@@ -388,22 +388,39 @@ pub fn read_part_from_reader<R: Read + Seek>(
 ) -> Result<Option<Vec<u8>>, XlsxError> {
     reader.seek(SeekFrom::Start(0))?;
     let mut zip = zip::ZipArchive::new(reader)?;
-    let part_name = part_name.strip_prefix('/').unwrap_or(part_name);
-    // `ZipFile` borrows `ZipArchive`; keep the `Result` in a local so it drops
-    // before `zip` to avoid borrowck issues.
-    let result = zip.by_name(part_name);
-    match result {
-        Ok(mut file) => {
-            if file.is_dir() {
-                return Ok(None);
+
+    // OPC part names should not include a leading `/` in the ZIP archive, but some producers do.
+    // Be tolerant by trying both forms.
+    let with_slash = if part_name.starts_with('/') {
+        None
+    } else {
+        Some(format!("/{part_name}"))
+    };
+    let candidates: [&str; 2] = if let Some(stripped) = part_name.strip_prefix('/') {
+        [part_name, stripped]
+    } else {
+        [part_name, with_slash.as_deref().expect("initialized for non-slashed names")]
+    };
+
+    for candidate in candidates {
+        // `ZipFile` borrows `ZipArchive`; keep the `Result` in a local so it drops
+        // before `zip` to avoid borrowck issues.
+        let result = zip.by_name(candidate);
+        match result {
+            Ok(mut file) => {
+                if file.is_dir() {
+                    return Ok(None);
+                }
+                let mut buf = Vec::with_capacity(file.size() as usize);
+                file.read_to_end(&mut buf)?;
+                return Ok(Some(buf));
             }
-            let mut buf = Vec::with_capacity(file.size() as usize);
-            file.read_to_end(&mut buf)?;
-            Ok(Some(buf))
+            Err(zip::result::ZipError::FileNotFound) => continue,
+            Err(err) => return Err(err.into()),
         }
-        Err(zip::result::ZipError::FileNotFound) => Ok(None),
-        Err(err) => Err(err.into()),
     }
+
+    Ok(None)
 }
 
 /// Parse the workbook theme palette from `xl/theme/theme1.xml` (if present) without inflating the
@@ -522,7 +539,18 @@ impl XlsxPackage {
     }
 
     pub fn part(&self, name: &str) -> Option<&[u8]> {
-        self.parts.get(name).map(|v| v.as_slice())
+        if let Some(bytes) = self.parts.get(name) {
+            return Some(bytes.as_slice());
+        }
+
+        if let Some(stripped) = name.strip_prefix('/') {
+            return self.parts.get(stripped).map(|v| v.as_slice());
+        }
+
+        let mut with_slash = String::with_capacity(name.len() + 1);
+        with_slash.push('/');
+        with_slash.push_str(name);
+        self.parts.get(with_slash.as_str()).map(|v| v.as_slice())
     }
 
     pub fn parts(&self) -> impl Iterator<Item = (&str, &[u8])> {
@@ -633,7 +661,7 @@ impl XlsxPackage {
 
     pub fn write_to<W: Write>(&self, mut w: W) -> Result<(), XlsxError> {
         let mut parts = self.parts.clone();
-        if parts.contains_key("xl/vbaProject.bin") {
+        if parts.contains_key("xl/vbaProject.bin") || parts.contains_key("/xl/vbaProject.bin") {
             crate::macro_repair::ensure_xlsm_content_types(&mut parts)?;
             crate::macro_repair::ensure_workbook_rels_has_vba(&mut parts)?;
             crate::macro_repair::ensure_vba_project_rels_has_signature(&mut parts)?;

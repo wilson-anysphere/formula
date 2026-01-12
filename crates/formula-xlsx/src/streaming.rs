@@ -500,6 +500,10 @@ mod macro_strip_streaming {
     const RELATIONSHIPS_NS: &[u8] =
         b"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
+    fn canonical_part_name(name: &str) -> &str {
+        name.strip_prefix('/').unwrap_or(name)
+    }
+
     pub(super) fn strip_vba_project_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
         archive: &mut ZipArchive<R>,
         output: W,
@@ -535,11 +539,12 @@ mod macro_strip_streaming {
             }
 
             let name = file.name().to_string();
-            if delete_parts.contains(&name) {
+            let canonical_name = canonical_part_name(&name);
+            if delete_parts.contains(canonical_name) {
                 continue;
             }
 
-            if let Some(bytes) = updated_parts.get(&name) {
+            if let Some(bytes) = updated_parts.get(canonical_name) {
                 zip.start_file(name, options)?;
                 zip.write_all(bytes)?;
             } else {
@@ -560,7 +565,7 @@ mod macro_strip_streaming {
             if file.is_dir() {
                 continue;
             }
-            out.insert(file.name().to_string());
+            out.insert(canonical_part_name(file.name()).to_string());
         }
         Ok(out)
     }
@@ -880,11 +885,7 @@ mod macro_strip_streaming {
         archive: &mut ZipArchive<R>,
         name: &str,
     ) -> Result<bool, StreamingPatchError> {
-        match archive.by_name(name) {
-            Ok(_) => Ok(true),
-            Err(zip::result::ZipError::FileNotFound) => Ok(false),
-            Err(err) => Err(err.into()),
-        }
+        super::zip_part_exists(archive, name)
     }
 
     fn strip_deleted_relationships(
@@ -1857,7 +1858,7 @@ fn plan_shared_strings<R: Read + Seek>(
 
     let mut shared_strings_bytes = Vec::new();
     {
-        let mut file = archive.by_name(&shared_strings_part)?;
+        let mut file = open_zip_part(archive, &shared_strings_part)?;
         file.read_to_end(&mut shared_strings_bytes)?;
     }
     let existing_shared_indices = scan_existing_shared_string_indices(archive, patches_by_part)?;
@@ -1993,7 +1994,7 @@ fn scan_existing_cell_types<R: Read + Seek>(
             continue;
         }
 
-        let mut file = match archive.by_name(part) {
+        let mut file = match open_zip_part(archive, part) {
             Ok(file) => file,
             Err(zip::result::ZipError::FileNotFound) => {
                 return Err(StreamingPatchError::MissingWorksheetPart(part.clone()));
@@ -2077,7 +2078,7 @@ fn scan_existing_shared_string_indices<R: Read + Seek>(
             continue;
         }
 
-        let mut file = match archive.by_name(part) {
+        let mut file = match open_zip_part(archive, part) {
             Ok(file) => file,
             Err(zip::result::ZipError::FileNotFound) => {
                 return Err(StreamingPatchError::MissingWorksheetPart(part.clone()));
@@ -2379,11 +2380,47 @@ fn patch_wants_shared_string(
     }
 }
 
+fn open_zip_part<'a, R: Read + Seek>(
+    archive: &'a mut ZipArchive<R>,
+    name: &str,
+) -> Result<zip::read::ZipFile<'a>, zip::result::ZipError> {
+    // ZIP entry names should not include a leading `/` in valid XLSX/XLSM files, but some producers
+    // emit them. Try both forms so streaming operations (patching, macro stripping, etc) remain
+    // robust.
+    let alt = if let Some(stripped) = name.strip_prefix('/') {
+        stripped.to_string()
+    } else {
+        let mut with_slash = String::with_capacity(name.len() + 1);
+        with_slash.push('/');
+        with_slash.push_str(name);
+        with_slash
+    };
+
+    // We cannot call `by_name` twice while returning the borrowed `ZipFile` because the borrow
+    // would have to live for `'a` in both control-flow paths. Instead, use `file_names()` to pick
+    // the correct entry name up front, then open it once.
+    let mut candidate = None::<String>;
+    for entry in archive.file_names() {
+        if entry == name {
+            candidate = Some(name.to_string());
+            break;
+        }
+        if entry == alt.as_str() {
+            candidate = Some(alt.clone());
+        }
+    }
+
+    match candidate {
+        Some(name) => archive.by_name(&name),
+        None => Err(zip::result::ZipError::FileNotFound),
+    }
+}
+
 fn zip_part_exists<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<bool, StreamingPatchError> {
-    match archive.by_name(name) {
+    match open_zip_part(archive, name) {
         Ok(_) => Ok(true),
         Err(zip::result::ZipError::FileNotFound) => Ok(false),
         Err(err) => Err(err.into()),
@@ -2394,7 +2431,7 @@ fn read_zip_part_optional<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Option<Vec<u8>>, StreamingPatchError> {
-    let mut file = match archive.by_name(name) {
+    let mut file = match open_zip_part(archive, name) {
         Ok(file) => file,
         Err(zip::result::ZipError::FileNotFound) => return Ok(None),
         Err(err) => return Err(err.into()),
@@ -2435,7 +2472,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
     let mut existing_non_material_cells_by_part: HashMap<String, HashSet<(u32, u32)>> =
         HashMap::new();
     for part in patches_by_part.keys() {
-        let mut file = match archive.by_name(part) {
+        let mut file = match open_zip_part(archive, part) {
             Ok(file) => file,
             Err(zip::result::ZipError::FileNotFound) => {
                 return Err(StreamingPatchError::MissingWorksheetPart(part.clone()));
@@ -2607,7 +2644,7 @@ fn streaming_patches_remove_existing_formulas<R: Read + Seek>(
             continue;
         }
 
-        let file = match archive.by_name(worksheet_part) {
+        let file = match open_zip_part(archive, worksheet_part) {
             Ok(file) => file,
             // If the worksheet is missing, the main streaming pass will surface this as
             // `MissingWorksheetPart`. Don't change the error type here.
@@ -2748,7 +2785,7 @@ fn read_zip_part<R: Read + Seek>(
     if let Some(bytes) = cache.get(name) {
         return Ok(bytes.clone());
     }
-    let mut file = archive.by_name(name)?;
+    let mut file = open_zip_part(archive, name)?;
     let mut buf = Vec::with_capacity(file.size() as usize);
     file.read_to_end(&mut buf)?;
     cache.insert(name.to_string(), buf.clone());

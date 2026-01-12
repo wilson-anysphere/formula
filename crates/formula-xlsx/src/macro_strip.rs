@@ -13,11 +13,70 @@ const CUSTOM_UI_REL_TYPES: [&str; 2] = [
 const RELATIONSHIPS_NS: &[u8] =
     b"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
+fn canonical_part_name(name: &str) -> &str {
+    name.strip_prefix('/').unwrap_or(name)
+}
+
+fn part_exists(parts: &BTreeMap<String, Vec<u8>>, name: &str) -> bool {
+    if parts.contains_key(name) {
+        return true;
+    }
+    if let Some(stripped) = name.strip_prefix('/') {
+        return parts.contains_key(stripped);
+    }
+    let mut with_slash = String::with_capacity(name.len() + 1);
+    with_slash.push('/');
+    with_slash.push_str(name);
+    parts.contains_key(with_slash.as_str())
+}
+
+fn get_part<'a>(parts: &'a BTreeMap<String, Vec<u8>>, name: &str) -> Option<&'a [u8]> {
+    parts
+        .get(name)
+        .map(Vec::as_slice)
+        .or_else(|| name.strip_prefix('/').and_then(|name| parts.get(name).map(Vec::as_slice)))
+        .or_else(|| {
+            if name.starts_with('/') {
+                return None;
+            }
+            let mut with_slash = String::with_capacity(name.len() + 1);
+            with_slash.push('/');
+            with_slash.push_str(name);
+            parts.get(with_slash.as_str()).map(Vec::as_slice)
+        })
+}
+
+fn get_part_cloned_with_key(
+    parts: &BTreeMap<String, Vec<u8>>,
+    name: &str,
+) -> Option<(String, Vec<u8>)> {
+    if let Some(bytes) = parts.get(name) {
+        return Some((name.to_string(), bytes.clone()));
+    }
+    if let Some(stripped) = name.strip_prefix('/') {
+        if let Some(bytes) = parts.get(stripped) {
+            return Some((stripped.to_string(), bytes.clone()));
+        }
+    } else {
+        let mut with_slash = String::with_capacity(name.len() + 1);
+        with_slash.push('/');
+        with_slash.push_str(name);
+        if let Some(bytes) = parts.get(with_slash.as_str()) {
+            return Some((with_slash, bytes.clone()));
+        }
+    }
+    None
+}
+
 pub(crate) fn strip_macros(parts: &mut BTreeMap<String, Vec<u8>>) -> Result<(), XlsxError> {
     let delete_parts = compute_macro_delete_set(parts)?;
 
     for part in &delete_parts {
         parts.remove(part);
+        let mut with_slash = String::with_capacity(part.len() + 1);
+        with_slash.push('/');
+        with_slash.push_str(part);
+        parts.remove(with_slash.as_str());
     }
 
     clean_relationship_parts(parts, &delete_parts)?;
@@ -38,18 +97,20 @@ fn compute_macro_delete_set(
 
     // Ribbon customizations.
     for name in parts.keys() {
-        if name.starts_with("customUI/") {
-            delete.insert(name.clone());
+        let normalized = canonical_part_name(name);
+        if normalized.starts_with("customUI/") {
+            delete.insert(normalized.to_string());
         }
     }
 
     // ActiveX + legacy form controls.
     for name in parts.keys() {
-        if name.starts_with("xl/activeX/")
-            || name.starts_with("xl/ctrlProps/")
-            || name.starts_with("xl/controls/")
+        let normalized = canonical_part_name(name);
+        if normalized.starts_with("xl/activeX/")
+            || normalized.starts_with("xl/ctrlProps/")
+            || normalized.starts_with("xl/controls/")
         {
-            delete.insert(name.clone());
+            delete.insert(normalized.to_string());
         }
     }
 
@@ -57,15 +118,18 @@ fn compute_macro_delete_set(
     // - Excel 4.0 macro sheets (XLM) stored under `xl/macrosheets/**`
     // - Dialog sheets stored under `xl/dialogsheets/**`
     for name in parts.keys() {
-        if name.starts_with("xl/macrosheets/") || name.starts_with("xl/dialogsheets/") {
-            delete.insert(name.clone());
+        let normalized = canonical_part_name(name);
+        if normalized.starts_with("xl/macrosheets/") || normalized.starts_with("xl/dialogsheets/") {
+            delete.insert(normalized.to_string());
         }
     }
 
     // Parts referenced by `xl/_rels/vbaProject.bin.rels` (e.g. signature payloads).
-    if let Some(rels_bytes) = parts.get("xl/_rels/vbaProject.bin.rels") {
+    if let Some((_rels_part, rels_bytes)) =
+        get_part_cloned_with_key(parts, "xl/_rels/vbaProject.bin.rels")
+    {
         let targets = parse_internal_relationship_targets(
-            rels_bytes,
+            &rels_bytes,
             "xl/vbaProject.bin",
             "xl/_rels/vbaProject.bin.rels",
             parts,
@@ -110,6 +174,7 @@ fn find_vml_ole_object_targets(
 
         // Only VML drawings can contain `<o:OLEObject>` control shapes (commentsDrawing* parts are
         // DrawingML XML, not VML).
+        let vml_part = canonical_part_name(vml_part);
         if !vml_part.starts_with("xl/drawings/") {
             continue;
         }
@@ -120,12 +185,12 @@ fn find_vml_ole_object_targets(
         }
 
         let rels_part = crate::path::rels_for_part(vml_part);
-        let Some(rels_bytes) = parts.get(&rels_part) else {
+        let Some((_rels_part, rels_bytes)) = get_part_cloned_with_key(parts, &rels_part) else {
             continue;
         };
 
         out.extend(parse_relationship_targets_for_ids(
-            rels_bytes, vml_part, &rel_ids,
+            &rels_bytes, vml_part, &rel_ids,
         )?);
     }
 
@@ -266,9 +331,10 @@ fn clean_relationship_parts(
         let Some(source_part) = source_part_from_rels_part(&rels_name) else {
             continue;
         };
+        let source_part = canonical_part_name(&source_part).to_string();
 
         // If the relationship source is gone, remove the `.rels` part as well.
-        if !source_part.is_empty() && !parts.contains_key(&source_part) {
+        if !source_part.is_empty() && !part_exists(parts, &source_part) {
             parts.remove(&rels_name);
             continue;
         }
@@ -444,7 +510,7 @@ fn should_remove_relationship(
         return Ok(false);
     }
 
-    if rels_part_name == "_rels/.rels"
+    if canonical_part_name(rels_part_name) == "_rels/.rels"
         && rel_type
             .as_deref()
             .is_some_and(|ty| CUSTOM_UI_REL_TYPES.iter().any(|known| ty == *known))
@@ -458,7 +524,7 @@ fn should_remove_relationship(
 
     let target = strip_fragment(&target);
     let resolved = resolve_target_best_effort(source_part, rels_part_name, target, |candidate| {
-        parts.contains_key(candidate) || delete_parts.contains(candidate)
+        part_exists(parts, candidate) || delete_parts.contains(candidate)
     });
     Ok(delete_parts.contains(&resolved))
 }
@@ -718,7 +784,7 @@ fn parse_internal_relationship_targets(
                 };
                 let target = strip_fragment(&target);
                 out.push(resolve_target_best_effort(source_part, rels_part, target, |candidate| {
-                    parts.contains_key(candidate)
+                    part_exists(parts, candidate)
                 }));
             }
             _ => {}
@@ -756,12 +822,12 @@ fn strip_source_relationship_references(
         return Ok(());
     }
 
-    let Some(xml) = parts.get(source_part).cloned() else {
+    let Some((source_key, xml)) = get_part_cloned_with_key(parts, source_part) else {
         return Ok(());
     };
 
     if let Some(updated) = strip_relationship_id_references(&xml, removed_ids)? {
-        parts.insert(source_part.to_string(), updated);
+        parts.insert(source_key, updated);
     }
 
     Ok(())
@@ -990,9 +1056,10 @@ impl RelationshipGraph {
             let Some(source_part) = source_part_from_rels_part(rels_part) else {
                 continue;
             };
+            let source_part = canonical_part_name(&source_part).to_string();
 
             // Ignore orphan `.rels` parts; they'll be removed during cleanup.
-            if !source_part.is_empty() && !parts.contains_key(&source_part) {
+            if !source_part.is_empty() && !part_exists(parts, &source_part) {
                 continue;
             }
 
@@ -1020,8 +1087,9 @@ pub fn validate_opc_relationships(
         let Some(source_part) = source_part_from_rels_part(rels_part) else {
             continue;
         };
+        let source_part = canonical_part_name(&source_part).to_string();
 
-        if !source_part.is_empty() && !parts.contains_key(&source_part) {
+        if !source_part.is_empty() && !part_exists(parts, &source_part) {
             return Err(XlsxError::Invalid(format!(
                 "orphan relationship part {rels_part} (missing source {source_part})"
             )));
@@ -1033,7 +1101,7 @@ pub fn validate_opc_relationships(
         let ids = parse_relationship_ids(xml)?;
         let targets = parse_internal_relationship_targets(xml, &source_part, rels_part, parts)?;
         for target in targets {
-            if !parts.contains_key(&target) {
+            if !part_exists(parts, &target) {
                 return Err(XlsxError::Invalid(format!(
                     "relationship target {target} referenced from {rels_part} is missing"
                 )));
@@ -1042,10 +1110,9 @@ pub fn validate_opc_relationships(
 
         if !source_part.is_empty()
             && (source_part.ends_with(".xml") || source_part.ends_with(".vml"))
-            && parts.contains_key(&source_part)
+            && part_exists(parts, &source_part)
         {
-            let source_xml = parts
-                .get(&source_part)
+            let source_xml = get_part(parts, &source_part)
                 .ok_or_else(|| XlsxError::MissingPart(source_part.clone()))?;
             let references = parse_relationship_id_references(source_xml)?;
             for id in references {

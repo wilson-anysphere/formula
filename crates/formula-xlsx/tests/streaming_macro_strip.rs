@@ -14,6 +14,14 @@ fn load_basic_fixture() -> Vec<u8> {
 }
 
 fn build_synthetic_macro_package() -> Vec<u8> {
+    build_synthetic_macro_package_impl(false)
+}
+
+fn build_synthetic_macro_package_with_leading_slash_entries() -> Vec<u8> {
+    build_synthetic_macro_package_impl(true)
+}
+
+fn build_synthetic_macro_package_impl(leading_slash_entries: bool) -> Vec<u8> {
     let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -116,85 +124,101 @@ fn build_synthetic_macro_package() -> Vec<u8> {
     let mut zip = ZipWriter::new(cursor);
     let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
 
+    let part_name = |name: &str| {
+        if leading_slash_entries {
+            format!("/{name}")
+        } else {
+            name.to_string()
+        }
+    };
+
     zip.start_file("[Content_Types].xml", options).unwrap();
     zip.write_all(content_types.as_bytes()).unwrap();
 
     zip.start_file("_rels/.rels", options).unwrap();
     zip.write_all(root_rels.as_bytes()).unwrap();
 
-    zip.start_file("xl/workbook.xml", options).unwrap();
+    zip.start_file(part_name("xl/workbook.xml"), options).unwrap();
     zip.write_all(workbook_xml.as_bytes()).unwrap();
 
-    zip.start_file("xl/_rels/workbook.xml.rels", options)
+    zip.start_file(part_name("xl/_rels/workbook.xml.rels"), options)
         .unwrap();
     zip.write_all(workbook_rels.as_bytes()).unwrap();
 
-    zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+    zip.start_file(part_name("xl/worksheets/sheet1.xml"), options)
+        .unwrap();
     zip.write_all(worksheet_xml.as_bytes()).unwrap();
 
-    zip.start_file("xl/worksheets/_rels/sheet1.xml.rels", options)
+    zip.start_file(part_name("xl/worksheets/_rels/sheet1.xml.rels"), options)
         .unwrap();
     zip.write_all(sheet_rels.as_bytes()).unwrap();
 
-    zip.start_file("xl/cellimages.xml", options).unwrap();
+    zip.start_file(part_name("xl/cellimages.xml"), options).unwrap();
     zip.write_all(cellimages_xml).unwrap();
 
-    zip.start_file("xl/_rels/cellimages.xml.rels", options)
+    zip.start_file(part_name("xl/_rels/cellimages.xml.rels"), options)
         .unwrap();
     zip.write_all(cellimages_rels).unwrap();
 
-    zip.start_file("xl/media/image1.png", options).unwrap();
+    zip.start_file(part_name("xl/media/image1.png"), options).unwrap();
     zip.write_all(b"not-a-real-png").unwrap();
 
-    zip.start_file("xl/controls/control1.xml", options).unwrap();
+    zip.start_file(part_name("xl/controls/control1.xml"), options)
+        .unwrap();
     zip.write_all(control_xml.as_bytes()).unwrap();
 
-    zip.start_file("xl/controls/_rels/control1.xml.rels", options)
+    zip.start_file(part_name("xl/controls/_rels/control1.xml.rels"), options)
         .unwrap();
     zip.write_all(control_rels).unwrap();
 
-    zip.start_file("customUI/customUI.xml", options).unwrap();
+    zip.start_file(part_name("customUI/customUI.xml"), options)
+        .unwrap();
     zip.write_all(custom_ui_xml.as_bytes()).unwrap();
 
-    zip.start_file("customUI/customUI14.xml", options).unwrap();
+    zip.start_file(part_name("customUI/customUI14.xml"), options)
+        .unwrap();
     zip.write_all(custom_ui_xml.as_bytes()).unwrap();
 
-    zip.start_file("customUI/_rels/customUI.xml.rels", options)
+    zip.start_file(part_name("customUI/_rels/customUI.xml.rels"), options)
         .unwrap();
     zip.write_all(custom_ui_rels.as_bytes()).unwrap();
 
-    zip.start_file("customUI/image1.png", options).unwrap();
+    zip.start_file(part_name("customUI/image1.png"), options)
+        .unwrap();
     zip.write_all(b"not-a-real-png").unwrap();
 
-    zip.start_file("xl/vbaProject.bin", options).unwrap();
+    zip.start_file(part_name("xl/vbaProject.bin"), options)
+        .unwrap();
     zip.write_all(b"fake-vba-project").unwrap();
 
-    zip.start_file("xl/_rels/vbaProject.bin.rels", options)
+    zip.start_file(part_name("xl/_rels/vbaProject.bin.rels"), options)
         .unwrap();
     zip.write_all(vba_rels.as_bytes()).unwrap();
 
-    zip.start_file("xl/vbaProjectSignature.bin", options)
+    zip.start_file(part_name("xl/vbaProjectSignature.bin"), options)
         .unwrap();
     zip.write_all(b"fake-signature").unwrap();
 
-    zip.start_file("xl/vbaData.xml", options).unwrap();
+    zip.start_file(part_name("xl/vbaData.xml"), options).unwrap();
     zip.write_all(b"<vbaData/>").unwrap();
 
-    zip.start_file("xl/activeX/activeX1.xml", options).unwrap();
+    zip.start_file(part_name("xl/activeX/activeX1.xml"), options)
+        .unwrap();
     zip.write_all(activex_xml.as_bytes()).unwrap();
 
-    zip.start_file("xl/activeX/_rels/activeX1.xml.rels", options)
+    zip.start_file(part_name("xl/activeX/_rels/activeX1.xml.rels"), options)
         .unwrap();
     zip.write_all(activex_rels.as_bytes()).unwrap();
 
-    zip.start_file("xl/activeX/activeX1.bin", options).unwrap();
+    zip.start_file(part_name("xl/activeX/activeX1.bin"), options)
+        .unwrap();
     zip.write_all(b"activex-binary").unwrap();
 
-    zip.start_file("xl/embeddings/oleObject1.bin", options)
+    zip.start_file(part_name("xl/embeddings/oleObject1.bin"), options)
         .unwrap();
     zip.write_all(b"ole-embedding").unwrap();
 
-    zip.start_file("xl/ctrlProps/ctrlProp1.xml", options)
+    zip.start_file(part_name("xl/ctrlProps/ctrlProp1.xml"), options)
         .unwrap();
     zip.write_all(ctrl_props_xml.as_bytes()).unwrap();
 
@@ -250,5 +274,11 @@ fn strip_vba_project_streaming_matches_in_memory_on_basic_fixture() {
 #[test]
 fn strip_vba_project_streaming_matches_in_memory_on_synthetic_macro_package() {
     let bytes = build_synthetic_macro_package();
+    assert_streaming_matches_in_memory(&bytes);
+}
+
+#[test]
+fn strip_vba_project_streaming_matches_in_memory_on_leading_slash_entries() {
+    let bytes = build_synthetic_macro_package_with_leading_slash_entries();
     assert_streaming_matches_in_memory(&bytes);
 }

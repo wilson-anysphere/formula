@@ -6,6 +6,27 @@ use quick_xml::{Reader as XmlReader, Writer as XmlWriter};
 use crate::openxml::local_name;
 use crate::XlsxError;
 
+fn select_part_key(parts: &BTreeMap<String, Vec<u8>>, name: &str) -> Option<String> {
+    if parts.contains_key(name) {
+        return Some(name.to_string());
+    }
+    if let Some(stripped) = name.strip_prefix('/') {
+        if parts.contains_key(stripped) {
+            return Some(stripped.to_string());
+        }
+    } else {
+        let with_slash = format!("/{name}");
+        if parts.contains_key(&with_slash) {
+            return Some(with_slash);
+        }
+    }
+    None
+}
+
+fn part_exists(parts: &BTreeMap<String, Vec<u8>>, name: &str) -> bool {
+    select_part_key(parts, name).is_some()
+}
+
 fn relationship_id_number(id: &str) -> Option<u32> {
     let id = id.trim();
     let bytes = id.as_bytes();
@@ -39,14 +60,18 @@ pub(crate) fn ensure_xlsm_content_types(
     parts: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<(), XlsxError> {
     let ct_name = "[Content_Types].xml";
-    let Some(existing) = parts.get(ct_name).cloned() else {
+    let Some(ct_key) = select_part_key(parts, ct_name) else {
         // We don't attempt to synthesize a full content types file; macro
         // preservation in this minimal crate assumes an existing workbook.
         return Ok(());
     };
+    let existing = parts
+        .get(&ct_key)
+        .cloned()
+        .expect("content types key resolved but missing");
 
     // Only repair to XLSM if the package actually contains the VBA project payload.
-    if !parts.contains_key("xl/vbaProject.bin") {
+    if !part_exists(parts, "xl/vbaProject.bin") {
         return Ok(());
     }
 
@@ -75,8 +100,8 @@ pub(crate) fn ensure_xlsm_content_types(
     const VBA_DATA_PART_NAME: &str = "/xl/vbaData.xml";
     const VBA_DATA_CONTENT_TYPE: &str = "application/vnd.ms-office.vbaData+xml";
 
-    let needs_signature = parts.contains_key("xl/vbaProjectSignature.bin");
-    let needs_vba_data = parts.contains_key("xl/vbaData.xml");
+    let needs_signature = part_exists(parts, "xl/vbaProjectSignature.bin");
+    let needs_vba_data = part_exists(parts, "xl/vbaData.xml");
 
     let mut reader = XmlReader::from_reader(existing.as_slice());
     reader.config_mut().trim_text(false);
@@ -325,7 +350,7 @@ pub(crate) fn ensure_xlsm_content_types(
     }
 
     if changed {
-        parts.insert(ct_name.to_string(), writer.into_inner());
+        parts.insert(ct_key, writer.into_inner());
     }
     Ok(())
 }
@@ -334,9 +359,13 @@ pub(crate) fn ensure_workbook_rels_has_vba(
     parts: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<(), XlsxError> {
     let rels_name = "xl/_rels/workbook.xml.rels";
-    let Some(existing) = parts.get(rels_name).cloned() else {
+    let Some(rels_key) = select_part_key(parts, rels_name) else {
         return Ok(());
     };
+    let existing = parts
+        .get(&rels_key)
+        .cloned()
+        .expect("workbook rels key resolved but missing");
 
     const VBA_REL_TYPE: &str = "http://schemas.microsoft.com/office/2006/relationships/vbaProject";
     const VBA_TARGET: &str = "vbaProject.bin";
@@ -506,7 +535,7 @@ pub(crate) fn ensure_workbook_rels_has_vba(
     }
 
     if changed {
-        parts.insert(rels_name.to_string(), writer.into_inner());
+        parts.insert(rels_key, writer.into_inner());
     }
     Ok(())
 }
@@ -514,7 +543,7 @@ pub(crate) fn ensure_workbook_rels_has_vba(
 pub(crate) fn ensure_vba_project_rels_has_signature(
     parts: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<(), XlsxError> {
-    if !(parts.contains_key("xl/vbaProject.bin") && parts.contains_key("xl/vbaProjectSignature.bin")) {
+    if !(part_exists(parts, "xl/vbaProject.bin") && part_exists(parts, "xl/vbaProjectSignature.bin")) {
         return Ok(());
     }
 
@@ -522,7 +551,16 @@ pub(crate) fn ensure_vba_project_rels_has_signature(
     const REL_TYPE: &str = "http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature";
     const TARGET: &str = "vbaProjectSignature.bin";
 
-    match parts.get(rels_name).cloned() {
+    let rels_key = select_part_key(parts, rels_name).unwrap_or_else(|| {
+        // Prefer matching the leading-`/` style used by `vbaProject.bin` when synthesizing.
+        if parts.contains_key("/xl/vbaProject.bin") && !parts.contains_key("xl/vbaProject.bin") {
+            format!("/{rels_name}")
+        } else {
+            rels_name.to_string()
+        }
+    });
+
+    match parts.get(&rels_key).cloned() {
         Some(existing) => {
             let mut reader = XmlReader::from_reader(existing.as_slice());
             reader.config_mut().trim_text(false);
@@ -689,7 +727,7 @@ pub(crate) fn ensure_vba_project_rels_has_signature(
                 buf.clear();
             }
             if changed {
-                parts.insert(rels_name.to_string(), writer.into_inner());
+                parts.insert(rels_key, writer.into_inner());
             }
         }
         None => {
@@ -701,7 +739,7 @@ pub(crate) fn ensure_vba_project_rels_has_signature(
   <Relationship Id="rId1" Type="{REL_TYPE}" Target="{TARGET}"/>
 </Relationships>"#
             );
-            parts.insert(rels_name.to_string(), xml.into_bytes());
+            parts.insert(rels_key, xml.into_bytes());
         }
     }
 

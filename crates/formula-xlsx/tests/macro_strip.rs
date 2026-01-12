@@ -2,7 +2,7 @@ use std::io::{Cursor, Write};
 
 use formula_xlsx::XlsxPackage;
 
-fn build_macro_control_fixture() -> Vec<u8> {
+fn build_macro_control_fixture(leading_slash_entries: bool) -> Vec<u8> {
     let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="xml" ContentType="application/xml"/>
@@ -65,10 +65,10 @@ fn build_macro_control_fixture() -> Vec<u8> {
     let options = zip::write::FileOptions::<()>::default()
         .compression_method(zip::CompressionMethod::Deflated);
 
-    fn add_file(
+    fn add_file<S: ToString>(
         zip: &mut zip::ZipWriter<Cursor<Vec<u8>>>,
         options: zip::write::FileOptions<()>,
-        name: &str,
+        name: S,
         bytes: &[u8],
     ) {
         zip.start_file(name, options).unwrap();
@@ -77,44 +77,72 @@ fn build_macro_control_fixture() -> Vec<u8> {
 
     add_file(&mut zip, options, "[Content_Types].xml", content_types.as_bytes());
     add_file(&mut zip, options, "_rels/.rels", root_rels.as_bytes());
-    add_file(&mut zip, options, "xl/workbook.xml", workbook_xml.as_bytes());
+    let xl_part_name = |name: &str| {
+        if leading_slash_entries {
+            format!("/{name}")
+        } else {
+            name.to_string()
+        }
+    };
+
+    add_file(&mut zip, options, xl_part_name("xl/workbook.xml"), workbook_xml.as_bytes());
     add_file(
         &mut zip,
         options,
-        "xl/_rels/workbook.xml.rels",
+        xl_part_name("xl/_rels/workbook.xml.rels"),
         workbook_rels.as_bytes(),
     );
-    add_file(&mut zip, options, "xl/worksheets/sheet1.xml", worksheet_xml.as_bytes());
     add_file(
         &mut zip,
         options,
-        "xl/worksheets/_rels/sheet1.xml.rels",
+        xl_part_name("xl/worksheets/sheet1.xml"),
+        worksheet_xml.as_bytes(),
+    );
+    add_file(
+        &mut zip,
+        options,
+        xl_part_name("xl/worksheets/_rels/sheet1.xml.rels"),
         sheet_rels.as_bytes(),
     );
 
-    add_file(&mut zip, options, "xl/vbaProject.bin", b"dummy-vba");
     add_file(
         &mut zip,
         options,
-        "xl/_rels/vbaProject.bin.rels",
+        xl_part_name("xl/vbaProject.bin"),
+        b"dummy-vba",
+    );
+    add_file(
+        &mut zip,
+        options,
+        xl_part_name("xl/_rels/vbaProject.bin.rels"),
         br#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#,
     );
 
-    add_file(&mut zip, options, "xl/controls/control1.xml", control_xml.as_bytes());
     add_file(
         &mut zip,
         options,
-        "xl/controls/_rels/control1.xml.rels",
+        xl_part_name("xl/controls/control1.xml"),
+        control_xml.as_bytes(),
+    );
+    add_file(
+        &mut zip,
+        options,
+        xl_part_name("xl/controls/_rels/control1.xml.rels"),
         control_rels.as_bytes(),
     );
-    add_file(&mut zip, options, "xl/media/image1.png", b"not-a-real-png");
+    add_file(
+        &mut zip,
+        options,
+        xl_part_name("xl/media/image1.png"),
+        b"not-a-real-png",
+    );
 
     zip.finish().unwrap().into_inner()
 }
 
 #[test]
 fn macro_stripping_removes_controls_parts_and_relationships() {
-    let fixture = build_macro_control_fixture();
+    let fixture = build_macro_control_fixture(false);
     let mut pkg = XlsxPackage::from_bytes(&fixture).expect("read fixture");
 
     pkg.remove_vba_project().expect("strip macros/controls");
@@ -157,3 +185,47 @@ fn macro_stripping_removes_controls_parts_and_relationships() {
     );
 }
 
+#[test]
+fn macro_stripping_removes_controls_parts_and_relationships_with_leading_slash_entries() {
+    let fixture = build_macro_control_fixture(true);
+    let mut pkg = XlsxPackage::from_bytes(&fixture).expect("read fixture");
+
+    pkg.remove_vba_project().expect("strip macros/controls");
+
+    let written = pkg.write_to_bytes().expect("write stripped package");
+    let pkg2 = XlsxPackage::from_bytes(&written).expect("read stripped package");
+
+    assert!(pkg2.part("xl/vbaProject.bin").is_none());
+    assert!(pkg2.part("xl/controls/control1.xml").is_none());
+    assert!(pkg2.part("xl/controls/_rels/control1.xml.rels").is_none());
+
+    // Relationship traversal should remove child parts that were only reachable from the deleted
+    // control part.
+    assert!(pkg2.part("xl/media/image1.png").is_none());
+
+    let sheet_rels = std::str::from_utf8(pkg2.part("xl/worksheets/_rels/sheet1.xml.rels").unwrap())
+        .expect("sheet rels utf-8");
+    assert!(
+        !sheet_rels.contains("controls/control1.xml"),
+        "expected sheet rels to stop referencing deleted controls (got {sheet_rels:?})"
+    );
+
+    for (name, bytes) in pkg2.parts() {
+        if !name.ends_with(".rels") {
+            continue;
+        }
+        let xml = std::str::from_utf8(bytes).expect("rels utf-8");
+        assert!(
+            !xml.contains("controls/"),
+            "{name} still references `xl/controls/**` parts: {xml:?}"
+        );
+    }
+
+    let ct = std::str::from_utf8(pkg2.part("[Content_Types].xml").unwrap()).expect("ct utf-8");
+    assert!(!ct.contains("vbaProject.bin"));
+    assert!(!ct.contains("xl/controls/control1.xml"));
+    assert!(
+        !ct.contains("macroEnabled.main+xml"),
+        "expected workbook content type to be downgraded to .xlsx (got {ct:?})"
+    );
+}
