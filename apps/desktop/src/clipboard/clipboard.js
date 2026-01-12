@@ -390,7 +390,9 @@ export function parseClipboardContentToCellGrid(content) {
   }
 
   const text = content.text;
-  if (typeof text === "string") {
+  // Some clipboard backends may provide an empty `text/plain` payload alongside richer formats.
+  // Treat empty strings as "missing" so we can still fall back to RTF extraction.
+  if (typeof text === "string" && text !== "") {
     const parsed = parseTsvToCellGrid(text);
     if (parsed) return parsed;
   }

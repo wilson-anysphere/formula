@@ -72,3 +72,20 @@ test("RTF fallback preserves trailing tab separators for empty last cells", () =
   assert.equal(grid[0][0].value, "A");
   assert.equal(grid[0][1].value, null);
 });
+
+test("clipboard RTF fallback still runs when text/plain is present but empty", () => {
+  const rtf =
+    "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Arial;}}\\viewkind4\\uc1\\pard A\\tab B\\par C\\tab D\\par}";
+
+  const grid = parseClipboardContentToCellGrid({ text: "", rtf });
+  assert.ok(grid);
+
+  assert.equal(grid.length, 2);
+  assert.equal(grid[0].length, 2);
+  assert.equal(grid[1].length, 2);
+
+  assert.equal(grid[0][0].value, "A");
+  assert.equal(grid[0][1].value, "B");
+  assert.equal(grid[1][0].value, "C");
+  assert.equal(grid[1][1].value, "D");
+});
