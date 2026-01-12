@@ -428,6 +428,18 @@ fn main() {
         .manage(open_file_state)
         .manage(TrayStatusState::default())
         .manage(startup_metrics)
+        // NOTE: IPC hardening / command allowlist (Tauri v2 capabilities)
+        //
+        // Any new `#[tauri::command]` must be:
+        //  1) Implemented in Rust (typically `src/commands.rs`, but may live elsewhere)
+        //  2) Registered here in `generate_handler![...]`
+        //  3) Added to the explicit JS invoke allowlist in
+        //     `src-tauri/capabilities/main.json` (`core:allow-invoke`)
+        //
+        // Otherwise `globalThis.__TAURI__.core.invoke("...")` will fail with a permission error.
+        //
+        // SECURITY: Commands touching filesystem/network/etc must validate inputs and enforce
+        // scoping/authorization in Rust (never trust the webview).
         .invoke_handler(tauri::generate_handler![
             clipboard::clipboard_read,
             clipboard::clipboard_write,
