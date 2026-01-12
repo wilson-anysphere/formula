@@ -110,13 +110,20 @@ def _tool_env(repo_root: Path) -> dict[str, str]:
     env.setdefault("RUSTC_WORKSPACE_WRAPPER", "")
 
     # Concurrency defaults: keep Rust builds stable on high-core-count multi-agent hosts.
-    jobs_raw = env.get("FORMULA_CARGO_JOBS") or env.get("CARGO_BUILD_JOBS") or "4"
+    #
+    # Prefer explicit overrides, but default to a conservative job count when unset. On very
+    # high core-count hosts, linking (lld) can spawn many threads per link step; combining that
+    # with Cargo-level parallelism can exceed sandbox process/thread limits and cause flaky
+    # "Resource temporarily unavailable" failures.
+    cpu_count = os.cpu_count() or 0
+    default_jobs = 2 if cpu_count >= 64 else 4
+    jobs_raw = env.get("FORMULA_CARGO_JOBS") or env.get("CARGO_BUILD_JOBS") or str(default_jobs)
     try:
         jobs_int = int(jobs_raw)
     except ValueError:
-        jobs_int = 4
+        jobs_int = default_jobs
     if jobs_int < 1:
-        jobs_int = 4
+        jobs_int = default_jobs
     jobs = str(jobs_int)
 
     env["CARGO_BUILD_JOBS"] = jobs
