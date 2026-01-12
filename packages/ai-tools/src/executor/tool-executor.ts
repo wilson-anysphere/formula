@@ -444,25 +444,45 @@ export class ToolExecutor {
       return { range: this.formatRangeForUser(range), values, ...(formulas ? { formulas } : {}) };
     }
 
-    // Only cache per-cell decisions when we will query the same cell twice (values + formulas).
-    // When formulas are not requested, the cache adds overhead without improving performance.
-    const cellDecisionCache = params.include_formulas ? new Map<string, boolean>() : null;
-    const isAllowedCell = (row: number, col: number) => {
-      if (!cellDecisionCache) return this.isDlpCellAllowed(dlp, row, col);
-      const key = `${row},${col}`;
-      const cached = cellDecisionCache.get(key);
-      if (cached !== undefined) return cached;
-      const allowed = this.isDlpCellAllowed(dlp, row, col);
-      cellDecisionCache.set(key, allowed);
-      return allowed;
-    };
-
     let redactedCellCount = 0;
+
+    // When formulas are requested, compute values + formulas in a single pass so we only
+    // evaluate DLP once per cell (avoids per-cell Map caching overhead).
+    if (params.include_formulas) {
+      const values: CellScalar[][] = [];
+      const formulas: Array<Array<string | null>> = [];
+      for (let r = 0; r < cells.length; r += 1) {
+        const row = cells[r] ?? [];
+        const valuesRow: CellScalar[] = [];
+        const formulasRow: Array<string | null> = [];
+        for (let c = 0; c < row.length; c += 1) {
+          const cell = row[c]!;
+          const rowIndex = range.startRow + r;
+          const colIndex = range.startCol + c;
+          if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
+            redactedCellCount += 1;
+            valuesRow.push(DLP_REDACTION_PLACEHOLDER);
+            formulasRow.push(DLP_REDACTION_PLACEHOLDER);
+            continue;
+          }
+          valuesRow.push(cell.formula ? null : cell.value);
+          formulasRow.push(cell.formula ?? null);
+        }
+        values.push(valuesRow);
+        formulas.push(formulasRow);
+      }
+
+      this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount });
+      const rangeForUser = { ...range, sheet: this.displaySheetName(range.sheet) };
+      enforceReadRangeCharLimit({ range: rangeForUser, values, formulas, maxChars: this.options.max_read_range_chars });
+      return { range: this.formatRangeForUser(range), values, formulas };
+    }
+
     const values = cells.map((row, r) =>
       row.map((cell, c) => {
         const rowIndex = range.startRow + r;
         const colIndex = range.startCol + c;
-        if (!isAllowedCell(rowIndex, colIndex)) {
+        if (!this.isDlpCellAllowed(dlp, rowIndex, colIndex)) {
           redactedCellCount++;
           return DLP_REDACTION_PLACEHOLDER;
         }
@@ -470,16 +490,7 @@ export class ToolExecutor {
       })
     );
 
-    const formulas = params.include_formulas
-      ? cells.map((row, r) =>
-          row.map((cell, c) => {
-            const rowIndex = range.startRow + r;
-            const colIndex = range.startCol + c;
-            if (!isAllowedCell(rowIndex, colIndex)) return DLP_REDACTION_PLACEHOLDER;
-            return cell.formula ?? null;
-          })
-        )
-      : undefined;
+    const formulas = undefined;
 
     this.logToolDlpDecision({ tool: "read_range", range, dlp, redactedCellCount });
     const rangeForUser = { ...range, sheet: this.displaySheetName(range.sheet) };
