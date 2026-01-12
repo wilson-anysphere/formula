@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { EngineWorker, type MessageChannelLike, type WorkerLike } from "../worker/EngineWorker.ts";
 import type {
+  CellValueRich,
   InitMessage,
   RpcRequest,
   WorkerInboundMessage,
@@ -297,6 +298,65 @@ describe("EngineWorker RPC", () => {
     );
     expect(requests).toHaveLength(1);
     expect(requests[0].params).toEqual({ sheet: "Sheet1" });
+  });
+
+  it("sends getCellRich RPC requests with the expected params", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    await engine.getCellRich("A1", "Sheet1");
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "getCellRich"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({ address: "A1", sheet: "Sheet1" });
+  });
+
+  it("flushes pending setCell batches before setCellRich", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    // Fire-and-forget setCell leaves a pending microtask flush.
+    void engine.setCell("A1", 1);
+
+    const value: CellValueRich = { type: "entity", value: { displayValue: "Acme" } };
+    await engine.setCellRich("A2", value, "Sheet1");
+
+    const methods = worker.received
+      .filter((msg): msg is RpcRequest => msg.type === "request")
+      .map((msg) => msg.method);
+
+    expect(methods).toEqual(["setCells", "setCellRich"]);
+  });
+
+  it("sends setCellRich RPC requests with the expected params", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    const value: CellValueRich = {
+      type: "entity",
+      value: { displayValue: "Acme", properties: { Price: { type: "number", value: 12.5 } } }
+    };
+    await engine.setCellRich("A1", value, "Sheet1");
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "setCellRich"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({ address: "A1", value, sheet: "Sheet1" });
   });
 
   it("supports request cancellation via AbortSignal", async () => {
