@@ -1055,3 +1055,22 @@ fn bytecode_backend_propagates_error_literals_through_supported_ops() {
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::NA));
     assert_engine_matches_ast(&engine, "=#N/A+1", "A1");
 }
+
+#[test]
+fn bytecode_backend_propagates_error_literals_through_supported_functions() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=ABS(#DIV/0!)")
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Div0)
+    );
+    assert_engine_matches_ast(&engine, "=ABS(#DIV/0!)", "A1");
+}
