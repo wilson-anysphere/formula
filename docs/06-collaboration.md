@@ -69,11 +69,58 @@ Each cell is stored as a `Y.Map` with the following relevant fields:
 - `value`: any JSON-serializable scalar/object (only when not a formula)
 - `formula`: string (normalized; when present, `value` is set to `null`)
 - `format`: JSON object for cell formatting (interned into `DocumentController.styleTable` on desktop)
-- `enc`: optional encrypted payload (see below)
+- `enc`: optional encrypted payload (see “Cell encryption” below)
 - `modified`: `number` (ms since epoch; best-effort)
 - `modifiedBy`: `string` (best-effort user id)
 
 Formula normalization is consistent across the stack: formula strings are treated as canonical when they start with `"="` and have no leading/trailing whitespace (see binder/session implementations).
+
+### Cell encryption (`enc`) (protected ranges)
+
+Because Yjs updates are broadcast to **all** collaborators (and the sync server), the server cannot filter per-cell content per connection. For true confidentiality of protected ranges, Formula supports optional **end-to-end encryption** of cell contents *before* they are written into the shared CRDT.
+
+Encrypted cell data is stored on the per-cell Y.Map under the `enc` field:
+
+```ts
+// Stored under `cells.get(cellKey).get("enc")`
+type EncryptedCellPayloadV1 = {
+  v: 1;
+  alg: "AES-256-GCM";
+  keyId: string;
+  ivBase64: string;
+  tagBase64: string;
+  ciphertextBase64: string;
+};
+```
+
+Implementation:
+
+- Encryption codec: [`packages/collab/encryption/src/index.node.js`](../packages/collab/encryption/src/index.node.js) (`encryptCellPlaintext`, `decryptCellPlaintext`, `isEncryptedCellPayload`)
+- Session + binder both treat **any** `enc` presence as “encrypted” (even if malformed) to avoid accidentally falling back to plaintext duplicates under legacy cell-key encodings.
+
+Usage:
+
+```ts
+import { createCollabSession } from "@formula/collab-session";
+
+const session = createCollabSession({
+  connection: { wsUrl, docId, token },
+  encryption: {
+    keyForCell: ({ sheetId, row, col }) => {
+      // Return a per-range key (or null for unencrypted cells).
+      return null;
+    },
+    // Optional: force encryption for some cells even if a key exists.
+    // shouldEncryptCell: (cell) => boolean
+  },
+});
+```
+
+Notes:
+
+- Plaintext is JSON `{ value, formula, format? }` and is bound to `{ docId, sheetId, row, col }` via AES-GCM Additional Authenticated Data (AAD) to prevent replay across docs/cells.
+- When `enc` is present, plaintext `value`/`formula` fields are omitted.
+- If a collaborator does not have the right key, `@formula/collab-session` and the desktop binder will surface a masked value and **refuse plaintext writes** into that cell.
 
 ### Sheet schema (`sheets` array entries)
 
@@ -200,6 +247,26 @@ const binder = bindYjsToDocumentController({
 // session.destroy();
 ```
 
+### Convenience helper: `bindCollabSessionToDocumentController`
+
+If you already have a `CollabSession`, `@formula/collab-session` also exports a small glue helper that calls the binder with sensible defaults:
+
+```ts
+import { bindCollabSessionToDocumentController } from "@formula/collab-session";
+
+// Optional: enable role-based permissions on the session.
+// session.setPermissions({ role: "editor", rangeRestrictions: [], userId });
+
+const binder = await bindCollabSessionToDocumentController({
+  session,
+  documentController,
+  userId,
+
+  // Optional: pass an explicit undoService (not defaulted by the helper).
+  // undoService: session.undo,
+});
+```
+
 ### Echo suppression (origins) + UndoManager exception
 
 When you bind two reactive systems, you must avoid doing this:
@@ -225,6 +292,11 @@ So the binder intentionally:
 - but **does not** ignore the UndoManager instance origin
 
 This is implemented by filtering `undoService.localOrigins` and excluding any value that looks like an UndoManager (see `isUndoManager(...)` in the binder).
+
+Practical rule of thumb:
+
+- When the binder is active, treat `DocumentController` as the “source of truth” for local edits.
+- If you also call `session.setCellValue` / `session.setCellFormula` directly, be careful when passing `undoService: session.undo`: those direct session writes use the same origin token and may be echo-suppressed from applying back into `DocumentController`. (This is why the helper `bindCollabSessionToDocumentController` does **not** default to `session.undo`.)
 
 ---
 
