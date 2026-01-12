@@ -23,8 +23,7 @@ test.describe("sheet tab context menu", () => {
     await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(false);
 
     // Hide Sheet2.
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await openSheetTabContextMenu(page, "Sheet2");
+    let menu = await openSheetTabContextMenu(page, "Sheet2");
     await menu.getByRole("button", { name: "Hide", exact: true }).click();
 
     await expect(sheet2Tab).toHaveCount(0);
@@ -38,7 +37,7 @@ test.describe("sheet tab context menu", () => {
     });
     await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(false);
 
-    await openSheetTabContextMenu(page, "Sheet1");
+    menu = await openSheetTabContextMenu(page, "Sheet1");
     await menu.getByRole("button", { name: "Unhide…", exact: true }).click();
     await menu.getByRole("button", { name: "Sheet2" }).click();
 
@@ -53,9 +52,10 @@ test.describe("sheet tab context menu", () => {
     await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(false);
 
     const sheet2TabVisible = page.getByTestId("sheet-tab-Sheet2");
-    await openSheetTabContextMenu(page, "Sheet2");
+    await expect(sheet2TabVisible).toBeVisible();
+    menu = await openSheetTabContextMenu(page, "Sheet2");
     await menu.getByRole("button", { name: "Tab Color", exact: true }).click();
-    await menu.getByRole("button", { name: "Red" }).click();
+    await menu.getByRole("button", { name: "Red", exact: true }).click();
 
     await expect(sheet2TabVisible).toHaveAttribute("data-tab-color", "#ff0000");
     await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(true);

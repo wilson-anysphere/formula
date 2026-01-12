@@ -32,8 +32,7 @@ test.describe("sheet switcher", () => {
     await expectSheetPosition(page, { position: 2, total: 3 });
 
     // Hide Sheet2 via context menu.
-    await openSheetTabContextMenu(page, "Sheet2");
-    const menu = page.getByTestId("sheet-tab-context-menu");
+    let menu = await openSheetTabContextMenu(page, "Sheet2");
     await expect(page.getByTestId("context-menu")).toBeHidden();
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Hide", exact: true }).click();
@@ -63,7 +62,7 @@ test.describe("sheet switcher", () => {
     }
 
     // Unhide Sheet2 via context menu on any visible tab.
-    await openSheetTabContextMenu(page, "Sheet1");
+    menu = await openSheetTabContextMenu(page, "Sheet1");
     await expect(page.getByTestId("context-menu")).toBeHidden();
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Unhide…", exact: true }).click();

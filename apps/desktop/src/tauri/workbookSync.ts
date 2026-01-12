@@ -160,7 +160,6 @@ function tabColorToBackendArg(input: unknown): TabColor | null {
   ) {
     return null;
   }
-
   return out;
 }
 
