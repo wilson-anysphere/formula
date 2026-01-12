@@ -282,10 +282,14 @@ function sameNormalizedCell(a, b) {
 }
 
 /**
- * Bind a Yjs spreadsheet document (the `cells` root type) to a desktop `DocumentController`.
+ * Bind a Yjs spreadsheet document to a desktop `DocumentController`.
  *
- * This binder syncs cell `value`, `formula`, and `format` (cell styles).
- * Other workbook metadata is expected to be handled by future bindings.
+ * This binder currently syncs:
+ *
+ * - Cell contents: `value`, `formula`, and `format` (cell styles) via the Yjs `cells` root
+ * - Sheet view state: `sheets[].view` (frozen panes + row/col size overrides)
+ *
+ * It does **not** currently implement full sheet list semantics (create/delete/rename/reorder).
  *
  * @param {{
  *   ydoc: import("yjs").Doc,
