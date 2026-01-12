@@ -11,7 +11,7 @@ fn build_cellimages_calcchain_fixture() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) 
   <Default Extension="png" ContentType="image/png"/>
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-  <Override PartName="/xl/calcChain.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"/>
+  <Override PartName="/xl/calcChain.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"></Override>
   <Override PartName="/xl/cellimages.xml" ContentType="application/vnd.ms-excel.cellimages+xml"/>
 </Types>"#;
 
@@ -37,7 +37,7 @@ fn build_cellimages_calcchain_fixture() -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) 
     Target="worksheets/sheet1.xml"/>
   <Relationship Id="rId2"
     Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain"
-    Target="calcChain.xml"/>
+    Target="calcChain.xml"></Relationship>
   <Relationship Id="rId3"
     Type="http://schemas.microsoft.com/office/2020/relationships/cellimages"
     Target="cellimages.xml"/>
