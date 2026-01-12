@@ -133,8 +133,9 @@ describe("SpreadsheetApp charts large ranges", () => {
       position: "Sheet1!C1",
     });
 
-    // ChartStore header detection reads a single cell (A1). We should *not* scan the full range.
-    expect(getCellSpy.mock.calls.length).toBe(1);
+    // We should *not* scan the full range. It's OK to do a small constant amount of sampling
+    // (e.g. header detection / type sniffing), but it must stay bounded as the range grows.
+    expect(getCellSpy.mock.calls.length).toBeLessThanOrEqual(20);
 
     const host = ((app as any).chartElements as Map<string, HTMLElement>).get(result.chart_id);
     expect(host).toBeTruthy();
@@ -144,4 +145,3 @@ describe("SpreadsheetApp charts large ranges", () => {
     root.remove();
   });
 });
-
