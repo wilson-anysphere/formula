@@ -115,7 +115,18 @@ test.describe("sheet reorder", () => {
         return tabs.map((el) => el.getAttribute("data-sheet-id") ?? "");
       });
 
+    const expectSheetPositionMatchesTabOrder = async () => {
+      const [order, activeSheetId] = await Promise.all([
+        tabOrder(),
+        page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId()),
+      ]);
+      const idx = order.indexOf(activeSheetId);
+      expect(idx).toBeGreaterThanOrEqual(0);
+      await expect(page.getByTestId("sheet-position")).toHaveText(`Sheet ${idx + 1} of ${order.length}`);
+    };
+
     expect(await tabOrder()).toEqual(["Sheet1", "Sheet2", "Sheet3"]);
+    await expectSheetPositionMatchesTabOrder();
 
     // Drop on the left half of the target tab so the reorder logic chooses "insert before".
     await page.evaluate(() => {
@@ -143,6 +154,7 @@ test.describe("sheet reorder", () => {
       return tabs[0]?.getAttribute("data-sheet-id") === "Sheet3";
     });
     expect(await tabOrder()).toEqual(["Sheet3", "Sheet1", "Sheet2"]);
+    await expectSheetPositionMatchesTabOrder();
 
     // Reload and re-open; backend should return the same sheet order.
     await page.reload();
@@ -159,5 +171,6 @@ test.describe("sheet reorder", () => {
       return tabs[0]?.getAttribute("data-sheet-id") === "Sheet3";
     });
     expect(await tabOrder()).toEqual(["Sheet3", "Sheet1", "Sheet2"]);
+    await expectSheetPositionMatchesTabOrder();
   });
 });
