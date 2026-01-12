@@ -1515,16 +1515,45 @@ function cloneCollabSheetMetaValue(value: unknown): unknown {
   if (typeof value !== "object") return value;
 
   const maybe: any = value;
-  if (maybe?.constructor?.name === "YText" && typeof maybe.toString === "function") {
+  const ctor = maybe?.constructor?.name ?? "";
+
+  // Clone nested Yjs types into local constructors so they can be safely re-inserted
+  // into the document (Yjs types cannot be "re-parented" after deletion).
+  if (ctor === "YText" && typeof maybe.toDelta === "function") {
+    const out = new Y.Text();
+    const delta = maybe.toDelta();
+    const structuredCloneFn = (globalThis as any).structuredClone as ((input: unknown) => unknown) | undefined;
     try {
-      return maybe.toString();
+      out.applyDelta(typeof structuredCloneFn === "function" ? structuredCloneFn(delta) : JSON.parse(JSON.stringify(delta)));
     } catch {
-      return null;
+      // Best-effort: fall back to inserting the string representation.
+      try {
+        out.insert(0, maybe.toString());
+      } catch {
+        // ignore
+      }
     }
+    return out;
   }
 
-  // Avoid copying nested Yjs types directly; they can't be re-parented safely.
-  const ctor = maybe?.constructor?.name ?? "";
+  if (ctor === "YMap" && typeof maybe.forEach === "function") {
+    const out = new Y.Map<unknown>();
+    maybe.forEach((v: unknown, k: string) => {
+      out.set(String(k), cloneCollabSheetMetaValue(v));
+    });
+    return out;
+  }
+
+  if (ctor === "YArray" && typeof maybe.toArray === "function") {
+    const out = new Y.Array<unknown>();
+    for (const item of maybe.toArray()) {
+      out.push([cloneCollabSheetMetaValue(item)]);
+    }
+    return out;
+  }
+
+  // Avoid copying other Yjs types directly (e.g. Xml) since we don't have a safe
+  // cloning strategy for them here.
   if (ctor.startsWith("Y") || ctor === "AbstractType") return undefined;
 
   const structuredCloneFn = (globalThis as any).structuredClone as ((input: unknown) => unknown) | undefined;
