@@ -466,10 +466,10 @@ const OPENAI_IN_CONFIG_RULE = {
  * @param {(filePath: string) => Promise<void>} onFile
  */
 async function walkDir(absoluteDir, rootDir, onFile) {
-  /** @type {Array<{ dir: string }>} */
-  const stack = [{ dir: absoluteDir }];
+  /** @type {Array<{ dir: string, inExcludedRootTree: boolean }>} */
+  const stack = [{ dir: absoluteDir, inExcludedRootTree: false }];
   while (stack.length) {
-    const { dir } = /** @type {{dir: string}} */ (stack.pop());
+    const { dir, inExcludedRootTree } = /** @type {{dir: string, inExcludedRootTree: boolean}} */ (stack.pop());
     let entries;
     try {
       entries = await readdir(dir, { withFileTypes: true });
@@ -480,7 +480,23 @@ async function walkDir(absoluteDir, rootDir, onFile) {
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       const rel = relativeToRoot(fullPath, rootDir);
-      if (shouldExcludeRootRelativePath(rel)) continue;
+      const normalizedRel = rel.split(path.sep).join("/");
+
+      // Always reject symlinks, even under excluded doc paths. Symlinks can point to
+      // unscanned trees and bypass policy enforcement.
+      if (entry.isSymbolicLink()) {
+        await onFile(fullPath);
+        continue;
+      }
+
+      const isInExcludedRootTree =
+        inExcludedRootTree ||
+        normalizedRel === "docs" ||
+        normalizedRel.startsWith("docs/") ||
+        normalizedRel === "instructions" ||
+        normalizedRel.startsWith("instructions/") ||
+        normalizedRel === "mockups" ||
+        normalizedRel.startsWith("mockups/");
 
       if (entry.isDirectory()) {
         if (entry.name.startsWith(".tmp")) continue;
@@ -488,14 +504,15 @@ async function walkDir(absoluteDir, rootDir, onFile) {
           // Extensions ship their built bundles (under `extensions/**/dist/`) so
           // integration tests and marketplace packaging can run without an extra
           // build step. Scan those committed dist assets for policy violations.
-          const normalized = rel.split(path.sep).join("/");
-          if (!(entry.name === "dist" && normalized.startsWith("extensions/"))) continue;
+          if (!(entry.name === "dist" && normalizedRel.startsWith("extensions/"))) continue;
         }
-        stack.push({ dir: fullPath });
+        stack.push({ dir: fullPath, inExcludedRootTree: isInExcludedRootTree });
         continue;
       }
 
       if (!(entry.isFile() || entry.isSymbolicLink())) continue;
+      if (isInExcludedRootTree) continue;
+      if (shouldExcludeRootRelativePath(rel)) continue;
       await onFile(fullPath);
     }
   }

@@ -470,6 +470,26 @@ test(
 );
 
 test(
+  "cursor AI policy guard rejects symlinks inside excluded docs/ trees (avoid scan bypass)",
+  { skip: process.platform === "win32" },
+  async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-symlink-docs-fail-"));
+    try {
+      await writeFixtureFile(tmpRoot, "docs/README.md", "OpenAI\n");
+      const linkPath = path.join(tmpRoot, "docs", "link");
+      await fs.symlink("does-not-exist", linkPath);
+
+      const result = await runPolicyApi(tmpRoot, { maxViolations: 1 });
+      assert.equal(result.ok, false);
+      assert.equal(result.violations[0]?.ruleId, "symlink");
+      assert.equal(result.violations[0]?.file, "docs/link");
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "cursor AI policy guard rejects tracked symlinks in a git repo (tracked-files mode)",
   { skip: !HAS_GIT || process.platform === "win32" },
   async () => {
