@@ -67,7 +67,10 @@ Build the native desktop application shell using **Tauri**. Handle system integr
 3. **Clipboard:** Rich clipboard support (HTML, RTF, images)
    - Frontend entry point: `apps/desktop/src/clipboard/platform/provider.js`
    - Desktop prefers custom Rust IPC commands `clipboard_read` / `clipboard_write` (multi-format),
-     with fallbacks to `navigator.clipboard` and legacy `globalThis.__TAURI__.clipboard.readText` / `writeText`.
+     with fallbacks to:
+     - legacy IPC command names: `read_clipboard` / `write_clipboard` (older builds / main-thread bridging on macOS)
+     - `navigator.clipboard` (Web Clipboard API)
+     - legacy `globalThis.__TAURI__.clipboard.readText` / `writeText` (plain text)
    - Supported formats: `text/plain`, `text/html`, `text/rtf`, `image/png`.
    - PNG over IPC is transported as `pngBase64` (raw base64, no `data:image/png;base64,` prefix).
 4. **Drag and drop:** Files and data
