@@ -63,6 +63,17 @@ export interface CellRichTextRun {
   start: number;
   /** Unicode code point end index (exclusive). */
   end: number;
+  /**
+   * Per-run style overrides (best-effort).
+   *
+   * The grid renderer currently supports the same keys as the legacy desktop rich-text renderer:
+   * - `bold?: boolean`
+   * - `italic?: boolean`
+   * - `underline?: string | boolean` (anything except `"none"` is treated as underlined)
+   * - `color?: string` (engine colors use `#AARRGGBB`)
+   * - `font?: string`
+   * - `size_100pt?: number` (font size in 1/100 points)
+   */
   style?: Record<string, unknown>;
 }
 
