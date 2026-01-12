@@ -448,7 +448,7 @@ It synchronizes:
 
 > Note: the binder syncs **cell contents** (`cells`) *and* **sheet view state**
 > (`sheets[].view`), but it does **not** implement full sheet list semantics
-> (create/delete/rename/reorder). If the desktop UI needs live sheet list syncing,
+> (create/delete/rename/reorder) or other sheet metadata syncing (e.g. `visibility`, `tabColor`). If the desktop UI needs live sheet list syncing,
 > it should observe the Yjs `sheets` array directly (or use a dedicated binder).
 
 ### End-to-end wiring example
@@ -666,6 +666,7 @@ namedRanges.set("Revenue", { sheetId: "Sheet1", startRow: 0, startCol: 0, endRow
 
 Note: the desktop `bindYjsToDocumentController` binder syncs **cells + sheet
 view state**, but does not project sheet list changes (add/delete/rename/order)
+or other per-sheet metadata changes (visibility/tabColor)
 into `DocumentController`. If the desktop UI needs live sheet list syncing, it
 should observe the Yjs `sheets` array directly (or via a dedicated binder).
 
