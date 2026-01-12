@@ -6,6 +6,8 @@ import { CanvasGridRenderer } from "../CanvasGridRenderer";
 type StrokeRecord = {
   strokeStyle: unknown;
   lineWidth: number;
+  lineDash: number[];
+  lineCap: CanvasLineCap;
   segments: Array<{ x1: number; y1: number; x2: number; y2: number }>;
 };
 
@@ -14,6 +16,8 @@ function createRecording2dContext(canvas: HTMLCanvasElement): { ctx: CanvasRende
   let fillStyle: unknown = "#000";
   let strokeStyle: unknown = "#000";
   let lineWidth = 1;
+  let lineDash: number[] = [];
+  let lineCap: CanvasLineCap = "butt";
   let cursor: { x: number; y: number } | null = null;
   let segments: StrokeRecord["segments"] = [];
   const strokes: StrokeRecord[] = [];
@@ -38,6 +42,12 @@ function createRecording2dContext(canvas: HTMLCanvasElement): { ctx: CanvasRende
     set lineWidth(value: number) {
       lineWidth = value;
     },
+    get lineCap() {
+      return lineCap;
+    },
+    set lineCap(value: CanvasLineCap) {
+      lineCap = value;
+    },
     font: "",
     textAlign: "left",
     textBaseline: "alphabetic",
@@ -55,7 +65,7 @@ function createRecording2dContext(canvas: HTMLCanvasElement): { ctx: CanvasRende
     clip: noop,
     fill: noop,
     stroke: () => {
-      strokes.push({ strokeStyle, lineWidth, segments: [...segments] });
+      strokes.push({ strokeStyle, lineWidth, lineDash: [...lineDash], lineCap, segments: [...segments] });
     },
     moveTo: (x: number, y: number) => {
       cursor = { x, y };
@@ -73,7 +83,9 @@ function createRecording2dContext(canvas: HTMLCanvasElement): { ctx: CanvasRende
     translate: noop,
     rotate: noop,
     fillText: noop,
-    setLineDash: noop,
+    setLineDash: (value: number[]) => {
+      lineDash = [...value];
+    },
     measureText: (text: string) =>
       ({
         width: text.length * 6,
@@ -167,5 +179,54 @@ describe("CanvasGridRenderer diagonal borders", () => {
           Math.abs(seg.y2 - 20) < 1e-6
       )
     ).toBe(true);
+  });
+
+  it("uses round caps + dotted dash patterns for dotted diagonal borders", () => {
+    const dotted: CellBorderSpec = { width: 1, style: "dotted", color: "#ff00ff" };
+
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row === 0 && col === 0) {
+          return { row, col, value: "A", style: { diagonalBorders: { down: dotted } } };
+        }
+        return { row, col, value: null };
+      }
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const { ctx: gridCtx, strokes } = createRecording2dContext(gridCanvas);
+    const contentCtx = createRecording2dContext(contentCanvas).ctx;
+    const selectionCtx = createRecording2dContext(selectionCanvas).ctx;
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, gridCtx],
+      [contentCanvas, contentCtx],
+      [selectionCanvas, selectionCtx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return contexts.get(this) ?? createRecording2dContext(this).ctx;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 2,
+      colCount: 2,
+      defaultRowHeight: 20,
+      defaultColWidth: 20
+    });
+
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(200, 200, 1);
+    renderer.renderImmediately();
+
+    const stroke = strokes.find((entry) => entry.strokeStyle === "#ff00ff" && entry.lineWidth === 1);
+    expect(stroke).toBeTruthy();
+    expect(stroke!.lineDash.join(",")).toBe("1,2");
+    expect(stroke!.lineCap).toBe("round");
+    expect(stroke!.segments.length).toBeGreaterThan(0);
   });
 });
