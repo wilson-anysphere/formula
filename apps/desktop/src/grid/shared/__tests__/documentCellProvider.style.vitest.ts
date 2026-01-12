@@ -239,4 +239,41 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect(a2).not.toBeNull();
     expect((a2 as any).style?.fill).toBe("#00ff00");
   });
+
+  it("respects range-run formatting precedence (sheet < col < row < range-run < cell)", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    // Establish base layers.
+    doc.setSheetFormat(sheetId, { fill: { pattern: "solid", fgColor: "#FFFFFF00" } }); // yellow
+    doc.setColFormat(sheetId, 0, { fill: { pattern: "solid", fgColor: "#FF00FF00" } }); // green (col A)
+    doc.setRowFormat(sheetId, 0, { fill: { pattern: "solid", fgColor: "#FF0000FF" } }); // blue (row 1)
+
+    // Apply a large rectangular range so DocumentController stores it as range runs (not per-cell styles).
+    // A1:D20000 => 20,000 rows * 4 cols = 80,000 cells (> 50,000 threshold).
+    doc.setRangeFormat(sheetId, "A1:D20000", { fill: { pattern: "solid", fgColor: "#FF800080" } }); // purple (range-run)
+
+    // Cell formatting should still win over the range-run layer.
+    doc.setRangeFormat(sheetId, "A1", { fill: { pattern: "solid", fgColor: "#FFFF0000" } }); // red (cell)
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    // A1: cell wins.
+    expect((provider.getCell(1, 1) as any)?.style?.fill).toBe("#ff0000");
+    // B1: range-run wins over row.
+    expect((provider.getCell(1, 2) as any)?.style?.fill).toBe("#800080");
+    // A2: range-run wins over col.
+    expect((provider.getCell(2, 1) as any)?.style?.fill).toBe("#800080");
+    // E1: no range-run, so row wins over sheet.
+    expect((provider.getCell(1, 5) as any)?.style?.fill).toBe("#0000ff");
+  });
 });
