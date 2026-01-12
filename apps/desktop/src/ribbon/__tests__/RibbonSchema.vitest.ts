@@ -43,6 +43,24 @@ describe("defaultRibbonSchema", () => {
     expect(branchManager?.testId).toBe("open-branch-manager-panel");
   });
 
+  it("keeps the File → Info → Manage Workbook → Version History menu item id wired", () => {
+    const fileTab = defaultRibbonSchema.tabs.find((tab) => tab.id === "file");
+    expect(fileTab, "Expected File tab to exist").toBeTruthy();
+    if (!fileTab) return;
+
+    const infoGroup = fileTab.groups.find((group) => group.id === "file.info");
+    expect(infoGroup, "Expected File → Info group to exist").toBeTruthy();
+    if (!infoGroup) return;
+
+    const manageWorkbook = infoGroup.buttons.find((button) => button.id === "file.info.manageWorkbook");
+    expect(manageWorkbook, "Expected File → Info → Manage Workbook dropdown").toBeTruthy();
+    expect(manageWorkbook?.kind).toBe("dropdown");
+    expect(
+      manageWorkbook?.menuItems?.some((item) => item.id === "file.info.manageWorkbook.versions"),
+      "Expected Manage Workbook dropdown to include file.info.manageWorkbook.versions",
+    ).toBe(true);
+  });
+
   it("ensures sibling ids are unique (tabs, groups, buttons, menu items)", () => {
     expectUniqueIds(
       defaultRibbonSchema.tabs.map((tab) => tab.id),
