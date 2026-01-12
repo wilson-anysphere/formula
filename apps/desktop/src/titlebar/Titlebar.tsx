@@ -113,7 +113,7 @@ export function Titlebar({
       role="banner"
       aria-label="Titlebar"
     >
-      <div className="formula-titlebar__window-controls" aria-label="Window controls">
+      <div className="formula-titlebar__window-controls" role="group" aria-label="Window controls">
         <button
           type="button"
           className="formula-titlebar__window-button formula-titlebar__window-button--close"

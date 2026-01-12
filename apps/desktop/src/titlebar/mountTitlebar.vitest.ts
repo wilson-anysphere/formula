@@ -49,6 +49,10 @@ describe("mountTitlebar", () => {
     expect(container.querySelector(".formula-titlebar__document-name")?.getAttribute("title")).toBe("Untitled.xlsx");
 
     // Window controls exist with accessible labels.
+    const windowControls = container.querySelector<HTMLElement>(".formula-titlebar__window-controls");
+    expect(windowControls?.getAttribute("role")).toBe("group");
+    expect(windowControls?.getAttribute("aria-label")).toBe("Window controls");
+
     const closeButton = container.querySelector('[aria-label="Close window"]');
     const minimizeButton = container.querySelector('[aria-label="Minimize window"]');
     const maximizeButton = container.querySelector('[aria-label="Maximize window"]');
