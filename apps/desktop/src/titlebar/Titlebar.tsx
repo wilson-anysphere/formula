@@ -116,6 +116,9 @@ export function Titlebar({
   const normalizedDocumentName = stripLeadingDocSeparator(documentName);
   const canUndo = Boolean(undoRedo?.canUndo) && typeof undoRedo?.onUndo === "function";
   const canRedo = Boolean(undoRedo?.canRedo) && typeof undoRedo?.onRedo === "function";
+  const canClose = typeof windowControls?.onClose === "function";
+  const canMinimize = typeof windowControls?.onMinimize === "function";
+  const canToggleMaximize = typeof windowControls?.onToggleMaximize === "function";
 
   return (
     <div
@@ -136,8 +139,8 @@ export function Titlebar({
           aria-label="Close window"
           title="Close window"
           data-testid="titlebar-window-close"
-          disabled={!windowControls?.onClose}
-          onClick={windowControls?.onClose}
+          disabled={!canClose}
+          onClick={canClose ? windowControls.onClose : undefined}
         />
         <button
           type="button"
@@ -145,8 +148,8 @@ export function Titlebar({
           aria-label="Minimize window"
           title="Minimize window"
           data-testid="titlebar-window-minimize"
-          disabled={!windowControls?.onMinimize}
-          onClick={windowControls?.onMinimize}
+          disabled={!canMinimize}
+          onClick={canMinimize ? windowControls.onMinimize : undefined}
         />
         <button
           type="button"
@@ -154,8 +157,8 @@ export function Titlebar({
           aria-label="Maximize window"
           title="Maximize window"
           data-testid="titlebar-window-maximize"
-          disabled={!windowControls?.onToggleMaximize}
-          onClick={windowControls?.onToggleMaximize}
+          disabled={!canToggleMaximize}
+          onClick={canToggleMaximize ? windowControls.onToggleMaximize : undefined}
         />
       </div>
 
@@ -196,7 +199,7 @@ export function Titlebar({
         className="formula-titlebar__drag-region"
         data-tauri-drag-region
         data-testid="titlebar-drag-region"
-        onDoubleClick={windowControls?.onToggleMaximize}
+        onDoubleClick={canToggleMaximize ? windowControls.onToggleMaximize : undefined}
       >
         <div className="formula-titlebar__titles" data-tauri-drag-region data-testid="titlebar-titles">
           {/* Tauri drag regions are computed per-element; apply the attribute to the nested
