@@ -115,8 +115,8 @@ export function ExtensionsPanel({
     void (async () => {
       await manager.host.resetAllPermissions();
       setPermissionsVersion((v) => v + 1);
-    })().catch(() => {
-      // ignore
+    })().catch((err) => {
+      showToast(`Failed to reset extension permissions: ${String((err as any)?.message ?? err)}`, "error");
     });
   }, [manager]);
 
@@ -361,8 +361,8 @@ export function ExtensionsPanel({
                         void (async () => {
                           await manager.host.revokePermissions(ext.id, [perm]);
                           await loadPermissionsForExtension(ext.id);
-                        })().catch(() => {
-                          // ignore
+                        })().catch((err) => {
+                          showToast(`Failed to revoke permission '${perm}': ${String((err as any)?.message ?? err)}`, "error");
                         });
                       }}
                       style={{
@@ -410,8 +410,8 @@ export function ExtensionsPanel({
                         void (async () => {
                           await manager.host.revokePermissions(ext.id, ["network"]);
                           await loadPermissionsForExtension(ext.id);
-                        })().catch(() => {
-                          // ignore
+                        })().catch((err) => {
+                          showToast(`Failed to revoke permission 'network': ${String((err as any)?.message ?? err)}`, "error");
                         });
                       }}
                       style={{
@@ -439,8 +439,8 @@ export function ExtensionsPanel({
                   void (async () => {
                     await manager.host.revokePermissions(ext.id);
                     await loadPermissionsForExtension(ext.id);
-                  })().catch(() => {
-                    // ignore
+                  })().catch((err) => {
+                    showToast(`Failed to revoke permissions: ${String((err as any)?.message ?? err)}`, "error");
                   });
                 }}
                 style={{
