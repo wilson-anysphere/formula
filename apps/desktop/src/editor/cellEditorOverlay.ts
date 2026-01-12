@@ -1,6 +1,6 @@
 import type { CellCoord } from "../selection/types";
 import type { Rect } from "../selection/renderer";
-import { extractFormulaReferences, toggleA1AbsoluteAtCursor } from "@formula/spreadsheet-frontend";
+import { toggleA1AbsoluteAtCursor } from "@formula/spreadsheet-frontend";
 
 export type EditorCommitReason = "enter" | "tab";
 
@@ -122,22 +122,11 @@ export class CellEditorOverlay {
       const cursorStart = this.element.selectionStart ?? prevText.length;
       const cursorEnd = this.element.selectionEnd ?? prevText.length;
 
-      const { references, activeIndex } = extractFormulaReferences(prevText, cursorStart, cursorEnd);
-      const active = activeIndex == null ? null : references[activeIndex] ?? null;
-      if (!active) return;
-
       const toggled = toggleA1AbsoluteAtCursor(prevText, cursorStart, cursorEnd);
       if (!toggled) return;
 
-      // Excel UX: after toggling, keep the full reference token selected so repeated
-      // F4 presses continue cycling the same reference.
-      const delta = toggled.text.length - prevText.length;
-      const oldTokenLen = active.end - active.start;
-      const nextStart = active.start;
-      const nextEnd = Math.max(nextStart, Math.min(nextStart + oldTokenLen + delta, toggled.text.length));
-
       this.element.value = toggled.text;
-      this.element.setSelectionRange(nextStart, nextEnd);
+      this.element.setSelectionRange(toggled.cursorStart, toggled.cursorEnd);
       this.adjustSize();
       return;
     }
