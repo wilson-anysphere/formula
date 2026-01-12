@@ -23,13 +23,15 @@ use formula_xlsx::{parse_value_metadata_vm_to_rich_value_index_map, XlsxPackage}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn usage() -> &'static str {
-    "dump_rich_data <path.xlsx> [--print-parts] [--extract-cell-images]\n\
+    "dump_rich_data <path.xlsx> [--print-parts] [--extract-cell-images] [--extract-cell-images-out <dir>]\n\
 \n\
 Debug helper for inspecting Excel rich data (linked entities, images-in-cell).\n\
 \n\
 Options:\n\
   --print-parts           List rich-data related ZIP parts found in the workbook\n\
   --extract-cell-images   Extract rich-data in-cell images by cell and print a summary\n\
+  --extract-cell-images-out <dir>\n\
+                         Write extracted in-cell images to <dir> as files\n\
 "
 }
 
@@ -41,6 +43,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut xlsx_path: Option<PathBuf> = None;
     let mut print_parts = false;
     let mut extract_cell_images = false;
+    let mut extract_cell_images_out: Option<PathBuf> = None;
 
     let mut args = std::env::args().skip(1).peekable();
     while let Some(arg) = args.next() {
@@ -55,6 +58,31 @@ fn main() -> Result<(), Box<dyn Error>> {
             "--extract-cell-images" => {
                 extract_cell_images = true;
             }
+            "--extract-cell-images-out" => {
+                let Some(dir) = args.next() else {
+                    return Err(format!(
+                        "missing <dir> for --extract-cell-images-out\n\n{}",
+                        usage()
+                    )
+                    .into());
+                };
+                extract_cell_images = true;
+                extract_cell_images_out = Some(PathBuf::from(dir));
+            }
+            flag if flag.starts_with("--extract-cell-images-out=") => {
+                let Some((_, dir)) = flag.split_once('=') else {
+                    unreachable!();
+                };
+                if dir.is_empty() {
+                    return Err(format!(
+                        "missing <dir> for --extract-cell-images-out\n\n{}",
+                        usage()
+                    )
+                    .into());
+                }
+                extract_cell_images = true;
+                extract_cell_images_out = Some(PathBuf::from(dir));
+            }
             flag if flag.starts_with('-') => {
                 return Err(format!("unknown flag: {flag}\n\n{}", usage()).into());
             }
@@ -68,7 +96,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let xlsx_path = xlsx_path.ok_or_else(|| format!("missing <path.xlsx>\n\n{}", usage()))?;
-    dump_one(&xlsx_path, print_parts, extract_cell_images)?;
+    dump_one(
+        &xlsx_path,
+        print_parts,
+        extract_cell_images,
+        extract_cell_images_out.as_deref(),
+    )?;
     Ok(())
 }
 
@@ -77,6 +110,7 @@ fn dump_one(
     xlsx_path: &Path,
     print_parts: bool,
     extract_cell_images: bool,
+    extract_cell_images_out: Option<&Path>,
 ) -> Result<(), Box<dyn Error>> {
     let bytes = fs::read(xlsx_path)?;
     let pkg = XlsxPackage::from_bytes(&bytes)?;
@@ -105,7 +139,7 @@ fn dump_one(
     dump_vm_cell_mappings(&pkg, vm_to_rich_value_index.as_ref(), &rv_to_targets);
 
     if extract_cell_images {
-        dump_rich_cell_images_by_cell(&pkg);
+        dump_rich_cell_images_by_cell(&pkg, extract_cell_images_out);
     }
 
     Ok(())
@@ -736,7 +770,7 @@ fn dump_vm_cell_mappings(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage) {
+fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage, out_dir: Option<&Path>) {
     let images_by_cell = match pkg.extract_rich_cell_images_by_cell() {
         Ok(v) => v,
         Err(err) => {
@@ -786,6 +820,50 @@ fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage) {
             break;
         }
         println!("    {sheet}!{cell}: {} bytes", bytes.len());
+    }
+
+    if let Some(out_dir) = out_dir {
+        if let Err(err) = fs::create_dir_all(out_dir) {
+            println!();
+            println!(
+                "rich-data in-cell images (by cell): failed to create output dir {}: {err}",
+                out_dir.display()
+            );
+            return;
+        }
+
+        let mut written = 0usize;
+        let mut failed = 0usize;
+
+        for ((sheet, cell), bytes) in &images_by_cell {
+            let sheet_sanitized = sanitize_filename_component(sheet);
+            let cell_a1 = cell.to_string();
+            let ext = guess_image_extension(bytes).unwrap_or("bin");
+
+            let mut file_name = format!("{sheet_sanitized}_{cell_a1}.{ext}");
+            let mut path = out_dir.join(&file_name);
+            if path.exists() {
+                // Avoid overwriting in case of name collisions.
+                for suffix in 1u32.. {
+                    file_name = format!("{sheet_sanitized}_{cell_a1}_{suffix}.{ext}");
+                    path = out_dir.join(&file_name);
+                    if !path.exists() {
+                        break;
+                    }
+                }
+            }
+
+            match fs::write(&path, bytes) {
+                Ok(()) => written += 1,
+                Err(_) => failed += 1,
+            }
+        }
+
+        println!();
+        println!(
+            "rich-data in-cell images (by cell): wrote {written} file(s) to {} (failed: {failed})",
+            out_dir.display()
+        );
     }
 }
 
@@ -1096,6 +1174,49 @@ fn is_probable_image_target(path: &str) -> bool {
         lower.rsplit_once('.').map(|(_, ext)| ext),
         Some("png" | "jpg" | "jpeg" | "gif" | "bmp" | "tif" | "tiff" | "emf" | "wmf")
     )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sanitize_filename_component(value: &str) -> String {
+    // Avoid path separators and other awkward filename chars across platforms.
+    // Keep it readable for debugging.
+    let mut out = String::with_capacity(value.len().min(64));
+    for ch in value.chars() {
+        if out.len() >= 64 {
+            break;
+        }
+        match ch {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => out.push(ch),
+            ' ' => out.push('_'),
+            _ => out.push('_'),
+        }
+    }
+    if out.is_empty() {
+        out.push_str("sheet");
+    }
+    out
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn guess_image_extension(bytes: &[u8]) -> Option<&'static str> {
+    // Common image signatures used by Excel media parts.
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
+    if bytes.starts_with(PNG) {
+        return Some("png");
+    }
+    if bytes.len() >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF {
+        return Some("jpg");
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        return Some("gif");
+    }
+    if bytes.starts_with(b"BM") {
+        return Some("bmp");
+    }
+    if bytes.starts_with(b"II*\0") || bytes.starts_with(b"MM\0*") {
+        return Some("tiff");
+    }
+    None
 }
 
 #[cfg(not(target_arch = "wasm32"))]
