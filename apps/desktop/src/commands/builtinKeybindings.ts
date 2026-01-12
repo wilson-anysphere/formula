@@ -32,6 +32,12 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
+    command: "comments.togglePanel",
+    key: "ctrl+shift+m",
+    mac: "cmd+shift+m",
+    when: null,
+  },
+  {
     command: "clipboard.pasteSpecial",
     key: "ctrl+shift+v",
     mac: "cmd+shift+v",

@@ -208,6 +208,18 @@ export function registerBuiltinCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
+    "comments.togglePanel",
+    "Toggle Comments Panel",
+    () => app.toggleCommentsPanel(),
+    {
+      category: "View",
+      icon: null,
+      description: "Toggle the Comments panel",
+      keywords: ["comments", "notes", "panel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     "view.freezePanes",
     "Freeze Panes",
     () => {
