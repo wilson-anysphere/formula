@@ -43,6 +43,40 @@ describe("defaultRibbonSchema", () => {
     expect(branchManager?.testId).toBe("open-branch-manager-panel");
   });
 
+  it("exposes Page Layout print/export controls with stable test ids", () => {
+    const pageLayoutTab = defaultRibbonSchema.tabs.find((tab) => tab.id === "pageLayout");
+    expect(pageLayoutTab, "Expected Page Layout tab to exist").toBeTruthy();
+    if (!pageLayoutTab) return;
+
+    const pageSetupGroup = pageLayoutTab.groups.find((group) => group.id === "pageLayout.pageSetup");
+    expect(pageSetupGroup, "Expected Page Layout → Page Setup group to exist").toBeTruthy();
+    if (!pageSetupGroup) return;
+
+    const pageSetupButton = pageSetupGroup.buttons.find((button) => button.id === "pageLayout.pageSetup.pageSetupDialog");
+    expect(pageSetupButton, "Expected Page Setup dialog button to exist").toBeTruthy();
+    expect(pageSetupButton?.testId).toBe("ribbon-page-setup");
+
+    const printAreaGroup = pageLayoutTab.groups.find((group) => group.id === "pageLayout.printArea");
+    expect(printAreaGroup, "Expected Page Layout → Print Area group to exist").toBeTruthy();
+    if (!printAreaGroup) return;
+
+    const setPrintArea = printAreaGroup.buttons.find((button) => button.id === "pageLayout.printArea.setPrintArea");
+    expect(setPrintArea, "Expected Set Print Area button").toBeTruthy();
+    expect(setPrintArea?.testId).toBe("ribbon-set-print-area");
+
+    const clearPrintArea = printAreaGroup.buttons.find((button) => button.id === "pageLayout.printArea.clearPrintArea");
+    expect(clearPrintArea, "Expected Clear Print Area button").toBeTruthy();
+    expect(clearPrintArea?.testId).toBe("ribbon-clear-print-area");
+
+    const exportGroup = pageLayoutTab.groups.find((group) => group.id === "pageLayout.export");
+    expect(exportGroup, "Expected Page Layout → Export group to exist").toBeTruthy();
+    if (!exportGroup) return;
+
+    const exportPdf = exportGroup.buttons.find((button) => button.id === "pageLayout.export.exportPdf");
+    expect(exportPdf, "Expected Export to PDF button").toBeTruthy();
+    expect(exportPdf?.testId).toBe("ribbon-export-pdf");
+  });
+
   it("keeps File → Info → Manage Workbook menu item ids wired", () => {
     const fileTab = defaultRibbonSchema.tabs.find((tab) => tab.id === "file");
     expect(fileTab, "Expected File tab to exist").toBeTruthy();
