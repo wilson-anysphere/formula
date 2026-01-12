@@ -107,7 +107,7 @@ fn ms_oshared_md5_digest_bytes_even_when_signeddata_uses_sha256() {
     let binding = verify_vba_project_signature_binding(&vba_project_bin, &pkcs7_der)
         .expect("binding verification should succeed");
     match binding {
-        VbaProjectBindingVerification::BoundUnknown(debug) => {
+        VbaProjectBindingVerification::BoundVerified(debug) => {
             assert_eq!(
                 debug.hash_algorithm_oid.as_deref(),
                 Some("2.16.840.1.101.3.4.2.1")
@@ -116,7 +116,7 @@ fn ms_oshared_md5_digest_bytes_even_when_signeddata_uses_sha256() {
             assert_eq!(debug.signed_digest.as_deref(), Some(project_md5.as_slice()));
             assert_eq!(debug.computed_digest.as_deref(), Some(project_md5.as_slice()));
         }
-        other => panic!("expected BoundUnknown, got {other:?}"),
+        other => panic!("expected BoundVerified, got {other:?}"),
     }
 }
 
@@ -213,7 +213,7 @@ fn ms_oshared_md5_source_hash_even_when_spc_indirect_data_content_v2_advertises_
     let binding = verify_vba_project_signature_binding(&unsigned_vba_project_bin, &pkcs7_der)
         .expect("binding verification should succeed");
     match binding {
-        VbaProjectBindingVerification::BoundUnknown(debug) => {
+        VbaProjectBindingVerification::BoundVerified(debug) => {
             // For V2 signatures we normalize to MD5 since the SigData sourceHash is always MD5 per
             // MS-OSHARED §4.3.
             assert_eq!(debug.hash_algorithm_oid.as_deref(), Some("1.2.840.113549.2.5"));
@@ -221,7 +221,7 @@ fn ms_oshared_md5_source_hash_even_when_spc_indirect_data_content_v2_advertises_
             assert_eq!(debug.signed_digest.as_deref(), Some(project_md5.as_slice()));
             assert_eq!(debug.computed_digest.as_deref(), Some(project_md5.as_slice()));
         }
-        other => panic!("expected BoundUnknown, got {other:?}"),
+        other => panic!("expected BoundVerified, got {other:?}"),
     }
 }
 

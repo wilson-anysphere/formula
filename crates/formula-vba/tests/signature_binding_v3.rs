@@ -300,20 +300,20 @@ fn verify_v3_md5_digest_does_not_bind_when_stream_kind_is_unknown() {
     // content/agile hashes for other signature streams. An out-of-spec MD5 digest over the v3
     // transcript should therefore not bind.
     let binding = verify_vba_signature_binding(&project_ole, &signature_stream_payload);
-    assert_eq!(binding, VbaSignatureBinding::Unknown);
+    assert_eq!(binding, VbaSignatureBinding::NotBound);
 
     let binding2 =
         verify_vba_signature_binding_with_stream_path(&project_ole, "", &signature_stream_payload);
-    assert_eq!(binding2, VbaSignatureBinding::Unknown);
+    assert_eq!(binding2, VbaSignatureBinding::NotBound);
 
     let binding3 = verify_vba_project_signature_binding(&project_ole, &signature_stream_payload)
         .expect("binding");
     match binding3 {
-        VbaProjectBindingVerification::BoundUnknown(debug) => {
+        VbaProjectBindingVerification::BoundMismatch(debug) => {
             assert_eq!(debug.signed_digest.as_deref(), Some(digest.as_slice()));
             assert_eq!(debug.computed_digest.as_deref(), Some(legacy_content.as_ref()));
         }
-        other => panic!("expected BoundUnknown, got {other:?}"),
+        other => panic!("expected BoundMismatch, got {other:?}"),
     }
 }
 
@@ -595,7 +595,7 @@ fn verify_vba_project_signature_binding_reports_mismatch_for_md5_digests_when_st
     let binding = verify_vba_project_signature_binding(&project_ole, &signature_stream_payload)
         .expect("binding");
     match binding {
-        VbaProjectBindingVerification::BoundUnknown(debug) => {
+        VbaProjectBindingVerification::BoundMismatch(debug) => {
             assert_eq!(
                 debug.hash_algorithm_oid.as_deref(),
                 Some("1.2.840.113549.2.5")
@@ -604,12 +604,12 @@ fn verify_vba_project_signature_binding_reports_mismatch_for_md5_digests_when_st
             assert_eq!(debug.signed_digest.as_deref(), Some(digest.as_slice()));
             assert_eq!(debug.computed_digest.as_deref(), Some(legacy_content.as_ref()));
         }
-        other => panic!("expected BoundUnknown, got {other:?}"),
+        other => panic!("expected BoundMismatch, got {other:?}"),
     }
 
     // Also cover the simpler binding helper (no debug info).
     assert_eq!(
         verify_vba_signature_binding(&project_ole, &signature_stream_payload),
-        VbaSignatureBinding::Unknown
+        VbaSignatureBinding::NotBound
     );
 }

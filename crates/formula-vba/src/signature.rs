@@ -829,10 +829,15 @@ pub fn verify_vba_digital_signature_with_trust(
 /// - `\x05DigitalSignatureExt` → MS-OVBA v3 transcript; `formula-vba` currently compares the signed
 ///                               digest bytes to [`crate::contents_hash_v3`] (SHA-256 helper)
 ///
-/// When the stream path is unknown or ambiguous, this uses a conservative fallback: it computes
-/// every supported contents-hash version that could plausibly match the signed digest length and
-/// returns [`VbaSignatureBinding::Bound`] only if **exactly one** version matches. Otherwise it
-/// returns [`VbaSignatureBinding::Unknown`].
+/// When the stream path is unknown or ambiguous, this uses a best-effort fallback:
+/// - Compute every supported contents-hash version that could plausibly match the signed digest
+///   length.
+/// - If **any** candidate matches and **all** plausible candidates were computed successfully,
+///   return [`VbaSignatureBinding::Bound`].
+/// - If **no** candidates match and **all** plausible candidates were computed successfully,
+///   return [`VbaSignatureBinding::NotBound`].
+/// - Otherwise (unsupported digest, missing project data, or missing candidates), return
+///   [`VbaSignatureBinding::Unknown`].
 ///
 /// This is a best-effort helper: it returns [`VbaSignatureBinding::Unknown`] when the signature
 /// does not contain a supported digest structure, uses an unsupported hash algorithm, or the
@@ -948,11 +953,16 @@ pub fn verify_vba_signature_binding_with_stream_path(
                     }
                 }
 
-                if match_count == 1 && !missing_candidate {
-                    VbaSignatureBinding::Bound
-                } else {
-                    VbaSignatureBinding::Unknown
+                if missing_candidate {
+                    return VbaSignatureBinding::Unknown;
                 }
+                if match_count > 0 {
+                    return VbaSignatureBinding::Bound;
+                }
+                if signed_digest.len() == 16 || signed_digest.len() == 32 {
+                    return VbaSignatureBinding::NotBound;
+                }
+                VbaSignatureBinding::Unknown
             }
         }
     }
@@ -1705,9 +1715,13 @@ pub fn verify_vba_project_signature_binding(
             Some(VbaSignatureStreamKind::Unknown) | None => {
                 // Unknown stream kind: conservative fallback.
                 //
-                // Only treat the signature as bound when **exactly one** supported contents hash
-                // version matches the signed digest, and we were able to compute every plausible
-                // candidate.
+                // Unknown stream kind: best-effort comparison against every plausible contents-hash
+                // candidate derived from the digest length.
+                //
+                // If we can compute *all* plausible candidates:
+                // - any match => BoundVerified (the signature is bound, even if we can't disambiguate
+                //   between V1/V2 when the digests are identical),
+                // - no match  => BoundMismatch (definite "not bound" under any supported scheme).
                 let mut match_count = 0usize;
                 let mut missing_candidate = false;
                 let mut first_computed: Option<Vec<u8>> = None;
@@ -1790,8 +1804,16 @@ pub fn verify_vba_project_signature_binding(
 
                 debug.computed_digest = matching_digest.or(first_computed);
 
-                if match_count == 1 && !missing_candidate {
-                    return Ok(VbaProjectBindingVerification::BoundVerified(debug));
+                if !missing_candidate {
+                    if match_count > 0 {
+                        return Ok(VbaProjectBindingVerification::BoundVerified(debug));
+                    }
+                    // If we computed every plausible candidate and none matched, treat this as a
+                    // definite mismatch (the signature is not bound under any supported scheme).
+                    if match_count == 0 && debug.computed_digest.is_some() {
+                        record_definite_mismatch(&debug);
+                        continue;
+                    }
                 }
 
                 record_any(&debug);

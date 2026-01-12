@@ -286,16 +286,16 @@ fn signature_binding_accepts_content_only_or_content_plus_forms_transcripts() {
     assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
     assert_eq!(
         verify_vba_signature_binding(&signed, &sig_stream),
-        VbaSignatureBinding::Unknown
+        VbaSignatureBinding::NotBound
     );
     match verify_vba_project_signature_binding(&signed, &sig_stream).expect("binding verification") {
-        VbaProjectBindingVerification::BoundUnknown(info) => {
+        VbaProjectBindingVerification::BoundMismatch(info) => {
             assert_eq!(info.signed_digest.as_deref(), Some(wrong_digest.as_slice()));
             assert!(
                 matches!(info.computed_digest.as_deref(), Some(d) if d == digest_content_only.as_slice()),
                 "expected computed_digest to be the legacy ContentHash digest"
             );
         }
-        other => panic!("expected BoundUnknown, got {other:?}"),
+        other => panic!("expected BoundMismatch, got {other:?}"),
     }
 }
