@@ -50,13 +50,18 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
     };
 
     // Excel has been observed to encode `rc/@t` as either 0-based or 1-based indices into the
-    // `<metadataTypes>` list. The index base appears to be consistent within a file, but accepting
-    // both simultaneously can produce false positives when the metadataTypes list contains multiple
-    // entries (the same `t` number can refer to different types depending on the base).
+    // `<metadataTypes>` list. Most files appear consistent, but some producers can mix the two
+    // schemes (e.g. some `<bk>` entries use 1-based while others use 0-based).
     //
-    // To be robust without over-matching, compute both interpretations and pick the one that yields
-    // the most resolved `vm -> richValue` links. (Some producers also omit the `futureMetadata`
-    // indirection and store the rich value index directly in `rc/@v`; this helper supports both.)
+    // Accepting both schemes simultaneously can produce false positives when `<metadataTypes>`
+    // contains multiple entries (the same `t` number can refer to different types depending on the
+    // base). We therefore:
+    // - Prefer a single inferred base when possible
+    // - Only accept both bases when we see evidence the file mixes them
+    // - Otherwise fall back to "whichever yields more resolved vm -> richValue links"
+    //
+    // Note: Some producers also omit the `<futureMetadata name="XLRICHVALUE">` indirection and store
+    // the rich value index directly in `rc/@v`; this helper supports both layouts.
     let Ok(xlrichvalue_t_zero_based) = u32::try_from(xlrichvalue_type_idx) else {
         return Ok(HashMap::new());
     };
@@ -70,16 +75,22 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
         //
         // Some producers omit `<futureMetadata name="XLRICHVALUE">` entirely and instead store the
         // rich value index directly in `<valueMetadata><bk><rc ... v="..."/>`.
-        let out = match rc_t_indexing {
-            RcTIndexing::ZeroBased => {
-                parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_zero_based])
-            }
-            RcTIndexing::OneBased => parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_one_based]),
-            RcTIndexing::Ambiguous => {
-                let a = parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_zero_based]);
-                let b = parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_one_based]);
-                if b.len() >= a.len() { b } else { a }
-            }
+    let out = match rc_t_indexing {
+        RcTIndexing::ZeroBased => {
+            parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_zero_based])
+        }
+        RcTIndexing::OneBased => {
+            parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_one_based])
+        }
+        RcTIndexing::Mixed => parse_value_metadata_direct_mappings(
+            &doc,
+            &[xlrichvalue_t_zero_based, xlrichvalue_t_one_based],
+        ),
+        RcTIndexing::Ambiguous => {
+            let a = parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_zero_based]);
+            let b = parse_value_metadata_direct_mappings(&doc, &[xlrichvalue_t_one_based]);
+            if b.len() >= a.len() { b } else { a }
+        }
         };
         return Ok(out);
     }
@@ -91,6 +102,11 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
         RcTIndexing::OneBased => {
             parse_value_metadata_mappings(&doc, &[xlrichvalue_t_one_based], &future_bk_indices)
         }
+        RcTIndexing::Mixed => parse_value_metadata_mappings(
+            &doc,
+            &[xlrichvalue_t_zero_based, xlrichvalue_t_one_based],
+            &future_bk_indices,
+        ),
         RcTIndexing::Ambiguous => {
             let a = parse_value_metadata_mappings(&doc, &[xlrichvalue_t_zero_based], &future_bk_indices);
             let b = parse_value_metadata_mappings(&doc, &[xlrichvalue_t_one_based], &future_bk_indices);
@@ -105,6 +121,7 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
 enum RcTIndexing {
     ZeroBased,
     OneBased,
+    Mixed,
     Ambiguous,
 }
 
@@ -133,7 +150,10 @@ fn find_metadata_type_index_and_count(doc: &Document<'_>, name: &str) -> Option<
     out_idx.map(|idx| (idx, count))
 }
 
-fn infer_value_metadata_rc_t_indexing(doc: &Document<'_>, metadata_types_count: usize) -> RcTIndexing {
+fn infer_value_metadata_rc_t_indexing(
+    doc: &Document<'_>,
+    metadata_types_count: usize,
+) -> RcTIndexing {
     if metadata_types_count == 0 {
         return RcTIndexing::Ambiguous;
     }
@@ -168,6 +188,12 @@ fn infer_value_metadata_rc_t_indexing(doc: &Document<'_>, metadata_types_count: 
     let Ok(count_u32) = u32::try_from(metadata_types_count) else {
         return RcTIndexing::Ambiguous;
     };
+
+    // If we see both 0 and `count` in the same file, that's strong evidence the producer mixed
+    // 0-based and 1-based indexing schemes across `<bk>` entries.
+    if min_t == 0 && max_t == count_u32 {
+        return RcTIndexing::Mixed;
+    }
 
     let zero_based_possible = max_t < count_u32;
     let one_based_possible = min_t >= 1 && max_t <= count_u32;
