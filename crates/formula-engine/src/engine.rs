@@ -5795,27 +5795,13 @@ enum ColumnSliceMode {
     IgnoreNonNumeric,
 }
 
-fn slice_mode_for_program(program: &bytecode::Program) -> ColumnSliceMode {
-    if program.funcs.iter().any(|f| {
-        matches!(
-            f,
-            bytecode::ast::Function::SumProduct
-                | bytecode::ast::Function::CountIf
-                | bytecode::ast::Function::SumIf
-                | bytecode::ast::Function::SumIfs
-                | bytecode::ast::Function::CountIfs
-                | bytecode::ast::Function::AverageIf
-                | bytecode::ast::Function::AverageIfs
-                | bytecode::ast::Function::MinIfs
-                | bytecode::ast::Function::MaxIfs
-                | bytecode::ast::Function::CountA
-                | bytecode::ast::Function::CountBlank
-        )
-    }) {
-        ColumnSliceMode::StrictNumeric
-    } else {
-        ColumnSliceMode::IgnoreNonNumeric
-    }
+fn slice_mode_for_program(_program: &bytecode::Program) -> ColumnSliceMode {
+    // Prefer allowing column slices even for "header + data" columns.
+    //
+    // Any bytecode runtime code paths that *require* strict numeric slices (e.g. SUMPRODUCT's
+    // coercion semantics or COUNTIF/criteria comparisons that must distinguish blanks from text)
+    // should call the `*_strict_numeric` slice APIs explicitly.
+    ColumnSliceMode::IgnoreNonNumeric
 }
 
 #[derive(Debug, Clone)]
@@ -6364,6 +6350,47 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
             ColumnSliceMode::IgnoreNonNumeric => &seg.blocked_rows_ignore_nonnumeric,
         };
         if has_blocked_row(blocked_rows, row_start, row_end) {
+            return None;
+        }
+
+        let start = (row_start - seg.row_start) as usize;
+        let end = (row_end - seg.row_start) as usize;
+        if end >= seg.values.len() {
+            return None;
+        }
+        Some(&seg.values[start..=end])
+    }
+
+    fn column_slice_on_sheet_strict_numeric(
+        &self,
+        sheet: usize,
+        col: i32,
+        row_start: i32,
+        row_end: i32,
+    ) -> Option<&[f64]> {
+        if col < 0
+            || col >= EXCEL_MAX_COLS_I32
+            || row_start < 0
+            || row_end < 0
+            || row_start > row_end
+            || row_end >= EXCEL_MAX_ROWS_I32
+        {
+            return None;
+        }
+        if !self.snapshot.sheets.contains(&sheet) {
+            return None;
+        }
+        let sheet_cols = self.cols_by_sheet.get(sheet)?;
+        let data = sheet_cols.get(&col)?;
+        let idx = data
+            .segments
+            .partition_point(|seg| seg.row_end() < row_start);
+        let seg = data.segments.get(idx)?;
+        if row_start < seg.row_start || row_end > seg.row_end() {
+            return None;
+        }
+
+        if has_blocked_row(&seg.blocked_rows_strict, row_start, row_end) {
             return None;
         }
 

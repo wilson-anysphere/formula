@@ -79,6 +79,21 @@ pub trait Grid: Sync {
         let _ = sheet;
         self.column_slice(col, row_start, row_end)
     }
+
+    /// Sheet-aware variant of [`Grid::column_slice_strict_numeric`].
+    ///
+    /// Implementations that allow non-numeric values in `column_slice_on_sheet` should override
+    /// this to apply stricter validation.
+    #[inline]
+    fn column_slice_on_sheet_strict_numeric(
+        &self,
+        sheet: usize,
+        col: i32,
+        row_start: i32,
+        row_end: i32,
+    ) -> Option<&[f64]> {
+        self.column_slice_on_sheet(sheet, col, row_start, row_end)
+    }
     fn bounds(&self) -> (i32, i32);
 
     /// Sheet-aware variant of [`Grid::bounds`].

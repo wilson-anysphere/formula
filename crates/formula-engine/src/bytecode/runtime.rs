@@ -2376,7 +2376,7 @@ fn fn_sumif(
             let crit_col = crit_range.col_start + col_off;
             let sum_col = sum_range.col_start + col_off;
             if grid
-                .column_slice(crit_col, crit_range.row_start, crit_range.row_end)
+                .column_slice_strict_numeric(crit_col, crit_range.row_start, crit_range.row_end)
                 .is_none()
                 || grid
                     .column_slice(sum_col, sum_range.row_start, sum_range.row_end)
@@ -2392,8 +2392,9 @@ fn fn_sumif(
             for col_off in 0..cols {
                 let crit_col = crit_range.col_start + col_off;
                 let sum_col = sum_range.col_start + col_off;
-                let crit_slice =
-                    grid.column_slice(crit_col, crit_range.row_start, crit_range.row_end).unwrap();
+                let crit_slice = grid
+                    .column_slice_strict_numeric(crit_col, crit_range.row_start, crit_range.row_end)
+                    .unwrap();
                 let sum_slice =
                     grid.column_slice(sum_col, sum_range.row_start, sum_range.row_end).unwrap();
                 sum += simd::sum_if_f64(sum_slice, crit_slice, numeric);
@@ -2509,7 +2510,7 @@ fn fn_sumifs(
             for range in &crit_ranges {
                 let col = range.col_start + col_off;
                 if grid
-                    .column_slice(col, range.row_start, range.row_end)
+                    .column_slice_strict_numeric(col, range.row_start, range.row_end)
                     .is_none()
                 {
                     slices_ok = false;
@@ -2530,7 +2531,9 @@ fn fn_sumifs(
                 let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
                 for range in &crit_ranges {
                     let col = range.col_start + col_off;
-                    let slice = grid.column_slice(col, range.row_start, range.row_end).unwrap();
+                    let slice = grid
+                        .column_slice_strict_numeric(col, range.row_start, range.row_end)
+                        .unwrap();
                     crit_slices.push(slice);
                 }
 
@@ -2681,7 +2684,9 @@ fn fn_countifs(
             let mut slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(ranges.len());
             for range in &ranges {
                 let col = range.col_start + col_off;
-                let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) else {
+                let Some(slice) =
+                    grid.column_slice_strict_numeric(col, range.row_start, range.row_end)
+                else {
                     slices.clear();
                     break;
                 };
@@ -2808,7 +2813,7 @@ fn fn_averageif(
             let crit_col = crit_range.col_start + col_off;
             let avg_col = avg_range.col_start + col_off;
             if grid
-                .column_slice(crit_col, crit_range.row_start, crit_range.row_end)
+                .column_slice_strict_numeric(crit_col, crit_range.row_start, crit_range.row_end)
                 .is_none()
                 || grid
                     .column_slice(avg_col, avg_range.row_start, avg_range.row_end)
@@ -2825,8 +2830,9 @@ fn fn_averageif(
             for col_off in 0..cols {
                 let crit_col = crit_range.col_start + col_off;
                 let avg_col = avg_range.col_start + col_off;
-                let crit_slice =
-                    grid.column_slice(crit_col, crit_range.row_start, crit_range.row_end).unwrap();
+                let crit_slice = grid
+                    .column_slice_strict_numeric(crit_col, crit_range.row_start, crit_range.row_end)
+                    .unwrap();
                 let avg_slice =
                     grid.column_slice(avg_col, avg_range.row_start, avg_range.row_end).unwrap();
                 let (s, c) = simd::sum_count_if_f64(avg_slice, crit_slice, numeric);
@@ -2955,7 +2961,7 @@ fn fn_averageifs(
             for range in &crit_ranges {
                 let col = range.col_start + col_off;
                 if grid
-                    .column_slice(col, range.row_start, range.row_end)
+                    .column_slice_strict_numeric(col, range.row_start, range.row_end)
                     .is_none()
                 {
                     slices_ok = false;
@@ -2977,7 +2983,9 @@ fn fn_averageifs(
                 let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
                 for range in &crit_ranges {
                     let col = range.col_start + col_off;
-                    let slice = grid.column_slice(col, range.row_start, range.row_end).unwrap();
+                    let slice = grid
+                        .column_slice_strict_numeric(col, range.row_start, range.row_end)
+                        .unwrap();
                     crit_slices.push(slice);
                 }
 
@@ -3160,7 +3168,9 @@ fn fn_minifs(
             let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
             for range in &crit_ranges {
                 let col = range.col_start + col_off;
-                let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) else {
+                let Some(slice) =
+                    grid.column_slice_strict_numeric(col, range.row_start, range.row_end)
+                else {
                     crit_slices.clear();
                     break;
                 };
@@ -3327,7 +3337,9 @@ fn fn_maxifs(
             let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
             for range in &crit_ranges {
                 let col = range.col_start + col_off;
-                let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) else {
+                let Some(slice) =
+                    grid.column_slice_strict_numeric(col, range.row_start, range.row_end)
+                else {
                     crit_slices.clear();
                     break;
                 };
@@ -4496,9 +4508,9 @@ fn counta_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, ErrorKin
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
         // Fast path: numeric-only columns (NaN = blank/non-numeric). This is only correct when
-        // slices are *strict numeric*; otherwise non-numeric values would appear as NaN and be
-        // miscounted. The engine selects strict slice mode for COUNTA/COUNTBLANK programs.
-        if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
+        // we validate that the slice contains no non-numeric values. (Non-numeric cells that
+        // would be indistinguishable from blanks in the slice force a fallback scan.)
+        if let Some(slice) = grid.column_slice_strict_numeric(col, range.row_start, range.row_end) {
             count += simd::count_ignore_nan_f64(slice);
         } else {
             for row in range.row_start..=range.row_end {
@@ -4538,7 +4550,12 @@ fn counta_range_on_sheet(
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
         // Same strict-numeric slice requirement as `counta_range`.
-        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
+        if let Some(slice) = grid.column_slice_on_sheet_strict_numeric(
+            sheet,
+            col,
+            range.row_start,
+            range.row_end,
+        ) {
             count += simd::count_ignore_nan_f64(slice);
         } else {
             for row in range.row_start..=range.row_end {
@@ -4578,7 +4595,7 @@ fn countblank_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, Erro
 
     let mut non_blank = 0u64;
     for col in range.col_start..=range.col_end {
-        if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
+        if let Some(slice) = grid.column_slice_strict_numeric(col, range.row_start, range.row_end) {
             non_blank += simd::count_ignore_nan_f64(slice) as u64;
         } else {
             for row in range.row_start..=range.row_end {
@@ -4621,7 +4638,12 @@ fn countblank_range_on_sheet(
 
     let mut non_blank = 0u64;
     for col in range.col_start..=range.col_end {
-        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
+        if let Some(slice) = grid.column_slice_on_sheet_strict_numeric(
+            sheet,
+            col,
+            range.row_start,
+            range.row_end,
+        ) {
             non_blank += simd::count_ignore_nan_f64(slice) as u64;
         } else {
             for row in range.row_start..=range.row_end {
@@ -4918,7 +4940,7 @@ fn count_if_range(
 
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
-        if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
+        if let Some(slice) = grid.column_slice_strict_numeric(col, range.row_start, range.row_end) {
             count += simd::count_if_blank_as_zero_f64(slice, criteria);
         } else {
             for row in range.row_start..=range.row_end {
@@ -4974,9 +4996,12 @@ fn count_if_range_on_sheet(
 
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
-        if let Some(slice) =
-            grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
-        {
+        if let Some(slice) = grid.column_slice_on_sheet_strict_numeric(
+            sheet,
+            col,
+            range.row_start,
+            range.row_end,
+        ) {
             count += simd::count_if_blank_as_zero_f64(slice, criteria);
         } else {
             for row in range.row_start..=range.row_end {
@@ -5023,8 +5048,8 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
         let col_a = a.col_start + col_offset;
         let col_b = b.col_start + col_offset;
         if let (Some(sa), Some(sb)) = (
-            grid.column_slice(col_a, a.row_start, a.row_end),
-            grid.column_slice(col_b, b.row_start, b.row_end),
+            grid.column_slice_strict_numeric(col_a, a.row_start, a.row_end),
+            grid.column_slice_strict_numeric(col_b, b.row_start, b.row_end),
         ) {
             sum += simd::sumproduct_ignore_nan_f64(sa, sb);
             continue;
