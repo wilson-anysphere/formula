@@ -11,9 +11,9 @@ test("renderMacroRunner is class-driven (no inline style assignments)", () => {
   const src = fs.readFileSync(srcPath, "utf8");
 
   assert.equal(
-    /\.style\./.test(src) || /\.style\[/.test(src),
+    /\.style\b/.test(src) || /setAttribute\(\s*["']style["']/.test(src),
     false,
-    "renderMacroRunner should not set inline styles (element.style.*); use src/styles/macros-runner.css classes instead",
+    "renderMacroRunner should not use inline styles (element.style* / setAttribute('style', ...)); use src/styles/macros-runner.css classes instead",
   );
 
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
