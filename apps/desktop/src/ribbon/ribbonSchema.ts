@@ -495,6 +495,20 @@ export const defaultRibbonSchema: RibbonSchema = {
           ],
         },
         {
+          id: "home.debug.ai",
+          label: "AI",
+          buttons: [
+            {
+              id: "open-panel-ai-chat",
+              label: "AI",
+              ariaLabel: "Toggle AI panel",
+              icon: "🤖",
+              testId: "open-panel-ai-chat",
+              size: "icon",
+            },
+          ],
+        },
+        {
           id: "home.alignment",
           label: "Alignment",
           buttons: [
@@ -775,14 +789,6 @@ export const defaultRibbonSchema: RibbonSchema = {
           id: "home.debug.panels",
           label: "Panels",
           buttons: [
-            {
-              id: "open-panel-ai-chat",
-              label: "AI chat",
-              ariaLabel: "Toggle AI chat panel",
-              icon: "🤖",
-              testId: "open-panel-ai-chat",
-              size: "icon",
-            },
             {
               id: "open-panel-ai-audit",
               label: "Audit log (alt)",
