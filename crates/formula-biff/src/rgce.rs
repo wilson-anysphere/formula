@@ -98,7 +98,8 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                 let Some(op) = op_str(ptg) else {
                     return Err(DecodeRgceError::UnsupportedToken { ptg });
                 };
-                let prec = binary_precedence(ptg).expect("precedence for binary ops");
+                let prec = binary_precedence(ptg)
+                    .ok_or(DecodeRgceError::UnsupportedToken { ptg })?;
 
                 let right = stack.pop().ok_or(DecodeRgceError::UnexpectedEof)?;
                 let left = stack.pop().ok_or(DecodeRgceError::UnexpectedEof)?;
@@ -500,7 +501,7 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
     }
 
     if stack.len() == 1 {
-        Ok(stack.pop().expect("len checked").text)
+        Ok(stack.pop().ok_or(DecodeRgceError::UnexpectedEof)?.text)
     } else {
         Err(DecodeRgceError::UnsupportedToken { ptg: 0x00 })
     }
@@ -632,30 +633,37 @@ fn format_structured_ref(
 
     // Item-only selections: `Table1[#All]`, `Table1[#Headers]`, etc.
     if columns == &StructuredColumns::All {
-        if let Some(item) = item {
-            return format!("{table}[{}]", structured_ref_item_literal(item));
-        }
-        // Default row selector with no column selection: treat as `[#Data]`.
-        return format!("{table}[#Data]");
+        return match item {
+            Some(item) => format!("{table}[{}]", structured_ref_item_literal(item)),
+            // Default row selector with no column selection: treat as `[#Data]`.
+            None => format!("{table}[#Data]"),
+        };
     }
 
-    // Single-column selection with default/data item: `Table1[Col]`.
+    // Single-column selection with default/data item: `Table1[Col]` or `Table1[[Col1]:[Col2]]`.
     if matches!(item, None | Some(StructuredRefItem::Data)) {
-        match columns {
+        return match columns {
             StructuredColumns::Single(col) => {
-                return format!("{table}[{}]", escape_structured_ref_bracket_content(col));
+                format!("{table}[{}]", escape_structured_ref_bracket_content(col))
             }
             StructuredColumns::Range { start, end } => {
                 let start = escape_structured_ref_bracket_content(start);
                 let end = escape_structured_ref_bracket_content(end);
-                return format!("{table}[[{start}]:[{end}]]");
+                format!("{table}[[{start}]:[{end}]]")
             }
-            StructuredColumns::All => {}
-        }
+            StructuredColumns::All => {
+                // Covered by the `columns == All` early return above.
+                format!("{table}[#Data]")
+            }
+        };
     }
 
     // General nested form: `Table1[[#Headers],[Col]]` or `Table1[[#Headers],[Col1]:[Col2]]`.
-    let item = item.expect("handled None above");
+    let item = match item {
+        Some(item) => item,
+        None => StructuredRefItem::Data,
+    };
+
     match columns {
         StructuredColumns::Single(col) => {
             let col = escape_structured_ref_bracket_content(col);
@@ -669,7 +677,10 @@ fn format_structured_ref(
                 structured_ref_item_literal(item)
             )
         }
-        StructuredColumns::All => unreachable!("handled above"),
+        StructuredColumns::All => {
+            // Covered by the `columns == All` early return above.
+            format!("{table}[{}]", structured_ref_item_literal(item))
+        }
     }
 }
 

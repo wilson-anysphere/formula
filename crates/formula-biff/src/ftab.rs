@@ -534,7 +534,9 @@ fn name_to_id() -> &'static HashMap<&'static str, u16> {
             if name.is_empty() {
                 continue;
             }
-            let id_u16: u16 = id.try_into().expect("FTAB length fits in u16");
+            let Ok(id_u16) = u16::try_from(id) else {
+                continue;
+            };
             let prev = map.insert(*name, id_u16);
             debug_assert!(prev.is_none(), "duplicate FTAB entry for {name}");
         }
