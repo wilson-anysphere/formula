@@ -2,6 +2,15 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { gotoDesktop, openSheetTabContextMenu } from "./helpers";
 
+async function openWorkbookFromFileDrop(page: Page, path: string = "/tmp/fake.xlsx"): Promise<void> {
+  await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+  await page.evaluate((workbookPath) => {
+    (window as any).__tauriListeners["file-dropped"]({ payload: [workbookPath] });
+  }, path);
+  // Wait for the workbook snapshot to be applied (our stub returns "Hello" in A1).
+  await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+}
+
 function installTauriStubForTests() {
   const listeners: Record<string, any> = {};
   (window as any).__tauriListeners = listeners;
@@ -144,9 +153,12 @@ test.describe("tauri workbookSync sheet metadata undo/redo", () => {
   test("rename sheet then undo mirrors rename_sheet back to original", async ({ page }) => {
     await page.addInitScript(installTauriStubForTests);
     await gotoDesktop(page);
+    await openWorkbookFromFileDrop(page);
 
     const tab = page.getByTestId("sheet-tab-Sheet1");
     await expect(tab).toBeVisible();
+
+    const renameCallsBefore = (await getInvokeCalls(page)).filter((c) => c.cmd === "rename_sheet").length;
 
     await tab.dblclick();
     const input = tab.locator("input");
@@ -157,52 +169,72 @@ test.describe("tauri workbookSync sheet metadata undo/redo", () => {
 
     await expect
       .poll(async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "rename_sheet").length, { timeout: 10_000 })
-      .toBe(1);
+      .toBeGreaterThan(renameCallsBefore);
+
+    const renameCallsAfterRename = (await getInvokeCalls(page)).filter((c) => c.cmd === "rename_sheet");
+    expect(
+      renameCallsAfterRename.slice(renameCallsBefore).some((c) => c.args?.sheet_id === "Sheet1" && c.args?.name === "RenamedSheet1"),
+    ).toBe(true);
 
     // Prefer app-level undo to avoid relying on keyboard focus.
+    const renameCallsBeforeUndo = renameCallsAfterRename.length;
     await page.evaluate(() => (window as any).__formulaApp.undo());
 
     await expect
       .poll(async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "rename_sheet").length, { timeout: 10_000 })
-      .toBe(2);
+      .toBeGreaterThan(renameCallsBeforeUndo);
 
-    const calls = (await getInvokeCalls(page)).filter((c) => c.cmd === "rename_sheet");
-    expect(calls[1]?.args).toMatchObject({ sheet_id: "Sheet1", name: "Sheet1" });
+    const renameCallsAfterUndo = (await getInvokeCalls(page)).filter((c) => c.cmd === "rename_sheet");
+    expect(
+      renameCallsAfterUndo.slice(renameCallsBeforeUndo).some((c) => c.args?.sheet_id === "Sheet1" && c.args?.name === "Sheet1"),
+    ).toBe(true);
   });
 
   test("hide sheet then undo mirrors set_sheet_visibility back to visible", async ({ page }) => {
     await page.addInitScript(installTauriStubForTests);
     await gotoDesktop(page);
+    await openWorkbookFromFileDrop(page);
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    const visibilityCallsBefore = (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_visibility").length;
+
     const menu = await openSheetTabContextMenu(page, "Sheet2");
     await menu.getByRole("button", { name: "Hide", exact: true }).click();
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
 
     await expect
-      .poll(
-        async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_visibility").length,
-        { timeout: 10_000 },
-      )
-      .toBe(1);
+      .poll(async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_visibility").length, { timeout: 10_000 })
+      .toBeGreaterThan(visibilityCallsBefore);
 
+    const visibilityCallsAfterHide = (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_visibility");
+    expect(
+      visibilityCallsAfterHide
+        .slice(visibilityCallsBefore)
+        .some((c) => c.args?.sheet_id === "Sheet2" && c.args?.visibility === "hidden"),
+    ).toBe(true);
+
+    const visibilityCallsBeforeUndo = visibilityCallsAfterHide.length;
     await page.evaluate(() => (window as any).__formulaApp.undo());
 
     await expect
-      .poll(
-        async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_visibility").length,
-        { timeout: 10_000 },
-      )
-      .toBe(2);
+      .poll(async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_visibility").length, { timeout: 10_000 })
+      .toBeGreaterThan(visibilityCallsBeforeUndo);
 
-    const calls = (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_visibility");
-    expect(calls[1]?.args).toMatchObject({ sheet_id: "Sheet2", visibility: "visible" });
+    const visibilityCallsAfterUndo = (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_visibility");
+    expect(
+      visibilityCallsAfterUndo
+        .slice(visibilityCallsBeforeUndo)
+        .some((c) => c.args?.sheet_id === "Sheet2" && c.args?.visibility === "visible"),
+    ).toBe(true);
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
   });
 
   test("set tab color then undo mirrors set_sheet_tab_color back to null", async ({ page }) => {
     await page.addInitScript(installTauriStubForTests);
     await gotoDesktop(page);
+    await openWorkbookFromFileDrop(page);
+
+    const tabColorCallsBefore = (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_tab_color").length;
 
     const menu = await openSheetTabContextMenu(page, "Sheet1");
     await menu.getByRole("button", { name: "Tab Color", exact: true }).click();
@@ -211,22 +243,31 @@ test.describe("tauri workbookSync sheet metadata undo/redo", () => {
 
     await expect
       .poll(async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_tab_color").length, { timeout: 10_000 })
-      .toBe(1);
+      .toBeGreaterThan(tabColorCallsBefore);
 
+    const tabColorCallsAfterSet = (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_tab_color");
+    expect(
+      tabColorCallsAfterSet.slice(tabColorCallsBefore).some((c) => c.args?.sheet_id === "Sheet1" && c.args?.tab_color != null),
+    ).toBe(true);
+
+    const tabColorCallsBeforeUndo = tabColorCallsAfterSet.length;
     await page.evaluate(() => (window as any).__formulaApp.undo());
 
     await expect
       .poll(async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_tab_color").length, { timeout: 10_000 })
-      .toBe(2);
+      .toBeGreaterThan(tabColorCallsBeforeUndo);
 
-    const calls = (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_tab_color");
-    expect(calls[1]?.args).toMatchObject({ sheet_id: "Sheet1", tab_color: null });
+    const tabColorCallsAfterUndo = (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_tab_color");
+    expect(
+      tabColorCallsAfterUndo.slice(tabColorCallsBeforeUndo).some((c) => c.args?.sheet_id === "Sheet1" && c.args?.tab_color == null),
+    ).toBe(true);
     await expect(page.getByTestId("sheet-tab-Sheet1")).not.toHaveAttribute("data-tab-color");
   });
 
   test("reorder sheets then undo mirrors the backend ordering via move_sheet", async ({ page }) => {
     await page.addInitScript(installTauriStubForTests);
     await gotoDesktop(page);
+    await openWorkbookFromFileDrop(page);
 
     await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
@@ -278,13 +319,14 @@ test.describe("tauri workbookSync sheet metadata undo/redo", () => {
     expect(moveCalls.some((c) => c.args?.sheet_id === "Sheet3" && c.args?.to_index === 2)).toBe(true);
   });
 
-  test("delete renamed sheet then undo recreates it via add_sheet_with_id (stable sheet id)", async ({ page }) => {
+  test("delete renamed sheet then undo recreates it via add_sheet (stable sheet id)", async ({ page }) => {
     await page.addInitScript(installTauriStubForTests);
     await page.addInitScript(() => {
       // Avoid native blocking confirm; use a stubbed confirm so nativeDialogs.confirm proceeds.
       (window as any).confirm = () => true;
     });
     await gotoDesktop(page);
+    await openWorkbookFromFileDrop(page);
 
     const tab = page.getByTestId("sheet-tab-Sheet1");
     await expect(tab).toBeVisible();
@@ -297,21 +339,29 @@ test.describe("tauri workbookSync sheet metadata undo/redo", () => {
     await input.press("Enter");
     await expect(tab.locator(".sheet-tab__name")).toHaveText("Budget");
 
+    const deleteCallsBefore = (await getInvokeCalls(page)).filter((c) => c.cmd === "delete_sheet").length;
+    const addCallsBefore = (await getInvokeCalls(page)).filter((c) => c.cmd === "add_sheet").length;
+
     // Delete via context menu.
     const menu = await openSheetTabContextMenu(page, "Sheet1");
     await menu.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveCount(0);
 
     await expect
       .poll(async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "delete_sheet").length, { timeout: 10_000 })
-      .toBe(1);
+      .toBeGreaterThan(deleteCallsBefore);
 
     await page.evaluate(() => (window as any).__formulaApp.undo());
 
     await expect
-      .poll(async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "add_sheet_with_id").length, { timeout: 10_000 })
-      .toBe(1);
+      .poll(async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "add_sheet").length, { timeout: 10_000 })
+      .toBeGreaterThan(addCallsBefore);
 
-    const calls = (await getInvokeCalls(page)).filter((c) => c.cmd === "add_sheet_with_id");
-    expect(calls[0]?.args).toMatchObject({ sheet_id: "Sheet1", name: "Budget" });
+    const callsAfterUndo = (await getInvokeCalls(page)).filter((c) => c.cmd === "add_sheet");
+    expect(
+      callsAfterUndo.slice(addCallsBefore).some((c) => c.args?.sheet_id === "Sheet1" && c.args?.name === "Budget"),
+    ).toBe(true);
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet1").locator(".sheet-tab__name")).toHaveText("Budget");
   });
 });

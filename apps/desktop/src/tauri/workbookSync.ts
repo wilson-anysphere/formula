@@ -117,6 +117,23 @@ function tabColorEquals(a: unknown, b: unknown): boolean {
   return tabColorToKey(a) === tabColorToKey(b);
 }
 
+function tabColorToBackendArg(input: unknown): TabColor | null {
+  if (!input) return null;
+  if (typeof input === "string") {
+    const rgb = input.trim();
+    return rgb ? { rgb } : null;
+  }
+  if (typeof input !== "object") return null;
+  const color = input as any;
+  const out: TabColor = {};
+  if (typeof color.rgb === "string" && color.rgb.trim() !== "") out.rgb = color.rgb.trim();
+  if (typeof color.theme === "number") out.theme = color.theme;
+  if (typeof color.indexed === "number") out.indexed = color.indexed;
+  if (typeof color.tint === "number") out.tint = color.tint;
+  if (typeof color.auto === "boolean") out.auto = color.auto;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 function normalizeSheetVisibility(raw: unknown): SheetVisibility {
   return raw === "hidden" || raw === "veryHidden" || raw === "visible" ? raw : "visible";
 }
