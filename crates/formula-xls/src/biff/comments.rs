@@ -780,6 +780,43 @@ fn fallback_decode_continue_fragments(
     codepage: u16,
     warnings: &mut Vec<String>,
 ) -> Option<String> {
+    fn looks_like_txo_formatting_runs(fragment: &[u8]) -> bool {
+        // TXO rich-text formatting runs are stored as an array of 4-byte records:
+        // [ich: u16][ifnt: u16] (see MS-XLS 2.5.267 / 2.4.334).
+        //
+        // When the TXO header is missing/truncated we don't know `cbRuns`, so we use a heuristic
+        // to avoid decoding formatting run bytes as text.
+        //
+        // Importantly: formatting-run CONTINUE payloads do *not* begin with the 1-byte "high-byte"
+        // string flag used by continued-string fragments. That means the payload length is usually
+        // a multiple of 4, whereas continued-string fragments are typically `1 + n` bytes (and
+        // Unicode fragments are always odd-length).
+        if fragment.len() < 4 || fragment.len() % 4 != 0 {
+            return false;
+        }
+
+        let mut likely_records = 0usize;
+        let mut total_records = 0usize;
+        for chunk in fragment.chunks_exact(4) {
+            total_records += 1;
+            let pos = u16::from_le_bytes([chunk[0], chunk[1]]) as usize;
+            let font = u16::from_le_bytes([chunk[2], chunk[3]]) as usize;
+            // Heuristic: formatting runs usually reference character positions and font indices
+            // that fit in a single byte (high bytes are zero) and are within reasonable bounds.
+            if chunk[1] == 0
+                && chunk[3] == 0
+                && pos <= TXO_MAX_TEXT_CHARS
+                && font <= 0x0FFF
+            {
+                likely_records += 1;
+            }
+        }
+
+        // Require a majority match so we don't accidentally treat short/odd continued-string
+        // fragments as formatting runs.
+        total_records > 0 && likely_records * 2 >= total_records
+    }
+
     let mut fragments = record.fragments();
     let _ = fragments.next(); // skip header
 
@@ -805,6 +842,12 @@ fn fallback_decode_continue_fragments(
     let mut remaining_chars = TXO_MAX_TEXT_CHARS;
     for frag in continues {
         if remaining_chars == 0 {
+            break;
+        }
+
+        // If this fragment looks like TXO formatting run data (no leading flags byte), stop before
+        // we accidentally decode it as text.
+        if looks_like_txo_formatting_runs(frag) {
             break;
         }
 
@@ -1440,6 +1483,33 @@ mod tests {
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hello");
+    }
+
+    #[test]
+    fn fallback_decode_stops_before_formatting_runs_when_txo_header_is_missing() {
+        // When the TXO header is missing, the best-effort fallback decoder should still avoid
+        // interpreting formatting run bytes as text.
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            record(RECORD_TXO, &[]),
+            continue_text_ascii("Hello"),
+            // Formatting run bytes: [ich=0][ifnt=1]. These bytes do *not* have the leading
+            // continued-string flags byte, so the fallback decoder must stop before decoding them.
+            record(records::RECORD_CONTINUE, &[0x00, 0x00, 0x01, 0x00]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("falling back")),
+            "expected fallback warning; warnings={warnings:?}"
+        );
     }
 
     #[test]

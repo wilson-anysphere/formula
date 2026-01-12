@@ -1475,6 +1475,11 @@ fn build_note_comment_missing_txo_header_sheet_stream() -> Vec<u8> {
     cont.extend_from_slice(TEXT.as_bytes());
     push_record(&mut sheet, RECORD_CONTINUE, &cont);
 
+    // Formatting runs continuation. Unlike continued string fragments, this payload does **not**
+    // have a leading flags byte. When the TXO header is missing, our fallback decoder should stop
+    // before decoding these bytes as text.
+    push_record(&mut sheet, RECORD_CONTINUE, &[0x00, 0x00, 0x01, 0x00]);
+
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
 }
