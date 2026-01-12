@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use calamine::{open_workbook, Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
     normalize_formula_text, CellRef, CellValue, ErrorValue, Range, SheetVisibility, Style,
-    Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, EXCEL_MAX_SHEET_NAME_LEN,
 };
 use thiserror::Error;
 
@@ -157,6 +157,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     let sheets: Vec<Sheet> = workbook.sheets_metadata().to_vec();
 
     let mut out = Workbook::new();
+    let mut used_sheet_names: Vec<String> = Vec::new();
     let mut warnings = Vec::new();
     let mut merged_ranges = Vec::new();
     let workbook_stream = match biff::read_workbook_stream_from_xls(path) {
@@ -315,7 +316,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     }
 
     for (sheet_idx, sheet_meta) in sheets.iter().enumerate() {
-        let sheet_name = sheet_meta.name.clone();
+        let source_sheet_name = sheet_meta.name.clone();
         let biff_idx = sheet_mapping.get(sheet_idx).copied().flatten();
 
         let sheet_cell_xfs_raw =
@@ -342,11 +343,11 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             || sheet_has_out_of_range_xf
             || sheet_xf_parse_failed;
 
-        let value_range = match workbook.worksheet_range(&sheet_name) {
+        let value_range = match workbook.worksheet_range(&source_sheet_name) {
             Ok(range) => Some(range),
             Err(err) => {
                 warnings.push(ImportWarning::new(format!(
-                    "failed to read cell values for sheet `{sheet_name}`: {err}"
+                    "failed to read cell values for sheet `{source_sheet_name}`: {err}"
                 )));
                 None
             }
@@ -362,7 +363,36 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             None
         };
 
-        let sheet_id = out.add_sheet(sheet_name.clone())?;
+        let (sheet_id, sheet_name) = match out.add_sheet(source_sheet_name.clone()) {
+            Ok(sheet_id) => {
+                used_sheet_names.push(source_sheet_name.clone());
+                (sheet_id, source_sheet_name.clone())
+            }
+            Err(err) => {
+                let mut candidate =
+                    sanitize_sheet_name(&source_sheet_name, sheet_idx + 1, &used_sheet_names);
+                let sheet_id = loop {
+                    match out.add_sheet(candidate.clone()) {
+                        Ok(sheet_id) => break sheet_id,
+                        Err(_) => {
+                            // If our best-effort sanitization still collides (e.g. due to
+                            // case-insensitive comparisons), treat the candidate as taken and
+                            // generate another.
+                            let mut augmented = used_sheet_names.clone();
+                            augmented.push(candidate);
+                            candidate =
+                                sanitize_sheet_name(&source_sheet_name, sheet_idx + 1, &augmented);
+                        }
+                    }
+                };
+
+                warnings.push(ImportWarning::new(format!(
+                    "sanitized sheet name `{source_sheet_name}` -> `{candidate}` ({err})"
+                )));
+                used_sheet_names.push(candidate.clone());
+                (sheet_id, candidate)
+            }
+        };
         let sheet = out
             .sheet_mut(sheet_id)
             .expect("sheet id should exist immediately after add");
@@ -385,7 +415,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             }
         }
 
-        if let Some(merge_cells) = workbook.worksheet_merge_cells(&sheet_name) {
+        if let Some(merge_cells) = workbook.worksheet_merge_cells(&source_sheet_name) {
             for dim in merge_cells {
                 let range = Range::new(
                     CellRef::new(dim.start.0, dim.start.1),
@@ -471,7 +501,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             }
         }
 
-        match workbook.worksheet_formula(&sheet_name) {
+        match workbook.worksheet_formula(&source_sheet_name) {
             Ok(formula_range) => {
                 let formula_start = formula_range.start().unwrap_or((0, 0));
                 for (row, col, formula) in formula_range.used_cells() {
@@ -708,6 +738,98 @@ fn apply_row_col_properties(
             sheet.set_col_hidden(col, true);
         }
     }
+}
+
+fn truncate_to_utf16_len(value: &str, max_len: usize) -> String {
+    if value.encode_utf16().count() <= max_len {
+        return value.to_string();
+    }
+
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in value.chars() {
+        let ch_len = ch.len_utf16();
+        if used.saturating_add(ch_len) > max_len {
+            break;
+        }
+        out.push(ch);
+        used = used.saturating_add(ch_len);
+    }
+    out
+}
+
+fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
+    a.chars()
+        .flat_map(|ch| ch.to_uppercase())
+        .eq(b.chars().flat_map(|ch| ch.to_uppercase()))
+}
+
+fn sheet_name_taken(candidate: &str, existing_names: &[String]) -> bool {
+    existing_names
+        .iter()
+        .any(|existing| sheet_name_eq_case_insensitive(existing, candidate))
+}
+
+/// Best-effort sanitization for legacy `.xls` sheet names.
+///
+/// Excel sheet names have a number of restrictions (see [`formula_model::validate_sheet_name`]).
+/// Calamine may still surface corrupt/non-compliant names from malformed BIFF files; this helper
+/// attempts to produce a deterministic, valid, unique name for the destination workbook.
+///
+/// This is part of the public API only so it can be tested from `crates/formula-xls/tests/`.
+#[doc(hidden)]
+pub fn sanitize_sheet_name(
+    original: &str,
+    sheet_number: usize,
+    existing_names: &[String],
+) -> String {
+    let without_nuls = original.replace('\0', "");
+    let trimmed = without_nuls.trim();
+
+    let mut cleaned = String::with_capacity(trimmed.len());
+    for ch in trimmed.chars() {
+        if matches!(ch, ':' | '\\' | '/' | '?' | '*' | '[' | ']') {
+            cleaned.push('_');
+        } else {
+            cleaned.push(ch);
+        }
+    }
+
+    // `formula_model::validate_sheet_name` forbids leading/trailing apostrophes.
+    let cleaned = cleaned.trim_matches('\'');
+
+    let mut base = if cleaned.trim().is_empty() {
+        format!("Sheet{sheet_number}")
+    } else {
+        truncate_to_utf16_len(cleaned, EXCEL_MAX_SHEET_NAME_LEN)
+    };
+
+    // Truncation can re-introduce a trailing apostrophe (`foo'bar...` → `foo'`).
+    // Excel forbids sheet names that begin or end with `'`.
+    base = truncate_to_utf16_len(base.trim_matches('\''), EXCEL_MAX_SHEET_NAME_LEN);
+    if base.trim().is_empty() {
+        base = truncate_to_utf16_len(&format!("Sheet{sheet_number}"), EXCEL_MAX_SHEET_NAME_LEN);
+    }
+
+    if !sheet_name_taken(&base, existing_names) {
+        return base;
+    }
+
+    for suffix_index in 2usize.. {
+        let suffix = format!(" ({suffix_index})");
+        let suffix_len = suffix.encode_utf16().count();
+        let max_base_len = EXCEL_MAX_SHEET_NAME_LEN.saturating_sub(suffix_len);
+
+        let mut candidate = truncate_to_utf16_len(&base, max_base_len);
+        candidate.push_str(&suffix);
+        let candidate = truncate_to_utf16_len(&candidate, EXCEL_MAX_SHEET_NAME_LEN);
+
+        if !sheet_name_taken(&candidate, existing_names) {
+            return candidate;
+        }
+    }
+
+    unreachable!("suffix loop should always return a unique sheet name");
 }
 
 fn normalize_sheet_name_for_match(name: &str) -> String {
