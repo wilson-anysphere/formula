@@ -101,6 +101,14 @@ function normalizeBaseUrl(baseUrl: string): string {
 export interface AIChatPanelContainerProps {
   getDocumentController: () => unknown;
   getActiveSheetId?: () => string;
+  /**
+   * Optional UI selection provider (0-based coordinates).
+   *
+   * When provided, chat includes the current selection as a sampled data block in
+   * workbook context, so prompts like "summarize this selection" work without an
+   * explicit attachment.
+   */
+  getSelection?: () => { sheetId: string; range: { startRow: number; startCol: number; endRow: number; endCol: number } } | null;
   workbookId?: string;
   createChart?: SpreadsheetApi["createChart"];
 }
@@ -394,6 +402,7 @@ function AIChatPanelRuntime(
       llmClient: client as any,
       model: (client as any).model ?? "gpt-4o-mini",
       getActiveSheetId: props.getActiveSheetId,
+      getSelectedRange: props.getSelection as any,
       createChart: props.createChart,
       auditStore,
       onApprovalRequired,
@@ -408,6 +417,7 @@ function AIChatPanelRuntime(
     onApprovalRequired,
     props.createChart,
     props.getActiveSheetId,
+    props.getSelection,
     ragService,
     workbookId,
   ]);

@@ -134,6 +134,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
           key={workbookId ?? "default"}
           getDocumentController={options.getDocumentController}
           getActiveSheetId={options.getActiveSheetId}
+          getSelection={options.getSelection as any}
           workbookId={workbookId}
           createChart={options.createChart}
         />,

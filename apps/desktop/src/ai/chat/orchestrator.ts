@@ -128,6 +128,14 @@ export interface AiChatOrchestratorOptions {
 
   getActiveSheetId?: () => string;
   /**
+   * Optional UI selection hook. When provided, the chat orchestrator will include a
+   * selection data block in the workbook context (unless a range attachment is
+   * explicitly provided, which takes precedence).
+   *
+   * Expected coordinates are 0-based (desktop `Range`).
+   */
+  getSelectedRange?: () => { sheetId: string; range: Range } | null;
+  /**
    * Optional chart host implementation. When provided, tool calls like
    * `create_chart` will add a chart to the desktop UI (via SpreadsheetApi
    * integration).
@@ -265,7 +273,7 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
     const activeSheetId = options.getActiveSheetId?.() ?? "Sheet1";
     const attachments = params.attachments ?? [];
-    const selectedRange = selectionFromAttachments(attachments, activeSheetId);
+    const selectedRange = selectionFromAttachments(attachments, activeSheetId) ?? options.getSelectedRange?.() ?? undefined;
 
     const dlp = maybeGetAiCloudDlpOptions({ documentId: options.workbookId, sheetId: activeSheetId }) ?? undefined;
 
