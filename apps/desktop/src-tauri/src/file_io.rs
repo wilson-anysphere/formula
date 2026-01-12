@@ -705,6 +705,30 @@ pub fn read_workbook_blocking(path: &Path) -> anyhow::Result<Workbook> {
     use std::io::Read;
 
     const PARQUET_MAGIC: [u8; 4] = *b"PAR1";
+    const TEXT_SNIFF_BYTES: usize = 4096;
+
+    fn looks_like_text(buf: &[u8]) -> bool {
+        if buf.is_empty() {
+            return false;
+        }
+        // Text/CSV inputs should never contain NUL bytes; treat those as a strong signal that the
+        // file is binary data and we should not route it to the CSV importer.
+        if buf.iter().any(|&b| b == 0) {
+            return false;
+        }
+
+        // Reject buffers with a meaningful amount of control bytes other than whitespace.
+        let mut suspicious = 0usize;
+        for &b in buf {
+            match b {
+                b'\t' | b'\n' | b'\r' => {}
+                0x20..=0x7E => {}
+                _ if b >= 0x80 => {}
+                _ => suspicious += 1,
+            }
+        }
+        suspicious <= buf.len() / 50
+    }
 
     let mut file =
         std::fs::File::open(path).with_context(|| format!("open workbook {:?}", path))?;
@@ -742,20 +766,32 @@ pub fn read_workbook_blocking(path: &Path) -> anyhow::Result<Workbook> {
         };
     }
 
-    // Fall back to Calamine's extension-based readers for other spreadsheet formats (e.g. `.ods`).
     let is_zip = prefix.len() >= 4
         && prefix[0] == b'P'
         && prefix[1] == b'K'
         && matches!(prefix[2], 0x03 | 0x05 | 0x07)
         && matches!(prefix[3], 0x04 | 0x06 | 0x08);
     if is_zip {
-        if let Ok(workbook) = read_xlsx_blocking(path) {
-            return Ok(workbook);
-        }
+        // ZIP containers should route to the XLSX/XLSM/XLSB sniffing logic inside `read_xlsx_blocking`.
+        return read_xlsx_blocking(path);
     }
 
-    // Default: treat as CSV text.
-    read_csv_blocking(path)
+    // Best-effort: sniff for text/CSV and only route to the CSV importer when it doesn't look
+    // like a binary file.
+    let mut file = std::fs::File::open(path).with_context(|| format!("open workbook {:?}", path))?;
+    let mut buf = vec![0u8; TEXT_SNIFF_BYTES];
+    let read = file
+        .read(&mut buf)
+        .with_context(|| format!("read workbook header {:?}", path))?;
+    buf.truncate(read);
+    if looks_like_text(&buf) {
+        return read_csv_blocking(path);
+    }
+
+    // Fall back to Calamine's extension-based readers for other spreadsheet formats (e.g. `.ods`).
+    // If it isn't a supported spreadsheet format, this should surface a clear error rather than
+    // trying to interpret arbitrary binary data as CSV.
+    read_xlsx_blocking(path)
 }
 
 pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {

@@ -3761,6 +3761,75 @@ mod tests {
     }
 
     #[test]
+    fn open_workbook_sniffs_csv_even_when_extension_is_xlsx() {
+        let dir = TempDir::new().expect("create temp dir");
+        let path = dir.path().join("data.xlsx");
+        std::fs::write(&path, b"a,b\n1,2\n").expect("write csv bytes");
+
+        let workbook = crate::file_io::read_workbook_blocking(&path).expect("open workbook");
+        assert!(
+            workbook.origin_xlsx_bytes.is_none(),
+            "expected CSV import to not preserve XLSX origin bytes"
+        );
+        assert!(
+            workbook
+                .sheets
+                .first()
+                .is_some_and(|sheet| sheet.columnar.is_some()),
+            "expected CSV import to use columnar backing"
+        );
+    }
+
+    #[test]
+    fn open_workbook_sniffs_xlsx_even_when_extension_is_unknown() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsx/tests/fixtures/rt_simple.xlsx"
+        ));
+        let dir = TempDir::new().expect("create temp dir");
+        let path = dir.path().join("data.unknown");
+        std::fs::copy(fixture_path, &path).expect("copy xlsx fixture");
+
+        let workbook = crate::file_io::read_workbook_blocking(&path).expect("open workbook");
+        assert!(
+            workbook.origin_xlsx_bytes.is_some(),
+            "expected XLSX import to preserve origin bytes"
+        );
+        assert!(
+            workbook
+                .sheets
+                .first()
+                .is_some_and(|sheet| sheet.columnar.is_none()),
+            "expected XLSX import not to use columnar backing"
+        );
+    }
+
+    #[cfg(feature = "parquet")]
+    #[test]
+    fn open_workbook_sniffs_parquet_even_when_extension_is_xlsx() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../packages/data-io/test/fixtures/simple.parquet"
+        ));
+        let dir = TempDir::new().expect("create temp dir");
+        let path = dir.path().join("data.xlsx");
+        std::fs::copy(fixture_path, &path).expect("copy parquet fixture");
+
+        let workbook = crate::file_io::read_workbook_blocking(&path).expect("open workbook");
+        assert!(
+            workbook.origin_xlsx_bytes.is_none(),
+            "expected Parquet import to not preserve XLSX origin bytes"
+        );
+        assert!(
+            workbook
+                .sheets
+                .first()
+                .is_some_and(|sheet| sheet.columnar.is_some()),
+            "expected Parquet import to use columnar backing"
+        );
+    }
+
+    #[test]
     fn list_dir_errors_when_entry_limit_reached() {
         use std::fs::{create_dir, remove_dir, File};
 
