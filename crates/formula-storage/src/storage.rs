@@ -2870,7 +2870,9 @@ fn rewrite_sheet_metadata_json_for_rename_tx(
 
     let mut rows = select_stmt.query(params![workbook_id])?;
     while let Some(row) = rows.next()? {
-        let sheet_id: String = row.get(0)?;
+        let Ok(sheet_id) = row.get::<_, String>(0) else {
+            continue;
+        };
         let Ok(json) = row.get::<_, String>(1) else {
             continue;
         };
@@ -3209,7 +3211,9 @@ fn rewrite_sheet_metadata_json_for_delete_tx(
 
     let mut rows = select_stmt.query(params![workbook_id])?;
     while let Some(row) = rows.next()? {
-        let sheet_id: String = row.get(0)?;
+        let Ok(sheet_id) = row.get::<_, String>(0) else {
+            continue;
+        };
         let Ok(json) = row.get::<_, String>(1) else {
             continue;
         };
