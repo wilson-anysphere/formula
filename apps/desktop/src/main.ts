@@ -98,6 +98,7 @@ import {
 } from "./extensions/contributedPanelsSeedStore.js";
 
 import sampleHelloManifest from "../../../extensions/sample-hello/package.json";
+import { purgeLegacyDesktopLLMSettings } from "./ai/llm/desktopLLMClient.js";
 
 // Apply theme + reduced motion settings as early as possible to avoid rendering with
 // default tokens before the user's preference is known.
