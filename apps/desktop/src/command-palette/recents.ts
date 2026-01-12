@@ -49,12 +49,17 @@ function safeParseLegacyRecents(raw: string | null): string[] {
     const out: string[] = [];
     const seen = new Set<string>();
     for (const item of parsed) {
-      if (typeof item !== "string") continue;
-      const commandId = String(item).trim();
-      if (!commandId) continue;
-      if (seen.has(commandId)) continue;
-      seen.add(commandId);
-      out.push(commandId);
+      const commandId =
+        typeof item === "string"
+          ? item
+          : item && typeof item === "object" && typeof (item as any).commandId === "string"
+            ? String((item as any).commandId)
+            : "";
+      const normalized = String(commandId).trim();
+      if (!normalized) continue;
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      out.push(normalized);
     }
     return out;
   } catch {

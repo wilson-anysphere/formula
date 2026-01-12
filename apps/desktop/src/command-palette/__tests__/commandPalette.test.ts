@@ -170,6 +170,18 @@ describe("command-palette/recents", () => {
     ]);
   });
 
+  test("migration tolerates legacy entries stored as objects", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(LEGACY_COMMAND_RECENTS_STORAGE_KEY, JSON.stringify([{ commandId: "cmd.a" }, { commandId: "cmd.b" }]));
+    const commandRegistry = new CommandRegistry();
+
+    installCommandRecentsTracker(commandRegistry, storage, { now: () => 999 });
+    expect(readCommandRecents(storage)).toEqual([
+      { commandId: "cmd.a", lastUsedMs: 999, count: 1 },
+      { commandId: "cmd.b", lastUsedMs: 999, count: 1 },
+    ]);
+  });
+
   test("removed commands are filtered out", () => {
     const storage = new MemoryStorage();
     storage.setItem(
