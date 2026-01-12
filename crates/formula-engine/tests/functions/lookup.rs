@@ -30,6 +30,19 @@ fn xmatch_and_xlookup_are_case_insensitive_for_unicode_text() {
 }
 
 #[test]
+fn xmatch_and_xlookup_coerce_numeric_text_via_value() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "1,234.5");
+    sheet.set("B1", 42.0);
+
+    assert_eq!(sheet.eval("=XMATCH(1234.5, A1:A1)"), Value::Number(1.0));
+    assert_eq!(
+        sheet.eval("=XLOOKUP(1234.5, A1:A1, B1:B1)"),
+        Value::Number(42.0)
+    );
+}
+
+#[test]
 fn match_and_vlookup_are_case_insensitive_for_unicode_text() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", "Straße");

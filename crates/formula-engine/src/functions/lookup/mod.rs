@@ -1,5 +1,6 @@
 use crate::{ErrorKind, Value};
 use crate::functions::wildcard::WildcardPattern;
+use crate::coercion::number::parse_number_strict;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
@@ -19,6 +20,12 @@ fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
         (Value::Text(a), Value::Text(b)) => text_eq_case_insensitive(a, b),
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Error(a), Value::Error(b)) => a == b,
+        (Value::Number(a), Value::Text(b)) | (Value::Text(b), Value::Number(a)) => {
+            parse_number_strict(b, '.', Some(',')).is_ok_and(|parsed| parsed == *a)
+        }
+        (Value::Bool(a), Value::Number(b)) | (Value::Number(b), Value::Bool(a)) => {
+            (*b == 0.0 && !a) || (*b == 1.0 && *a)
+        }
         (Value::Blank, Value::Blank) => true,
         _ => false,
     }
@@ -275,10 +282,10 @@ fn xmatch_linear(
         MatchMode::ExactOrNextSmaller => {
             let mut best: Option<usize> = None;
             for (idx, candidate) in iter {
-                let ord = lookup_cmp(candidate, lookup_value);
-                if ord == Ordering::Equal && values_equal_for_lookup(lookup_value, candidate) {
+                if values_equal_for_lookup(lookup_value, candidate) {
                     return Ok(idx);
                 }
+                let ord = lookup_cmp(candidate, lookup_value);
                 if ord == Ordering::Less || ord == Ordering::Equal {
                     best = match best {
                         None => Some(idx),
@@ -302,10 +309,10 @@ fn xmatch_linear(
         MatchMode::ExactOrNextLarger => {
             let mut best: Option<usize> = None;
             for (idx, candidate) in iter {
-                let ord = lookup_cmp(candidate, lookup_value);
-                if ord == Ordering::Equal && values_equal_for_lookup(lookup_value, candidate) {
+                if values_equal_for_lookup(lookup_value, candidate) {
                     return Ok(idx);
                 }
+                let ord = lookup_cmp(candidate, lookup_value);
                 if ord == Ordering::Greater || ord == Ordering::Equal {
                     best = match best {
                         None => Some(idx),
@@ -378,10 +385,10 @@ fn xmatch_linear_accessor(
             let mut best: Option<(usize, Value)> = None;
             for idx in iter {
                 let candidate = value_at(idx);
-                let ord = lookup_cmp(&candidate, lookup_value);
-                if ord == Ordering::Equal && values_equal_for_lookup(lookup_value, &candidate) {
+                if values_equal_for_lookup(lookup_value, &candidate) {
                     return Ok(idx);
                 }
+                let ord = lookup_cmp(&candidate, lookup_value);
                 if ord == Ordering::Less || ord == Ordering::Equal {
                     best = match best {
                         None => Some((idx, candidate)),
@@ -405,10 +412,10 @@ fn xmatch_linear_accessor(
             let mut best: Option<(usize, Value)> = None;
             for idx in iter {
                 let candidate = value_at(idx);
-                let ord = lookup_cmp(&candidate, lookup_value);
-                if ord == Ordering::Equal && values_equal_for_lookup(lookup_value, &candidate) {
+                if values_equal_for_lookup(lookup_value, &candidate) {
                     return Ok(idx);
                 }
+                let ord = lookup_cmp(&candidate, lookup_value);
                 if ord == Ordering::Greater || ord == Ordering::Equal {
                     best = match best {
                         None => Some((idx, candidate)),
