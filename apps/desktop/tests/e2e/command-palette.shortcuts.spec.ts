@@ -30,7 +30,12 @@ test.describe("command palette shortcut hints", () => {
 
     await page.getByTestId("command-palette-input").fill("replace");
 
-    const item = page.locator("li.command-palette__item", { hasText: "Replace" }).first();
+    // "replace" also matches the REPLACE() function result. Ensure we're asserting on the
+    // *command* (Replace…) row, not the spreadsheet function suggestion.
+    const item = page
+      .locator("li.command-palette__item", { hasText: "Replace…" })
+      .filter({ hasText: "Show the Replace dialog" })
+      .first();
     await expect(item).toBeVisible();
     await expect(item.locator(".command-palette__shortcut")).toHaveText(expectedReplaceShortcut);
   });
