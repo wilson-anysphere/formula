@@ -85,6 +85,12 @@ pnpm -w run report:function-parity
 
 To regenerate: run the command above and replace the block between the markers below.
 
+To update this file automatically:
+
+```bash
+pnpm -w run report:function-parity -- --update-doc
+```
+
 <!-- BEGIN GENERATED: report-function-parity -->
 ```text
 Function parity report (catalog ↔ BIFF FTAB)

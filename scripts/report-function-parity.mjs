@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -6,6 +6,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 
 const catalogPath = path.join(repoRoot, "shared", "functionCatalog.json");
 const ftabPath = path.join(repoRoot, "crates", "formula-biff", "src", "ftab.rs");
+const docsPath = path.join(repoRoot, "docs", "15-excel-feature-parity.md");
 
 const TOP_N = 50;
 
@@ -17,6 +18,26 @@ function formatRelPath(absPath) {
   // `path.relative` uses platform separators, which makes output non-deterministic across OSes.
   // Normalize to `/` so reports are stable (and match docs snapshots) on all platforms.
   return path.relative(repoRoot, absPath).split(path.sep).join("/");
+}
+
+function buildSummaryLines({
+  catalogTotal,
+  ftabNonEmptyTotal,
+  matchingCatalogCount,
+  missingFromCatalogCount,
+  catalogNotInFtabCount,
+}) {
+  const relCatalog = formatRelPath(catalogPath);
+  const relFtab = formatRelPath(ftabPath);
+  return [
+    "Function parity report (catalog ↔ BIFF FTAB)",
+    "",
+    `Catalog functions (${relCatalog}): ${catalogTotal}`,
+    `FTAB functions (${relFtab}): ${ftabNonEmptyTotal}`,
+    `Catalog ∩ FTAB (case-insensitive name match): ${matchingCatalogCount}`,
+    `FTAB \\ Catalog (missing from catalog): ${missingFromCatalogCount}`,
+    `Catalog \\ FTAB (not present in FTAB): ${catalogNotInFtabCount}`,
+  ];
 }
 
 /**
@@ -96,14 +117,39 @@ const catalogNotInFtab = Array.from(catalogNameSet)
   .filter((name) => !ftabNameSet.has(name))
   .sort();
 
-console.log("Function parity report (catalog ↔ BIFF FTAB)");
+const summaryLines = buildSummaryLines({
+  catalogTotal,
+  ftabNonEmptyTotal,
+  matchingCatalogCount,
+  missingFromCatalogCount: ftabMissingFromCatalog.length,
+  catalogNotInFtabCount: catalogNotInFtab.length,
+});
+
+for (const line of summaryLines) {
+  console.log(line);
+}
 console.log("");
-console.log(`Catalog functions (${formatRelPath(catalogPath)}): ${catalogTotal}`);
-console.log(`FTAB functions (${formatRelPath(ftabPath)}): ${ftabNonEmptyTotal}`);
-console.log(`Catalog ∩ FTAB (case-insensitive name match): ${matchingCatalogCount}`);
-console.log(`FTAB \\ Catalog (missing from catalog): ${ftabMissingFromCatalog.length}`);
-console.log(`Catalog \\ FTAB (not present in FTAB): ${catalogNotInFtab.length}`);
-console.log("");
+
+const args = new Set(process.argv.slice(2));
+if (args.has("--update-doc")) {
+  const beginMarker = "<!-- BEGIN GENERATED: report-function-parity -->";
+  const endMarker = "<!-- END GENERATED: report-function-parity -->";
+  const rawDoc = await readFile(docsPath, "utf8");
+  const begin = rawDoc.indexOf(beginMarker);
+  const end = rawDoc.indexOf(endMarker);
+  if (begin === -1 || end === -1 || begin > end) {
+    throw new Error(
+      `failed to update ${formatRelPath(docsPath)}: could not find expected markers:\n${beginMarker}\n${endMarker}`
+    );
+  }
+
+  const replacementBody = `\n\`\`\`text\n${summaryLines.join("\n")}\n\`\`\`\n`;
+  const updated =
+    rawDoc.slice(0, begin + beginMarker.length) + replacementBody + rawDoc.slice(end);
+  if (updated !== rawDoc) {
+    await writeFile(docsPath, updated, "utf8");
+  }
+}
 
 console.log(`FTAB \\ Catalog (missing from catalog): ${ftabMissingFromCatalog.length}`);
 printNameList(ftabMissingFromCatalog, TOP_N);
