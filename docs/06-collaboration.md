@@ -236,8 +236,10 @@ type SheetViewState = {
 // - nested inside `sheets[].view` in some BranchService-style snapshots.
 type SheetFormatDefaults = {
   defaultFormat?: Record<string, any>;
-  rowFormats?: Record<string, Record<string, any>>;
-  colFormats?: Record<string, Record<string, any>>;
+  // Canonical (binder) encoding is a Y.Map keyed by string indices ("0", "1", ...),
+  // but BranchService-style snapshots may store these as plain objects.
+  rowFormats?: Y.Map<any> | Record<string, Record<string, any>>;
+  colFormats?: Y.Map<any> | Record<string, Record<string, any>>;
 };
 
 type Sheet = {
@@ -547,7 +549,8 @@ Per-sheet view state (frozen panes + row/col size overrides) is stored on each s
 
 - `doc.getArray("sheets").get(i).get("view")`
 
-The `view` object uses the `SheetViewState` shape from BranchService. The desktop
+The `view` object is BranchService-compatible (some snapshots may include
+additional keys like layered formatting defaults), but the desktop
 binder/`DocumentController` currently consume the subset of fields related to
 frozen panes + row/col size overrides:
 
@@ -584,7 +587,9 @@ In addition, the binder synchronizes layered formatting defaults (sheet/row/col 
   (preferring top-level keys, with fallback to `sheets[].view.*` for legacy snapshots) and applies
   them via `DocumentController.applyExternalFormatDeltas` when available.
 - **Desktop → Yjs:** listens for `formatDeltas` emitted by `DocumentController` and writes them
-  into the sheet entry using sparse encodings (`defaultFormat`, `rowFormats`, `colFormats`).
+  into the sheet entry using sparse encodings:
+  - `defaultFormat` (style object)
+  - `rowFormats` / `colFormats` (`Y.Map<string, styleObject>` keyed by string indices)
 
 Semantics note:
 
