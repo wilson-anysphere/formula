@@ -179,8 +179,12 @@ describe("SpreadsheetApp charts + frozen panes", () => {
 
       // The outer layer should stay pinned under headers (not under user frozen panes).
       const chartLayer = (app as any).chartLayer as HTMLElement;
+      expect(chartLayer.classList.contains("chart-layer--shared")).toBe(true);
       expect(chartLayer.style.left).toBe("48px");
       expect(chartLayer.style.top).toBe("24px");
+
+      const selectionCanvas = (app as any).selectionCanvas as HTMLElement;
+      expect(selectionCanvas.classList.contains("grid-canvas--shared-selection")).toBe(true);
 
       app.destroy();
       root.remove();
