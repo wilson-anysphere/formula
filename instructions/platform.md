@@ -139,6 +139,9 @@ If you add new desktop IPC surface area, you must update the capability allowlis
 - new `#[tauri::command]` names → `core:allow-invoke`
 - new frontend↔backend events → `event:allow-listen` / `event:allow-emit`
 
+Note: do **not** add `plugin:*` command names to `core:allow-invoke`. Plugin APIs are gated by their own permission strings
+(e.g. `dialog:allow-open`, `updater:allow-check`).
+
 We keep guardrail tests to ensure we don't accidentally broaden the desktop IPC surface:
 
 - **Event allowlists**: enforce the **exact** `event:allow-listen` / `event:allow-emit` sets (no wildcard / allow-all):

@@ -699,6 +699,9 @@ We intentionally keep capabilities narrow and rely on explicit Rust commands + h
 - If you add a new event name used by `listen(...)` or `emit(...)`, update the `event:allow-listen` / `event:allow-emit` allowlists.
 - If the frontend starts using a new Tauri core/plugin API (dialog/window/clipboard/shell/updater), add the corresponding `*:allow-*` permission string.
 
+Note: do **not** add `plugin:*` command names to `core:allow-invoke`. Plugin APIs are gated by their own permission strings
+(e.g. `dialog:allow-open`, `updater:allow-check`).
+
 Guardrails (CI/tests):
 
 - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs` ensures `core:allow-invoke` matches the command list registered in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`).
