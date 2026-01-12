@@ -18,8 +18,9 @@ function safeParseRecents(raw: string | null): CommandRecentEntry[] {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
 
-    const out: CommandRecentEntry[] = [];
+    const out: Array<CommandRecentEntry & { __order: number }> = [];
     const seen = new Set<string>();
+    let order = 0;
     for (const item of parsed) {
       if (!item || typeof item !== "object") continue;
       const commandId = typeof (item as any).commandId === "string" ? String((item as any).commandId).trim() : "";
@@ -29,12 +30,12 @@ function safeParseRecents(raw: string | null): CommandRecentEntry[] {
       if (!Number.isFinite(lastUsedMs)) continue;
       if (seen.has(commandId)) continue;
       seen.add(commandId);
-      out.push({ commandId, lastUsedMs, ...(count != null ? { count } : {}) });
+      out.push({ commandId, lastUsedMs, ...(count != null ? { count } : {}), __order: order++ });
     }
 
     // Ensure deterministic ordering for callers (and for the stored JSON).
-    out.sort((a, b) => b.lastUsedMs - a.lastUsedMs);
-    return out;
+    out.sort((a, b) => b.lastUsedMs - a.lastUsedMs || a.__order - b.__order);
+    return out.map(({ __order: _order, ...entry }) => entry);
   } catch {
     return [];
   }
@@ -109,13 +110,14 @@ export function recordCommandRecent(
   const without = current.filter((entry) => entry.commandId !== id);
   const prev = current.find((entry) => entry.commandId === id) ?? null;
 
-  const next: CommandRecentEntry[] = [
-    { commandId: id, lastUsedMs: now, count: (prev?.count ?? 0) + 1 },
-    ...without,
+  const next: Array<CommandRecentEntry & { __order: number }> = [
+    { commandId: id, lastUsedMs: now, count: (prev?.count ?? 0) + 1, __order: 0 },
+    ...without.map((entry, idx) => ({ ...entry, __order: idx + 1 })),
   ];
-  next.sort((a, b) => b.lastUsedMs - a.lastUsedMs);
+  next.sort((a, b) => b.lastUsedMs - a.lastUsedMs || a.__order - b.__order);
 
-  const trimmed = limit > 0 ? next.slice(0, limit) : [];
+  const trimmed =
+    limit > 0 ? next.slice(0, limit).map(({ __order: _order, ...entry }) => entry) : [];
   writeCommandRecents(storage, trimmed, { storageKey });
   return trimmed;
 }

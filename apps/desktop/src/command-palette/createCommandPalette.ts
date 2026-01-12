@@ -1064,6 +1064,10 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   const disposeRecentsTracker = installCommandRecentsTracker(commandRegistry, storage, {
     ignoreCommandIds: [
       "workbench.showCommandPalette",
+      // Undo/redo is also extremely high frequency during normal editing and not
+      // very useful as a "recent command palette command".
+      "edit.undo",
+      "edit.redo",
       // Clipboard commands are extremely high frequency (via keybindings/menus) and would
       // otherwise dominate the "RECENT" group.
       "clipboard.copy",
