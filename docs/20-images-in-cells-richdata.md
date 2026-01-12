@@ -126,6 +126,10 @@ Key observations (useful for implementers):
   * `.../rdRichValue`, `.../rdRichValueStructure`, `.../rdRichValueTypes`
   * `.../2022/10/relationships/richValueRel`
 * `[Content_Types].xml` includes explicit overrides for `/xl/metadata.xml` and the `xl/richData/*` parts.
+* This fixture demonstrates **multiple images** and multiple value metadata records:
+  * Observed `vm="1"` shared across multiple cells, and `vm="2"` for another cell.
+  * `xl/metadata.xml` includes `<xlrd:rvb i="0"/>` and `<xlrd:rvb i="1"/>` entries.
+  * `xl/richData/rdrichvalue.xml` contains multiple `<rv>` entries with positional values for `_rvRel:LocalImageIdentifier` and `CalcOrigin`.
 
 ### Observed “rdRichValue*” naming (rust_xlsxwriter-generated)
 
@@ -155,21 +159,6 @@ encoding `t="e"`/`#VALUE!`, the `_localImage` rich value structure keys, `CalcOr
 the exact relationship/content-type URIs) are documented here:
 
 * [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md)
-
-#### Excel-produced `rdRichValue*` fixture
-
-The repository also contains an **Excel-produced** fixture workbook that uses the same `rdRichValue` /
-`_localImage` wiring (and also does **not** use `xl/cellImages.xml`):
-
-* `fixtures/xlsx/basic/image-in-cell.xlsx` (notes in [`fixtures/xlsx/basic/image-in-cell.md`](../fixtures/xlsx/basic/image-in-cell.md))
-
-That fixture demonstrates multiple images and multiple value-metadata records:
-
-* Worksheet cells are encoded as `t="e"` with cached `#VALUE!` and `vm="…"` (observed `vm="1"` and `vm="2"`).
-* `xl/metadata.xml` uses `futureMetadata name="XLRICHVALUE"` with `<xlrd:rvb i="…"/>` entries to select rich
-  value indices.
-* `xl/richData/rdrichvalue.xml` contains multiple `<rv>` entries, each providing `_rvRel:LocalImageIdentifier`
-  and `CalcOrigin` values (positional ordering defined by `rdrichvaluestructure.xml`).
 
 ### Roles (high level)
 
