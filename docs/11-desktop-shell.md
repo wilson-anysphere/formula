@@ -875,8 +875,6 @@ bash scripts/cargo_agent.sh check -p formula-desktop-tauri --features desktop --
 cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls
 ```
 
-Note: on Tauri v2.9, core permissions use the `core:` prefix (e.g. `core:event:allow-listen`).
-
 ### Practical workflow
 
 - If you add a new event name used by `listen(...)` or `emit(...)`, update the `event:allow-listen` / `event:allow-emit` allowlists (in `apps/desktop/src-tauri/capabilities/main.json`).
