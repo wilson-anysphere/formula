@@ -1,6 +1,6 @@
 import { JSDOM } from 'jsdom';
 
-import { CanvasGridRenderer, type CellProvider } from '@formula/grid/node';
+import { CanvasGridRenderer, type CellData, type CellProvider } from '@formula/grid/node';
 
 type BenchmarkDef = {
   name: string;
@@ -107,7 +107,8 @@ function ensureDomAndCanvasMocks(): void {
 }
 
 function createDeterministicProvider(): CellProvider {
-  // Avoid per-call allocations: pick from a small pool of stable strings.
+  // Avoid per-call allocations: use a small pool of stable strings and reuse CellData
+  // objects so GC pauses don't dominate benchmark p95.
   const poolSize = 256;
   const values = new Array<string>(poolSize);
   for (let i = 0; i < poolSize; i++) {
@@ -115,10 +116,19 @@ function createDeterministicProvider(): CellProvider {
     values[i] = `v${i.toString(16).padStart(2, '0')}`;
   }
 
+  const cells: CellData[] = values.map((value) => ({
+    // The renderer does not depend on the returned cell's `row`/`col` fields (it
+    // uses the indices passed to `getCell`), so keep them constant to allow
+    // object reuse across the entire grid.
+    row: 0,
+    col: 0,
+    value,
+  }));
+
   return {
     getCell: (row, col) => {
       const idx = ((row * 31) ^ (col * 17)) & (poolSize - 1);
-      return { row, col, value: values[idx]! };
+      return cells[idx] ?? null;
     },
   };
 }
