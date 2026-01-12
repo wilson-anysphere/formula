@@ -742,6 +742,93 @@ test("loadAllInstalled does not call host.startup() when the host is already run
   }
 });
 
+test("loadAllInstalled starts newly installed onStartupFinished extensions when the host is already running (no workbookOpened spam)", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-all-running-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const installedId = "test.startup-all-running-ext";
+  const installedVersion = "1.0.0";
+
+  const manifest = {
+    name: "startup-all-running-ext",
+    publisher: "test",
+    version: installedVersion,
+    main: "./dist/extension.js",
+    browser: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+    activationEvents: ["onStartupFinished"],
+    permissions: ["storage"],
+    contributes: {}
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  await fs.writeFile(
+    path.join(extDir, "dist", "extension.js"),
+    `import * as formula from "@formula/extension-api";\nexport async function activate() {\n  formula.events.onWorkbookOpened(() => {\n    void (async () => {\n      const prev = await formula.storage.get(\"installed.count\");\n      const next = (typeof prev === \"number\" ? prev : 0) + 1;\n      await formula.storage.set(\"installed.count\", next);\n    })().catch(() => {});\n  });\n}\n`
+  );
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  const marketplaceClient = createMockMarketplace({
+    extensionId: installedId,
+    latestVersion: installedVersion,
+    publicKeyPem: keys.publicKeyPem,
+    packages: { [installedVersion]: pkgBytes }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+
+  const runningId = "test.running-host";
+  const runningSource = `const api = globalThis[Symbol.for(\"formula.extensionApi.api\")];\nif (!api) { throw new Error(\"missing formula api\"); }\nexport async function activate() {\n  api.events.onWorkbookOpened(() => {\n    void (async () => {\n      const prev = await api.storage.get(\"running.count\");\n      const next = (typeof prev === \"number\" ? prev : 0) + 1;\n      await api.storage.set(\"running.count\", next);\n    })().catch(() => {});\n  });\n}\n`;
+  const runningUrl = `data:text/javascript,${encodeURIComponent(runningSource)}`;
+  await host.loadExtension({
+    extensionId: runningId,
+    extensionPath: "memory://running-host/",
+    manifest: {
+      name: "running-host",
+      publisher: "test",
+      version: "1.0.0",
+      main: "./dist/extension.mjs",
+      browser: "./dist/extension.mjs",
+      engines: { formula: "^1.0.0" },
+      activationEvents: ["onStartupFinished"],
+      permissions: ["storage"],
+      contributes: {}
+    },
+    mainUrl: runningUrl
+  });
+
+  // Start the host (activates running-host + emits workbookOpened).
+  await host.startup();
+  const runningStore = (host as any)._storageApi.getExtensionStore(runningId);
+  await waitFor(() => runningStore["running.count"] === 1);
+  expect(runningStore["running.count"]).toBe(1);
+
+  const manager = new WebExtensionManager({ marketplaceClient, host });
+  try {
+    await manager.install(installedId);
+    await manager.loadAllInstalled();
+
+    // Existing active extensions should not get an extra startup workbookOpened event.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(runningStore["running.count"]).toBe(1);
+
+    const installedStore = (host as any)._storageApi.getExtensionStore(installedId);
+    await waitFor(() => installedStore["installed.count"] === 1);
+    expect(installedStore["installed.count"]).toBe(1);
+    expect(host.listExtensions().find((e: any) => e.id === installedId)?.active).toBe(true);
+  } finally {
+    await manager.dispose();
+    await host.dispose();
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("loadInstalled does not call host.startup() when startupExtension is unavailable and other extensions exist", async () => {
   const keys = generateEd25519KeyPair();
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-fallback-existing-"));
