@@ -16,6 +16,7 @@ const WHEN_SPREADSHEET_READY = "spreadsheet.isEditing == false && focus.inTextIn
 const WHEN_SHEET_NAVIGATION =
   "focus.inSheetTabRename == false && (focus.inTextInput == false || spreadsheet.formulaBarFormulaEditing == true)";
 const WHEN_COMMAND_PALETTE_CLOSED = "workbench.commandPaletteOpen == false";
+const WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT = "workbench.commandPaletteOpen == false && focus.inTextInput == false";
 
 /**
  * Built-in keybindings that power UI affordances (Command Palette + context menus)
@@ -186,20 +187,20 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "edit.find",
     key: "ctrl+f",
     mac: "cmd+f",
-    when: WHEN_COMMAND_PALETTE_CLOSED,
+    when: WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT,
   },
   {
     command: "edit.replace",
     key: "ctrl+h",
     // Cmd+H is reserved by macOS for "Hide". Use Cmd+Option+F like many native apps.
     mac: "cmd+option+f",
-    when: WHEN_COMMAND_PALETTE_CLOSED,
+    when: WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT,
   },
   {
     command: "navigation.goTo",
     key: "ctrl+g",
     mac: "cmd+g",
-    when: WHEN_COMMAND_PALETTE_CLOSED,
+    when: WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT,
   },
   {
     command: "edit.clearContents",
@@ -336,12 +337,12 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "comments.togglePanel",
     key: "ctrl+shift+m",
     mac: "cmd+shift+m",
-    when: WHEN_COMMAND_PALETTE_CLOSED,
+    when: WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT,
   },
   // Some environments emit both Ctrl+Meta for a single chord (remote desktop / VM keyboard setups).
   {
     command: "comments.togglePanel",
     key: "ctrl+cmd+shift+m",
-    when: WHEN_COMMAND_PALETTE_CLOSED,
+    when: WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT,
   },
 ];
