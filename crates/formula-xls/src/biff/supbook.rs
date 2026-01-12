@@ -254,7 +254,10 @@ fn workbook_name_from_virt_path(virt_path: &str) -> String {
     inner.to_string()
 }
 
-fn parse_externname_record(record: &records::LogicalBiffRecord<'_>, codepage: u16) -> Result<String, String> {
+fn parse_externname_record(
+    record: &records::LogicalBiffRecord<'_>,
+    codepage: u16,
+) -> Result<String, String> {
     // Best-effort EXTERNNAME parsing.
     //
     // The record structure is complex and varies depending on flags (add-in, OLE/DDE, etc). For
@@ -514,3 +517,128 @@ impl<'a> FragmentCursor<'a> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(id: u16, payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(4 + payload.len());
+        out.extend_from_slice(&id.to_le_bytes());
+        out.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+        out.extend_from_slice(payload);
+        out
+    }
+
+    fn xl_unicode_string_compressed(s: &str) -> Vec<u8> {
+        let bytes = s.as_bytes();
+        let cch: u16 = bytes.len().try_into().expect("len fits u16");
+        [cch.to_le_bytes().to_vec(), vec![0u8], bytes.to_vec()].concat()
+    }
+
+    #[test]
+    fn parses_external_supbook_with_sheet_list() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&1u16.to_le_bytes()); // ctab
+        payload.extend_from_slice(&xl_unicode_string_compressed("Book2.xlsx"));
+        payload.extend_from_slice(&xl_unicode_string_compressed("Sheet1"));
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_SUPBOOK, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_supbook_table(&stream, 1252);
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+        assert_eq!(parsed.supbooks.len(), 1);
+        let sb = &parsed.supbooks[0];
+        assert_eq!(sb.kind, SupBookKind::ExternalWorkbook);
+        assert_eq!(sb.virt_path, "Book2.xlsx");
+        assert_eq!(sb.workbook_name.as_deref(), Some("Book2.xlsx"));
+        assert_eq!(sb.sheet_names, vec!["Sheet1".to_string()]);
+        assert!(sb.extern_names.is_empty());
+    }
+
+    #[test]
+    fn parses_continued_supbook_workbook_name() {
+        let full_name = "ABCDEFGHIJ";
+
+        let mut full_payload = Vec::new();
+        full_payload.extend_from_slice(&0u16.to_le_bytes()); // ctab=0 (no sheet names)
+        full_payload.extend_from_slice(&xl_unicode_string_compressed(full_name));
+
+        // Split in the middle of the character bytes ("ABCD" | "EFGHIJ").
+        let split_at = 2 + 2 + 1 + 4;
+        let first = &full_payload[..split_at];
+        let rest = &full_payload[split_at..];
+
+        // BIFF8 inserts a single option-flags byte at the start of a continued string segment.
+        let second = [vec![0u8], rest.to_vec()].concat();
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_SUPBOOK, first),
+            record(records::RECORD_CONTINUE, &second),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_supbook_table(&stream, 1252);
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+        assert_eq!(parsed.supbooks.len(), 1);
+        let sb = &parsed.supbooks[0];
+        assert_eq!(sb.kind, SupBookKind::ExternalWorkbook);
+        assert_eq!(sb.virt_path, full_name);
+        assert_eq!(sb.workbook_name.as_deref(), Some(full_name));
+        assert!(sb.sheet_names.is_empty());
+    }
+
+    #[test]
+    fn parses_internal_supbook_marker_without_sheet_names() {
+        // Internal SUPBOOK: ctab=sheet count, virtPath is the single 0x01 marker character.
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&3u16.to_le_bytes()); // ctab (sheet count)
+        payload.extend_from_slice(&xl_unicode_string_compressed("\u{0001}"));
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_SUPBOOK, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_supbook_table(&stream, 1252);
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+        assert_eq!(parsed.supbooks.len(), 1);
+        let sb = &parsed.supbooks[0];
+        assert_eq!(sb.kind, SupBookKind::Internal);
+        assert_eq!(sb.virt_path, "\u{0001}");
+        assert_eq!(sb.workbook_name, None);
+        assert!(sb.sheet_names.is_empty());
+        assert!(sb.extern_names.is_empty());
+    }
+
+    #[test]
+    fn extracts_workbook_name_from_path_and_brackets() {
+        let virt_path = "C:\\tmp\\[Book2.xlsx]\u{0000}";
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes()); // ctab
+        payload.extend_from_slice(&xl_unicode_string_compressed(virt_path));
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_SUPBOOK, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_supbook_table(&stream, 1252);
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+        assert_eq!(parsed.supbooks.len(), 1);
+        let sb = &parsed.supbooks[0];
+        assert_eq!(sb.kind, SupBookKind::ExternalWorkbook);
+        assert_eq!(sb.workbook_name.as_deref(), Some("Book2.xlsx"));
+    }
+}
