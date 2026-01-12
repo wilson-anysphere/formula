@@ -703,6 +703,15 @@ fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
     }
 }
 
+fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
+    match oid {
+        "1.2.840.113549.2.5" => Some(DigestAlg::Md5),
+        "1.3.14.3.2.26" => Some(DigestAlg::Sha1),
+        "2.16.840.1.101.3.4.2.1" => Some(DigestAlg::Sha256),
+        _ => None,
+    }
+}
+
 fn is_signature_component(component: &str) -> bool {
     let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
     matches!(

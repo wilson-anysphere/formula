@@ -815,13 +815,85 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
                     source,
                 },
             }),
+            "xltx" => {
+                let mut out = package.clone();
+                if out.vba_project_bin().is_some() {
+                    out.remove_vba_project()
+                        .map_err(|source| Error::SaveXlsxPackage {
+                            path: path.to_path_buf(),
+                            source,
+                        })?;
+                }
+                out.enforce_workbook_kind(xlsx::WorkbookKind::Template)
+                    .map_err(|source| Error::SaveXlsxPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
+                atomic_write(path, |file| out.write_to(file)).map_err(|err| match err {
+                    AtomicWriteError::Io(source) => Error::SaveIo {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                    AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                })
+            }
+            "xltm" => {
+                let mut out = package.clone();
+                out.enforce_workbook_kind(xlsx::WorkbookKind::MacroEnabledTemplate)
+                    .map_err(|source| Error::SaveXlsxPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
+                atomic_write(path, |file| out.write_to(file)).map_err(|err| match err {
+                    AtomicWriteError::Io(source) => Error::SaveIo {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                    AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                })
+            }
+            "xlam" => {
+                let mut out = package.clone();
+                out.enforce_workbook_kind(xlsx::WorkbookKind::MacroEnabledAddIn)
+                    .map_err(|source| Error::SaveXlsxPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
+                atomic_write(path, |file| out.write_to(file)).map_err(|err| match err {
+                    AtomicWriteError::Io(source) => Error::SaveIo {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                    AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                })
+            }
             other => Err(Error::UnsupportedExtension {
                 path: path.to_path_buf(),
                 extension: other.to_string(),
             }),
         },
         Workbook::Xls(result) => match ext.as_str() {
-            "xlsx" => atomic_write(path, |file| xlsx::write_workbook_to_writer(&result.workbook, file))
+            "xlsx" | "xltx" | "xltm" | "xlam" => {
+                let kind = match ext.as_str() {
+                    "xlsx" => xlsx::WorkbookKind::Workbook,
+                    "xltx" => xlsx::WorkbookKind::Template,
+                    "xltm" => xlsx::WorkbookKind::MacroEnabledTemplate,
+                    "xlam" => xlsx::WorkbookKind::MacroEnabledAddIn,
+                    _ => unreachable!(),
+                };
+
+                atomic_write(path, |file| {
+                    xlsx::write_workbook_to_writer_with_kind(&result.workbook, file, kind)
+                })
                 .map_err(|err| match err {
                     AtomicWriteError::Io(source) => Error::SaveIo {
                         path: path.to_path_buf(),
@@ -831,7 +903,8 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
                         path: path.to_path_buf(),
                         source,
                     },
-                }),
+                })
+            }
             other => Err(Error::UnsupportedExtension {
                 path: path.to_path_buf(),
                 extension: other.to_string(),
@@ -848,12 +921,22 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
                     source,
                 },
             }),
-            "xlsx" => {
+            "xlsx" | "xltx" | "xltm" | "xlam" => {
+                let kind = match ext.as_str() {
+                    "xlsx" => xlsx::WorkbookKind::Workbook,
+                    "xltx" => xlsx::WorkbookKind::Template,
+                    "xltm" => xlsx::WorkbookKind::MacroEnabledTemplate,
+                    "xlam" => xlsx::WorkbookKind::MacroEnabledAddIn,
+                    _ => unreachable!(),
+                };
                 let model = xlsb_to_model_workbook(wb).map_err(|source| Error::SaveXlsbExport {
                     path: path.to_path_buf(),
                     source,
                 })?;
-                atomic_write(path, |file| xlsx::write_workbook_to_writer(&model, file)).map_err(|err| match err {
+                atomic_write(path, |file| {
+                    xlsx::write_workbook_to_writer_with_kind(&model, file, kind)
+                })
+                .map_err(|err| match err {
                     AtomicWriteError::Io(source) => Error::SaveIo {
                         path: path.to_path_buf(),
                         source,
@@ -870,9 +953,19 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
             }),
         },
         Workbook::Model(model) => match ext.as_str() {
-            "xlsx" => {
+            "xlsx" | "xltx" | "xltm" | "xlam" => {
+                let kind = match ext.as_str() {
+                    "xlsx" => xlsx::WorkbookKind::Workbook,
+                    "xltx" => xlsx::WorkbookKind::Template,
+                    "xltm" => xlsx::WorkbookKind::MacroEnabledTemplate,
+                    "xlam" => xlsx::WorkbookKind::MacroEnabledAddIn,
+                    _ => unreachable!(),
+                };
                 let export = materialize_columnar_tables_for_export(model);
-                atomic_write(path, |file| xlsx::write_workbook_to_writer(&export, file)).map_err(|err| match err {
+                atomic_write(path, |file| {
+                    xlsx::write_workbook_to_writer_with_kind(&export, file, kind)
+                })
+                .map_err(|err| match err {
                     AtomicWriteError::Io(source) => Error::SaveIo {
                         path: path.to_path_buf(),
                         source,

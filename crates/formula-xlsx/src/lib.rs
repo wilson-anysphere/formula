@@ -120,7 +120,7 @@ pub use streaming::{
 pub use styles::*;
 pub use workbook::ChartExtractionError;
 #[cfg(not(target_arch = "wasm32"))]
-pub use writer::{write_workbook, write_workbook_to_writer, XlsxWriteError};
+pub use writer::{write_workbook, write_workbook_to_writer, write_workbook_to_writer_with_kind, XlsxWriteError};
 pub use xml::XmlDomError;
 
 use formula_model::rich_text::RichText;

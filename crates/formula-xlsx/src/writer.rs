@@ -1,5 +1,6 @@
 use crate::tables::{write_table_xml, TABLE_REL_TYPE};
 use crate::styles::StylesPart;
+use crate::WorkbookKind;
 use formula_columnar::{ColumnType as ColumnarType, Value as ColumnarValue};
 use formula_model::{
     normalize_formula_text, Cell, CellRef, CellValue, DateSystem, DefinedNameScope, Hyperlink,
@@ -23,11 +24,26 @@ pub enum XlsxWriteError {
 }
 
 pub fn write_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), XlsxWriteError> {
+    let path = path.as_ref();
     let file = File::create(path)?;
-    write_workbook_to_writer(workbook, file)
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let kind = WorkbookKind::from_extension(&ext).unwrap_or(WorkbookKind::Workbook);
+    write_workbook_to_writer_with_kind(workbook, file, kind)
 }
 
 pub fn write_workbook_to_writer<W: Write + Seek>(workbook: &Workbook, writer: W) -> Result<(), XlsxWriteError> {
+    write_workbook_to_writer_with_kind(workbook, writer, WorkbookKind::Workbook)
+}
+
+pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
+    workbook: &Workbook,
+    writer: W,
+    kind: WorkbookKind,
+) -> Result<(), XlsxWriteError> {
     let mut zip = ZipWriter::new(writer);
     let options = zip::write::FileOptions::<()>::default()
         .compression_method(zip::CompressionMethod::Deflated);
@@ -52,7 +68,7 @@ pub fn write_workbook_to_writer<W: Write + Seek>(workbook: &Workbook, writer: W)
 
     // Content types
     zip.start_file("[Content_Types].xml", options)?;
-    zip.write_all(content_types_xml(workbook, &shared_strings).as_bytes())?;
+    zip.write_all(content_types_xml(workbook, &shared_strings, kind).as_bytes())?;
 
     // Workbook
     zip.start_file("xl/workbook.xml", options)?;
@@ -783,11 +799,12 @@ fn shared_strings_xml(shared: &SharedStrings) -> String {
     )
 }
 
-fn content_types_xml(workbook: &Workbook, shared_strings: &SharedStrings) -> String {
+fn content_types_xml(workbook: &Workbook, shared_strings: &SharedStrings, kind: WorkbookKind) -> String {
     let mut overrides = String::new();
-    overrides.push_str(
-        r#"<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>"#,
-    );
+    overrides.push_str(&format!(
+        r#"<Override PartName="/xl/workbook.xml" ContentType="{}"/>"#,
+        kind.workbook_content_type()
+    ));
     overrides.push_str(
         r#"<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>"#,
     );
