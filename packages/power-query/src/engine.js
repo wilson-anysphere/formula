@@ -2037,6 +2037,9 @@ export class QueryEngine {
           if (!isOptionalArrowDependencyError(err) && !isModuleNotFoundError(err)) {
             throw err;
           }
+          if (!connector.readParquetTable) {
+            throw err;
+          }
         }
       }
 
@@ -2062,6 +2065,9 @@ export class QueryEngine {
           return { table, meta, sources: [meta] };
         } catch (err) {
           if (!isOptionalArrowDependencyError(err) && !isModuleNotFoundError(err)) {
+            throw err;
+          }
+          if (!connector.readParquetTable) {
             throw err;
           }
         }
