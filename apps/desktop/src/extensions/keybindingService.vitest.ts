@@ -498,4 +498,65 @@ describe("KeybindingService", () => {
     expect(handledFallback).toBe(true);
     expect(builtinRun).toHaveBeenCalledTimes(2);
   });
+
+  it("does not allow extensions to steal grid typing when builtins dispatch in capture phase", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const extRun = vi.fn();
+    commandRegistry.setExtensionCommands(
+      [{ extensionId: "ext", command: "ext.stealTyping", title: "Ext" }],
+      async () => extRun(),
+    );
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
+    service.setExtensionKeybindings([{ extensionId: "ext", command: "ext.stealTyping", key: "c", mac: null, when: null }]);
+
+    const event = makeKeydownEvent({ key: "c" });
+
+    // Capture-phase dispatch: builtins only. Extensions must *not* run here.
+    const captureHandled = await service.dispatchKeydown(event, { allowBuiltins: true, allowExtensions: false });
+    expect(captureHandled).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+
+    // Bubble-phase "grid" handler consumes the key (e.g. start typing to edit).
+    event.preventDefault();
+
+    // Bubble-phase dispatch: extensions only. Must respect SpreadsheetApp preventDefault.
+    const bubbleHandled = await service.dispatchKeydown(event, { allowBuiltins: false, allowExtensions: true });
+    expect(bubbleHandled).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+  });
+
+  it("dispatches builtins in capture phase without dispatching extensions", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const builtinRun = vi.fn();
+    const extRun = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.editCell", "Builtin", builtinRun);
+    commandRegistry.setExtensionCommands(
+      [{ extensionId: "ext", command: "ext.stealTyping", title: "Ext" }],
+      async () => extRun(),
+    );
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
+    service.setBuiltinKeybindings([{ command: "builtin.editCell", key: "f2" }]);
+    service.setExtensionKeybindings([{ extensionId: "ext", command: "ext.stealTyping", key: "c", mac: null, when: null }]);
+
+    const event = makeKeydownEvent({ key: "F2" });
+
+    const captureHandled = await service.dispatchKeydown(event, { allowBuiltins: true, allowExtensions: false });
+    expect(captureHandled).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(builtinRun).toHaveBeenCalledTimes(1);
+    expect(extRun).not.toHaveBeenCalled();
+
+    // Bubble-phase extension dispatch should not fire because the built-in handler already
+    // consumed the key with preventDefault().
+    const bubbleHandled = await service.dispatchKeydown(event, { allowBuiltins: false, allowExtensions: true });
+    expect(bubbleHandled).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
+  });
 });

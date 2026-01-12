@@ -240,11 +240,14 @@ export class KeybindingService {
   /**
    * Install the global keydown listener (bubble phase by default).
    */
-  installWindowListener(target: Window = window, opts: { capture?: boolean } = {}): () => void {
+  installWindowListener(
+    target: Window = window,
+    opts: { capture?: boolean; allowBuiltins?: boolean; allowExtensions?: boolean } = {},
+  ): () => void {
     this.dispose();
-    const capture = opts.capture ?? false;
+    const { capture = false, allowBuiltins, allowExtensions } = opts;
     const handler = (e: KeyboardEvent) => {
-      void this.dispatchKeydown(e);
+      void this.dispatchKeydown(e, { allowBuiltins, allowExtensions });
     };
     target.addEventListener("keydown", handler, { capture });
     this.removeListener = () => target.removeEventListener("keydown", handler, { capture });
@@ -261,7 +264,10 @@ export class KeybindingService {
    *
    * Returns `true` when handled and calls `preventDefault()`.
    */
-  handleKeydown(event: KeyboardEvent): boolean {
+  handleKeydown(
+    event: KeyboardEvent,
+    opts: { allowBuiltins?: boolean; allowExtensions?: boolean } = {},
+  ): boolean {
     if (event.defaultPrevented) return false;
     if (event.repeat) return false;
     if (isInsideKeybindingBarrier(event.target)) return false;
@@ -269,7 +275,9 @@ export class KeybindingService {
     if (inputTarget && this.ignoreInputTargets === "all") return false;
 
     const match = this.findMatchingBinding(event, {
-      allowExtensions: !(inputTarget && this.ignoreInputTargets === "extensions"),
+      ...opts,
+      allowExtensions:
+        (opts.allowExtensions ?? true) && !(inputTarget && this.ignoreInputTargets === "extensions"),
     });
     if (!match) return false;
 
@@ -285,7 +293,10 @@ export class KeybindingService {
     return true;
   }
 
-  async dispatchKeydown(event: KeyboardEvent): Promise<boolean> {
+  async dispatchKeydown(
+    event: KeyboardEvent,
+    opts: { allowBuiltins?: boolean; allowExtensions?: boolean } = {},
+  ): Promise<boolean> {
     if (event.defaultPrevented) return false;
     // Avoid repeatedly firing commands when the user holds a key down (e.g. toggles like
     // command palette / AI chat). Spreadsheet-style repeat behavior is handled by the grid.
@@ -295,7 +306,9 @@ export class KeybindingService {
     if (inputTarget && this.ignoreInputTargets === "all") return false;
 
     const match = this.findMatchingBinding(event, {
-      allowExtensions: !(inputTarget && this.ignoreInputTargets === "extensions"),
+      ...opts,
+      allowExtensions:
+        (opts.allowExtensions ?? true) && !(inputTarget && this.ignoreInputTargets === "extensions"),
     });
     if (!match) return false;
 
@@ -311,16 +324,17 @@ export class KeybindingService {
 
   private findMatchingBinding(
     event: KeyboardEvent,
-    opts: {
-      allowExtensions?: boolean;
-    } = {},
+    opts: { allowBuiltins?: boolean; allowExtensions?: boolean } = {},
   ): StoredKeybinding | null {
+    const allowBuiltins = opts.allowBuiltins ?? true;
     const allowExtensions = opts.allowExtensions ?? true;
     const lookup = this.params.contextKeys.asLookup();
 
-    // Built-ins always win.
-    const builtin = this.findFirstMatch(this.builtin, event, lookup);
-    if (builtin) return builtin;
+    // Built-ins always win when enabled.
+    if (allowBuiltins) {
+      const builtin = this.findFirstMatch(this.builtin, event, lookup);
+      if (builtin) return builtin;
+    }
 
     if (!allowExtensions) return null;
 

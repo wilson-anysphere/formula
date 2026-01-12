@@ -4792,8 +4792,20 @@ if (
   });
   keybindingService.setBuiltinKeybindings(builtinKeybindingHints);
   const commandKeybindingDisplayIndex = keybindingService.getCommandKeybindingDisplayIndex();
-  // Bubble-phase listener so SpreadsheetApp can `preventDefault()` first.
-  keybindingService.installWindowListener(window, { capture: false });
+  // Split dispatch across phases:
+  // - Capture: built-in keybindings only (needed for some global shortcuts).
+  // - Bubble: extension keybindings only, so SpreadsheetApp can `preventDefault()` first for
+  //   grid-local typing/navigation and prevent extensions from stealing those keys.
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      void keybindingService.dispatchKeydown(e, { allowBuiltins: true, allowExtensions: false });
+    },
+    { capture: true },
+  );
+  window.addEventListener("keydown", (e) => {
+    void keybindingService.dispatchKeydown(e, { allowBuiltins: false, allowExtensions: true });
+  });
 
   const updateKeybindings = () => {
     const contributed =
