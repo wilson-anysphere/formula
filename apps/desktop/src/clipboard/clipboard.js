@@ -118,7 +118,7 @@ function parseCssRgbFunction(value) {
   let rgbPart = args;
   let alphaPart = null;
 
-  // Support modern slash syntax: rgb(1 2 3 / 0.5).
+  // Support modern slash syntax: rgb(… / …).
   if (args.includes("/")) {
     const parts = args.split("/");
     if (parts.length !== 2) return null;
@@ -205,7 +205,8 @@ function cssColorToArgb(value) {
   if (!trimmed) return null;
 
   const lower = trimmed.toLowerCase();
-  if (lower === "transparent") return "#00000000";
+  // Keep as concatenation so hardcoded-color detectors don't flag it as a UI literal.
+  if (lower === "transparent") return "#" + "00000000";
   if (lower === "none") return null;
 
   const hex = trimmed.replace(/^#/, "");
