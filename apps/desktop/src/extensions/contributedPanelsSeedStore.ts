@@ -76,8 +76,8 @@ export function readContributedPanelsSeedStore(storage: StorageLike): Contribute
     out[panelId] = {
       extensionId,
       title,
-      ...(icon !== undefined ? { icon } : null),
-      ...(defaultDock ? { defaultDock } : null),
+      ...(icon !== undefined ? { icon } : {}),
+      ...(defaultDock ? { defaultDock } : {}),
     };
   }
 
@@ -97,8 +97,8 @@ export function writeContributedPanelsSeedStore(storage: StorageLike, data: Cont
     normalized[panelId] = {
       extensionId,
       title,
-      ...(icon !== undefined ? { icon } : null),
-      ...(defaultDock ? { defaultDock } : null),
+      ...(icon !== undefined ? { icon } : {}),
+      ...(defaultDock ? { defaultDock } : {}),
     };
   }
   safeSetItem(storage, CONTRIBUTED_PANELS_SEED_STORE_KEY, JSON.stringify(normalized));
@@ -154,8 +154,8 @@ export function setSeedPanelsForExtension(
     next[panelId] = {
       extensionId: owner,
       title,
-      ...(icon !== undefined ? { icon } : null),
-      ...(defaultDock ? { defaultDock } : null),
+      ...(icon !== undefined ? { icon } : {}),
+      ...(defaultDock ? { defaultDock } : {}),
     };
   }
 
@@ -216,4 +216,3 @@ export function seedPanelRegistryFromContributedPanelsSeedStore(
     }
   }
 }
-
