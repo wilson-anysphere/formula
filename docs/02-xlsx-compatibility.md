@@ -348,38 +348,51 @@ Some packages instead attach the richData parts to `xl/metadata.xml` via `xl/_re
 </Relationships>
 ```
 
-##### `xl/richData/rdRichValueTypes.xml` + `xl/richData/rdrichvaluestructure.xml` (type/structure tables)
+##### `xl/richData/rdRichValueTypes.xml` + `xl/richData/rdrichvaluestructure.xml` (supporting schema tables; XML shape varies)
 
-Excel commonly emits additional Rich Data “schema” parts:
+When workbooks use the `rdRichValue*` naming scheme, Excel can emit additional “schema” parts under
+`xl/richData/`.
 
-- `xl/richData/rdRichValueTypes.xml` — rich value type IDs (numeric) and links to a structure ID
-- `xl/richData/rdrichvaluestructure.xml` — rich value structures (field layouts)
+These parts are **not always required** to follow the **image byte chain** (which mainly depends on
+`xl/metadata.xml` → `xl/richData/rdrichvalue.xml` → `xl/richData/richValueRel.xml` → `.rels` → `xl/media/*`),
+but they are important for interpreting rich value payloads and should be preserved for round-trip safety.
 
-These are not always required to follow the **image byte** chain above (which mainly depends on `metadata.xml`, `rdrichvalue.xml`, and `richValueRel.xml`), but they are important for interpreting rich value payloads and should be preserved for round-trip safety.
+Observed in the real Excel fixture `fixtures/xlsx/basic/image-in-cell.xlsx`:
 
-Representative (synthetic) shapes (element names/namespaces vary across Excel versions; see [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) for a deeper breakdown):
-
-`xl/richData/rdRichValueTypes.xml`:
-
-```xml
-<rvTypes xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
-  <types>
-    <type id="0" name="com.microsoft.excel.image" structure="s_image"/>
-  </types>
-</rvTypes>
-```
-
-`xl/richData/rdrichvaluestructure.xml`:
+`xl/richData/rdrichvaluestructure.xml` (structure `_localImage` and the positional key list):
 
 ```xml
-<rvStruct xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
-  <structures>
-    <structure id="s_image">
-      <member name="imageRel" kind="rel"/>
-    </structure>
-  </structures>
-</rvStruct>
+<rvStructures xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata" count="1">
+  <s t="_localImage">
+    <k n="_rvRel:LocalImageIdentifier" t="i"/>
+    <k n="CalcOrigin" t="i"/>
+  </s>
+</rvStructures>
 ```
+
+`xl/richData/rdRichValueTypes.xml` (key flag metadata; note the different root and namespace):
+
+```xml
+<rvTypesInfo xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="x"
+             xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <global>
+    <keyFlags>
+      <key name="_Self">
+        <flag name="ExcludeFromFile" value="1"/>
+        <flag name="ExcludeFromCalcComparison" value="1"/>
+      </key>
+      <!-- ... -->
+    </keyFlags>
+  </global>
+</rvTypesInfo>
+```
+
+See also:
+
+- [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md) — broader richValue*/rdRichValue* tables + index-base notes
+- [`fixtures/xlsx/basic/image-in-cell.md`](../fixtures/xlsx/basic/image-in-cell.md) — fixture walkthrough
 
 ##### 3) `richValueRel.xml` → `xl/media/*` via `.rels`
 
