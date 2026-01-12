@@ -16,6 +16,16 @@ pub trait Grid: Sync {
     /// Return a contiguous slice for a single-column row range if the backing storage is columnar.
     fn column_slice(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]>;
 
+    /// Like [`Grid::column_slice`], but only when the underlying cells are strictly numeric/blank.
+    ///
+    /// This is used by lookup functions where treating logical/text values as `NaN` would produce
+    /// incorrect comparison ordering (e.g. for approximate matches). Implementations that allow
+    /// non-numeric values in `column_slice` should override this to apply stricter validation.
+    #[inline]
+    fn column_slice_strict_numeric(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]> {
+        self.column_slice(col, row_start, row_end)
+    }
+
     /// Optional sparse iteration over populated cells.
     ///
     /// When implemented, this should yield coordinates and values for cells that have a stored

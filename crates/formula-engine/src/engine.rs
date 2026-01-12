@@ -5493,9 +5493,6 @@ fn slice_mode_for_program(program: &bytecode::Program) -> ColumnSliceMode {
                 | bytecode::ast::Function::AverageIfs
                 | bytecode::ast::Function::MinIfs
                 | bytecode::ast::Function::MaxIfs
-                | bytecode::ast::Function::VLookup
-                | bytecode::ast::Function::HLookup
-                | bytecode::ast::Function::Match
         )
     }) {
         ColumnSliceMode::StrictNumeric
@@ -5825,6 +5822,49 @@ struct EngineBytecodeGrid<'a> {
     slice_mode: ColumnSliceMode,
 }
 
+impl<'a> EngineBytecodeGrid<'a> {
+    fn column_slice_impl(
+        &self,
+        col: i32,
+        row_start: i32,
+        row_end: i32,
+        slice_mode: ColumnSliceMode,
+    ) -> Option<&'a [f64]> {
+        if col < 0
+            || col >= EXCEL_MAX_COLS_I32
+            || row_start < 0
+            || row_end < 0
+            || row_start > row_end
+            || row_end >= EXCEL_MAX_ROWS_I32
+        {
+            return None;
+        }
+        let data = self.cols.get(&col)?;
+        let idx = data
+            .segments
+            .partition_point(|seg| seg.row_end() < row_start);
+        let seg = data.segments.get(idx)?;
+        if row_start < seg.row_start || row_end > seg.row_end() {
+            return None;
+        }
+
+        let blocked_rows = match slice_mode {
+            ColumnSliceMode::StrictNumeric => &seg.blocked_rows_strict,
+            ColumnSliceMode::IgnoreNonNumeric => &seg.blocked_rows_ignore_nonnumeric,
+        };
+        if has_blocked_row(blocked_rows, row_start, row_end) {
+            return None;
+        }
+
+        let start = (row_start - seg.row_start) as usize;
+        let end = (row_end - seg.row_start) as usize;
+        if end >= seg.values.len() {
+            return None;
+        }
+        Some(&seg.values[start..=end])
+    }
+}
+
 impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     fn get_value(&self, coord: bytecode::CellCoord) -> bytecode::Value {
         if coord.row < 0
@@ -5857,38 +5897,11 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     }
 
     fn column_slice(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]> {
-        if col < 0
-            || col >= EXCEL_MAX_COLS_I32
-            || row_start < 0
-            || row_end < 0
-            || row_start > row_end
-            || row_end >= EXCEL_MAX_ROWS_I32
-        {
-            return None;
-        }
-        let data = self.cols.get(&col)?;
-        let idx = data
-            .segments
-            .partition_point(|seg| seg.row_end() < row_start);
-        let seg = data.segments.get(idx)?;
-        if row_start < seg.row_start || row_end > seg.row_end() {
-            return None;
-        }
+        self.column_slice_impl(col, row_start, row_end, self.slice_mode)
+    }
 
-        let blocked_rows = match self.slice_mode {
-            ColumnSliceMode::StrictNumeric => &seg.blocked_rows_strict,
-            ColumnSliceMode::IgnoreNonNumeric => &seg.blocked_rows_ignore_nonnumeric,
-        };
-        if has_blocked_row(blocked_rows, row_start, row_end) {
-            return None;
-        }
-
-        let start = (row_start - seg.row_start) as usize;
-        let end = (row_end - seg.row_start) as usize;
-        if end >= seg.values.len() {
-            return None;
-        }
-        Some(&seg.values[start..=end])
+    fn column_slice_strict_numeric(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]> {
+        self.column_slice_impl(col, row_start, row_end, ColumnSliceMode::StrictNumeric)
     }
 
     fn iter_cells(

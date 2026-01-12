@@ -2720,7 +2720,9 @@ fn approximate_match_in_first_col(
         _ => None,
     };
     if let Some(lookup_num) = lookup_num {
-        if let Some(slice) = grid.column_slice(table.col_start, table.row_start, table.row_end) {
+        if let Some(slice) =
+            grid.column_slice_strict_numeric(table.col_start, table.row_start, table.row_end)
+        {
             let mut lo = 0usize;
             let mut hi = slice.len();
             while lo < hi {
