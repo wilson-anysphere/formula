@@ -78,9 +78,9 @@ fn sheet_range_3d_area_decodes_as_quoted_prefix_and_reencodes_with_same_ixti() {
 #[test]
 fn external_workbook_sheet_range_3d_ref_decodes_as_quoted_prefix_and_reencodes_with_same_ixti() {
     let mut ctx = WorkbookContext::default();
-    // Encoding uses the `[Book]Sheet` form (AST encoder expands external workbook refs this way).
-    ctx.add_extern_sheet("[Book2.xlsb]SheetA", "[Book2.xlsb]SheetB", 9);
-    // Decoding uses the workbook + sheet span split from the ExternSheet/SupBook tables.
+    // Decoding uses the workbook + sheet span split from the ExternSheet/SupBook tables. Encoding
+    // should work too because `add_extern_sheet_external_workbook` also populates the forward
+    // ExternSheet map using the `[Book]Sheet` form.
     ctx.add_extern_sheet_external_workbook("Book2.xlsb", "SheetA", "SheetB", 9);
 
     // PtgRef3d: [ptg][ixti: u16][row: u32][col: u16]
@@ -113,7 +113,6 @@ fn external_workbook_sheet_range_3d_ref_decodes_as_quoted_prefix_and_reencodes_w
 #[test]
 fn external_workbook_sheet_range_3d_area_decodes_as_quoted_prefix_and_reencodes_with_same_ixti() {
     let mut ctx = WorkbookContext::default();
-    ctx.add_extern_sheet("[Book2.xlsb]SheetA", "[Book2.xlsb]SheetB", 9);
     ctx.add_extern_sheet_external_workbook("Book2.xlsb", "SheetA", "SheetB", 9);
 
     // PtgArea3d: [ptg][ixti: u16][rowFirst: u32][rowLast: u32][colFirst: u16][colLast: u16]

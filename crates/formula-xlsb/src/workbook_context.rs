@@ -153,12 +153,24 @@ impl WorkbookContext {
         last_sheet: impl Into<String>,
         ixti: u16,
     ) {
+        let workbook = workbook.into();
+        let first_sheet = first_sheet.into();
+        let last_sheet = last_sheet.into();
+
+        // Also populate the forward map used by formula encoders. `formula-engine` represents
+        // external workbook refs as `[Book]Sheet`, so store the ExternSheet mapping using the same
+        // prefix on both ends of the span.
+        let first_key = format!("[{workbook}]{first_sheet}");
+        let last_key = format!("[{workbook}]{last_sheet}");
+        self.extern_sheets
+            .insert((normalize_key(&first_key), normalize_key(&last_key)), ixti);
+
         self.extern_sheet_targets_rev.insert(
             ixti,
             ExternSheetTarget {
-                workbook: Some(workbook.into()),
-                first_sheet: first_sheet.into(),
-                last_sheet: last_sheet.into(),
+                workbook: Some(workbook),
+                first_sheet,
+                last_sheet,
             },
         );
     }
