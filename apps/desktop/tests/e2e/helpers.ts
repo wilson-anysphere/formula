@@ -88,11 +88,10 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
 }
 
 /**
- * Click the toolbar/ribbon button that toggles the Extensions panel.
+ * Click the ribbon button that toggles the Extensions panel.
  *
- * The desktop UI renders both a modern ribbon command button and (in some HTML scaffolds) a
- * fallback toolbar button with the same `data-testid="open-extensions-panel"`. Playwright strict
- * locators fail when multiple elements share a test id, so prefer the ribbon button when present.
+ * The Extensions panel toggle is ribbon-owned. Scope the locator under `data-testid="ribbon-root"`
+ * to avoid Playwright strict-mode collisions if another surface reuses the same test id.
  */
 export async function openExtensionsPanel(page: Page): Promise<void> {
   const panel = page.getByTestId("panel-extensions");
