@@ -4175,6 +4175,37 @@ fn bytecode_backend_inlines_constant_defined_names() {
 }
 
 #[test]
+fn bytecode_backend_inlines_constant_defined_names_inside_let() {
+    // LET should still be bytecode-eligible when binding values reference constant defined names.
+    // This requires inlining the constant into the lowered bytecode AST, while still respecting
+    // lexical scoping rules for LET locals.
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "RATE",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(0.1)),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, RATE, x*2)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(via_bytecode, Value::Number(0.2));
+
+    // Compare against the AST backend (which can resolve defined names at runtime).
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "A1");
+
+    assert_eq!(via_bytecode, via_ast);
+}
+
+#[test]
 fn bytecode_backend_inlines_constant_defined_names_case_insensitive_and_recompiles() {
     // Exercise case-insensitive name matching and ensure bytecode programs are recompiled when
     // a constant defined name changes (since the constant is inlined into the bytecode AST).
