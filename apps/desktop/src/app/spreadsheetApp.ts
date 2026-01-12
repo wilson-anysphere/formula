@@ -7621,7 +7621,7 @@ export class SpreadsheetApp {
     const styleIdByLayerKey = new Map<string, number>();
 
     // Best-effort access to the underlying sheet model to cheaply derive a stable
-    // (sheet,row,col,cell) style id tuple key without computing full merges for
+    // (sheet,row,col,cell,range-run) style id tuple key without computing full merges for
     // every copied cell.
     const sheetModel = (() => {
       try {
@@ -7662,7 +7662,10 @@ export class SpreadsheetApp {
         try {
           const tuple = docAny.getCellFormatStyleIds(this.sheetId, { row, col });
           if (Array.isArray(tuple) && tuple.length >= 4) {
-            const normalized = tuple.map(normalizeStyleId);
+            const normalized =
+              tuple.length >= 5
+                ? tuple.slice(0, 5).map(normalizeStyleId)
+                : [tuple[0], tuple[1], tuple[2], tuple[3], 0].map(normalizeStyleId);
             return normalized.join(",");
           }
         } catch {

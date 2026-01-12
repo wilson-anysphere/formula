@@ -512,7 +512,7 @@ export function getCellGridFromRange(doc, sheetId, range) {
         const rowStyleId = normalizeStyleId(out.rowStyleId ?? out.rowDefaultStyleId ?? out.rowDefault);
         const colStyleId = normalizeStyleId(out.colStyleId ?? out.colDefaultStyleId ?? out.colDefault);
         const cellId = normalizeStyleId(out.cellStyleId ?? out.styleId ?? cellStyleId);
-        const runId = normalizeStyleId(out.rangeRunStyleId ?? out.runStyleId ?? out.rangeStyleId ?? 0);
+        const runId = normalizeStyleId(out.rangeRunStyleId ?? out.runStyleId ?? out.rangeStyleId ?? out.rangeRun ?? 0);
         return [sheetDefaultStyleId, rowStyleId, colStyleId, cellId, runId];
       }
     }
@@ -651,7 +651,7 @@ export function getCellGridFromRange(doc, sheetId, range) {
       const cellStyleId = typeof cell?.styleId === "number" ? cell.styleId : 0;
 
       // If the controller can supply the contributing style ids, cache by the
-      // (sheet,row,col,cell) style-id tuple. Otherwise, fall back to caching by
+      // (sheet,row,col,cell,range-run) style-id tuple. Otherwise, fall back to caching by
       // the resolved style object to avoid collisions.
       let format = null;
       if (doc && typeof doc.getCellFormat === "function" && !canDeriveStyleIdTuple) {

@@ -531,7 +531,7 @@ test("getUsedRange(includeFormat) unions row and column formatting to full grid 
   assert.equal(doc.getUsedRange("Sheet1", { includeFormat: true }), null);
 });
 
-test("getCellFormatStyleIds exposes layered style id tuple (sheet/row/col/cell)", () => {
+test("getCellFormatStyleIds exposes layered style id tuple (sheet/row/col/cell/range-run)", () => {
   const doc = new DocumentController();
 
   // Column default: bold.

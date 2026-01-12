@@ -99,3 +99,27 @@ test("copyRangeToClipboardPayload uses sheet-level formats from full-sheet selec
   assert.ok(payload.html);
   assert.match(payload.html, /font-weight:bold/i);
 });
+
+test("copyRangeToClipboardPayload uses effective formats from range-run formatting (large rectangles)", () => {
+  const doc = new DocumentController();
+  // Large rectangle (> 50k cells) should store formatting as per-column row interval runs.
+  doc.setRangeFormat("Sheet1", "A1:B30000", { font: { bold: true } }, { label: "Bold Runs" });
+
+  // The formatted cell should not be materialized as a per-cell styleId.
+  assert.equal(doc.getCell("Sheet1", "A20000").styleId, 0);
+
+  const [sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId, rangeRunStyleId] = doc.getCellFormatStyleIds(
+    "Sheet1",
+    "A20000"
+  );
+  assert.equal(sheetDefaultStyleId, 0);
+  assert.equal(rowStyleId, 0);
+  assert.equal(colStyleId, 0);
+  assert.equal(cellStyleId, 0);
+  assert.notEqual(rangeRunStyleId, 0);
+  assert.equal(Boolean(doc.styleTable.get(rangeRunStyleId)?.font?.bold), true);
+
+  const payload = copyRangeToClipboardPayload(doc, "Sheet1", "A20000");
+  assert.ok(payload.html);
+  assert.match(payload.html, /font-weight:bold/i);
+});
