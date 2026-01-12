@@ -23,7 +23,11 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 const DEFAULT_SHARED_STRINGS_PART: &str = "xl/sharedStrings.bin";
 const DEFAULT_STYLES_PART: &str = "xl/styles.bin";
+const DEFAULT_WORKBOOK_PART: &str = "xl/workbook.bin";
+const DEFAULT_WORKBOOK_RELS_PART: &str = "xl/_rels/workbook.bin.rels";
 
+const OFFICE_DOCUMENT_REL_TYPE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
 const SHARED_STRINGS_REL_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings";
 const STYLES_REL_TYPE: &str =
@@ -69,6 +73,8 @@ impl Default for OpenOptions {
 pub struct XlsbWorkbook {
     path: PathBuf,
     sheets: Vec<SheetMeta>,
+    workbook_part: String,
+    workbook_rels_part: String,
     shared_strings: Vec<String>,
     shared_strings_table: Vec<SharedString>,
     shared_strings_part: Option<String>,
@@ -100,12 +106,30 @@ impl XlsbWorkbook {
         preserve_part(&mut zip, &mut preserved_parts, "[Content_Types].xml")?;
         preserve_part(&mut zip, &mut preserved_parts, "_rels/.rels")?;
 
-        let workbook_rels_bytes = read_zip_entry(&mut zip, "xl/_rels/workbook.bin.rels")?
+        let workbook_part = preserved_parts
+            .get("_rels/.rels")
+            .and_then(|root_rels| match relationship_target_by_type(root_rels, OFFICE_DOCUMENT_REL_TYPE) {
+                Ok(Some(target)) => root_target_candidates(&target)
+                    .into_iter()
+                    .find_map(|candidate| find_zip_entry_case_insensitive(&zip, &candidate)),
+                Ok(None) => None,
+                // Be tolerant of malformed root relationships and fall back to the default
+                // workbook location, matching historical behavior.
+                Err(_) => None,
+            })
+            .or_else(|| find_zip_entry_case_insensitive(&zip, DEFAULT_WORKBOOK_PART))
             .ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))?;
-        preserved_parts.insert(
-            "xl/_rels/workbook.bin.rels".to_string(),
-            workbook_rels_bytes.clone(),
-        );
+
+        let workbook_rels_part = {
+            let candidate = rels_part_name_for_part(&workbook_part);
+            find_zip_entry_case_insensitive(&zip, &candidate)
+                .or_else(|| find_zip_entry_case_insensitive(&zip, DEFAULT_WORKBOOK_RELS_PART))
+                .ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))?
+        };
+
+        let workbook_rels_bytes = read_zip_entry(&mut zip, &workbook_rels_part)?
+            .ok_or_else(|| ParseError::Zip(zip::result::ZipError::FileNotFound))?;
+        preserved_parts.insert(workbook_rels_part.clone(), workbook_rels_bytes.clone());
         let workbook_rels = parse_relationships(&workbook_rels_bytes)?;
 
         let content_types_xml = preserved_parts
@@ -150,7 +174,7 @@ impl XlsbWorkbook {
         }
 
         let workbook_bin = {
-            let mut wb = zip.by_name("xl/workbook.bin")?;
+            let mut wb = zip.by_name(&workbook_part)?;
             let mut bytes = Vec::with_capacity(wb.size() as usize);
             wb.read_to_end(&mut bytes)?;
             bytes
@@ -169,7 +193,7 @@ impl XlsbWorkbook {
             }
         }
         if options.preserve_parsed_parts {
-            preserved_parts.insert("xl/workbook.bin".to_string(), workbook_bin);
+            preserved_parts.insert(workbook_part.clone(), workbook_bin);
         }
 
         let shared_strings = match shared_strings_part.as_deref() {
@@ -195,14 +219,16 @@ impl XlsbWorkbook {
         let mut known_parts: HashSet<String> = [
             "[Content_Types].xml",
             "_rels/.rels",
-            "xl/workbook.bin",
-            "xl/_rels/workbook.bin.rels",
+            DEFAULT_WORKBOOK_PART,
+            DEFAULT_WORKBOOK_RELS_PART,
             DEFAULT_SHARED_STRINGS_PART,
             DEFAULT_STYLES_PART,
         ]
         .into_iter()
         .map(str::to_string)
         .collect();
+        known_parts.insert(workbook_part.clone());
+        known_parts.insert(workbook_rels_part.clone());
         if let Some(part) = &shared_strings_part {
             known_parts.insert(part.clone());
         }
@@ -238,6 +264,8 @@ impl XlsbWorkbook {
         Ok(Self {
             path,
             sheets,
+            workbook_part,
+            workbook_rels_part,
             shared_strings,
             shared_strings_table,
             shared_strings_part,
@@ -802,7 +830,7 @@ impl XlsbWorkbook {
     /// If any overridden worksheet part differs from the original package, we treat this as an
     /// edited save and remove `xl/calcChain.bin` (if present) and its references from:
     /// - `[Content_Types].xml`
-    /// - `xl/_rels/workbook.bin.rels`
+    /// - the workbook relationships part (typically `xl/_rels/workbook.bin.rels`)
     ///
     /// A stale calcChain can cause Excel to open with incorrect cached results or spend time
     /// rebuilding the chain.
@@ -848,7 +876,7 @@ impl XlsbWorkbook {
                 &mut zip,
                 &self.preserved_parts,
                 overrides,
-                "xl/_rels/workbook.bin.rels",
+                &self.workbook_rels_part,
             )?;
             if let Some(workbook_rels) = workbook_rels {
                 updated_workbook_rels = Some(remove_calc_chain_from_workbook_rels(&workbook_rels)?);
@@ -858,7 +886,7 @@ impl XlsbWorkbook {
                 &mut zip,
                 &self.preserved_parts,
                 overrides,
-                "xl/workbook.bin",
+                &self.workbook_part,
             )?;
             if let Some(workbook_bin) = workbook_bin {
                 if let Some(patched) = patch_workbook_bin_full_calc_on_load(&workbook_bin)? {
@@ -908,7 +936,7 @@ impl XlsbWorkbook {
                     continue;
                 }
             }
-            if edited && name == "xl/_rels/workbook.bin.rels" {
+            if edited && name == self.workbook_rels_part {
                 if let Some(updated) = &updated_workbook_rels {
                     if overrides.contains_key(&name) {
                         used_overrides.insert(name.clone());
@@ -917,7 +945,7 @@ impl XlsbWorkbook {
                     continue;
                 }
             }
-            if edited && name == "xl/workbook.bin" {
+            if edited && name == self.workbook_part {
                 if let Some(updated) = &updated_workbook_bin {
                     if overrides.contains_key(&name) {
                         used_overrides.insert(name.clone());
@@ -1037,7 +1065,7 @@ impl XlsbWorkbook {
                 &mut zip,
                 &self.preserved_parts,
                 overrides,
-                "xl/_rels/workbook.bin.rels",
+                &self.workbook_rels_part,
             )?;
             if let Some(workbook_rels) = workbook_rels {
                 updated_workbook_rels = Some(remove_calc_chain_from_workbook_rels(&workbook_rels)?);
@@ -1047,7 +1075,7 @@ impl XlsbWorkbook {
                 &mut zip,
                 &self.preserved_parts,
                 overrides,
-                "xl/workbook.bin",
+                &self.workbook_part,
             )?;
             if let Some(workbook_bin) = workbook_bin {
                 if let Some(patched) = patch_workbook_bin_full_calc_on_load(&workbook_bin)? {
@@ -1096,7 +1124,7 @@ impl XlsbWorkbook {
                     continue;
                 }
             }
-            if edited && name == "xl/_rels/workbook.bin.rels" {
+            if edited && name == self.workbook_rels_part {
                 if let Some(updated) = &updated_workbook_rels {
                     if overrides.contains_key(&name) {
                         used_overrides.insert(name.clone());
@@ -1105,7 +1133,7 @@ impl XlsbWorkbook {
                     continue;
                 }
             }
-            if edited && name == "xl/workbook.bin" {
+            if edited && name == self.workbook_part {
                 if let Some(updated) = &updated_workbook_bin {
                     if overrides.contains_key(&name) {
                         used_overrides.insert(name.clone());
@@ -1291,6 +1319,15 @@ fn content_type_override_part_names(
     Ok(out)
 }
 
+fn root_target_candidates(target: &str) -> Vec<String> {
+    let target = normalize_zip_part_name(target);
+    let mut candidates = vec![target.clone()];
+    if !target.to_ascii_lowercase().starts_with("xl/") {
+        candidates.push(normalize_zip_part_name(&format!("xl/{target}")));
+    }
+    candidates
+}
+
 fn workbook_target_candidates(target: &str) -> Vec<String> {
     // workbook.bin is stored under `xl/`, so relationship targets are typically relative to `xl/`.
     // Some writers use absolute targets with a leading `/`.
@@ -1301,6 +1338,14 @@ fn workbook_target_candidates(target: &str) -> Vec<String> {
     candidates.push(normalize_zip_part_name(&format!("xl/{target}")));
     candidates.push(normalize_zip_part_name(target));
     candidates
+}
+
+fn rels_part_name_for_part(part_name: &str) -> String {
+    let part_name = normalize_zip_part_name(part_name);
+    match part_name.rsplit_once('/') {
+        Some((dir, file)) => format!("{dir}/_rels/{file}.rels"),
+        None => format!("_rels/{part_name}.rels"),
+    }
 }
 
 fn normalize_zip_part_name(part_name: &str) -> String {
