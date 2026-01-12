@@ -295,6 +295,11 @@ Notes:
   matches the `<rel>` order in `richValueRel.xml`. Resolve the slot index using the `<rel>` list order,
   then look up that `r:id` in the `.rels` file to find the `Target`.
 
+**`xl/richData/rdRichValueTypes.xml` root + namespace**
+
+This fixture also includes `xl/richData/rdRichValueTypes.xml`, with root/local-name `rvTypesInfo` in the
+`http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2` namespace.
+
 ---
 
 ## Where this is implemented in Formula (code pointers)

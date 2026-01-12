@@ -324,6 +324,26 @@ Notes:
   </Relationships>
   ```
 
+**`xl/richData/rdRichValueTypes.xml` root + namespace**
+
+This fixture also includes `xl/richData/rdRichValueTypes.xml`, which uses the `richdata2` namespace and a
+different root local-name:
+
+```xml
+<rvTypesInfo xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata2"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="x"
+             xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <global>
+    <keyFlags>…</keyFlags>
+  </global>
+</rvTypesInfo>
+```
+
+This part is not required to follow the local-image resolution chain in the observed fixtures (which only
+needs `metadata.xml` → `rdrichvalue.xml`/structure → `richValueRel.xml`/`.rels`), but should be preserved
+byte-for-byte for round-trip safety.
+
 **Workbook relationships**
 
 From `xl/_rels/workbook.xml.rels` (excerpt):
