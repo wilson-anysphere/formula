@@ -24,7 +24,7 @@ and exits non-zero if mismatches exceed the configured threshold.
 
 ## Repository layout
 
-- `cases.json` — curated (~1k) formula + input-grid cases (deterministic).
+- `cases.json` — curated (~1.4k) formula + input-grid cases (deterministic).
 - `datasets/` — results datasets:
   - `excel-oracle.pinned.json` — pinned Excel dataset for CI (no Excel needed).
   - `versioned/` — version-tagged pinned datasets (useful when Excel behavior differs across versions/builds).
@@ -34,6 +34,11 @@ and exits non-zero if mismatches exceed the configured threshold.
 Note: the repo may include a **small pinned dataset** to keep CI fast. For the
 true Excel oracle, regenerate the dataset with the Windows + Excel runner and
 pin it (see below).
+
+The case corpus generator (`tools/excel-oracle/generate_cases.py`) validates that:
+
+- every `non_volatile` function in `shared/functionCatalog.json` has at least one case
+- `volatile` catalog functions are excluded (keeps pinned oracle comparisons deterministic)
 
 ## Tags and filtering
 

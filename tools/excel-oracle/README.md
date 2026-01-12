@@ -43,6 +43,11 @@ python tools/excel-oracle/generate_cases.py --out tests/compatibility/excel-orac
 
 The generator is deterministic; committing `cases.json` makes CI stable and reviewable.
 
+The generator also validates the corpus against `shared/functionCatalog.json` to ensure:
+
+- every `non_volatile` catalog function is exercised by at least one case
+- `volatile` catalog functions are excluded (so pinned comparisons remain deterministic)
+
 ## Generate oracle dataset from Excel
 
 From repo root on Windows:

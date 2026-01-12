@@ -97,7 +97,7 @@ jobs:
             # core operators + a few baseline functions.
             if ([string]::IsNullOrWhiteSpace($include)) {
               # Include a small amount of dynamic array spill coverage as well.
-              $include = "add,sub,mul,div,cmp,SUM,IF,IFERROR,ISERROR,error,range,TRANSPOSE,SEQUENCE"
+              $include = "add,sub,mul,div,cmp,SUM,IF,IFERROR,ISERROR,error,range,TRANSPOSE,SEQUENCE,COUNT,COUNTIF,TEXT,VALUE,DATEVALUE,WORKDAY,NETWORKDAYS,XLOOKUP,XMATCH,FILTER,SORT,UNIQUE"
             }
           }
 
