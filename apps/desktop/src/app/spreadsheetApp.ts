@@ -6510,9 +6510,8 @@ export class SpreadsheetApp {
       }
     }
 
-    const rect = this.root.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = e.clientX - this.rootLeft;
+    const y = e.clientY - this.rootTop;
     if (this.dragPointerPos) {
       this.dragPointerPos.x = x;
       this.dragPointerPos.y = y;
@@ -6582,7 +6581,7 @@ export class SpreadsheetApp {
       return;
     }
 
-    if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
+    if (x < 0 || y < 0 || x > this.width || y > this.height) {
       this.hideCommentTooltip();
       this.root.style.cursor = "";
       return;
