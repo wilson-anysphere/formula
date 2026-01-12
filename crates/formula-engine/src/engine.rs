@@ -11555,6 +11555,23 @@ mod tests {
     }
 
     #[test]
+    fn value_delta_treats_rich_values_as_non_numeric() {
+        use crate::value::{EntityValue, RecordValue};
+
+        let entity_a = Value::Entity(EntityValue::new("A"));
+        let entity_b = Value::Entity(EntityValue::new("B"));
+        assert!(numeric_value(&entity_a).is_none());
+        assert_eq!(value_delta(&entity_a, &entity_b), f64::INFINITY);
+        assert_eq!(value_delta(&entity_a, &entity_a), 0.0);
+
+        let record_a = Value::Record(RecordValue::new("A"));
+        let record_b = Value::Record(RecordValue::new("B"));
+        assert!(numeric_value(&record_a).is_none());
+        assert_eq!(value_delta(&record_a, &record_b), f64::INFINITY);
+        assert_eq!(value_delta(&record_a, &record_a), 0.0);
+    }
+
+    #[test]
     fn bytecode_column_cache_ignores_ranges_used_only_for_implicit_intersection() {
         let mut engine = Engine::new();
         engine.set_cell_formula("Sheet1", "B1", "=@A1:A10").unwrap();
