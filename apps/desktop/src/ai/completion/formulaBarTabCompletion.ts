@@ -40,9 +40,9 @@ export class FormulaBarTabCompletionController {
   readonly #formulaBar: FormulaBarView;
   readonly #document: DocumentController;
   readonly #getSheetId: () => string;
+  readonly #sheetNameResolver: SheetNameResolver | null;
   readonly #limits: { maxRows: number; maxCols: number } | null;
   readonly #schemaProvider: SchemaProvider;
-  readonly #sheetNameResolver: SheetNameResolver | null;
 
   #cellsVersion = 0;
   #completionRequest = 0;
@@ -54,8 +54,8 @@ export class FormulaBarTabCompletionController {
     this.#formulaBar = opts.formulaBar;
     this.#document = opts.document;
     this.#getSheetId = opts.getSheetId;
-    this.#limits = opts.limits ?? null;
     this.#sheetNameResolver = opts.sheetNameResolver ?? null;
+    this.#limits = opts.limits ?? null;
 
     const defaultSchemaProvider: SchemaProvider = {
       getSheetNames: () => {
@@ -174,6 +174,7 @@ export class FormulaBarTabCompletionController {
     const activeCell = model.activeCell.address;
     const sheetId = this.#getSheetId();
     const cellsVersion = this.#cellsVersion;
+    const sheetNameResolver = this.#sheetNameResolver;
     const knownSheets =
       typeof this.#document.getSheetIds === "function"
         ? (this.#document.getSheetIds() as string[]).filter((s) => typeof s === "string" && s.length > 0)
@@ -183,17 +184,16 @@ export class FormulaBarTabCompletionController {
       const trimmed = name.trim();
       if (!trimmed) return null;
 
-      const resolved = this.#sheetNameResolver?.getSheetIdByName(trimmed);
-      if (resolved) return resolved;
+      const resolved = sheetNameResolver?.getSheetIdByName(trimmed) ?? null;
+      const candidate = resolved ?? trimmed;
 
       // Avoid creating phantom sheets during completion (DocumentController lazily
       // materializes sheets on read). If we don't have any known sheets yet,
       // only allow reads against the current sheet id.
-      if (knownSheets.length === 0) {
-        return trimmed.toLowerCase() === sheetId.toLowerCase() ? sheetId : null;
-      }
+      if (candidate.toLowerCase() === sheetId.toLowerCase()) return sheetId;
+      if (knownSheets.length === 0) return null;
 
-      return knownSheets.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
+      return knownSheets.find((id) => id.toLowerCase() === candidate.toLowerCase()) ?? null;
     };
 
     const surroundingCells = {
@@ -213,20 +213,23 @@ export class FormulaBarTabCompletionController {
     };
 
     this.#pendingCompletion = this.#completion
-      .getSuggestions({
-        currentInput: draft,
-        cursorPosition: cursor,
-        cellRef: activeCell,
-        surroundingCells,
-      }, {
-        previewEvaluator: createPreviewEvaluator({
-          document: this.#document,
-          sheetId,
-          cellAddress: activeCell,
-          schemaProvider: this.#schemaProvider,
-          sheetNameResolver: this.#sheetNameResolver ?? undefined,
-        })
-      })
+      .getSuggestions(
+        {
+          currentInput: draft,
+          cursorPosition: cursor,
+          cellRef: activeCell,
+          surroundingCells,
+        },
+        {
+          previewEvaluator: createPreviewEvaluator({
+            document: this.#document,
+            sheetId,
+            cellAddress: activeCell,
+            schemaProvider: this.#schemaProvider,
+            sheetNameResolver: this.#sheetNameResolver,
+          }),
+        },
+      )
       .then((suggestions) => {
         if (requestId !== this.#completionRequest) return;
         if (this.#getSheetId() !== sheetId) return;
@@ -399,15 +402,15 @@ function createPreviewEvaluator(params: {
       const trimmed = name.trim();
       if (!trimmed) return null;
 
-      const resolved = sheetNameResolver?.getSheetIdByName(trimmed);
-      if (resolved) return resolved;
+      const resolved = sheetNameResolver?.getSheetIdByName(trimmed) ?? null;
+      const candidate = resolved ?? trimmed;
       // Avoid creating phantom sheets during preview evaluation (DocumentController
       // lazily materializes sheets on read). If we don't have any known sheets
       // yet, only allow reads against the current sheet id.
-      if (knownSheets.length === 0) {
-        return trimmed.toLowerCase() === sheetId.toLowerCase() ? sheetId : null;
-      }
-      return knownSheets.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
+      if (candidate.toLowerCase() === sheetId.toLowerCase()) return sheetId;
+      if (knownSheets.length === 0) return null;
+
+      return knownSheets.find((id) => id.toLowerCase() === candidate.toLowerCase()) ?? null;
     };
 
     let reads = 0;
@@ -427,7 +430,7 @@ function createPreviewEvaluator(params: {
       if (bang >= 0) {
         const sheetName = trimmed.slice(0, bang).trim();
         const resolved = resolveSheetId(sheetName);
-        if (!resolved) return null;
+        if (!resolved) return "#REF!";
         targetSheet = resolved;
         addr = trimmed.slice(bang + 1);
       }

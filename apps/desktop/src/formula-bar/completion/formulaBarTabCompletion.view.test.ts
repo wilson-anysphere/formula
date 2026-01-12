@@ -448,6 +448,108 @@ describe("FormulaBarView tab completion (integration)", () => {
     host.remove();
   });
 
+  it("suggests sheet-qualified ranges for sheet names requiring quotes", async () => {
+    const doc = new DocumentController();
+    for (let row = 0; row < 10; row += 1) {
+      doc.setCellValue("sheet2", { row, col: 0 }, row + 1);
+    }
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "B11", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      sheetNameResolver: {
+        getSheetNameById: (id) => {
+          if (id === "sheet2") return "My Sheet";
+          if (id === "Sheet1") return "Sheet1";
+          return null;
+        },
+        getSheetIdByName: (name) => {
+          const key = name.trim().toLowerCase();
+          if (key === "my sheet") return "sheet2";
+          if (key === "sheet1") return "Sheet1";
+          return null;
+        },
+      },
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+    });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=SUM('My Sheet'!A";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    expect(view.model.aiSuggestion()).toBe("=SUM('My Sheet'!A1:A10)");
+    expect(view.model.aiGhostText()).toBe("1:A10)");
+    expect(view.model.aiSuggestionPreview()).toBe(55);
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
+    expect(view.model.draft).toBe("=SUM('My Sheet'!A1:A10)");
+
+    completion.destroy();
+    host.remove();
+  });
+
+  it("uses sheet display names (not ids) after sheet rename", async () => {
+    const doc = new DocumentController();
+    for (let row = 0; row < 10; row += 1) {
+      // Sheet id is still "Sheet2", but the display name is "Budget".
+      doc.setCellValue("Sheet2", { row, col: 0 }, row + 1);
+    }
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "B11", input: "", value: null });
+
+    const completion = new FormulaBarTabCompletionController({
+      formulaBar: view,
+      document: doc,
+      getSheetId: () => "Sheet1",
+      sheetNameResolver: {
+        getSheetNameById: (id) => {
+          if (id === "Sheet2") return "Budget";
+          if (id === "Sheet1") return "Sheet1";
+          return null;
+        },
+        getSheetIdByName: (name) => {
+          const key = name.trim().toLowerCase();
+          if (key === "budget") return "Sheet2";
+          if (key === "sheet1") return "Sheet1";
+          return null;
+        },
+      },
+      limits: { maxRows: 10_000, maxCols: 10_000 },
+    });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=SUM(Budget!A";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    await completion.flushTabCompletion();
+
+    expect(doc.getSheetIds()).not.toContain("Budget");
+    expect(view.model.aiSuggestion()).toBe("=SUM(Budget!A1:A10)");
+    expect(view.model.aiGhostText()).toBe("1:A10)");
+    expect(view.model.aiSuggestionPreview()).toBe(55);
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true }));
+    expect(view.model.draft).toBe("=SUM(Budget!A1:A10)");
+
+    completion.destroy();
+    host.remove();
+  });
+
   it("suggests function name completion (=VLO → VLOOKUP()", async () => {
     const doc = new DocumentController();
     const host = document.createElement("div");
