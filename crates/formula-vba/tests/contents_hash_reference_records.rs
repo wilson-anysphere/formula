@@ -25,29 +25,52 @@ fn build_vba_project_with_dir(dir_decompressed: &[u8]) -> Vec<u8> {
 #[test]
 fn v3_content_normalized_data_includes_all_reference_record_types_in_order() {
     // Build a decompressed `VBA/dir` stream containing each supported reference record type.
-    // We deliberately choose numeric little-endian fields that contain an early NUL (0x00) to
-    // exercise the MS-OVBA "copy bytes until first NUL" normalization behavior.
+    //
+    // MS-OVBA §2.4.2.5 V3ContentNormalizedData is a *field-level* transcript:
+    // - it includes record IDs for reference records,
+    // - it incorporates the specified payload fields (and some size-of-libid fields),
+    // - it does *not* perform the legacy "copy bytes until first NUL" truncation used by
+    //   ContentNormalizedData (v1).
+    //
+    // We deliberately include little-endian integers that contain embedded NUL bytes to ensure the
+    // implementation preserves them.
+    // REFERENCECONTROL (0x002F) payload: u32-len-prefixed libid + reserved1(u32) + reserved2(u16).
+    //
+    // reserved1=1 => 0x01 0x00 0x00 0x00 includes embedded NUL bytes that must be preserved.
+    let libid_twiddled = b"ControlLib";
+    let reserved1: u32 = 1;
+    let reserved2: u16 = 0;
+    let mut reference_control = Vec::new();
+    reference_control.extend_from_slice(&(libid_twiddled.len() as u32).to_le_bytes());
+    reference_control.extend_from_slice(libid_twiddled);
+    reference_control.extend_from_slice(&reserved1.to_le_bytes());
+    reference_control.extend_from_slice(&reserved2.to_le_bytes());
+
+    // REFERENCEPROJECT (0x000E) payload: two u32-len-prefixed strings + major(u32) + minor(u16).
+    //
+    // major=1 => 0x01 0x00 0x00 0x00 includes embedded NUL bytes that must be preserved.
+    let libid_absolute = b"ProjLib";
+    let libid_relative = b"";
+    let major: u32 = 1;
+    let minor: u16 = 0;
+    let mut reference_project = Vec::new();
+    reference_project.extend_from_slice(&(libid_absolute.len() as u32).to_le_bytes());
+    reference_project.extend_from_slice(libid_absolute);
+    reference_project.extend_from_slice(&(libid_relative.len() as u32).to_le_bytes());
+    reference_project.extend_from_slice(libid_relative);
+    reference_project.extend_from_slice(&major.to_le_bytes());
+    reference_project.extend_from_slice(&minor.to_le_bytes());
+
     let dir_decompressed = {
         let mut out = Vec::new();
 
-        // REFERENCENAME (0x0016): copied as raw bytes.
+        // REFERENCENAME (0x0016): Id + SizeOfName + Name.
         push_record(&mut out, 0x0016, b"RefName");
         // REFERENCENAMEUNICODE marker / payload (0x003E): copied as raw bytes.
         // Use UTF-16LE bytes that include NULs to ensure we do not treat this as NUL-terminated.
         push_record(&mut out, 0x003E, &[b'U', 0x00, b'N', 0x00]);
 
-        // REFERENCECONTROL (0x002F): u32-len-prefixed libid + reserved1(u32) + reserved2(u16).
-        //
-        // reserved1=1 => 0x01 0x00 0x00 0x00 causes the normalization to stop immediately after the
-        // low byte (0x01) of reserved1.
-        let libid_twiddled = b"ControlLib";
-        let reserved1: u32 = 1;
-        let reserved2: u16 = 0;
-        let mut reference_control = Vec::new();
-        reference_control.extend_from_slice(&(libid_twiddled.len() as u32).to_le_bytes());
-        reference_control.extend_from_slice(libid_twiddled);
-        reference_control.extend_from_slice(&reserved1.to_le_bytes());
-        reference_control.extend_from_slice(&reserved2.to_le_bytes());
+        // REFERENCECONTROL (0x002F)
         push_record(&mut out, 0x002F, &reference_control);
 
         // REFERENCEEXTENDED (0x0030): incorporated as raw payload bytes.
@@ -62,20 +85,7 @@ fn v3_content_normalized_data_includes_all_reference_record_types_in_order() {
         // REFERENCEREGISTERED (0x000D): record bytes are incorporated directly.
         push_record(&mut out, 0x000D, b"{REG}");
 
-        // REFERENCEPROJECT (0x000E): two u32-len-prefixed strings + major(u32) + minor(u16).
-        //
-        // major=1 => 0x01 0x00 0x00 0x00 causes early termination (after copying 0x01).
-        let libid_absolute = b"ProjLib";
-        let libid_relative = b"";
-        let major: u32 = 1;
-        let minor: u16 = 0;
-        let mut reference_project = Vec::new();
-        reference_project.extend_from_slice(&(libid_absolute.len() as u32).to_le_bytes());
-        reference_project.extend_from_slice(libid_absolute);
-        reference_project.extend_from_slice(&(libid_relative.len() as u32).to_le_bytes());
-        reference_project.extend_from_slice(libid_relative);
-        reference_project.extend_from_slice(&major.to_le_bytes());
-        reference_project.extend_from_slice(&minor.to_le_bytes());
+        // REFERENCEPROJECT (0x000E)
         push_record(&mut out, 0x000E, &reference_project);
 
         out
@@ -84,31 +94,32 @@ fn v3_content_normalized_data_includes_all_reference_record_types_in_order() {
     let vba_bin = build_vba_project_with_dir(&dir_decompressed);
     let normalized = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
 
-    // Expected output is the concatenation of normalized reference record bytes in on-disk order:
-    // - 0x0016: raw payload bytes
-    // - 0x003E: raw payload bytes
-    // - 0x002F: TempBuffer = LibidTwiddled || Reserved1 || Reserved2; copy until first 0x00
-    // - 0x0030: raw payload bytes
-    // - 0x0033: LibidOriginal; copy until first 0x00
-    // - 0x000D: raw bytes
-    // - 0x000E: TempBuffer = LibidAbsolute || LibidRelative || MajorVersion || MinorVersion; copy until first 0x00
-    let expected_name = b"RefName".as_slice();
-    let expected_name_unicode = [b'U', 0x00, b'N', 0x00].as_slice();
-    let expected_control = b"ControlLib\x01".as_slice();
-    let expected_extended = b"EXTENDED".as_slice();
-    let expected_original = b"OrigLib".as_slice();
-    let expected_registered = b"{REG}".as_slice();
-    let expected_project = b"ProjLib\x01".as_slice();
-    let expected = [
-        expected_name,
-        expected_name_unicode,
-        expected_control,
-        expected_extended,
-        expected_original,
-        expected_registered,
-        expected_project,
-    ]
-    .concat();
+    // Expected output is the concatenation of reference transcripts in on-disk order.
+    let mut expected = Vec::new();
+    // REFERENCENAME: Id + SizeOfName + Name
+    expected.extend_from_slice(&0x0016u16.to_le_bytes());
+    expected.extend_from_slice(&(b"RefName".len() as u32).to_le_bytes());
+    expected.extend_from_slice(b"RefName");
+    // REFERENCENAMEUNICODE: Id + SizeOfNameUnicode + NameUnicode (UTF-16LE bytes).
+    expected.extend_from_slice(&0x003Eu16.to_le_bytes());
+    expected.extend_from_slice(&(4u32).to_le_bytes());
+    expected.extend_from_slice(&[b'U', 0x00, b'N', 0x00]);
+    // REFERENCECONTROL: Id + payload (no record SizeTwiddled field)
+    expected.extend_from_slice(&0x002Fu16.to_le_bytes());
+    expected.extend_from_slice(&reference_control);
+    // REFERENCEEXTENDED: Id + payload (no record SizeExtended field)
+    expected.extend_from_slice(&0x0030u16.to_le_bytes());
+    expected.extend_from_slice(b"EXTENDED");
+    // REFERENCEORIGINAL: Id + SizeOfLibidOriginal + LibidOriginal
+    expected.extend_from_slice(&0x0033u16.to_le_bytes());
+    expected.extend_from_slice(&(b"OrigLib".len() as u32).to_le_bytes());
+    expected.extend_from_slice(b"OrigLib");
+    // REFERENCEREGISTERED: Id + payload (no record Size field)
+    expected.extend_from_slice(&0x000Du16.to_le_bytes());
+    expected.extend_from_slice(b"{REG}");
+    // REFERENCEPROJECT: Id + payload (no record Size field)
+    expected.extend_from_slice(&0x000Eu16.to_le_bytes());
+    expected.extend_from_slice(&reference_project);
 
     assert_eq!(normalized, expected);
 }

@@ -1071,6 +1071,10 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
 
     let mut out = Vec::new();
     let mut current_module: Option<ModuleInfoV3> = None;
+    // MS-OVBA `REFERENCENAME` (0x0016) can optionally be followed by a record id 0x003E containing
+    // the UTF-16LE "NameUnicode" bytes. The v3 transcript includes these bytes, so keep a small
+    // amount of state to associate the 0x003E record with the preceding 0x0016.
+    let mut expect_reference_name_unicode = false;
 
     let mut offset = 0usize;
     while offset < dir_decompressed.len() {
@@ -1092,6 +1096,10 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
         let data = &dir_decompressed[offset..offset + len];
         offset += len;
 
+        if id != 0x003E {
+            expect_reference_name_unicode = false;
+        }
+
         match id {
             // ---- References ----
             //
@@ -1100,7 +1108,19 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
 
             // REFERENCENAME
             0x0016 => {
+                out.extend_from_slice(&id.to_le_bytes());
+                out.extend_from_slice(&(len as u32).to_le_bytes());
                 out.extend_from_slice(data);
+                expect_reference_name_unicode = true;
+            }
+
+            // REFERENCENAME "NameUnicode" marker/record id. This follows a 0x0016 record when the
+            // reference includes a UTF-16LE name.
+            0x003E if expect_reference_name_unicode => {
+                out.extend_from_slice(&id.to_le_bytes());
+                out.extend_from_slice(&(len as u32).to_le_bytes());
+                out.extend_from_slice(data);
+                expect_reference_name_unicode = false;
             }
 
             // REFERENCENAME (Unicode / reserved marker record)
@@ -1116,27 +1136,43 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
 
             // REFERENCEREGISTERED
             0x000D => {
+                out.extend_from_slice(&id.to_le_bytes());
+                // Do not include the record `Size` field (MS-OVBA pseudocode appends SizeOfLibid,
+                // Libid, and reserved fields only).
                 out.extend_from_slice(data);
             }
 
             // REFERENCEPROJECT
             0x000E => {
-                out.extend_from_slice(&normalize_reference_project(data)?);
+                out.extend_from_slice(&id.to_le_bytes());
+                // Do not include the record `Size` field (MS-OVBA pseudocode appends the libid
+                // size fields + libid bytes + version fields).
+                out.extend_from_slice(data);
             }
 
             // REFERENCECONTROL
             0x002F => {
-                out.extend_from_slice(&normalize_reference_control(data)?);
+                out.extend_from_slice(&id.to_le_bytes());
+                // Do not include `SizeTwiddled` (the record `Size` field); include only the fields
+                // in the record payload (SizeOfLibidTwiddled/LibidTwiddled/Reserved1/Reserved2).
+                out.extend_from_slice(data);
             }
 
             // REFERENCEEXTENDED
             0x0030 => {
+                out.extend_from_slice(&id.to_le_bytes());
+                // Do not include `SizeExtended` (the record `Size` field); include only the fields
+                // in the record payload (SizeOfLibidExtended/LibidExtended/Reserved4/Reserved5/GUID/Cookie).
                 out.extend_from_slice(data);
             }
 
             // REFERENCEORIGINAL
             0x0033 => {
-                out.extend_from_slice(&normalize_reference_original(data)?);
+                out.extend_from_slice(&id.to_le_bytes());
+                // The `Size` field for this record is `SizeOfLibidOriginal` and is incorporated by
+                // the MS-OVBA v3 pseudocode.
+                out.extend_from_slice(&(len as u32).to_le_bytes());
+                out.extend_from_slice(data);
             }
 
             // ---- ProjectModules / ProjectCookie / dir Terminator ----
