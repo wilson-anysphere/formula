@@ -93,6 +93,52 @@ describe("security hardening", () => {
     expect((limited.json() as any).error).toBe("too_many_requests");
   });
 
+  it("rate limits repeated OIDC start requests and returns Retry-After", async () => {
+    let limited: any = null;
+    const orgId = "00000000-0000-0000-0000-000000000000";
+    for (let i = 0; i < 50; i++) {
+      const res = await app.inject({
+        method: "GET",
+        url: `/auth/oidc/${orgId}/test/start`,
+        remoteAddress: "198.51.100.20"
+      });
+
+      if (res.statusCode === 429) {
+        limited = res;
+        break;
+      }
+    }
+
+    expect(limited).toBeTruthy();
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers["retry-after"]).toBeTypeOf("string");
+    expect(Number(limited.headers["retry-after"])).toBeGreaterThan(0);
+    expect((limited.json() as any).error).toBe("too_many_requests");
+  });
+
+  it("rate limits repeated OIDC callback requests and returns Retry-After", async () => {
+    let limited: any = null;
+    const orgId = "00000000-0000-0000-0000-000000000000";
+    for (let i = 0; i < 50; i++) {
+      const res = await app.inject({
+        method: "GET",
+        url: `/auth/oidc/${orgId}/test/callback`,
+        remoteAddress: "198.51.100.21"
+      });
+
+      if (res.statusCode === 429) {
+        limited = res;
+        break;
+      }
+    }
+
+    expect(limited).toBeTruthy();
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers["retry-after"]).toBeTypeOf("string");
+    expect(Number(limited.headers["retry-after"])).toBeGreaterThan(0);
+    expect((limited.json() as any).error).toBe("too_many_requests");
+  });
+
   it("rate limits repeated SAML start requests and returns Retry-After", async () => {
     let limited: any = null;
     const orgId = "00000000-0000-0000-0000-000000000000";
