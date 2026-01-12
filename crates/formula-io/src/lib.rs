@@ -8,7 +8,6 @@ use formula_model::import::{
 };
 use formula_model::sanitize_sheet_name;
 use std::io::{Read, Seek};
-
 pub use formula_xls as xls;
 pub use formula_xlsb as xlsb;
 pub use formula_xlsx as xlsx;
@@ -268,19 +267,33 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
             source,
         })?;
         if let Ok(mut ole) = cfb::CompoundFile::open(file) {
-            if stream_exists(&mut ole, "EncryptionInfo")
-                && stream_exists(&mut ole, "EncryptedPackage")
+            if stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage")
             {
                 return Err(Error::EncryptedWorkbook {
                     path: path.to_path_buf(),
                 });
             }
+
+            // Only treat OLE compound files as legacy `.xls` workbooks when they contain the BIFF
+            // workbook stream. Other Office document types (and arbitrary OLE containers) should
+            // not be misclassified as spreadsheets.
+            let has_workbook_stream =
+                stream_exists(&mut ole, "Workbook") || stream_exists(&mut ole, "Book");
+            if !has_workbook_stream {
+                return Ok(WorkbookFormat::Unknown);
+            }
+
             if ole_workbook_has_biff_filepass_record(&mut ole) {
                 return Err(Error::EncryptedWorkbook {
                     path: path.to_path_buf(),
                 });
             }
+
+            return Ok(WorkbookFormat::Xls);
         }
+
+        // If we can't parse the compound file structure, fall back to the legacy `.xls`
+        // classification (the downstream importer will still surface an error).
         return Ok(WorkbookFormat::Xls);
     }
     if header.len() >= PARQUET_MAGIC.len() && header[..PARQUET_MAGIC.len()] == PARQUET_MAGIC {
@@ -427,13 +440,29 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
                     path: path.to_path_buf(),
                 });
             }
+
+            // Only treat OLE compound files as legacy `.xls` workbooks when they contain the BIFF
+            // workbook stream. Other Office document types (and arbitrary OLE containers) should
+            // not be routed through the `.xls` importer.
+            let has_workbook_stream =
+                stream_exists(&mut ole, "Workbook") || stream_exists(&mut ole, "Book");
+            if !has_workbook_stream {
+                return Err(Error::UnsupportedExtension {
+                    path: path.to_path_buf(),
+                    extension: ext,
+                });
+            }
+
             if ole_workbook_has_biff_filepass_record(&mut ole) {
                 return Err(Error::EncryptedWorkbook {
                     path: path.to_path_buf(),
                 });
             }
-        }
 
+            return Ok(WorkbookFormat::Xls);
+        }
+        // If we can't parse the compound file structure, fall back to the legacy `.xls`
+        // classification (the downstream importer will still surface an error).
         return Ok(WorkbookFormat::Xls);
     }
 
