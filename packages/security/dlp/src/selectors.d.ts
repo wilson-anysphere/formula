@@ -16,6 +16,13 @@ export function effectiveRangeClassification(
   records: Array<{ selector: any; classification: any }>
 ): any;
 
+export function normalizeRange(range: { start: { row: number; col: number }; end: { row: number; col: number } }): {
+  start: { row: number; col: number };
+  end: { row: number; col: number };
+};
+
+export function selectorKey(selector: unknown): string;
+
 export function effectiveDocumentClassification(
   documentId: string,
   records: Array<{ selector: any; classification: any }>
