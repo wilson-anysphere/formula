@@ -138,6 +138,25 @@ fn imports_note_comment_author_stored_as_biff8_short_string_biff5() {
 }
 
 #[test]
+fn imports_note_comment_author_stored_as_biff8_unicode_string_biff5() {
+    let bytes =
+        xls_fixture_builder::build_note_comment_biff5_author_biff8_unicode_string_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("NotesBiff5AuthorBiff8Unicode")
+        .expect("NotesBiff5AuthorBiff8Unicode missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let comments = sheet.comments_for_cell(a1);
+    assert_eq!(comments.len(), 1, "expected 1 comment on A1");
+    assert_eq!(comments[0].content, "Hi");
+    assert_eq!(comments[0].author.name, "\u{0410}");
+    assert_eq!(comments[0].id, "xls-note:A1:1");
+}
+
+#[test]
 fn anchors_note_comments_to_merged_region_top_left_cell() {
     let bytes = xls_fixture_builder::build_note_comment_in_merged_region_fixture_xls();
     let result = import_fixture(&bytes);

@@ -594,6 +594,22 @@ pub fn build_note_comment_biff5_author_biff8_short_string_fixture_xls() -> Vec<u
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF5 `.xls` fixture where the NOTE author string is stored as a BIFF8-style
+/// `XLUnicodeString` (16-bit length + flags byte) even though the workbook is BIFF5.
+pub fn build_note_comment_biff5_author_biff8_unicode_string_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_biff5_author_biff8_unicode_string_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF5 `.xls` fixture containing a single sheet with a merged region (`A1:B1`).
 ///
 /// The NOTE record is targeted at the non-anchor cell (`B1`), but the importer should
@@ -2137,6 +2153,14 @@ fn build_note_comment_biff5_author_biff8_short_string_workbook_stream() -> Vec<u
     )
 }
 
+fn build_note_comment_biff5_author_biff8_unicode_string_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream_biff5(
+        "NotesBiff5AuthorBiff8Unicode",
+        &build_note_comment_biff5_author_biff8_unicode_string_sheet_stream(),
+        1252,
+    )
+}
+
 fn build_note_comment_biff5_in_merged_region_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream_biff5(
         "MergedNotesBiff5",
@@ -2472,6 +2496,53 @@ fn build_note_comment_biff5_author_biff8_short_string_sheet_stream() -> Vec<u8> 
     let text_bytes = [b'H', b'i'];
     let segments: [&[u8]; 1] = [&text_bytes];
     build_note_comment_biff5_sheet_stream_with_ansi_txo(&author_bytes, &segments, false, true)
+}
+
+fn build_note_comment_biff5_author_biff8_unicode_string_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const XF_GENERAL_CELL: u16 = 16;
+
+    let author = "\u{0410}"; // Cyrillic "А"
+    let text_bytes = [b'H', b'i'];
+    let cch_text: u16 = text_bytes
+        .len()
+        .try_into()
+        .expect("comment text too long for u16 length");
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof_biff5(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS (BIFF5): rows [0, 1), cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+    push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
+
+    // NOTE author stored as BIFF8 XLUnicodeString (u16 length + flags byte).
+    push_record(
+        &mut sheet,
+        RECORD_NOTE,
+        &note_record_biff5_author_biff8_unicode_string(0u16, 0u16, OBJECT_ID, author),
+    );
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
+
+    // TXO header: cchText at offset 6, cbRuns at offset 12.
+    let mut txo = [0u8; 18];
+    txo[6..8].copy_from_slice(&cch_text.to_le_bytes());
+    txo[12..14].copy_from_slice(&4u16.to_le_bytes()); // cbRuns
+    push_record(&mut sheet, RECORD_TXO, &txo);
+
+    push_record(&mut sheet, RECORD_CONTINUE, &text_bytes);
+    push_record(&mut sheet, RECORD_CONTINUE, &[0u8; 4]);
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
 }
 
 fn build_note_comment_biff5_in_merged_region_sheet_stream() -> Vec<u8> {
@@ -3332,6 +3403,36 @@ fn note_record_biff5_author_biff8_short_string_bytes(
     out.push(len);
     out.push(0); // flags: compressed 8-bit chars
     out.extend_from_slice(author_bytes);
+    out
+}
+
+fn note_record_biff5_author_biff8_unicode_string(
+    row: u16,
+    col: u16,
+    object_id: u16,
+    author: &str,
+) -> Vec<u8> {
+    // NOTE record (BIFF5) with a non-standard BIFF8 XLUnicodeString author encoding:
+    //   [rw:u16][col:u16][grbit:u16][idObj:u16][cch:u16][flags:u8][chars...]
+    //
+    // We encode the author as UTF-16LE (fHighByte=1) so it round-trips independently of workbook
+    // codepage.
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&row.to_le_bytes());
+    out.extend_from_slice(&col.to_le_bytes());
+    out.extend_from_slice(&object_id.to_le_bytes()); // grbit (or idObj)
+    out.extend_from_slice(&object_id.to_le_bytes()); // idObj (or grbit)
+
+    let utf16: Vec<u16> = author.encode_utf16().collect();
+    let len: u16 = utf16
+        .len()
+        .try_into()
+        .expect("author string too long for u16 length");
+    out.extend_from_slice(&len.to_le_bytes());
+    out.push(1); // flags: uncompressed UTF-16LE
+    for ch in utf16 {
+        out.extend_from_slice(&ch.to_le_bytes());
+    }
     out
 }
 

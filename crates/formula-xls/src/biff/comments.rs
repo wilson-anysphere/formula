@@ -334,25 +334,28 @@ fn parse_note_record(
                         _ => s,
                     },
                     BiffVersion::Biff5 => {
+                        // Some BIFF5 writers store NOTE authors using BIFF8 string encodings.
+                        // Attempt both common BIFF8 variants (ShortXLUnicodeString / XLUnicodeString)
+                        // when the BIFF5 short-string parser doesn't consume the full payload.
+                        let mut recovered: Option<String> = None;
                         if let Ok((alt, alt_consumed)) =
                             strings::parse_biff8_short_string(author_bytes, codepage)
                         {
                             if alt_consumed == author_bytes.len() {
-                                alt
-                            } else {
-                                s
+                                recovered = Some(alt);
                             }
-                        } else if let Ok((alt, alt_consumed)) =
-                            strings::parse_biff8_unicode_string(author_bytes, codepage)
-                        {
-                            if alt_consumed == author_bytes.len() {
-                                alt
-                            } else {
-                                s
-                            }
-                        } else {
-                            s
                         }
+                        if recovered.is_none() {
+                            if let Ok((alt, alt_consumed)) =
+                                strings::parse_biff8_unicode_string(author_bytes, codepage)
+                            {
+                                if alt_consumed == author_bytes.len() {
+                                    recovered = Some(alt);
+                                }
+                            }
+                        }
+
+                        recovered.unwrap_or(s)
                     }
                 }
             } else {
@@ -387,10 +390,35 @@ fn parse_note_record(
             BiffVersion::Biff5 => {
                 // Best-effort: some BIFF5 files appear to store NOTE authors using BIFF8 string
                 // encodings (leading option flags byte, 16-bit length prefix, etc).
-                if let Ok((alt, alt_consumed)) = strings::parse_biff8_short_string(author_bytes, codepage)
+                if let Ok((alt, alt_consumed)) =
+                    strings::parse_biff8_short_string(author_bytes, codepage)
                 {
                     if alt_consumed == author_bytes.len() {
                         alt
+                    } else if let Ok((alt, alt_consumed)) =
+                        strings::parse_biff8_unicode_string(author_bytes, codepage)
+                    {
+                        if alt_consumed == author_bytes.len() {
+                            alt
+                        } else if let Some(best_effort) =
+                            strings::parse_biff5_short_string_best_effort(author_bytes, codepage)
+                        {
+                            push_warning(
+                                warnings,
+                                format!(
+                                    "failed to fully parse NOTE author string at offset {offset}: {err}; treating author as truncated BIFF5 ANSI short string"
+                                ),
+                            );
+                            best_effort
+                        } else {
+                            push_warning(
+                                warnings,
+                                format!(
+                                    "failed to fully parse NOTE author string at offset {offset}: {err}"
+                                ),
+                            );
+                            String::new()
+                        }
                     } else if let Some(best_effort) =
                         strings::parse_biff5_short_string_best_effort(author_bytes, codepage)
                     {
