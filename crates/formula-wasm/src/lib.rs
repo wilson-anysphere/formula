@@ -48,6 +48,15 @@ fn edit_error_to_string(err: EngineEditError) -> String {
     }
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ParseOptionsJsDto {
+    #[serde(default)]
+    locale_id: Option<String>,
+    #[serde(default)]
+    reference_style: Option<formula_engine::ReferenceStyle>,
+}
+
 fn parse_options_from_js(options: Option<JsValue>) -> Result<ParseOptions, JsValue> {
     let Some(value) = options else {
         return Ok(ParseOptions::default());
@@ -55,7 +64,41 @@ fn parse_options_from_js(options: Option<JsValue>) -> Result<ParseOptions, JsVal
     if value.is_undefined() || value.is_null() {
         return Ok(ParseOptions::default());
     }
-    serde_wasm_bindgen::from_value(value).map_err(|err| js_err(err.to_string()))
+
+    // Prefer a small JS-friendly options object. This keeps callers from having to construct
+    // `formula_engine::ParseOptions` directly in JS.
+    //
+    // Supported shape:
+    //   { localeId?: string, referenceStyle?: "A1" | "R1C1" }
+    //
+    // For backward compatibility, also accept a fully-serialized `ParseOptions`.
+    let obj = value
+        .dyn_into::<Object>()
+        .map_err(|_| js_err("options must be an object".to_string()))?;
+    let keys = js_sys::Object::keys(&obj);
+    if keys.length() == 0 {
+        return Ok(ParseOptions::default());
+    }
+
+    let has_locale_id = Reflect::has(&obj, &JsValue::from_str("localeId")).unwrap_or(false);
+    let has_ref_style = Reflect::has(&obj, &JsValue::from_str("referenceStyle")).unwrap_or(false);
+    if has_locale_id || has_ref_style {
+        let dto: ParseOptionsJsDto =
+            serde_wasm_bindgen::from_value(obj.into()).map_err(|err| js_err(err.to_string()))?;
+        let mut opts = ParseOptions::default();
+        if let Some(locale_id) = dto.locale_id {
+            let locale = get_locale(&locale_id)
+                .ok_or_else(|| js_err(format!("unknown localeId: {locale_id}")))?;
+            opts.locale = locale.config.clone();
+        }
+        if let Some(style) = dto.reference_style {
+            opts.reference_style = style;
+        }
+        return Ok(opts);
+    }
+
+    // Fall back to the full ParseOptions struct for advanced callers.
+    serde_wasm_bindgen::from_value(obj.into()).map_err(|err| js_err(err.to_string()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1627,12 +1670,7 @@ pub fn parse_formula_partial(
 ) -> Result<JsValue, JsValue> {
     ensure_rust_constructors_run();
 
-    let opts: formula_engine::ParseOptions = match opts {
-        Some(value) if !value.is_undefined() && !value.is_null() => {
-            serde_wasm_bindgen::from_value(value).map_err(|err| js_err(err.to_string()))?
-        }
-        _ => formula_engine::ParseOptions::default(),
-    };
+    let opts = parse_options_from_js(opts)?;
 
     // Cursor is expressed in UTF-16 code units by JS callers.
     let formula_utf16_len = formula.encode_utf16().count() as u32;
