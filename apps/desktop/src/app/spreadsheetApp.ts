@@ -6734,8 +6734,8 @@ export class SpreadsheetApp {
       if (typeof docAny.getCellFormatStyleIds === "function") {
         try {
           const tuple = docAny.getCellFormatStyleIds(this.sheetId, { row, col });
-          if (Array.isArray(tuple) && tuple.length === 4) {
-            const normalized = tuple.map(normalizeStyleId);
+          if (Array.isArray(tuple) && tuple.length >= 4) {
+            const normalized = tuple.slice(0, 4).map(normalizeStyleId);
             return normalized.join(",");
           }
         } catch {
