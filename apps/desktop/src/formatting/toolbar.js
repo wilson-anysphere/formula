@@ -5,7 +5,8 @@ import { applyStylePatch } from "./styleTable.js";
 // Excel grid limits (used by the selection model and layered formatting fast paths).
 const EXCEL_MAX_ROW = 1_048_576 - 1;
 const EXCEL_MAX_COL = 16_384 - 1;
-const MAX_RANGE_FORMATTING_CELLS = 50_000;
+// Keep aligned with `apps/desktop/src/formatting/selectionSizeGuard.ts` default UI limit.
+const MAX_RANGE_FORMATTING_CELLS = 100_000;
 
 function rangeCellCount(range) {
   const rows = Math.max(0, range.end.row - range.start.row + 1);
