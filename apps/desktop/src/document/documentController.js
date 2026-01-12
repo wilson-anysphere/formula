@@ -1221,13 +1221,24 @@ export class DocumentController {
    */
   getCellFormatStyleIds(sheetId, coord) {
     const c = typeof coord === "string" ? parseA1(coord) : coord;
-    const cell = this.model.getCell(sheetId, c.row, c.col);
-    const sheet = this.model.sheets.get(sheetId);
+    // Ensure the sheet is materialized (DocumentController is lazily sheet-creating).
+    // Avoid cloning the full cell state; we only need the stored style ids.
+    let sheet = this.model.sheets.get(sheetId);
+    if (!sheet) {
+      this.model.getCell(sheetId, 0, 0);
+      sheet = this.model.sheets.get(sheetId);
+    }
+
+    // Read the stored cell styleId directly from the sheet's sparse cell map. This avoids
+    // cloning/normalizing rich cell values for callers that only need the style tuple
+    // (clipboard caches, render caches, etc).
+    const cell = sheet?.cells?.get?.(`${c.row},${c.col}`) ?? null;
+    const cellStyleId = typeof cell?.styleId === "number" ? cell.styleId : 0;
     return [
       sheet?.defaultStyleId ?? 0,
       sheet?.rowStyleIds.get(c.row) ?? 0,
       sheet?.colStyleIds.get(c.col) ?? 0,
-      cell.styleId ?? 0,
+      cellStyleId,
     ];
   }
 
