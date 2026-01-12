@@ -2658,9 +2658,46 @@ function installSheetStoreSubscription(): void {
           return;
         }
 
-        // Fall back to forcing the backend into the desired order. The algorithm is:
-        // for each desired index, move that sheet id to the target index. This converges on the
-        // target order regardless of the current backend order.
+        // Fall back to persisting a multi-move reorder.
+        //
+        // If the reorder is a pure permutation (no added/removed sheets), we can compute a minimal-ish
+        // sequence of `move_sheet` ops to transform `beforeOrder` into `afterOrder` by simulating the
+        // backend order as we go and only moving sheets that are out of place.
+        //
+        // This is still potentially expensive (each backend `move_sheet` rebuilds the engine), but it
+        // avoids the worst-case "move every sheet" behavior for common reorder patterns.
+        const isPureReorder = (() => {
+          if (beforeOrder.length !== afterOrder.length) return false;
+          const beforeSet = new Set(beforeOrder);
+          const afterSet = new Set(afterOrder);
+          if (beforeSet.size !== beforeOrder.length) return false;
+          if (afterSet.size !== afterOrder.length) return false;
+          if (beforeSet.size !== afterSet.size) return false;
+          for (const id of beforeSet) {
+            if (!afterSet.has(id)) return false;
+          }
+          return true;
+        })();
+
+        if (isPureReorder) {
+          const current = beforeOrder.slice();
+          for (let targetIndex = 0; targetIndex < afterOrder.length; targetIndex += 1) {
+            const desiredId = afterOrder[targetIndex];
+            if (!desiredId) continue;
+            if (current[targetIndex] === desiredId) continue;
+            const fromIndex = current.indexOf(desiredId);
+            if (fromIndex === -1) continue;
+
+            current.splice(fromIndex, 1);
+            current.splice(targetIndex, 0, desiredId);
+            await invoke("move_sheet", { sheet_id: desiredId, to_index: targetIndex });
+          }
+          return;
+        }
+
+        // Mixed reorder (sheet add/delete + order changes): force the backend into the desired order.
+        // The algorithm is: for each desired index, move that sheet id to the target index. This
+        // converges on the target order regardless of the current backend order.
         for (let targetIndex = 0; targetIndex < afterOrder.length; targetIndex += 1) {
           const sheetId = afterOrder[targetIndex];
           if (!sheetId) continue;
