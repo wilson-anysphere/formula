@@ -4,6 +4,7 @@ import { parseHtmlToCellGrid, serializeCellGridToHtml } from "./html.js";
 import { serializeCellGridToRtf } from "./rtf.js";
 import { parseTsvToCellGrid, serializeCellGridToTsv } from "./tsv.js";
 import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
+import { normalizeExcelColorToCss } from "../shared/colors.js";
 
 /**
  * @typedef {import("./types.js").CellGrid} CellGrid
@@ -18,31 +19,7 @@ import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
  */
 
 function normalizeHexToCssColor(hex) {
-  const normalized = String(hex).trim().replace(/^#/, "");
-  if (!/^[0-9a-fA-F]+$/.test(normalized)) return null;
-
-  // #RRGGBB
-  if (normalized.length === 6) return `#${normalized}`;
-
-  // Excel/OOXML commonly stores colors as ARGB (AARRGGBB).
-  if (normalized.length === 8) {
-    const a = Number.parseInt(normalized.slice(0, 2), 16);
-    const r = Number.parseInt(normalized.slice(2, 4), 16);
-    const g = Number.parseInt(normalized.slice(4, 6), 16);
-    const b = Number.parseInt(normalized.slice(6, 8), 16);
-
-    if (![a, r, g, b].every((n) => Number.isFinite(n))) return null;
-
-    if (a >= 255) {
-      return `#${normalized.slice(2)}`;
-    }
-
-    const alpha = Math.max(0, Math.min(1, a / 255));
-    const rounded = Math.round(alpha * 1000) / 1000;
-    return `rgba(${r}, ${g}, ${b}, ${rounded})`;
-  }
-
-  return null;
+  return normalizeExcelColorToCss(hex) ?? null;
 }
 
 function normalizeCssColor(value) {
