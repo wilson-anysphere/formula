@@ -1,0 +1,36 @@
+/**
+ * @vitest-environment jsdom
+ */
+
+import { describe, expect, it } from "vitest";
+
+import { FormulaBarView } from "./FormulaBarView.js";
+import { parseA1Range } from "../spreadsheet/a1.js";
+
+describe("FormulaBarView hover previews", () => {
+  it("emits a range for sheet-qualified references when hovering in view mode", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    let hovered = null as ReturnType<typeof parseA1Range>;
+    const view = new FormulaBarView(host, {
+      onCommit: () => {},
+      onHoverRange: (range) => {
+        hovered = range;
+      },
+    });
+
+    view.setActiveCell({ address: "A1", input: "=Sheet2!A1:B2", value: null });
+
+    const highlight = host.querySelector<HTMLElement>('[data-testid="formula-highlight"]');
+    const refSpan = highlight?.querySelector<HTMLElement>('span[data-kind="reference"]');
+    expect(refSpan?.textContent).toBe("Sheet2!A1:B2");
+
+    refSpan?.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+
+    expect(hovered).toEqual(parseA1Range("A1:B2"));
+
+    host.remove();
+  });
+});
+
