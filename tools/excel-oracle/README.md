@@ -340,12 +340,21 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset
 ```
 
 You can also patch by **tag filter** without a dedicated subset file by running against the
-canonical corpus and passing through `-IncludeTags`/`-ExcludeTags`:
+canonical corpus and passing through `-IncludeTags` (OR semantics), `-RequireTags` (AND semantics),
+and/or `-ExcludeTags`:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset-with-excel.ps1 `
   -SubsetCasesPath tests/compatibility/excel-oracle/cases.json `
   -IncludeTags odd_coupon_validation
+```
+
+Example (patch only the odd-coupon `basis=4` cases using AND tag filtering):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/patch-pinned-dataset-with-excel.ps1 `
+  -SubsetCasesPath tests/compatibility/excel-oracle/cases.json `
+  -RequireTags odd_coupon,basis4
 ```
 
 This script patches the pinned dataset by invoking `update_pinned_dataset.py`, which preserves
