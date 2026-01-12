@@ -1,4 +1,4 @@
-import { isCellEmpty, normalizeRange, rangeToA1 } from "./a1.js";
+import { isCellEmpty, normalizeRange, parseA1Range, rangeToA1 } from "./a1.js";
 
 /**
  * @typedef {"empty"|"number"|"boolean"|"date"|"string"|"formula"|"mixed"} InferredType
@@ -165,6 +165,85 @@ export function detectDataRegions(values) {
 }
 
 /**
+ * @param {unknown[][]} sheetValues
+ * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} normalized
+ * @returns {{
+ *   hasHeader: boolean,
+ *   headers: string[],
+ *   inferredColumnTypes: InferredType[],
+ *   columns: { name: string, type: InferredType, sampleValues: string[] }[],
+ *   rowCount: number,
+ *   columnCount: number,
+ * }}
+ */
+function analyzeRegion(sheetValues, normalized) {
+  const regionValues = slice2D(sheetValues, normalized);
+  const headerRowValues = regionValues[0] ?? [];
+  const nextRowValues = regionValues[1];
+  const hasHeader = isLikelyHeaderRow(headerRowValues, nextRowValues);
+
+  const dataStartRow = hasHeader ? 1 : 0;
+  const dataRows = regionValues.slice(dataStartRow);
+  const columnCount = Math.max(...regionValues.map((row) => row.length), 0);
+
+  const headers = [];
+  for (let c = 0; c < columnCount; c++) {
+    const raw = headerRowValues[c];
+    const fallback = `Column${c + 1}`;
+    headers.push(hasHeader && isHeaderCandidateValue(raw) ? String(raw).trim() : fallback);
+  }
+
+  /** @type {InferredType[]} */
+  const inferredColumnTypes = [];
+  /** @type {{ name: string, type: InferredType, sampleValues: string[] }[]} */
+  const columns = [];
+
+  for (let c = 0; c < columnCount; c++) {
+    const colValues = dataRows.map((row) => row[c]).filter((v) => v !== undefined);
+    const type = inferColumnType(colValues);
+    inferredColumnTypes.push(type);
+
+    const sampleValues = [];
+    for (const v of colValues) {
+      if (isCellEmpty(v)) continue;
+      const s = String(v);
+      if (!sampleValues.includes(s)) sampleValues.push(s);
+      if (sampleValues.length >= 3) break;
+    }
+
+    columns.push({
+      name: headers[c] ?? `Column${c + 1}`,
+      type,
+      sampleValues,
+    });
+  }
+
+  const rowCount = Math.max(regionValues.length - (hasHeader ? 1 : 0), 0);
+
+  return {
+    hasHeader,
+    headers,
+    inferredColumnTypes,
+    columns,
+    rowCount,
+    columnCount,
+  };
+}
+
+/**
+ * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} outer
+ * @param {{ startRow: number, startCol: number, endRow: number, endCol: number }} inner
+ */
+function rangeContains(outer, inner) {
+  return (
+    outer.startRow <= inner.startRow &&
+    outer.startCol <= inner.startCol &&
+    outer.endRow >= inner.endRow &&
+    outer.endCol >= inner.endCol
+  );
+}
+
+/**
  * @typedef {{ name: string, range: string, columns: { name: string, type: InferredType, sampleValues: string[] }[], rowCount: number }} TableSchema
  * @typedef {{ name: string, range: string }} NamedRangeSchema
  * @typedef {{ range: string, hasHeader: boolean, headers: string[], inferredColumnTypes: InferredType[], rowCount: number, columnCount: number }} DataRegionSchema
@@ -188,77 +267,109 @@ export function extractSheetSchema(sheet) {
   const dataRegions = [];
   /** @type {TableSchema[]} */
   const implicitTables = [];
+  /** @type {{ startRow: number, startCol: number, endRow: number, endCol: number }[]} */
+  const implicitTableRects = [];
 
   for (let i = 0; i < regions.length; i++) {
     const region = regions[i];
     const normalized = normalizeRange(region);
-    const regionValues = slice2D(sheet.values, normalized);
-    const headerRowValues = regionValues[0] ?? [];
-    const nextRowValues = regionValues[1];
-    const hasHeader = isLikelyHeaderRow(headerRowValues, nextRowValues);
-
-    const headers = [];
-    for (let c = 0; c < (headerRowValues?.length ?? 0); c++) {
-      const raw = headerRowValues[c];
-      const fallback = `Column${c + 1}`;
-      headers.push(hasHeader && isHeaderCandidateValue(raw) ? String(raw).trim() : fallback);
-    }
-
-    const dataStartRow = hasHeader ? 1 : 0;
-    const dataRows = regionValues.slice(dataStartRow);
-    const columnCount = Math.max(...regionValues.map((row) => row.length), 0);
-
-    /** @type {InferredType[]} */
-    const inferredColumnTypes = [];
-    /** @type {{ name: string, type: InferredType, sampleValues: string[] }[]} */
-    const columns = [];
-
-    for (let c = 0; c < columnCount; c++) {
-      const colValues = dataRows.map((row) => row[c]).filter((v) => v !== undefined);
-      const type = inferColumnType(colValues);
-      inferredColumnTypes.push(type);
-
-      const sampleValues = [];
-      for (const v of colValues) {
-        if (isCellEmpty(v)) continue;
-        const s = String(v);
-        if (!sampleValues.includes(s)) sampleValues.push(s);
-        if (sampleValues.length >= 3) break;
-      }
-
-      columns.push({
-        name: headers[c] ?? `Column${c + 1}`,
-        type,
-        sampleValues,
-      });
-    }
-
+    const analyzed = analyzeRegion(sheet.values, normalized);
     const range = rangeToA1({ ...normalized, sheetName: sheet.name });
-    const rowCount = Math.max(regionValues.length - (hasHeader ? 1 : 0), 0);
 
     dataRegions.push({
       range,
-      hasHeader,
-      headers,
-      inferredColumnTypes,
-      rowCount,
-      columnCount,
+      hasHeader: analyzed.hasHeader,
+      headers: analyzed.headers,
+      inferredColumnTypes: analyzed.inferredColumnTypes,
+      rowCount: analyzed.rowCount,
+      columnCount: analyzed.columnCount,
     });
 
     implicitTables.push({
       name: `Region${i + 1}`,
       range,
-      columns,
-      rowCount,
+      columns: analyzed.columns,
+      rowCount: analyzed.rowCount,
     });
+    implicitTableRects.push(normalized);
   }
 
-  // TODO: When the spreadsheet engine provides explicit structured tables, reconcile
-  // them with implicit region detection (avoid duplicates, prefer explicit names).
+  /** @type {{ name: string, range: string, rect: { startRow: number, startCol: number, endRow: number, endCol: number } }[]} */
+  const explicitDefs = [];
+
+  if (sheet.tables?.length) {
+    const seenRanges = new Set();
+    for (const table of sheet.tables) {
+      if (!table || typeof table !== "object") continue;
+      if (typeof table.range !== "string" || typeof table.name !== "string") continue;
+
+      let parsed;
+      try {
+        parsed = parseA1Range(table.range);
+      } catch {
+        continue;
+      }
+
+      if (parsed.sheetName && parsed.sheetName !== sheet.name) continue;
+      const rect = normalizeRange(parsed);
+      const canonicalRange = rangeToA1({ ...rect, sheetName: sheet.name });
+
+      if (seenRanges.has(canonicalRange)) continue;
+      seenRanges.add(canonicalRange);
+      explicitDefs.push({ name: table.name, range: canonicalRange, rect });
+    }
+  }
+
+  /** @type {{ table: TableSchema, rect: { startRow: number, startCol: number, endRow: number, endCol: number } }[]} */
+  const tableEntries = [];
+
+  if (explicitDefs.length) {
+    const coveredImplicit = new Set();
+    for (let i = 0; i < implicitTableRects.length; i++) {
+      const implicitRect = implicitTableRects[i];
+      for (const explicit of explicitDefs) {
+        if (rangeContains(explicit.rect, implicitRect)) {
+          coveredImplicit.add(i);
+          break;
+        }
+      }
+    }
+
+    const implicitUncovered = [];
+    for (let i = 0; i < implicitTables.length; i++) {
+      if (coveredImplicit.has(i)) continue;
+      implicitUncovered.push({ table: implicitTables[i], rect: implicitTableRects[i] });
+    }
+
+    // Re-number implicit regions so we don't end up with confusing gaps when some
+    // regions are replaced by explicit tables.
+    for (let i = 0; i < implicitUncovered.length; i++) {
+      implicitUncovered[i].table.name = `Region${i + 1}`;
+    }
+
+    tableEntries.push(...implicitUncovered);
+
+    for (const explicit of explicitDefs) {
+      const analyzed = analyzeRegion(sheet.values, explicit.rect);
+      tableEntries.push({
+        table: {
+          name: explicit.name,
+          range: explicit.range,
+          columns: analyzed.columns,
+          rowCount: analyzed.rowCount,
+        },
+        rect: explicit.rect,
+      });
+    }
+
+    tableEntries.sort((a, b) => (a.rect.startRow - b.rect.startRow) || (a.rect.startCol - b.rect.startCol));
+  } else {
+    tableEntries.push(...implicitTables.map((t, idx) => ({ table: t, rect: implicitTableRects[idx] })));
+  }
 
   return {
     name: sheet.name,
-    tables: implicitTables,
+    tables: tableEntries.map((t) => t.table),
     namedRanges: sheet.namedRanges ?? [],
     dataRegions,
   };

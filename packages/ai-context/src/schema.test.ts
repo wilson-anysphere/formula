@@ -61,5 +61,37 @@ describe("extractSheetSchema", () => {
     expect(schema.dataRegions[0].hasHeader).toBe(false);
     expect(schema.dataRegions[0].headers).toEqual(["Column1", "Column2"]);
   });
-});
 
+  it("reconciles explicit tables with implicit regions (prefer explicit names, avoid duplicates)", () => {
+    const sheet = {
+      name: "Sheet1",
+      values: [
+        ["Product", "Sales"],
+        ["Alpha", 10],
+        ["Beta", 20]
+      ],
+      tables: [{ name: "SalesTable", range: "A1:B3" }]
+    };
+
+    const schema = extractSheetSchema(sheet);
+    expect(schema.tables).toHaveLength(1);
+    expect(schema.tables[0].name).toBe("SalesTable");
+    expect(schema.tables[0].range).toBe("Sheet1!A1:B3");
+  });
+
+  it("keeps implicit regions that are not covered by explicit tables", () => {
+    const sheet = {
+      name: "Sheet1",
+      values: [
+        ["A", null, null, "X"],
+        [1, null, null, 9],
+        [null, null, null, null]
+      ],
+      tables: [{ name: "FirstTable", range: "Sheet1!A1:A2" }]
+    };
+
+    const schema = extractSheetSchema(sheet);
+    expect(schema.tables.map((t: any) => t.name)).toEqual(["FirstTable", "Region1"]);
+    expect(schema.tables.map((t: any) => t.range)).toEqual(["Sheet1!A1:A2", "Sheet1!D1:D2"]);
+  });
+});
