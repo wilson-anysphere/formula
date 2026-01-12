@@ -1,0 +1,26 @@
+{
+  "identifier": "default",
+  "description": "Default capability for the main window.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "core:event:allow-listen",
+      "allow": [
+        { "event": "close-prep" },
+        { "event": "close-requested" },
+        { "event": "file-dropped" },
+        { "event": "tray-open" },
+        { "event": "tray-new" },
+        { "event": "tray-quit" },
+        { "event": "shortcut-quick-open" },
+        { "event": "shortcut-command-palette" },
+        { "event": "update-available" }
+      ]
+    },
+    {
+      "identifier": "core:event:allow-emit",
+      "allow": [{ "event": "close-prep-done" }, { "event": "close-handled" }]
+    }
+  ]
+}
