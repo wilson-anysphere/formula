@@ -8963,7 +8963,9 @@ export class SpreadsheetApp {
     const hasAiFunction = AI_FUNCTION_CALL_RE.test(state.formula);
     const address = hasAiFunction ? cellToA1(cell) : "";
     const cellAddress = hasAiFunction ? `${sheetId}!${address}` : undefined;
-    const coordScratch = { row: 0, col: 0 };
+    // Lazily allocate the scratch coord. Many formulas are pure expressions (e.g. `=1+1`)
+    // and never invoke the reference resolver callback.
+    let coordScratch: { row: number; col: number } | null = null;
 
     const value = evaluateFormula(state.formula, (ref) => {
       const normalized = ref.trim();
@@ -8982,10 +8984,11 @@ export class SpreadsheetApp {
       }
       // Avoid allocating a fresh `{row,col}` object for every reference evaluation.
       // (The scratch coord is safe because `computeCellValue` does not retain the object.)
-      coordScratch.row = 0;
-      coordScratch.col = 0;
-      parseA1CellRefIntoCoord(targetAddress, coordScratch);
-      return this.computeCellValue(targetSheet, coordScratch, memo, stack, options);
+      const coord = coordScratch ?? (coordScratch = { row: 0, col: 0 });
+      coord.row = 0;
+      coord.col = 0;
+      parseA1CellRefIntoCoord(targetAddress, coord);
+      return this.computeCellValue(targetSheet, coord, memo, stack, options);
     }, { ai: this.aiCellFunctions, cellAddress });
 
     sheetStack.delete(key);
