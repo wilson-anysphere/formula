@@ -251,12 +251,39 @@ fn normalize_sheet_key(name: &str) -> String {
     name.to_ascii_uppercase()
 }
 
+fn parse_error_kind_literal(value: &str) -> Option<ErrorKind> {
+    match value {
+        "#NULL!" => Some(ErrorKind::Null),
+        "#DIV/0!" => Some(ErrorKind::Div0),
+        "#VALUE!" => Some(ErrorKind::Value),
+        "#REF!" => Some(ErrorKind::Ref),
+        "#NAME?" => Some(ErrorKind::Name),
+        "#NUM!" => Some(ErrorKind::Num),
+        "#N/A" => Some(ErrorKind::NA),
+        "#SPILL!" => Some(ErrorKind::Spill),
+        "#CALC!" => Some(ErrorKind::Calc),
+        _ => None,
+    }
+}
+
 fn json_to_engine_value(value: &JsonValue) -> EngineValue {
     match value {
         JsonValue::Null => EngineValue::Blank,
         JsonValue::Bool(b) => EngineValue::Bool(*b),
         JsonValue::Number(n) => EngineValue::Number(n.as_f64().unwrap_or(0.0)),
-        JsonValue::String(s) => EngineValue::Text(s.clone()),
+        JsonValue::String(s) => {
+            // Excel-style quote prefix: a leading apostrophe forces the value to be treated as
+            // literal text (even if it looks like an error code or formula).
+            if let Some(rest) = s.strip_prefix('\'') {
+                return EngineValue::Text(rest.to_string());
+            }
+
+            if let Some(kind) = parse_error_kind_literal(s) {
+                return EngineValue::Error(kind);
+            }
+
+            EngineValue::Text(s.clone())
+        }
         JsonValue::Array(_) | JsonValue::Object(_) => {
             // Should be unreachable due to `is_scalar_json` validation, but keep a fallback.
             EngineValue::Blank

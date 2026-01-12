@@ -504,6 +504,53 @@ fn from_xlsx_bytes_imports_bool_and_error_cells() {
 }
 
 #[wasm_bindgen_test]
+fn leading_apostrophe_forces_text_for_error_literals() {
+    let mut wb = WasmWorkbook::new();
+    wb.set_cell("A1".to_string(), JsValue::from_str("#DIV/0!"), None)
+        .unwrap();
+    wb.set_cell("A2".to_string(), JsValue::from_str("'#DIV/0!"), None)
+        .unwrap();
+    wb.set_cell(
+        "A3".to_string(),
+        JsValue::from_str("'#GETTING_DATA"),
+        None,
+    )
+    .unwrap();
+
+    // Use ISERROR to distinguish between real errors and error-looking text.
+    wb.set_cell("B1".to_string(), JsValue::from_str("=ISERROR(A1)"), None)
+        .unwrap();
+    wb.set_cell("B2".to_string(), JsValue::from_str("=ISERROR(A2)"), None)
+        .unwrap();
+    wb.set_cell("B3".to_string(), JsValue::from_str("=ISERROR(A3)"), None)
+        .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_eq!(b1.value, json!(true));
+
+    let b2_js = wb.get_cell("B2".to_string(), None).unwrap();
+    let b2: CellData = serde_wasm_bindgen::from_value(b2_js).unwrap();
+    assert_eq!(b2.value, json!(false));
+
+    let b3_js = wb.get_cell("B3".to_string(), None).unwrap();
+    let b3: CellData = serde_wasm_bindgen::from_value(b3_js).unwrap();
+    assert_eq!(b3.value, json!(false));
+
+    let a2_js = wb.get_cell("A2".to_string(), None).unwrap();
+    let a2: CellData = serde_wasm_bindgen::from_value(a2_js).unwrap();
+    assert_eq!(a2.input, json!("'#DIV/0!"));
+    assert_eq!(a2.value, json!("#DIV/0!"));
+
+    let a3_js = wb.get_cell("A3".to_string(), None).unwrap();
+    let a3: CellData = serde_wasm_bindgen::from_value(a3_js).unwrap();
+    assert_eq!(a3.input, json!("'#GETTING_DATA"));
+    assert_eq!(a3.value, json!("#GETTING_DATA"));
+}
+
+#[wasm_bindgen_test]
 fn from_xlsx_bytes_loads_shared_strings_fixture() {
     let bytes = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
