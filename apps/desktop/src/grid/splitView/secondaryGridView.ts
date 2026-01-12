@@ -1,4 +1,4 @@
-import type { CellRange, CellRange as GridCellRange, FillCommitEvent, GridAxisSizeChange } from "@formula/grid";
+import type { CellRange, CellRange as GridCellRange, CellRichText, FillCommitEvent, GridAxisSizeChange } from "@formula/grid";
 import type { CellRange as FillEngineRange } from "@formula/fill-engine";
 import type { DocumentController } from "../../document/documentController.js";
 import { applyFillCommitToDocumentController } from "../../fill/applyFillCommit";
@@ -17,7 +17,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-type RichTextValue = { text: string; runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }> };
+type RichTextValue = CellRichText;
 
 function isRichTextValue(value: unknown): value is RichTextValue {
   if (typeof value !== "object" || value == null) return false;
