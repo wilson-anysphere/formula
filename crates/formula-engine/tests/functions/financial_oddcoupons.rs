@@ -300,6 +300,66 @@ fn odd_coupon_settlement_boundary_behavior() {
 }
 
 #[test]
+fn oddf_issue_equal_settlement_boundary_roundtrip() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // ODDF*: issue == settlement is allowed (zero accrued interest).
+    let issue = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let settlement = issue;
+    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 7, 1), system).unwrap();
+
+    let rate = 0.05;
+    let yld_in = 0.06;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 0;
+
+    let pr = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        yld_in,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("ODDFPRICE should allow issue == settlement");
+    assert!(pr.is_finite() && pr > 0.0, "expected positive finite price, got {pr}");
+
+    let yld_out = oddfyield(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        pr,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("ODDFYIELD should converge when issue == settlement");
+    assert_close(yld_out, yld_in, 1e-6);
+
+    // Also validate worksheet functions.
+    let mut sheet = TestSheet::new();
+    let v = sheet.eval("=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.06,100,2,0)");
+    assert!(
+        matches!(v, Value::Number(n) if n.is_finite() && n > 0.0),
+        "expected positive finite number for worksheet ODDFPRICE when issue == settlement, got {v:?}"
+    );
+    let v = sheet.eval("=ODDFYIELD(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.06,100,2,0),100,2,0)");
+    assert!(
+        matches!(v, Value::Number(n) if (n - yld_in).abs() <= 1e-6),
+        "expected yield ~0.06 for worksheet ODDFYIELD when issue == settlement, got {v:?}"
+    );
+}
+
+#[test]
 fn odd_coupon_yield_price_roundtrip() {
     let system = ExcelDateSystem::EXCEL_1900;
 
