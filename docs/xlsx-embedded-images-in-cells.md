@@ -19,6 +19,9 @@ Related in-repo references:
 * Preservation/regression test that generates a “Place in Cell” workbook via `rust_xlsxwriter`:
   * `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
 
+The same overall wiring (worksheet error cell + `metadata.xml` + `xl/richData/rd*` + `richValueRel` →
+`xl/media/*`) is also present in the Excel-produced fixture `fixtures/xlsx/basic/image-in-cell.xlsx`.
+
 ## High-level mapping chain (cell → image bytes)
 
 In this schema, the *cell value itself is an error* (`#VALUE!`). The **image is attached via value-metadata** which points into Excel’s **Rich Data / Rich Value** parts.

@@ -75,6 +75,8 @@ For a concrete, fixture-backed “Place in Cell” schema walkthrough (including
 `_rvRel:LocalImageIdentifier` and `CalcOrigin`), see:
 
 - [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md)
+  - The Excel-produced fixture `fixtures/xlsx/basic/image-in-cell.xlsx` uses the same richData-only wiring
+    (and does **not** use `xl/cellImages.xml`), with notes in `fixtures/xlsx/basic/image-in-cell.md`.
 
 ## In-repo fixture (cell image store part)
 

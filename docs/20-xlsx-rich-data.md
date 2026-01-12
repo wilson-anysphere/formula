@@ -9,6 +9,7 @@ For the dedicated “images in cells” packaging overview (including the option
 - [`docs/20-images-in-cells.md`](./20-images-in-cells.md)
 - [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md)
 - [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md) (confirmed “Place in Cell” rich-value wiring + exact URIs)
+  - See also the Excel-produced fixture `fixtures/xlsx/basic/image-in-cell.xlsx` (notes in `fixtures/xlsx/basic/image-in-cell.md`).
 
 In OOXML this is implemented using **Rich Values** (“richData”) plus **cell value metadata**:
 
