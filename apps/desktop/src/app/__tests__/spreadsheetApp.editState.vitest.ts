@@ -157,6 +157,36 @@ describe("SpreadsheetApp edit state API", () => {
     root.remove();
   });
 
+  it("opens the in-grid cell editor with the caret at the end of the existing value (F2 semantics)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+    doc.setCellValue(sheetId, "A1", "hello");
+
+    root.dispatchEvent(new KeyboardEvent("keydown", { key: "F2" }));
+
+    const editor = root.querySelector<HTMLTextAreaElement>("textarea.cell-editor");
+    expect(editor).not.toBeNull();
+    expect(editor!.value).toBe("hello");
+
+    const end = editor!.value.length;
+    expect(editor!.selectionStart).toBe(end);
+    expect(editor!.selectionEnd).toBe(end);
+
+    editor!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(app.isEditing()).toBe(false);
+
+    app.destroy();
+    root.remove();
+  });
+
   it("fires edit state changes for formula bar begin edit + commit/cancel", () => {
     const root = createRoot();
     const status = {
@@ -203,4 +233,3 @@ describe("SpreadsheetApp edit state API", () => {
     formulaBar.remove();
   });
 });
-
