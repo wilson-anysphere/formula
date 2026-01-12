@@ -170,6 +170,10 @@ fn report_startup_tti(app: tauri::AppHandle, state: State<'_, SharedStartupMetri
     let shared = state.inner().clone();
     let (tti_ms, snapshot) = {
         let mut metrics = shared.lock().unwrap();
+        // If we somehow never recorded a window-visible timestamp (e.g. the webview
+        // never called `report_startup_webview_loaded`), fall back to "at least by
+        // the time we became interactive the window was visible".
+        metrics.record_window_visible();
         let tti_ms = metrics.record_tti();
         let snapshot = metrics.snapshot();
         metrics.maybe_log();
