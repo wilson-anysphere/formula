@@ -101,23 +101,79 @@ checked in):
 **Round-trip rule:** `vm`, `cm`, and the entire `<extLst>` subtree must be preserved verbatim unless we
 explicitly implement full rich-value editing.
 
+### How `vm` maps to `xl/metadata.xml` and `xl/richData/richValue.xml`
+
+Formula’s current understanding (implemented in `crates/formula-xlsx/src/rich_data/metadata.rs`) is:
+
+1. Worksheet cells reference a *value metadata record* via `c/@vm` (**1-based**).
+2. `xl/metadata.xml` contains `<valueMetadata>` with a list of `<bk>` records; `vm` selects a `<bk>`.
+3. That `<bk>` contains `<rc t="…" v="…"/>` where:
+   - `t` is the **1-based** index of `"XLRICHVALUE"` inside `<metadataTypes>`.
+   - `v` is a **0-based** index into `<futureMetadata name="XLRICHVALUE">`’s `<bk>` list.
+4. That future-metadata `<bk>` contains an extension element (commonly `xlrd:rvb`) with an `i="…"`
+   attribute, which is a **0-based** index into `xl/richData/richValue.xml`.
+
+Representative snippet (from the unit tests in `crates/formula-xlsx/src/rich_data/metadata.rs`):
+
+```xml
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="2">
+    <metadataType name="SOMEOTHERTYPE"/>
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+
+  <futureMetadata name="XLRICHVALUE" count="2">
+    <bk>
+      <extLst>
+        <ext uri="{...}">
+          <xlrd:rvb i="5"/>
+        </ext>
+      </extLst>
+    </bk>
+    <bk>
+      <extLst>
+        <ext uri="{...}">
+          <xlrd:rvb i="42"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+
+  <valueMetadata count="2">
+    <bk><rc t="2" v="0"/></bk> <!-- vm="1" -> rv index 5 -->
+    <bk><rc t="2" v="1"/></bk> <!-- vm="2" -> rv index 42 -->
+  </valueMetadata>
+</metadata>
+```
+
 ## `xl/cellimages.xml`
 
 `xl/cellimages.xml` is the workbook-level “cell image store” part. It is expected to contain a list of
 image entries that can be referenced (directly or indirectly) by rich values.
 
-**Schema note:** the exact XML namespace and element vocabulary is Excel-specific and must be validated
-against a real fixture before we implement a semantic model.
+The part embeds **SpreadsheetDrawing / DrawingML** `<xdr:pic>` payloads and uses
+`<a:blip r:embed="rId…">` to reference an image relationship in `xl/_rels/cellimages.xml.rels`.
 
-Representative skeleton:
+Observed root namespaces (from in-repo tests; Excel versions may vary):
+
+- `http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages`
+- `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
+
+Representative example (from `crates/formula-xlsx/tests/cell_images.rs`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<cellImages xmlns="TODO:excel-cellimages-namespace"
-            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <cellImage r:id="rId1"/>
-  <!-- ... -->
-</cellImages>
+<cx:cellImages xmlns:cx="http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages"
+               xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+               xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:pic>
+    <xdr:blipFill>
+      <a:blip r:embed="rId1"/>
+    </xdr:blipFill>
+  </xdr:pic>
+</cx:cellImages>
 ```
 
 ### `xl/_rels/cellimages.xml.rels`
@@ -169,6 +225,9 @@ For images-in-cells, these rich values are expected to contain (directly or indi
 - an entry in `xl/cellimages.xml`, and therefore
 - an image binary in `xl/media/*`.
 
+At minimum, `xl/richData/richValue.xml` is expected to exist when `xl/metadata.xml` contains
+`<futureMetadata name="XLRICHVALUE">` entries with `xlrd:rvb i="…"` references (see mapping details above).
+
 Because the exact file set and schemas vary across Excel builds, Formula’s short-term strategy is:
 
 - **preserve all `xl/richData/*` parts and their `*.rels`**, and
@@ -188,7 +247,19 @@ Workbooks that include these parts must also declare content types in `[Content_
 - **Override** entries for XML parts like `/xl/cellimages.xml`, `/xl/metadata.xml`, and `xl/richData/*.xml`
 - **Default** entries for image extensions used under `/xl/media/*` (`png`, `jpg`, `gif`, etc.)
 
-Representative (content types for these newer parts are **TODO** until we have an Excel fixture):
+### `xl/cellimages.xml` content type override
+
+Observed values (from in-repo tests; preserve whatever is in the source workbook):
+
+- `application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml`
+  - used by `crates/formula-xlsx/tests/cell_images.rs`
+- `application/vnd.ms-excel.cellimages+xml`
+  - used by `crates/formula-xlsx/tests/cellimages_preservation.rs`
+
+### Other content types (TODO: fixture-driven)
+
+Content types for `xl/metadata.xml` and `xl/richData/*` still need confirmation from a real Excel-exported
+workbook (and corresponding fixture + tests).
 
 ```xml
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -196,16 +267,17 @@ Representative (content types for these newer parts are **TODO** until we have a
   <Default Extension="png" ContentType="image/png"/>
   <!-- ... -->
 
-  <Override PartName="/xl/cellimages.xml" ContentType="TODO"/>
+  <Override PartName="/xl/cellimages.xml"
+            ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml"/>
+
+  <!-- TODO: confirm these from an Excel fixture -->
   <Override PartName="/xl/metadata.xml" ContentType="TODO"/>
-  <Override PartName="/xl/richData/richValueTypes.xml" ContentType="TODO"/>
-  <Override PartName="/xl/richData/richValueStructures.xml" ContentType="TODO"/>
-  <Override PartName="/xl/richData/richValueData.xml" ContentType="TODO"/>
+  <Override PartName="/xl/richData/richValue.xml" ContentType="TODO"/>
 </Types>
 ```
 
-**TODO (fixture-driven):** confirm the exact `ContentType="..."` strings produced by current Excel builds
-and add a fixture + assertion coverage in `crates/formula-xlsx`.
+**TODO (fixture-driven):** add an Excel-generated workbook using real images-in-cells, then update this
+section with the exact `ContentType="..."` strings for `metadata.xml` and `richData/*`.
 
 ## Relationship type URIs (what we know vs TODO)
 
@@ -250,24 +322,35 @@ does not “orphan” images or break Excel’s internal references.
 
 ### Implemented / covered by tests today
 
+- **`xl/cellimages.xml` parsing (workbook-level) + media import**
+  - Parser: `crates/formula-xlsx/src/cell_images/mod.rs`
+  - Test: `crates/formula-xlsx/tests/cell_images.rs`
+- **Preservation of `xl/cellimages.xml` + `xl/_rels/cellimages.xml.rels` + `xl/media/*` on cell edits**
+  - Test: `crates/formula-xlsx/tests/cellimages_preservation.rs`
 - **`vm` attribute preservation** on edit is covered by:
   - `crates/formula-xlsx/tests/sheetdata_row_col_attrs.rs` (`editing_a_cell_does_not_strip_unrelated_row_col_or_cell_attrs`)
 - **`cm` + `<extLst>` preservation** during cell patching is covered by:
   - `crates/formula-xlsx/tests/cell_metadata_preservation.rs`
+- **Best-effort `xl/metadata.xml` parsing for rich values (`vm` -> richValue index)**
+  - `crates/formula-xlsx/src/rich_data/metadata.rs`
 - **`_xlfn.` prefix handling** exists in:
   - `crates/formula-xlsx/src/formula_text.rs`
+  - includes an explicit `IMAGE()` round-trip test (`xlfn_roundtrip_preserves_image_function`)
 
 ### TODO work (required for images-in-cells)
 
-- **Add a `cellimages.xml` parser/preserver task**
-  - Parse and preserve `xl/cellimages.xml` + `xl/_rels/cellimages.xml.rels` + referenced `xl/media/*`.
-  - Add a fixture workbook that includes at least one placed-in-cell image and one `IMAGE()` result.
-  - Add round-trip assertions for:
-    - relationship IDs
-    - `[Content_Types].xml` overrides
-    - worksheet `vm`/`cm` attributes
-- **Add `_xlfn.IMAGE` to the `_xlfn.` prefix-required function set**
-  - Excel stores newer functions with `_xlfn.` in OOXML; `IMAGE` must be included for correct save
-    compatibility.
-  - Update `XL_FN_REQUIRED_FUNCTIONS` in `crates/formula-xlsx/src/formula_text.rs` once validated.
-
+- **Add a real Excel-generated fixture workbook** covering:
+  - a “Place in Cell” inserted image
+  - a formula cell containing `=IMAGE(...)`
+  - and the accompanying `xl/metadata.xml` + `xl/richData/*` parts
+- **Confirm and document the remaining relationship/content-type details** from that fixture:
+  - `[Content_Types].xml` overrides for:
+    - `/xl/metadata.xml`
+    - `/xl/richData/*.xml` (especially `/xl/richData/richValue.xml`)
+  - the relationship Type URIs (if any) that connect the workbook/worksheets to:
+    - `xl/cellimages.xml`
+    - `xl/metadata.xml`
+    - `xl/richData/*`
+- **Rich-value semantics (beyond preservation)**:
+  - parse enough of `xl/richData/richValue.xml` to connect `vm` → richValue record → cell image entry
+  - (still out of scope here: UI rendering)
