@@ -53,8 +53,10 @@ const testFiles = [];
 await collect(repoRoot, testFiles);
 testFiles.sort();
 
+const tsLoaderArgs = resolveTypeScriptLoaderArgs();
 const canStripTypes = supportsTypeStripping();
-let runnableTestFiles = canStripTypes ? testFiles : await filterTypeScriptImportTests(testFiles);
+const canExecuteTypeScript = canStripTypes || tsLoaderArgs.length > 0;
+let runnableTestFiles = canExecuteTypeScript ? testFiles : await filterTypeScriptImportTests(testFiles);
 const typeScriptFilteredCount = testFiles.length - runnableTestFiles.length;
 
 const hasDeps = await hasNodeModules();
@@ -62,11 +64,13 @@ let externalDepsFilteredCount = 0;
 let missingWorkspaceDepsFilteredCount = 0;
 if (!hasDeps) {
   const before = runnableTestFiles.length;
-  runnableTestFiles = await filterExternalDependencyTests(runnableTestFiles, { canStripTypes });
+  runnableTestFiles = await filterExternalDependencyTests(runnableTestFiles, {
+    canStripTypes: canExecuteTypeScript,
+  });
   externalDepsFilteredCount = before - runnableTestFiles.length;
 } else {
   const before = runnableTestFiles.length;
-  runnableTestFiles = await filterMissingWorkspaceDependencyTests(runnableTestFiles, { canStripTypes });
+  runnableTestFiles = await filterMissingWorkspaceDependencyTests(runnableTestFiles, { canStripTypes: canExecuteTypeScript });
   missingWorkspaceDepsFilteredCount = before - runnableTestFiles.length;
 }
 
@@ -75,7 +79,7 @@ if (runnableTestFiles.length !== testFiles.length) {
   /** @type {string[]} */
   const reasons = [];
   if (typeScriptFilteredCount > 0) {
-    reasons.push(`${typeScriptFilteredCount} import .ts modules (TypeScript stripping not available)`);
+    reasons.push(`${typeScriptFilteredCount} import .ts modules (TypeScript execution not available)`);
   }
   if (externalDepsFilteredCount > 0) {
     reasons.push(`${externalDepsFilteredCount} depend on external packages (dependencies not installed)`);
@@ -93,7 +97,9 @@ if (runnableTestFiles.length === 0) {
 }
 
 const baseNodeArgs = ["--no-warnings"];
-if (canStripTypes) {
+if (tsLoaderArgs.length > 0) {
+  baseNodeArgs.push(...tsLoaderArgs);
+} else if (canStripTypes) {
   baseNodeArgs.push("--experimental-strip-types");
   // Many TS sources in this repo use `.js` specifiers that point at `.ts` files
   // (bundler-style resolution). Node's default ESM resolver does not support that,
@@ -194,6 +200,35 @@ function supportsTypeStripping() {
     stdio: "ignore",
   });
   return probe.status === 0;
+}
+
+function resolveTypeScriptLoaderArgs() {
+  // When `typescript` is available, prefer a real TS->JS transpile loader over Node's
+  // "strip-only" TS support:
+  // - strip-only mode rejects TS features like parameter properties
+  // - many packages use `.js` specifiers that should resolve to `.ts` sources (TS ESM convention)
+  //
+  // This keeps `node --test` usable without a separate build step.
+  try {
+    require.resolve("typescript", { paths: [repoRoot] });
+  } catch {
+    return [];
+  }
+
+  const allowedFlags =
+    process.allowedNodeEnvironmentFlags && typeof process.allowedNodeEnvironmentFlags.has === "function"
+      ? process.allowedNodeEnvironmentFlags
+      : new Set();
+
+  const loaderUrl = new URL("./resolve-ts-loader.mjs", import.meta.url).href;
+
+  if (allowedFlags.has("--loader")) {
+    return ["--loader", loaderUrl];
+  }
+  if (allowedFlags.has("--experimental-loader")) {
+    return [`--experimental-loader=${loaderUrl}`];
+  }
+  return [];
 }
 
 async function hasNodeModules() {
