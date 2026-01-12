@@ -1,9 +1,10 @@
 [package]
-name = "desktop"
+name = "formula-desktop-tauri"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
+name = "desktop"
 path = "src/lib.rs"
 
 [[bin]]

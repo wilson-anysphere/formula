@@ -1377,56 +1377,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "desktop"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "anyhow",
- "base64 0.22.1",
- "calamine 0.26.1",
- "cfb 0.10.0",
- "directories",
- "formula-columnar",
- "formula-engine",
- "formula-format",
- "formula-model",
- "formula-storage",
- "formula-vba",
- "formula-vba-runtime",
- "formula-xls",
- "formula-xlsb",
- "formula-xlsx",
- "futures-util",
- "gdk",
- "gdk-pixbuf",
- "glib",
- "gtk",
- "hex",
- "http-range",
- "keyring",
- "percent-encoding",
- "rand_core 0.6.4",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "tauri",
- "tauri-build",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-notification",
- "tauri-plugin-shell",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "url",
- "uuid",
- "xlsx-diff",
- "zip 2.4.2",
-]
-
-[[package]]
 name = "diff"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1914,6 +1864,56 @@ dependencies = [
  "ordered-float 4.6.0",
  "pretty_assertions",
  "thiserror 2.0.17",
+]
+
+[[package]]
+name = "formula-desktop-tauri"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "base64 0.22.1",
+ "calamine 0.26.1",
+ "cfb 0.10.0",
+ "directories",
+ "formula-columnar",
+ "formula-engine",
+ "formula-format",
+ "formula-model",
+ "formula-storage",
+ "formula-vba",
+ "formula-vba-runtime",
+ "formula-xls",
+ "formula-xlsb",
+ "formula-xlsx",
+ "futures-util",
+ "gdk",
+ "gdk-pixbuf",
+ "glib",
+ "gtk",
+ "hex",
+ "http-range",
+ "keyring",
+ "percent-encoding",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-notification",
+ "tauri-plugin-shell",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "url",
+ "uuid",
+ "xlsx-diff",
+ "zip 2.4.2",
 ]
 
 [[package]]
