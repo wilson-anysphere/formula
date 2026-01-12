@@ -422,6 +422,32 @@ test("getUsedRange(includeFormat) returns full grid when sheet-level default for
   assert.equal(doc.getUsedRange("Sheet1", { includeFormat: true }), null);
 });
 
+test("getUsedRange(includeFormat) unions row and column formatting to full grid bounds", () => {
+  const doc = new DocumentController();
+
+  doc.setRowFormat("Sheet1", 2, { font: { bold: true } });
+  doc.setColFormat("Sheet1", 3, { font: { italic: true } });
+
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 0,
+    endRow: 1_048_575,
+    startCol: 0,
+    endCol: 16_383,
+  });
+
+  // Clearing one axis shrinks back to the remaining formatting.
+  doc.setColFormat("Sheet1", 3, null);
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 2,
+    endRow: 2,
+    startCol: 0,
+    endCol: 16_383,
+  });
+
+  doc.setRowFormat("Sheet1", 2, null);
+  assert.equal(doc.getUsedRange("Sheet1", { includeFormat: true }), null);
+});
+
 test("getCellFormatStyleIds exposes layered style id tuple (sheet/row/col/cell)", () => {
   const doc = new DocumentController();
 
