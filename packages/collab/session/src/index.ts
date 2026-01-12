@@ -1592,7 +1592,7 @@ export class CollabSession {
 
       cell.delete("enc");
       cell.set("value", value ?? null);
-      cell.delete("formula");
+      cell.set("formula", null);
       cell.set("modified", modified);
       if (userId) cell.set("modifiedBy", userId);
     });
@@ -1701,7 +1701,7 @@ export class CollabSession {
       cell.delete("enc");
 
       if (nextFormula) cell.set("formula", nextFormula);
-      else cell.delete("formula");
+      else cell.set("formula", null);
 
       cell.set("value", null);
       cell.set("modified", Date.now());
