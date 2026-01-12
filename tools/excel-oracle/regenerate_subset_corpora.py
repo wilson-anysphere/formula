@@ -38,6 +38,7 @@ After running, commit the resulting diffs.
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Any
@@ -61,11 +62,51 @@ def _has_tag(case: dict[str, Any], tag: str) -> bool:
     return isinstance(tags, list) and tag in tags
 
 
-def main() -> int:
-    repo_root = Path(__file__).resolve().parents[2]
-    corpus_path = repo_root / "tests" / "compatibility" / "excel-oracle" / "cases.json"
-    corpus = _load_json(corpus_path)
+def _resolve_under_repo_root(repo_root: Path, raw: str) -> Path:
+    p = Path(raw)
+    if p.is_absolute():
+        return p
+    return repo_root / p
 
+
+def _expected_subset_payload(*, case_set: str, cases: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "caseSet": case_set,
+        "defaultSheet": "Sheet1",
+        "cases": cases,
+    }
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(
+        description=(
+            "Regenerate small convenience subset corpora under tools/excel-oracle/ "
+            "from the canonical cases corpus."
+        )
+    )
+    p.add_argument(
+        "--cases",
+        default="tests/compatibility/excel-oracle/cases.json",
+        help="Path to canonical cases.json (default: %(default)s)",
+    )
+    p.add_argument(
+        "--out-dir",
+        default="tools/excel-oracle",
+        help="Directory to write subset corpora into (default: %(default)s)",
+    )
+    p.add_argument(
+        "--check",
+        action="store_true",
+        help="Validate that the subset corpora are up to date, without rewriting files.",
+    )
+    args = p.parse_args()
+
+    repo_root = Path(__file__).resolve().parents[2]
+    corpus_path = _resolve_under_repo_root(repo_root, args.cases).resolve()
+    out_dir = _resolve_under_repo_root(repo_root, args.out_dir).resolve()
+
+    corpus = _load_json(corpus_path)
     cases = [c for c in corpus.get("cases", []) if isinstance(c, dict)]
 
     validation_cases = [c for c in cases if _has_tag(c, "odd_coupon_validation")]
@@ -75,49 +116,67 @@ def main() -> int:
         c for c in cases if _has_tag(c, "odd_coupon") and _has_tag(c, "invalid_schedule")
     ]
 
-    _write_json(
-        repo_root / "tools" / "excel-oracle" / "odd_coupon_validation_cases.json",
-        {
-            "schemaVersion": 1,
-            "caseSet": "financial-odd-coupon-validation",
-            "defaultSheet": "Sheet1",
-            "cases": validation_cases,
-        },
-    )
-    _write_json(
-        repo_root / "tools" / "excel-oracle" / "odd_coupon_boundary_cases.json",
-        {
-            "schemaVersion": 1,
-            "caseSet": "odd-coupon-boundaries",
-            "defaultSheet": "Sheet1",
-            "cases": boundary_cases,
-        },
-    )
-    _write_json(
-        repo_root / "tools" / "excel-oracle" / "odd_coupon_long_stub_cases.json",
-        {
-            "schemaVersion": 1,
-            "caseSet": "financial-odd-coupon-long",
-            "defaultSheet": "Sheet1",
-            "cases": long_stub_cases,
-        },
-    )
-    _write_json(
-        repo_root / "tools" / "excel-oracle" / "odd_coupon_invalid_schedule_cases.json",
-        {
-            "schemaVersion": 1,
-            "caseSet": "financial-odd-coupon-invalid-schedule",
-            "defaultSheet": "Sheet1",
-            "cases": invalid_schedule_cases,
-        },
-    )
+    targets = [
+        (
+            out_dir / "odd_coupon_validation_cases.json",
+            _expected_subset_payload(
+                case_set="financial-odd-coupon-validation", cases=validation_cases
+            ),
+            len(validation_cases),
+        ),
+        (
+            out_dir / "odd_coupon_boundary_cases.json",
+            _expected_subset_payload(case_set="odd-coupon-boundaries", cases=boundary_cases),
+            len(boundary_cases),
+        ),
+        (
+            out_dir / "odd_coupon_long_stub_cases.json",
+            _expected_subset_payload(case_set="financial-odd-coupon-long", cases=long_stub_cases),
+            len(long_stub_cases),
+        ),
+        (
+            out_dir / "odd_coupon_invalid_schedule_cases.json",
+            _expected_subset_payload(
+                case_set="financial-odd-coupon-invalid-schedule", cases=invalid_schedule_cases
+            ),
+            len(invalid_schedule_cases),
+        ),
+    ]
 
-    print(f"Wrote {len(validation_cases)} cases -> tools/excel-oracle/odd_coupon_validation_cases.json")
-    print(f"Wrote {len(boundary_cases)} cases -> tools/excel-oracle/odd_coupon_boundary_cases.json")
-    print(f"Wrote {len(long_stub_cases)} cases -> tools/excel-oracle/odd_coupon_long_stub_cases.json")
-    print(
-        f"Wrote {len(invalid_schedule_cases)} cases -> tools/excel-oracle/odd_coupon_invalid_schedule_cases.json"
-    )
+    if args.check:
+        mismatched: list[Path] = []
+        for path, expected, _count in targets:
+            if not path.is_file():
+                mismatched.append(path)
+                continue
+            actual = _load_json(path)
+            if actual != expected:
+                mismatched.append(path)
+        if mismatched:
+            rels = []
+            for m in mismatched:
+                try:
+                    rels.append(m.resolve().relative_to(repo_root.resolve()).as_posix())
+                except Exception:
+                    rels.append(m.as_posix())
+            sys_err = "\n".join(f"- {r}" for r in rels)
+            raise SystemExit(
+                "Subset corpora are out of date. Re-run:\n"
+                "  python tools/excel-oracle/regenerate_subset_corpora.py\n"
+                f"Mismatched files:\n{sys_err}"
+            )
+        print("Subset corpora are up to date.")
+        return 0
+
+    for path, payload, count in targets:
+        _write_json(path, payload)
+        # Print paths relative to repo root for stability/readability.
+        try:
+            rel = path.resolve().relative_to(repo_root.resolve()).as_posix()
+        except Exception:
+            rel = path.as_posix()
+        print(f"Wrote {count} cases -> {rel}")
+
     return 0
 
 
