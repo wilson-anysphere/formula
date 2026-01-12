@@ -17,6 +17,8 @@ import datetime as dt
 import hashlib
 import itertools
 import json
+import re
+from pathlib import Path
 from typing import Any, Iterable
 
 
@@ -90,6 +92,77 @@ def _excel_serial_1900(year: int, month: int, day: int) -> int:
     if cur >= dt.date(1900, 3, 1):
         serial += 1
     return serial
+
+
+_FUNC_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_.]*)\s*\(")
+
+
+def _extract_function_names(formula: str | None) -> list[str]:
+    if not formula:
+        return []
+    raw = formula.strip()
+    if raw.startswith("="):
+        raw = raw[1:]
+
+    out: list[str] = []
+    for match in _FUNC_RE.finditer(raw):
+        name = match.group(1).upper()
+        if name.startswith("_XLFN."):
+            name = name[len("_XLFN.") :]
+        out.append(name)
+    return out
+
+
+def _validate_against_function_catalog(payload: dict[str, Any]) -> None:
+    """
+    Keep the oracle corpus aligned with `shared/functionCatalog.json`.
+
+    The goal of the Excel-oracle corpus is to provide end-to-end coverage for
+    all deterministic functions. We intentionally exclude volatile functions
+    from the corpus because they cannot be pinned/stably compared.
+    """
+
+    repo_root = Path(__file__).resolve().parents[2]
+    catalog_path = repo_root / "shared" / "functionCatalog.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+
+    catalog_nonvolatile: set[str] = set()
+    catalog_volatile: set[str] = set()
+    for entry in catalog.get("functions", []):
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name", "")).upper()
+        if not name:
+            continue
+        vol = entry.get("volatility")
+        if vol == "volatile":
+            catalog_volatile.add(name)
+        elif vol == "non_volatile":
+            catalog_nonvolatile.add(name)
+        else:
+            raise SystemExit(f"Unknown volatility in functionCatalog.json for {name!r}: {vol!r}")
+
+    used: set[str] = set()
+    for case in payload.get("cases", []):
+        if not isinstance(case, dict):
+            continue
+        used.update(_extract_function_names(case.get("formula")))
+
+    missing_nonvolatile = sorted(catalog_nonvolatile.difference(used))
+    if missing_nonvolatile:
+        preview = ", ".join(missing_nonvolatile[:25])
+        suffix = "" if len(missing_nonvolatile) <= 25 else f" (+{len(missing_nonvolatile) - 25} more)"
+        raise SystemExit(
+            "Oracle corpus does not cover all deterministic functions in shared/functionCatalog.json. "
+            f"Missing ({len(missing_nonvolatile)}): {preview}{suffix}"
+        )
+
+    present_volatile = sorted(catalog_volatile.intersection(used))
+    if present_volatile:
+        raise SystemExit(
+            "Oracle corpus must not include volatile functions (non-deterministic). "
+            f"Found: {', '.join(present_volatile)}"
+        )
 
 
 def generate_cases() -> dict[str, Any]:
@@ -1631,6 +1704,7 @@ def main() -> int:
     args = parser.parse_args()
 
     payload = generate_cases()
+    _validate_against_function_catalog(payload)
 
     # Stable JSON formatting for review diffs.
     out_path = args.out
