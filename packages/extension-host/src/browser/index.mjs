@@ -1407,7 +1407,15 @@ class BrowserExtensionHost {
         return this.openWorkbook(null);
       case "workbook.save":
         if (typeof this._spreadsheet.saveWorkbook === "function") {
-          this._broadcastEvent("beforeSave", { workbook: await this._getActiveWorkbook() });
+          const workbook = await this._getActiveWorkbook();
+          // If the workbook already has a path we can emit `beforeSave` immediately.
+          // For pathless workbooks, the host app may prompt for a Save As path and can
+          // cancel the operation. Avoid emitting `beforeSave` until the path is known.
+          const workbookPath = workbook?.path;
+          const hasPath = typeof workbookPath === "string" && workbookPath.trim().length > 0;
+          if (hasPath) {
+            this._broadcastEvent("beforeSave", { workbook });
+          }
           await this._spreadsheet.saveWorkbook();
           // Saving can update the workbook path/name (e.g. Save prompting for a path).
           // Refresh internal workbook metadata so subsequent snapshots are accurate.

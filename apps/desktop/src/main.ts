@@ -3274,7 +3274,16 @@ if (
     };
 
     extensionSpreadsheetApi.saveWorkbook = async () => {
-      await handleSave({ notifyExtensions: false, throwOnCancel: true });
+      // When saving a workbook that already has a file path, the BrowserExtensionHost
+      // emits `beforeSave` directly for the calling extension API request.
+      //
+      // When the workbook has no path, `handleSave()` will prompt for a Save As target.
+      // In that scenario we let the desktop save flow notify extensions once a path is
+      // chosen (via `handleSaveAsPath()` calling `host.saveWorkbookAs(...)`) so:
+      //   - cancelling the dialog does not emit `beforeSave`
+      //   - the `beforeSave` event includes the final path selected by the user
+      const notifyExtensions = !activeWorkbook?.path;
+      await handleSave({ notifyExtensions, throwOnCancel: true });
     };
 
     extensionSpreadsheetApi.saveWorkbookAs = async (path: string) => {

@@ -1073,6 +1073,7 @@ test.describe("extension workbook lifecycle (tauri)", () => {
     });
 
     expect(result.ok).toBe(false);
+    expect(result.beforeSave).toEqual([]);
     expect(String(result.error ?? "")).toMatch(/save/i);
     expect(String(result.error ?? "")).toMatch(/cancel/i);
 
