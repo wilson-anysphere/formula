@@ -1,15 +1,12 @@
 use crate::eval::CompiledExpr;
 use crate::coercion::datetime::parse_value_text;
-use crate::date::ExcelDateSystem;
 use crate::functions::lookup;
 use crate::functions::wildcard::WildcardPattern;
 use crate::functions::{
     eval_scalar_arg, ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference, SheetId,
 };
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::locale::ValueLocaleConfig;
 use crate::value::{Array, ErrorKind, Value};
-use chrono::Utc;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -537,6 +534,7 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 search_mode,
                 ctx.value_locale(),
                 ctx.date_system(),
+                ctx.now_utc(),
             );
 
             match pos {
@@ -555,6 +553,7 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 search_mode,
                 ctx.value_locale(),
                 ctx.date_system(),
+                ctx.now_utc(),
             ) {
                 Ok(pos) => Value::Number(pos as f64),
                 Err(e) => Value::Error(e),
@@ -666,6 +665,7 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         search_mode,
                         ctx.value_locale(),
                         ctx.date_system(),
+                        ctx.now_utc(),
                     )
                 }
                 XlookupLookupArray::Reference {
@@ -698,6 +698,7 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         search_mode,
                         ctx.value_locale(),
                         ctx.date_system(),
+                        ctx.now_utc(),
                     )
                 }
             }
@@ -1249,7 +1250,7 @@ fn pivot_item_matches(ctx: &dyn FunctionContext, cell: &Value, item: &Value) -> 
             let item_text = item.coerce_to_string_with_ctx(ctx)?;
             Ok(item_text.is_empty())
         }
-        _ => Ok(excel_eq(cell, item)),
+        _ => Ok(excel_eq(ctx, cell, item)),
     }
 }
 
@@ -1337,7 +1338,7 @@ fn exact_match_values(ctx: &dyn FunctionContext, lookup: &Value, values: &[Value
         return None;
     }
 
-    values.iter().position(|v| excel_eq(lookup, v))
+    values.iter().position(|v| excel_eq(ctx, lookup, v))
 }
 
 fn approximate_match_values(lookup: &Value, values: &[Value], ascending: bool) -> Option<usize> {
@@ -1393,7 +1394,7 @@ fn exact_match_in_first_col(
             if pattern.matches(text.as_ref()) {
                 return Some(idx as u32);
             }
-        } else if excel_eq(lookup, &key) {
+        } else if excel_eq(ctx, lookup, &key) {
             return Some(idx as u32);
         }
     }
@@ -1420,7 +1421,7 @@ fn exact_match_in_first_col_array(
             if pattern.matches(text.as_ref()) {
                 return Some(row as u32);
             }
-        } else if excel_eq(lookup, key) {
+        } else if excel_eq(ctx, lookup, key) {
             return Some(row as u32);
         }
     }
@@ -1452,7 +1453,7 @@ fn exact_match_in_first_row(
             if pattern.matches(text.as_ref()) {
                 return Some(idx as u32);
             }
-        } else if excel_eq(lookup, &key) {
+        } else if excel_eq(ctx, lookup, &key) {
             return Some(idx as u32);
         }
     }
@@ -1479,7 +1480,7 @@ fn exact_match_in_first_row_array(
             if pattern.matches(text.as_ref()) {
                 return Some(col as u32);
             }
-        } else if excel_eq(lookup, key) {
+        } else if excel_eq(ctx, lookup, key) {
             return Some(col as u32);
         }
     }
@@ -1606,7 +1607,7 @@ fn exact_match_1d(
             if pattern.matches(text.as_ref()) {
                 return Some(idx);
             }
-        } else if excel_eq(lookup, &v) {
+        } else if excel_eq(ctx, lookup, &v) {
             return Some(idx);
         }
     }
@@ -1694,7 +1695,7 @@ fn cmp_case_insensitive(a: &str, b: &str) -> std::cmp::Ordering {
     }
 }
 
-fn excel_eq(a: &Value, b: &Value) -> bool {
+fn excel_eq(ctx: &dyn FunctionContext, a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => x == y,
         (Value::Text(x), Value::Text(y)) => text_eq_case_insensitive(x, y),
@@ -1708,9 +1709,9 @@ fn excel_eq(a: &Value, b: &Value) -> bool {
             } else {
                 parse_value_text(
                     trimmed,
-                    ValueLocaleConfig::en_us(),
-                    Utc::now(),
-                    ExcelDateSystem::EXCEL_1900,
+                    ctx.value_locale(),
+                    ctx.now_utc(),
+                    ctx.date_system(),
                 )
                 .is_ok_and(|parsed| parsed == *num)
             }

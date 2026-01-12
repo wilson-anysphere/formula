@@ -223,6 +223,51 @@ fn lookup_wildcard_numeric_text_coercion_respects_value_locale() {
 }
 
 #[test]
+fn lookup_numeric_text_parsing_respects_value_locale_for_number_equality() {
+    for bytecode_enabled in [false, true] {
+        let mut engine = Engine::new();
+        engine.set_bytecode_enabled(bytecode_enabled);
+        engine.set_value_locale(ValueLocaleConfig::de_de());
+
+        // MATCH should coerce numeric text to numbers using the workbook value locale.
+        engine.set_cell_value("Sheet1", "A1", "1,5").unwrap();
+        engine
+            .set_cell_formula("Sheet1", "Z1", "=MATCH(1.5, A1:A1, 0)")
+            .unwrap();
+
+        // VLOOKUP should do the same for exact matches.
+        engine.set_cell_value("Sheet1", "A2", "1.234,5").unwrap();
+        engine.set_cell_value("Sheet1", "B2", 42.0).unwrap();
+        engine
+            .set_cell_formula("Sheet1", "Z2", "=VLOOKUP(1234.5, A2:B2, 2, FALSE)")
+            .unwrap();
+
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "Z1"), Value::Number(1.0));
+        assert_eq!(engine.get_cell_value("Sheet1", "Z2"), Value::Number(42.0));
+
+        if bytecode_enabled {
+            assert!(
+                engine.bytecode_program_count() > 0,
+                "expected lookup formulas to compile to bytecode for this test"
+            );
+        }
+    }
+
+    // XMATCH/XLOOKUP use their own lookup engine; ensure it also respects the workbook value locale
+    // when comparing numbers to numeric text.
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+    sheet.set("A1", "1.234,5");
+    sheet.set("B1", 99.0);
+    assert_eq!(sheet.eval("=XMATCH(1234.5, A1:A1)"), Value::Number(1.0));
+    assert_eq!(
+        sheet.eval("=XLOOKUP(1234.5, A1:A1, B1:B1)"),
+        Value::Number(99.0)
+    );
+}
+
+#[test]
 fn xmatch_supports_next_smaller_and_next_larger() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);

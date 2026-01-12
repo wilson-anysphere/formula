@@ -3665,9 +3665,9 @@ fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
             } else {
                 crate::coercion::datetime::parse_value_text(
                     trimmed,
-                    ValueLocaleConfig::en_us(),
-                    Utc::now(),
-                    ExcelDateSystem::EXCEL_1900,
+                    thread_value_locale(),
+                    thread_now_utc(),
+                    thread_date_system(),
                 )
                 .is_ok_and(|parsed| parsed == *a)
             }
