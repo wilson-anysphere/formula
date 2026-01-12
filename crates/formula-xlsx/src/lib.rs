@@ -44,7 +44,6 @@ pub mod metadata;
 pub mod minimal;
 pub mod outline;
 pub mod rich_data;
-mod rich_data_images;
 mod package;
 pub mod patch;
 mod path;
