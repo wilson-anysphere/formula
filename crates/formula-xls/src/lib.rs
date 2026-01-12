@@ -2809,10 +2809,75 @@ fn build_in_memory_xls(workbook_stream: &[u8]) -> Result<Vec<u8>, ImportError> {
     Ok(ole.into_inner().into_inner())
 }
 
+fn strip_wrapping_parentheses(mut expr: &str) -> &str {
+    // Strip a single layer of wrapping parentheses when they enclose the entire expression.
+    //
+    // This is needed because BIFF formulas can contain `PtgParen` tokens that preserve redundant
+    // parentheses. When rendered to A1 text (either by our BIFF rgce decoder or by calamine), this
+    // can produce formulas like `=(Sheet1!$A$1:$C$5)`, which we still want to recognize as a plain
+    // range reference.
+    loop {
+        let trimmed = expr.trim();
+        if trimmed.len() < 2 || !trimmed.starts_with('(') || !trimmed.ends_with(')') {
+            return trimmed;
+        }
+
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+        let mut depth: u32 = 0;
+
+        let bytes = trimmed.as_bytes();
+        let mut idx = 0usize;
+        while idx < bytes.len() {
+            match bytes[idx] {
+                b'"' if !in_single_quote => {
+                    in_double_quote = !in_double_quote;
+                    idx += 1;
+                }
+                b'\'' if !in_double_quote => {
+                    if in_single_quote {
+                        // Inside sheet-name quoting, `''` escapes a single quote.
+                        if bytes.get(idx + 1) == Some(&b'\'') {
+                            idx += 2;
+                        } else {
+                            in_single_quote = false;
+                            idx += 1;
+                        }
+                    } else {
+                        in_single_quote = true;
+                        idx += 1;
+                    }
+                }
+                b'(' if !in_single_quote && !in_double_quote => {
+                    depth = depth.saturating_add(1);
+                    idx += 1;
+                }
+                b')' if !in_single_quote && !in_double_quote => {
+                    depth = depth.saturating_sub(1);
+                    // If the initial `(` closes before the end of the string, the outer
+                    // parentheses do not wrap the entire expression.
+                    if depth == 0 && idx != bytes.len().saturating_sub(1) {
+                        return trimmed;
+                    }
+                    idx += 1;
+                }
+                _ => idx += 1,
+            }
+        }
+
+        if depth != 0 {
+            return trimmed;
+        }
+
+        expr = &trimmed[1..trimmed.len().saturating_sub(1)];
+    }
+}
+
 fn parse_autofilter_range_from_defined_name(refers_to: &str) -> Result<Range, String> {
     let refers_to = refers_to.trim();
     let refers_to = refers_to.strip_prefix('=').unwrap_or(refers_to).trim();
     let refers_to = refers_to.strip_prefix('@').unwrap_or(refers_to).trim();
+    let refers_to = strip_wrapping_parentheses(refers_to);
     if refers_to.is_empty() {
         return Err("empty `refers_to`".to_string());
     }
@@ -2868,6 +2933,7 @@ fn parse_autofilter_range_from_defined_name(refers_to: &str) -> Result<Range, St
         .map(|(_, tail)| tail)
         .unwrap_or(refers_to)
         .trim();
+    let a1 = strip_wrapping_parentheses(a1);
 
     Range::from_a1(a1).map_err(|err| format!("invalid A1 range `{a1}`: {err}"))
 }
@@ -3437,6 +3503,29 @@ mod tests {
         assert!(
             calamine_can_open_workbook_stream(&sanitized),
             "expected calamine to open after repairing truncated NAME record"
+        );
+    }
+
+    #[test]
+    fn parse_autofilter_range_strips_wrapping_parentheses() {
+        let range = parse_autofilter_range_from_defined_name("=($A$1:$B$3)")
+            .expect("expected parenthesized range to parse");
+        assert_eq!(range, Range::from_a1("A1:B3").unwrap());
+
+        let range = parse_autofilter_range_from_defined_name("=(Sheet1!$A$1:$B$3)")
+            .expect("expected parenthesized sheet-qualified range to parse");
+        assert_eq!(range, Range::from_a1("A1:B3").unwrap());
+    }
+
+    #[test]
+    fn parse_autofilter_range_rejects_union_even_when_wrapped_in_parentheses() {
+        let err = parse_autofilter_range_from_defined_name(
+            "=(Sheet1!$A$1:$A$2,Sheet1!$C$1:$C$2)",
+        )
+        .expect_err("expected union formula to be rejected");
+        assert!(
+            err.contains("union"),
+            "expected union error, got {err:?}"
         );
     }
 }
