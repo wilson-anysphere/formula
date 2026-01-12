@@ -560,19 +560,22 @@ fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, S
                 .unwrap_or_default()
                 .to_string();
 
-            out.push(ListDirEntry {
-                path: entry_path.to_string_lossy().to_string(),
-                name,
-                size: metadata.len(),
-                mtime_ms: duration.as_millis() as u64,
-            });
-
+            // Enforce a hard cap on output size to prevent unbounded memory usage.
+            //
+            // We allow exactly MAX_LIST_DIR_ENTRIES results; error only when we'd exceed it.
             if out.len() >= crate::resource_limits::MAX_LIST_DIR_ENTRIES {
                 return Err(format!(
                     "Directory listing exceeded limit (max {} entries)",
                     crate::resource_limits::MAX_LIST_DIR_ENTRIES
                 ));
             }
+
+            out.push(ListDirEntry {
+                path: entry_path.to_string_lossy().to_string(),
+                name,
+                size: metadata.len(),
+                mtime_ms: duration.as_millis() as u64,
+            });
         }
         Ok(())
     }
@@ -3421,13 +3424,27 @@ mod tests {
         use std::fs::File;
 
         let dir = TempDir::new().expect("create temp dir");
-        for idx in 0..=crate::resource_limits::MAX_LIST_DIR_ENTRIES {
+        for idx in 0..crate::resource_limits::MAX_LIST_DIR_ENTRIES {
             let path = dir.path().join(format!("file_{idx}.txt"));
             File::create(path).expect("create temp file");
         }
 
+        let ok = list_dir_blocking(dir.path().to_str().unwrap(), false)
+            .expect("expected list_dir to succeed when at the entry limit");
+        assert_eq!(
+            ok.len(),
+            crate::resource_limits::MAX_LIST_DIR_ENTRIES,
+            "expected exactly MAX_LIST_DIR_ENTRIES results"
+        );
+
+        // Now add one more file and ensure we get a clear error.
+        let extra_path = dir
+            .path()
+            .join(format!("file_{}.txt", crate::resource_limits::MAX_LIST_DIR_ENTRIES));
+        File::create(extra_path).expect("create extra temp file");
+
         let err = list_dir_blocking(dir.path().to_str().unwrap(), false)
-            .expect_err("expected list_dir to error once entry limit is reached");
+            .expect_err("expected list_dir to error once entry limit is exceeded");
         assert!(
             err.contains(&format!(
                 "Directory listing exceeded limit (max {} entries)",
