@@ -86,16 +86,34 @@ impl XlsxPackage {
                 metadata_bytes,
             )
             .map_err(|e| XlsxError::Invalid(format!("failed to parse xl/metadata.xml: {e}")))?;
-            for (vm, rv_idx) in parsed {
-                vm_to_rich_value.entry(vm).or_insert(rv_idx);
-                // Excel has been observed to encode `vm` as both 0-based and 1-based in the wild.
-                // Insert both so callers don't need to care.
-                if vm > 0 {
-                    vm_to_rich_value.entry(vm - 1).or_insert(rv_idx);
-                }
-            }
+            vm_to_rich_value = parsed;
         }
         let has_vm_mapping = !vm_to_rich_value.is_empty();
+
+        // Excel has been observed to encode worksheet `c/@vm` as both 0-based and 1-based indices
+        // into `xl/metadata.xml`'s `<valueMetadata>` `<bk>` list. The metadata parser returns a
+        // *1-based* mapping.
+        //
+        // If we see any `vm="0"` in the worksheets, treat the sheet values as 0-based and add 1
+        // before looking up in the parsed map. This avoids key-collision bugs that occur if we
+        // try to store both 0- and 1-based mappings in the same `HashMap` when multiple images are
+        // present.
+        let vm_offset: u32 = if has_vm_mapping {
+            let mut saw_zero = false;
+            for sheet in self.worksheet_parts()? {
+                let Some(sheet_xml_bytes) = self.part(&sheet.worksheet_part) else {
+                    continue;
+                };
+                let vm_cells = parse_sheet_vm_image_cells(sheet_xml_bytes)?;
+                if vm_cells.iter().any(|(_, vm)| *vm == 0) {
+                    saw_zero = true;
+                    break;
+                }
+            }
+            if saw_zero { 1 } else { 0 }
+        } else {
+            0
+        };
 
         // Optional: richValue.xml relationship indices (rich value index -> relationship slot).
         let rich_value_rel_indices: Vec<Option<u32>> = match self.part("xl/richData/richValue.xml") {
@@ -147,6 +165,7 @@ impl XlsxPackage {
             for (cell_ref, vm) in parse_sheet_vm_image_cells(sheet_xml_bytes)? {
                 // First resolve the cell's `vm` into a rich value index when possible.
                 let rich_value_index = if has_vm_mapping {
+                    let vm = vm.saturating_add(vm_offset);
                     let Some(&idx) = vm_to_rich_value.get(&vm) else {
                         continue;
                     };
