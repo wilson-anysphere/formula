@@ -125,3 +125,41 @@ fn rich_value_indexing_collision_is_deterministic_and_warns() {
         "expected a DuplicateIndex warning, got: {warnings:?}"
     );
 }
+
+#[test]
+fn rich_value_images_tolerate_non_r_prefixes_for_embed_and_id_attrs() {
+    let rich_value = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rd:richValue xmlns:rd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
+              xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+              xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rd:rv rel:id="10">
+    <a:blip rel:embed="rIdImg"/>
+  </rd:rv>
+</rd:richValue>"#;
+
+    let rich_value_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdImg" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+</Relationships>"#;
+
+    let metadata = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <rvb i="10"/>
+</metadata>"#;
+
+    let image_bytes = b"fake-png";
+
+    let bytes = build_package(&[
+        ("xl/metadata.xml", metadata),
+        ("xl/richData/richValue1.xml", rich_value),
+        ("xl/richData/_rels/richValue1.xml.rels", rich_value_rels),
+        ("xl/media/image1.png", image_bytes),
+    ]);
+
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+    let ExtractedRichValueImages { images, warnings } =
+        pkg.extract_rich_value_images().expect("extract");
+
+    assert_eq!(images.get(&10).map(Vec::as_slice), Some(image_bytes.as_slice()));
+    assert!(warnings.is_empty(), "did not expect warnings, got: {warnings:?}");
+}

@@ -244,8 +244,11 @@ fn parse_rich_value_part(part_name: &str, bytes: &[u8]) -> Result<Vec<ParsedRv>,
 fn parse_rv_explicit_index(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<u32>, XlsxError> {
     for attr in e.attributes() {
         let attr = attr?;
-        let key = attr.key.as_ref();
-        if key != b"i" && key != b"id" && key != b"idx" {
+        let key = openxml::local_name(attr.key.as_ref());
+        if !key.eq_ignore_ascii_case(b"i")
+            && !key.eq_ignore_ascii_case(b"id")
+            && !key.eq_ignore_ascii_case(b"idx")
+        {
             continue;
         }
         let Ok(idx) = attr.unescape_value()?.into_owned().trim().parse::<u32>() else {
@@ -296,8 +299,8 @@ fn parse_rv_embed_rel_id(reader: &mut Reader<Cursor<&[u8]>>) -> Result<Option<St
 fn parse_blip_embed(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<String>, XlsxError> {
     for attr in e.attributes() {
         let attr = attr?;
-        let key = attr.key.as_ref();
-        if key == b"r:embed" || key == b"embed" {
+        let key = openxml::local_name(attr.key.as_ref());
+        if key.eq_ignore_ascii_case(b"embed") {
             return Ok(Some(attr.unescape_value()?.into_owned()));
         }
     }
@@ -317,7 +320,8 @@ fn parse_metadata_rich_value_indices(bytes: &[u8]) -> Result<Vec<u32>, XlsxError
             Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"rvb" => {
                 for attr in e.attributes() {
                     let attr = attr?;
-                    if attr.key.as_ref() != b"i" {
+                    let key = openxml::local_name(attr.key.as_ref());
+                    if !key.eq_ignore_ascii_case(b"i") {
                         continue;
                     }
                     let Ok(idx) = attr.unescape_value()?.into_owned().trim().parse::<u32>() else {
