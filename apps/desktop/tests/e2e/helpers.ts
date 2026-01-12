@@ -93,8 +93,9 @@ export async function waitForDesktopReady(page: Page): Promise<void> {
 /**
  * Click the ribbon button that toggles the Extensions panel.
  *
- * The Extensions panel toggle is ribbon-owned. Scope the locator under `data-testid="ribbon-root"`
- * to avoid Playwright strict-mode collisions if another surface reuses the same test id.
+ * The only stable `data-testid="open-extensions-panel"` control lives in the ribbon (React).
+ * The static `apps/desktop/index.html` shell must not include legacy debug buttons with the same
+ * test id (to avoid Playwright strict-mode collisions), so always scope this locator to the ribbon.
  */
 export async function openExtensionsPanel(page: Page): Promise<void> {
   const panel = page.getByTestId("panel-extensions");
@@ -102,12 +103,7 @@ export async function openExtensionsPanel(page: Page): Promise<void> {
 
   if (!panelVisible) {
     const ribbonButton = page.getByTestId("ribbon-root").getByTestId("open-extensions-panel");
-    try {
-      await ribbonButton.click({ timeout: 5_000 });
-    } catch {
-      // Fallback: click the first visible matching element (avoid strict-mode violations).
-      await page.locator('[data-testid="open-extensions-panel"]:visible').first().click();
-    }
+    await ribbonButton.click({ timeout: 30_000 });
 
     await panel.waitFor({ state: "visible", timeout: 30_000 });
   }
