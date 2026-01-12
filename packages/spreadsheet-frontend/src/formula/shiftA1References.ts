@@ -136,7 +136,7 @@ function shiftSegment(segment: string, deltaRows: number, deltaCols: number): st
     replaceRowRange as any
   );
 
-  return withRowRanges.replace(cellRefRegex, (_match, prefix: string, sheetPrefix: string, colAbs: string, col: string, rowAbs: string, row: string) => {
+  const shifted = withRowRanges.replace(cellRefRegex, (_match, prefix: string, sheetPrefix: string, colAbs: string, col: string, rowAbs: string, row: string) => {
     const col0 = colNameToIndex(col);
     const row0 = Number.parseInt(row, 10) - 1;
 
@@ -150,4 +150,9 @@ function shiftSegment(segment: string, deltaRows: number, deltaCols: number): st
     const next = `${sheetPrefix}${colAbs}${colToName(nextCol0)}${rowAbs}${nextRow0 + 1}`;
     return `${prefix}${next}`;
   });
+
+  // Excel drops the spill-range operator (`#`) once the base reference becomes invalid.
+  // Our shifter can rewrite `A1#` into `#REF!#`; normalize that to `#REF!` for closer
+  // parity with the engine's AST-based rewrite.
+  return shifted.replace(/#REF!#+/g, "#REF!");
 }

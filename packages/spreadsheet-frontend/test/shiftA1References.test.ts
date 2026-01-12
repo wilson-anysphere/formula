@@ -26,6 +26,10 @@ describe("shiftA1References", () => {
     expect(shiftA1References("=SUM('Sheet Name'!$1:2)", 3, 0)).toBe("=SUM('Sheet Name'!$1:5)");
   });
 
+  it("drops the spill-range postfix when shifting creates a #REF!", () => {
+    expect(shiftA1References("=A1#", 0, -1)).toBe("=#REF!");
+  });
+
   it("shifts sheet-qualified references", () => {
     expect(shiftA1References("=Sheet1!A1+1", 2, 0)).toBe("=Sheet1!A3+1");
     expect(shiftA1References("='Sheet Name'!$A$1", 3, 2)).toBe("='Sheet Name'!$A$1");
