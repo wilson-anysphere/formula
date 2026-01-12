@@ -105,7 +105,10 @@ async function publishExtension({ extensionDir, marketplaceUrl, token, privateKe
   // accept a trailing `/api` and normalize it away here.
   const normalizedMarketplaceUrl = (() => {
     const raw = String(marketplaceUrl ?? "").trim();
-    const withoutTrailingSlash = raw.replace(/\/+$/, "");
+    // A defensive normalization: treat query/hash as invalid for the base URL and strip them so we
+    // don't accidentally generate URLs like `https://host/api?x=y/api/publish-bin`.
+    const withoutQueryHash = raw.split("#", 1)[0].split("?", 1)[0];
+    const withoutTrailingSlash = withoutQueryHash.replace(/\/+$/, "");
     if (!withoutTrailingSlash) {
       throw new Error("marketplaceUrl must be a non-empty URL (e.g. https://marketplace.formula.app)");
     }

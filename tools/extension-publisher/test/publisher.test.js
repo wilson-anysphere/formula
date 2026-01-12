@@ -142,3 +142,49 @@ test("publishExtension tolerates marketplaceUrl ending with /api (avoids /api/ap
   assert.equal(published.manifest.main, "./dist/extension.js");
   assert.deepEqual(calls, ["https://marketplace.example.com/api/publish-bin"]);
 });
+
+test("publishExtension strips query/hash from marketplaceUrl", async (t) => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "formula-publish-baseurl-query-"));
+  t.after(async () => {
+    await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  await writeJson(path.join(tmp, "package.json"), {
+    name: "hello",
+    publisher: "publisher",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+  });
+  await fs.mkdir(path.join(tmp, "dist"), { recursive: true });
+  await fs.writeFile(path.join(tmp, "dist", "extension.js"), "module.exports = {};\n", "utf8");
+
+  const { privateKey } = crypto.generateKeyPairSync("ed25519");
+  const privateKeyPem = privateKey.export({ type: "pkcs8", format: "pem" });
+
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(JSON.stringify({ id: "publisher.hello", version: "1.0.0" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const published = await publishExtension({
+    extensionDir: tmp,
+    marketplaceUrl: "https://marketplace.example.com/api?x=y#frag",
+    token: "publisher-token",
+    privateKeyPemOrPath: privateKeyPem,
+    formatVersion: 2,
+  });
+
+  assert.equal(published.id, "publisher.hello");
+  assert.equal(published.version, "1.0.0");
+  assert.deepEqual(calls, ["https://marketplace.example.com/api/publish-bin"]);
+});
