@@ -4119,6 +4119,7 @@ if (
       }
 
       const taintedRanges = Array.isArray(params.taintedRanges) ? params.taintedRanges : [];
+      if (taintedRanges.length === 0) return;
       for (const raw of taintedRanges) {
         if (!raw || typeof raw !== "object") continue;
         const sheetId = typeof (raw as any).sheetId === "string" ? String((raw as any).sheetId) : "";
@@ -4479,8 +4480,44 @@ if (
         return text ?? "";
       },
       writeText: async (text: string) => {
-        // DLP enforcement for extension clipboard writes is handled by `clipboardWriteGuard`
-        // using per-extension taint tracking (data read via `cells.*` and `events.*`).
+        // Extensions can write arbitrary text to the system clipboard via `formula.clipboard.writeText()`.
+        //
+        // Enforce clipboard-copy DLP against the current UI selection (active-cell fallback) so
+        // extensions cannot bypass SpreadsheetApp's copy/cut policy enforcement by directly writing
+        // to the system clipboard.
+        //
+        // Note: DLP enforcement based on per-extension taint tracking (ranges read via `cells.*` and
+        // `events.*`) is handled separately by `clipboardWriteGuard`.
+        try {
+          const sheetId = app.getCurrentSheetId();
+          const active = app.getActiveCell();
+          const selectionRanges = app.getSelectionRanges();
+          const rangesToCheck =
+            selectionRanges.length > 0
+              ? selectionRanges
+              : [{ startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col }];
+
+          for (const range of rangesToCheck) {
+            enforceExtensionClipboardDlpForRange({ sheetId, range: normalizeSelectionRange(range) });
+          }
+        } catch (err) {
+          const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
+          if (isDlpViolation) {
+            const message =
+              typeof (err as any)?.message === "string" && String((err as any).message).trim().length > 0
+                ? String((err as any).message)
+                : "Clipboard copy is blocked by data loss prevention policy.";
+            try {
+              showToast(message, "error");
+            } catch {
+              // `showToast` requires a #toast-root; unit tests don't always include it.
+            }
+            // Throw a generic Error so extension commands fail without depending on the host-side
+            // DlpViolationError type.
+            throw new Error(message);
+          }
+          throw err;
+        }
         const provider = await getClipboardProvider();
         await provider.write({ text: String(text ?? "") });
       },
