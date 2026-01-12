@@ -229,7 +229,7 @@ test.describe("tauri workbook integration", () => {
     });
 
     await expect(page.getByTestId("toast-root")).toContainText(
-      "Workbook partially loaded due to load limits (maxRows=10000, maxCols=200).",
+      "Workbook partially loaded (limited to 10,000 rows × 200 cols).",
       { timeout: 30_000 },
     );
   });
@@ -251,7 +251,7 @@ test.describe("tauri workbook integration", () => {
     });
 
     await expect(page.getByTestId("toast-root")).toContainText(
-      "Workbook partially loaded due to load limits (maxRows=5, maxCols=6).",
+      "Workbook partially loaded (limited to 5 rows × 6 cols).",
       { timeout: 30_000 },
     );
   });
