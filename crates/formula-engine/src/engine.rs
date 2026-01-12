@@ -3810,7 +3810,11 @@ impl Engine {
         };
         let compiled = parsed.map_sheets(&mut map);
 
-        let (value, trace) = crate::debug::evaluate_with_trace(&snapshot, ctx, &compiled);
+        let mut recalc_ctx = crate::eval::RecalcContext::new(0);
+        let separators = self.value_locale.separators;
+        recalc_ctx.number_locale =
+            crate::value::NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep));
+        let (value, trace) = crate::debug::evaluate_with_trace(&snapshot, ctx, &recalc_ctx, &compiled);
 
         Ok(crate::debug::DebugEvaluation {
             formula: formula.to_string(),

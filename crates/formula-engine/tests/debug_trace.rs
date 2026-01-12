@@ -115,7 +115,7 @@ impl ExternalDataProvider for TestExternalDataProvider {
             args.push(Value::Text(caption.to_string()));
         }
         self.record_call("CUBERANKEDMEMBER", args);
-        Value::Error(formula_engine::ErrorKind::NA)
+        Value::Number(rank as f64)
     }
 
     fn cube_set(
@@ -311,6 +311,38 @@ fn debug_trace_supports_cube_calls() {
             .iter()
             .any(|(name, _args)| name == "CUBEVALUE"),
         "expected provider to record a CUBEVALUE call"
+    );
+}
+
+#[test]
+fn debug_trace_respects_value_locale_for_cube_numeric_args() {
+    let provider = Arc::new(TestExternalDataProvider::default());
+
+    let mut engine = Engine::new();
+    assert!(engine.set_value_locale_id("de-DE"));
+    engine.set_external_data_provider(Some(provider.clone()));
+
+    // Rank argument is text that depends on value-locale numeric parsing ("," decimal separator
+    // for de-DE). The provider returns the parsed rank so we can assert debug tracing uses the
+    // same coercion semantics as normal evaluation.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CUBERANKEDMEMBER(\"conn\",\"set\",\"1,5\")")
+        .unwrap();
+    engine.recalculate();
+
+    let computed = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(computed, Value::Number(1.0));
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(dbg.trace.children.len(), 3);
+
+    assert!(
+        provider
+            .calls()
+            .iter()
+            .any(|(name, args)| name == "CUBERANKEDMEMBER" && args.get(2) == Some(&Value::Number(1.0))),
+        "expected provider to record a CUBERANKEDMEMBER call with rank=1"
     );
 }
 

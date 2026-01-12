@@ -190,13 +190,13 @@ pub fn parse_spanned_formula(input: &str) -> Result<SpannedExpr<String>, Formula
 pub(crate) fn evaluate_with_trace<R: crate::eval::ValueResolver>(
     resolver: &R,
     ctx: EvalContext,
+    recalc_ctx: &crate::eval::RecalcContext,
     expr: &SpannedExpr<usize>,
 ) -> (Value, TraceNode) {
-    let recalc_ctx = crate::eval::RecalcContext::new(0);
     let evaluator = TracedEvaluator {
         resolver,
         ctx,
-        recalc_ctx: &recalc_ctx,
+        recalc_ctx,
     };
     evaluator.eval_formula(expr)
 }
@@ -2339,8 +2339,8 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
         if let Value::Error(e) = rank {
             return (Value::Error(e), traces);
         }
-        let rank = match rank.coerce_to_i64() {
-            Ok(n) => n,
+        let rank = match rank.coerce_to_number_with_locale(self.recalc_ctx.number_locale) {
+            Ok(n) => n.trunc() as i64,
             Err(e) => return (Value::Error(e), traces),
         };
 
@@ -2420,8 +2420,8 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
             if let Value::Error(e) = order {
                 return (Value::Error(e), traces);
             }
-            let order = match order.coerce_to_i64() {
-                Ok(n) => n,
+            let order = match order.coerce_to_number_with_locale(self.recalc_ctx.number_locale) {
+                Ok(n) => n.trunc() as i64,
                 Err(e) => return (Value::Error(e), traces),
             };
             Some(order)
