@@ -151,4 +151,40 @@ describe("SpreadsheetApp computed-value cache", () => {
     app.destroy();
     root.remove();
   });
+
+  it("parses A1 addresses in engine computed changes (including $ markers) without allocating A1 strings on lookup", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    const doc = app.getDocument() as any;
+    const sheetId = app.getCurrentSheetId();
+
+    // Make the target cell a formula cell so computed values are meaningful.
+    doc.setCellFormula(sheetId, { row: 0, col: 0 }, "=1+1");
+
+    // Apply computed changes using only an A1 address (with `$` absolute markers).
+    (app as any).applyComputedChanges([{ sheetId, address: "$A$1", value: 123 }]);
+
+    const spy = vi.spyOn(selectionA1, "cellToA1");
+    spy.mockClear();
+
+    for (let i = 0; i < 10_000; i += 1) {
+      expect(app.getCellComputedValueForSheet(sheetId, { row: 0, col: 0 })).toBe(123);
+    }
+    expect(spy).not.toHaveBeenCalled();
+
+    // Invalidate using the address-only change and ensure we fall back to local evaluation.
+    (app as any).invalidateComputedValues([{ sheetId, address: "$A$1" }]);
+    spy.mockClear();
+    expect(app.getCellComputedValueForSheet(sheetId, { row: 0, col: 0 })).toBe(2);
+    expect(spy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
 });
