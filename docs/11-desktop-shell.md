@@ -62,7 +62,12 @@ How this is (currently) handled in the repo:
   If this is missing in a production desktop build, the UI logs an error and shows a long-lived toast (see
   `warnIfMissingCrossOriginIsolationInTauriProd()` in `apps/desktop/src/main.ts`).
 
-Quick verification guidance lives in `apps/desktop/README.md` (“Production/Tauri: `crossOriginIsolated` check”).
+Quick verification guidance lives in `apps/desktop/README.md` (“Production/Tauri: `crossOriginIsolated` check”),
+including an automated smoke check:
+
+```bash
+pnpm -C apps/desktop check:coi
+```
 
 Practical warning: with `Cross-Origin-Embedder-Policy: require-corp`, *every* subresource must be same-origin or explicitly opt-in via CORS/CORP.
 In Tauri production it’s common to load icons/fonts/images via `asset:`/`asset://…`, which may require adding a `Cross-Origin-Resource-Policy`
