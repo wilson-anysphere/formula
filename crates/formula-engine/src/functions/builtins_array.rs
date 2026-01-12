@@ -29,7 +29,11 @@ fn transpose_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             ctx.record_reference(&r);
             let rows = (r.end.row - r.start.row + 1) as usize;
             let cols = (r.end.col - r.start.col + 1) as usize;
-            let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+            let total = rows.saturating_mul(cols);
+            let mut values = Vec::new();
+            if values.try_reserve_exact(total).is_err() {
+                return Value::Error(ErrorKind::Num);
+            }
             for row in r.start.row..=r.end.row {
                 for col in r.start.col..=r.end.col {
                     values.push(ctx.get_cell_value(&r.sheet_id, CellAddr { row, col }));
@@ -40,7 +44,11 @@ fn transpose_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         ArgValue::ReferenceUnion(_) => return Value::Error(ErrorKind::Value),
     };
 
-    let mut out_values = Vec::with_capacity(input.rows.saturating_mul(input.cols));
+    let total = input.rows.saturating_mul(input.cols);
+    let mut out_values = Vec::new();
+    if out_values.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
     for r in 0..input.cols {
         for c in 0..input.rows {
             out_values.push(input.get(c, r).cloned().unwrap_or(Value::Blank));
@@ -114,7 +122,10 @@ fn sequence_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         None => return Value::Error(ErrorKind::Num),
     };
 
-    let mut values = Vec::with_capacity(total);
+    let mut values = Vec::new();
+    if values.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
     for idx in 0..total {
         values.push(Value::Number(start + step * (idx as f64)));
     }
