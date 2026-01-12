@@ -21,7 +21,8 @@ const SyncJwtClaimsSchema = z
     docId: z.string().uuid(),
     orgId: z.string().uuid(),
     role: RoleSchema,
-    sessionId: z.string().uuid().optional()
+    sessionId: z.string().uuid().optional(),
+    apiKeyId: z.string().uuid().optional()
   })
   // Allow standard claims (iat, exp, aud, jti, etc).
   .passthrough();
@@ -129,6 +130,32 @@ export async function introspectSyncToken(
     const expiresAtMs = new Date(session.expires_at).getTime();
     if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
       return { active: false, reason: "session_expired", userId, orgId, role };
+    }
+  }
+
+  if (claims.apiKeyId) {
+    const apiKeyRes = await db.query(
+      `
+        SELECT org_id, created_by, revoked_at
+        FROM api_keys
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [claims.apiKeyId]
+    );
+    if (apiKeyRes.rowCount !== 1) {
+      return { active: false, reason: "api_key_not_found", userId, orgId, role };
+    }
+
+    const apiKey = apiKeyRes.rows[0] as { org_id: string; created_by: string; revoked_at: Date | null };
+    if (apiKey.created_by !== userId) {
+      return { active: false, reason: "api_key_user_mismatch", userId, orgId, role };
+    }
+    if (apiKey.org_id !== orgId) {
+      return { active: false, reason: "api_key_org_mismatch", userId, orgId, role };
+    }
+    if (apiKey.revoked_at) {
+      return { active: false, reason: "api_key_revoked", userId, orgId, role };
     }
   }
 

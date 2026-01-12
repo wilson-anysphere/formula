@@ -670,7 +670,8 @@ export function registerDocRoutes(app: FastifyInstance): void {
         docId,
         orgId: membership.orgId,
         role: membership.role,
-        sessionId: request.session?.id
+        sessionId: request.session?.id,
+        apiKeyId: request.apiKey?.id
       }
     });
 

@@ -16,6 +16,10 @@ export function statusCodeForIntrospectionReason(reason: string | undefined): 40
     case "session_revoked":
     case "session_expired":
     case "session_user_mismatch":
+    case "api_key_not_found":
+    case "api_key_revoked":
+    case "api_key_user_mismatch":
+    case "api_key_org_mismatch":
       return 401;
     default:
       return 403;

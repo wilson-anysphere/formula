@@ -25,6 +25,14 @@ export interface SyncTokenClaims {
    * `/internal/sync/introspect` endpoint.
    */
   sessionId?: string;
+  /**
+   * Optional issuing API key id (when the token is minted using API key auth).
+   *
+   * Revoking an API key (`api_keys.revoked_at`) implicitly revokes all derived sync
+   * tokens because sync-server can revalidate it via the internal
+   * `/internal/sync/introspect` endpoint.
+   */
+  apiKeyId?: string;
 }
 
 export function signSyncToken(params: {
@@ -70,12 +78,16 @@ export function verifySyncToken(params: { token: string; secret: string }): Sync
   const orgId = payload.orgId;
   const role = payload.role;
   const sessionId = payload.sessionId;
+  const apiKeyId = payload.apiKeyId;
 
   if (!isUuid(sub)) throw new Error("invalid_sync_token");
   if (!isUuid(docId)) throw new Error("invalid_sync_token");
   if (!isUuid(orgId)) throw new Error("invalid_sync_token");
   if (!isDocumentRole(role)) throw new Error("invalid_sync_token");
   if (sessionId !== undefined && !isUuid(sessionId)) {
+    throw new Error("invalid_sync_token");
+  }
+  if (apiKeyId !== undefined && !isUuid(apiKeyId)) {
     throw new Error("invalid_sync_token");
   }
 
@@ -88,6 +100,9 @@ export function verifySyncToken(params: { token: string; secret: string }): Sync
 
   if (sessionId !== undefined) {
     claims.sessionId = sessionId;
+  }
+  if (apiKeyId !== undefined) {
+    claims.apiKeyId = apiKeyId;
   }
 
   return claims;

@@ -294,4 +294,102 @@ describe("internal sync token introspection", () => {
     },
     15_000
   );
-}); 
+
+  it(
+    "rejects introspection for revoked API keys",
+    async () => {
+      const register = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "api-key-introspect@example.com",
+          password: "password1234",
+          name: "API Key User",
+          orgName: "API Key Org"
+        }
+      });
+      expect(register.statusCode).toBe(200);
+      const cookie = extractCookie(register.headers["set-cookie"]);
+      const registerBody = register.json() as any;
+      const orgId = registerBody.organization.id as string;
+      const userId = registerBody.user.id as string;
+
+      const allowApiKeys = await app.inject({
+        method: "PATCH",
+        url: `/orgs/${orgId}/settings`,
+        headers: { cookie },
+        payload: { allowedAuthMethods: ["password", "api_key"] }
+      });
+      expect(allowApiKeys.statusCode).toBe(200);
+
+      const createDoc = await app.inject({
+        method: "POST",
+        url: "/docs",
+        headers: { cookie },
+        payload: { orgId, title: "API Key Doc" }
+      });
+      expect(createDoc.statusCode).toBe(200);
+      const docId = (createDoc.json() as any).document.id as string;
+
+      const createKey = await app.inject({
+        method: "POST",
+        url: `/orgs/${orgId}/api-keys`,
+        headers: { cookie },
+        payload: { name: "ci" }
+      });
+      expect(createKey.statusCode).toBe(200);
+      const keyBody = createKey.json() as any;
+      const apiKeyId = keyBody.apiKey.id as string;
+      const apiKeyToken = keyBody.key as string;
+
+      const syncTokenRes = await app.inject({
+        method: "POST",
+        url: `/docs/${docId}/sync-token`,
+        headers: { authorization: `Bearer ${apiKeyToken}` }
+      });
+      expect(syncTokenRes.statusCode).toBe(200);
+      const syncToken = (syncTokenRes.json() as any).token as string;
+
+      const decoded = jwt.verify(syncToken, config.syncTokenSecret, {
+        audience: "formula-sync"
+      }) as any;
+      expect(decoded).toMatchObject({ sub: userId, docId, orgId, apiKeyId });
+
+      const introspectOk = await app.inject({
+        method: "POST",
+        url: "/internal/sync/introspect",
+        headers: { "x-internal-admin-token": config.internalAdminToken! },
+        payload: { token: syncToken, docId }
+      });
+      expect(introspectOk.statusCode).toBe(200);
+      expect(introspectOk.json()).toMatchObject({
+        ok: true,
+        active: true,
+        userId,
+        orgId
+      });
+
+      const revokeKey = await app.inject({
+        method: "DELETE",
+        url: `/orgs/${orgId}/api-keys/${apiKeyId}`,
+        headers: { cookie }
+      });
+      expect(revokeKey.statusCode).toBe(200);
+
+      const introspectRevoked = await app.inject({
+        method: "POST",
+        url: "/internal/sync/introspect",
+        headers: { "x-internal-admin-token": config.internalAdminToken! },
+        payload: { token: syncToken, docId }
+      });
+      expect(introspectRevoked.statusCode).toBe(200);
+      expect(introspectRevoked.json()).toMatchObject({
+        ok: false,
+        active: false,
+        error: "forbidden",
+        reason: "api_key_revoked"
+      });
+    },
+    15_000
+  );
+});
