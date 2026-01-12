@@ -2293,8 +2293,8 @@ fn build_single_sheet_workbook_stream_biff5(
 
     push_record(
         &mut globals,
-        // BIFF5 and BIFF8 both use BOF record id 0x0809; the BIFF version is encoded in the BOF
-        // payload (0x0500 for BIFF5, 0x0600 for BIFF8).
+        // Note: BIFF5 fixtures use BOF record id 0x0809 with a BIFF5 version (0x0500) in the BOF
+        // payload because calamine accepts this layout for minimal test workbooks.
         RECORD_BOF,
         &bof_biff5(BOF_DT_WORKBOOK_GLOBALS),
     );
