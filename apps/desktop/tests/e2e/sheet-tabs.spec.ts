@@ -372,6 +372,39 @@ test.describe("sheet tabs", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe(initialSheetId);
   });
 
+  test("Ctrl+PgUp/PgDn does not switch sheets while the cell editor is open", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Create a second sheet so sheet navigation would be observable.
+    await page.getByTestId("sheet-add").click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    // Return to Sheet1 and open the in-cell editor.
+    const sheet1Tab = page.getByTestId("sheet-tab-Sheet1");
+    await sheet1Tab.click();
+    await expect(sheet1Tab).toHaveAttribute("data-active", "true");
+
+    // Click inside A1 (avoid the shared-grid corner header/select-all region).
+    await page.click("#grid", { position: { x: 80, y: 40 } });
+    await page.keyboard.press("F2");
+
+    const editor = page.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await expect(editor).toBeFocused();
+
+    // Dispatch directly to the textarea so the global shortcut handler must *not* steal it.
+    await page.evaluate(() => {
+      const editor = document.querySelector("textarea.cell-editor") as HTMLTextAreaElement | null;
+      if (!editor) throw new Error("Missing cell editor textarea");
+      const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
+      editor.dispatchEvent(evt);
+    });
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+    await expect(editor).toBeVisible();
+    await expect(editor).toBeFocused();
+  });
+
   test("invalid rename (forbidden characters) keeps editing and blocks switching sheets", async ({ page }) => {
     await gotoDesktop(page);
 
