@@ -66,7 +66,10 @@ impl XlsxPackage {
     /// only looks for `r:embed` on `<blip>` elements within `<rv>` and resolves the target via
     /// the part's `.rels` file.
     pub fn extract_rich_value_images(&self) -> Result<ExtractedRichValueImages, XlsxError> {
-        let Some(metadata) = self.part("xl/metadata.xml") else {
+        let Some(metadata_part) = super::find_metadata_part(self) else {
+            return Ok(ExtractedRichValueImages::default());
+        };
+        let Some(metadata) = self.part(&metadata_part) else {
             return Ok(ExtractedRichValueImages::default());
         };
 

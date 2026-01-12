@@ -263,7 +263,9 @@ fn extract_rich_data_images_via_rel_table(
     // The workbook parsing stack can error for malformed workbook.xml; bubble that up.
     let worksheet_parts = pkg.worksheet_parts()?;
 
-    let metadata_part = resolve_workbook_metadata_part_name(pkg)?;
+    let Some(metadata_part) = find_metadata_part(pkg) else {
+        return Ok(HashMap::new());
+    };
     let Some(metadata_bytes) = pkg.part(&metadata_part) else {
         return Ok(HashMap::new());
     };
@@ -272,7 +274,14 @@ fn extract_rich_data_images_via_rel_table(
         return Ok(HashMap::new());
     }
 
-    let Some(rich_value_rel_bytes) = pkg.part("xl/richData/richValueRel.xml") else {
+    let rich_value_part_for_rels = pkg
+        .part_names()
+        .find(|name| is_rich_value_part(name))
+        .unwrap_or("xl/richData/richValue.xml");
+    let Some(rich_value_rel_part) = find_rich_value_rel_part(pkg, rich_value_part_for_rels) else {
+        return Ok(HashMap::new());
+    };
+    let Some(rich_value_rel_bytes) = pkg.part(&rich_value_rel_part) else {
         return Ok(HashMap::new());
     };
     let rel_index_to_rid = parse_rich_value_rel_rids(rich_value_rel_bytes)?;
@@ -280,8 +289,8 @@ fn extract_rich_data_images_via_rel_table(
         return Ok(HashMap::new());
     }
 
-    let Some(rich_value_rel_rels_bytes) = pkg.part("xl/richData/_rels/richValueRel.xml.rels")
-    else {
+    let rich_value_rel_rels_part = path::rels_for_part(&rich_value_rel_part);
+    let Some(rich_value_rel_rels_bytes) = pkg.part(&rich_value_rel_rels_part) else {
         return Ok(HashMap::new());
     };
     let rid_to_target = parse_rich_value_rel_rels(rich_value_rel_rels_bytes)?;
@@ -321,7 +330,7 @@ fn extract_rich_data_images_via_rel_table(
             let Some(target) = rid_to_target.get(rid) else {
                 continue;
             };
-            let target_part = path::resolve_target("xl/richData/richValueRel.xml", target);
+            let target_part = path::resolve_target(&rich_value_rel_part, target);
             let Some(bytes) = pkg.part(&target_part) else {
                 continue;
             };
@@ -351,7 +360,9 @@ pub fn extract_rich_cell_images(
     // The workbook parsing stack can error for malformed workbook.xml; bubble that up.
     let worksheet_parts = pkg.worksheet_parts()?;
 
-    let metadata_part = resolve_workbook_metadata_part_name(pkg)?;
+    let Some(metadata_part) = find_metadata_part(pkg) else {
+        return Ok(HashMap::new());
+    };
     let Some(metadata_bytes) = pkg.part(&metadata_part) else {
         return Ok(HashMap::new());
     };
@@ -407,7 +418,15 @@ pub fn extract_rich_cell_images(
         return Ok(HashMap::new());
     }
 
-    let Some(rich_value_rel_bytes) = pkg.part("xl/richData/richValueRel.xml") else {
+    let rich_value_part_for_rels = rich_value_parts
+        .iter()
+        .copied()
+        .find(|name| *name == "xl/richData/richValue.xml")
+        .unwrap_or(rich_value_parts[0]);
+    let Some(rich_value_rel_part) = find_rich_value_rel_part(pkg, rich_value_part_for_rels) else {
+        return Ok(HashMap::new());
+    };
+    let Some(rich_value_rel_bytes) = pkg.part(&rich_value_rel_part) else {
         return Ok(HashMap::new());
     };
     let rel_index_to_rid = parse_rich_value_rel_rids(rich_value_rel_bytes)?;
@@ -415,8 +434,8 @@ pub fn extract_rich_cell_images(
         return Ok(HashMap::new());
     }
 
-    let Some(rich_value_rel_rels_bytes) = pkg.part("xl/richData/_rels/richValueRel.xml.rels")
-    else {
+    let rich_value_rel_rels_part = path::rels_for_part(&rich_value_rel_part);
+    let Some(rich_value_rel_rels_bytes) = pkg.part(&rich_value_rel_rels_part) else {
         return Ok(HashMap::new());
     };
     let rid_to_target = parse_rich_value_rel_rels(rich_value_rel_rels_bytes)?;
@@ -435,7 +454,7 @@ pub fn extract_rich_cell_images(
         let Some(target) = rid_to_target.get(rid.as_str()) else {
             continue;
         };
-        let target_part = path::resolve_target("xl/richData/richValueRel.xml", target);
+        let target_part = path::resolve_target(&rich_value_rel_part, target);
         let Some(bytes) = pkg.part(&target_part) else {
             continue;
         };
@@ -445,34 +464,117 @@ pub fn extract_rich_cell_images(
     Ok(out)
 }
 
-fn resolve_workbook_metadata_part_name(pkg: &XlsxPackage) -> Result<String, RichDataError> {
-    const DEFAULT: &str = "xl/metadata.xml";
-    const REL_TYPE_SHEET_METADATA: &str =
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata";
-    const REL_TYPE_METADATA: &str =
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata";
+/// Best-effort discovery of the workbook metadata part (`xl/metadata*.xml`).
+///
+/// Excel has historically used `xl/metadata.xml`, but real-world packages may:
+/// - reference the metadata part via `xl/_rels/workbook.xml.rels`
+/// - use numbered part names like `xl/metadata1.xml`
+///
+/// This helper prefers relationship-based resolution and falls back to filename scans.
+pub(crate) fn find_metadata_part(pkg: &XlsxPackage) -> Option<String> {
+    const WORKBOOK_PART: &str = "xl/workbook.xml";
+    const WORKBOOK_RELS_PART: &str = "xl/_rels/workbook.xml.rels";
 
-    let Some(rels_bytes) = pkg.part("xl/_rels/workbook.xml.rels") else {
-        return Ok(DEFAULT.to_string());
-    };
+    if let Some(workbook_rels) = pkg.part(WORKBOOK_RELS_PART) {
+        if let Ok(rels) = crate::openxml::parse_relationships(workbook_rels) {
+            for rel in rels {
+                if rel
+                    .target_mode
+                    .as_deref()
+                    .is_some_and(|m| m.trim().eq_ignore_ascii_case("External"))
+                {
+                    continue;
+                }
 
-    let rels = crate::openxml::parse_relationships(rels_bytes)?;
-    for rel in rels {
-        if rel
-            .target_mode
-            .as_deref()
-            .is_some_and(|m| m.trim().eq_ignore_ascii_case("External"))
-        {
-            continue;
-        }
-
-        let type_uri = rel.type_uri.trim();
-        if type_uri == REL_TYPE_SHEET_METADATA || type_uri == REL_TYPE_METADATA {
-            return Ok(path::resolve_target("xl/workbook.xml", &rel.target));
+                // Prefer explicit metadata relationship types, but also accept any target that ends
+                // with `metadata.xml` (e.g. `custom-metadata.xml` or `xl/metadata.xml`).
+                if rel.target.ends_with("metadata.xml") || rel.type_uri.ends_with("/metadata") {
+                    let resolved = path::resolve_target(WORKBOOK_PART, &rel.target);
+                    if pkg.part(&resolved).is_some() {
+                        return Some(resolved);
+                    }
+                }
+            }
         }
     }
 
-    Ok(DEFAULT.to_string())
+    if pkg.part("xl/metadata.xml").is_some() {
+        return Some("xl/metadata.xml".to_string());
+    }
+
+    find_lowest_numbered_part(pkg, "xl/metadata", ".xml")
+}
+
+fn resolve_workbook_metadata_part_name(pkg: &XlsxPackage) -> Result<String, RichDataError> {
+    Ok(find_metadata_part(pkg).unwrap_or_else(|| "xl/metadata.xml".to_string()))
+}
+
+/// Best-effort discovery of the richValueRel part (`xl/richData/richValueRel*.xml`) for a chosen
+/// richValue part.
+///
+/// Excel typically stores this at `xl/richData/richValueRel.xml`, but it can also be referenced
+/// via the richValue part's relationships (`xl/richData/_rels/richValue*.xml.rels`) and/or use a
+/// numbered filename.
+pub(crate) fn find_rich_value_rel_part(pkg: &XlsxPackage, rich_value_part: &str) -> Option<String> {
+    if pkg.part("xl/richData/richValueRel.xml").is_some() {
+        return Some("xl/richData/richValueRel.xml".to_string());
+    }
+
+    let rich_value_rels_part = path::rels_for_part(rich_value_part);
+    if let Some(rich_value_rels_xml) = pkg.part(&rich_value_rels_part) {
+        if let Ok(rels) = crate::openxml::parse_relationships(rich_value_rels_xml) {
+            for rel in rels {
+                if rel
+                    .target_mode
+                    .as_deref()
+                    .is_some_and(|m| m.trim().eq_ignore_ascii_case("External"))
+                {
+                    continue;
+                }
+                if rel.target.contains("richValueRel") {
+                    let resolved = path::resolve_target(rich_value_part, &rel.target);
+                    if pkg.part(&resolved).is_some() {
+                        return Some(resolved);
+                    }
+                }
+            }
+        }
+    }
+
+    find_lowest_numbered_part(pkg, "xl/richData/richValueRel", ".xml")
+}
+
+fn find_lowest_numbered_part(pkg: &XlsxPackage, prefix: &str, suffix: &str) -> Option<String> {
+    let mut best: Option<(u32, String)> = None;
+
+    for part in pkg.part_names() {
+        let Some(num) = numeric_suffix(part, prefix, suffix) else {
+            continue;
+        };
+
+        match &mut best {
+            Some((best_num, best_name)) => {
+                if num < *best_num || (num == *best_num && part < best_name.as_str()) {
+                    *best_num = num;
+                    *best_name = part.to_string();
+                }
+            }
+            None => best = Some((num, part.to_string())),
+        }
+    }
+
+    best.map(|(_, name)| name)
+}
+
+fn numeric_suffix(part_name: &str, prefix: &str, suffix: &str) -> Option<u32> {
+    let mid = part_name.strip_prefix(prefix)?.strip_suffix(suffix)?;
+    if !mid.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    if mid.is_empty() {
+        return Some(0);
+    }
+    mid.parse::<u32>().ok()
 }
 
 fn build_rich_value_rel_index_to_target_part(

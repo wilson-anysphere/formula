@@ -972,7 +972,7 @@ fn write_updated_cell<W: Write>(
             CellValueKind::Other { t } => c_start.push_attribute(("t", t.as_str())),
         }
     }
-    // `vm="..."` is a SpreadsheetML value-metadata pointer (typically into `xl/metadata.xml`).
+    // `vm="..."` is a SpreadsheetML value-metadata pointer (typically into `xl/metadata*.xml`).
     //
     // Excel uses this for rich value types (linked data types, embedded images, etc). When the
     // cell's value changes away from those semantics, drop `vm` to avoid leaving a dangling

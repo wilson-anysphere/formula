@@ -212,7 +212,7 @@ pub fn patch_xlsx_streaming_with_recalc_policy<R: Read + Seek, W: Write + Seek>(
     for patches in patches_by_part.values_mut() {
         patches.sort_by_key(|p| (p.cell.row, p.cell.col));
     }
-
+ 
     let mut archive = ZipArchive::new(input)?;
     // `vm` points into `xl/metadata.xml` value metadata (rich values / images-in-cell).
     //
