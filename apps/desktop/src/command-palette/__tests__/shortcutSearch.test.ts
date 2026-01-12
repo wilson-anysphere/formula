@@ -55,6 +55,21 @@ describe("command-palette shortcut search", () => {
     ]);
   });
 
+  test("matches option/alt modifier queries against mac symbol shortcuts (cmd+option+f vs ⌥⌘F)", () => {
+    const commands = [
+      { commandId: "edit.replace", title: "Replace", category: "Edit", source: { kind: "builtin" as const } },
+    ];
+    const keybindingIndex = new Map<string, readonly string[]>([["edit.replace", ["⌥⌘F"]]]);
+
+    expect(searchShortcutCommands({ commands, keybindingIndex, query: "cmd+option+f" }).map((c) => c.commandId)).toEqual([
+      "edit.replace",
+    ]);
+
+    // Common synonyms should also match.
+    expect(searchShortcutCommands({ commands, keybindingIndex, query: "cmd+opt+f" }).map((c) => c.commandId)).toEqual(["edit.replace"]);
+    expect(searchShortcutCommands({ commands, keybindingIndex, query: "cmd+alt+f" }).map((c) => c.commandId)).toEqual(["edit.replace"]);
+  });
+
   test("matches pageup/pagedown tokens against mac symbol shortcuts (cmd+pgup vs ⌘⇞)", () => {
     const commands = [
       {
