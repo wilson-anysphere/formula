@@ -85,10 +85,25 @@ pub fn parse_rich_value_rel_table(xml_bytes: &[u8]) -> Result<Vec<String>, XlsxE
     let doc = Document::parse(xml)?;
 
     let mut out = Vec::new();
-    for rel in doc
+    // Typical shape:
+    // <rvRel> <rels> <rel r:id="rId*"/>* </rels> </rvRel>
+    //
+    // Be tolerant: allow wrappers under `<rels>`, and fall back to scanning the full document if a
+    // `<rels>` container isn't present.
+    let rels_root = doc
         .descendants()
-        .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rel"))
-    {
+        .find(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rels"));
+    let rel_nodes = match rels_root {
+        Some(rels) => rels
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rel"))
+            .collect::<Vec<_>>(),
+        None => doc
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rel"))
+            .collect::<Vec<_>>(),
+    };
+    for rel in rel_nodes {
         out.push(get_rel_id(&rel).unwrap_or_default());
     }
 
@@ -192,5 +207,24 @@ mod tests {
 
         let parsed = parse_rich_value_rel_table(xml.as_bytes()).expect("parse");
         assert_eq!(parsed, vec!["rId7".to_string()]);
+    }
+
+    #[test]
+    fn prefers_rels_container_when_present() {
+        // Avoid false positives: if a document contains an unrelated `<rel>` element outside the
+        // `<rels>` container, do not treat it as part of the relationship id table.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rels>
+    <rel r:id="rId1"/>
+  </rels>
+  <other>
+    <rel r:id="rId2"/>
+  </other>
+</rvRel>"#;
+
+        let parsed = parse_rich_value_rel_table(xml.as_bytes()).expect("parse");
+        assert_eq!(parsed, vec!["rId1".to_string()]);
     }
 }
