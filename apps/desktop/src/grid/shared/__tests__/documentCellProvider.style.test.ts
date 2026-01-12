@@ -158,4 +158,42 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect(cellC1).not.toBeNull();
     expect((cellC1 as any)?.style?.textIndentPx).toBeUndefined();
   });
+
+  it("respects layered sheet/row/col/cell formatting precedence", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", "Styled");
+    // Sheet -> col -> row -> cell precedence.
+    doc.setSheetFormat(sheetId, { fill: { pattern: "solid", fgColor: "#FFFFFF00" } }); // yellow
+    doc.setColFormat(sheetId, 0, { fill: { pattern: "solid", fgColor: "#FF00FF00" } }); // green
+    doc.setRowFormat(sheetId, 0, { fill: { pattern: "solid", fgColor: "#FF0000FF" } }); // blue
+    doc.setRangeFormat(sheetId, "A1", { fill: { pattern: "solid", fgColor: "#FFFF0000" } }); // red (cell)
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const a1 = provider.getCell(1, 1);
+    expect(a1).not.toBeNull();
+    expect(a1?.value).toBe("Styled");
+    expect((a1 as any).style?.fill).toBe("#ff0000");
+
+    // B1: row formatting wins (no col/cell override).
+    const b1 = provider.getCell(1, 2);
+    expect(b1).not.toBeNull();
+    expect((b1 as any).style?.fill).toBe("#0000ff");
+
+    // A2: col formatting wins (no row/cell override).
+    const a2 = provider.getCell(2, 1);
+    expect(a2).not.toBeNull();
+    expect((a2 as any).style?.fill).toBe("#00ff00");
+  });
 });
