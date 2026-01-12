@@ -598,8 +598,16 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
       ),
     };
 
+    // Avoid pulling in the default sqlite-backed audit store here; that initialization can be slow
+    // and make this cancellation regression test flaky under full-suite runs.
+    const auditStore = {
+      logEntry: vi.fn(async () => {}),
+      listEntries: vi.fn(async () => []),
+    };
+
     const app = new SpreadsheetApp(root, status, {
-      inlineEdit: { llmClient, model: "unit-test-model" },
+      // Ensure the run can complete promptly after cancellation so we can re-open inline edit.
+      inlineEdit: { llmClient, model: "unit-test-model", auditStore: auditStore as any },
     });
 
     app.selectRange({ range: { startRow: 0, endRow: 2, startCol: 2, endCol: 2 } }); // C1:C3
@@ -632,7 +640,7 @@ describe("AI inline edit (Cmd/Ctrl+K)", () => {
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
       const el = document.querySelector<HTMLElement>('[data-testid="inline-edit-overlay"]');
       return el && !el.hidden ? el : null;
-    });
+    }, 5000);
 
     const doc = app.getDocument();
     expect(doc.getCell("Sheet1", "C1").value).toBeNull();
