@@ -134,9 +134,7 @@ function unionCell(rect: Rect | undefined, row: number, col: number): Rect {
   };
 }
 
-function getUiSelectionRect(app: SpreadsheetAppLike): Rect {
-  const active = app.getActiveCell();
-  const ranges = app.getSelectionRanges();
+function getUiSelectionRectFromState(active: { row: number; col: number }, ranges: Range[]): Rect {
   const containing =
     ranges.find(
       (r) =>
@@ -154,10 +152,16 @@ function getUiSelectionRect(app: SpreadsheetAppLike): Rect {
   });
 }
 
+function getUiSelectionRect(app: SpreadsheetAppLike): Rect {
+  const active = app.getActiveCell();
+  return getUiSelectionRectFromState(active, app.getSelectionRanges());
+}
+
 async function setMacroUiContext(args: InstallVbaEventMacrosArgs, context?: UiContext): Promise<void> {
   const sheetId = context?.sheetId ?? args.app.getCurrentSheetId();
   const active = context ? { row: context.activeRow, col: context.activeCol } : args.app.getActiveCell();
-  const selectionRaw = context?.selection ?? getUiSelectionRect(args.app);
+  const selectionRaw =
+    context?.selection ?? getUiSelectionRectFromState(active, context ? [] : args.app.getSelectionRanges());
   const selection = normalizeRect({
     startRow: nonNegativeInt(selectionRaw.startRow),
     startCol: nonNegativeInt(selectionRaw.startCol),
@@ -782,7 +786,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     if (!eventsAllowed) return;
 
     const active = args.app.getActiveCell();
-    const selectionRect = getUiSelectionRect(args.app);
+    const selectionRect = getUiSelectionRectFromState(active, args.app.getSelectionRanges());
 
     for (const delta of deltas) {
       if (!delta?.before || !delta?.after) continue;
@@ -823,7 +827,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     }
 
     const active = args.app.getActiveCell();
-    const rect = getUiSelectionRect(args.app);
+    const rect = getUiSelectionRectFromState(active, selection.ranges);
 
     const sheetId = args.app.getCurrentSheetId();
     const key = `${sheetId}:${rect.startRow},${rect.startCol}:${rect.endRow},${rect.endCol}@${active.row},${active.col}`;
