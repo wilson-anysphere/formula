@@ -430,6 +430,31 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(sheetModel!.cells.size).toBe(0);
   });
 
+  it("does not drop existing per-cell formatting overrides that match inherited formatting when writeRange round-trips formats", () => {
+    const controller = new DocumentController();
+    controller.setRangeValues("Sheet1", "A1", [[1]]);
+    controller.setRangeFormat("Sheet1", "A1", { font: { bold: true } }, { label: "Bold A1" });
+
+    const beforeCell = controller.getCell("Sheet1", "A1");
+    expect(beforeCell.styleId).toBeGreaterThan(0);
+
+    // Apply column-level bold via layered formatting (colStyleIds).
+    controller.setColFormat("Sheet1", 0, { font: { bold: true } });
+    expect(controller.getCellFormat("Sheet1", "A1").font?.bold).toBe(true);
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    api.writeRange({ sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 1, endCol: 1 }, [[{ value: 1, format: { bold: true } }]]);
+
+    // writeRange should not clear A1's existing per-cell bold override just because it is also
+    // satisfied by the inherited column formatting.
+    const afterCell = controller.getCell("Sheet1", "A1");
+    expect(afterCell.styleId).toBeGreaterThan(0);
+
+    // Clearing the inherited column formatting should leave the per-cell formatting intact.
+    controller.setColFormat("Sheet1", 0, null);
+    expect(api.getCell({ sheet: "Sheet1", row: 1, col: 1 }).format).toEqual({ bold: true });
+  });
+
   it("clears stale formatting when writeRange moves formatted cells (no contamination)", () => {
     const controller = new DocumentController();
     controller.setRangeValues("Sheet1", "A1:B1", [[1, 2]]);

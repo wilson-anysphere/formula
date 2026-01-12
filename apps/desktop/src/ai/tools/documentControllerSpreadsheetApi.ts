@@ -686,7 +686,13 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
           // CellData.format in writeRange is treated like the ai-tools InMemoryWorkbook: it is a
           // per-cell override for supported keys. We still want to preserve layered defaults
           // (sheet/row/col) without materializing them into per-cell styles. To do that, drop any
-          // requested keys that are already satisfied by inherited formatting.
+          // requested keys that are already satisfied by inherited formatting *when the cell does
+          // not already have an explicit per-cell override for that key*.
+          //
+          // Note: we must preserve existing per-cell overrides even if they match inherited
+          // formatting, otherwise writeRange round-trips (e.g. sort_range) could accidentally
+          // "promote" direct cell formatting into column/row defaults, changing how formatting
+          // moves if the inherited layer is later cleared.
           let formatToWrite: CellFormat | null | undefined = null;
           if (!requestedFormat) {
             // No format specified for this cell => clear ai-tools supported keys (preserve other style keys).
@@ -694,10 +700,13 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
           } else {
             const override: CellFormat = {};
             const inherited = inheritedFormat ?? {};
+            const explicit = getFormatForStyleId(cellStyleId) ?? {};
             for (const key of Object.keys(requestedFormat) as Array<keyof CellFormat>) {
               const value = requestedFormat[key];
               if (value === undefined) continue;
-              if ((inherited as any)[key] === value) continue;
+              // Avoid materializing inherited formatting into per-cell styles for cells that don't
+              // already have an explicit override, but keep any existing explicit overrides.
+              if ((inherited as any)[key] === value && (explicit as any)[key] === undefined) continue;
               (override as any)[key] = value;
             }
             formatToWrite = Object.keys(override).length > 0 ? override : {};
