@@ -45,8 +45,12 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     //
     // Note: `VBA/dir` stores records as: u16 id, u32 len, `len` bytes of record data.
     const PROJECTSYSKIND: u16 = 0x0001;
-    // Present in many real-world files, but MS-OVBA §2.4.2.6 `ProjectNormalizedData` does not
-    // incorporate it (so it must not affect hashing/signature binding).
+    // PROJECTCOMPATVERSION (0x004A) is present in many real-world `VBA/dir` streams and must be
+    // incorporated into `ProjectNormalizedData` (see `tests/project_normalized_data.rs`).
+    //
+    // Note: 0x004A is also used by some module-level Unicode records; we only treat it as
+    // PROJECTCOMPATVERSION while still in the ProjectInformation section (before any MODULENAME
+    // records).
     const PROJECTCOMPATVERSION: u16 = 0x004A;
     const PROJECTLCID: u16 = 0x0002;
     const PROJECTCODEPAGE: u16 = 0x0003;
@@ -96,10 +100,17 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
         let data = &dir_decompressed[offset..offset + len];
         offset += len;
 
+        // Stop once we hit the first module record group to avoid accidentally treating module-level
+        // Unicode records (some of which reuse the same numeric IDs) as ProjectInformation records.
+        if id == 0x0019 {
+            break;
+        }
+
         let next_id = peek_next_record_id(&dir_decompressed, offset);
 
         match id {
             PROJECTSYSKIND
+            | PROJECTCOMPATVERSION
             | PROJECTLCID
             | PROJECTLCIDINVOKE
             | PROJECTCODEPAGE
@@ -109,11 +120,6 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
             | PROJECTLIBFLAGS
             | PROJECTVERSION => {
                 out.extend_from_slice(data);
-            }
-
-            PROJECTCOMPATVERSION => {
-                // MS-OVBA `ProjectNormalizedData` pseudocode does not include this record's data.
-                // Keep parsing resilient to its presence, but do not incorporate it into the output.
             }
 
             PROJECTDOCSTRING => {

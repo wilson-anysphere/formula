@@ -58,7 +58,7 @@ fn project_normalized_data_includes_expected_dir_records_and_prefers_unicode_var
 
         // Included: PROJECTSYSKIND
         push_record(&mut out, 0x0001, &1u32.to_le_bytes());
-        // Excluded: PROJECTCOMPATVERSION (must not affect ProjectNormalizedData)
+        // Included (optional): PROJECTCOMPATVERSION
         push_record(&mut out, 0x004A, &0xDEADBEEFu32.to_le_bytes());
         // Included: PROJECTLCID
         push_record(&mut out, 0x0002, &0x0409u32.to_le_bytes());
@@ -88,6 +88,7 @@ fn project_normalized_data_includes_expected_dir_records_and_prefers_unicode_var
 
     let expected = [
         1u32.to_le_bytes().as_slice(),
+        0xDEADBEEFu32.to_le_bytes().as_slice(),
         0x0409u32.to_le_bytes().as_slice(),
         1252u16.to_le_bytes().as_slice(),
         b"MyProject".as_slice(),
@@ -102,10 +103,9 @@ fn project_normalized_data_includes_expected_dir_records_and_prefers_unicode_var
 }
 
 #[test]
-fn project_normalized_data_skips_projectcompatversion_record() {
+fn project_normalized_data_includes_projectcompatversion_record() {
     // Real-world `VBA/dir` streams often include PROJECTCOMPATVERSION (0x004A) in the
-    // ProjectInformation record list. MS-OVBA does not include this record in the
-    // ProjectNormalizedData transcript, so it must be safely skipped.
+    // ProjectInformation record list. Ensure it contributes to ProjectNormalizedData.
     let compat_version = 0xDEADBEEFu32.to_le_bytes();
 
     fn build_dir(include_compat: bool, compat_version: &[u8; 4]) -> Vec<u8> {
@@ -147,9 +147,9 @@ fn project_normalized_data_skips_projectcompatversion_record() {
     let normalized_with =
         project_normalized_data(&vba_with).expect("ProjectNormalizedData with compat");
 
-    assert_eq!(
+    assert_ne!(
         normalized_without, normalized_with,
-        "PROJECTCOMPATVERSION (0x004A) must not affect ProjectNormalizedData"
+        "PROJECTCOMPATVERSION (0x004A) must affect ProjectNormalizedData when present"
     );
     assert!(
         find_subslice(&normalized_without, b"VBAProject").is_some(),
@@ -159,13 +159,13 @@ fn project_normalized_data_skips_projectcompatversion_record() {
         !normalized_without
             .windows(compat_version.len())
             .any(|w| w == compat_version),
-        "ProjectNormalizedData must skip PROJECTCOMPATVERSION payload bytes"
+        "ProjectNormalizedData without compat must not contain PROJECTCOMPATVERSION payload bytes"
     );
     assert!(
-        !normalized_with
+        normalized_with
             .windows(compat_version.len())
             .any(|w| w == compat_version),
-        "ProjectNormalizedData must skip PROJECTCOMPATVERSION payload bytes"
+        "ProjectNormalizedData must include PROJECTCOMPATVERSION payload bytes when present"
     );
 }
 
