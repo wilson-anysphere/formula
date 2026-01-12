@@ -1,5 +1,6 @@
 const DEFAULT_ALLOWED_PROTOCOLS = new Set(["http", "https", "mailto"]);
-const BLOCKED_PROTOCOLS = new Set(["javascript", "data"]);
+// Schemes that should never be opened via external navigation (even with user confirmation).
+const BLOCKED_PROTOCOLS = new Set(["javascript", "data", "file"]);
 
 /**
  * @typedef {{
@@ -15,8 +16,9 @@ const BLOCKED_PROTOCOLS = new Set(["javascript", "data"]);
  *
  * Security:
  * - http/https/mailto allowed by default
- * - javascript:/data: are always blocked
- * - any other protocol requires an explicit confirmation prompt
+ * - javascript:/data:/file: are always blocked
+ * - in Tauri builds, any other protocol is blocked (Rust allowlist boundary)
+ * - in web builds, other protocols may be allowed with an explicit confirmation prompt
  *
  * Permission integration:
  * - if a `permissions` manager is provided, `external_navigation` is requested
@@ -46,6 +48,11 @@ export async function openExternalHyperlink(uri, deps) {
   const allowlist = deps.allowedProtocols ?? DEFAULT_ALLOWED_PROTOCOLS;
   const isTrusted = allowlist.has(protocol);
   if (!isTrusted) {
+    // In the desktop shell, link opening is routed through a Rust command that enforces a strict
+    // scheme allowlist. Avoid prompting for protocols that will be rejected anyway.
+    const isTauri = typeof globalThis !== "undefined" && Boolean(globalThis.__TAURI__);
+    if (isTauri) return false;
+
     const confirm = deps.confirmUntrustedProtocol ?? (async () => false);
     const ok = await confirm(
       `Open link with untrusted protocol "${protocol}"?\n\n${uri}\n\n` +
@@ -69,4 +76,3 @@ export async function openExternalHyperlink(uri, deps) {
   await deps.shellOpen(uri);
   return true;
 }
-
