@@ -135,6 +135,86 @@ fn oddlyield_extreme_prices_roundtrip() {
 }
 
 #[test]
+fn odd_coupon_functions_coerce_frequency_like_excel() {
+    let mut sheet = TestSheet::new();
+    // Task: coercion edge cases for `frequency`.
+    //
+    // Excel coerces:
+    // - numeric text: "2" -> 2
+    // - TRUE/FALSE -> 1/0
+    //
+    // `frequency` must be one of {1,2,4}. So FALSE (0) should produce #NUM!.
+
+    // Baseline semiannual (frequency=2) example (Task 56).
+    let baseline_semiannual = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0)";
+    let baseline_semiannual_value = match eval_number_or_skip(&mut sheet, baseline_semiannual) {
+        Some(v) => v,
+        None => return,
+    };
+
+    let semiannual_text_freq = r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,"2",0)"#;
+    let semiannual_text_freq_value = eval_number_or_skip(&mut sheet, semiannual_text_freq)
+        .expect("ODDFPRICE should accept frequency supplied as numeric text");
+    assert_close(semiannual_text_freq_value, baseline_semiannual_value, 1e-9);
+
+    // Annual schedule (frequency=1) example.
+    let baseline_annual = "=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,0)";
+    let baseline_annual_value = eval_number_or_skip(&mut sheet, baseline_annual)
+        .expect("ODDFPRICE should accept explicit annual frequency");
+
+    let annual_true_freq = "=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,TRUE,0)";
+    let annual_true_freq_value = eval_number_or_skip(&mut sheet, annual_true_freq)
+        .expect("ODDFPRICE should accept TRUE frequency (TRUE->1)");
+    assert_close(annual_true_freq_value, baseline_annual_value, 1e-9);
+
+    let annual_false_freq = "=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,FALSE,0)";
+    match sheet.eval(annual_false_freq) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM! for frequency=FALSE (0), got {other:?}"),
+    }
+}
+
+#[test]
+fn odd_coupon_functions_coerce_basis_like_excel() {
+    let mut sheet = TestSheet::new();
+    // Task: coercion edge cases for `basis`.
+    //
+    // Excel coerces:
+    // - TRUE/FALSE -> 1/0
+    // - blank -> 0 (same as default)
+    //
+    // Use an ODDFPRICE example with basis=0/1 to confirm.
+
+    let baseline_basis_0 = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0)";
+    let baseline_basis_0_value = match eval_number_or_skip(&mut sheet, baseline_basis_0) {
+        Some(v) => v,
+        None => return,
+    };
+
+    // Basis passed as a blank cell should behave like basis=0.
+    // (A1 is unset/blank by default.)
+    let blank_basis = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,A1)";
+    let blank_basis_value = eval_number_or_skip(&mut sheet, blank_basis)
+        .expect("ODDFPRICE should accept blank basis and treat it as 0");
+    assert_close(blank_basis_value, baseline_basis_0_value, 1e-9);
+
+    let false_basis = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,FALSE)";
+    let false_basis_value = eval_number_or_skip(&mut sheet, false_basis)
+        .expect("ODDFPRICE should accept FALSE basis (FALSE->0)");
+    assert_close(false_basis_value, baseline_basis_0_value, 1e-9);
+
+    let baseline_basis_1 = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1)";
+    let baseline_basis_1_value = eval_number_or_skip(&mut sheet, baseline_basis_1)
+        .expect("ODDFPRICE should accept explicit basis=1");
+
+    let true_basis = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,TRUE)";
+    let true_basis_value = eval_number_or_skip(&mut sheet, true_basis)
+        .expect("ODDFPRICE should accept TRUE basis (TRUE->1)");
+    assert_close(true_basis_value, baseline_basis_1_value, 1e-9);
+}
+
+#[test]
 fn odd_first_coupon_bond_functions_respect_workbook_date_system() {
     let mut sheet = TestSheet::new();
 
