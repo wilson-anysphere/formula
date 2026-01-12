@@ -3645,16 +3645,6 @@ if (
     return { startRow, startCol, endRow, endCol };
   };
 
-  const getClipboardDlpSelection = () => {
-    const sheetId = app.getCurrentSheetId();
-    const active = app.getActiveCell();
-    const selection = app.getSelectionRanges?.()[0] ?? null;
-    const range = selection
-      ? normalizeSelectionRange(selection)
-      : { startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
-    return { sheetId, range };
-  };
-
   const enforceExtensionClipboardDlpForRange = (params: {
     sheetId: string;
     range: { startRow: number; startCol: number; endRow: number; endCol: number };
@@ -4101,28 +4091,6 @@ if (
         return text ?? "";
       },
       writeText: async (text: string) => {
-        // Defense-in-depth: enforce clipboard-copy DLP on the current selection before writing.
-        // The BrowserExtensionHost also enforces DLP via `clipboardWriteGuard` using taint tracking,
-        // but this protects against misconfiguration and selection changes between guard + write.
-        try {
-          const selection = getClipboardDlpSelection();
-          enforceExtensionClipboardDlpForRange({ sheetId: selection.sheetId, range: selection.range });
-        } catch (err) {
-          const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
-          if (isDlpViolation) {
-            const message =
-              typeof (err as any)?.message === "string" && (err as any).message.trim()
-                ? String((err as any).message)
-                : "Clipboard copy blocked by data loss prevention policy.";
-            try {
-              showToast(message, "error");
-            } catch {
-              // `showToast` requires a #toast-root; unit tests don't always include it.
-            }
-            throw new Error(message);
-          }
-          throw err;
-        }
         const provider = await clipboardProviderPromise;
         await provider.write({ text: String(text ?? "") });
       },

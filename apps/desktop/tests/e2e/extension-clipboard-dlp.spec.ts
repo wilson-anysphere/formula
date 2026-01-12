@@ -162,7 +162,7 @@ test.describe("Extension clipboard DLP (taint tracking)", () => {
     expect(clipboardText).toBe(marker);
   });
 
-  test("allows clipboard.writeText when the extension did not read any cells (even if Restricted cells exist)", async ({
+  test("allows clipboard.writeText when the extension did not read any cells (even if the selection is Restricted)", async ({
     page,
   }) => {
     const extensionId = "formula-test.dlp-clipboard-allow";
@@ -178,12 +178,13 @@ test.describe("Extension clipboard DLP (taint tracking)", () => {
     await gotoDesktop(page);
     await assertClipboardSupportedOrSkip(page);
 
-    // Move off the Restricted cell so selection-based DLP enforcement doesn't block this test.
+    // Keep the active cell on the Restricted range; clipboard should still be allowed because the
+    // extension never reads any cell data (no taint).
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const app: any = (window as any).__formulaApp;
       const sheetId = app.getCurrentSheetId();
-      app.activateCell({ sheetId, row: 0, col: 1 }); // B1
+      app.activateCell({ sheetId, row: 0, col: 0 }); // A1
     });
 
     const marker = `__formula_clipboard_marker__${Math.random().toString(16).slice(2)}`;
