@@ -6,6 +6,7 @@ import "./styles/workspace.css";
 import "./styles/comments.css";
 import "./styles/shell.css";
 import "./styles/auditing.css";
+import "./styles/format-cells-dialog.css";
 
 import { ThemeController } from "./theme/themeController.js";
 
@@ -53,6 +54,8 @@ import {
 } from "./power-query/service.js";
 import { createPowerQueryRefreshStateStore } from "./power-query/refreshStateStore.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
+import { openFormatCellsDialog } from "./formatting/openFormatCellsDialog.js";
+import { installFormattingShortcuts } from "./formatting/shortcuts.js";
 import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.js";
 import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
 import { ContextKeyService } from "./extensions/contextKeys.js";
@@ -341,6 +344,19 @@ app.onEditStateChange((isEditing) => {
 });
 
 app.focus();
+
+function openFormatCells(): void {
+  openFormatCellsDialog({
+    isEditing: () => app.isEditing(),
+    getDocument: () => app.getDocument(),
+    getSheetId: () => app.getCurrentSheetId(),
+    getActiveCell: () => app.getActiveCell(),
+    getSelectionRanges: () => app.getSelectionRanges(),
+    focusGrid: () => app.focus(),
+  });
+}
+
+installFormattingShortcuts(window, { openFormatCells });
 
 const titlebar = mountTitlebar(titlebarRootEl, {
   actions: [],
@@ -2572,6 +2588,11 @@ mountRibbon(ribbonRoot, {
         return;
       case "home.number.date":
         applyToSelection("Number format", (sheetId, ranges) => applyNumberFormatPreset(app.getDocument(), sheetId, ranges, "date"));
+        return;
+      case "home.number.formatCells":
+      case "home.number.moreFormats.formatCells":
+      case "home.cells.format.formatCells":
+        openFormatCells();
         return;
       case "home.editing.findSelect.find":
         showDialogAndFocus(findDialog);

@@ -385,6 +385,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "home.number.moreFormats.custom", label: "Custom…", ariaLabel: "Custom Number Format", icon: "✎" },
               ],
             },
+            { id: "home.number.formatCells", label: "Format Cells…", ariaLabel: "Format Cells", icon: "⚙️", size: "small", testId: "ribbon-format-cells" },
           ],
         },
         {

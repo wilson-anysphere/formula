@@ -1,0 +1,191 @@
+/*
+  Format Cells dialog (minimal).
+
+  This file intentionally uses only design tokens from `tokens.css` and does not
+  hardcode colors (enforced by `noHardcodedColors.test.js`).
+*/
+
+dialog.format-cells-dialog {
+  width: min(720px, 92vw);
+  max-height: min(720px, 86vh);
+  border: 1px solid var(--dialog-border);
+  border-radius: 12px;
+  padding: 0;
+  background: var(--dialog-bg);
+  color: var(--text-primary);
+  box-shadow: var(--dialog-shadow);
+}
+
+dialog.format-cells-dialog::backdrop {
+  background: var(--dialog-backdrop);
+}
+
+.format-cells-dialog__header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.format-cells-dialog__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.format-cells-dialog__content {
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  overflow: auto;
+}
+
+@media (min-width: 720px) {
+  .format-cells-dialog__content {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.format-cells-dialog__section {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--bg-secondary);
+}
+
+.format-cells-dialog__section-title {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.format-cells-dialog__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.format-cells-dialog__row:last-child {
+  margin-bottom: 0;
+}
+
+.format-cells-dialog__label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+
+.format-cells-dialog__control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.format-cells-dialog__select,
+.format-cells-dialog__input {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.format-cells-dialog__toggles {
+  display: flex;
+  gap: 6px;
+}
+
+.format-cells-dialog__toggle {
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-weight: 700;
+  cursor: pointer;
+  min-width: 32px;
+}
+
+.format-cells-dialog__toggle[aria-pressed="true"] {
+  border-color: var(--selection-border);
+  background: var(--selection-bg);
+}
+
+.format-cells-dialog__checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.format-cells-dialog__swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.format-cells-dialog__swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  padding: 0;
+  background: var(--bg-primary);
+}
+
+.format-cells-dialog__swatch[data-color="none"] {
+  background: linear-gradient(135deg, transparent 0 45%, var(--border) 45% 55%, transparent 55% 100%);
+}
+
+.format-cells-dialog__swatch[data-color="custom"] {
+  background: linear-gradient(135deg, var(--bg-primary) 0 50%, var(--bg-tertiary) 50% 100%);
+}
+
+.format-cells-dialog__swatch[data-color="series1"] {
+  background: var(--chart-series-1);
+}
+
+.format-cells-dialog__swatch[data-color="series2"] {
+  background: var(--chart-series-2);
+}
+
+.format-cells-dialog__swatch[data-color="series3"] {
+  background: var(--chart-series-3);
+}
+
+.format-cells-dialog__swatch[data-color="series4"] {
+  background: var(--chart-series-4);
+}
+
+.format-cells-dialog__swatch[data-selected="true"] {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.format-cells-dialog__actions {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.format-cells-dialog__actions button {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.format-cells-dialog__actions button[data-primary="true"] {
+  border-color: var(--selection-border);
+  background: var(--selection-bg);
+}
