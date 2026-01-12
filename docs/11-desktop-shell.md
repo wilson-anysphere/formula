@@ -605,7 +605,8 @@ Provider selection:
 End-to-end flow (grid copy/paste):
 
 1. UI handlers in `apps/desktop/src/app/spreadsheetApp.ts` intercept `Cmd/Ctrl+C`, `X`, `V`.
-2. Copy/cut serializes the selection via `copyRangeToClipboardPayload()` (`apps/desktop/src/clipboard/clipboard.js`), producing `{ text, html, rtf }`.
+2. Copy/cut builds a `CellGrid` via `getCellGridFromRange()` and serializes it via `serializeCellGridToClipboardPayload()` (`apps/desktop/src/clipboard/clipboard.js`), producing `{ text, html, rtf }`.
+   - For formula cells, the copy/cut path ensures `text/plain` contains the **displayed value** (computed formula result), while `text/html` can still preserve formulas (via `data-formula`) for spreadsheet-to-spreadsheet pastes.
 3. The platform provider (`apps/desktop/src/clipboard/platform/provider.js`) writes/reads the system clipboard.
 4. Paste parses clipboard payloads in priority order: `text/html` → `text/plain` → `text/rtf` (plain-text extracted from RTF).
 
@@ -670,7 +671,6 @@ Security boundaries:
 
 - **DLP enforcement happens before writing**: grid copy/cut paths perform DLP checks before touching the system clipboard:
   - `SpreadsheetApp.copySelectionToClipboard()` / `cutSelectionToClipboard()`
-  - → `copyRangeToClipboardPayload()`
   - → `enforceClipboardCopy` (`apps/desktop/src/dlp/enforceClipboardCopy.js`)
 - **Extension sandboxing**: extension panels run in sandboxed iframes; do not expose Tauri IPC (`invoke`) or native clipboard APIs directly to untrusted iframe content. Clipboard operations must be mediated by the trusted host UI layer.
 
