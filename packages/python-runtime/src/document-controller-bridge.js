@@ -84,7 +84,29 @@ export class DocumentControllerBridge {
       return name;
     }
 
-    const beforeOrder = typeof this.doc?.getSheetIds === "function" ? this.doc.getSheetIds() : Array.from(this.sheetIds);
+    let beforeOrder = typeof this.doc?.getSheetIds === "function" ? this.doc.getSheetIds() : Array.from(this.sheetIds);
+
+    // DocumentController materializes sheets lazily. If the host hasn't touched the active sheet yet
+    // (so `getSheetIds()` is empty) but our bridge has an `activeSheetId`, ensure the active sheet
+    // exists before inserting a new sheet "after active". This matches user expectations from Excel,
+    // where the active sheet always exists even if no cells have been accessed.
+    if (
+      beforeOrder.length === 0 &&
+      typeof this.doc?.getSheetIds === "function" &&
+      typeof this.doc?.getCell === "function" &&
+      this.activeSheetId
+    ) {
+      try {
+        this.doc.getCell(this.activeSheetId, { row: 0, col: 0 });
+        const refreshed = this.doc.getSheetIds();
+        if (Array.isArray(refreshed) && refreshed.length > 0) {
+          beforeOrder = refreshed;
+          this.sheetIds = new Set(refreshed);
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     const hasExplicitIndex = typeof index === "number" && Number.isInteger(index) && index >= 0;
 

@@ -47,6 +47,15 @@ test("DocumentControllerBridge create_sheet inserts after active sheet by defaul
   assert.equal(doc.getSheetMeta(newId)?.name, "Inserted");
 });
 
+test("DocumentControllerBridge create_sheet materializes the active sheet when the doc is empty", () => {
+  const doc = new DocumentController();
+  const bridge = new DocumentControllerBridge(doc, { activeSheetId: "Sheet1" });
+
+  const newId = bridge.create_sheet({ name: "Inserted" });
+  assert.deepEqual(doc.getSheetIds(), ["Sheet1", newId]);
+  assert.equal(doc.getSheetMeta(newId)?.name, "Inserted");
+});
+
 test("DocumentControllerBridge create_sheet honors explicit index (0-based) over active sheet", () => {
   const doc = new DocumentController();
   const sheetA = doc.addSheet({ sheetId: "sheet_a", name: "A" });
@@ -64,4 +73,3 @@ test("DocumentControllerBridge create_sheet honors explicit index (0-based) over
   const atEnd = bridge.create_sheet({ name: "AtEnd", index: 99 });
   assert.deepEqual(doc.getSheetIds(), [at0, sheetA, at2, sheetB, sheetC, atEnd]);
 });
-
