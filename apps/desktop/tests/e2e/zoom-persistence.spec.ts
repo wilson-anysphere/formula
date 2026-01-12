@@ -7,12 +7,22 @@ test.describe("shared grid zoom persistence", () => {
   test.describe.configure({ timeout: 120_000 });
 
   test("persists zoom across reloads", async ({ page }) => {
-    await gotoDesktop(page, "/?grid=shared");
-
     // Start from a clean storage state so prior runs (or dev sessions) don't influence the test.
-    await page.evaluate(() => localStorage.clear());
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await waitForDesktopReady(page);
+    //
+    // Use `sessionStorage` as a per-tab guard so the cleanup runs only on the first navigation;
+    // otherwise we'd clear the persisted zoom again before the reload assertion.
+    await page.addInitScript(() => {
+      try {
+        if (sessionStorage.getItem("__formula_zoom_persistence_cleared") !== "1") {
+          localStorage.clear();
+          sessionStorage.setItem("__formula_zoom_persistence_cleared", "1");
+        }
+      } catch {
+        // ignore storage errors (disabled/quota/etc.)
+      }
+    });
+
+    await gotoDesktop(page, "/?grid=shared");
 
     const zoomControl = page.getByTestId("zoom-control");
 
