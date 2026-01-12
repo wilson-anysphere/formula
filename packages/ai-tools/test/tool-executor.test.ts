@@ -170,6 +170,36 @@ describe("ToolExecutor", () => {
     expect(charts[0]?.spec.data_range).toBe("Sheet2!A1:B3");
   });
 
+  it("supports quoted display sheet names (spaces/quotes) with sheet_name_resolver", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet2"]);
+    const sheetNameResolver = {
+      getSheetIdByName(name: string) {
+        const normalized = name.trim().toLowerCase();
+        if (normalized === "q1 budget") return "Sheet2";
+        if (normalized === "bob's budget") return "Sheet2";
+        return null;
+      },
+      getSheetNameById(id: string) {
+        return id === "Sheet2" ? "Bob's Budget" : null;
+      }
+    };
+
+    const executor = new ToolExecutor(workbook, { default_sheet: "Sheet2", sheet_name_resolver: sheetNameResolver });
+
+    const result = await executor.execute({
+      name: "write_cell",
+      parameters: { cell: "'Bob''s Budget'!A1", value: 7 }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("write_cell");
+    if (!result.ok || result.tool !== "write_cell") throw new Error("Unexpected tool result");
+    expect(result.data?.cell).toBe("'Bob''s Budget'!A1");
+
+    expect(workbook.getCell(parseA1Cell("Sheet2!A1")).value).toBe(7);
+    expect(workbook.listSheets()).toEqual(["Sheet2"]);
+  });
+
   it("write_cell writes a formula when value starts with '='", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);
