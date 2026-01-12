@@ -1927,18 +1927,25 @@ fn materialize_shared_formula<'a>(
     col: u32,
     shared_formulas: &'a HashMap<(u32, u32), SharedFormulaDef>,
 ) -> Option<MaterializedSharedFormula<'a>> {
-    let (base_row, base_col) = parse_ptg_exp(rgce)?;
+    let candidates = parse_ptg_exp_candidates(rgce)?;
 
-    let def = shared_formulas
-        .get(&(base_row, base_col))
-        .filter(|def| def.contains_cell(row, col))?;
+    for (base_row, base_col) in candidates {
+        let Some(def) = shared_formulas
+            .get(&(base_row, base_col))
+            .filter(|def| def.contains_cell(row, col))
+        else {
+            continue;
+        };
 
-    // Produce a cell-specific rgce so callers don't need shared-formula context.
-    let rgce = materialize_rgce(&def.rgce, base_row, base_col, row, col)?;
-    Some(MaterializedSharedFormula {
-        rgce,
-        rgcb: &def.rgcb,
-    })
+        // Produce a cell-specific rgce so callers don't need shared-formula context.
+        let rgce = materialize_rgce(&def.rgce, base_row, base_col, row, col)?;
+        return Some(MaterializedSharedFormula {
+            rgce,
+            rgcb: &def.rgcb,
+        });
+    }
+
+    None
 }
 
 struct MaterializedSharedFormula<'a> {
@@ -1946,34 +1953,58 @@ struct MaterializedSharedFormula<'a> {
     rgcb: &'a [u8],
 }
 
-fn parse_ptg_exp(rgce: &[u8]) -> Option<(u32, u32)> {
+fn parse_ptg_exp_candidates(rgce: &[u8]) -> Option<Vec<(u32, u32)>> {
     // PtgExp is used by shared formulas / array formulas to refer back to the
     // "master" formula. In practice it's usually the entire rgce for a cell.
     if rgce.first().copied()? != 0x01 {
         return None;
     }
     let payload = &rgce[1..];
-    match payload.len() {
-        // BIFF8-style: row u16, col u16.
-        4 => {
-            let row = u16::from_le_bytes(payload.get(0..2)?.try_into().ok()?) as u32;
-            let col = u16::from_le_bytes(payload.get(2..4)?.try_into().ok()?) as u32;
-            Some((row, col))
-        }
-        // BIFF12-ish: row u32, col u16.
-        6 => {
-            let row = u32::from_le_bytes(payload.get(0..4)?.try_into().ok()?);
-            let col = u16::from_le_bytes(payload.get(4..6)?.try_into().ok()?) as u32;
-            Some((row, col))
-        }
-        // BIFF12-ish: row u32, col u32.
-        8 => {
-            let row = u32::from_le_bytes(payload.get(0..4)?.try_into().ok()?);
-            let col = u32::from_le_bytes(payload.get(4..8)?.try_into().ok()?);
-            Some((row, col))
-        }
-        _ => None,
+    if payload.len() < 4 {
+        return None;
     }
+
+    const MAX_ROW: u32 = 1_048_575;
+    const MAX_COL: u32 = 16_383;
+
+    // Some writers appear to include trailing bytes after `PtgExp` coordinates. To stay robust,
+    // collect all plausible interpretations and let the shared-formula lookup decide which one
+    // matches an actual `BrtShrFmla` anchor.
+    let mut candidates: Vec<(u32, u32, usize)> = Vec::new();
+
+    // BIFF12-ish: row u32, col u32.
+    if payload.len() >= 8 {
+        let row = u32::from_le_bytes(payload.get(0..4)?.try_into().ok()?);
+        let col = u32::from_le_bytes(payload.get(4..8)?.try_into().ok()?);
+        if row <= MAX_ROW && col <= MAX_COL {
+            candidates.push((row, col, 8));
+        }
+    }
+
+    // BIFF12-ish: row u32, col u16.
+    if payload.len() >= 6 {
+        let row = u32::from_le_bytes(payload.get(0..4)?.try_into().ok()?);
+        let col = u16::from_le_bytes(payload.get(4..6)?.try_into().ok()?) as u32;
+        if row <= MAX_ROW && col <= MAX_COL {
+            candidates.push((row, col, 6));
+        }
+    }
+
+    // BIFF8-style: row u16, col u16.
+    let row = u16::from_le_bytes(payload.get(0..2)?.try_into().ok()?) as u32;
+    let col = u16::from_le_bytes(payload.get(2..4)?.try_into().ok()?) as u32;
+    if row <= MAX_ROW && col <= MAX_COL {
+        candidates.push((row, col, 4));
+    }
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    // Prefer candidates that consume more bytes (newer formats), but always keep all viable ones.
+    candidates.sort_by_key(|(_, _, n)| *n);
+    let out: Vec<(u32, u32)> = candidates.into_iter().rev().map(|(r, c, _)| (r, c)).collect();
+    Some(out)
 }
 
 fn materialize_rgce(
