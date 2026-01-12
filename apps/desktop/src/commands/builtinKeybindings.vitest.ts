@@ -39,6 +39,9 @@ describe("builtin keybinding catalog", () => {
   it("gates representative keybindings via focus/edit context keys (capture-phase safe)", () => {
     // Fail-closed behavior is important while migrating to capture-phase routing: if context
     // keys haven't been initialized yet, spreadsheet-affecting shortcuts should not fire.
+    //
+    // Exception: undo/redo are intentionally unguarded because the command implementation
+    // is responsible for routing to text undo/redo vs workbook history.
     const emptyKeys = new ContextKeyService();
     const emptyLookup = emptyKeys.asLookup();
 
@@ -47,8 +50,8 @@ describe("builtin keybinding catalog", () => {
     expect(evaluateWhenClause(copyWhen, emptyLookup)).toBe(false);
 
     const undoWhen = builtinKeybindings.find((kb) => kb.command === "edit.undo" && kb.key === "ctrl+z")?.when;
-    expect(typeof undoWhen).toBe("string");
-    expect(evaluateWhenClause(undoWhen, emptyLookup)).toBe(false);
+    expect(undoWhen).toBeNull();
+    expect(evaluateWhenClause(undoWhen, emptyLookup)).toBe(true);
 
     const paletteWhen = builtinKeybindings.find((kb) => kb.command === "workbench.showCommandPalette" && kb.key === "ctrl+shift+p")
       ?.when;
@@ -71,23 +74,17 @@ describe("builtin keybinding catalog", () => {
     expect(evaluateWhenClause(copyWhen, lookup)).toBe(true);
     expect(evaluateWhenClause(saveWhen, lookup)).toBe(true);
 
-    // Undo should work normally when not editing, and also during formula-bar formula-editing
-    // when focus temporarily moves back to the grid (range selection mode).
-    contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": false, "spreadsheet.formulaBarFormulaEditing": false });
-    expect(evaluateWhenClause(undoWhen, lookup)).toBe(true);
-
-    contextKeys.batch({ "spreadsheet.isEditing": true, "focus.inTextInput": false, "spreadsheet.formulaBarFormulaEditing": false });
-    expect(evaluateWhenClause(undoWhen, lookup)).toBe(false);
-
-    contextKeys.batch({ "spreadsheet.isEditing": true, "focus.inTextInput": false, "spreadsheet.formulaBarFormulaEditing": true });
+    // Undo is unguarded (command will decide whether to route to text undo or spreadsheet history).
     expect(evaluateWhenClause(undoWhen, lookup)).toBe(true);
 
     contextKeys.set("focus.inTextInput", true);
     expect(evaluateWhenClause(copyWhen, lookup)).toBe(false);
     expect(evaluateWhenClause(saveWhen, lookup)).toBe(false);
+    expect(evaluateWhenClause(undoWhen, lookup)).toBe(true);
 
     contextKeys.batch({ "spreadsheet.isEditing": true, "focus.inTextInput": false });
     expect(evaluateWhenClause(copyWhen, lookup)).toBe(false);
+    expect(evaluateWhenClause(undoWhen, lookup)).toBe(true);
 
     // Edit cell (F2) should be handled by the active grid when a grid has focus.
     // The global keybinding is intended as a fallback when focus is elsewhere.
