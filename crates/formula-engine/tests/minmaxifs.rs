@@ -42,6 +42,52 @@ fn minmaxifs_basic_filtering() {
 }
 
 #[test]
+fn minifs_numeric_criteria_does_not_treat_text_as_zero() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", "x").unwrap();
+    engine.set_cell_value("Sheet1", "A2", 0.0).unwrap();
+    // A3 left unset (blank) -> treated as 0 for numeric criteria.
+
+    engine.set_cell_value("Sheet1", "B1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 20.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "Z1", "=MINIFS(B1:B3,A1:A3,0)")
+        .unwrap();
+    assert!(
+        engine.bytecode_program_count() > 0,
+        "expected MINIFS formula to compile to bytecode for this test"
+    );
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "Z1"), Value::Number(10.0));
+}
+
+#[test]
+fn maxifs_numeric_criteria_does_not_treat_text_as_zero() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", "x").unwrap();
+    engine.set_cell_value("Sheet1", "A2", 0.0).unwrap();
+    // A3 left unset (blank) -> treated as 0 for numeric criteria.
+
+    engine.set_cell_value("Sheet1", "B1", 100.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 20.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "Z1", "=MAXIFS(B1:B3,A1:A3,0)")
+        .unwrap();
+    assert!(
+        engine.bytecode_program_count() > 0,
+        "expected MAXIFS formula to compile to bytecode for this test"
+    );
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "Z1"), Value::Number(20.0));
+}
+
+#[test]
 fn minmaxifs_multiple_criteria() {
     let mut engine = Engine::new();
 
