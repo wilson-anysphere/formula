@@ -252,6 +252,7 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
                     preserve_unknown_parts: false,
                     preserve_parsed_parts: false,
                     preserve_worksheets: false,
+                    decode_formulas: true,
                 },
             )
             .map_err(|source| Error::OpenXlsb {
