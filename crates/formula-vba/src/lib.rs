@@ -14,6 +14,7 @@ mod dir;
 mod normalized_data;
 mod offcrypto;
 mod ole;
+mod project_normalized_data;
 mod project_digest;
 mod signature;
 
@@ -29,6 +30,7 @@ pub use dir::{DirParseError, DirStream, ModuleRecord, ModuleType};
 pub use normalized_data::forms_normalized_data;
 pub use ole::{OleError, OleFile};
 pub use project_digest::{compute_vba_project_digest, compute_vba_project_digest_v3, DigestAlg};
+pub use project_normalized_data::project_normalized_data_v3_dir_records;
 pub use signature::{
     extract_signer_certificate_info, list_vba_digital_signatures,
     parse_and_verify_vba_signature_blob, parse_vba_digital_signature, verify_vba_digital_signature,

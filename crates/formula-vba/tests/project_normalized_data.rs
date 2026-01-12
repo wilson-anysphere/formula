@@ -1,8 +1,8 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    compress_container, project_normalized_data, project_normalized_data_v3, DirParseError,
-    ParseError,
+    compress_container, project_normalized_data, project_normalized_data_v3,
+    project_normalized_data_v3_dir_records, DirParseError, ParseError,
 };
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
@@ -28,6 +28,16 @@ fn utf16le_bytes(s: &str) -> Vec<u8> {
     let mut out = Vec::new();
     for unit in s.encode_utf16() {
         out.extend_from_slice(&unit.to_le_bytes());
+    }
+    out
+}
+
+fn unicode_record_data(s: &str) -> Vec<u8> {
+    let units: Vec<u16> = s.encode_utf16().collect();
+    let mut out = Vec::with_capacity(4 + units.len() * 2);
+    out.extend_from_slice(&(units.len() as u32).to_le_bytes());
+    for u in units {
+        out.extend_from_slice(&u.to_le_bytes());
     }
     out
 }
@@ -135,5 +145,134 @@ fn project_normalized_data_v3_dir_bad_record_length_beyond_buffer() {
         }
         other => panic!("expected Dir(BadRecordLength), got {other:?}"),
     }
+}
+
+#[test]
+fn project_normalized_data_v3_minimal_project_concatenates_selected_records() {
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // PROJECTNAME
+        push_record(&mut out, 0x0004, b"VBAProject");
+        // PROJECTCONSTANTS
+        push_record(&mut out, 0x000C, b"Const=1");
+
+        // Module group
+        push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
+
+        // MODULESTREAMNAME + reserved u16 at the end.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized =
+        project_normalized_data_v3_dir_records(&vba_bin).expect("ProjectNormalizedDataV3");
+
+    let expected = [
+        b"VBAProject".as_slice(),
+        b"Const=1".as_slice(),
+        b"Module1".as_slice(),
+        b"Module1".as_slice(),
+        &0u16.to_le_bytes(),
+    ]
+    .concat();
+
+    assert_eq!(normalized, expected);
+}
+
+#[test]
+fn project_normalized_data_v3_prefers_unicode_over_ansi_for_strings() {
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // Both ANSI and Unicode project name records; v3 should emit only Unicode payload bytes.
+        push_record(&mut out, 0x0004, b"AnsiProj");
+        push_record(&mut out, 0x0040, &unicode_record_data("UniProj"));
+
+        // Module group with both MODULENAME and MODULENAMEUNICODE.
+        push_record(&mut out, 0x0019, b"AnsiMod");
+        push_record(&mut out, 0x0047, &unicode_record_data("UniMod"));
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized =
+        project_normalized_data_v3_dir_records(&vba_bin).expect("ProjectNormalizedDataV3");
+
+    let expected = [utf16le_bytes("UniProj"), utf16le_bytes("UniMod"), 0u16.to_le_bytes().to_vec()]
+        .concat();
+
+    assert_eq!(normalized, expected);
+    assert!(
+        !normalized.windows(b"AnsiProj".len()).any(|w| w == b"AnsiProj"),
+        "expected ANSI PROJECTNAME bytes to be omitted when PROJECTNAMEUNICODE is present"
+    );
+    assert!(
+        !normalized.windows(b"AnsiMod".len()).any(|w| w == b"AnsiMod"),
+        "expected ANSI MODULENAME bytes to be omitted when MODULENAMEUNICODE is present"
+    );
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+#[test]
+fn project_normalized_data_v3_is_sensitive_to_module_record_group_order() {
+    fn build_dir_with_modules(order: [&'static str; 2]) -> Vec<u8> {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0004, b"VBAProject");
+
+        for name in order {
+            push_record(&mut out, 0x0019, name.as_bytes());
+            let mut stream_name = Vec::new();
+            stream_name.extend_from_slice(name.as_bytes());
+            stream_name.extend_from_slice(&0u16.to_le_bytes());
+            push_record(&mut out, 0x001A, &stream_name);
+            push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        }
+
+        out
+    }
+
+    // Non-alphabetical: ModuleB then ModuleA.
+    let vba_bin = build_vba_bin_with_dir_decompressed(&build_dir_with_modules(["ModuleB", "ModuleA"]));
+    let normalized =
+        project_normalized_data_v3_dir_records(&vba_bin).expect("ProjectNormalizedDataV3");
+
+    let pos_b = find_subslice(&normalized, b"ModuleB").expect("ModuleB bytes present");
+    let pos_a = find_subslice(&normalized, b"ModuleA").expect("ModuleA bytes present");
+    assert!(pos_b < pos_a, "expected ModuleB group to precede ModuleA group");
+
+    // Swapping module order should swap the normalized output.
+    let vba_bin_swapped =
+        build_vba_bin_with_dir_decompressed(&build_dir_with_modules(["ModuleA", "ModuleB"]));
+    let normalized_swapped =
+        project_normalized_data_v3_dir_records(&vba_bin_swapped).expect("ProjectNormalizedDataV3");
+    assert_ne!(
+        normalized, normalized_swapped,
+        "changing module stored order should change ProjectNormalizedDataV3"
+    );
+
+    let pos_a2 = find_subslice(&normalized_swapped, b"ModuleA").expect("ModuleA bytes present");
+    let pos_b2 = find_subslice(&normalized_swapped, b"ModuleB").expect("ModuleB bytes present");
+    assert!(
+        pos_a2 < pos_b2,
+        "expected ModuleA group to precede ModuleB group when dir order is A then B"
+    );
 }
 
