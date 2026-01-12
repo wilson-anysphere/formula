@@ -69,6 +69,7 @@
       "identifier": "core:allow-invoke",
       "allow": [
         { "command": "add_sheet" },
+        { "command": "add_sheet_with_id" },
         { "command": "check_for_updates" },
         { "command": "clipboard_read" },
         { "command": "clipboard_write" },
