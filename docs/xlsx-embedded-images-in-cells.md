@@ -11,6 +11,14 @@ See also (broader context + variant coverage):
 - [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md) — RichData (`richValue*` / `rdrichvalue*`) tables + index-base notes
 - [`docs/20-xlsx-rich-data.md`](./20-xlsx-rich-data.md) — shorter overview of the rich-data wiring
 
+Related in-repo references:
+
+* Fixture workbook + notes:
+  * `fixtures/xlsx/basic/image-in-cell.xlsx`
+  * `fixtures/xlsx/basic/image-in-cell.md`
+* Preservation/regression test that generates a “Place in Cell” workbook via `rust_xlsxwriter`:
+  * `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
+
 ## High-level mapping chain (cell → image bytes)
 
 In this schema, the *cell value itself is an error* (`#VALUE!`). The **image is attached via value-metadata** which points into Excel’s **Rich Data / Rich Value** parts.
