@@ -147,6 +147,23 @@ fn ms_oshared_md5_digest_bytes_even_when_signeddata_uses_sha256() {
         VbaSignatureBinding::Bound,
         "expected signature binding to be Bound even when DigestInfo.digestAlgorithm is sha256 but digest bytes are MD5"
     );
+
+    // Also exercise the "binding-only" helper API which takes the signature bytes separately
+    // (e.g. `xl/vbaProjectSignature.bin` in OOXML packages).
+    let binding = verify_vba_project_signature_binding(&vba_project_bin, &pkcs7_der)
+        .expect("binding verification should succeed");
+    match binding {
+        VbaProjectBindingVerification::BoundVerified(debug) => {
+            assert_eq!(
+                debug.hash_algorithm_oid.as_deref(),
+                Some("2.16.840.1.101.3.4.2.1")
+            );
+            assert_eq!(debug.hash_algorithm_name.as_deref(), Some("SHA-256"));
+            assert_eq!(debug.signed_digest.as_deref(), Some(project_md5.as_slice()));
+            assert_eq!(debug.computed_digest.as_deref(), Some(project_md5.as_slice()));
+        }
+        other => panic!("expected BoundVerified, got {other:?}"),
+    }
 }
 
 #[test]

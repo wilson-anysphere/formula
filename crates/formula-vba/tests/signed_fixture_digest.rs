@@ -42,7 +42,7 @@ fn extracts_spc_indirect_data_digest_from_signed_vba_fixture() {
         sig.signer_subject
     );
 
-    // Many real-world files wrap the PKCS#7 blob in a [MS-OFFCRYPTO] DigSigInfoSerialized header.
+    // Many real-world files wrap the PKCS#7 blob in a [MS-OSHARED] DigSigInfoSerialized header.
     assert_ne!(sig.signature.first(), Some(&0x30));
     assert!(
         sig.signature.len() >= 12,

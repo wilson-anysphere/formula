@@ -119,13 +119,13 @@ pub struct VbaDigitalSignatureStream {
     pub signature: Vec<u8>,
     /// Verification state (best-effort).
     pub verification: VbaSignatureVerification,
-    /// If the signature stream is wrapped in an [MS-OFFCRYPTO] `DigSigInfoSerialized` prefix,
-    /// this is the byte offset (from the start of the stream) where the PKCS#7/CMS `ContentInfo`
-    /// begins.
+    /// If the signature stream is wrapped in a [MS-OSHARED] `DigSigInfoSerialized` prefix (VBA
+    /// digital signature storage, §2.3.2), this is the byte offset (from the start of the stream)
+    /// where the PKCS#7/CMS `ContentInfo` begins.
     pub pkcs7_offset: Option<usize>,
-    /// If the signature stream is wrapped in an [MS-OFFCRYPTO] `DigSigInfoSerialized` prefix,
-    /// this is the length (in bytes) of the PKCS#7/CMS `ContentInfo` TLV (supports both strict DER
-    /// and BER/indefinite-length encodings).
+    /// If the signature stream is wrapped in a [MS-OSHARED] `DigSigInfoSerialized` prefix (VBA
+    /// digital signature storage, §2.3.2), this is the length (in bytes) of the PKCS#7/CMS
+    /// `ContentInfo` TLV (supports both strict DER and BER/indefinite-length encodings).
     pub pkcs7_len: Option<usize>,
     /// Best-effort DigestInfo algorithm OID extracted from Authenticode's
     /// `SpcIndirectDataContent` (if present).
@@ -225,9 +225,9 @@ pub fn extract_signer_certificate_info(signature_blob: &[u8]) -> Option<VbaSigne
 
 /// Enumerate and inspect *all* VBA digital signature streams found in a `vbaProject.bin`.
 ///
-/// Excel stores VBA project signatures in one of the `\u{0005}DigitalSignature*` streams
-/// (see MS-OVBA). Some files may contain multiple signature streams (e.g. legacy and
-/// SHA-2-era formats). This API exposes each stream independently.
+/// Excel stores VBA project signatures in one of the `\u{0005}DigitalSignature*` streams.
+/// Some files may contain multiple signature streams (e.g. legacy and newer formats). This API
+/// exposes each stream independently.
 ///
 /// Streams are returned in deterministic Excel-like order (newest stream first; see
 /// `signature_path_rank`).
@@ -730,7 +730,6 @@ fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
         _ => None,
     }
 }
-
 fn is_signature_component(component: &str) -> bool {
     let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
     matches!(
@@ -957,7 +956,7 @@ fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, u
     // last, so we prefer the last candidate in the stream.
     let mut best: Option<(Pkcs7, usize)> = None;
 
-    // Office commonly wraps the PKCS#7 blob in a [MS-OFFCRYPTO] DigSigInfoSerialized structure.
+    // Office commonly wraps the PKCS#7 blob in a [MS-OSHARED] DigSigInfoSerialized structure.
     // Parsing the header is deterministic and avoids the worst-case behavior of scanning/parsing
     // from every 0x30 offset.
     if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(signature) {

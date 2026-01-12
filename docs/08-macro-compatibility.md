@@ -1054,8 +1054,9 @@ of the control-character-prefixed streams:
 - `\x05DigitalSignatureEx`
 - `\x05DigitalSignatureExt`
 
-If more than one signature stream exists, Excel/MS-OVBA prefers the newest stream:
+If more than one signature stream exists, Excel prefers the newest stream:
 `DigitalSignatureExt` → `DigitalSignatureEx` → `DigitalSignature`.
+(This stream-name precedence is not normatively specified in MS-OVBA.)
 
 Edge case: some producers store a **storage** named `\x05DigitalSignature*` containing a nested
 stream (e.g. `\x05DigitalSignature/sig`). When searching for signatures, match on any path
@@ -1064,7 +1065,7 @@ component, not just root-level streams.
 Common signature stream payload shapes we must handle:
 
 1. **Raw PKCS#7/CMS DER** (`ContentInfo`, usually begins with ASN.1 `SEQUENCE (0x30)`).
-2. **MS-OFFCRYPTO `DigSigInfoSerialized` wrapper/prefix**, which contains (or precedes) the
+2. **MS-OSHARED `DigSigInfoSerialized` wrapper/prefix**, which contains (or precedes) the
    DER-encoded PKCS#7/CMS payload.
 3. **Detached `content || pkcs7`**, where the stream is `signed_content_bytes` followed by a
    detached PKCS#7 signature over those bytes.
@@ -1101,8 +1102,7 @@ For more detail, see [`vba-digital-signatures.md`](./vba-digital-signatures.md).
 Relevant specs:
 
 - MS-OVBA (VBA project storage + Contents Hash / Agile Content Hash): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
-- MS-OFFCRYPTO (`DigSigInfoSerialized` wrapper): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
-- MS-OSHARED (MD5 VBA project hash rule): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
+- MS-OSHARED (VBA digital signature storage / DigSigInfoSerialized + MD5 VBA project hash rule): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
 
 ### Script Sandboxing
 

@@ -37,8 +37,9 @@ Notes:
 - Some producers store the signature as a **storage** named `\x05DigitalSignature*` containing one
   or more streams, e.g. `\x05DigitalSignature/sig`. Signature discovery should therefore match on
   any *path component*, not only a root stream.
-- If more than one signature stream exists, Excel/MS-OVBA prefers the newest stream:
+- If more than one signature stream exists, Excel prefers the newest stream:
   `DigitalSignatureExt` → `DigitalSignatureEx` → `DigitalSignature`.
+  (This stream-name precedence is not normatively specified in MS-OVBA.)
 
 ## Signatures stored in external OPC parts (vbaProjectSignature.bin)
 
@@ -82,9 +83,9 @@ In the wild, the signature stream bytes are not always “just a PKCS#7 blob”.
 1. **Raw PKCS#7/CMS DER**
    - The stream is a DER-encoded CMS `ContentInfo` (ASN.1 `SEQUENCE`, often starting with `0x30`).
    - `ContentInfo.contentType` is typically `signedData` (`1.2.840.113549.1.7.2`).
-2. **MS-OFFCRYPTO `DigSigInfoSerialized` wrapper/prefix**
-   - Some Office producers wrap or prefix the CMS bytes with a `DigSigInfoSerialized` structure
-     (see MS-OFFCRYPTO).
+2. **MS-OSHARED `DigSigInfoSerialized` wrapper/prefix**
+    - Some Office producers wrap or prefix the CMS bytes with a `DigSigInfoSerialized` structure
+      (see MS-OSHARED).
    - `DigSigInfoSerialized` is a little-endian length-prefixed structure; parsing it lets us locate
      the embedded CMS payload deterministically instead of scanning for a DER `SEQUENCE`.
    - Common (but not universal) layout:
@@ -117,7 +118,7 @@ High-level extraction steps:
 
 1. **Obtain the CMS `ContentInfo` bytes**
    - If the stream is raw CMS DER, use it directly.
-   - If the stream is a `DigSigInfoSerialized` wrapper, unwrap it (per MS-OFFCRYPTO).
+  - If the stream is a `DigSigInfoSerialized` wrapper, unwrap it (per MS-OSHARED).
    - If the stream is `content || pkcs7`, split it (find the CMS DER start); the `content` prefix is
      the detached signed content.
 2. **Parse CMS and locate `SignedData.encapContentInfo`**
@@ -239,7 +240,7 @@ If you need to update or extend signature handling, start with:
   - signature stream discovery (`\x05DigitalSignature*`)
   - CMS verification and the `VbaDigitalSignature::binding` decision
 - `crates/formula-vba/src/offcrypto.rs`
-  - `[MS-OFFCRYPTO] DigSigInfoSerialized` parsing (deterministic CMS offset/length)
+  - `[MS-OSHARED] DigSigInfoSerialized` parsing (deterministic CMS offset/length)
 - `crates/formula-vba/src/authenticode.rs`
   - `SignedData.encapContentInfo.eContent` parsing and `SpcIndirectDataContent` → `DigestInfo`
 - `crates/formula-vba/src/project_digest.rs`
@@ -262,11 +263,9 @@ and binding behavior:
 
 ## Specs / references
 
-- **MS-OVBA**: VBA project storage, signature streams, and VBA project digest computation.
+- **MS-OVBA**: VBA project storage and VBA project digest computation / binding verification.
   - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
-- **MS-OFFCRYPTO**: Office cryptography structures, including `DigSigInfoSerialized`.
-  - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
-- **MS-OSHARED**: Office shared structures, including the MD5 “VBA project hash” rule (MS-OSHARED §4.3).
+- **MS-OSHARED**: VBA digital signature storage (`DigSigInfoSerialized`) and the MD5 “VBA project hash” rule (MS-OSHARED §4.3).
   - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
 - **RFC 5652**: Cryptographic Message Syntax (CMS) (PKCS#7 `SignedData`).
   - https://www.rfc-editor.org/rfc/rfc5652

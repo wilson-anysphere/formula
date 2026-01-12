@@ -1,12 +1,15 @@
-//! Parsers for a small subset of MS-OFFCRYPTO structures used by Office VBA project signatures.
+//! Parsers for a small subset of [MS-OSHARED] structures used by Office VBA project signatures.
 //!
-//! Excel stores a signed VBA project in an OLE stream named `\x05DigitalSignature*` (see MS-OVBA).
+//! Excel stores a signed VBA project in an OLE stream named `\x05DigitalSignature*`.
 //! In many real-world files the PKCS#7/CMS `SignedData` payload is wrapped in a
-//! `[MS-OFFCRYPTO] DigSigInfoSerialized` header. The header contains size fields for the
-//! surrounding metadata, making it possible to locate the PKCS#7 blob deterministically instead of
-//! scanning the whole stream (and works for both strict DER and BER/indefinite encodings).
+//! `[MS-OSHARED] DigSigInfoSerialized` header (VBA Digital Signature Storage, §2.3.2). The header
+//! contains size fields for the surrounding metadata, making it possible to locate the PKCS#7 blob
+//! deterministically instead of scanning the whole stream (and works for both strict DER and
+//! BER/indefinite encodings).
+//!
+//! https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
 
-/// Parsed information from a `[MS-OFFCRYPTO] DigSigInfoSerialized` prefix.
+/// Parsed information from a `[MS-OSHARED] DigSigInfoSerialized` prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DigSigInfoSerialized {
     /// Offset (from the start of the stream) where the PKCS#7 `ContentInfo` begins.
@@ -17,14 +20,14 @@ pub(crate) struct DigSigInfoSerialized {
     pub(crate) version: Option<u32>,
 }
 
-/// Best-effort parse of `[MS-OFFCRYPTO] DigSigInfoSerialized`.
+/// Best-effort parse of `[MS-OSHARED] DigSigInfoSerialized`.
 ///
 /// Returns `None` if the stream does not look like a DigSigInfoSerialized-wrapped PKCS#7 payload.
 ///
 /// Notes:
-/// - The MS-OFFCRYPTO structure contains several length-prefixed metadata blobs (project name,
-///   certificate store, etc.). The order varies across producers/versions, so we try a small set of
-///   deterministic layouts and validate by checking for a well-formed PKCS#7 `SignedData`
+/// - The DigSigInfoSerialized structure contains several length-prefixed metadata blobs (project
+///   name, certificate store, etc.). The order varies across producers/versions, so we try a small
+///   set of deterministic layouts and validate by checking for a well-formed PKCS#7 `SignedData`
 ///   `ContentInfo` at the computed offset.
 /// - Integer fields are little-endian.
 pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSerialized> {
@@ -47,7 +50,7 @@ pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSe
         Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
 
-    // Build a small set of header candidates. MS-OFFCRYPTO uses little-endian DWORD fields.
+    // Build a small set of header candidates. The structure uses little-endian DWORD fields.
     let mut headers = Vec::<Header>::new();
 
     // Common layout: [cbSignature, cbSigningCertStore, cchProjectName] then variable data.

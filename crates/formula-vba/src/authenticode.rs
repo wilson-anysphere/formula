@@ -45,7 +45,7 @@ pub fn extract_vba_signature_signed_digest(
     let mut any_candidate = false;
     let mut last_err = None;
 
-    // Prefer a deterministic MS-OFFCRYPTO DigSigInfoSerialized location when present.
+    // Prefer a deterministic MS-OSHARED DigSigInfoSerialized location when present.
     if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(signature_stream) {
         let end = info.pkcs7_offset.saturating_add(info.pkcs7_len);
         if end <= signature_stream.len() {
