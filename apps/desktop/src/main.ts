@@ -4706,12 +4706,12 @@ if (
   // through `CommandRegistry.executeCommand(...)` works as well.
   commandRegistry.registerBuiltinCommand(
     "workbench.showCommandPalette",
-    "Show Command Palette",
+    t("command.workbench.showCommandPalette"),
     () => commandPalette.open(),
     {
-      category: "Navigation",
+      category: t("commandCategory.navigation"),
       icon: null,
-      description: "Show the command palette",
+      description: t("commandDescription.workbench.showCommandPalette"),
       keywords: ["command palette", "commands"],
     },
   );
