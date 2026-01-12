@@ -7019,11 +7019,91 @@ export class SpreadsheetApp {
   }
 
   private autoSumSelection(): void {
-    const active = this.selection.active;
     const sheetId = this.sheetId;
 
-    const isNumericishCell = (row: number, col: number): boolean => {
+    const normalizeRange = (range: Range): Range => ({
+      startRow: Math.min(range.startRow, range.endRow),
+      endRow: Math.max(range.startRow, range.endRow),
+      startCol: Math.min(range.startCol, range.endCol),
+      endCol: Math.max(range.startCol, range.endCol),
+    });
+
+    const getCellState = (row: number, col: number): { value: unknown; formula: string | null } | null => {
       const state = this.document.getCell(sheetId, { row, col }) as { value: unknown; formula: string | null };
+      return state ?? null;
+    };
+
+    const isEmptyCell = (row: number, col: number): boolean => {
+      const state = getCellState(row, col);
+      if (!state) return true;
+      return state.value == null && state.formula == null;
+    };
+
+    const chooseTargetFromSelection = (): { target: CellCoord; sumRange: Range } | null => {
+      if (this.selection.ranges.length !== 1) return null;
+      const range = normalizeRange(this.selection.ranges[0]!);
+      const isSingleRow = range.startRow === range.endRow;
+      const isSingleCol = range.startCol === range.endCol;
+
+      // Excel-style: if the user selects a vertical or horizontal range of values,
+      // AutoSum inserts the SUM formula just below / to the right (or in the last
+      // selected cell if it's empty).
+      if (isSingleCol && range.endRow > range.startRow) {
+        const bottom = { row: range.endRow, col: range.startCol };
+        if (isEmptyCell(bottom.row, bottom.col)) {
+          const sumRange: Range = {
+            startRow: range.startRow,
+            endRow: range.endRow - 1,
+            startCol: range.startCol,
+            endCol: range.endCol,
+          };
+          if (sumRange.endRow < sumRange.startRow) return null;
+          return { target: bottom, sumRange };
+        }
+
+        const nextRow = range.endRow + 1;
+        if (nextRow >= this.limits.maxRows) return null;
+        return { target: { row: nextRow, col: range.startCol }, sumRange: range };
+      }
+
+      if (isSingleRow && range.endCol > range.startCol) {
+        const right = { row: range.startRow, col: range.endCol };
+        if (isEmptyCell(right.row, right.col)) {
+          const sumRange: Range = {
+            startRow: range.startRow,
+            endRow: range.endRow,
+            startCol: range.startCol,
+            endCol: range.endCol - 1,
+          };
+          if (sumRange.endCol < sumRange.startCol) return null;
+          return { target: right, sumRange };
+        }
+
+        const nextCol = range.endCol + 1;
+        if (nextCol >= this.limits.maxCols) return null;
+        return { target: { row: range.startRow, col: nextCol }, sumRange: range };
+      }
+
+      return null;
+    };
+
+    const selected = chooseTargetFromSelection();
+    if (selected) {
+      // Move the active cell to the insertion point (Excel behavior) and keep the
+      // operation as a single undoable edit.
+      this.selection = setActiveCell(this.selection, selected.target, this.limits);
+      if (this.sharedGrid) this.syncSharedGridSelectionFromState({ scrollIntoView: true });
+      else this.scrollCellIntoView(selected.target);
+
+      const formula = `=SUM(${rangeToA1(selected.sumRange)})`;
+      this.document.setCellInput(sheetId, selected.target, formula, { label: "AutoSum" });
+      return;
+    }
+
+    const active = this.selection.active;
+
+    const isNumericishCell = (row: number, col: number): boolean => {
+      const state = getCellState(row, col);
       if (!state) return false;
       if (state.formula != null) {
         const computed = this.getCellComputedValue({ row, col });
