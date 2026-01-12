@@ -6887,13 +6887,31 @@ export class SpreadsheetApp {
       return Number.isInteger(n) && n >= 0 ? n : 0;
     };
 
+    const styleIdForRowInRuns = (runs: unknown, row: number): number => {
+      if (!Array.isArray(runs) || runs.length === 0) return 0;
+      let lo = 0;
+      let hi = runs.length - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const run = runs[mid] as any;
+        const startRow = Number(run?.startRow);
+        const endRowExclusive = Number(run?.endRowExclusive);
+        const styleId = Number(run?.styleId);
+        if (!Number.isInteger(startRow) || !Number.isInteger(endRowExclusive) || !Number.isInteger(styleId)) return 0;
+        if (row < startRow) hi = mid - 1;
+        else if (row >= endRowExclusive) lo = mid + 1;
+        else return styleId;
+      }
+      return 0;
+    };
+
     const getStyleIdTupleKey = (row: number, col: number, cellStyleId: number): string | null => {
       // Prefer a public tuple helper if present (some controller implementations expose these).
       if (typeof docAny.getCellFormatStyleIds === "function") {
         try {
           const tuple = docAny.getCellFormatStyleIds(this.sheetId, { row, col });
           if (Array.isArray(tuple) && tuple.length >= 4) {
-            const normalized = tuple.slice(0, 4).map(normalizeStyleId);
+            const normalized = tuple.map(normalizeStyleId);
             return normalized.join(",");
           }
         } catch {
@@ -6901,7 +6919,7 @@ export class SpreadsheetApp {
         }
       }
 
-      // DocumentController layered-formatting storage (sheet/row/col/cell).
+      // DocumentController layered-formatting storage (sheet/row/col/range-run/cell).
       if (sheetModel && typeof sheetModel === "object") {
         // These property names match the desktop DocumentController's internal model.
         // Keep legacy fallbacks (`sheetStyleId` / `sheetDefaultStyleId`, `rowStyles`, `colStyles`)
@@ -6915,7 +6933,15 @@ export class SpreadsheetApp {
         const colStyleId = normalizeStyleId(
           (sheetModel as any).colStyleIds?.get?.(col) ?? (sheetModel as any).colStyles?.get?.(col)
         );
-        return [sheetDefaultStyleId, rowStyleId, colStyleId, normalizeStyleId(cellStyleId)].join(",");
+        const runsByCol = (sheetModel as any).formatRunsByCol;
+        const runs =
+          runsByCol && typeof runsByCol?.get === "function"
+            ? runsByCol.get(col)
+            : runsByCol && typeof runsByCol === "object"
+              ? (runsByCol as any)[String(col)]
+              : null;
+        const runStyleId = styleIdForRowInRuns(runs, row);
+        return [sheetDefaultStyleId, rowStyleId, colStyleId, normalizeStyleId(cellStyleId), normalizeStyleId(runStyleId)].join(",");
       }
 
       return null;
@@ -6937,7 +6963,7 @@ export class SpreadsheetApp {
 
         if (styleId === undefined) {
           // If everything is default, skip resolving/interning.
-          if (layerKey === "0,0,0,0") {
+          if (layerKey === "0,0,0,0" || layerKey === "0,0,0,0,0") {
             styleId = 0;
           } else {
             const effectiveStyle = (() => {

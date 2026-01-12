@@ -29,6 +29,12 @@ test("setRangeFormat uses compressed range runs for huge rectangles without mate
   // Styles should be interned per segment, not per cell.
   assert.equal(doc.styleTable.size, 2); // default + bold
 
+  // Style-id tuples should include the range-run layer so caches can key correctly.
+  const idsInside = doc.getCellFormatStyleIds("Sheet1", "A1");
+  assert.equal(idsInside.length, 5);
+  assert.equal(idsInside[3], 0); // cell layer remains empty
+  assert.equal(idsInside[4], 1); // range-run layer contributes bold
+
   // includeFormat used range should incorporate range-run formatting (without cell materialization).
   assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
     startRow: 0,
@@ -36,6 +42,34 @@ test("setRangeFormat uses compressed range runs for huge rectangles without mate
     startCol: 0,
     endCol: 25,
   });
+});
+
+test("setRangeFormat for full-height columns patches existing range-run formatting", () => {
+  const doc = new DocumentController();
+
+  doc.setRangeFormat("Sheet1", "A1:Z1000000", { font: { bold: true } });
+
+  // Clear formatting for column A across the full sheet height. This should also clear any
+  // existing range-run formatting in that column (range runs are higher precedence than col defaults).
+  doc.setRangeFormat("Sheet1", "A1:A1048576", null);
+
+  assert.equal(doc.getCellFormat("Sheet1", "A1").font?.bold, undefined);
+  assert.equal(doc.getCellFormat("Sheet1", "B1").font?.bold, true);
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.formatRunsByCol.has(0), false);
+});
+
+test("setRangeFormat clearing a single cell removes underlying range-run formatting", () => {
+  const doc = new DocumentController();
+  doc.setRangeFormat("Sheet1", "A1:A10", { font: { bold: true } });
+
+  assert.equal(doc.getCellFormat("Sheet1", "A1").font?.bold, true);
+  doc.setRangeFormat("Sheet1", "A1", null);
+
+  assert.equal(doc.getCellFormat("Sheet1", "A1").font?.bold, undefined);
+  assert.equal(doc.getCellFormat("Sheet1", "A2").font?.bold, true);
 });
 
 test("range-run formatting is undoable + redoable", () => {

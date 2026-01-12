@@ -44,10 +44,14 @@ test("getCellFormatStyleIds returns the layered style id tuple for a cell", () =
   doc.setColFormat("Sheet1", 0, { fill: { fgColor: "red" } });
   doc.setRangeFormat("Sheet1", "A1", { numberFormat: "0.00" });
 
-  const [sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId] = doc.getCellFormatStyleIds("Sheet1", "A1");
+  const [sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId, rangeRunStyleId] = doc.getCellFormatStyleIds(
+    "Sheet1",
+    "A1",
+  );
 
   assert.equal(doc.styleTable.get(sheetDefaultStyleId)?.font?.bold, true);
   assert.equal(doc.styleTable.get(rowStyleId)?.font?.italic, true);
   assert.equal(doc.styleTable.get(colStyleId)?.fill?.fgColor, "red");
   assert.equal(doc.styleTable.get(cellStyleId)?.numberFormat, "0.00");
+  assert.equal(rangeRunStyleId, 0);
 });

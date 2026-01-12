@@ -454,10 +454,14 @@ test("getCellFormatStyleIds exposes layered style id tuple (sheet/row/col/cell)"
   // Column default: bold.
   doc.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } });
 
-  const [sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId] = doc.getCellFormatStyleIds("Sheet1", "A1");
+  const [sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId, rangeRunStyleId] = doc.getCellFormatStyleIds(
+    "Sheet1",
+    "A1",
+  );
   assert.equal(sheetDefaultStyleId, 0);
   assert.equal(rowStyleId, 0);
   assert.equal(cellStyleId, 0);
+  assert.equal(rangeRunStyleId, 0);
   assert.equal(Boolean(doc.styleTable.get(colStyleId).font?.bold), true);
 
   // Convenience accessors match.

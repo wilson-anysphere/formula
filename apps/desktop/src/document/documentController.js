@@ -762,6 +762,62 @@ function patchFormatRuns(runs, startRow, endRowExclusive, stylePatch, styleTable
   return normalizeFormatRuns(out);
 }
 
+/**
+ * Apply a style patch to only the *existing* runs over a row interval.
+ *
+ * Unlike {@link patchFormatRuns}, this does NOT create new runs for gaps. This is useful when
+ * applying formatting to full rows/cols/sheet where the underlying formatting should stay stored
+ * in the sheet/row/col layers, but we still need the patch to override any pre-existing range-run
+ * formatting (since range-runs have higher precedence than row/col defaults).
+ *
+ * @param {FormatRun[]} runs
+ * @param {number} startRow
+ * @param {number} endRowExclusive
+ * @param {Record<string, any> | null} stylePatch
+ * @param {StyleTable} styleTable
+ * @returns {FormatRun[]}
+ */
+function patchExistingFormatRuns(runs, startRow, endRowExclusive, stylePatch, styleTable) {
+  const clampedStart = Math.max(0, Math.trunc(startRow));
+  const clampedEnd = Math.max(clampedStart, Math.trunc(endRowExclusive));
+  if (clampedEnd <= clampedStart) return Array.isArray(runs) ? runs.slice() : [];
+
+  const input = Array.isArray(runs) ? runs : [];
+  /** @type {FormatRun[]} */
+  const out = [];
+
+  for (const run of input) {
+    if (!run) continue;
+
+    // No overlap.
+    if (run.endRowExclusive <= clampedStart || run.startRow >= clampedEnd) {
+      out.push(cloneFormatRun(run));
+      continue;
+    }
+
+    // Prefix.
+    if (run.startRow < clampedStart) {
+      out.push({ startRow: run.startRow, endRowExclusive: clampedStart, styleId: run.styleId });
+    }
+
+    // Overlap.
+    const overlapStart = Math.max(run.startRow, clampedStart);
+    const overlapEnd = Math.min(run.endRowExclusive, clampedEnd);
+    const baseStyle = styleTable.get(run.styleId);
+    const merged = applyStylePatch(baseStyle, stylePatch);
+    const styleId = styleTable.intern(merged);
+    if (styleId !== 0) out.push({ startRow: overlapStart, endRowExclusive: overlapEnd, styleId });
+
+    // Suffix.
+    if (run.endRowExclusive > clampedEnd) {
+      out.push({ startRow: clampedEnd, endRowExclusive: run.endRowExclusive, styleId: run.styleId });
+    }
+  }
+
+  out.sort((a, b) => a.startRow - b.startRow);
+  return normalizeFormatRuns(out);
+}
+
 class SheetModel {
   constructor() {
     /** @type {Map<string, CellState>} */
@@ -1701,11 +1757,11 @@ export class DocumentController {
    * render caches, etc) without needing to stringify full style objects.
    *
    * Tuple order is:
-   * `[sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId]`.
+   * `[sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId, rangeRunStyleId]`.
    *
    * @param {string} sheetId
    * @param {CellCoord | string} coord
-   * @returns {[number, number, number, number]}
+   * @returns {[number, number, number, number, number]}
    */
   getCellFormatStyleIds(sheetId, coord) {
     const c = typeof coord === "string" ? parseA1(coord) : coord;
@@ -1722,11 +1778,13 @@ export class DocumentController {
     // (clipboard caches, render caches, etc).
     const cell = sheet?.cells?.get?.(`${c.row},${c.col}`) ?? null;
     const cellStyleId = typeof cell?.styleId === "number" ? cell.styleId : 0;
+    const rangeRunStyleId = styleIdForRowInRuns(sheet?.formatRunsByCol?.get?.(c.col), c.row);
     return [
       sheet?.defaultStyleId ?? 0,
       sheet?.rowStyleIds.get(c.row) ?? 0,
       sheet?.colStyleIds.get(c.col) ?? 0,
       cellStyleId,
+      rangeRunStyleId,
     ];
   }
 
@@ -2053,6 +2111,8 @@ export class DocumentController {
     const cellDeltas = [];
     /** @type {FormatDelta[]} */
     const formatDeltas = [];
+    /** @type {RangeRunDelta[]} */
+    const rangeRunDeltas = [];
 
     /** @type {Map<number, number>} */
     const patchedStyleIdCache = new Map();
@@ -2099,7 +2159,21 @@ export class DocumentController {
         cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
       }
 
-      this.#applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, { label: options.label });
+      // Patch existing range-run formatting so the patch applies everywhere.
+      for (const [col, beforeRuns] of sheet.formatRunsByCol.entries()) {
+        const afterRuns = patchExistingFormatRuns(beforeRuns, 0, EXCEL_MAX_ROWS, stylePatch, this.styleTable);
+        if (formatRunsEqual(beforeRuns, afterRuns)) continue;
+        rangeRunDeltas.push({
+          sheetId,
+          col,
+          startRow: 0,
+          endRowExclusive: EXCEL_MAX_ROWS,
+          beforeRuns: beforeRuns.map(cloneFormatRun),
+          afterRuns: afterRuns.map(cloneFormatRun),
+        });
+      }
+
+      this.#applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, rangeRunDeltas, { label: options.label });
       return;
     }
 
@@ -2125,7 +2199,23 @@ export class DocumentController {
         cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
       }
 
-      this.#applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, { label: options.label });
+      // Patch any existing range-run formatting in the selected columns so the patch applies everywhere.
+      for (let col = r.start.col; col <= r.end.col; col++) {
+        const beforeRuns = sheet.formatRunsByCol.get(col) ?? [];
+        if (beforeRuns.length === 0) continue;
+        const afterRuns = patchExistingFormatRuns(beforeRuns, 0, EXCEL_MAX_ROWS, stylePatch, this.styleTable);
+        if (formatRunsEqual(beforeRuns, afterRuns)) continue;
+        rangeRunDeltas.push({
+          sheetId,
+          col,
+          startRow: 0,
+          endRowExclusive: EXCEL_MAX_ROWS,
+          beforeRuns: beforeRuns.map(cloneFormatRun),
+          afterRuns: afterRuns.map(cloneFormatRun),
+        });
+      }
+
+      this.#applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, rangeRunDeltas, { label: options.label });
       return;
     }
 
@@ -2151,7 +2241,23 @@ export class DocumentController {
         cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
       }
 
-      this.#applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, { label: options.label });
+      // Patch any existing range-run formatting that overlaps the selected rows so the patch applies everywhere.
+      const startRow = r.start.row;
+      const endRowExclusive = r.end.row + 1;
+      for (const [col, beforeRuns] of sheet.formatRunsByCol.entries()) {
+        const afterRuns = patchExistingFormatRuns(beforeRuns, startRow, endRowExclusive, stylePatch, this.styleTable);
+        if (formatRunsEqual(beforeRuns, afterRuns)) continue;
+        rangeRunDeltas.push({
+          sheetId,
+          col,
+          startRow,
+          endRowExclusive,
+          beforeRuns: beforeRuns.map(cloneFormatRun),
+          afterRuns: afterRuns.map(cloneFormatRun),
+        });
+      }
+
+      this.#applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, rangeRunDeltas, { label: options.label });
       return;
     }
 
@@ -2203,6 +2309,25 @@ export class DocumentController {
     }
 
     // Fallback: sparse per-cell overrides.
+    // Also patch existing range-run formatting that overlaps this rectangle so clearing formatting works
+    // (a cell with no explicit styleId should still clear underlying range-run formatting).
+    const startRow = r.start.row;
+    const endRowExclusive = r.end.row + 1;
+    for (let col = r.start.col; col <= r.end.col; col++) {
+      const beforeRuns = sheet.formatRunsByCol.get(col) ?? [];
+      if (beforeRuns.length === 0) continue;
+      const afterRuns = patchExistingFormatRuns(beforeRuns, startRow, endRowExclusive, stylePatch, this.styleTable);
+      if (formatRunsEqual(beforeRuns, afterRuns)) continue;
+      rangeRunDeltas.push({
+        sheetId,
+        col,
+        startRow,
+        endRowExclusive,
+        beforeRuns: beforeRuns.map(cloneFormatRun),
+        afterRuns: afterRuns.map(cloneFormatRun),
+      });
+    }
+
     for (let row = r.start.row; row <= r.end.row; row++) {
       for (let col = r.start.col; col <= r.end.col; col++) {
         const before = this.model.getCell(sheetId, row, col);
@@ -2213,7 +2338,7 @@ export class DocumentController {
       }
     }
 
-    this.#applyUserCellAndFormatDeltas(cellDeltas, [], { label: options.label });
+    this.#applyUserCellAndFormatDeltas(cellDeltas, [], rangeRunDeltas, { label: options.label });
   }
 
   /**
@@ -3362,19 +3487,22 @@ export class DocumentController {
   }
 
   /**
-   * Apply a set of cell deltas and format deltas as a single user edit (one change event / one
-   * undo step), merging into an active batch if present.
+   * Apply a set of cell deltas, layered format deltas (sheet/row/col), and range-run deltas as a
+   * single user edit (one change event / one undo step), merging into an active batch if present.
    *
-   * This is primarily used for range formatting operations that need to update both the
-   * sheet/row/col layers and a sparse set of cell overrides.
+   * This is primarily used for range formatting operations that need to update multiple formatting
+   * layers at once (e.g. full-column formatting should also override any existing range-run formatting
+   * in that column).
    *
    * @param {CellDelta[]} cellDeltas
    * @param {FormatDelta[]} formatDeltas
+   * @param {RangeRunDelta[]} rangeRunDeltas
    * @param {{ label?: string, mergeKey?: string, source?: string }} options
    */
-  #applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, options) {
+  #applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, rangeRunDeltas, options) {
     cellDeltas = Array.isArray(cellDeltas) ? cellDeltas : [];
     formatDeltas = Array.isArray(formatDeltas) ? formatDeltas : [];
+    rangeRunDeltas = Array.isArray(rangeRunDeltas) ? rangeRunDeltas : [];
 
     if (cellDeltas.length > 0 && this.canEditCell) {
       cellDeltas = cellDeltas.filter((delta) =>
@@ -3382,20 +3510,21 @@ export class DocumentController {
       );
     }
 
-    if (cellDeltas.length === 0 && formatDeltas.length === 0) return;
+    if (cellDeltas.length === 0 && formatDeltas.length === 0 && rangeRunDeltas.length === 0) return;
 
     const source = typeof options?.source === "string" ? options.source : undefined;
     const shouldRecalc = this.batchDepth === 0 && cellDeltasAffectRecalc(cellDeltas);
-    this.#applyEdits(cellDeltas, [], formatDeltas, [], { recalc: shouldRecalc, emitChange: true, source });
+    this.#applyEdits(cellDeltas, [], formatDeltas, rangeRunDeltas, { recalc: shouldRecalc, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       if (cellDeltas.length > 0) this.#mergeIntoBatch(cellDeltas);
       if (formatDeltas.length > 0) this.#mergeFormatIntoBatch(formatDeltas);
+      if (rangeRunDeltas.length > 0) this.#mergeRangeRunIntoBatch(rangeRunDeltas);
       this.#emitDirty();
       return;
     }
 
-    this.#commitOrMergeHistoryEntry(cellDeltas, [], formatDeltas, [], options);
+    this.#commitOrMergeHistoryEntry(cellDeltas, [], formatDeltas, rangeRunDeltas, options);
   }
 
   /**

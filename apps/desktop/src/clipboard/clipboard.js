@@ -430,10 +430,26 @@ export function getCellGridFromRange(doc, sheetId, range) {
    * @param {number} row
    * @param {number} col
    * @param {number} cellStyleId
-   * @returns {[number, number, number, number]}
+   * @returns {[number, number, number, number, number]}
    */
   const getCellStyleIdTuple = (row, col, cellStyleId) => {
     const coord = { row, col };
+    const styleIdForRowInRuns = (runs, r) => {
+      if (!Array.isArray(runs) || runs.length === 0) return 0;
+      let lo = 0;
+      let hi = runs.length - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const run = runs[mid];
+        const startRow = Number(run?.startRow);
+        const endRowExclusive = Number(run?.endRowExclusive);
+        if (!Number.isInteger(startRow) || !Number.isInteger(endRowExclusive)) return 0;
+        if (r < startRow) hi = mid - 1;
+        else if (r >= endRowExclusive) lo = mid + 1;
+        else return normalizeStyleId(run?.styleId);
+      }
+      return 0;
+    };
 
     // Preferred: helper that returns the tuple directly.
     /** @type {any} */
@@ -445,13 +461,11 @@ export function getCellGridFromRange(doc, sheetId, range) {
 
     if (helper) {
       const out = helper.call(doc, sheetId, coord);
+      if (Array.isArray(out) && out.length >= 5) {
+        return [normalizeStyleId(out[0]), normalizeStyleId(out[1]), normalizeStyleId(out[2]), normalizeStyleId(out[3]), normalizeStyleId(out[4])];
+      }
       if (Array.isArray(out) && out.length >= 4) {
-        return [
-          normalizeStyleId(out[0]),
-          normalizeStyleId(out[1]),
-          normalizeStyleId(out[2]),
-          normalizeStyleId(out[3]),
-        ];
+        return [normalizeStyleId(out[0]), normalizeStyleId(out[1]), normalizeStyleId(out[2]), normalizeStyleId(out[3]), 0];
       }
       if (out && typeof out === "object") {
         const sheetDefaultStyleId = normalizeStyleId(
@@ -460,7 +474,8 @@ export function getCellGridFromRange(doc, sheetId, range) {
         const rowStyleId = normalizeStyleId(out.rowStyleId ?? out.rowDefaultStyleId ?? out.rowDefault);
         const colStyleId = normalizeStyleId(out.colStyleId ?? out.colDefaultStyleId ?? out.colDefault);
         const cellId = normalizeStyleId(out.cellStyleId ?? out.styleId ?? cellStyleId);
-        return [sheetDefaultStyleId, rowStyleId, colStyleId, cellId];
+        const runId = normalizeStyleId(out.rangeRunStyleId ?? out.runStyleId ?? out.rangeStyleId ?? 0);
+        return [sheetDefaultStyleId, rowStyleId, colStyleId, cellId, runId];
       }
     }
 
@@ -494,7 +509,15 @@ export function getCellGridFromRange(doc, sheetId, range) {
         return normalizeStyleId(colStyles[String(col)] ?? colStyles[col]);
       })();
 
-      return [sheetDefaultStyleId, rowStyleId, colStyleId, normalizeStyleId(cellStyleId)];
+      const runsByCol = sheetModel.formatRunsByCol ?? sheetModel.formatRunsByColumn ?? sheetModel.rangeRunsByCol;
+      const runs = (() => {
+        if (!runsByCol) return null;
+        if (typeof runsByCol.get === "function") return runsByCol.get(col);
+        return runsByCol[String(col)] ?? runsByCol[col];
+      })();
+      const runStyleId = styleIdForRowInRuns(runs, row);
+
+      return [sheetDefaultStyleId, rowStyleId, colStyleId, normalizeStyleId(cellStyleId), runStyleId];
     }
 
     // Best-effort fallback: query per-layer style ids if exposed.
@@ -532,7 +555,7 @@ export function getCellGridFromRange(doc, sheetId, range) {
       colStyleId = normalizeStyleId(doc.getColStyleId(sheetId, col));
     }
 
-    return [sheetDefaultStyleId, rowStyleId, colStyleId, normalizeStyleId(cellStyleId)];
+    return [sheetDefaultStyleId, rowStyleId, colStyleId, normalizeStyleId(cellStyleId), 0];
   };
 
   /**
