@@ -6743,7 +6743,6 @@ if (
 
     const onMove = (move: PointerEvent) => {
       if (move.pointerId !== pointerId) return;
-      move.preventDefault();
       didMove = true;
       latestClientX = move.clientX;
       latestClientY = move.clientY;
@@ -6780,9 +6779,11 @@ if (
       }
     };
 
-    window.addEventListener("pointermove", onMove, { passive: false });
-    window.addEventListener("pointerup", onUp, { passive: false });
-    window.addEventListener("pointercancel", onUp, { passive: false });
+    // `touch-action: none` on `#grid-splitter` prevents native touch panning during drags,
+    // so these listeners can remain passive (avoids scroll-blocking overhead).
+    window.addEventListener("pointermove", onMove, { passive: true });
+    window.addEventListener("pointerup", onUp, { passive: true });
+    window.addEventListener("pointercancel", onUp, { passive: true });
   });
 
   // --- Command palette -----------------------------------------------------------
