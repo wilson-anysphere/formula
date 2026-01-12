@@ -60,7 +60,7 @@ test.describe("collab presence: sheet switching", () => {
 
       const remotePresenceIds = async (targetPage: typeof page): Promise<string[]> => {
         return targetPage.evaluate(() => {
-          const app = (window as any).__formulaApp;
+          const app = window.__formulaApp as any;
           if (!app) return [];
           const mode = app.getGridMode?.() ?? null;
 
