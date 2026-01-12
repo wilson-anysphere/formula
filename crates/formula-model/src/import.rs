@@ -20,6 +20,10 @@ pub struct CsvOptions {
     /// Use [`CSV_DELIMITER_AUTO`] to automatically detect the delimiter from the first few records
     /// (Excel-like behavior). Auto-detection also honors Excel's `sep=<delimiter>` directive when
     /// it appears as the first line in the file.
+    ///
+    /// When auto-detecting, [`CsvOptions::decimal_separator`] is used as a locale hint: if the
+    /// decimal separator is `,`, delimiter detection will bias toward `;` in ambiguous cases
+    /// (matching common Excel locale behavior).
     pub delimiter: u8,
     pub has_header: bool,
     pub sample_rows: usize,
