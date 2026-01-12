@@ -349,7 +349,9 @@ class ExtensionHost {
     permissionsStoragePath = path.join(process.cwd(), ".formula", "permissions.json"),
     extensionStoragePath = path.join(process.cwd(), ".formula", "storage.json"),
     auditDbPath = null,
-    activationTimeoutMs = 5000,
+    // Extension worker spawn + VM initialization can be slow under load (especially in CI).
+    // Keep a conservative default so legitimate extensions don't hit spurious timeouts.
+    activationTimeoutMs = 15000,
     commandTimeoutMs = 5000,
     customFunctionTimeoutMs = 5000,
     dataConnectorTimeoutMs = 5000,
@@ -368,7 +370,7 @@ class ExtensionHost {
     this._clipboardText = "";
     this._activationTimeoutMs = Number.isFinite(activationTimeoutMs)
       ? Math.max(0, activationTimeoutMs)
-      : 5000;
+      : 15000;
     this._commandTimeoutMs = Number.isFinite(commandTimeoutMs) ? Math.max(0, commandTimeoutMs) : 5000;
     this._customFunctionTimeoutMs = Number.isFinite(customFunctionTimeoutMs)
       ? Math.max(0, customFunctionTimeoutMs)

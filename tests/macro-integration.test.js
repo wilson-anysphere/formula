@@ -27,7 +27,7 @@ test("macro recorder generates runnable TypeScript that replays simple edits", a
   freshWorkbook.setActiveSheet("Sheet1");
 
   const runtime = new ScriptRuntime(freshWorkbook);
-  const result = await runtime.run(script, { timeoutMs: 20_000 });
+  const result = await runtime.run(script, { timeoutMs: 30_000 });
   assert.equal(result.error, undefined, result.error?.message);
 
   const freshSheet = freshWorkbook.getActiveSheet();

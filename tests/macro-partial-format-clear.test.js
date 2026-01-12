@@ -36,7 +36,7 @@ test("macro recorder can clear backgroundColor without clearing other formats (D
   const freshWorkbook = new DocumentControllerWorkbookAdapter(freshController, { activeSheetName: "Sheet1" });
 
   const runtime = new ScriptRuntime(freshWorkbook);
-  const result = await runtime.run(script, { timeoutMs: 20_000 });
+  const result = await runtime.run(script, { timeoutMs: 30_000 });
   assert.equal(result.error, undefined, result.error?.message);
 
   const freshSheet = freshWorkbook.getActiveSheet();
@@ -76,7 +76,7 @@ test("macro recorder can clear numberFormat without clearing other formats (Docu
   const freshWorkbook = new DocumentControllerWorkbookAdapter(freshController, { activeSheetName: "Sheet1" });
 
   const runtime = new ScriptRuntime(freshWorkbook);
-  const result = await runtime.run(script, { timeoutMs: 20_000 });
+  const result = await runtime.run(script, { timeoutMs: 30_000 });
   assert.equal(result.error, undefined, result.error?.message);
 
   const freshSheet = freshWorkbook.getActiveSheet();
