@@ -200,6 +200,26 @@ impl CellImages {
     }
 }
 
+/// Best-effort loader for Excel "in-cell" images.
+///
+/// Excel stores the image catalog in `xl/cellimages*.xml`, with image payloads
+/// referenced via the part's relationships (`xl/_rels/cellimages*.xml.rels`).
+///
+/// This helper is intentionally tolerant: any errors while parsing a specific
+/// part are ignored so workbook loading does not fail.
+pub fn load_cell_images_from_parts(
+    parts: &BTreeMap<String, Vec<u8>>,
+    workbook: &mut formula_model::Workbook,
+) {
+    for path in parts.keys() {
+        if !is_cell_images_part(path) {
+            continue;
+        }
+        // Best-effort: ignore parse errors/missing parts so we don't fail workbook loads.
+        let _ = parse_cell_images_part(path, parts, workbook);
+    }
+}
+
 fn is_cell_images_part(path: &str) -> bool {
     let Some(rest) = path.strip_prefix("xl/") else {
         return false;
@@ -258,11 +278,10 @@ fn parse_cell_images_part(
             continue;
         };
 
-        let rel = rels_by_id.get(&embed_rel_id).ok_or_else(|| {
-            XlsxError::Invalid(format!(
-                "cellimages.xml references missing image relationship {embed_rel_id}"
-            ))
-        })?;
+        let Some(rel) = rels_by_id.get(&embed_rel_id) else {
+            // Best-effort: skip broken references instead of failing the whole workbook load.
+            continue;
+        };
 
         if rel
             .target_mode
@@ -281,10 +300,11 @@ fn parse_cell_images_part(
         let image_id = image_id_from_target_path(&target_path);
 
         if workbook.images.get(&image_id).is_none() {
-            let bytes = parts
-                .get(&target_path)
-                .ok_or_else(|| XlsxError::MissingPart(target_path.clone()))?
-                .clone();
+            let Some(bytes) = parts.get(&target_path) else {
+                // Best-effort: missing media should not prevent the workbook from loading.
+                continue;
+            };
+            let bytes = bytes.clone();
             let ext = image_id
                 .as_str()
                 .rsplit_once('.')
