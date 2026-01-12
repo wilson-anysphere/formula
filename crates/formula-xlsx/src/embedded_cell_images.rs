@@ -200,9 +200,9 @@ impl XlsxPackage {
                 .part(&sheet_rels_part)
                 .and_then(|bytes| std::str::from_utf8(bytes).ok());
 
-              // Best-effort: if hyperlink parsing fails (malformed file), still extract images.
-              let hyperlinks =
-                  parse_worksheet_hyperlinks(sheet_xml, sheet_rels_xml).unwrap_or_default();
+            // Best-effort: if hyperlink parsing fails (malformed file), still extract images.
+            let hyperlinks =
+                parse_worksheet_hyperlinks(sheet_xml, sheet_rels_xml).unwrap_or_default();
 
             for (cell_ref, vm) in parse_sheet_vm_image_cells(sheet_xml_bytes)? {
                 // First resolve the cell's `vm` into a rich value index when possible.
@@ -311,6 +311,7 @@ fn parse_rich_value_rel_ids(xml: &str) -> Result<Vec<String>, XlsxError> {
         match reader.read_event_into(&mut buf)? {
             Event::Eof => break,
             Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"rel" => {
+                let mut rid: Option<String> = None;
                 for attr in e.attributes() {
                     let attr = attr?;
                     let key = attr.key.as_ref();
@@ -326,10 +327,12 @@ fn parse_rich_value_rel_ids(xml: &str) -> Result<Vec<String>, XlsxError> {
                         && trimmed.len() > 3
                         && trimmed[3..].chars().all(|c| c.is_ascii_digit())
                     {
-                        out.push(value);
+                        rid = Some(trimmed.to_string());
                         break;
                     }
                 }
+                // Preserve missing/invalid entries as placeholders so indices remain stable.
+                out.push(rid.unwrap_or_default());
             }
             _ => {}
         }
