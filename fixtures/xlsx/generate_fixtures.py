@@ -1278,6 +1278,102 @@ def write_image_xlsx(path: pathlib.Path) -> None:
         _zip_write(zf, "xl/styles.xml", styles_minimal_xml())
 
 
+def content_types_activex_control_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="bin" ContentType="application/vnd.ms-office.activeX"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/ctrlProps/ctrlProp1.xml" ContentType="application/vnd.ms-excel.ctrlProps+xml"/>
+  <Override PartName="/xl/activeX/activeX1.xml" ContentType="application/vnd.ms-office.activeX+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>
+"""
+
+
+def sheet_activex_control_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData/>
+  <controls>
+    <control r:id="rId1" name="Control 1" shapeId="1025"/>
+  </controls>
+</worksheet>
+"""
+
+
+def sheet1_control_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/control" Target="../ctrlProps/ctrlProp1.xml"/>
+</Relationships>
+"""
+
+
+def ctrl_prop1_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ctrlProp xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>
+"""
+
+
+def ctrl_prop1_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/activeXControl" Target="../activeX/activeX1.xml"/>
+</Relationships>
+"""
+
+
+def active_x1_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<activeX xmlns="http://schemas.microsoft.com/office/2006/activeX"/>
+"""
+
+
+def active_x1_rels_xml() -> str:
+    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/activeXControlBinary" Target="activeX1.bin"/>
+</Relationships>
+"""
+
+
+def active_x1_bin_bytes() -> bytes:
+    return b"FORMULA-ACTIVEX"
+
+
+def write_activex_control_xlsx(path: pathlib.Path) -> None:
+    sheet_names = ["Sheet1"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+
+    with zipfile.ZipFile(path, "w") as zf:
+        _zip_write(zf, "[Content_Types].xml", content_types_activex_control_xml())
+        _zip_write(zf, "_rels/.rels", package_rels_xml())
+        _zip_write(zf, "docProps/core.xml", core_props_xml())
+        _zip_write(zf, "docProps/app.xml", app_props_xml(sheet_names))
+        _zip_write(zf, "xl/workbook.xml", workbook_xml(sheet_names))
+        _zip_write(
+            zf,
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels_xml(sheet_count=1, include_shared_strings=False),
+        )
+        _zip_write(zf, "xl/worksheets/sheet1.xml", sheet_activex_control_xml())
+        _zip_write(zf, "xl/worksheets/_rels/sheet1.xml.rels", sheet1_control_rels_xml())
+        _zip_write(zf, "xl/ctrlProps/ctrlProp1.xml", ctrl_prop1_xml())
+        _zip_write(zf, "xl/ctrlProps/_rels/ctrlProp1.xml.rels", ctrl_prop1_rels_xml())
+        _zip_write(zf, "xl/activeX/activeX1.xml", active_x1_xml())
+        _zip_write(zf, "xl/activeX/_rels/activeX1.xml.rels", active_x1_rels_xml())
+        _zip_write_bytes(zf, "xl/activeX/activeX1.bin", active_x1_bin_bytes())
+        _zip_write(zf, "xl/styles.xml", styles_minimal_xml())
+
+
 def main() -> None:
     write_xlsx(
         ROOT / "basic" / "basic.xlsx",
@@ -1337,6 +1433,7 @@ def main() -> None:
     write_ole_object_xlsx(ROOT / "basic" / "ole-object.xlsx")
     write_chart_sheet_xlsx(ROOT / "charts" / "chart-sheet.xlsx")
     write_hyperlinks_xlsx(ROOT / "hyperlinks" / "hyperlinks.xlsx")
+    write_activex_control_xlsx(ROOT / "basic" / "activex-control.xlsx")
 
     write_xlsx(
         ROOT / "metadata" / "date-iso-cell.xlsx",
