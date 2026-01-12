@@ -3354,9 +3354,7 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     Ok(match (&l, &r) {
         (Value::Number(a), Value::Number(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
         (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
-            let au = text_like_str(a).unwrap().to_ascii_uppercase();
-            let bu = text_like_str(b).unwrap().to_ascii_uppercase();
-            au.cmp(&bu)
+            crate::value::cmp_case_insensitive(text_like_str(a).unwrap(), text_like_str(b).unwrap())
         }
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
         (Value::Number(_), Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Bool(_)) => {
