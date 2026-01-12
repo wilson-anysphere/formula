@@ -8497,6 +8497,7 @@ export class SpreadsheetApp {
 
   private invalidateComputedValues(changes: unknown): void {
     if (!Array.isArray(changes)) return;
+    const coordScratch = { row: 0, col: 0 };
     let lastSheetId: string | null = null;
     let lastSheetCache: Map<number, SpreadsheetValue> | null = null;
     for (const change of changes) {
@@ -8526,12 +8527,9 @@ export class SpreadsheetApp {
       let row = isInteger(ref.row) ? ref.row : undefined;
       let col = isInteger(ref.col) ? ref.col : undefined;
       if ((row === undefined || col === undefined) && address) {
-        try {
-          const parsed = fromA1A1(address);
-          row = parsed.row0;
-          col = parsed.col0;
-        } catch {
-          // ignore parse errors
+        if (parseA1CellRefIntoCoord(address, coordScratch)) {
+          row = coordScratch.row;
+          col = coordScratch.col;
         }
       }
 
@@ -8552,6 +8550,7 @@ export class SpreadsheetApp {
     const sheetCount = (this.document as any)?.model?.sheets?.size;
     const shouldInvalidate = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
 
+    const coordScratch = { row: 0, col: 0 };
     let lastSheetId: string | null = null;
     let lastSheetCache: Map<number, SpreadsheetValue> | null = null;
 
@@ -8588,12 +8587,9 @@ export class SpreadsheetApp {
       let row = isInteger(ref.row) ? ref.row : undefined;
       let col = isInteger(ref.col) ? ref.col : undefined;
       if ((row === undefined || col === undefined) && address) {
-        try {
-          const parsed = fromA1A1(address);
-          row = parsed.row0;
-          col = parsed.col0;
-        } catch {
-          // ignore parse errors
+        if (parseA1CellRefIntoCoord(address, coordScratch)) {
+          row = coordScratch.row;
+          col = coordScratch.col;
         }
       }
 
@@ -8721,7 +8717,7 @@ export class SpreadsheetApp {
     const coordScratch = { row: 0, col: 0 };
 
     const value = evaluateFormula(state.formula, (ref) => {
-      const normalized = ref.replaceAll("$", "").trim();
+      const normalized = ref.trim();
       let targetSheet = sheetId;
       let targetAddress = normalized;
       const bang = normalized.lastIndexOf("!");
@@ -8737,14 +8733,9 @@ export class SpreadsheetApp {
       }
       // Avoid allocating a fresh `{row,col}` object for every reference evaluation.
       // (The scratch coord is safe because `computeCellValue` does not retain the object.)
-      try {
-        const parsed = fromA1A1(targetAddress);
-        coordScratch.row = parsed.row0;
-        coordScratch.col = parsed.col0;
-      } catch {
-        coordScratch.row = 0;
-        coordScratch.col = 0;
-      }
+      coordScratch.row = 0;
+      coordScratch.col = 0;
+      parseA1CellRefIntoCoord(targetAddress, coordScratch);
       return this.computeCellValue(targetSheet, coordScratch, memo, stack, options);
     }, { ai: this.aiCellFunctions, cellAddress });
 
@@ -9058,4 +9049,67 @@ function parseA1(a1: string): CellCoord {
   } catch {
     return { row: 0, col: 0 };
   }
+}
+
+function parseA1CellRefIntoCoord(address: string, out: { row: number; col: number }): boolean {
+  // Avoid regex + throwy parsing on hot paths. This parses a single A1 cell reference
+  // (optionally containing `$` absolute markers) and writes the 0-based coord into `out`.
+  //
+  // Supported forms:
+  // - A1
+  // - $A$1
+  // - A$1
+  // - $A1
+  //
+  // Not supported:
+  // - ranges (A1:B2)
+  // - sheet-qualified refs (Sheet1!A1) (callers should split first)
+  // - R1C1 / structured refs
+  let start = 0;
+  let end = address.length;
+
+  // Trim ASCII whitespace without allocating.
+  while (start < end && address.charCodeAt(start) <= 32) start += 1;
+  while (end > start && address.charCodeAt(end - 1) <= 32) end -= 1;
+  if (start >= end) return false;
+
+  let i = start;
+  // Optional leading `$`.
+  if (address.charCodeAt(i) === 36) i += 1;
+
+  // Column letters.
+  let col1 = 0;
+  let sawLetter = false;
+  while (i < end) {
+    const code = address.charCodeAt(i);
+    let n = 0;
+    if (code >= 65 && code <= 90) n = code - 64; // A-Z
+    else if (code >= 97 && code <= 122) n = code - 96; // a-z
+    else break;
+    sawLetter = true;
+    col1 = col1 * 26 + n;
+    i += 1;
+  }
+  if (!sawLetter) return false;
+
+  // Optional `$` before row digits.
+  if (i < end && address.charCodeAt(i) === 36) i += 1;
+  if (i >= end) return false;
+
+  // Row digits (1-based, must start with 1-9).
+  const firstDigit = address.charCodeAt(i);
+  if (firstDigit < 49 || firstDigit > 57) return false;
+
+  let row1 = 0;
+  while (i < end) {
+    const code = address.charCodeAt(i);
+    if (code < 48 || code > 57) return false;
+    row1 = row1 * 10 + (code - 48);
+    i += 1;
+  }
+
+  // fromA1 returns 0-based row/col.
+  out.row = row1 - 1;
+  out.col = col1 - 1;
+  return true;
 }
