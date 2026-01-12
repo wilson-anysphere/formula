@@ -1,6 +1,7 @@
 use base64::Engine as _;
 use formula_model::CellRef;
 use formula_xlsx::XlsxPackage;
+use roxmltree::Document;
 use rust_xlsxwriter::{Image, Workbook};
 
 #[test]
@@ -34,6 +35,30 @@ fn embedded_cell_images_supports_zero_based_vm_with_rdrichvalue_parts() {
         assert!(
             patched.contains("vm=\"0\""),
             "expected patched worksheet to contain vm=\"0\", got: {patched}"
+        );
+        patched.into_bytes()
+    });
+    let bytes = rewrite_zip_part(&bytes, "xl/richData/_rels/richValueRel.xml.rels", |rels| {
+        // Some producers emit `Target="xl/media/image1.png"` (missing the leading `/`), which would
+        // otherwise resolve relative to `xl/richData/`.
+        let xml = std::str::from_utf8(rels).expect("rels xml utf-8");
+        let doc = Document::parse(xml).expect("parse rels xml");
+        let ns = "http://schemas.openxmlformats.org/package/2006/relationships";
+        let relationship = doc
+            .descendants()
+            .find(|n| {
+                n.has_tag_name((ns, "Relationship"))
+                    && n.attribute("Type")
+                        .is_some_and(|t| t.ends_with("/relationships/image"))
+            })
+            .expect("expected an image relationship");
+        let target = relationship
+            .attribute("Target")
+            .expect("expected image relationship Target attribute");
+        let patched = xml.replacen(target, "xl/media/image1.png", 1);
+        assert!(
+            patched.contains("xl/media/image1.png"),
+            "expected patched rels xml to contain xl/media/image1.png, got: {patched}"
         );
         patched.into_bytes()
     });
@@ -137,4 +162,3 @@ fn rewrite_zip_part(
     assert!(rewritten, "expected to rewrite zip part {part_name}");
     zip.finish().expect("finish zip").into_inner()
 }
-
