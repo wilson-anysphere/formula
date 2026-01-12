@@ -111,3 +111,43 @@ fn textsplit_keeps_rows_that_become_empty_after_column_split() {
     assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::from("x"));
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::from("x"));
 }
+
+#[test]
+fn textsplit_rejects_empty_column_delimiter() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=TEXTSPLIT(\"a,b\",\"\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(formula_engine::ErrorKind::Value));
+}
+
+#[test]
+fn textsplit_ignore_empty_can_return_calc_when_all_segments_removed() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=TEXTSPLIT(\",,,\",\",\",,TRUE)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(formula_engine::ErrorKind::Calc));
+}
+
+#[test]
+fn textsplit_invalid_match_mode_is_value_error() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=TEXTSPLIT(\"aXb\",\"x\",,FALSE,2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(formula_engine::ErrorKind::Value));
+}
+
+#[test]
+fn textsplit_rejects_array_pad_with() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=TEXTSPLIT(\"a,b\",\",\",,FALSE,0,{\"x\"})")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(formula_engine::ErrorKind::Value));
+}
