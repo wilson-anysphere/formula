@@ -63,13 +63,25 @@ test.describe("ribbon view toggles", () => {
     const formulasShowFormulasToggle = page.locator('[data-command-id="formulas.formulaAuditing.showFormulas"]');
     await expect(formulasShowFormulasToggle).toHaveAttribute("aria-pressed", "true");
 
-    // Toggle via keyboard shortcut: pressed state syncs back off.
+    // Toggle via the Formulas tab control: should hide formulas and sync back to the View tab toggle.
+    await formulasShowFormulasToggle.click();
+    await waitForIdle(page);
+    await expect(formulasShowFormulasToggle).toHaveAttribute("aria-pressed", "false");
+    const ribbonToggledOffText = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayTextForRenderA1("C1"));
+    expect(ribbonToggledOffText).toBe("3");
+
+    await viewTab.click();
+    await expect(showFormulasToggle).toHaveAttribute("aria-pressed", "false");
+
+    // Toggle via keyboard shortcut: pressed state syncs back on.
     await page.click("#grid", { position: { x: 260, y: 40 } });
     await toggleShowFormulasShortcut(page);
-    await expect(showFormulasToggle).toHaveAttribute("aria-pressed", "false");
-    await expect(formulasShowFormulasToggle).toHaveAttribute("aria-pressed", "false");
+    await waitForIdle(page);
+    await expect(showFormulasToggle).toHaveAttribute("aria-pressed", "true");
+    await formulasTab.click();
+    await expect(formulasShowFormulasToggle).toHaveAttribute("aria-pressed", "true");
     const toggledBackText = await page.evaluate(() => (window as any).__formulaApp.getCellDisplayTextForRenderA1("C1"));
-    expect(toggledBackText).toBe("3");
+    expect(toggledBackText).toBe("=SUM(A1:A2)");
   });
 
   test("Performance Stats toggle reflects app state (shared grid mode)", async ({ page }) => {
