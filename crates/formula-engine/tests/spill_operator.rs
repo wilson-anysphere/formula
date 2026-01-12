@@ -1,3 +1,4 @@
+use formula_engine::eval::parse_a1;
 use formula_engine::{parse_formula, Engine, ParseOptions, SerializeOptions, Value};
 use pretty_assertions::assert_eq;
 
@@ -32,6 +33,16 @@ fn engine_evaluates_spill_operator_against_spilled_ranges() {
         .set_cell_formula("Sheet1", "C4", "=SUM(A1#)")
         .unwrap();
 
+    // Ensure the spill-range formulas compile to bytecode (no AST fallback).
+    let report = engine.bytecode_compile_report(usize::MAX);
+    for addr in ["A1", "G1", "I1", "C4"] {
+        let cell = parse_a1(addr).unwrap();
+        assert!(
+            !report.iter().any(|e| e.addr == cell),
+            "expected {addr} to compile to bytecode (report={report:?})"
+        );
+    }
+
     engine.recalculate();
 
     // Validate the original spill.
@@ -56,6 +67,17 @@ fn engine_evaluates_spill_operator_against_spilled_ranges() {
 
     // Change the spill shape from 2x2 to 2x1.
     engine.set_cell_formula("Sheet1", "A1", "=D1:D2").unwrap();
+
+    // Ensure the updated spill still compiles to bytecode.
+    let report = engine.bytecode_compile_report(usize::MAX);
+    for addr in ["A1", "G1", "I1", "C4"] {
+        let cell = parse_a1(addr).unwrap();
+        assert!(
+            !report.iter().any(|e| e.addr == cell),
+            "expected {addr} to compile to bytecode after resize (report={report:?})"
+        );
+    }
+
     engine.recalculate();
 
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
