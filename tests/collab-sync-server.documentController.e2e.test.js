@@ -201,6 +201,38 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
     );
   }, 10_000);
 
+  // Now simulate a remote collaborator updating view state directly in Yjs
+  // (i.e. not via DocumentController). This should propagate back into both
+  // clients' DocumentControllers via the binder's `sheets.observeDeep`.
+  const remoteViewOrigin = { type: "remote-view-test" };
+  clientB.ydoc.transact(() => {
+    const sheets = clientB.ydoc.getArray("sheets");
+    const entry = sheets.get(0);
+    assert.ok(entry, "expected Sheet1 sheet entry");
+    if (typeof (entry).set === "function") {
+      entry.set("view", { frozenRows: 0, frozenCols: 3, colWidths: { "1": 200 }, rowHeights: { "10": 55 } });
+    } else {
+      // Plain-object fallback (should be rare in sync-server scenarios).
+      const idx = sheets.toArray().findIndex((e) => (e?.get?.("id") ?? e?.id) === "Sheet1");
+      sheets.delete(idx, 1);
+      sheets.insert(idx, [
+        { id: "Sheet1", name: "Sheet1", view: { frozenRows: 0, frozenCols: 3, colWidths: { "1": 200 }, rowHeights: { "10": 55 } } },
+      ]);
+    }
+  }, remoteViewOrigin);
+
+  await waitForCondition(() => {
+    const view = clientA.documentController.getSheetView("Sheet1");
+    return (
+      view.frozenRows === 0 &&
+      view.frozenCols === 3 &&
+      view.colWidths?.["1"] === 200 &&
+      view.rowHeights?.["10"] === 55 &&
+      !view.colWidths?.["0"] &&
+      !view.rowHeights?.["5"]
+    );
+  }, 10_000);
+
   // Tear down clients and restart the server, keeping the same data directory.
   clientA.destroy();
   clientB.destroy();
@@ -238,10 +270,10 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
   await waitForCondition(() => {
     const view = clientC.documentController.getSheetView("Sheet1");
     return (
-      view.frozenRows === 2 &&
-      view.frozenCols === 1 &&
-      view.colWidths?.["0"] === 120 &&
-      view.rowHeights?.["5"] === 40
+      view.frozenRows === 0 &&
+      view.frozenCols === 3 &&
+      view.colWidths?.["1"] === 200 &&
+      view.rowHeights?.["10"] === 55
     );
   }, 10_000);
 
