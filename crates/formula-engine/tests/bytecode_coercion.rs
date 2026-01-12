@@ -1,13 +1,29 @@
 use formula_engine::coercion::ValueLocaleConfig;
+use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::{Engine, Value};
 
-fn eval_single_cell(formula: &str, bytecode_enabled: bool, locale: ValueLocaleConfig) -> (Value, usize) {
+fn eval_single_cell_with_date_system(
+    formula: &str,
+    bytecode_enabled: bool,
+    locale: ValueLocaleConfig,
+    date_system: ExcelDateSystem,
+) -> (Value, usize) {
     let mut engine = Engine::new();
     engine.set_value_locale(locale);
+    engine.set_date_system(date_system);
     engine.set_bytecode_enabled(bytecode_enabled);
     engine.set_cell_formula("Sheet1", "A1", formula).unwrap();
     engine.recalculate_single_threaded();
     (engine.get_cell_value("Sheet1", "A1"), engine.bytecode_program_count())
+}
+
+fn eval_single_cell(formula: &str, bytecode_enabled: bool, locale: ValueLocaleConfig) -> (Value, usize) {
+    eval_single_cell_with_date_system(
+        formula,
+        bytecode_enabled,
+        locale,
+        ExcelDateSystem::EXCEL_1900,
+    )
 }
 
 fn assert_number_close(value: &Value, expected: f64) {
@@ -105,5 +121,57 @@ fn bytecode_coercion_not_date_string_matches_ast() {
 
     let (bc_val, bc_programs) = eval_single_cell(formula, true, ValueLocaleConfig::en_us());
     assert!(bc_programs > 0, "expected formula to compile to bytecode");
+    assert_eq!(bc_val, ast_val);
+}
+
+#[test]
+fn bytecode_coercion_date_order_matches_ast() {
+    let formula = "=\"1/2/2020\"+0";
+
+    let expected_mdy = ymd_to_serial(ExcelDate::new(2020, 1, 2), ExcelDateSystem::EXCEL_1900)
+        .unwrap() as f64;
+    let expected_dmy = ymd_to_serial(ExcelDate::new(2020, 2, 1), ExcelDateSystem::EXCEL_1900)
+        .unwrap() as f64;
+    assert_ne!(expected_mdy, expected_dmy);
+
+    // en-US: MDY => Jan 2, 2020
+    let (ast_mdy, _) = eval_single_cell(formula, false, ValueLocaleConfig::en_us());
+    assert_number_close(&ast_mdy, expected_mdy);
+    let (bc_mdy, bc_programs) = eval_single_cell(formula, true, ValueLocaleConfig::en_us());
+    assert!(bc_programs > 0, "expected formula to compile to bytecode");
+    assert_number_close(&bc_mdy, expected_mdy);
+    assert_eq!(bc_mdy, ast_mdy);
+
+    // de-DE: DMY => Feb 1, 2020
+    let (ast_dmy, _) = eval_single_cell(formula, false, ValueLocaleConfig::de_de());
+    assert_number_close(&ast_dmy, expected_dmy);
+    let (bc_dmy, bc_programs) = eval_single_cell(formula, true, ValueLocaleConfig::de_de());
+    assert!(bc_programs > 0, "expected formula to compile to bytecode");
+    assert_number_close(&bc_dmy, expected_dmy);
+    assert_eq!(bc_dmy, ast_dmy);
+}
+
+#[test]
+fn bytecode_coercion_respects_excel_1904_date_system() {
+    let formula = "=\"2020-01-01\"+0";
+
+    let expected = ymd_to_serial(ExcelDate::new(2020, 1, 1), ExcelDateSystem::Excel1904).unwrap() as f64;
+
+    let (ast_val, _) = eval_single_cell_with_date_system(
+        formula,
+        false,
+        ValueLocaleConfig::en_us(),
+        ExcelDateSystem::Excel1904,
+    );
+    assert_number_close(&ast_val, expected);
+
+    let (bc_val, bc_programs) = eval_single_cell_with_date_system(
+        formula,
+        true,
+        ValueLocaleConfig::en_us(),
+        ExcelDateSystem::Excel1904,
+    );
+    assert!(bc_programs > 0, "expected formula to compile to bytecode");
+    assert_number_close(&bc_val, expected);
     assert_eq!(bc_val, ast_val);
 }
