@@ -419,6 +419,16 @@ This document tracks every Excel feature and our implementation status. Features
 | YIELDDISC | ✅ | |
 | YIELDMAT | ✅ | |
 
+#### Odd-coupon bond functions (ODDF\*/ODDL\*)
+
+Odd-coupon bond functions have many Excel-specific conventions (basis day-count, end-of-month
+coupon schedules, accrued interest, yield solver behavior). When implementing or modifying:
+
+- `ODDFPRICE` / `ODDFYIELD`
+- `ODDLPRICE` / `ODDLYIELD`
+
+See: [`docs/financial-odd-coupon-bonds.md`](financial-odd-coupon-bonds.md).
+
 ---
 
 ## File Format Features

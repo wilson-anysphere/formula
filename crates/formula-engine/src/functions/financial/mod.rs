@@ -1,6 +1,7 @@
 mod builtins;
 mod builtins_depreciation_ext;
 mod builtins_securities;
+mod bonds_odd;
 mod cashflows;
 mod depreciation;
 mod iterative;
