@@ -47,6 +47,7 @@ export class DesktopExtensionHostManager {
   readonly host: InstanceType<typeof BrowserExtensionHost>;
   readonly engineVersion: string;
   private readonly listeners = new Set<() => void>();
+  private readonly uiApi: ExtensionHostUiApi;
   private _ready = false;
   private _error: unknown = null;
 
@@ -79,6 +80,7 @@ export class DesktopExtensionHostManager {
       });
 
     this.engineVersion = String(params.engineVersion ?? "");
+    this.uiApi = params.uiApi;
     this.host = new BrowserExtensionHost({
       engineVersion: this.engineVersion,
       spreadsheetApi: params.spreadsheetApi,
@@ -148,7 +150,19 @@ export class DesktopExtensionHostManager {
     // manager's `loadAllInstalled()` boot helper so `onStartupFinished` + the initial
     // `workbookOpened` event behave consistently for built-in *and* installed extensions.
     try {
-      await this.getMarketplaceExtensionManager().loadAllInstalled();
+      await this.getMarketplaceExtensionManager().loadAllInstalled({
+        onExtensionError: ({ id, version, error }) => {
+          const message = `Failed to load extension ${id}@${version}: ${String((error as any)?.message ?? error)}`;
+          // eslint-disable-next-line no-console
+          console.error(`[formula][desktop] ${message}`);
+          try {
+            void this.uiApi.showMessage?.(message, "error");
+          } catch {
+            // ignore UI errors
+          }
+        },
+      });
+
       // If any extensions were loaded (built-in or marketplace-installed) before the manager
       // ran `host.startup()`, calling `loadAllInstalled()` may have skipped the global startup
       // broadcast to avoid duplicate `workbookOpened` events. Ensure any `onStartupFinished`
@@ -163,6 +177,13 @@ export class DesktopExtensionHostManager {
         }
       }
     } catch (err) {
+      // Best-effort: surface startup failures but keep going so built-in extensions can run.
+      try {
+        const msg = String((err as any)?.message ?? err);
+        void this.uiApi.showMessage?.(`Failed to load installed extensions: ${msg}`, "error");
+      } catch {
+        // ignore
+      }
       // Fallback: if loading installed extensions fails (IndexedDB unavailable/corrupted),
       // still attempt to start the host so built-in extensions can run.
       try {

@@ -1107,7 +1107,14 @@ export class WebExtensionManager {
    * `activationEvents: ["onStartupFinished"]` are activated and receive the initial
    * `workbookOpened` event.
    */
-  async loadAllInstalled(): Promise<string[]> {
+  async loadAllInstalled(options: {
+    /**
+     * Optional callback invoked when an individual extension fails to load (corrupted install,
+     * invalid manifest, etc). Errors are reported per-extension so that other installed extensions
+     * can still be loaded.
+     */
+    onExtensionError?: (info: { id: string; version: string; error: unknown }) => void;
+  } = {}): Promise<string[]> {
     if (!this.host) throw new Error("WebExtensionManager requires a BrowserExtensionHost to load extensions");
     const installed = await this.listInstalled();
 
@@ -1119,10 +1126,21 @@ export class WebExtensionManager {
       try {
         await this._loadInstalledInternal(record.id, { start: false });
         newlyLoaded.push(record.id);
-      } catch {
+      } catch (error) {
         // Best-effort: a single bad/corrupted extension should not prevent other installed
         // extensions from being loaded at startup. The failing install is expected to have been
         // quarantined (corrupted/incompatible) by `_loadInstalledInternal` where possible.
+        // eslint-disable-next-line no-console
+        console.error(
+          `[formula][extensions] Failed to load installed extension ${record.id}@${record.version}: ${String(
+            (error as Error)?.message ?? error
+          )}`
+        );
+        try {
+          options.onExtensionError?.({ id: record.id, version: record.version, error });
+        } catch {
+          // ignore observer errors
+        }
       }
     }
 

@@ -3685,6 +3685,7 @@ if (
   // expensive in e2e + low-spec environments, so defer actually loading extensions until
   // the user opens the Extensions panel or invokes an extension command.
   let extensionsLoadPromise: Promise<void> | null = null;
+
   const ensureExtensionsLoaded = async () => {
     if (extensionHostManager.ready) return;
     if (!extensionsLoadPromise) {
