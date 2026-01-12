@@ -8,11 +8,16 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 
-const rawArgs = process.argv.slice(2);
-if (rawArgs[0] === "--") rawArgs.shift();
+let cliArgs = process.argv.slice(2);
+// pnpm forwards a literal `--` delimiter into scripts. Strip the first occurrence so
+// `pnpm benchmark -- --foo` behaves the same as `pnpm benchmark --foo`.
+const delimiterIdx = cliArgs.indexOf("--");
+if (delimiterIdx >= 0) {
+  cliArgs = [...cliArgs.slice(0, delimiterIdx), ...cliArgs.slice(delimiterIdx + 1)];
+}
 
-const entry = rawArgs[0];
-const entryArgs = rawArgs.slice(1);
+const entry = cliArgs[0];
+const entryArgs = cliArgs.slice(1);
 
 if (!entry) {
   console.error("Usage: node scripts/run-node-ts.mjs <entrypoint> [...args]");

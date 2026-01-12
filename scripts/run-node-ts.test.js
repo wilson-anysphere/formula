@@ -72,3 +72,22 @@ test("run-node-ts can execute a TS entrypoint", { skip: !canExecuteTypeScript },
   assert.equal(child.stdout.trim(), "42,42,42");
 });
 
+test("run-node-ts strips pnpm `--` delimiters before forwarding argv", { skip: !canExecuteTypeScript }, () => {
+  const child = spawnSync(
+    process.execPath,
+    [
+      "scripts/run-node-ts.mjs",
+      "scripts/__fixtures__/run-node-ts/argv-check.ts",
+      "--",
+      "--some-arg",
+    ],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+
+  assert.equal(
+    child.status,
+    0,
+    `run-node-ts exited with ${child.status}\nstdout:\n${child.stdout}\nstderr:\n${child.stderr}`,
+  );
+  assert.equal(child.stdout.trim(), "ok");
+});
