@@ -4,8 +4,11 @@ This fixture is an XLSX produced by modern Excel that demonstrates **images stor
 
 Notably, this fixture **does _not_ contain** an `xl/cellimages.xml` part; instead, `xl/richData/_rels/richValueRel.xml.rels` points directly at `xl/media/image*.png`.
 
-See also: [`docs/xlsx-embedded-images-in-cells.md`](../../../docs/xlsx-embedded-images-in-cells.md) for a
-concrete schema walkthrough (relationships, content types, `_localImage` keys, etc.).
+See also:
+
+- [`docs/20-images-in-cells.md`](../../../docs/20-images-in-cells.md) — overall “Images in Cell” packaging + round-trip constraints
+- [`docs/20-images-in-cells-richdata.md`](../../../docs/20-images-in-cells-richdata.md) — RichData (`richValue*` / `rdrichvalue*`) tables + index-base notes
+- [`docs/xlsx-embedded-images-in-cells.md`](../../../docs/xlsx-embedded-images-in-cells.md) — concrete schema walkthrough (relationships, content types, `_localImage` keys, etc.)
 
 ## ZIP part inventory (relevant parts only)
 
