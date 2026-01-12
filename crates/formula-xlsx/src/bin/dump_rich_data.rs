@@ -79,6 +79,7 @@ fn dump_one(xlsx_path: &Path, print_parts: bool) -> Result<(), Box<dyn Error>> {
     }
 
     let vm_to_rich_value_index = dump_metadata(&pkg);
+    dump_metadata_relationships(&pkg);
     let cell_images = dump_cell_images(&pkg);
     let usage = scan_worksheet_vm_cm_usage(&pkg);
 
@@ -207,6 +208,46 @@ fn dump_metadata(pkg: &XlsxPackage) -> Option<HashMap<u32, u32>> {
             println!("  vm -> rich_value_index: (failed to resolve: {err})");
             None
         }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dump_metadata_relationships(pkg: &XlsxPackage) {
+    let rels_part = openxml::rels_part_name("xl/metadata.xml");
+    let Some((part_name, bytes)) = find_part_case_insensitive(pkg, &rels_part) else {
+        return;
+    };
+
+    println!();
+    println!("{part_name}:");
+
+    let relationships = match openxml::parse_relationships(&bytes) {
+        Ok(r) => r,
+        Err(err) => {
+            println!("  (failed to parse relationships: {err})");
+            return;
+        }
+    };
+
+    if relationships.is_empty() {
+        println!("  (no relationships)");
+        return;
+    }
+
+    for rel in relationships {
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|m| m.trim().eq_ignore_ascii_case("External"))
+        {
+            println!("  {} [{}] -> {} (external)", rel.id, rel.type_uri, rel.target);
+            continue;
+        }
+        let resolved = openxml::resolve_target("xl/metadata.xml", &rel.target);
+        println!(
+            "  {} [{}] -> {} (resolved: {})",
+            rel.id, rel.type_uri, rel.target, resolved
+        );
     }
 }
 
