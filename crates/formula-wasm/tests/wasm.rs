@@ -228,6 +228,25 @@ fn lex_formula_honors_reference_style_option() {
 }
 
 #[wasm_bindgen_test]
+fn lex_formula_accepts_full_parse_options_struct() {
+    // Backward compatibility: `lexFormula` should still accept a fully-serialized
+    // `formula_engine::ParseOptions` object (snake_case), not just the JS-friendly DTO.
+    let opts = formula_engine::ParseOptions {
+        locale: formula_engine::LocaleConfig::en_us(),
+        reference_style: formula_engine::ReferenceStyle::R1C1,
+        normalize_relative_to: None,
+    };
+    let opts_js = serde_wasm_bindgen::to_value(&opts).unwrap();
+
+    let tokens_js = lex_formula("=R1C1", Some(opts_js)).unwrap();
+    let tokens: Vec<TokenKindOnly> = serde_wasm_bindgen::from_value(tokens_js).unwrap();
+    assert!(
+        tokens.iter().any(|t| t.kind == "R1C1Cell"),
+        "expected full ParseOptions R1C1 lexing to emit R1C1Cell tokens, got {tokens:?}"
+    );
+}
+
+#[wasm_bindgen_test]
 fn parse_formula_partial_honors_locale_id_option() {
     let opts = Object::new();
     Reflect::set(&opts, &JsValue::from_str("localeId"), &JsValue::from_str("de-DE")).unwrap();
@@ -305,6 +324,33 @@ fn parse_formula_partial_honors_reference_style_option() {
         matches!(default_parsed.ast.expr, formula_engine::Expr::NameRef(_)),
         "expected default A1 parse to yield NameRef, got {:?}",
         default_parsed.ast.expr
+    );
+}
+
+#[wasm_bindgen_test]
+fn parse_formula_partial_accepts_full_parse_options_struct() {
+    #[derive(Debug, serde::Deserialize)]
+    struct PartialParseWithAst {
+        ast: formula_engine::Ast,
+        error: Option<PartialParseError>,
+    }
+
+    // Backward compatibility: `parseFormulaPartial` should still accept a fully-serialized
+    // `formula_engine::ParseOptions` object (snake_case), not just the JS-friendly DTO.
+    let opts = formula_engine::ParseOptions {
+        locale: formula_engine::LocaleConfig::en_us(),
+        reference_style: formula_engine::ReferenceStyle::R1C1,
+        normalize_relative_to: None,
+    };
+    let opts_js = serde_wasm_bindgen::to_value(&opts).unwrap();
+
+    let parsed_js = parse_formula_partial("=R1C1".to_string(), None, Some(opts_js)).unwrap();
+    let parsed: PartialParseWithAst = serde_wasm_bindgen::from_value(parsed_js).unwrap();
+    assert!(parsed.error.is_none(), "expected successful parse, got {parsed:?}");
+    assert!(
+        matches!(parsed.ast.expr, formula_engine::Expr::CellRef(_)),
+        "expected full ParseOptions R1C1 parse to yield CellRef, got {:?}",
+        parsed.ast.expr
     );
 }
 
