@@ -8,6 +8,7 @@ import * as Y from "yjs";
 import { createUndoService } from "@formula/collab-undo";
 
 import { bindYjsToDocumentController } from "../index.js";
+import { decryptCellPlaintext, encryptCellPlaintext, isEncryptedCellPayload } from "../../encryption/src/index.node.js";
 import { getWorkbookRoots } from "../../workbook/src/index.ts";
 
 function requireYjsCjs() {
@@ -27,6 +28,17 @@ function requireYjsCjs() {
 
 async function flushAsync(times = 3) {
   for (let i = 0; i < times; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+async function waitFor(predicate, { timeoutMs = 2000 } = {}) {
+  const start = Date.now();
+  while (true) {
+    if (predicate()) return;
+    if (Date.now() - start > timeoutMs) {
+      throw new Error("Timed out waiting for condition");
+    }
     await new Promise((resolve) => setImmediate(resolve));
   }
 }
@@ -432,6 +444,97 @@ test("binder normalizes foreign nested cell maps for formula edits so collab und
   assert.equal(undoService.canUndo(), false);
   assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).value, "from-cjs");
   assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).formula, null);
+
+  binder.destroy();
+  doc.destroy();
+});
+
+test("binder normalizes foreign nested cell maps for encrypted edits so collab undo works", async () => {
+  const Ycjs = requireYjsCjs();
+
+  const guid = `doc-${Date.now()}`;
+  const key = { keyId: "key-1", keyBytes: new Uint8Array(32).fill(7) };
+
+  const encryptedPayload = await encryptCellPlaintext({
+    plaintext: { value: "from-cjs", formula: null },
+    key,
+    context: { docId: guid, sheetId: "Sheet1", row: 0, col: 0 },
+  });
+
+  const remote = new Ycjs.Doc({ guid });
+  const remoteCells = remote.getMap("cells");
+  remote.transact(() => {
+    const canonical = new Ycjs.Map();
+    canonical.set("enc", encryptedPayload);
+    canonical.set("modified", 1);
+    remoteCells.set("Sheet1:0:0", canonical);
+
+    const legacy = new Ycjs.Map();
+    legacy.set("enc", encryptedPayload);
+    legacy.set("modified", 1);
+    remoteCells.set("Sheet1:0,0", legacy);
+  });
+  const update = Ycjs.encodeStateAsUpdate(remote);
+
+  const doc = new Y.Doc({ guid });
+  const cellsRoot = getWorkbookRoots(doc).cells;
+  Ycjs.applyUpdate(doc, update);
+
+  const beforeWrite = cellsRoot.get("Sheet1:0:0");
+  assert.ok(beforeWrite);
+  assert.equal(beforeWrite instanceof Y.Map, false);
+
+  const localOrigin = { type: "local:test" };
+  const undoService = createUndoService({ mode: "collab", doc, scope: [cellsRoot], origin: localOrigin });
+
+  const documentController = new TestDocumentController();
+  const binder = bindYjsToDocumentController({
+    ydoc: doc,
+    documentController,
+    undoService,
+    defaultSheetId: "Sheet1",
+    encryption: {
+      keyForCell: () => key,
+      shouldEncryptCell: () => true,
+    },
+  });
+
+  await waitFor(() => documentController.getCell("Sheet1", { row: 0, col: 0 }).value === "from-cjs");
+  assert.equal(documentController.externalDeltaCount, 1);
+
+  documentController.setCellValue("Sheet1", { row: 0, col: 0 }, "edited");
+  await flushAsync(5);
+
+  const afterWrite = cellsRoot.get("Sheet1:0:0");
+  assert.ok(afterWrite);
+  assert.ok(afterWrite instanceof Y.Map);
+  const afterEnc = afterWrite.get("enc");
+  assert.ok(isEncryptedCellPayload(afterEnc));
+  const decryptedAfter = await decryptCellPlaintext({
+    encrypted: afterEnc,
+    key,
+    context: { docId: guid, sheetId: "Sheet1", row: 0, col: 0 },
+  });
+  assert.equal(decryptedAfter?.value, "edited");
+
+  assert.equal(undoService.canUndo(), true);
+  undoService.undo();
+  await waitFor(() => documentController.getCell("Sheet1", { row: 0, col: 0 }).value === "from-cjs");
+  assert.equal(documentController.externalDeltaCount, 2);
+
+  const afterUndo = cellsRoot.get("Sheet1:0:0");
+  assert.ok(afterUndo);
+  assert.ok(afterUndo instanceof Y.Map);
+  const afterUndoEnc = afterUndo.get("enc");
+  assert.ok(isEncryptedCellPayload(afterUndoEnc));
+  const decryptedAfterUndo = await decryptCellPlaintext({
+    encrypted: afterUndoEnc,
+    key,
+    context: { docId: guid, sheetId: "Sheet1", row: 0, col: 0 },
+  });
+  assert.equal(decryptedAfterUndo?.value, "from-cjs");
+
+  assert.equal(undoService.canUndo(), false);
 
   binder.destroy();
   doc.destroy();
