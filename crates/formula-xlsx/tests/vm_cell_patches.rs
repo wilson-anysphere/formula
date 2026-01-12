@@ -8,9 +8,9 @@ fn build_minimal_xlsx(sheet_xml: &str) -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets>
-    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
-  </sheets>
+   <sheets>
+     <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+   </sheets>
 </workbook>"#;
 
     let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -28,6 +28,41 @@ fn build_minimal_xlsx(sheet_xml: &str) -> Vec<u8> {
 
     zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
     zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+    zip.write_all(sheet_xml.as_bytes()).unwrap();
+
+    zip.finish().unwrap().into_inner()
+}
+
+fn build_minimal_xlsx_with_styles(sheet_xml: &str, styles_xml: &str) -> Vec<u8> {
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = zip::write::FileOptions::<()>::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/workbook.xml", options).unwrap();
+    zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+    zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/styles.xml", options).unwrap();
+    zip.write_all(styles_xml.as_bytes()).unwrap();
 
     zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
     zip.write_all(sheet_xml.as_bytes()).unwrap();
@@ -163,3 +198,39 @@ fn streaming_cell_patches_support_vm_overrides() -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
+#[test]
+fn in_memory_cell_patches_preserve_vm_on_style_only_updates() -> Result<(), Box<dyn std::error::Error>>
+{
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" vm="1"><v>2</v></c></row>
+  </sheetData>
+</worksheet>"#;
+
+    // Minimal style table with two xfs so `s="1"` is a valid index.
+    let styles_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <cellXfs count="2">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+  </cellXfs>
+</styleSheet>"#;
+
+    let bytes = build_minimal_xlsx_with_styles(worksheet_xml, styles_xml);
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    // Update only the style; keep the cached value as-is.
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A1")?,
+        CellPatch::set_value_with_style(CellValue::Number(2.0), 1),
+    );
+    pkg.apply_cell_patches(&patches)?;
+
+    let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap())?;
+    assert_eq!(cell_attr(out_xml, "A1", "vm"), Some("1".to_string()));
+    assert_eq!(cell_attr(out_xml, "A1", "s"), Some("1".to_string()));
+    Ok(())
+}
