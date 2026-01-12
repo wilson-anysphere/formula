@@ -21,7 +21,13 @@ In OOXML this is implemented using **Rich Values** (“richData”) plus **cell 
 
 This document captures the part relationships and (most importantly) the **index mappings** needed to implement full support (reader → model → writer) and to avoid compatibility regressions when round-tripping unknown rich-data content.
 
-> Note: The exact element/type names inside `<rv>` for image payloads vary by Excel version and are not fully specified in the public ECMA-376 base schema. Real Excel fixtures are required to validate the precise XML shape. This doc focuses on the *stable wiring* (OPC parts + index indirections) that we must preserve.
+> Note: The exact element/type names inside `<rv>` for image payloads vary by Excel version and are not
+> fully specified in the public ECMA-376 base schema. This doc focuses on the *stable wiring* (OPC parts
+> + index indirections) that we must preserve.
+>
+> One concrete schema is now confirmed for “Place in Cell” images produced by `rust_xlsxwriter`:
+> worksheet cell `t="e"`/`#VALUE!` + `metadata.xml` + `xl/richData/rdrichvalue*.xml` + `richValueRel` →
+> `xl/media/*`. See [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md).
 
 ---
 
@@ -104,6 +110,14 @@ sheetN.xml: <c vm="VM_INDEX">…</c>
 The following example is *synthetic* but demonstrates the mapping.
 
 ### 1) Worksheet cell (`xl/worksheets/sheet1.xml`)
+
+Cells that reference rich values always carry `vm="…"` to select a record in `xl/metadata.xml`, but the
+*underlying cell value representation varies*:
+
+* Some files store a normal `<v>` payload (often numeric) alongside `vm="…"`.
+* “Place in Cell” embedded images (confirmed for rust_xlsxwriter) store the cell as an error:
+  `t="e"` with cached `#VALUE!` and `vm="1"`. See
+  [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md).
 
 ```xml
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -234,7 +248,10 @@ Even before full rich-data editing is implemented, round-trip compatibility need
 ## Known gaps / uncertainties (needs real Excel fixtures)
 
 1. **Exact `<rv>` payload shape for images**
-   - The field names / element structure used to point at the image relationship slot need to be confirmed with real `Place in Cell` files.
+   - Confirmed for the `rdRichValue` / `_localImage` variant emitted by `rust_xlsxwriter`:
+     `_rvRel:LocalImageIdentifier` + `CalcOrigin` (positional values) with `richValueRel` indirection.
+     See: [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md).
+   - Still an open question for other Excel/producers and for the `richValue.xml` (non-`rd*`) variants.
 2. **Multi-part `richValue*.xml` behavior**
    - When does Excel split into `richValue1.xml`, `richValue2.xml`, etc.?
    - Are indices global across all parts? (Assumed yes.)
