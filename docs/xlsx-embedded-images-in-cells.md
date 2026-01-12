@@ -85,8 +85,10 @@ For the “Place in Cell” local-image shape documented here, a robust detector
    * The `<v>` corresponding to `_rvRel:LocalImageIdentifier` is the relationship slot index (in the observed fixture it is the first `<v>` because `_rvRel:LocalImageIdentifier` is the first `<k>` in `rdrichvaluestructure.xml`).
    * Second `<v>` = `CalcOrigin` (preserve as an opaque Excel flag).
 
-The cached cell representation (`t="e"` + `#VALUE!`) is a strong signal for “Place in Cell”, but the
-structure check above is the more semantically reliable way to identify local embedded images.
+The cached cell representation in this fixture (`t="e"` + `#VALUE!`) is a strong signal for this
+`rdRichValue*` variant, but other real Excel workbooks can use other cached-value encodings (e.g.
+placeholder numeric `<v>0</v>`). The structure check above is the more semantically reliable way to
+identify local embedded images.
 
 ## 1) Worksheet cell encoding: `t="e" vm="1"` + `#VALUE!`
 
