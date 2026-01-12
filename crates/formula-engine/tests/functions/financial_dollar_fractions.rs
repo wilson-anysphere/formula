@@ -73,9 +73,17 @@ fn builtins_evaluate_doc_examples() {
 
     assert_number(&sheet.eval("=DOLLARDE(1.02, 16)"), 1.125);
     assert_number(&sheet.eval("=DOLLARFR(1.125, 16)"), 1.02);
+    assert_number(&sheet.eval("=DOLLARDE(1.1, 32)"), 1.3125);
+    assert_number(&sheet.eval("=DOLLARFR(1.3125, 32)"), 1.1);
 
     assert_number(&sheet.eval("=DOLLARDE(-1.02, 16)"), -1.125);
     assert_number(&sheet.eval("=DOLLARFR(-1.125, 16)"), -1.02);
+    assert_number(&sheet.eval("=DOLLARDE(-1.1, 32)"), -1.3125);
+    assert_number(&sheet.eval("=DOLLARFR(-1.3125, 32)"), -1.1);
+
+    // Single-digit fraction denominators use a scale of 10^1.
+    assert_number(&sheet.eval("=DOLLARDE(1.2, 4)"), 1.5);
+    assert_number(&sheet.eval("=DOLLARFR(1.5, 4)"), 1.2);
 
     // Fraction is truncated to an integer.
     assert_number(&sheet.eval("=DOLLARDE(1.02, 16.9)"), 1.125);
