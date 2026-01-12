@@ -781,6 +781,11 @@ mod write_xlsx_from_storage_tests {
             let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
                 .with_context(|| format!("export to .{ext}"))?;
 
+            let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref())
+                .with_context(|| format!("parse exported .{ext} package"))?;
+            formula_xlsx::validate_opc_relationships(pkg.parts_map())
+                .with_context(|| format!("validate OPC relationships for .{ext} export"))?;
+
             let reread = formula_xlsx::print::read_workbook_print_settings(bytes.as_ref())
                 .context("read print settings from exported workbook")?;
             assert_eq!(
@@ -816,6 +821,8 @@ mod write_xlsx_from_storage_tests {
 
         let pkg =
             formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref()).context("parse exported package")?;
+        formula_xlsx::validate_opc_relationships(pkg.parts_map())
+            .context("validate OPC relationships for exported workbook")?;
         let out_power_query = pkg
             .part("xl/formula/power-query.xml")
             .context("expected xl/formula/power-query.xml to be present")?;
@@ -858,6 +865,8 @@ mod write_xlsx_from_storage_tests {
 
         let pkg =
             formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref()).context("parse exported package")?;
+        formula_xlsx::validate_opc_relationships(pkg.parts_map())
+            .context("validate OPC relationships for exported workbook")?;
         let out_image = pkg
             .part("xl/media/image1.png")
             .context("expected xl/media/image1.png to be present in output")?;
@@ -919,6 +928,8 @@ mod write_xlsx_from_storage_tests {
 
         let pkg =
             formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref()).context("parse exported package")?;
+        formula_xlsx::validate_opc_relationships(pkg.parts_map())
+            .context("validate OPC relationships for exported workbook")?;
         let out_pivot_table = pkg
             .part("xl/pivotTables/pivotTable1.xml")
             .context("expected xl/pivotTables/pivotTable1.xml to be present in output")?;
@@ -962,6 +973,11 @@ mod write_xlsx_from_storage_tests {
             let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
                 .with_context(|| format!("export .{ext}"))?;
 
+            let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref())
+                .with_context(|| format!("parse exported .{ext} package"))?;
+            formula_xlsx::validate_opc_relationships(pkg.parts_map())
+                .with_context(|| format!("validate OPC relationships for .{ext} export"))?;
+
             let reread = formula_xlsx::read_workbook_from_reader(Cursor::new(bytes.as_ref()))
                 .with_context(|| format!("read exported workbook model for .{ext}"))?;
             assert_eq!(
@@ -1004,6 +1020,11 @@ mod write_xlsx_from_storage_tests {
         let out_path = tmp.path().join("cached-values.xlsx");
         let bytes =
             write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)?;
+
+        let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref())
+            .context("parse exported package")?;
+        formula_xlsx::validate_opc_relationships(pkg.parts_map())
+            .context("validate OPC relationships for exported workbook")?;
 
         let reread = formula_xlsx::read_workbook_from_reader(Cursor::new(bytes.as_ref()))
             .context("read exported workbook model")?;
