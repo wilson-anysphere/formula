@@ -23,6 +23,8 @@ pub enum OpCode {
     Ge = 15,
     CallFunc = 16,
     ImplicitIntersection = 17,
+    StoreLocal = 18,
+    LoadLocal = 19,
 }
 
 /// Packed instruction:
@@ -61,6 +63,8 @@ impl Instruction {
             15 => OpCode::Ge,
             16 => OpCode::CallFunc,
             17 => OpCode::ImplicitIntersection,
+            18 => OpCode::StoreLocal,
+            19 => OpCode::LoadLocal,
             _ => unreachable!("invalid opcode"),
         }
     }
@@ -97,6 +101,7 @@ pub struct Program {
     pub(crate) cell_refs: Vec<Ref>,
     pub(crate) range_refs: Vec<RangeRef>,
     pub(crate) funcs: Vec<Function>,
+    pub(crate) locals: Vec<Arc<str>>,
     pub(crate) key: Arc<str>,
 }
 
@@ -108,6 +113,7 @@ impl Program {
             cell_refs: Vec::new(),
             range_refs: Vec::new(),
             funcs: Vec::new(),
+            locals: Vec::new(),
             key,
         }
     }

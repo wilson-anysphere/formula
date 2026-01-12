@@ -387,6 +387,62 @@ fn bytecode_backend_does_not_inline_dynamic_defined_name_formulas() {
 }
 
 #[test]
+fn bytecode_backend_compiles_and_evaluates_let_formulas() {
+    // Simple LET (scalar-only) should compile to bytecode and match the AST evaluator.
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, 1, x+2)")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
+    assert_engine_matches_ast(&engine, "=LET(x, 1, x+2)", "A1");
+}
+
+#[test]
+fn bytecode_backend_let_supports_nested_scopes_and_shadowing() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, 1, LET(x, 2, x+1))")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
+    assert_engine_matches_ast(&engine, "=LET(x, 1, LET(x, 2, x+1))", "A1");
+}
+
+#[test]
+fn bytecode_backend_let_supports_reference_bindings() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 10.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=LET(x, A1, x+1)")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(11.0));
+    assert_engine_matches_ast(&engine, "=LET(x, A1, x+1)", "B1");
+}
+
+#[test]
+fn bytecode_backend_rejects_invalid_let_arity() {
+    // LET must have an odd number of args >= 3.
+    // Invalid forms should fall back to the AST evaluator (and produce #VALUE!).
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, 1)")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Value));
+    assert_engine_matches_ast(&engine, "=LET(x, 1)", "A1");
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_countif_grouped_numeric_criteria() {
     let mut engine = Engine::new();
     engine

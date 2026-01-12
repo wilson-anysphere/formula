@@ -25,6 +25,7 @@ pub enum BinaryOp {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Function {
+    Let,
     If,
     And,
     Or,
@@ -67,6 +68,7 @@ impl Function {
         let upper = name.to_ascii_uppercase();
         let base = upper.strip_prefix("_XLFN.").unwrap_or(upper.as_str());
         match base {
+            "LET" => Function::Let,
             "IF" => Function::If,
             "AND" => Function::And,
             "OR" => Function::Or,
@@ -107,6 +109,7 @@ impl Function {
 
     pub fn name(&self) -> &str {
         match self {
+            Function::Let => "LET",
             Function::If => "IF",
             Function::And => "AND",
             Function::Or => "OR",
@@ -151,6 +154,7 @@ pub enum Expr {
     Literal(Value),
     CellRef(Ref),
     RangeRef(RangeRef),
+    NameRef(Arc<str>),
     Unary {
         op: UnaryOp,
         expr: Box<Expr>,
@@ -471,7 +475,9 @@ impl<'a> Parser<'a> {
             _ => {}
         }
 
-        let first = parse_a1_ref(ident, self.origin).ok_or(ParseError::InvalidCellRef)?;
+        let Some(first) = parse_a1_ref(ident, self.origin) else {
+            return Ok(Expr::NameRef(Arc::from(upper)));
+        };
         self.skip_ws();
         if self.peek_byte() == Some(b':') {
             self.pos += 1;

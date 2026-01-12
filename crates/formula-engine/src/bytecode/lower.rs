@@ -375,8 +375,19 @@ pub fn lower_canonical_expr(
             }),
             crate::PostfixOp::SpillRange => Err(LowerError::Unsupported),
         },
-        crate::Expr::NameRef(_)
-        | crate::Expr::ColRef(_)
+        crate::Expr::NameRef(nref) => {
+            // Bytecode locals (LET) only support unqualified identifiers.
+            // Defined names / sheet-qualified names are currently handled by the AST evaluator.
+            if nref.workbook.is_some() {
+                return Err(LowerError::ExternalReference);
+            }
+            if nref.sheet.is_some() {
+                return Err(LowerError::Unsupported);
+            }
+            let key = crate::value::casefold(nref.name.trim());
+            Ok(BytecodeExpr::NameRef(Arc::from(key)))
+        }
+        crate::Expr::ColRef(_)
         | crate::Expr::RowRef(_)
         | crate::Expr::StructuredRef(_) => Err(LowerError::Unsupported),
     }

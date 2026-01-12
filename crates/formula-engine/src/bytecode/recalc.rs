@@ -198,6 +198,7 @@ fn collect_deps_inner(expr: &Expr, base: CellCoord, out: &mut AHashSet<(i32, i32
             }
         }
         Expr::Literal(_) => {}
+        Expr::NameRef(_) => {}
         Expr::Unary { expr, .. } => collect_deps_inner(expr, base, out),
         Expr::Binary { left, right, .. } => {
             collect_deps_inner(left, base, out);

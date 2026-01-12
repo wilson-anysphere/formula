@@ -15,6 +15,7 @@ use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 thread_local! {
@@ -98,29 +99,66 @@ fn parse_value_from_text(s: &str) -> Result<f64, ErrorKind> {
     })
 }
 
-pub fn eval_ast(
+pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord, locale: &crate::LocaleConfig) -> Value {
+    let mut lexical_scopes: Vec<HashMap<Arc<str>, Value>> = Vec::new();
+    eval_ast_inner(expr, grid, base, locale, &mut lexical_scopes)
+}
+
+fn eval_ast_inner(
     expr: &Expr,
     grid: &dyn Grid,
     base: CellCoord,
     locale: &crate::LocaleConfig,
+    lexical_scopes: &mut Vec<HashMap<Arc<str>, Value>>,
 ) -> Value {
     match expr {
         Expr::Literal(v) => v.clone(),
         Expr::CellRef(r) => grid.get_value(r.resolve(base)),
         Expr::RangeRef(r) => Value::Range(*r),
+        Expr::NameRef(name) => {
+            for scope in lexical_scopes.iter().rev() {
+                if let Some(v) = scope.get(name) {
+                    return v.clone();
+                }
+            }
+            Value::Error(ErrorKind::Name)
+        }
         Expr::Unary { op, expr } => {
-            let v = eval_ast(expr, grid, base, locale);
+            let v = eval_ast_inner(expr, grid, base, locale, lexical_scopes);
             match op {
                 UnaryOp::ImplicitIntersection => apply_implicit_intersection(v, grid, base),
                 _ => apply_unary(*op, v),
             }
         }
         Expr::Binary { op, left, right } => {
-            let l = eval_ast(left, grid, base, locale);
-            let r = eval_ast(right, grid, base, locale);
+            let l = eval_ast_inner(left, grid, base, locale, lexical_scopes);
+            let r = eval_ast_inner(right, grid, base, locale, lexical_scopes);
             apply_binary(*op, l, r)
         }
         Expr::FuncCall { func, args } => {
+            if matches!(func, Function::Let) {
+                if args.len() < 3 || args.len() % 2 == 0 {
+                    return Value::Error(ErrorKind::Value);
+                }
+
+                let last = args.len() - 1;
+                lexical_scopes.push(HashMap::new());
+                for pair in args[..last].chunks_exact(2) {
+                    let Expr::NameRef(name) = &pair[0] else {
+                        lexical_scopes.pop();
+                        return Value::Error(ErrorKind::Value);
+                    };
+                    let value = eval_ast_inner(&pair[1], grid, base, locale, lexical_scopes);
+                    lexical_scopes
+                        .last_mut()
+                        .expect("pushed scope")
+                        .insert(name.clone(), value);
+                }
+                let result = eval_ast_inner(&args[last], grid, base, locale, lexical_scopes);
+                lexical_scopes.pop();
+                return result;
+            }
+
             // Evaluate arguments first (AST evaluation).
             let mut evaluated: SmallVec<[Value; 8]> = SmallVec::with_capacity(args.len());
             for (arg_idx, arg) in args.iter().enumerate() {
@@ -149,6 +187,7 @@ pub fn eval_ast(
                     | Function::IsError
                     | Function::IsNa
                     | Function::Na
+                    | Function::Let
                     | Function::Abs
                     | Function::Int
                     | Function::Round
@@ -168,7 +207,7 @@ pub fn eval_ast(
                     }
                 }
 
-                evaluated.push(eval_ast(arg, grid, base, locale));
+                evaluated.push(eval_ast_inner(arg, grid, base, locale, lexical_scopes));
             }
             call_function(func, &evaluated, grid, base, locale)
         }
@@ -500,6 +539,9 @@ pub fn call_function(
     locale: &crate::LocaleConfig,
 ) -> Value {
     match func {
+        // LET is lowered to bytecode locals by the compiler; it should not be invoked via the
+        // generic function-call path (its "name" arguments are not evaluated values).
+        Function::Let => Value::Error(ErrorKind::Value),
         Function::If => fn_if(args),
         Function::And => fn_and(args, grid, base),
         Function::Or => fn_or(args, grid, base),

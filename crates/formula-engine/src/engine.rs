@@ -5257,6 +5257,7 @@ impl BytecodeColumnCache {
         fn range_refs_used_by_functions(program: &bytecode::Program) -> Vec<bool> {
             let mut used = vec![false; program.range_refs.len()];
             let mut stack: Vec<StackValue> = Vec::new();
+            let mut locals: Vec<StackValue> = vec![StackValue::Other; program.locals.len()];
 
             for inst in program.instrs() {
                 match inst.op() {
@@ -5265,6 +5266,18 @@ impl BytecodeColumnCache {
                     }
                     bytecode::OpCode::LoadRange => {
                         stack.push(StackValue::Range(inst.a() as usize));
+                    }
+                    bytecode::OpCode::StoreLocal => {
+                        let idx = inst.a() as usize;
+                        let v = stack.pop().unwrap_or(StackValue::Other);
+                        if idx < locals.len() {
+                            locals[idx] = v;
+                        }
+                    }
+                    bytecode::OpCode::LoadLocal => {
+                        let idx = inst.a() as usize;
+                        let v = locals.get(idx).copied().unwrap_or(StackValue::Other);
+                        stack.push(v);
                     }
                     bytecode::OpCode::UnaryPlus
                     | bytecode::OpCode::UnaryNeg
@@ -5632,7 +5645,8 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
 }
 
 fn bytecode_expr_is_eligible(expr: &bytecode::Expr) -> bool {
-    bytecode_expr_is_eligible_inner(expr, false)
+    let mut lexical_scopes: Vec<HashSet<Arc<str>>> = Vec::new();
+    bytecode_expr_is_eligible_inner(expr, false, &mut lexical_scopes)
 }
 
 fn bytecode_expr_within_grid_limits(
@@ -5669,6 +5683,7 @@ fn bytecode_expr_within_grid_limits(
                 Err(BytecodeCompileReason::ExceedsRangeCellLimit)
             }
         }
+        bytecode::Expr::NameRef(_) => Ok(()),
         bytecode::Expr::Unary { op, expr } => match op {
             bytecode::ast::UnaryOp::Plus | bytecode::ast::UnaryOp::Neg => {
                 bytecode_expr_within_grid_limits(expr, origin)
@@ -5706,7 +5721,15 @@ fn bytecode_expr_within_grid_limits(
     }
 }
 
-fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> bool {
+fn bytecode_expr_is_eligible_inner(
+    expr: &bytecode::Expr,
+    allow_range: bool,
+    lexical_scopes: &mut Vec<HashSet<Arc<str>>>,
+) -> bool {
+    fn name_is_local(scopes: &[HashSet<Arc<str>>], name: &Arc<str>) -> bool {
+        scopes.iter().rev().any(|scope| scope.contains(name))
+    }
+
     match expr {
         bytecode::Expr::Literal(v) => match v {
             bytecode::Value::Number(_) | bytecode::Value::Bool(_) => true,
@@ -5720,11 +5743,14 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
         },
         bytecode::Expr::CellRef(_) => true,
         bytecode::Expr::RangeRef(_) => allow_range,
+        bytecode::Expr::NameRef(name) => name_is_local(lexical_scopes, name),
         bytecode::Expr::Unary { op, expr } => match op {
             bytecode::ast::UnaryOp::Plus | bytecode::ast::UnaryOp::Neg => {
-                bytecode_expr_is_eligible_inner(expr, false)
+                bytecode_expr_is_eligible_inner(expr, false, lexical_scopes)
             }
-            bytecode::ast::UnaryOp::ImplicitIntersection => bytecode_expr_is_eligible_inner(expr, true),
+            bytecode::ast::UnaryOp::ImplicitIntersection => {
+                bytecode_expr_is_eligible_inner(expr, true, lexical_scopes)
+            }
         },
         bytecode::Expr::Binary { op, left, right } => {
             matches!(
@@ -5740,8 +5766,8 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
                     | bytecode::ast::BinaryOp::Le
                     | bytecode::ast::BinaryOp::Gt
                     | bytecode::ast::BinaryOp::Ge
-            ) && bytecode_expr_is_eligible_inner(left, false)
-                && bytecode_expr_is_eligible_inner(right, false)
+            ) && bytecode_expr_is_eligible_inner(left, false, lexical_scopes)
+                && bytecode_expr_is_eligible_inner(right, false, lexical_scopes)
         }
         bytecode::Expr::FuncCall { func, args } => match func {
             bytecode::ast::Function::If => {
@@ -5749,36 +5775,67 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
                     return false;
                 }
                 args.iter()
-                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false))
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, lexical_scopes))
             }
             bytecode::ast::Function::And | bytecode::ast::Function::Or => {
                 if args.is_empty() {
                     return false;
                 }
                 args.iter()
-                    .all(|arg| bytecode_expr_is_eligible_inner(arg, true))
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, true, lexical_scopes))
             }
             bytecode::ast::Function::IfError | bytecode::ast::Function::IfNa => {
                 if args.len() != 2 {
                     return false;
                 }
                 args.iter()
-                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false))
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, lexical_scopes))
             }
             bytecode::ast::Function::IsError | bytecode::ast::Function::IsNa => {
                 if args.len() != 1 {
                     return false;
                 }
-                bytecode_expr_is_eligible_inner(&args[0], false)
+                bytecode_expr_is_eligible_inner(&args[0], false, lexical_scopes)
             }
             bytecode::ast::Function::Na => args.is_empty(),
+            bytecode::ast::Function::Let => {
+                if args.len() < 3 || args.len() % 2 == 0 {
+                    return false;
+                }
+
+                lexical_scopes.push(HashSet::new());
+
+                for pair in args[..args.len() - 1].chunks_exact(2) {
+                    let bytecode::Expr::NameRef(name) = &pair[0] else {
+                        lexical_scopes.pop();
+                        return false;
+                    };
+                    if name.is_empty() {
+                        lexical_scopes.pop();
+                        return false;
+                    }
+                    if !bytecode_expr_is_eligible_inner(&pair[1], true, lexical_scopes) {
+                        lexical_scopes.pop();
+                        return false;
+                    }
+                    lexical_scopes
+                        .last_mut()
+                        .expect("pushed scope")
+                        .insert(name.clone());
+                }
+
+                let ok =
+                    bytecode_expr_is_eligible_inner(&args[args.len() - 1], allow_range, lexical_scopes);
+                lexical_scopes.pop();
+                ok
+            }
             bytecode::ast::Function::Sum
             | bytecode::ast::Function::Average
             | bytecode::ast::Function::Min
             | bytecode::ast::Function::Max
             | bytecode::ast::Function::Count => args
                 .iter()
-                .all(|arg| bytecode_expr_is_eligible_inner(arg, true)),
+                .all(|arg| bytecode_expr_is_eligible_inner(arg, true, lexical_scopes)),
             bytecode::ast::Function::SumIf | bytecode::ast::Function::AverageIf => {
                 if args.len() != 2 && args.len() != 3 {
                     return false;
@@ -5787,7 +5844,7 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
                     args[0],
                     bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
                 );
-                let criteria_ok = bytecode_expr_is_eligible_inner(&args[1], false);
+                let criteria_ok = bytecode_expr_is_eligible_inner(&args[1], false, lexical_scopes);
                 let sum_range_ok = match args.get(2) {
                     None => true,
                     // Excel treats an explicitly missing optional range arg as "omitted".
@@ -5817,7 +5874,7 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
                         pair[0],
                         bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
                     );
-                    let criteria_ok = bytecode_expr_is_eligible_inner(&pair[1], false);
+                    let criteria_ok = bytecode_expr_is_eligible_inner(&pair[1], false, lexical_scopes);
                     if !range_ok || !criteria_ok {
                         return false;
                     }
@@ -5832,7 +5889,7 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
                     args[0],
                     bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
                 );
-                let criteria_ok = bytecode_expr_is_eligible_inner(&args[1], false);
+                let criteria_ok = bytecode_expr_is_eligible_inner(&args[1], false, lexical_scopes);
 
                 range_ok && criteria_ok
             }
@@ -5845,7 +5902,7 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
                         pair[0],
                         bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
                     );
-                    let criteria_ok = bytecode_expr_is_eligible_inner(&pair[1], false);
+                    let criteria_ok = bytecode_expr_is_eligible_inner(&pair[1], false, lexical_scopes);
                     if !range_ok || !criteria_ok {
                         return false;
                     }
@@ -5870,10 +5927,10 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
                     args[1],
                     bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
                 );
-                let lookup_ok = bytecode_expr_is_eligible_inner(&args[0], false);
-                let index_ok = bytecode_expr_is_eligible_inner(&args[2], false);
+                let lookup_ok = bytecode_expr_is_eligible_inner(&args[0], false, lexical_scopes);
+                let index_ok = bytecode_expr_is_eligible_inner(&args[2], false, lexical_scopes);
                 let range_lookup_ok = if args.len() == 4 {
-                    bytecode_expr_is_eligible_inner(&args[3], false)
+                    bytecode_expr_is_eligible_inner(&args[3], false, lexical_scopes)
                 } else {
                     true
                 };
@@ -5889,9 +5946,9 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
                     args[1],
                     bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
                 );
-                let lookup_ok = bytecode_expr_is_eligible_inner(&args[0], false);
+                let lookup_ok = bytecode_expr_is_eligible_inner(&args[0], false, lexical_scopes);
                 let match_type_ok = if args.len() == 3 {
-                    bytecode_expr_is_eligible_inner(&args[2], false)
+                    bytecode_expr_is_eligible_inner(&args[2], false, lexical_scopes)
                 } else {
                     true
                 };
@@ -5908,7 +5965,7 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
             | bytecode::ast::Function::Concat
             | bytecode::ast::Function::Not => args
                 .iter()
-                .all(|arg| bytecode_expr_is_eligible_inner(arg, false)),
+                .all(|arg| bytecode_expr_is_eligible_inner(arg, false, lexical_scopes)),
             bytecode::ast::Function::Unknown(_) => false,
         },
     }

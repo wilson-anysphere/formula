@@ -12,16 +12,21 @@ use super::program::{OpCode, Program};
 #[derive(Default)]
 pub struct Vm {
     stack: Vec<Value>,
+    locals: Vec<Value>,
 }
 
 impl Vm {
     pub fn new() -> Self {
-        Self { stack: Vec::new() }
+        Self {
+            stack: Vec::new(),
+            locals: Vec::new(),
+        }
     }
 
     pub fn with_capacity(stack: usize) -> Self {
         Self {
             stack: Vec::with_capacity(stack),
+            locals: Vec::new(),
         }
     }
 
@@ -33,6 +38,8 @@ impl Vm {
         locale: &crate::LocaleConfig,
     ) -> Value {
         self.stack.clear();
+        self.locals.clear();
+        self.locals.resize(program.locals.len(), Value::Empty);
         for inst in program.instrs() {
             match inst.op() {
                 OpCode::PushConst => {
@@ -46,6 +53,19 @@ impl Vm {
                 OpCode::LoadRange => {
                     let r = program.range_refs[inst.a() as usize];
                     self.stack.push(Value::Range(r));
+                }
+                OpCode::StoreLocal => {
+                    let v = self.stack.pop().unwrap_or(Value::Empty);
+                    let idx = inst.a() as usize;
+                    if idx >= self.locals.len() {
+                        self.locals.resize(idx + 1, Value::Empty);
+                    }
+                    self.locals[idx] = v;
+                }
+                OpCode::LoadLocal => {
+                    let idx = inst.a() as usize;
+                    let v = self.locals.get(idx).cloned().unwrap_or(Value::Empty);
+                    self.stack.push(v);
                 }
                 OpCode::UnaryPlus => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
