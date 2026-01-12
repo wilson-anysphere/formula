@@ -1448,7 +1448,11 @@ export function bindYjsToDocumentController(options) {
       const path = event?.path;
       const touchesView = Array.isArray(path) && path.includes("view");
       const touchesFormats =
-        Array.isArray(path) && (path.includes("rowFormats") || path.includes("colFormats") || path.includes("defaultFormat"));
+        Array.isArray(path) &&
+        (path.includes("rowFormats") ||
+          path.includes("colFormats") ||
+          path.includes("defaultFormat") ||
+          path.includes("formatRunsByCol"));
       const changes = event?.changes?.keys;
 
       // Array-level changes (insert/delete/move) don't expose meaningful `changes.keys`. This can
