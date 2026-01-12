@@ -2680,6 +2680,9 @@ export class SpreadsheetApp {
   private openEditorFromSharedGrid(request: { row: number; col: number; initialKey?: string }): void {
     if (!this.sharedGrid) return;
     if (this.editor.isOpen()) return;
+    const headerRows = this.sharedHeaderRows();
+    const headerCols = this.sharedHeaderCols();
+    if (request.row < headerRows || request.col < headerCols) return;
     const docCell = this.docCellFromGridCell({ row: request.row, col: request.col });
     const rect = this.sharedGrid.getCellRect(request.row, request.col);
     if (!rect) return;
@@ -2818,6 +2821,12 @@ export class SpreadsheetApp {
     const vy = e.clientY - canvasRect.top;
     const picked = this.sharedGrid.renderer.pickCellAt(vx, vy);
     if (!picked) {
+      this.hideCommentTooltip();
+      return;
+    }
+    const headerRows = this.sharedHeaderRows();
+    const headerCols = this.sharedHeaderCols();
+    if (picked.row < headerRows || picked.col < headerCols) {
       this.hideCommentTooltip();
       return;
     }
