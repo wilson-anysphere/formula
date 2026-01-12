@@ -4,7 +4,8 @@ import { gotoDesktop } from "./helpers";
 
 test.describe("outline grouping", () => {
   test("collapse and expand a row group", async ({ page }) => {
-    await gotoDesktop(page);
+    // Outline rendering + navigation currently rely on legacy row/col visibility caches.
+    await gotoDesktop(page, "/?grid=legacy");
 
     // The demo sheet seeds an outline group for rows 2-4 with a summary row at 5.
     const toggle = page.getByTestId("outline-toggle-row-5");
