@@ -1,4 +1,6 @@
 //! Helpers for working with `xl/richData/richValue*.xml` rich value parts.
+//!
+//! Currently used for best-effort extraction of images referenced by rich values.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Cursor;

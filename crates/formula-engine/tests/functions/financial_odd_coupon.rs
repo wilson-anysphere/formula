@@ -25,7 +25,6 @@ fn cell_number_or_skip(sheet: &TestSheet, addr: &str) -> Option<f64> {
         other => panic!("expected number, got {other:?} from cell {addr}"),
     }
 }
-
 fn eval_value_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<Value> {
     match sheet.eval(formula) {
         Value::Error(ErrorKind::Name) => None,

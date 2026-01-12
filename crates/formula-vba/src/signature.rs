@@ -834,7 +834,6 @@ pub fn verify_vba_signature_certificate_trust(
     }
     verify_pkcs7_trust(signature, &options.trusted_root_certs_der)
 }
-
 fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
     match oid.trim() {
         // id-md5 (RFC 1321 / PKCS#1)

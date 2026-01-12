@@ -266,6 +266,7 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                 // `formula-model` uses camelCase for rich value payloads, but we also accept legacy
                 // snake_case / display aliases for robustness.
                 .get("displayValue")
+                // Back-compat: earlier payloads used snake_case.
                 .or_else(|| value.get("display_value"))
                 .or_else(|| value.get("display"))
                 .and_then(|v| v.as_str())?;
@@ -273,13 +274,63 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
         }
         "record" => {
             let record = serialized.get("value")?;
-
             // Current `formula-model` record values are a simple display string.
             if let Some(display) = record.as_str() {
-                if !display.is_empty() {
-                    return Some(CellValue::Text(display.to_string()));
+                return if display.is_empty() {
+                    Some(CellValue::Blank)
+                } else {
+                    Some(CellValue::Text(display.to_string()))
+                };
+            }
+
+            // Prefer using `displayField` when it points at a scalar, since this preserves the
+            // value's natural sort order (e.g. numbers sort numerically).
+            let display_field = record
+                .get("displayField")
+                .or_else(|| record.get("display_field"))
+                .and_then(|v| v.as_str());
+            if let Some(display_field) = display_field {
+                if let Some(fields) = record.get("fields").and_then(|v| v.as_object()) {
+                    if let Some(display_value) = fields.get(display_field) {
+                        if let Some(display_value_type) =
+                            display_value.get("type").and_then(|v| v.as_str())
+                        {
+                            let parsed = match display_value_type {
+                                "number" => display_value
+                                    .get("value")
+                                    .and_then(|v| v.as_f64())
+                                    .map(CellValue::Number),
+                                "string" => display_value
+                                    .get("value")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| CellValue::Text(s.to_string())),
+                                "boolean" => display_value
+                                    .get("value")
+                                    .and_then(|v| v.as_bool())
+                                    .map(CellValue::Bool),
+                                "error" => display_value
+                                    .get("value")
+                                    .and_then(|v| v.as_str())
+                                    .map(|err_str| {
+                                        let err = err_str
+                                            .parse::<formula_model::ErrorValue>()
+                                            .unwrap_or(formula_model::ErrorValue::Unknown);
+                                        CellValue::Error(err)
+                                    }),
+                                "rich_text" => display_value
+                                    .get("value")
+                                    .and_then(|v| v.get("text"))
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| CellValue::Text(s.to_string())),
+                                _ => None,
+                            };
+
+                            if parsed.is_some() {
+                                return parsed;
+                            }
+                        }
+                    }
                 }
-                return Some(CellValue::Blank);
             }
 
             // Prefer a precomputed display string when present.
@@ -289,41 +340,14 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                 .or_else(|| record.get("display"))
                 .and_then(|v| v.as_str())
             {
-                if !display.is_empty() {
-                    return Some(CellValue::Text(display.to_string()));
-                }
+                return if display.is_empty() {
+                    Some(CellValue::Blank)
+                } else {
+                    Some(CellValue::Text(display.to_string()))
+                };
             }
 
-            // Backwards/forwards compatible fallback: treat record values like the old
-            // rich-data record structure (display_field + fields map) when present.
-            let display_field = record
-                .get("displayField")
-                .or_else(|| record.get("display_field"))?
-                .as_str()?;
-            let fields = record.get("fields")?.as_object()?;
-            let display_value = fields.get(display_field)?;
-
-            let display_value_type = display_value.get("type")?.as_str()?;
-            match display_value_type {
-                "number" => Some(CellValue::Number(display_value.get("value")?.as_f64()?)),
-                "string" => Some(CellValue::Text(display_value.get("value")?.as_str()?.to_string())),
-                "boolean" => Some(CellValue::Bool(display_value.get("value")?.as_bool()?)),
-                "error" => {
-                    let err_str = display_value.get("value")?.as_str()?;
-                    let err = err_str
-                        .parse::<formula_model::ErrorValue>()
-                        .unwrap_or(formula_model::ErrorValue::Unknown);
-                    Some(CellValue::Error(err))
-                }
-                "rich_text" => Some(CellValue::Text(
-                    display_value
-                        .get("value")?
-                        .get("text")?
-                        .as_str()?
-                        .to_string(),
-                )),
-                _ => None,
-            }
+            None
         }
         _ => None,
     }

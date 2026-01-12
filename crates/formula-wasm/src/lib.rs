@@ -2596,6 +2596,19 @@ mod tests {
     }
 
     #[test]
+    fn cell_value_to_engine_maps_field_error() {
+        let value = CellValue::Error(formula_model::ErrorValue::Field);
+        assert_eq!(
+            cell_value_to_engine(&value),
+            EngineValue::Error(ErrorKind::Field)
+        );
+        assert_eq!(
+            engine_value_to_json(EngineValue::Error(ErrorKind::Field)),
+            json!("#FIELD!")
+        );
+    }
+
+    #[test]
     fn recalculate_includes_spill_output_cells() {
         let mut wb = WorkbookState::new_with_default_sheet();
         wb.set_cell_internal(DEFAULT_SHEET, "A1", json!("=SEQUENCE(1,2)"))
