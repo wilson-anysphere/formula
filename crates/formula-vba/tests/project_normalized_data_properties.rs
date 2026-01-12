@@ -106,6 +106,76 @@ fn project_normalized_data_project_properties_parse_name_and_value_tokens_withou
 }
 
 #[test]
+fn project_normalized_data_project_properties_accepts_lfcr_newlines() {
+    // MS-OVBA defines `NWLN` as either CRLF or LFCR. This regression test ensures `ProjectProperties`
+    // parsing works for LFCR-terminated property lines and still emits only name/value token bytes.
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0003, &1252u16.to_le_bytes()); // PROJECTCODEPAGE
+
+        // Module group for designer module identifier `UserForm1`.
+        push_record(&mut out, 0x0019, b"UserForm1"); // MODULENAME
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"UserForm1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes()); // reserved u16
+        push_record(&mut out, 0x001A, &stream_name); // MODULESTREAMNAME
+        push_record(&mut out, 0x0021, &0x0003u16.to_le_bytes()); // MODULETYPE (UserForm)
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    // Same properties as the CRLF test, but terminated with LFCR.
+    let project_stream = concat!(
+        "Name=\"VBAProject\"\n\r",
+        "BaseClass=UserForm1\n\r",
+        "HelpFile=\"c:\\example path\\example.hlp\"\n\r",
+        "HelpContextID=\"1\"\n\r",
+    );
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream.as_bytes())
+            .expect("write PROJECT");
+    }
+
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    ole.create_storage("UserForm1")
+        .expect("create designer storage");
+    {
+        let mut s = ole
+            .create_stream("UserForm1/f")
+            .expect("create designer stream");
+        s.write_all(b"DESIGNER").expect("write designer bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized =
+        project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(&1252u16.to_le_bytes());
+    expected.extend_from_slice(b"NameVBAProject");
+    expected.extend_from_slice(b"BaseClassUserForm1");
+    expected.extend_from_slice(b"HelpFilec:\\example path\\example.hlp");
+    expected.extend_from_slice(b"HelpContextID1");
+
+    let mut expected_designer_storage = Vec::new();
+    expected_designer_storage.extend_from_slice(b"DESIGNER");
+    expected_designer_storage.extend(std::iter::repeat(0u8).take(1023 - b"DESIGNER".len()));
+    expected.extend_from_slice(&expected_designer_storage);
+
+    assert_eq!(normalized, expected);
+}
+
+#[test]
 fn project_normalized_data_project_properties_preserves_non_ascii_mbcs_bytes_verbatim() {
     // Regression test: `ProjectProperties` name/value tokens are appended as **raw MBCS bytes**.
     // A naive implementation might decode to a Rust `String` and then append UTF-8 bytes, which

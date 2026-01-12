@@ -2,7 +2,7 @@
 ///
 /// Record IDs are from **MS-OVBA §2.3.4 (dir Stream)**.
 ///
-/// Notes (seen in the wild):
+/// Notes:
 /// - Some `VBA/dir` encodings emit Unicode/alternate strings as standalone records whose `data` is
 ///   UTF-16LE bytes (sometimes with an internal `u32le` length prefix).
 /// - Some Unicode/alternate record IDs are "canonical" per MS-OVBA, while others are observed
@@ -19,15 +19,20 @@ pub fn record_name(id: u16) -> Option<&'static str> {
         0x0002 => "PROJECTLCID",
         0x0003 => "PROJECTCODEPAGE",
         0x0004 => "PROJECTNAME",
+
         0x0005 => "PROJECTDOCSTRING",
         0x0040 => "PROJECTDOCSTRINGUNICODE",
+
         0x0006 => "PROJECTHELPFILEPATH",
         0x003D => "PROJECTHELPFILEPATH2",
+
         0x0007 => "PROJECTHELPCONTEXT",
         0x0008 => "PROJECTLIBFLAGS",
         0x0009 => "PROJECTVERSION",
+
         0x000C => "PROJECTCONSTANTS",
         0x003C => "PROJECTCONSTANTSUNICODE",
+
         0x0014 => "PROJECTLCIDINVOKE",
         0x004A => "PROJECTCOMPATVERSION",
 
