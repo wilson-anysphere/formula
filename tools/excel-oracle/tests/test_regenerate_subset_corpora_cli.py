@@ -149,6 +149,54 @@ class RegenerateSubsetCorporaCliTests(unittest.TestCase):
             self.assertNotEqual(proc.returncode, 0, "expected --check to fail on drift")
             self.assertIn("Subset corpora are out of date", proc.stderr + proc.stdout)
 
+    def test_dry_run_does_not_write_files(self) -> None:
+        repo_root = Path(__file__).resolve().parents[3]
+        script = repo_root / "tools" / "excel-oracle" / "regenerate_subset_corpora.py"
+        self.assertTrue(script.is_file(), f"script not found at {script}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            cases_path = tmp / "cases.json"
+            out_dir = tmp / "out"
+
+            cases_payload = {
+                "schemaVersion": 1,
+                "caseSet": "test",
+                "defaultSheet": "Sheet1",
+                "cases": [
+                    {
+                        "id": "v1",
+                        "formula": "=1",
+                        "outputCell": "C1",
+                        "inputs": [],
+                        "tags": ["odd_coupon_validation"],
+                    }
+                ],
+            }
+            cases_path.write_text(
+                json.dumps(cases_payload, indent=2, sort_keys=False) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--cases",
+                    str(cases_path),
+                    "--out-dir",
+                    str(out_dir),
+                    "--dry-run",
+                ],
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertFalse(out_dir.exists(), "--dry-run should not create the output directory")
+            self.assertIn("Would write", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

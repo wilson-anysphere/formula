@@ -196,6 +196,12 @@ To only verify the subset corpora are up to date (without rewriting files), run:
 python tools/excel-oracle/regenerate_subset_corpora.py --check
 ```
 
+To preview what would be written (case counts + paths) without writing files, run:
+
+```bash
+python tools/excel-oracle/regenerate_subset_corpora.py --dry-run
+```
+
 Note: this subset corpus reuses the **canonical case IDs** from `tests/compatibility/excel-oracle/cases.json`,
 so you can map results back to the full corpus by `caseId` (useful when updating/pinning datasets).
 

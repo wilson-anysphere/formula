@@ -103,6 +103,11 @@ def main() -> int:
         action="store_true",
         help="Validate that the subset corpora are up to date, without rewriting files.",
     )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would be written (case counts + paths) without creating or modifying any files.",
+    )
     args = p.parse_args()
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -175,6 +180,16 @@ def main() -> int:
                 f"Mismatched files:\n{sys_err}"
             )
         print("Subset corpora are up to date.")
+        return 0
+
+    if args.dry_run:
+        for path, _payload, count in targets:
+            # Print paths relative to repo root for stability/readability.
+            try:
+                rel = path.resolve().relative_to(repo_root.resolve()).as_posix()
+            except Exception:
+                rel = path.as_posix()
+            print(f"Would write {count} cases -> {rel}")
         return 0
 
     for path, payload, count in targets:

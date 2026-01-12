@@ -66,6 +66,12 @@ and exits non-zero if mismatches exceed the configured threshold.
   ```bash
   python tools/excel-oracle/regenerate_subset_corpora.py --check
   ```
+
+  To preview what would be written (case counts + paths) without writing files, run:
+
+  ```bash
+  python tools/excel-oracle/regenerate_subset_corpora.py --dry-run
+  ```
 - `datasets/` — results datasets:
   - `excel-oracle.pinned.json` — pinned Excel dataset for CI (no Excel needed).
   - `versioned/` — version-tagged pinned datasets (useful when Excel behavior differs across versions/builds).
