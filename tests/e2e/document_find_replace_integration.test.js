@@ -72,3 +72,43 @@ test("ReplaceAll (look in formulas) rewrites formula text through DocumentWorkbo
   assert.ok(stored?.includes("AVERAGE"), `expected formula to include AVERAGE, got: ${stored}`);
   assert.ok(!stored?.includes("SUM("), `expected SUM to be replaced, got: ${stored}`);
 });
+
+test("Find/Replace resolves sheet display names to stable sheet ids (no phantom sheets)", async () => {
+  const doc = new DocumentController();
+  // Use a stable id that differs from the display name.
+  doc.setCellValue("sheet-1", "A1", "foo");
+
+  const resolver = {
+    getSheetNameById: (id) => (String(id) === "sheet-1" ? "Budget" : null),
+    getSheetIdByName: (name) => (String(name).trim().toLowerCase() === "budget" ? "sheet-1" : null),
+  };
+
+  const workbook = new DocumentWorkbookAdapter({ document: doc, sheetNameResolver: resolver });
+
+  let activeCell = { sheetName: "Budget", row: 0, col: 0 };
+
+  const controller = new FindReplaceController({
+    workbook,
+    getCurrentSheetName: () => activeCell.sheetName,
+    getActiveCell: () => activeCell,
+    setActiveCell: (next) => {
+      activeCell = next;
+    },
+    beginBatch: (opts) => doc.beginBatch(opts),
+    endBatch: () => doc.endBatch(),
+  });
+
+  controller.scope = "sheet";
+  controller.lookIn = "values";
+  controller.query = "foo";
+  controller.replacement = "bar";
+
+  const results = await controller.findAll();
+  assert.equal(results.length, 1);
+  assert.equal(results[0].sheetName, "Budget");
+
+  const res = await controller.replaceAll();
+  assert.deepEqual(res, { replacedCells: 1, replacedOccurrences: 1 });
+  assert.equal(doc.getCell("sheet-1", "A1").value, "bar");
+  assert.deepEqual(doc.getSheetIds(), ["sheet-1"]);
+});
