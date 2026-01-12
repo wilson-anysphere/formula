@@ -2517,6 +2517,21 @@ class BrowserExtensionHost {
         const selection = data?.selection;
         if (!selection || typeof selection !== "object") return;
 
+        // Only taint when the event payload actually includes cell values. Some hosts may emit
+        // selectionChanged events with empty/truncated matrices (e.g. large selections) to avoid
+        // catastrophic allocations; those payloads do not expose spreadsheet data and should not
+        // contribute to clipboard DLP enforcement.
+        try {
+          if (!Object.prototype.hasOwnProperty.call(selection, "values")) return;
+          if (selection.truncated === true) return;
+          const values = selection.values;
+          if (!Array.isArray(values) || values.length === 0) return;
+          const hasAnyCell = values.some((row) => Array.isArray(row) && row.length > 0);
+          if (!hasAnyCell) return;
+        } catch {
+          return;
+        }
+
         const looksLikeRange =
           Object.prototype.hasOwnProperty.call(selection, "startRow") &&
           Object.prototype.hasOwnProperty.call(selection, "startCol") &&
@@ -2580,6 +2595,9 @@ class BrowserExtensionHost {
 
       if (evt === "cellChanged") {
         if (!data || typeof data !== "object") return;
+        // Only taint when the payload includes a cell value (even if null). If a host emits
+        // coordinate-only cellChanged events, those do not expose data and should not taint.
+        if (!Object.prototype.hasOwnProperty.call(data, "value")) return;
         const hasRow = Object.prototype.hasOwnProperty.call(data, "row");
         const hasCol = Object.prototype.hasOwnProperty.call(data, "col");
 

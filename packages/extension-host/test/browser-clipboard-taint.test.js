@@ -395,6 +395,100 @@ test("BrowserExtensionHost: does not taint from events for inactive extensions",
   assert.deepEqual(extension.taintedRanges, []);
 });
 
+test("BrowserExtensionHost: does not taint selectionChanged when values are empty (truncated payload)", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async setCell() {},
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.event-taint-truncated";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "event-taint-truncated",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+  extension.active = true;
+
+  host._broadcastEvent("selectionChanged", {
+    sheetId: "sheet1",
+    selection: {
+      startRow: 0,
+      startCol: 0,
+      endRow: 999,
+      endCol: 999,
+      values: [],
+      truncated: true,
+    },
+  });
+
+  assert.deepEqual(extension.taintedRanges, []);
+});
+
+test("BrowserExtensionHost: does not taint cellChanged when value is missing", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async setCell() {},
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.event-taint-cell-missing-value";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "event-taint-cell-missing-value",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+  extension.active = true;
+
+  host._broadcastEvent("cellChanged", { sheetId: "sheet1", row: 0, col: 0 });
+
+  assert.deepEqual(extension.taintedRanges, []);
+});
+
 test("BrowserExtensionHost: records taint for selectionChanged events (and passes it to clipboard guard)", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
