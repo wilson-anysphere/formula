@@ -218,8 +218,11 @@ fn record_name(id: u16) -> Option<&'static str> {
         // ---- Module records ----
         0x0015 => "MODULECOUNT",
         0x0019 => "MODULENAME",
+        0x0047 => "MODULENAMEUNICODE",
         0x001A => "MODULESTREAMNAME",
+        0x0032 => "MODULESTREAMNAMEUNICODE",
         0x001C => "MODULEDOCSTRING",
+        0x0048 => "MODULEDOCSTRINGUNICODE",
         0x001D => "MODULEHELPFILEPATH",
         0x001E => "MODULEHELPCONTEXT",
         0x0021 => "MODULETYPE (procedural TypeRecord.Id=0x0021)",
