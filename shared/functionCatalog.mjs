@@ -1482,6 +1482,16 @@ export default {
       ]
     },
     {
+      "name": "FORMULATEXT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
       "name": "FREQUENCY",
       "min_args": 2,
       "max_args": 2,
@@ -1952,6 +1962,16 @@ export default {
       "return_type": "bool",
       "arg_types": [
         "number"
+      ]
+    },
+    {
+      "name": "ISFORMULA",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "bool",
+      "arg_types": [
+        "any"
       ]
     },
     {
@@ -3392,6 +3412,26 @@ export default {
         "number",
         "number",
         "number",
+        "any"
+      ]
+    },
+    {
+      "name": "SHEET",
+      "min_args": 0,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any"
+      ]
+    },
+    {
+      "name": "SHEETS",
+      "min_args": 0,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
         "any"
       ]
     },

@@ -40,6 +40,7 @@ mod index_reference;
 mod information;
 mod information_worksheet;
 mod info_cell;
+mod workbook_info;
 mod lambda_let;
 mod logical;
 mod logical_extended;

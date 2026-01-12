@@ -33881,6 +33881,99 @@
       "id": "info_ffe59ed06a96"
     },
     {
+      "formula": "=SHEET()",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "SHEET"
+      ],
+      "id": "sheet_7dce9a8d409b"
+    },
+    {
+      "formula": "=SHEET(A1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "SHEET"
+      ],
+      "id": "sheet_2adbaa985742"
+    },
+    {
+      "formula": "=SHEETS(A1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "info",
+        "SHEETS"
+      ],
+      "id": "sheets_7c3532d7395b"
+    },
+    {
+      "formula": "=FORMULATEXT(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "formula": "=1+1"
+        }
+      ],
+      "tags": [
+        "info",
+        "FORMULATEXT"
+      ],
+      "id": "formulatext_e475ecc3e23c"
+    },
+    {
+      "formula": "=FORMULATEXT(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 5
+        }
+      ],
+      "tags": [
+        "info",
+        "FORMULATEXT",
+        "error"
+      ],
+      "description": "FORMULATEXT returns #N/A when the referenced cell has no formula",
+      "id": "formulatext_6e53664936a7"
+    },
+    {
+      "formula": "=ISFORMULA(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "formula": "=1+1"
+        }
+      ],
+      "tags": [
+        "info",
+        "ISFORMULA"
+      ],
+      "id": "isformula_de4876bb5980"
+    },
+    {
+      "formula": "=ISFORMULA(A1)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 5
+        }
+      ],
+      "tags": [
+        "info",
+        "ISFORMULA"
+      ],
+      "description": "ISFORMULA returns FALSE for constant values",
+      "id": "isformula_86cf6becefe7"
+    },
+    {
       "formula": "=LET(x,1,x+1)",
       "outputCell": "C1",
       "inputs": [],

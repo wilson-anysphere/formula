@@ -69,3 +69,40 @@ def generate(
 
     add_case(cases, prefix="info", tags=["info", "INFO"], formula='=INFO("recalc")')
     add_case(cases, prefix="info", tags=["info", "INFO", "error"], formula='=INFO("no_such_key")')
+
+    # Workbook / worksheet metadata functions (auditing helpers in modern Excel).
+    add_case(cases, prefix="sheet", tags=["info", "SHEET"], formula="=SHEET()")
+    add_case(cases, prefix="sheet", tags=["info", "SHEET"], formula="=SHEET(A1)")
+    # Avoid `SHEETS()` (no arg) because the default sheet count in new workbooks can vary by
+    # Excel user preferences; `SHEETS(A1)` is deterministic.
+    add_case(cases, prefix="sheets", tags=["info", "SHEETS"], formula="=SHEETS(A1)")
+    add_case(
+        cases,
+        prefix="formulatext",
+        tags=["info", "FORMULATEXT"],
+        formula="=FORMULATEXT(A1)",
+        inputs=[CellInput("A1", formula="=1+1")],
+    )
+    add_case(
+        cases,
+        prefix="formulatext",
+        tags=["info", "FORMULATEXT", "error"],
+        formula="=FORMULATEXT(A1)",
+        inputs=[CellInput("A1", 5)],
+        description="FORMULATEXT returns #N/A when the referenced cell has no formula",
+    )
+    add_case(
+        cases,
+        prefix="isformula",
+        tags=["info", "ISFORMULA"],
+        formula="=ISFORMULA(A1)",
+        inputs=[CellInput("A1", formula="=1+1")],
+    )
+    add_case(
+        cases,
+        prefix="isformula",
+        tags=["info", "ISFORMULA"],
+        formula="=ISFORMULA(A1)",
+        inputs=[CellInput("A1", 5)],
+        description="ISFORMULA returns FALSE for constant values",
+    )

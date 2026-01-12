@@ -1,3 +1,5 @@
+pub mod workbook;
+
 use crate::{ErrorKind, Value};
 
 pub mod worksheet;
