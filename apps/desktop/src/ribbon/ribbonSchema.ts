@@ -2084,7 +2084,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                   id: "view.appearance.theme.highContrast",
                   label: "High Contrast",
                   ariaLabel: "Use high contrast theme",
-                  icon: "◐",
+                  icon: "◧",
                   testId: "theme-option-high-contrast",
                 },
               ],

@@ -1071,6 +1071,22 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       return "Custom";
     })();
 
+    const themePreferenceLabel = (() => {
+      const preference = themeController.getThemePreference();
+      switch (preference) {
+        case "system":
+          return "System";
+        case "light":
+          return "Light";
+        case "dark":
+          return "Dark";
+        case "high-contrast":
+          return "High Contrast";
+        default:
+          return "System";
+      }
+    })();
+
     const zoomDisabled = !app.supportsZoom();
     const disabledById = {
       ...(isEditing
@@ -1112,7 +1128,10 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
 
     setRibbonUiState({
       pressedById,
-      labelById: { "home.number.numberFormat": numberFormatLabel },
+      labelById: {
+        "home.number.numberFormat": numberFormatLabel,
+        "view.appearance.theme": `Theme: ${themePreferenceLabel}`,
+      },
       disabledById,
     });
   });
@@ -6348,18 +6367,22 @@ mountRibbon(ribbonReactRoot, {
         return;
       case "view.appearance.theme.system":
         themeController.setThemePreference("system");
+        scheduleRibbonSelectionFormatStateUpdate();
         app.focus();
         return;
       case "view.appearance.theme.light":
         themeController.setThemePreference("light");
+        scheduleRibbonSelectionFormatStateUpdate();
         app.focus();
         return;
       case "view.appearance.theme.dark":
         themeController.setThemePreference("dark");
+        scheduleRibbonSelectionFormatStateUpdate();
         app.focus();
         return;
       case "view.appearance.theme.highContrast":
         themeController.setThemePreference("high-contrast");
+        scheduleRibbonSelectionFormatStateUpdate();
         app.focus();
         return;
 
