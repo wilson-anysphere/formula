@@ -33,4 +33,34 @@ test.describe("file shortcuts", () => {
       "Desktop-only: Saving workbooks is available in the desktop app.",
     );
   });
+
+  test("Ctrl/Cmd+S does not trigger the save command while typing in an input", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Clear any startup toasts so the assertion is deterministic.
+    await page.evaluate(() => {
+      document.getElementById("toast-root")?.replaceChildren();
+    });
+
+    // Enter formula-bar edit mode (focus the textarea).
+    await page.getByTestId("formula-highlight").click();
+    await expect(page.getByTestId("formula-input")).toBeFocused();
+
+    const defaultPrevented = await page.evaluate((isMac) => {
+      const target = document.activeElement ?? window;
+      const e = new KeyboardEvent("keydown", {
+        key: "s",
+        ctrlKey: !isMac,
+        metaKey: isMac,
+        bubbles: true,
+        cancelable: true,
+      });
+      target.dispatchEvent(e);
+      return e.defaultPrevented;
+    }, process.platform === "darwin");
+
+    // The file shortcut should be gated by focus.inTextInput == false.
+    expect(defaultPrevented).toBe(false);
+    await expect(page.getByTestId("toast")).toHaveCount(0);
+  });
 });
