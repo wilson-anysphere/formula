@@ -50,10 +50,16 @@ export type SelectionRenderDebugInfo = {
 };
 
 function defaultStyleFromTheme(): SelectionRenderStyle {
+  const resolveToken = (primary: string, fallback: () => string): string => {
+    const value = resolveCssVar(primary, { fallback: "" });
+    if (value) return value;
+    return fallback();
+  };
+
   return {
-    fillColor: resolveCssVar("--formula-grid-selection-fill", { fallback: resolveCssVar("--selection-fill", { fallback: "transparent" }) }),
-    borderColor: resolveCssVar("--formula-grid-selection-border", { fallback: resolveCssVar("--selection-border", { fallback: "transparent" }) }),
-    activeBorderColor: resolveCssVar("--formula-grid-selection-border", { fallback: resolveCssVar("--selection-border", { fallback: "transparent" }) }),
+    fillColor: resolveToken("--formula-grid-selection-fill", () => resolveCssVar("--selection-fill", { fallback: "transparent" })),
+    borderColor: resolveToken("--formula-grid-selection-border", () => resolveCssVar("--selection-border", { fallback: "transparent" })),
+    activeBorderColor: resolveToken("--formula-grid-selection-border", () => resolveCssVar("--selection-border", { fallback: "transparent" })),
     borderWidth: 2,
     activeBorderWidth: 3,
     fillHandleSize: 8,
