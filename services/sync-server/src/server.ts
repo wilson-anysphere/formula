@@ -238,6 +238,24 @@ export function createSyncServer(
   logger: Logger,
   { createLeveldbPersistence }: SyncServerCreateOptions = {}
 ) {
+  const nodeEnv = process.env.NODE_ENV ?? "development";
+  const reservedRootGuardEnabled = (() => {
+    const raw = process.env.SYNC_SERVER_RESERVED_ROOT_GUARD_ENABLED;
+    if (raw === undefined) {
+      // Default to enabled in production, but allow tests/dev environments to opt out
+      // so existing workflows that store versioning/branching metadata in the Y.Doc
+      // remain compatible.
+      return nodeEnv === "production";
+    }
+    const normalized = raw.trim().toLowerCase();
+    return normalized === "1" || normalized === "true";
+  })();
+  const reservedRootGuard = {
+    enabled: reservedRootGuardEnabled,
+    reservedRootNames: ["versions", "versionsMeta"],
+    reservedRootPrefixes: ["branching:"],
+  };
+
   const connectionTracker = new ConnectionTracker(
     config.limits.maxConnections,
     config.limits.maxConnectionsPerIp
@@ -1405,6 +1423,7 @@ export function createSyncServer(
         maxVersionsPerDoc: config.limits.maxVersionsPerDoc,
       },
       enforceRangeRestrictions: config.enforceRangeRestrictions,
+      reservedRootGuard,
     });
     setupWSConnection(ws, req, { gc: config.gc });
   });

@@ -25,6 +25,20 @@ const MAX_CELL_KEY_CHARS = 1024;
 const MAX_SHEET_ID_CHARS = 256;
 const MAX_CELL_INDEX_CHARS = 32;
 
+type ReservedRootGuardConfig = {
+  enabled: boolean;
+  reservedRootNames: string[];
+  reservedRootPrefixes: string[];
+};
+
+const DEFAULT_RESERVED_ROOT_GUARD: ReservedRootGuardConfig = {
+  enabled: true,
+  reservedRootNames: ["versions", "versionsMeta"],
+  reservedRootPrefixes: ["branching:"],
+};
+
+const RESERVED_ROOT_MUTATION_CLOSE_REASON = "reserved root mutation";
+
 // Tracks which websocket "owns" an awareness clientID for a given doc.
 // Used to reject attempts to send awareness updates for another live connection.
 const awarenessClientIdOwnersByDoc = new Map<string, Map<number, WebSocket>>();
@@ -151,6 +165,261 @@ function concatUint8Arrays(arrays: Uint8Array[]): Uint8Array {
 type AwarenessEntry = { clientID: number; clock: number; stateJSON: string };
 
 type CellAddress = { sheetId: string; row: number; col: number };
+
+function truncateForLog(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  // Avoid logging unbounded attacker-controlled strings.
+  return `${value.slice(0, maxChars)}...`;
+}
+
+function isLikelyYjsId(value: unknown): value is { client: number; clock: number } {
+  if (!value || typeof value !== "object") return false;
+  const maybe = value as { client?: unknown; clock?: unknown };
+  return typeof maybe.client === "number" && typeof maybe.clock === "number";
+}
+
+function yjsIdKey(id: { client: number; clock: number }): string {
+  return `${id.client}:${id.clock}`;
+}
+
+function findStructAtClock(structs: any[], clock: number): any | null {
+  let lo = 0;
+  let hi = structs.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const struct = structs[mid];
+    const start = struct?.id?.clock;
+    const length = struct?.length;
+    if (typeof start !== "number" || typeof length !== "number") return null;
+    const end = start + length;
+    if (clock < start) {
+      hi = mid - 1;
+    } else if (clock >= end) {
+      lo = mid + 1;
+    } else {
+      return struct;
+    }
+  }
+  return null;
+}
+
+type ItemMeta = { parent: string | { client: number; clock: number }; parentSub: string | null };
+
+type ReservedRootTouchSummary = { root: string; keyPath: string[] };
+
+function inspectUpdateForReservedRootMutation(opts: {
+  ydoc: any;
+  update: Uint8Array;
+  reservedRootNames: Set<string>;
+  reservedRootPrefixes: string[];
+}): ReservedRootTouchSummary | null {
+  const { ydoc, update, reservedRootNames, reservedRootPrefixes } = opts;
+
+  const isReservedRootName = (name: string): boolean => {
+    if (reservedRootNames.has(name)) return true;
+    for (const prefix of reservedRootPrefixes) {
+      if (prefix && name.startsWith(prefix)) return true;
+    }
+    return false;
+  };
+
+  // Decode the update without applying it (no shadow-doc). We use Yjs' built-in
+  // decoder so we don't need to reimplement the update format.
+  const decoded = Y.decodeUpdate(update) as {
+    structs: any[];
+    ds: { clients: Map<number, Array<{ clock: number; len: number }>> };
+  };
+
+  const structs = Array.isArray(decoded?.structs) ? decoded.structs : [];
+
+  // Group decoded structs by client so we can resolve delete-set ranges that
+  // refer to newly-created structs in this same update.
+  const updateStructsByClient = new Map<number, any[]>();
+  const itemMetaById = new Map<string, ItemMeta>();
+  for (const struct of structs) {
+    const id = struct?.id;
+    if (!isLikelyYjsId(id)) continue;
+    const arr = updateStructsByClient.get(id.client) ?? [];
+    arr.push(struct);
+    updateStructsByClient.set(id.client, arr);
+
+    if (struct?.constructor?.name === "Item") {
+      const parent = struct.parent;
+      if (typeof parent === "string" || isLikelyYjsId(parent)) {
+        itemMetaById.set(yjsIdKey(id), {
+          parent,
+          parentSub: typeof struct.parentSub === "string" ? struct.parentSub : null,
+        });
+      }
+    }
+  }
+  for (const arr of updateStructsByClient.values()) {
+    arr.sort((a, b) => (a?.id?.clock ?? 0) - (b?.id?.clock ?? 0));
+  }
+
+  const rootNameCache = new Map<any, string>();
+  const rootNameFromType = (type: any): string | null => {
+    const cached = rootNameCache.get(type);
+    if (cached) return cached;
+    const share = ydoc?.share;
+    if (!(share instanceof Map)) return null;
+    for (const [name, value] of share.entries()) {
+      if (value === type) {
+        rootNameCache.set(type, name);
+        return name;
+      }
+    }
+    return null;
+  };
+
+  const getItemMetaFromDoc = (id: { client: number; clock: number }): ItemMeta | null => {
+    const store = ydoc?.store;
+    const clients = store?.clients;
+    if (!(clients instanceof Map)) return null;
+    const structsForClient = clients.get(id.client);
+    if (!Array.isArray(structsForClient)) return null;
+    const struct = findStructAtClock(structsForClient, id.clock);
+    if (!struct || struct.constructor?.name !== "Item") return null;
+
+    const parentType = struct.parent;
+    let parent: string | { client: number; clock: number } | null = null;
+    if (typeof parentType === "string") {
+      parent = parentType;
+    } else if (parentType && typeof parentType === "object") {
+      const parentItem = (parentType as any)._item;
+      if (parentItem == null) {
+        const name = rootNameFromType(parentType);
+        if (name) parent = name;
+      } else if (isLikelyYjsId(parentItem.id)) {
+        parent = parentItem.id;
+      }
+    }
+
+    if (!parent) return null;
+    return {
+      parent,
+      parentSub: typeof struct.parentSub === "string" ? struct.parentSub : null,
+    };
+  };
+
+  const getItemMeta = (id: { client: number; clock: number }): ItemMeta | null => {
+    const key = yjsIdKey(id);
+    const cached = itemMetaById.get(key);
+    if (cached) return cached;
+    const fromDoc = getItemMetaFromDoc(id);
+    if (fromDoc) {
+      itemMetaById.set(key, fromDoc);
+      return fromDoc;
+    }
+    return null;
+  };
+
+  const resolveRootAndKeyPath = (
+    parentRef: unknown,
+    parentSub: unknown
+  ): { root: string | null; keyPath: string[] } => {
+    const keyPath: string[] = [];
+    let currentParentRef: unknown = parentRef;
+    let currentParentSub: unknown = parentSub;
+
+    // Avoid pathological cycles if an update is malformed.
+    const visited = new Set<string>();
+
+    for (let depth = 0; depth < 32; depth += 1) {
+      if (typeof currentParentSub === "string") {
+        keyPath.unshift(currentParentSub);
+      }
+
+      if (typeof currentParentRef === "string") {
+        return { root: currentParentRef, keyPath };
+      }
+
+      if (isLikelyYjsId(currentParentRef)) {
+        const id = currentParentRef;
+        const key = yjsIdKey(id);
+        if (visited.has(key)) break;
+        visited.add(key);
+        const meta = getItemMeta(id);
+        if (!meta) break;
+        currentParentRef = meta.parent;
+        currentParentSub = meta.parentSub;
+        continue;
+      }
+
+      // Unrecognized parent representation.
+      break;
+    }
+
+    return { root: null, keyPath };
+  };
+
+  const maybeReturnReservedTouch = (
+    parentRef: unknown,
+    parentSub: unknown
+  ): ReservedRootTouchSummary | null => {
+    const { root, keyPath } = resolveRootAndKeyPath(parentRef, parentSub);
+    if (!root) return null;
+    if (!isReservedRootName(root)) return null;
+    return { root, keyPath };
+  };
+
+  // 1) Inspect newly-created structs in the update.
+  for (const struct of structs) {
+    if (!struct || struct.constructor?.name !== "Item") continue;
+    const touch = maybeReturnReservedTouch(struct.parent, struct.parentSub);
+    if (touch) return touch;
+  }
+
+  // 2) Inspect delete-set ranges (e.g. pure deletes have no structs).
+  const dsClients = decoded?.ds?.clients;
+  if (dsClients instanceof Map) {
+    for (const [client, ranges] of dsClients.entries()) {
+      if (!Array.isArray(ranges)) continue;
+      for (const range of ranges) {
+        const startClock = range?.clock;
+        const len = range?.len;
+        if (typeof startClock !== "number" || typeof len !== "number") continue;
+        const endClock = startClock + len;
+        let clock = startClock;
+
+        while (clock < endClock) {
+          const updateStructs = updateStructsByClient.get(client);
+          const fromUpdate =
+            updateStructs && updateStructs.length > 0
+              ? findStructAtClock(updateStructs, clock)
+              : null;
+          const struct =
+            fromUpdate ??
+            (() => {
+              const store = ydoc?.store;
+              const clients = store?.clients;
+              if (!(clients instanceof Map)) return null;
+              const docStructs = clients.get(client);
+              if (!Array.isArray(docStructs) || docStructs.length === 0) return null;
+              return findStructAtClock(docStructs, clock);
+            })();
+
+          if (!struct || !isLikelyYjsId(struct.id) || typeof struct.length !== "number") {
+            // Can't resolve this range; stop scanning it.
+            break;
+          }
+
+          if (struct.constructor?.name === "Item") {
+            const meta = getItemMeta(struct.id);
+            const touch = meta ? maybeReturnReservedTouch(meta.parent, meta.parentSub) : null;
+            if (touch) return touch;
+          }
+
+          const structEndClock = struct.id.clock + struct.length;
+          if (structEndClock <= clock) break; // defensive (avoid infinite loop)
+          clock = Math.min(endClock, structEndClock);
+        }
+      }
+    }
+  }
+
+  return null;
+}
 
 function parseCellKey(key: string, defaultSheetId: string = "Sheet1"): CellAddress | null {
   if (typeof key !== "string" || key.length === 0) return null;
@@ -442,6 +711,7 @@ export function installYwsSecurity(
       maxVersionsPerDoc?: number;
     };
     enforceRangeRestrictions?: boolean;
+    reservedRootGuard?: ReservedRootGuardConfig;
   }
 ): void {
   const {
@@ -452,12 +722,19 @@ export function installYwsSecurity(
     metrics,
     limits,
     enforceRangeRestrictions: enforceRangeRestrictionsConfig,
+    reservedRootGuard: reservedRootGuardConfig,
   } = params;
   const role = auth?.role ?? "viewer";
   const userId = auth?.userId ?? "unknown";
   const readOnly = role === "viewer" || role === "commenter";
   const maxBranchingCommitsPerDoc = Math.max(0, limits.maxBranchingCommitsPerDoc ?? 0);
   const maxVersionsPerDoc = Math.max(0, limits.maxVersionsPerDoc ?? 0);
+
+  const reservedRootGuard = reservedRootGuardConfig ?? DEFAULT_RESERVED_ROOT_GUARD;
+  const reservedRootGuardEnabled = Boolean(reservedRootGuard.enabled);
+  const reservedRootNames = new Set<string>(reservedRootGuard.reservedRootNames);
+  const reservedRootPrefixes = reservedRootGuard.reservedRootPrefixes;
+  let loggedReservedRootViolation = false;
 
   const rangeRestrictions =
     auth?.tokenType === "jwt" && Array.isArray(auth.rangeRestrictions)
@@ -478,6 +755,19 @@ export function installYwsSecurity(
   const shadowDoc = enforceRangeRestrictions ? new Y.Doc() : null;
   const shadowCells = shadowDoc ? shadowDoc.getMap("cells") : null;
   let loggedRangeRestrictionViolation = false;
+
+  const logReservedRootOnce = (summary: ReservedRootTouchSummary): void => {
+    if (!reservedRootGuardEnabled || loggedReservedRootViolation) return;
+    loggedReservedRootViolation = true;
+    const keyPath = summary.keyPath
+      .slice(0, 8)
+      .map((segment) => truncateForLog(segment, 256));
+    const root = truncateForLog(summary.root, 256);
+    logger.warn(
+      { docName, userId, role, root, keyPath },
+      "reserved_root_mutation_rejected"
+    );
+  };
 
   const logRangeRestrictionOnce = (
     event: string,
@@ -644,7 +934,8 @@ export function installYwsSecurity(
         isSyncUpdate && (branchingCommitsAtOrOverLimit || versionsAtOrOverLimit);
 
       const shouldParseUpdate =
-        isSyncUpdate && (enforceRangeRestrictions || shouldCheckReservedRootQuotas);
+        isSyncUpdate &&
+        (reservedRootGuardEnabled || enforceRangeRestrictions || shouldCheckReservedRootQuotas);
 
       let updateBytes: Uint8Array | null = null;
       if (shouldParseUpdate) {
@@ -652,6 +943,26 @@ export function installYwsSecurity(
           const updateRes = readVarUint8Array(message, offset);
           updateBytes = updateRes.value;
         } catch {
+          ws.close(1003, "malformed sync update");
+          return { drop: true };
+        }
+      }
+
+      if (reservedRootGuardEnabled && isSyncUpdate && updateBytes) {
+        try {
+          const reservedTouch = inspectUpdateForReservedRootMutation({
+            ydoc,
+            update: updateBytes,
+            reservedRootNames,
+            reservedRootPrefixes,
+          });
+          if (reservedTouch) {
+            logReservedRootOnce(reservedTouch);
+            ws.close(1008, RESERVED_ROOT_MUTATION_CLOSE_REASON);
+            return { drop: true };
+          }
+        } catch {
+          // If we can't decode/inspect the update, treat it as malformed.
           ws.close(1003, "malformed sync update");
           return { drop: true };
         }
