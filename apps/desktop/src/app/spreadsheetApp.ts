@@ -7721,6 +7721,9 @@ export class SpreadsheetApp {
       return;
     }
     if (e.key === "Delete") {
+      // Delete should never clear sheet contents while the formula bar is editing (including
+      // range-selection mode, where focus may temporarily move to the grid).
+      if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
       e.preventDefault();
       this.clearSelectionContents();
       return;
@@ -9521,6 +9524,7 @@ export class SpreadsheetApp {
    * (command palette, context menus, extensions) can invoke it via `CommandRegistry`.
    */
   clearSelectionContents(): void {
+    if (this.isEditing()) return;
     this.clearSelectionContentsInternal();
     this.refresh();
   }
