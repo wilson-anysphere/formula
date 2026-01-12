@@ -6,6 +6,7 @@
 */
 
 .extensions-ui .dialog__field {
+  box-sizing: border-box;
   width: 100%;
   padding: 10px 12px;
   border-radius: 10px;
@@ -26,6 +27,11 @@
   box-shadow: 0 0 0 2px var(--selection-bg);
 }
 
+.extensions-ui,
+.extensions-ui * {
+  box-sizing: border-box;
+}
+
 .extensions-ui .quick-pick__list {
   display: flex;
   flex-direction: column;
@@ -41,11 +47,24 @@
   background: var(--bg-primary);
   color: var(--text-primary);
   cursor: pointer;
+  outline: none;
   font: inherit;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease),
+    box-shadow var(--motion-duration) var(--motion-ease);
 }
 
-.extensions-ui .quick-pick__item:focus {
-  outline: none;
+.extensions-ui .quick-pick__item:hover {
+  background: var(--bg-hover);
+}
+
+.extensions-ui .quick-pick__item:active {
+  background: var(--bg-active);
+}
+
+.extensions-ui .quick-pick__item:focus-visible {
   border-color: var(--selection-border);
   box-shadow: 0 0 0 2px var(--selection-bg);
 }
