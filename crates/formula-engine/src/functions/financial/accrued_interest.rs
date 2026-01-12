@@ -82,6 +82,7 @@ pub fn accrint(
 
     let frequency = validate_frequency(frequency)?;
     let months = 12 / frequency;
+    let eom = is_eom(first_interest, system)?;
     let coupon = par * rate / f64::from(frequency);
     if !coupon.is_finite() || coupon < 0.0 {
         return Err(ExcelError::Num);
@@ -92,7 +93,6 @@ pub fn accrint(
     // Excel applies an end-of-month (EOM) pinning rule for coupon schedules: if the anchor date is
     // month-end (even if not the 31st, e.g. Apr 30 or Feb 28/29), subsequent coupon dates are pinned
     // to month-end.
-    let eom = is_eom(first_interest, system)?;
     let (pcd, ncd) = if settlement < first_interest {
         let pcd = shift_coupon_months_eom(first_interest, -months, eom, system)?;
         (pcd, first_interest)

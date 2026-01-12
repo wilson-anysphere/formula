@@ -168,6 +168,22 @@ fn accrint_coupon_schedule_pins_month_end_when_first_interest_is_month_end() {
 }
 
 #[test]
+fn accrint_coupon_schedule_restores_month_end_when_first_interest_is_eom_february() {
+    let mut sheet = TestSheet::new();
+    // If `first_interest` is the last day of February (28th in a non-leap year), Excel treats the
+    // coupon schedule as end-of-month and restores month-end in later months (e.g. Aug 31 rather
+    // than Aug 28).
+    //
+    // Settlement is after first interest, so accrual should be from PCD=first_interest to
+    // settlement with E = days(first_interest, next_coupon) under basis 1.
+    let expected = 60.0 * 15.0 / 184.0; // C=1000*0.12/2, A=15 days (Feb 28 -> Mar 15), E=184 days (Feb 28 -> Aug 31)
+    assert_number(
+        &sheet.eval("=ACCRINT(DATE(2020,12,15),DATE(2021,2,28),DATE(2021,3,15),0.12,1000,2,1)"),
+        expected,
+    );
+}
+
+#[test]
 fn accrint_calc_method_affects_only_stub_period_before_first_interest() {
     let mut sheet = TestSheet::new();
 
