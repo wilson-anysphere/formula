@@ -908,6 +908,22 @@ fn bytecode_backend_let_preserves_reference_semantics_for_sum() {
 }
 
 #[test]
+fn bytecode_backend_choose_preserves_reference_semantics_for_sum() {
+    // CHOOSE can return references; when the selected choice is a cell reference, outer aggregate
+    // functions should observe reference semantics (e.g. SUM ignores text in referenced cells).
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", "5").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(CHOOSE(1, A1, 2))")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(0.0));
+    assert_engine_matches_ast(&engine, "=SUM(CHOOSE(1, A1, 2))", "B1");
+}
+
+#[test]
 fn bytecode_backend_let_supports_range_bindings_when_consumed_by_sum() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
