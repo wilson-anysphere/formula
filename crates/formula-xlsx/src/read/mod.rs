@@ -1312,7 +1312,6 @@ fn parse_worksheet_into_model(
                             let xf_index = attr.unescape_value()?.into_owned().parse().unwrap_or(0);
                             current_style = styles_part.style_id_for_xf(xf_index);
                         }
-<<<<<<< HEAD
                         b"cm" => {
                             current_cm = attr
                                 .unescape_value()?
@@ -1320,8 +1319,6 @@ fn parse_worksheet_into_model(
                                 .parse::<u32>()
                                 .ok();
                         }
-=======
->>>>>>> 66d5c0c (feat: expose rich value indices via metadata.xml vm mapping)
                         b"vm" => {
                             current_vm = attr
                                 .unescape_value()?
@@ -1336,10 +1333,7 @@ fn parse_worksheet_into_model(
             Event::Empty(e) if in_sheet_data && e.local_name().as_ref() == b"c" => {
                 let mut cell_ref = None;
                 let mut style_id = 0u32;
-<<<<<<< HEAD
                 let mut cm: Option<u32> = None;
-=======
->>>>>>> 66d5c0c (feat: expose rich value indices via metadata.xml vm mapping)
                 let mut vm: Option<u32> = None;
                 for attr in e.attributes() {
                     let attr = attr?;
@@ -1354,12 +1348,9 @@ fn parse_worksheet_into_model(
                             let xf_index = attr.unescape_value()?.into_owned().parse().unwrap_or(0);
                             style_id = styles_part.style_id_for_xf(xf_index);
                         }
-<<<<<<< HEAD
                         b"cm" => {
                             cm = attr.unescape_value()?.into_owned().parse::<u32>().ok();
                         }
-=======
->>>>>>> 66d5c0c (feat: expose rich value indices via metadata.xml vm mapping)
                         b"vm" => {
                             vm = attr.unescape_value()?.into_owned().parse::<u32>().ok();
                         }

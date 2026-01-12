@@ -8,6 +8,11 @@
 //! This module exposes best-effort parsing helpers without integrating into `formula-model` yet.
 
 pub mod metadata;
+mod rich_value_images;
+
+pub use rich_value_images::{
+    ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning,
+};
 
 use std::collections::HashMap;
 
@@ -420,4 +425,3 @@ fn parse_rich_value_rel_rels(bytes: &[u8]) -> Result<HashMap<String, String>, Ri
     }
     Ok(out)
 }
-
