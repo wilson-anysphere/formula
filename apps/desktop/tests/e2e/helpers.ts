@@ -281,6 +281,12 @@ export async function openSheetTabContextMenu(page: Page, sheetId: string): Prom
       ) ?? null;
     if (!tab) throw new Error(`Missing sheet tab button for sheet id: ${id}`);
     const rect = tab.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    // Clamp to the viewport so the context menu anchor is never off-screen, even if the
+    // tab is scrolled out of view.
+    const clampedX = Math.max(0, Math.min(x, window.innerWidth - 1));
+    const clampedY = Math.max(0, Math.min(y, window.innerHeight - 1));
     tab.dispatchEvent(
       new MouseEvent("contextmenu", {
         bubbles: true,
@@ -288,8 +294,8 @@ export async function openSheetTabContextMenu(page: Page, sheetId: string): Prom
         // Explicitly mark this as a right-click.
         button: 2,
         // Use the center of the tab so narrow tabs still receive the event.
-        clientX: rect.left + rect.width / 2,
-        clientY: rect.top + rect.height / 2,
+        clientX: clampedX,
+        clientY: clampedY,
       }),
     );
   }, sheetId);
@@ -304,14 +310,18 @@ export async function openSheetTabStripContextMenu(page: Page): Promise<Locator>
     const strip = document.querySelector<HTMLElement>("#sheet-tabs .sheet-tabs");
     if (!strip) throw new Error("Missing sheet tab strip");
     const rect = strip.getBoundingClientRect();
+    const x = rect.left + rect.width - 4;
+    const y = rect.top + rect.height / 2;
+    const clampedX = Math.max(0, Math.min(x, window.innerWidth - 1));
+    const clampedY = Math.max(0, Math.min(y, window.innerHeight - 1));
     strip.dispatchEvent(
       new MouseEvent("contextmenu", {
         bubbles: true,
         cancelable: true,
         button: 2,
         // Aim near the end of the strip so the menu isn't rendered on top of the first tab.
-        clientX: rect.left + rect.width - 4,
-        clientY: rect.top + rect.height / 2,
+        clientX: clampedX,
+        clientY: clampedY,
       }),
     );
   });
