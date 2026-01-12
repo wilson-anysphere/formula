@@ -195,10 +195,11 @@ function allCellsMatchRange(doc, sheetId, range, predicate) {
 
   /** @type {{ col: number, runs: any[] }[]} */
   const runCols = [];
-  if (formatRunsByCol && typeof formatRunsByCol.entries === "function") {
-    for (const [rawCol, runs] of formatRunsByCol.entries()) {
-      const col = Number(rawCol);
-      if (!Number.isInteger(col) || col < range.start.col || col > range.end.col) continue;
+  if (formatRunsByCol && typeof formatRunsByCol.get === "function") {
+    // Iterate only selected columns (<= 16,384 in Excel space) rather than scanning every
+    // column that happens to have runs in the sheet.
+    for (let col = range.start.col; col <= range.end.col; col++) {
+      const runs = formatRunsByCol.get(col) ?? null;
       if (!runsOverlapRange(runs, startRow, endRowExclusive)) continue;
       runCols.push({ col, runs });
     }
@@ -267,7 +268,16 @@ function allCellsMatchRange(doc, sheetId, range, predicate) {
 
   // 1) Check explicit cell-level overrides inside the selection.
   //    These always win over all other layers.
-  if (sheet.cells && sheet.cells.size > 0) {
+  const boundsAreReliable = !sheet.formatBoundsDirty;
+  const storedBounds = boundsAreReliable ? sheet.formatBounds ?? null : null;
+  const selectionIntersectsStoredBounds =
+    !storedBounds ||
+    (storedBounds.endRow >= range.start.row &&
+      storedBounds.startRow <= range.end.row &&
+      storedBounds.endCol >= range.start.col &&
+      storedBounds.startCol <= range.end.col);
+
+  if (selectionIntersectsStoredBounds && sheet.cells && sheet.cells.size > 0) {
     for (const [key, cell] of sheet.cells.entries()) {
       if (!cell || cell.styleId === 0) continue;
       const coord = parseRowColKey(key);
