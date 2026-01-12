@@ -1,6 +1,7 @@
 import type { CellData, CellProvider, CellProviderUpdate, CellRange, CellStyle } from "@formula/grid";
 import { LruCache } from "@formula/grid";
 import type { DocumentController } from "../../document/documentController.js";
+import { resolveCssVar } from "../../theme/cssVars.js";
 
 type RichTextValue = { text: string; runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }> };
 
@@ -126,7 +127,10 @@ export class DocumentCellProvider implements CellProvider {
 
     const border = isPlainObject(docStyle.border) ? docStyle.border : null;
     if (border) {
-      const black = "rgba(0,0,0,1)";
+      // Use a theme token for default border colors so dark mode remains legible.
+      // `resolveCssVar()` returns computed values at runtime, but falls back
+      // gracefully in unit tests / non-DOM environments.
+      const defaultBorderColor = resolveCssVar("--text-primary", { fallback: "CanvasText" });
       const mapExcelBorderStyle = (style: unknown): { width: number; style: string } | null => {
         if (typeof style !== "string") return null;
         switch (style) {
@@ -151,7 +155,7 @@ export class DocumentCellProvider implements CellProvider {
         if (!isPlainObject(edge)) return undefined;
         const mapped = mapExcelBorderStyle(edge.style);
         if (!mapped) return undefined;
-        const color = argbToCanvasCss(edge.color) ?? black;
+        const color = argbToCanvasCss(edge.color) ?? defaultBorderColor;
         return { width: mapped.width, style: mapped.style, color };
       };
 
