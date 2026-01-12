@@ -1,9 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::preserve::opc_graph::collect_transitive_related_parts;
-use crate::XlsxPackage;
+use crate::{XlsxError, XlsxPackage};
 
 impl XlsxPackage {
+    /// Legacy helper kept for backwards compatibility.
+    ///
+    /// Prefer [`XlsxPackage::rich_data_media_parts`], which performs a best-effort traversal of the
+    /// RichData relationship graph.
+    pub fn extract_rich_data_images(&self) -> Result<BTreeMap<String, Vec<u8>>, XlsxError> {
+        Ok(self.rich_data_media_parts())
+    }
+
     /// Extract `xl/media/*` parts referenced by the workbook's RichData (`xl/richData`) graph.
     ///
     /// Excel stores "images in cell" and other RichData values using a set of parts under
@@ -41,4 +49,3 @@ impl XlsxPackage {
             .collect()
     }
 }
-
