@@ -632,23 +632,22 @@ fn eval_ast_inner(
                         if let Value::Error(e) = case_val {
                             return Value::Error(e);
                         }
-                        let matches =
+                        let matches_val =
                             apply_binary(BinaryOp::Eq, expr_val.clone(), case_val, grid, sheet_id, base);
-                        match matches {
-                            Value::Bool(true) => {
-                                return eval_ast_inner(
-                                    &pair[1],
-                                    grid,
-                                    sheet_id,
-                                    base,
-                                    locale,
-                                    lexical_scopes,
-                                    false,
-                                );
-                            }
-                            Value::Bool(false) => continue,
-                            Value::Error(e) => return Value::Error(e),
-                            _ => return Value::Error(ErrorKind::Value),
+                        let matches = match coerce_to_bool(&matches_val) {
+                            Ok(b) => b,
+                            Err(e) => return Value::Error(e),
+                        };
+                        if matches {
+                            return eval_ast_inner(
+                                &pair[1],
+                                grid,
+                                sheet_id,
+                                base,
+                                locale,
+                                lexical_scopes,
+                                false,
+                            );
                         }
                     }
 

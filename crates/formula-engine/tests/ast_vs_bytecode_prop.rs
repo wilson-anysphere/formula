@@ -102,6 +102,13 @@ fn arb_expr(base: CellCoord, rows: i32, cols: i32) -> impl Strategy<Value = Expr
         32, // size
         4,  // items per collection
         move |inner| {
+            // Keep "scalar" expressions (no range refs) for control-flow functions where the VM
+            // currently treats non-scalar conditions as #SPILL!.
+            let scalar = prop_oneof![
+                arb_literal(),
+                arb_ref(base, rows, cols).prop_map(Expr::CellRef),
+            ]
+            .boxed();
             prop_oneof![
                 inner.clone().prop_map(|e| Expr::Unary {
                     op: UnaryOp::Neg,
@@ -127,6 +134,25 @@ fn arb_expr(base: CellCoord, rows: i32, cols: i32) -> impl Strategy<Value = Expr
                     func: Function::If,
                     args: vec![c, t],
                 }),
+                // CHOOSE(index, value1, value2)
+                (scalar.clone(), inner.clone(), inner.clone()).prop_map(|(idx, a, b)| Expr::FuncCall {
+                    func: Function::Choose,
+                    args: vec![idx, a, b],
+                }),
+                // IFS(cond1, value1, cond2, value2)
+                (scalar.clone(), inner.clone(), scalar.clone(), inner.clone()).prop_map(
+                    |(c1, v1, c2, v2)| Expr::FuncCall {
+                        func: Function::Ifs,
+                        args: vec![c1, v1, c2, v2],
+                    },
+                ),
+                // SWITCH(expr, case1, value1, default)
+                (scalar.clone(), scalar.clone(), inner.clone(), inner.clone()).prop_map(
+                    |(expr, case, value, default)| Expr::FuncCall {
+                        func: Function::Switch,
+                        args: vec![expr, case, value, default],
+                    },
+                ),
                 // AND(a, b)
                 (inner.clone(), inner.clone()).prop_map(|(a, b)| Expr::FuncCall {
                     func: Function::And,
