@@ -14,7 +14,6 @@ use std::path::Path;
 pub(crate) mod globals;
 mod comments;
 pub(crate) mod defined_names;
-pub(crate) mod extern_sheet;
 pub(crate) mod externsheet;
 pub(crate) mod rgce;
 pub(crate) mod records;
@@ -27,7 +26,7 @@ pub(crate) use globals::{
 };
 pub(crate) use defined_names::parse_biff_defined_names;
 #[allow(unused_imports)]
-pub(crate) use externsheet::{parse_biff_externsheet, ExternSheetEntry};
+pub(crate) use externsheet::{parse_biff_externsheet, ExternSheetEntry, ExternSheetTable};
 pub(crate) use sheet::{
     parse_biff_sheet_cell_xf_indices_filtered, parse_biff_sheet_hyperlinks,
     parse_biff_sheet_merged_cells, parse_biff_sheet_protection, parse_biff_sheet_row_col_properties,

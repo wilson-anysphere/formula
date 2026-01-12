@@ -1,3 +1,9 @@
+//! BIFF `EXTERNSHEET` (0x0017) record parsing.
+//!
+//! BIFF8 defined-name (`NAME`) formula token streams frequently contain `PtgRef3d` / `PtgArea3d`
+//! tokens that reference an `ixti` entry in the workbook-global `EXTERNSHEET` table. This module
+//! provides a small, best-effort parser for that table.
+
 #![allow(dead_code)]
 
 use super::{records, BiffVersion};
@@ -12,144 +18,119 @@ const RECORD_EXTERNSHEET: u16 = 0x0017;
 /// This corresponds to one `XTI` structure in [MS-XLS] 2.4.102.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ExternSheetEntry {
+    /// Index of the referenced `SUPBOOK` record (`iSupBook`).
+    ///
+    /// `0` indicates an internal workbook reference.
     pub(crate) supbook: u16,
-    pub(crate) itab_first: u16,
-    pub(crate) itab_last: u16,
+    /// First BIFF sheet index in the referenced sheet range (`itabFirst`).
+    pub(crate) itab_first: i16,
+    /// Last BIFF sheet index in the referenced sheet range (`itabLast`).
+    pub(crate) itab_last: i16,
 }
 
+/// Best-effort parse result for the workbook-global `EXTERNSHEET` table.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct ExternSheetTable {
+    /// Entries indexed by `ixti` (0-based).
+    pub(crate) entries: Vec<ExternSheetEntry>,
+    /// Any non-fatal parse warnings.
+    pub(crate) warnings: Vec<String>,
+}
+
+/// Scan the workbook-global BIFF substream for an `EXTERNSHEET` record and parse its XTI table.
+///
+/// Best-effort semantics:
+/// - Stops at the workbook-global `EOF` record, or the next `BOF` record (start of the next
+///   substream).
+/// - If the record is truncated or malformed, emits a warning and returns what was parsed.
 pub(crate) fn parse_biff_externsheet(
     workbook_stream: &[u8],
     biff: BiffVersion,
     codepage: u16,
-) -> Result<Vec<ExternSheetEntry>, String> {
+) -> ExternSheetTable {
     // Signature matches other workbook-global parsers; `codepage` is currently unused.
     let _ = codepage;
 
     match biff {
-        BiffVersion::Biff8 => parse_biff8_externsheet(workbook_stream),
+        BiffVersion::Biff8 => parse_biff8_externsheet_table(workbook_stream),
         // BIFF5 `EXTERNSHEET` is not currently needed by the importer.
-        BiffVersion::Biff5 => Ok(Vec::new()),
+        BiffVersion::Biff5 => ExternSheetTable::default(),
     }
 }
 
-fn parse_biff8_externsheet(workbook_stream: &[u8]) -> Result<Vec<ExternSheetEntry>, String> {
-    let mut out = Vec::new();
+pub(crate) fn parse_biff8_externsheet_table(workbook_stream: &[u8]) -> ExternSheetTable {
+    let mut out = ExternSheetTable::default();
 
     let iter = records::LogicalBiffRecordIter::new(workbook_stream, allows_continuation);
     for record in iter {
         let record = match record {
             Ok(record) => record,
-            // Best-effort: stop at the first malformed/truncated physical record and return what
-            // we've parsed so far.
-            Err(_) => break,
+            Err(err) => {
+                out.warnings.push(format!(
+                    "malformed BIFF record while scanning for EXTERNSHEET: {err}"
+                ));
+                break;
+            }
         };
 
-        // The `EXTERNSHEET` record lives in the workbook-global substream. Stop if we see the start
-        // of the next substream (worksheet BOF), even if the workbook-global EOF is missing.
+        // Stop scanning at the start of the next substream (worksheet BOF), even if the workbook
+        // globals are missing the expected EOF record.
         if record.offset != 0 && records::is_bof_record(record.record_id) {
             break;
         }
 
         match record.record_id {
             RECORD_EXTERNSHEET => {
-                out.extend(parse_biff8_externsheet_record(&record));
+                parse_externsheet_record(&mut out, record.data.as_ref(), record.offset);
+                break;
             }
             records::RECORD_EOF => break,
             _ => {}
         }
     }
 
-    Ok(out)
+    out
 }
 
 fn allows_continuation(record_id: u16) -> bool {
+    // EXTERNSHEET can be large and may be split across one or more `CONTINUE` records.
     record_id == RECORD_EXTERNSHEET
 }
 
-fn parse_biff8_externsheet_record(record: &records::LogicalBiffRecord<'_>) -> Vec<ExternSheetEntry> {
+fn parse_externsheet_record(out: &mut ExternSheetTable, data: &[u8], offset: usize) {
     // BIFF8 EXTERNSHEET layout:
     //   [cXTI: u16]
-    //   cXTI * [iSupBook: u16, itabFirst: u16, itabLast: u16]
-    //
-    // The record may be split across one or more `CONTINUE` records; use the logical record
-    // fragments so we can read cleanly across boundaries.
-    let fragments: Vec<&[u8]> = record.fragments().collect();
-    let total_len: usize = fragments.iter().map(|f| f.len()).sum();
+    //   cXTI * [iSupBook: u16, itabFirst: i16, itabLast: i16]
+    if data.len() < 2 {
+        out.warnings.push(format!(
+            "truncated EXTERNSHEET record at offset {offset}: missing cxti"
+        ));
+        return;
+    }
 
-    let mut cursor = FragmentCursor::new(&fragments);
+    let cxti = u16::from_le_bytes([data[0], data[1]]) as usize;
+    let mut cursor = 2usize;
 
-    let cxti = match cursor.read_u16_le() {
-        Ok(v) => v as usize,
-        Err(_) => return Vec::new(),
-    };
+    out.entries.reserve(cxti);
 
-    let available_entries = total_len.saturating_sub(2) / 6;
-    let count = cxti.min(available_entries);
+    for parsed in 0..cxti {
+        if data.len() < cursor + 6 {
+            out.warnings.push(format!(
+                "truncated EXTERNSHEET record at offset {offset}: expected {cxti} XTI entries, got {parsed}"
+            ));
+            break;
+        }
 
-    let mut out = Vec::with_capacity(count);
-    for _ in 0..count {
-        let supbook = match cursor.read_u16_le() {
-            Ok(v) => v,
-            Err(_) => break,
-        };
-        let itab_first = match cursor.read_u16_le() {
-            Ok(v) => v,
-            Err(_) => break,
-        };
-        let itab_last = match cursor.read_u16_le() {
-            Ok(v) => v,
-            Err(_) => break,
-        };
-        out.push(ExternSheetEntry {
+        let supbook = u16::from_le_bytes([data[cursor], data[cursor + 1]]);
+        let itab_first = i16::from_le_bytes([data[cursor + 2], data[cursor + 3]]);
+        let itab_last = i16::from_le_bytes([data[cursor + 4], data[cursor + 5]]);
+        cursor += 6;
+
+        out.entries.push(ExternSheetEntry {
             supbook,
             itab_first,
             itab_last,
         });
-    }
-
-    out
-}
-
-struct FragmentCursor<'a> {
-    fragments: &'a [&'a [u8]],
-    frag_idx: usize,
-    offset: usize,
-}
-
-impl<'a> FragmentCursor<'a> {
-    fn new(fragments: &'a [&'a [u8]]) -> Self {
-        Self {
-            fragments,
-            frag_idx: 0,
-            offset: 0,
-        }
-    }
-
-    fn advance_fragment(&mut self) -> Result<(), ()> {
-        self.frag_idx = self.frag_idx.saturating_add(1);
-        self.offset = 0;
-        if self.frag_idx >= self.fragments.len() {
-            return Err(());
-        }
-        Ok(())
-    }
-
-    fn read_u8(&mut self) -> Result<u8, ()> {
-        loop {
-            let frag = self.fragments.get(self.frag_idx).ok_or(())?;
-            if self.offset < frag.len() {
-                let b = frag[self.offset];
-                self.offset += 1;
-                return Ok(b);
-            }
-            self.advance_fragment()?;
-        }
-    }
-
-    fn read_u16_le(&mut self) -> Result<u16, ()> {
-        let lo = self.read_u8()?;
-        let hi = self.read_u8()?;
-        Ok(u16::from_le_bytes([lo, hi]))
     }
 }
 
@@ -170,15 +151,15 @@ mod tests {
         payload.extend_from_slice(&(entries.len() as u16).to_le_bytes());
         for &(supbook, itab_first, itab_last) in entries {
             payload.extend_from_slice(&supbook.to_le_bytes());
-            payload.extend_from_slice(&itab_first.to_le_bytes());
-            payload.extend_from_slice(&itab_last.to_le_bytes());
+            payload.extend_from_slice(&(itab_first as i16).to_le_bytes());
+            payload.extend_from_slice(&(itab_last as i16).to_le_bytes());
         }
         payload
     }
 
     #[test]
     fn parses_externsheet_entries_biff8() {
-        let entries = [(1, 2, 3), (4, 5, 6)];
+        let entries = [(0, 2, 3), (0, 5, 6)];
         let payload = externsheet_payload(&entries);
 
         let stream = [
@@ -188,23 +169,23 @@ mod tests {
         ]
         .concat();
 
-        let parsed =
-            parse_biff_externsheet(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        let parsed = parse_biff_externsheet(&stream, BiffVersion::Biff8, 1252);
         assert_eq!(
-            parsed,
+            parsed.entries,
             vec![
                 ExternSheetEntry {
-                    supbook: 1,
+                    supbook: 0,
                     itab_first: 2,
-                    itab_last: 3
+                    itab_last: 3,
                 },
                 ExternSheetEntry {
-                    supbook: 4,
+                    supbook: 0,
                     itab_first: 5,
-                    itab_last: 6
+                    itab_last: 6,
                 }
             ]
         );
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
 
     #[test]
@@ -225,23 +206,23 @@ mod tests {
         ]
         .concat();
 
-        let parsed =
-            parse_biff_externsheet(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        let parsed = parse_biff_externsheet(&stream, BiffVersion::Biff8, 1252);
         assert_eq!(
-            parsed,
+            parsed.entries,
             vec![
                 ExternSheetEntry {
                     supbook: 0x0010,
                     itab_first: 0x0020,
-                    itab_last: 0x0030
+                    itab_last: 0x0030,
                 },
                 ExternSheetEntry {
                     supbook: 0x0040,
                     itab_first: 0x0050,
-                    itab_last: 0x0060
+                    itab_last: 0x0060,
                 }
             ]
         );
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
 
     #[test]
@@ -257,35 +238,104 @@ mod tests {
         ]
         .concat();
 
-        let parsed =
-            parse_biff_externsheet(&stream, BiffVersion::Biff8, 1252).expect("parse");
-        assert_eq!(parsed.len(), 2);
-        assert_eq!(parsed[0].itab_first, 2);
-        assert_eq!(parsed[1].itab_last, 6);
+        let parsed = parse_biff_externsheet(&stream, BiffVersion::Biff8, 1252);
+        assert_eq!(parsed.entries.len(), 2);
+        assert_eq!(parsed.entries[0].itab_first, 2);
+        assert_eq!(parsed.entries[1].itab_last, 6);
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
 
     #[test]
     fn scan_stops_on_malformed_record_and_returns_partial() {
-        let entries = [(1, 2, 3), (4, 5, 6)];
-        let payload = externsheet_payload(&entries);
-
         // Truncated record: declares 4 bytes but only provides 2. Must be at end of stream.
         let mut truncated = Vec::new();
         truncated.extend_from_slice(&0x1234u16.to_le_bytes());
         truncated.extend_from_slice(&4u16.to_le_bytes());
         truncated.extend_from_slice(&[0xAA, 0xBB]);
 
+        let stream = [record(records::RECORD_BOF_BIFF8, &[0u8; 16]), truncated].concat();
+
+        let parsed = parse_biff_externsheet(&stream, BiffVersion::Biff8, 1252);
+        assert!(
+            parsed.entries.is_empty(),
+            "expected empty table on malformed record, got {:?}",
+            parsed.entries
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("malformed BIFF record")),
+            "expected malformed warning, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn scan_ignores_externsheet_after_next_bof_without_eof() {
+        let entries = [(0, 0, 0)];
+        let payload = externsheet_payload(&entries);
+
+        // EXTERNSHEET lives after the next BOF; it should be ignored.
         let stream = [
             record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
             record(RECORD_EXTERNSHEET, &payload),
-            truncated,
         ]
         .concat();
 
-        let parsed =
-            parse_biff_externsheet(&stream, BiffVersion::Biff8, 1252).expect("parse");
-        assert_eq!(parsed.len(), 2);
-        assert_eq!(parsed[0].supbook, 1);
-        assert_eq!(parsed[1].itab_last, 6);
+        let parsed = parse_biff_externsheet(&stream, BiffVersion::Biff8, 1252);
+        assert!(parsed.entries.is_empty(), "entries={:?}", parsed.entries);
+    }
+
+    #[test]
+    fn warns_and_returns_partial_on_truncated_payload() {
+        let entries = [(0, 0, 0), (0, 1, 1), (0, 2, 2)];
+        let payload = externsheet_payload(&entries);
+
+        // Truncate so we only have 2 entries worth of data.
+        let truncated = &payload[..(2 + 6 * 2)];
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_EXTERNSHEET, truncated),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_externsheet(&stream, BiffVersion::Biff8, 1252);
+        assert_eq!(parsed.entries.len(), 2);
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("truncated EXTERNSHEET")),
+            "expected truncated warning, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn preserves_supbook_for_external_references() {
+        let entries = [(2, 0, 0)];
+        let payload = externsheet_payload(&entries);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_EXTERNSHEET, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_externsheet(&stream, BiffVersion::Biff8, 1252);
+        assert_eq!(
+            parsed.entries,
+            vec![ExternSheetEntry {
+                supbook: 2,
+                itab_first: 0,
+                itab_last: 0,
+            }]
+        );
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
 }

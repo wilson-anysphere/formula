@@ -10,7 +10,7 @@
 
 #![allow(dead_code)]
 
-use super::{extern_sheet, records, rgce, strings, BiffVersion};
+use super::{externsheet, records, rgce, strings, BiffVersion};
 
 // Record ids used by workbook-global defined name parsing.
 // See [MS-XLS] sections:
@@ -82,30 +82,11 @@ pub(crate) fn parse_biff_defined_names(
         return Ok(out);
     }
 
-    let extern_sheet::ExternSheetTable { entries, warnings } =
-        extern_sheet::parse_biff8_externsheet_table(workbook_stream);
+    let externsheet::ExternSheetTable {
+        entries: externsheet_entries,
+        warnings,
+    } = externsheet::parse_biff_externsheet(workbook_stream, biff, codepage);
     out.warnings.extend(warnings);
-    let externsheet: Vec<rgce::ExternSheetRef> = entries
-        .into_iter()
-        .map(|entry| match entry {
-            extern_sheet::ExternSheetRef::Internal {
-                itab_first,
-                itab_last,
-            } => rgce::ExternSheetRef {
-                // Best-effort: the rgce decoder expects unsigned indices. Negative itab values are
-                // treated as out-of-range by the decoder and will render as a placeholder quoted
-                // sheet name like `'#SHEET(...)'!`.
-                itab_first: itab_first as u16,
-                itab_last: itab_last as u16,
-            },
-            extern_sheet::ExternSheetRef::External => rgce::ExternSheetRef {
-                // External references cannot currently be resolved; use a sentinel that will render
-                // as a placeholder quoted sheet name like `'#SHEET(...)'!` with a warning.
-                itab_first: u16::MAX,
-                itab_last: u16::MAX,
-            },
-        })
-        .collect();
 
     let allows_continuation = |id: u16| id == RECORD_NAME;
     let iter = records::LogicalBiffRecordIter::new(workbook_stream, allows_continuation);
@@ -150,7 +131,7 @@ pub(crate) fn parse_biff_defined_names(
     let ctx = rgce::RgceDecodeContext {
         codepage,
         sheet_names,
-        externsheet: &externsheet,
+        externsheet: &externsheet_entries,
         defined_names: &metas,
     };
 

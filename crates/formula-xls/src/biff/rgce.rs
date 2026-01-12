@@ -19,18 +19,12 @@
 //! base is known, the decoder defaults to `(0,0)` (A1) but still preserves `$` absolute/relative
 //! markers in the rendered A1 text.
 
-use super::strings;
+use super::{externsheet::ExternSheetEntry, strings};
 
 // BIFF8 supports 65,536 rows (0-based 0..=65,535).
 const BIFF8_MAX_ROW0: i64 = u16::MAX as i64;
 // Columns are stored in a 14-bit field in many BIFF8 structures.
 const BIFF8_MAX_COL0: i64 = 0x3FFF;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ExternSheetRef {
-    pub(crate) itab_first: u16,
-    pub(crate) itab_last: u16,
-}
 
 /// Context needed to decode BIFF8 `rgce` streams that may reference workbook-scoped metadata such
 /// as sheets (`EXTERNSHEET`) and other defined names (`NAME` table).
@@ -44,7 +38,7 @@ pub(crate) struct DefinedNameMeta {
 pub(crate) struct RgceDecodeContext<'a> {
     pub(crate) codepage: u16,
     pub(crate) sheet_names: &'a [String],
-    pub(crate) externsheet: &'a [ExternSheetRef],
+    pub(crate) externsheet: &'a [ExternSheetEntry],
     pub(crate) defined_names: &'a [DefinedNameMeta],
 }
 
@@ -81,7 +75,7 @@ pub(crate) type DecodedRgce = DecodeRgceResult;
 #[allow(dead_code)]
 pub(crate) fn decode_defined_name_rgce(rgce: &[u8], codepage: u16) -> DecodedRgce {
     let sheet_names: &[String] = &[];
-    let externsheet: &[ExternSheetRef] = &[];
+    let externsheet: &[ExternSheetEntry] = &[];
     let defined_names: &[DefinedNameMeta] = &[];
     let ctx = RgceDecodeContext {
         codepage,
@@ -1226,6 +1220,20 @@ fn format_sheet_ref(ixti: u16, ctx: &RgceDecodeContext<'_>) -> Result<String, St
         ));
     };
 
+    if entry.supbook != 0 {
+        return Err(format!(
+            "EXTERNSHEET entry ixti={ixti} references external workbook (iSupBook={})",
+            entry.supbook
+        ));
+    }
+
+    if entry.itab_first < 0 || entry.itab_last < 0 {
+        return Err(format!(
+            "EXTERNSHEET entry ixti={ixti} has negative sheet indices itabFirst={} itabLast={}",
+            entry.itab_first, entry.itab_last
+        ));
+    }
+
     let itab_first = entry.itab_first as usize;
     let itab_last = entry.itab_last as usize;
 
@@ -1445,7 +1453,7 @@ mod tests {
 
     fn empty_ctx<'a>(
         sheet_names: &'a [String],
-        externsheet: &'a [ExternSheetRef],
+        externsheet: &'a [ExternSheetEntry],
         defined_names: &'a [DefinedNameMeta],
     ) -> RgceDecodeContext<'a> {
         RgceDecodeContext {
@@ -1470,7 +1478,7 @@ mod tests {
     #[test]
     fn decodes_ptg_ref_n_default_base() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1501,7 +1509,7 @@ mod tests {
     #[test]
     fn decodes_spill_range_postfix() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1525,7 +1533,7 @@ mod tests {
     #[test]
     fn decodes_ptg_ref_n_value_class_variant() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1556,7 +1564,7 @@ mod tests {
     #[test]
     fn decodes_ptg_ref_n_with_base() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1585,7 +1593,7 @@ mod tests {
     #[test]
     fn ptg_ref_n_out_of_range_emits_ref_error() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1619,7 +1627,7 @@ mod tests {
     #[test]
     fn ptg_ref_n_col_out_of_range_emits_ref_error() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1653,7 +1661,7 @@ mod tests {
     #[test]
     fn ptg_ref_n_preserves_absolute_relative_flags() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1682,7 +1690,7 @@ mod tests {
     #[test]
     fn decodes_ptg_area_n_default_base() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1719,7 +1727,7 @@ mod tests {
     #[test]
     fn decodes_ptg_area_n_with_base() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1756,7 +1764,7 @@ mod tests {
     #[test]
     fn decodes_ptg_area_n_array_class_variant() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1793,7 +1801,7 @@ mod tests {
     #[test]
     fn decodes_ptg_referr_to_ref() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1812,7 +1820,7 @@ mod tests {
     #[test]
     fn decodes_ptg_areaerr_to_ref() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1831,7 +1839,8 @@ mod tests {
     #[test]
     fn decodes_ptg_referr3d_to_ref() {
         let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
-        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -1853,7 +1862,8 @@ mod tests {
     #[test]
     fn decodes_ptg_areaerr3d_to_ref() {
         let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
-        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -1881,7 +1891,7 @@ mod tests {
     #[test]
     fn decodes_whole_row_area_as_row_range() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1927,7 +1937,7 @@ mod tests {
     #[test]
     fn decodes_whole_column_area_as_col_range() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1952,7 +1962,7 @@ mod tests {
     #[test]
     fn continues_to_render_rectangular_ranges_as_a1_areas() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -1971,7 +1981,7 @@ mod tests {
     #[test]
     fn decodes_print_titles_union_as_row_and_col_ranges() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -2006,7 +2016,8 @@ mod tests {
     fn decodes_whole_row_area3d_as_row_range() {
         // Same whole-row area but stored as PtgArea3d with an EXTERNSHEET sheet prefix.
         let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
-        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -2058,7 +2069,8 @@ mod tests {
     #[test]
     fn decodes_whole_column_area3d_as_col_range() {
         let sheet_names = vec!["Sheet1".to_string()];
-        let externsheet = vec![ExternSheetRef {
+        let externsheet = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -2086,7 +2098,8 @@ mod tests {
     #[test]
     fn decodes_print_titles_union_area3d_as_row_and_col_ranges() {
         let sheet_names = vec!["Sheet1".to_string()];
-        let externsheet = vec![ExternSheetRef {
+        let externsheet = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -2125,7 +2138,8 @@ mod tests {
     #[test]
     fn decodes_ptg_arean3d_to_sheet_range() {
         let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
-        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -2166,7 +2180,8 @@ mod tests {
     #[test]
     fn decodes_ptg_refn3d_to_sheet_ref() {
         let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
-        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -2265,7 +2280,8 @@ mod tests {
     #[test]
     fn decodes_ptg_ref3d_with_missing_sheet_to_placeholder_sheet_name() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -2287,7 +2303,7 @@ mod tests {
     #[test]
     fn decodes_ptg_name_missing_to_name_error() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -2306,7 +2322,7 @@ mod tests {
     #[test]
     fn decodes_unknown_ptg_to_parseable_error_literal() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -2375,7 +2391,7 @@ mod tests {
     #[test]
     fn decodes_ptg_namex_to_ref_placeholder() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -2396,7 +2412,7 @@ mod tests {
     #[test]
     fn decodes_sum_1_2_from_ptg_funcvar() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -2419,7 +2435,7 @@ mod tests {
     #[test]
     fn decodes_if_true_1_2_from_ptg_funcvar() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -2448,7 +2464,7 @@ mod tests {
     #[test]
     fn decodes_abs_neg1_from_ptg_func() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -2475,7 +2491,8 @@ mod tests {
     #[test]
     fn decodes_sum_sheet1_a1_2_from_ptg_ref3d_and_funcvar() {
         let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
-        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -2505,7 +2522,8 @@ mod tests {
     #[test]
     fn defined_name_3d_ref_quotes_sheet_names_with_spaces() {
         let sheet_names: Vec<String> = vec!["My Sheet".to_string()];
-        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -2527,7 +2545,8 @@ mod tests {
     #[test]
     fn defined_name_3d_ref_escapes_apostrophes_in_sheet_names() {
         let sheet_names: Vec<String> = vec!["O'Brien".to_string()];
-        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -2552,7 +2571,8 @@ mod tests {
             "Sheet 2".to_string(),
             "Sheet 3".to_string(),
         ];
-        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 2,
         }];
@@ -2573,7 +2593,8 @@ mod tests {
     #[test]
     fn decodes_ptg_area3d_sheet_range_with_quoting() {
         let sheet_names = vec!["Sheet 1".to_string(), "Sheet3".to_string()];
-        let externsheet = vec![ExternSheetRef {
+        let externsheet = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 1,
         }];
@@ -2602,7 +2623,7 @@ mod tests {
     #[test]
     fn decodes_ptgname_workbook_and_sheet_scope() {
         let sheet_names = vec!["Sheet 1".to_string()];
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names = vec![
             DefinedNameMeta {
                 name: "MyName".to_string(),
@@ -2649,7 +2670,8 @@ mod tests {
         ];
 
         let sheet_names = vec!["Sheet1".to_string()];
-        let externsheet = vec![ExternSheetRef {
+        let externsheet = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -2683,7 +2705,8 @@ mod tests {
             "Sheet2".to_string(),
             "Sheet 3".to_string(),
         ];
-        let externsheet = vec![ExternSheetRef {
+        let externsheet = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 2,
         }];
@@ -2703,7 +2726,7 @@ mod tests {
     #[test]
     fn decodes_ptgname_workbook_and_sheet_scoped() {
         let sheet_names = vec!["Sheet1".to_string()];
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names = vec![
             DefinedNameMeta {
                 name: "GlobalName".to_string(),
@@ -2756,7 +2779,8 @@ mod tests {
         ];
 
         let sheet_names = vec!["A1".to_string()];
-        let externsheet = vec![ExternSheetRef {
+        let externsheet = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
