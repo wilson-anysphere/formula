@@ -24,6 +24,7 @@ If you are editing collaboration code, start here and keep this doc in sync with
 - Desktop binder: [`packages/collab/binder/index.js`](../packages/collab/binder/index.js) (`bindYjsToDocumentController`)
 - Presence (Awareness wrapper): [`packages/collab/presence/src/presenceManager.js`](../packages/collab/presence/src/presenceManager.js) (`PresenceManager`)
 - Desktop presence renderer: [`apps/desktop/src/grid/presence-renderer/`](../apps/desktop/src/grid/presence-renderer/) (`PresenceRenderer`)
+- Offline persistence helper: [`packages/collab/offline/src/index.ts`](../packages/collab/offline/src/index.ts) / [`index.node.ts`](../packages/collab/offline/src/index.node.ts) (`attachOfflinePersistence`)
 - Comments (Yjs `comments` root helpers): [`packages/collab/comments/src/manager.ts`](../packages/collab/comments/src/manager.ts) (`CommentManager`, `createCommentManagerForSession`, `migrateCommentsArrayToMap`)
 - Conflict monitors: [`packages/collab/conflicts/index.js`](../packages/collab/conflicts/index.js) (`FormulaConflictMonitor`, `CellConflictMonitor`, `CellStructuralConflictMonitor`)
 - Collab version history glue: [`packages/collab/versioning/src/index.ts`](../packages/collab/versioning/src/index.ts) (`createCollabVersioning`)
@@ -202,6 +203,31 @@ Useful lifecycle helpers:
 If you use `persistence` or offline auto-connect gating, the initial WebSocket connection may be delayed until hydration completes (so offline edits are present before syncing).
 
 Implementation: see `scheduleProviderConnectAfterHydration()` in [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts).
+
+### Offline persistence (`options.offline`)
+
+In addition to the pluggable `options.persistence` interface, `@formula/collab-session` supports a convenience `offline` option backed by `@formula/collab-offline`.
+
+This persists raw Yjs updates locally so edits survive reload/crash and merge on reconnect.
+
+Example (desktop/Node file log):
+
+```ts
+import { createCollabSession } from "@formula/collab-session";
+
+const session = createCollabSession({
+  connection: { wsUrl, docId, token },
+  offline: { mode: "file", filePath: "/path/to/doc.yjslog" },
+});
+
+await session.offline?.whenLoaded();
+await session.whenSynced();
+```
+
+Notes:
+
+- When `offline` is enabled alongside `connection`, the session can delay provider connection until offline state has loaded (`offline.autoConnectAfterLoad`, default `true`).
+- `offline.mode: "indexeddb"` is available in browser environments.
 
 ### Schema initialization (default sheet + root normalization)
 
