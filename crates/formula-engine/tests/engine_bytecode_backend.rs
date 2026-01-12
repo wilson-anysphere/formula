@@ -5366,6 +5366,49 @@ fn bytecode_backend_reference_algebra_accepts_let_single_cell_reference_locals()
 }
 
 #[test]
+fn bytecode_backend_reference_algebra_as_formula_result_matches_ast() {
+    let mut engine = Engine::new();
+
+    // Populate a small grid of numbers:
+    // A1:C3 = 1..=9 (row-major).
+    let mut n = 1.0;
+    for row in 1..=3 {
+        for col in ["A", "B", "C"] {
+            engine
+                .set_cell_value("Sheet1", &format!("{col}{row}"), n)
+                .unwrap();
+            n += 1.0;
+        }
+    }
+
+    engine
+        .set_cell_formula("Sheet1", "E1", "=(A1:A3,B1:B3)")
+        .unwrap();
+    // Spill result: intersection of A1:C3 and B2:D4 is B2:C3 (2x2).
+    engine
+        .set_cell_formula("Sheet1", "E2", "=(A1:C3 B2:D4)")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected reference algebra formula results to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, 2);
+    assert_eq!(stats.compiled, 2);
+
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=(A1:A3,B1:B3)", "E1");
+    assert_engine_spill_matches_ast(&engine, "=(A1:C3 B2:D4)", "E2");
+
+    // Discontiguous unions cannot be spilled as a single rectangle.
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Error(ErrorKind::Value));
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_information_functions_scalar() {
     let mut engine = Engine::new();
 
