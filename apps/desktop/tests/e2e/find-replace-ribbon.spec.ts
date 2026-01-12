@@ -7,6 +7,10 @@ test.describe("ribbon Find & Select", () => {
     await gotoDesktop(page);
     await waitForDesktopReady(page);
 
+    // Desktop currently defaults to the View tab (where debug controls live). Switch to Home
+    // so we can access the Find & Select dropdown.
+    await page.getByRole("tab", { name: "Home" }).click();
+
     const findSelect = page.getByRole("button", { name: "Find and Select" });
     await expect(findSelect).toBeVisible();
 
@@ -39,4 +43,3 @@ test.describe("ribbon Find & Select", () => {
     await expect(page.locator("dialog.goto-dialog[open]")).toHaveCount(0);
   });
 });
-

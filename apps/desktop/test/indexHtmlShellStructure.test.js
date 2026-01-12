@@ -34,6 +34,7 @@ test("desktop index.html exposes required shell containers and testids", () => {
 
   const requiredTestIds = [
     "titlebar",
+    "ribbon",
     "sheet-tabs",
     "toast-root",
 
@@ -105,11 +106,11 @@ test("desktop index.html exposes required shell containers and testids", () => {
   assert.match(
     html,
     /\bid="grid"[^>]*\btabindex="0"/,
-    "Expected #grid to have tabindex=\"0\" so it can receive focus",
+    'Expected #grid to have tabindex="0" so it can receive focus',
   );
   assert.match(
     html,
     /\bid="grid-secondary"[^>]*\btabindex="0"/,
-    "Expected #grid-secondary to have tabindex=\"0\" so it can receive focus",
+    'Expected #grid-secondary to have tabindex="0" so it can receive focus',
   );
 });
