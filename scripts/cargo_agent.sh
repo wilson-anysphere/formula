@@ -20,6 +20,7 @@ set -euo pipefail
 #   FORMULA_CARGO_LIMIT_AS   Address-space cap (default: 12G)
 #   FORMULA_RUST_TEST_THREADS  Default RUST_TEST_THREADS for cargo test (default: min(nproc, 16))
 #   FORMULA_RAYON_NUM_THREADS  Default RAYON_NUM_THREADS (default: FORMULA_CARGO_JOBS)
+#   FORMULA_CARGO_RETRY_ATTEMPTS  Retry count for transient rustc EAGAIN panics (default: 5)
 #
 # Based on fastrender's cargo_agent.sh (simpler than cgroups/systemd-run).
 
@@ -39,6 +40,7 @@ Environment:
   FORMULA_CARGO_LIMIT_AS     Address-space cap (default: 12G)
   FORMULA_RUST_TEST_THREADS  RUST_TEST_THREADS for cargo test (default: min(nproc, 16))
   FORMULA_RAYON_NUM_THREADS  RAYON_NUM_THREADS (default: FORMULA_CARGO_JOBS)
+  FORMULA_CARGO_RETRY_ATTEMPTS  Retry count for transient rustc EAGAIN panics (default: 5)
 EOF
 }
 
@@ -112,6 +114,10 @@ fi
 caller_jobs_env="${FORMULA_CARGO_JOBS:-${CARGO_BUILD_JOBS:-}}"
 jobs="${FORMULA_CARGO_JOBS:-${CARGO_BUILD_JOBS:-4}}"
 limit_as="${FORMULA_CARGO_LIMIT_AS:-14G}"
+
+# Note: For `cargo test`, this wrapper may override the above `jobs` default to `1` (unless callers
+# explicitly configure `FORMULA_CARGO_JOBS`/`CARGO_BUILD_JOBS`). This avoids sporadic rustc thread
+# spawn failures under high system load on multi-agent hosts.
 
 # Record whether the caller explicitly configured Rayon thread counts before we set any defaults.
 orig_rayon_num_threads="${RAYON_NUM_THREADS:-}"
