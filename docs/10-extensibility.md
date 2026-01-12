@@ -125,6 +125,11 @@ Notes:
 Extensions can contribute menu items via `contributes.menus` in the manifest (and via `formula.ui.registerContextMenu(...)`).
 The desktop merges both sources and applies the same `when` + `group` sorting/grouping rules.
 
+Notes:
+
+- `formula.ui.registerContextMenu(...)` is a permissioned API and requires the `ui.menus` permission.
+- Menu items invoke commands; command registration/execution is gated by `ui.commands`.
+
 Supported menu locations (desktop UI):
 
 - `cell/context` — the grid (cell) context menu (`contributes.menus["cell/context"]`).
