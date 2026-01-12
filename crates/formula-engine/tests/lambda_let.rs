@@ -45,3 +45,11 @@ fn top_level_lambda_returns_calc_error() {
     assert_eq!(eval(&mut engine, "=LAMBDA(x,x)"), Value::Error(ErrorKind::Calc));
 }
 
+#[test]
+fn lambda_used_as_number_returns_value_error() {
+    let mut engine = Engine::new();
+    assert_eq!(
+        eval(&mut engine, "=1+LAMBDA(x,x)"),
+        Value::Error(ErrorKind::Value)
+    );
+}
