@@ -190,6 +190,7 @@ describe("mountTitlebar", () => {
     expect(container.querySelector('[data-testid="titlebar-document-name"]')?.textContent).toBe("Doc 2");
     expect(container.querySelector('[data-testid="titlebar-document-name"]')?.getAttribute("title")).toBe("Doc 2");
     expect(container.querySelector('[data-testid="titlebar-actions"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="titlebar-action-share"]')).toBeTruthy();
     expect(container.querySelector<HTMLButtonElement>('[aria-label="Share document"]')?.disabled).toBe(true);
 
     act(() => {

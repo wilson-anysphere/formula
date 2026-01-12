@@ -214,6 +214,7 @@ export function Titlebar({
                 className={["formula-titlebar__action-button", variantClass].filter(Boolean).join(" ")}
                 aria-label={action.ariaLabel}
                 title={action.ariaLabel}
+                data-testid={action.id ? `titlebar-action-${action.id}` : undefined}
                 onClick={action.onClick}
                 disabled={action.disabled}
               >
