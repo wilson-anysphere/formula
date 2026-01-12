@@ -89,3 +89,11 @@ test("clipboard RTF fallback still runs when text/plain is present but empty", (
   assert.equal(grid[1][0].value, "C");
   assert.equal(grid[1][1].value, "D");
 });
+
+test("clipboard still parses empty text/plain as a 1×1 empty grid when no richer formats exist", () => {
+  const grid = parseClipboardContentToCellGrid({ text: "" });
+  assert.ok(grid);
+  assert.equal(grid.length, 1);
+  assert.equal(grid[0].length, 1);
+  assert.equal(grid[0][0].value, null);
+});

@@ -390,15 +390,18 @@ export function parseClipboardContentToCellGrid(content) {
   }
 
   const text = content.text;
+  const rtf = content.rtf;
+  const hasMeaningfulRtf = typeof rtf === "string" && rtf.trim() !== "";
+
   // Some clipboard backends may provide an empty `text/plain` payload alongside richer formats.
-  // Treat empty strings as "missing" so we can still fall back to RTF extraction.
-  if (typeof text === "string" && text !== "") {
+  // Only treat empty strings as "missing" when we have an RTF payload to fall back to. Otherwise
+  // keep the legacy behavior (pasting a blank 1×1 cell should still clear the target).
+  if (typeof text === "string" && (text !== "" || !hasMeaningfulRtf)) {
     const parsed = parseTsvToCellGrid(text);
     if (parsed) return parsed;
   }
 
-  const rtf = content.rtf;
-  if (typeof rtf === "string") {
+  if (hasMeaningfulRtf) {
     const extracted = extractPlainTextFromRtf(rtf);
     if (extracted) {
       const parsed = parseTsvToCellGrid(extracted);
