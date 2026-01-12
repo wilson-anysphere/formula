@@ -20,6 +20,9 @@ const NAME_FLAG_BUILTIN: u16 = 0x0020;
 // Built-in defined name ids [MS-XLS 2.5.66].
 // These are stored in the NAME record when `fBuiltin == 1`.
 const BUILTIN_NAME_FILTER_DATABASE: u8 = 0x0D;
+// Some writers appear to store the FilterDatabase name as a normal string rather than as a
+// built-in id. Excel's visible built-in name omits the `_xlnm.` prefix used in XLSX.
+const FILTER_DATABASE_NAME_ALIAS: &str = "_FilterDatabase";
 
 // BIFF8 string flags (mirrors `strings.rs`).
 const STR_FLAG_HIGH_BYTE: u8 = 0x01;
@@ -122,7 +125,7 @@ pub(crate) fn parse_biff_filter_database_ranges(
             RECORD_NAME => {
                 match parse_name_record_best_effort(record.data.as_ref(), biff, codepage) {
                     Ok(Some(parsed)) => {
-                        if parsed.name == XLNM_FILTER_DATABASE {
+                        if is_filter_database_name(&parsed.name) {
                             filter_database_names.push(FilterDatabaseName {
                                 record_offset: record.offset,
                                 itab: parsed.itab,
@@ -182,6 +185,11 @@ pub(crate) fn parse_biff_filter_database_ranges(
     }
 
     Ok(out)
+}
+
+fn is_filter_database_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case(XLNM_FILTER_DATABASE)
+        || name.eq_ignore_ascii_case(FILTER_DATABASE_NAME_ALIAS)
 }
 
 fn supbook_record_is_internal(data: &[u8], codepage: u16) -> bool {
@@ -771,6 +779,48 @@ mod tests {
         name_data.extend_from_slice(&1u16.to_le_bytes()); // itab (sheet 1)
         name_data.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu..cchStatusText
         name_data.push(BUILTIN_NAME_FILTER_DATABASE); // built-in name id
+        name_data.extend_from_slice(&rgce);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_globals()),
+            record(RECORD_NAME, &name_data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(1))
+            .expect("parse");
+
+        assert_eq!(
+            parsed.by_sheet.get(&0).copied(),
+            Some(Range::new(CellRef::new(0, 0), CellRef::new(4, 2)))
+        );
+    }
+
+    #[test]
+    fn decodes_filter_database_from_non_builtin_name_using_filterdatabase_alias() {
+        // Some writers store `_FilterDatabase` as a normal string NAME rather than a built-in id.
+        // Accept the alias and recover the filter range.
+        let mut rgce = Vec::new();
+        rgce.push(0x25); // PtgArea
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        rgce.extend_from_slice(&4u16.to_le_bytes()); // rwLast
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        rgce.extend_from_slice(&2u16.to_le_bytes()); // colLast
+
+        let name_str = FILTER_DATABASE_NAME_ALIAS;
+        let cch = name_str.len() as u8;
+
+        let mut name_data = Vec::new();
+        name_data.extend_from_slice(&0u16.to_le_bytes()); // grbit (not builtin)
+        name_data.push(0); // chKey
+        name_data.push(cch); // cch
+        name_data.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        name_data.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        name_data.extend_from_slice(&1u16.to_le_bytes()); // itab (sheet 1)
+        name_data.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu..cchStatusText
+        name_data.push(0); // flags (compressed XLUnicodeStringNoCch)
+        name_data.extend_from_slice(name_str.as_bytes());
         name_data.extend_from_slice(&rgce);
 
         let stream = [

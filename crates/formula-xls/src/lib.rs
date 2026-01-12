@@ -1388,7 +1388,7 @@ fn import_xls_path_with_biff_reader(
     // supported). Never fail import due to AutoFilter parsing.
     let mut autofilters: Vec<(formula_model::WorksheetId, Range)> = Vec::new();
     for name in &out.defined_names {
-        if !name.name.eq_ignore_ascii_case(XLNM_FILTER_DATABASE) {
+        if !is_filter_database_defined_name(&name.name) {
             continue;
         }
 
@@ -1545,7 +1545,7 @@ fn import_xls_path_with_biff_reader(
             ) {
                 Ok(mut parsed) => {
                     for name in parsed.names.drain(..) {
-                        if name.name != XLNM_FILTER_DATABASE {
+                        if !is_filter_database_defined_name(&name.name) {
                             continue;
                         }
                         let Some(biff_sheet_idx) = name.scope_sheet else {
@@ -1792,6 +1792,19 @@ fn normalize_calamine_defined_name_name(name: &str) -> String {
     // Calamine can surface BIFF8 Unicode strings with embedded NUL bytes; strip them so the
     // imported name matches Excel’s visible name semantics.
     name.replace('\0', "")
+}
+
+fn is_filter_database_defined_name(name: &str) -> bool {
+    // In XLSX, the AutoFilter range is stored in `_xlnm._FilterDatabase`. Some `.xls` writers (and
+    // some decoders) omit the `_xlnm.` prefix and use Excel's visible built-in name
+    // `_FilterDatabase` instead. Treat both spellings as the AutoFilter name.
+    //
+    // Calamine has been observed to surface `_FilterDatabase` with the final `e` truncated (i.e.
+    // `_FilterDatabas`) for some BIFF NAME encodings; accept that variant as well so we still
+    // preserve AutoFilter ranges when BIFF parsing is unavailable.
+    name.eq_ignore_ascii_case(XLNM_FILTER_DATABASE)
+        || name.eq_ignore_ascii_case("_FilterDatabase")
+        || name.eq_ignore_ascii_case("_FilterDatabas")
 }
 
 fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {

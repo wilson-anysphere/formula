@@ -153,3 +153,28 @@ fn imports_autofilter_range_from_workbook_scope_filterdatabase_name_without_biff
     assert!(af.sort_state.is_none());
     assert!(af.raw_xml.is_empty());
 }
+
+#[test]
+fn imports_autofilter_range_from_filterdatabase_alias_defined_name_without_biff() {
+    // Some `.xls` files (or decoders like calamine) surface the AutoFilter built-in name without
+    // the `_xlnm.` prefix (i.e. `_FilterDatabase`). Ensure we still import the AutoFilter range
+    // from the calamine defined-name fallback path.
+    let bytes = xls_fixture_builder::build_autofilter_calamine_filterdatabase_alias_fixture_xls();
+    let result = import_fixture_without_biff(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("AutoFilter")
+        .expect("AutoFilter sheet missing");
+
+    let af = sheet.auto_filter.as_ref().unwrap_or_else(|| {
+        panic!(
+            "auto_filter missing; defined_names={:?}; warnings={:?}",
+            result.workbook.defined_names, result.warnings
+        )
+    });
+    assert_eq!(af.range, Range::from_a1("A1:C5").unwrap());
+    assert!(af.filter_columns.is_empty());
+    assert!(af.sort_state.is_none());
+    assert!(af.raw_xml.is_empty());
+}
