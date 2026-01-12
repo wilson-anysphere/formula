@@ -10,6 +10,7 @@ use std::io::Cursor;
 
 use png::{BitDepth, ColorType};
 
+const BITMAPINFOHEADER_SIZE: usize = 40;
 const BITMAPV5HEADER_SIZE: usize = 124;
 const BI_RGB: u32 = 0;
 const BI_BITFIELDS: u32 = 3;
@@ -184,14 +185,14 @@ pub fn png_to_dibv5(png_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
 /// Convert CF_DIBV5 bytes (BITMAPV5HEADER + pixels) into PNG bytes.
 pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
-    if dib_bytes.len() < BITMAPV5HEADER_SIZE {
-        return Err("dib is too small to contain BITMAPV5HEADER".to_string());
+    if dib_bytes.len() < BITMAPINFOHEADER_SIZE {
+        return Err("dib is too small to contain BITMAPINFOHEADER".to_string());
     }
 
     let header_size = read_u32_le(dib_bytes, 0).ok_or("failed to read bV5Size")? as usize;
-    if header_size < BITMAPV5HEADER_SIZE {
+    if header_size < BITMAPINFOHEADER_SIZE {
         return Err(format!(
-            "unsupported DIB header size: {header_size} (expected >= {BITMAPV5HEADER_SIZE})"
+            "unsupported DIB header size: {header_size} (expected >= {BITMAPINFOHEADER_SIZE})"
         ));
     }
     if header_size > dib_bytes.len() {
@@ -241,7 +242,25 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
         other => return Err(format!("unsupported DIB bit depth: {other}")),
     };
 
-    let pixel_offset = header_size;
+    // In a BITMAPINFOHEADER with BI_BITFIELDS compression, the color masks are stored immediately
+    // after the 40-byte header (3 DWORDs, i.e. 12 bytes). For BITMAPV4/V5 headers the masks live
+    // inside the header itself.
+    let mut pixel_offset = header_size;
+    if compression == BI_BITFIELDS && header_size == BITMAPINFOHEADER_SIZE {
+        pixel_offset = header_size + 12;
+    }
+
+    // Bitmaps stored as 32bpp BI_RGB typically use the 4th byte as padding (BGRX) rather than
+    // alpha; treat them as fully opaque to avoid producing fully-transparent output.
+    //
+    // For BI_BITFIELDS, only treat the 4th byte as alpha when a non-zero alpha mask is present
+    // (BITMAPV4/V5 headers).
+    let alpha_mask = if bit_count == 32 && compression == BI_BITFIELDS && header_size >= 56 {
+        read_u32_le(dib_bytes, 52).unwrap_or(0)
+    } else {
+        0
+    };
+    let has_alpha = compression == BI_BITFIELDS && alpha_mask != 0;
     let needed = pixel_offset + stride * height_u32 as usize;
     if dib_bytes.len() < needed {
         return Err("dib does not contain full pixel data".to_string());
@@ -264,7 +283,7 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
                     let b = px[0];
                     let g = px[1];
                     let r = px[2];
-                    let a = px[3];
+                    let a = if has_alpha { px[3] } else { 255 };
                     rgba.extend_from_slice(&[r, g, b, a]);
                 }
             }
@@ -333,5 +352,37 @@ mod tests {
 
         assert_eq!((w1, h1), (w2, h2));
         assert_eq!(px1, px2);
+    }
+
+    #[test]
+    fn dib32_bi_rgb_is_treated_as_opaque() {
+        // Minimal BITMAPINFOHEADER (40 bytes) + 2 pixels BGRA (bottom-up).
+        //
+        // Many BI_RGB 32bpp DIBs use BGRX where the 4th byte is padding (often 0). If we treat it
+        // as alpha we end up with a fully transparent image.
+        let mut dib = Vec::new();
+        push_u32_le(&mut dib, BITMAPINFOHEADER_SIZE as u32); // biSize
+        push_i32_le(&mut dib, 2); // biWidth
+        push_i32_le(&mut dib, 1); // biHeight (bottom-up)
+        push_u16_le(&mut dib, 1); // biPlanes
+        push_u16_le(&mut dib, 32); // biBitCount
+        push_u32_le(&mut dib, BI_RGB); // biCompression
+        push_u32_le(&mut dib, 0); // biSizeImage
+        push_i32_le(&mut dib, 0); // biXPelsPerMeter
+        push_i32_le(&mut dib, 0); // biYPelsPerMeter
+        push_u32_le(&mut dib, 0); // biClrUsed
+        push_u32_le(&mut dib, 0); // biClrImportant
+
+        // Pixel data starts immediately after the 40-byte header.
+        debug_assert_eq!(dib.len(), BITMAPINFOHEADER_SIZE);
+        // Two pixels: red and green. Alpha/padding byte is 0 to simulate BGRX.
+        dib.extend_from_slice(&[
+            0, 0, 255, 0, // red (BGRA/BGRX)
+            0, 255, 0, 0, // green
+        ]);
+
+        let png = dibv5_to_png(&dib).expect("dibv5_to_png failed");
+        let (_w, _h, px) = decode_png(&png);
+        assert_eq!(px, vec![255, 0, 0, 255, 0, 255, 0, 255]);
     }
 }

@@ -18,6 +18,7 @@ use super::{ClipboardContent, ClipboardError, ClipboardWritePayload};
 // Built-in clipboard formats that we use directly. Keeping these as numeric constants avoids
 // needing Win32 System Ole bindings just for format IDs.
 const CF_UNICODETEXT: u32 = 13;
+const CF_DIB: u32 = 8;
 const CF_DIBV5: u32 = 17;
 
 struct ClipboardGuard;
@@ -201,18 +202,21 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         })
         .filter(|s| !s.is_empty());
 
-    let png_base64 = if let Some(png_bytes) = try_get_clipboard_bytes(format_png)? {
+    let mut png_base64 = if let Some(png_bytes) = try_get_clipboard_bytes(format_png)? {
         Some(STANDARD.encode(png_bytes))
     } else if let Some(format) = format_image_png {
         try_get_clipboard_bytes(format)?.map(|bytes| STANDARD.encode(bytes))
     } else if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIBV5)? {
-        match dibv5_to_png(&dib_bytes) {
-            Ok(png) => Some(STANDARD.encode(png)),
-            Err(_) => None,
-        }
+        dibv5_to_png(&dib_bytes).ok().map(|png| STANDARD.encode(png))
     } else {
         None
     };
+
+    if png_base64.is_none() {
+        if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIB)? {
+            png_base64 = dibv5_to_png(&dib_bytes).ok().map(|png| STANDARD.encode(png));
+        }
+    }
 
     Ok(ClipboardContent {
         text,
