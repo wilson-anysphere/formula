@@ -982,6 +982,31 @@ export class DocumentController {
   }
 
   /**
+   * Return the set of style ids contributing to a cell's effective formatting.
+   *
+   * This is useful for callers that want to cache derived formatting (clipboard export,
+   * render caches, etc) without needing to stringify full style objects.
+   *
+   * Tuple order is:
+   * `[sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId]`.
+   *
+   * @param {string} sheetId
+   * @param {CellCoord | string} coord
+   * @returns {[number, number, number, number]}
+   */
+  getCellFormatStyleIds(sheetId, coord) {
+    const c = typeof coord === "string" ? parseA1(coord) : coord;
+    const cell = this.model.getCell(sheetId, c.row, c.col);
+    const sheet = this.model.sheets.get(sheetId);
+    return [
+      sheet?.defaultStyleId ?? 0,
+      sheet?.rowStyleIds.get(c.row) ?? 0,
+      sheet?.colStyleIds.get(c.col) ?? 0,
+      cell.styleId ?? 0,
+    ];
+  }
+
+  /**
    * Return the set of sheet ids that exist in the underlying model.
    *
    * Note: the DocumentController currently creates sheets lazily when a sheet id is first

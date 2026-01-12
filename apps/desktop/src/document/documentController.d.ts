@@ -22,6 +22,7 @@ export class DocumentController {
 
   getCell(sheetId: string, coord: unknown): any;
   getCellFormat(sheetId: string, coord: unknown): Record<string, any>;
+  getCellFormatStyleIds(sheetId: string, coord: unknown): [number, number, number, number];
 
   setCellValue(sheetId: string, coord: unknown, value: unknown, options?: unknown): void;
   setCellFormula(sheetId: string, coord: unknown, formula: string | null, options?: unknown): void;

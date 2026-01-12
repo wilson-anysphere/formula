@@ -36,3 +36,18 @@ test("cell formatting overrides row/col formatting", () => {
   assert.equal(format.fill?.fgColor, "green");
 });
 
+test("getCellFormatStyleIds returns the layered style id tuple for a cell", () => {
+  const doc = new DocumentController();
+
+  doc.setSheetFormat("Sheet1", { font: { bold: true } });
+  doc.setRowFormat("Sheet1", 0, { font: { italic: true } });
+  doc.setColFormat("Sheet1", 0, { fill: { fgColor: "red" } });
+  doc.setRangeFormat("Sheet1", "A1", { numberFormat: "0.00" });
+
+  const [sheetDefaultStyleId, rowStyleId, colStyleId, cellStyleId] = doc.getCellFormatStyleIds("Sheet1", "A1");
+
+  assert.equal(doc.styleTable.get(sheetDefaultStyleId)?.font?.bold, true);
+  assert.equal(doc.styleTable.get(rowStyleId)?.font?.italic, true);
+  assert.equal(doc.styleTable.get(colStyleId)?.fill?.fgColor, "red");
+  assert.equal(doc.styleTable.get(cellStyleId)?.numberFormat, "0.00");
+});
