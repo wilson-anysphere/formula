@@ -623,6 +623,15 @@ impl<'a> FragmentCursor<'a> {
                     let bytes = self.read_bytes(10)?;
                     out.extend_from_slice(&bytes);
                 }
+                // 3D relative references: PtgRefN3d / PtgAreaN3d.
+                0x3E | 0x5E | 0x7E => {
+                    let bytes = self.read_bytes(6)?;
+                    out.extend_from_slice(&bytes);
+                }
+                0x3F | 0x5F | 0x7F => {
+                    let bytes = self.read_bytes(10)?;
+                    out.extend_from_slice(&bytes);
+                }
                 // PtgMem* tokens: consume the nested rgce payload. These tokens have the form:
                 //   [ptg][cce: u16][rgce: cce bytes]
                 //
