@@ -101,6 +101,13 @@ export interface EngineClient {
     options?: FormulaParseOptions,
     rpcOptions?: RpcOptions
   ): Promise<FormulaPartialParseResult>;
+  /**
+   * Best-effort partial parse at the end of the formula string (cursor defaults to `formula.length`).
+   *
+   * This overload is a convenience so callers can pass parse options without having to provide an
+   * explicit cursor.
+   */
+  parseFormulaPartial(formula: string, options?: FormulaParseOptions, rpcOptions?: RpcOptions): Promise<FormulaPartialParseResult>;
   terminate(): void;
 }
 
@@ -200,8 +207,16 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     applyOperation: async (op, rpcOptions) => await withEngine((connected) => connected.applyOperation(op, rpcOptions)),
     lexFormula: async (formula, options, rpcOptions) =>
       await withEngine((connected) => connected.lexFormula(formula, options, rpcOptions)),
-    parseFormulaPartial: async (formula, cursor, options, rpcOptions) =>
-      await withEngine((connected) => connected.parseFormulaPartial(formula, cursor, options, rpcOptions)),
+    parseFormulaPartial: async (
+      formula: string,
+      cursorOrOptions?: number | FormulaParseOptions,
+      optionsOrRpcOptions?: FormulaParseOptions | RpcOptions,
+      rpcOptions?: RpcOptions
+    ) =>
+      await withEngine((connected) =>
+        // EngineWorker implements overloads/argument parsing; forward through.
+        (connected.parseFormulaPartial as any)(formula, cursorOrOptions, optionsOrRpcOptions, rpcOptions)
+      ),
     terminate: () => {
       generation++;
       enginePromise = null;

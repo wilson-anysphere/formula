@@ -240,8 +240,67 @@ export class EngineWorker {
     cursor?: number,
     options?: FormulaParseOptions,
     rpcOptions?: RpcOptions
+  ): Promise<FormulaPartialParseResult>;
+  async parseFormulaPartial(
+    formula: string,
+    options?: FormulaParseOptions,
+    rpcOptions?: RpcOptions
+  ): Promise<FormulaPartialParseResult>;
+  async parseFormulaPartial(
+    formula: string,
+    cursorOrOptions?: number | FormulaParseOptions,
+    optionsOrRpcOptions?: FormulaParseOptions | RpcOptions,
+    rpcOptions?: RpcOptions
   ): Promise<FormulaPartialParseResult> {
-    return (await this.invoke("parseFormulaPartial", { formula, cursor, options }, rpcOptions)) as FormulaPartialParseResult;
+    const isFormulaParseOptions = (value: unknown): value is FormulaParseOptions =>
+      Boolean(value && typeof value === "object" && ("localeId" in value || "referenceStyle" in value));
+    const isRpcOptions = (value: unknown): value is RpcOptions =>
+      Boolean(value && typeof value === "object" && ("signal" in value || "timeoutMs" in value));
+
+    let cursor: number | undefined;
+    let options: FormulaParseOptions | undefined;
+    let finalRpcOptions: RpcOptions | undefined;
+
+    if (typeof cursorOrOptions === "number") {
+      cursor = cursorOrOptions;
+      if (isRpcOptions(optionsOrRpcOptions)) {
+        // Allow: parseFormulaPartial(formula, cursor, rpcOptions)
+        options = undefined;
+        finalRpcOptions = optionsOrRpcOptions;
+      } else {
+        options = optionsOrRpcOptions as FormulaParseOptions | undefined;
+        finalRpcOptions = rpcOptions;
+      }
+    } else {
+      // Cursor omitted. Support both:
+      // - parseFormulaPartial(formula, options?, rpcOptions?)
+      // - parseFormulaPartial(formula, undefined, options?, rpcOptions?) (legacy call sites)
+      if (isFormulaParseOptions(cursorOrOptions)) {
+        options = cursorOrOptions;
+        finalRpcOptions = (isRpcOptions(optionsOrRpcOptions) ? optionsOrRpcOptions : rpcOptions) as RpcOptions | undefined;
+      } else if (cursorOrOptions === undefined) {
+        if (isFormulaParseOptions(optionsOrRpcOptions)) {
+          options = optionsOrRpcOptions;
+          finalRpcOptions = rpcOptions;
+        } else if (isRpcOptions(optionsOrRpcOptions)) {
+          options = undefined;
+          finalRpcOptions = optionsOrRpcOptions;
+        } else {
+          options = undefined;
+          finalRpcOptions = rpcOptions;
+        }
+      } else if (isRpcOptions(cursorOrOptions)) {
+        // Allow: parseFormulaPartial(formula, rpcOptions)
+        options = undefined;
+        finalRpcOptions = cursorOrOptions;
+      } else {
+        // Unknown object; assume it's a parse options bag.
+        options = cursorOrOptions as FormulaParseOptions;
+        finalRpcOptions = optionsOrRpcOptions as RpcOptions | undefined;
+      }
+    }
+
+    return (await this.invoke("parseFormulaPartial", { formula, cursor, options }, finalRpcOptions)) as FormulaPartialParseResult;
   }
 
   async setSheetDimensions(sheet: string, rows: number, cols: number, options?: RpcOptions): Promise<void> {

@@ -407,6 +407,27 @@ describe("EngineWorker RPC", () => {
     expect(requests[0].params).toEqual({ formula: "=SUM(1,", cursor: 6, options: undefined });
   });
 
+  it("supports parseFormulaPartial overload with options as the second argument", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    await engine.parseFormulaPartial("=SUM(1,", { localeId: "de-DE", referenceStyle: "R1C1" });
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "parseFormulaPartial"
+    );
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({
+      formula: "=SUM(1,",
+      cursor: undefined,
+      options: { localeId: "de-DE", referenceStyle: "R1C1" }
+    });
+  });
+
   it("forwards parseFormulaPartial options in the RPC params", async () => {
     const worker = new MockWorker();
     const engine = await EngineWorker.connect({
