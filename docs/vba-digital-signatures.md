@@ -271,8 +271,12 @@ V3ContentHash         = SHA-256(ProjectNormalizedData)
 ```
 
 Where `(filtered PROJECT stream properties)` is derived from the textual `PROJECT` stream:
-for each non-empty `key=value` line, if `key` is **not** one of `ID`, `Document`, `CMG`, `DPB`, `GC`
-(case-insensitive), include the trimmed `key=value` bytes and terminate the line with `CRLF`.
+
+- Split the stream into lines on `CR` and/or `LF`
+- Trim ASCII whitespace from each line and strip a leading UTF-8 BOM if present
+- For each non-empty line containing `=`, parse `key` as the trimmed left-hand side
+  - If `key` is **not** one of `ID`, `Document`, `CMG`, `DPB`, `GC` (case-insensitive), include the
+    full trimmed line bytes (preserving any interior whitespace) and terminate the line with `CRLF`
 
 In this repo:
 
