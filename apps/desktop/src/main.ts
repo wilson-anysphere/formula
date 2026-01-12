@@ -325,11 +325,15 @@ function rgbHexToArgb(rgb: string): string | null {
   return ["#", "FF", rgb.slice(1)].join("");
 }
 
-function applyToSelection(label: string, fn: (sheetId: string, ranges: CellRange[]) => void): void {
+function applyToSelection(
+  label: string,
+  fn: (sheetId: string, ranges: CellRange[]) => void,
+  options: { forceBatch?: boolean } = {},
+): void {
   const doc = app.getDocument();
   const sheetId = app.getCurrentSheetId();
   const ranges = selectionRangesForFormatting();
-  const shouldBatch = ranges.length > 1;
+  const shouldBatch = Boolean(options.forceBatch) || ranges.length > 1;
 
   if (shouldBatch) doc.beginBatch({ label });
   try {
@@ -3183,6 +3187,7 @@ mountRibbon(ribbonRoot, {
     const bordersPrefix = "home.font.borders.";
     if (commandId.startsWith(bordersPrefix)) {
       const kind = commandId.slice(bordersPrefix.length);
+      const defaultBorderColor = ["#", "FF", "000000"].join("");
       if (kind === "none") {
         applyToSelection("Borders", (sheetId, ranges) => {
           for (const range of ranges) {
@@ -3192,17 +3197,61 @@ mountRibbon(ribbonRoot, {
         return;
       }
 
-      if (kind === "all" || kind === "outside") {
+      if (kind === "all") {
         applyToSelection("Borders", (sheetId, ranges) => applyAllBorders(doc, sheetId, ranges));
         return;
       }
 
-      if (kind === "thickBox") {
-        applyToSelection("Borders", (sheetId, ranges) => applyAllBorders(doc, sheetId, ranges, { style: "thick" }));
+      if (kind === "outside" || kind === "thickBox") {
+        const edgeStyle = kind === "thickBox" ? "thick" : "thin";
+        const edge = { style: edgeStyle, color: defaultBorderColor };
+        applyToSelection(
+          "Borders",
+          (sheetId, ranges) => {
+            for (const range of ranges) {
+              const startRow = range.start.row;
+              const endRow = range.end.row;
+              const startCol = range.start.col;
+              const endCol = range.end.col;
+
+              // Top edge.
+              doc.setRangeFormat(
+                sheetId,
+                { start: { row: startRow, col: startCol }, end: { row: startRow, col: endCol } },
+                { border: { top: edge } },
+                { label: "Borders" },
+              );
+
+              // Bottom edge.
+              doc.setRangeFormat(
+                sheetId,
+                { start: { row: endRow, col: startCol }, end: { row: endRow, col: endCol } },
+                { border: { bottom: edge } },
+                { label: "Borders" },
+              );
+
+              // Left edge.
+              doc.setRangeFormat(
+                sheetId,
+                { start: { row: startRow, col: startCol }, end: { row: endRow, col: startCol } },
+                { border: { left: edge } },
+                { label: "Borders" },
+              );
+
+              // Right edge.
+              doc.setRangeFormat(
+                sheetId,
+                { start: { row: startRow, col: endCol }, end: { row: endRow, col: endCol } },
+                { border: { right: edge } },
+                { label: "Borders" },
+              );
+            }
+          },
+          { forceBatch: true },
+        );
         return;
       }
 
-      const defaultBorderColor = ["#", "FF", "000000"].join("");
       const edge = { style: "thin", color: defaultBorderColor };
       const borderPatch = (() => {
         switch (kind) {
