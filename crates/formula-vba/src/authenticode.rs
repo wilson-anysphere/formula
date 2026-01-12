@@ -109,14 +109,7 @@ pub(crate) fn locate_pkcs7_signed_data_bounds(signature_stream: &[u8]) -> Option
         return Some((info.pkcs7_offset, info.pkcs7_len));
     }
 
-    if signature_stream.first() == Some(&0x30)
-        && looks_like_pkcs7_signed_data_content_info(signature_stream)
-    {
-        let rem = skip_element(signature_stream).ok()?;
-        let len = signature_stream.len().saturating_sub(rem.len());
-        return Some((0, len));
-    }
-
+    let mut best: Option<(usize, usize)> = None;
     for offset in 0..signature_stream.len() {
         if signature_stream[offset] != 0x30 {
             continue;
@@ -125,11 +118,11 @@ pub(crate) fn locate_pkcs7_signed_data_bounds(signature_stream: &[u8]) -> Option
         if looks_like_pkcs7_signed_data_content_info(slice) {
             let rem = skip_element(slice).ok()?;
             let len = slice.len().saturating_sub(rem.len());
-            return Some((offset, len));
+            best = Some((offset, len));
         }
     }
 
-    None
+    best
 }
 
 #[derive(Debug, Clone, Copy)]
