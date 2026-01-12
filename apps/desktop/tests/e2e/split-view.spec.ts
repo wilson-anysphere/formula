@@ -124,6 +124,52 @@ test.describe("split view", () => {
     const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
     expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
   });
+
+  test("secondary drag selection preserves active cell semantics and does not scroll primary", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("split-vertical").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await expect(secondary.locator("canvas")).toHaveCount(3);
+
+    // Scroll the primary pane so we're verifying drag selection from secondary does not disturb it.
+    const primary = page.locator("#grid");
+    await primary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(0, 200 * 24);
+    await expect.poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().y)).toBeGreaterThan(0);
+
+    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+
+    const secondaryBox = await secondary.boundingBox();
+    if (!secondaryBox) throw new Error("Missing secondary grid bounding box");
+
+    // Drag-select from D4 -> B2 in the secondary pane.
+    // Coords are derived from the default desktop grid geometry:
+    // - row header width ~48px
+    // - col header height ~24px
+    // - default col width 100px
+    // - default row height 24px
+    const start = { x: 48 + 3 * 100 + 12, y: 24 + 3 * 24 + 12 }; // D4
+    const end = { x: 48 + 1 * 100 + 12, y: 24 + 1 * 24 + 12 }; // B2
+
+    await page.mouse.move(secondaryBox.x + start.x, secondaryBox.y + start.y);
+    await page.mouse.down();
+    await page.mouse.move(secondaryBox.x + end.x, secondaryBox.y + end.y);
+    await page.mouse.up();
+
+    // Shared-grid mouse drag keeps the *anchor* cell active (D4 here) even though the range normalizes to B2:D4.
+    await expect(page.getByTestId("selection-range")).toHaveText("B2:D4");
+    await expect(page.getByTestId("active-cell")).toHaveText("D4");
+
+    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
+  });
 });
 
 test.describe("split view / shared grid zoom", () => {

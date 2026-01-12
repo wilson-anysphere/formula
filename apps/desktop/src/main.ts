@@ -1430,15 +1430,31 @@ if (
     const activeIndex = secondaryGridView.grid.renderer.getActiveSelectionIndex();
     if (!gridSelection || gridRanges.length === 0) return;
 
-    // SpreadsheetApp does not currently support multi-range programmatic selection. Mirror
-    // the active range and active cell only.
-    const activeRange = gridRanges[Math.max(0, Math.min(activeIndex, gridRanges.length - 1))] ?? gridRanges[0];
-    if (!activeRange) return;
-
-    const docRange = docRangeFromGridRange(activeRange);
-
     splitSelectionSyncInProgress = true;
     try {
+      // Prefer syncing via the primary shared-grid instance (when available) so we preserve:
+      // - multi-range selection
+      // - the shared-grid active cell semantics (mouse-drag keeps the anchor cell active)
+      // while still avoiding cross-pane scrolling.
+      const primarySharedGrid = (app as any).sharedGrid as
+        | { setSelectionRanges?: (ranges: GridCellRange[] | null, opts?: unknown) => void }
+        | null;
+      if (primarySharedGrid?.setSelectionRanges) {
+        primarySharedGrid.setSelectionRanges(gridRanges, {
+          activeIndex,
+          activeCell: gridSelection,
+          scrollIntoView: false,
+        });
+        return;
+      }
+
+      // Fallback (legacy grid mode): SpreadsheetApp does not currently support multi-range
+      // or explicit active-cell programmatic selection. Mirror the active range only.
+      const activeRange = gridRanges[Math.max(0, Math.min(activeIndex, gridRanges.length - 1))] ?? gridRanges[0];
+      if (!activeRange) return;
+
+      const docRange = docRangeFromGridRange(activeRange);
+
       // Prevent the primary pane from scrolling/focusing when selection is driven from the secondary pane.
       app.selectRange({ range: docRange }, { scrollIntoView: false, focus: false });
     } finally {
