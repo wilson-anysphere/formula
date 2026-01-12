@@ -3611,8 +3611,17 @@ export class CanvasGridRenderer {
         return roundedWidth % 2 === 1 ? roundedPos + 0.5 : roundedPos;
       };
 
-      const winners = new Map<string, BorderWinner>();
-      const consider = (key: string, candidate: BorderWinner) => {
+      // Use numeric keys for edge winner maps to avoid allocating per-edge string keys.
+      // Keys are relative to the current rendered window (startRow/startCol), so they stay small.
+      const rowSpan = endRow - startRow;
+      const colSpan = endCol - startCol;
+      const horizontalKeySpace = (rowSpan + 1) * colSpan;
+      const hKey = (rowBoundary: number, col: number): number => (rowBoundary - startRow) * colSpan + (col - startCol);
+      const vKey = (row: number, colBoundary: number): number =>
+        horizontalKeySpace + (row - startRow) * (colSpan + 1) + (colBoundary - startCol);
+
+      const winners = new Map<number, BorderWinner>();
+      const consider = (key: number, candidate: BorderWinner) => {
         const existing = winners.get(key);
         if (!existing) {
           winners.set(key, candidate);
@@ -3657,7 +3666,7 @@ export class CanvasGridRenderer {
       };
 
       const addBorder = (options: {
-        key: string;
+        key: number;
         spec: CellBorderSpec;
         sourceRow: number;
         sourceCol: number;
@@ -3701,7 +3710,7 @@ export class CanvasGridRenderer {
 
             if (isCellBorder(top)) {
               addBorder({
-                key: `h:${row}:${col}`,
+                key: hKey(row, col),
                 spec: top,
                 sourceRow: row,
                 sourceCol: col,
@@ -3710,7 +3719,7 @@ export class CanvasGridRenderer {
             }
             if (isCellBorder(bottom)) {
               addBorder({
-                key: `h:${row + 1}:${col}`,
+                key: hKey(row + 1, col),
                 spec: bottom,
                 sourceRow: row,
                 sourceCol: col,
@@ -3719,7 +3728,7 @@ export class CanvasGridRenderer {
             }
             if (isCellBorder(left)) {
               addBorder({
-                key: `v:${row}:${col}`,
+                key: vKey(row, col),
                 spec: left,
                 sourceRow: row,
                 sourceCol: col,
@@ -3728,7 +3737,7 @@ export class CanvasGridRenderer {
             }
             if (isCellBorder(right)) {
               addBorder({
-                key: `v:${row}:${col + 1}`,
+                key: vKey(row, col + 1),
                 spec: right,
                 sourceRow: row,
                 sourceCol: col,
@@ -3771,7 +3780,7 @@ export class CanvasGridRenderer {
               const colWidth = colAxis.getSize(col);
               const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
               addBorder({
-                key: `h:${range.startRow}:${col}`,
+                key: hKey(range.startRow, col),
                 spec: top,
                 sourceRow: anchorRow,
                 sourceCol: anchorCol,
@@ -3790,7 +3799,7 @@ export class CanvasGridRenderer {
               const colWidth = colAxis.getSize(col);
               const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
               addBorder({
-                key: `h:${range.endRow}:${col}`,
+                key: hKey(range.endRow, col),
                 spec: bottom,
                 sourceRow: anchorRow,
                 sourceCol: anchorCol,
@@ -3809,7 +3818,7 @@ export class CanvasGridRenderer {
               const rowHeight = rowAxis.getSize(row);
               const y = ySheet - quadrant.scrollBaseY + quadrant.originY;
               addBorder({
-                key: `v:${row}:${range.startCol}`,
+                key: vKey(row, range.startCol),
                 spec: left,
                 sourceRow: anchorRow,
                 sourceCol: anchorCol,
@@ -3828,7 +3837,7 @@ export class CanvasGridRenderer {
               const rowHeight = rowAxis.getSize(row);
               const y = ySheet - quadrant.scrollBaseY + quadrant.originY;
               addBorder({
-                key: `v:${row}:${range.endCol}`,
+                key: vKey(row, range.endCol),
                 spec: right,
                 sourceRow: anchorRow,
                 sourceCol: anchorCol,
