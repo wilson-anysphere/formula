@@ -815,7 +815,9 @@ fixture `fixtures/xlsx/rich-data/richdata-minimal.xlsx` (used by tests) uses the
 
 TODO (fixture-driven): add additional Excel-generated workbooks covering:
 
-- `=IMAGE(...)` results
+- `IMAGE()` results across Excel versions and input types (URL vs local file).
+  - We have an initial Excel-produced sample with an `_xlfn.IMAGE(...)` formula cell:
+    - `fixtures/xlsx/images-in-cells/image-in-cell.xlsx`
 - “Place in Cell” images across Excel versions
 
 and update this section if Excel emits additional `xl/richData/*` part names or content types beyond those
@@ -823,6 +825,7 @@ already observed in our fixture corpus (including synthetic fixtures and real Ex
 
 - `fixtures/xlsx/rich-data/richdata-minimal.xlsx` (synthetic Formula fixture used by tests)
 - `fixtures/xlsx/basic/image-in-cell.xlsx` (Excel-generated)
+- `fixtures/xlsx/images-in-cells/image-in-cell.xlsx` (Excel-generated; Place in Cell + `_xlfn.IMAGE()`)
 
 and exercised by tests like
 `crates/formula-xlsx/tests/richdata_preservation.rs`.
@@ -842,6 +845,8 @@ Partially known (fixture-driven details still recommended):
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
   - Also observed in [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx):
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
+  - Also observed in [`fixtures/xlsx/images-in-cells/image-in-cell.xlsx`](../fixtures/xlsx/images-in-cells/image-in-cell.xlsx):
+    - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
   - Observed in the **synthetic** fixture [`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`](../fixtures/xlsx/basic/image-in-cell-richdata.xlsx):
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
   - Observed in [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx):
@@ -853,6 +858,15 @@ Partially known (fixture-driven details still recommended):
       - `Target="richData/richValue.xml"`
     - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel"`
       - `Target="richData/richValueRel.xml"`
+  - Also observed in the real Excel fixture [`fixtures/xlsx/images-in-cells/image-in-cell.xlsx`](../fixtures/xlsx/images-in-cells/image-in-cell.xlsx):
+    - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue"`
+      - `Target="richData/richValue.xml"`
+    - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel"`
+      - `Target="richData/richValueRel.xml"`
+    - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueTypes"`
+      - `Target="richData/richValueTypes.xml"`
+    - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueStructure"`
+      - `Target="richData/richValueStructure.xml"`
 - Metadata → richData parts (when linked indirectly via `xl/_rels/metadata.xml.rels`):
   - Observed in the synthetic fixture `fixtures/xlsx/rich-data/richdata-minimal.xlsx` and the real Excel fixture
     [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx):
@@ -870,6 +884,8 @@ Partially known (fixture-driven details still recommended):
   - **Confirmed in fixtures:**
     - `Type="http://schemas.microsoft.com/office/2019/relationships/cellimages"`
       - real Excel fixture: [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx)
+    - `Type="http://schemas.microsoft.com/office/2017/06/relationships/cellImages"`
+      - real Excel fixture: [`fixtures/xlsx/images-in-cells/image-in-cell.xlsx`](../fixtures/xlsx/images-in-cells/image-in-cell.xlsx)
     - `Type="http://schemas.microsoft.com/office/2023/02/relationships/cellImage"`
       - synthetic fixture: `fixtures/xlsx/basic/cell-images.xlsx`
     - `Type="http://schemas.microsoft.com/office/2022/relationships/cellImages"`
@@ -885,8 +901,16 @@ Partially known (fixture-driven details still recommended):
   - Observed in the **synthetic** fixture `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` and the unit test
     `crates/formula-xlsx/tests/rich_data_cell_images.rs`.
   - Workbook → richData relationships (Type URIs are Microsoft-specific and versioned). Observed in this repo:
-    - `http://schemas.microsoft.com/office/2017/06/relationships/richValue` (synthetic fixture: `image-in-cell-richdata.xlsx`)
-    - `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` (synthetic fixture: `image-in-cell-richdata.xlsx`)
+    - `http://schemas.microsoft.com/office/2017/06/relationships/richValue`
+      - synthetic fixture: `image-in-cell-richdata.xlsx`
+      - real Excel fixture: `fixtures/xlsx/images-in-cells/image-in-cell.xlsx`
+    - `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel`
+      - synthetic fixture: `image-in-cell-richdata.xlsx`
+      - real Excel fixture: `fixtures/xlsx/images-in-cells/image-in-cell.xlsx`
+    - `http://schemas.microsoft.com/office/2017/06/relationships/richValueTypes`
+      - real Excel fixture: `fixtures/xlsx/images-in-cells/image-in-cell.xlsx`
+    - `http://schemas.microsoft.com/office/2017/06/relationships/richValueStructure`
+      - real Excel fixture: `fixtures/xlsx/images-in-cells/image-in-cell.xlsx`
     - `http://schemas.microsoft.com/office/2017/relationships/richValue` (fixture: [`images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx) via `xl/_rels/metadata.xml.rels`)
     - `http://schemas.microsoft.com/office/2017/relationships/richValueRel` (fixture: [`images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx) via `xl/_rels/metadata.xml.rels`)
     - `http://schemas.microsoft.com/office/2017/relationships/richValueTypes` (fixture: [`images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx) via `xl/_rels/metadata.xml.rels`)
@@ -911,9 +935,10 @@ Current status:
   - RichData + cell image store wiring (`xl/cellimages.xml` present):
     - [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx) (notes in [`fixtures/xlsx/rich-data/images-in-cell.md`](../fixtures/xlsx/rich-data/images-in-cell.md))
     - cell `A1` uses `vm="1" cm="1"` with cached `<v>0</v>` (image binding still comes from `vm` + `xl/metadata.xml`)
-- **Still needed**: a real Excel-generated workbook that includes a formula cell containing `=IMAGE(...)` (ideally without external network dependencies).
 - ✅ Real Excel-generated workbook that includes an `_xlfn.IMAGE(...)` formula cell:
   - [`fixtures/xlsx/images-in-cells/image-in-cell.xlsx`](../fixtures/xlsx/images-in-cells/image-in-cell.xlsx)
+- Still recommended: additional real Excel-generated `IMAGE()` fixtures without external network dependencies
+  (e.g. `file://`), to confirm whether Excel embeds/caches image bytes differently across builds.
 
 Before we hardcode any remaining assumptions, validate them against a real Excel-generated workbook that uses both:
 
@@ -924,18 +949,26 @@ Checklist (what we still want additional fixtures for):
 
 1. Confirm whether Excel ever uses numbered parts like `cellImages1.xml` / `cellimages1.xml` (not yet observed in this repo).
 2. Discover additional `cellImages` namespace variants across Excel versions:
-   - observed: `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages` (real Excel fixture `images-in-cell.xlsx`)
+   - observed: `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages` (real Excel fixtures:
+     `fixtures/xlsx/rich-data/images-in-cell.xlsx`, `fixtures/xlsx/images-in-cells/image-in-cell.xlsx`)
    - observed: `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main` (synthetic fixture `cell-images.xlsx`)
 3. Discover additional XML shapes:
-   - observed: `<cellImages><cellImage><xdr:pic>...` (real Excel fixture `images-in-cell.xlsx`)
+   - observed: `<cellImages><cellImage><xdr:pic>...` (real Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx`)
+   - observed: `<cellImages><xdr:pic>...` (real Excel fixture `fixtures/xlsx/images-in-cells/image-in-cell.xlsx`)
 4. Confirm additional `[Content_Types].xml` override strings (observed to vary across producers/fixtures):
-   - observed: `application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml`
-   - observed: `application/vnd.ms-excel.cellimages+xml`
+   - observed: `application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml` (real Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx`)
+   - observed: `application/vnd.ms-excel.cellimages+xml` (real Excel fixture `fixtures/xlsx/images-in-cells/image-in-cell.xlsx`)
 5. Discover additional relationship Type URIs and owning-part behaviors:
-   - observed workbook → cellimages: `http://schemas.microsoft.com/office/2019/relationships/cellimages` (real Excel fixture)
-   - observed workbook → cellImages: `http://schemas.microsoft.com/office/2023/02/relationships/cellImage` (synthetic fixture)
-    - still unknown: worksheet-level relationship variants (if any)
-6. Confirm how `=IMAGE(...)` worksheet cells are encoded (still unknown in real Excel fixtures checked into this repo).
+    - observed workbook → cellimages: `http://schemas.microsoft.com/office/2019/relationships/cellimages`
+      - real Excel fixture: `fixtures/xlsx/rich-data/images-in-cell.xlsx`
+    - observed workbook → cellimages: `http://schemas.microsoft.com/office/2017/06/relationships/cellImages`
+      - real Excel fixture: `fixtures/xlsx/images-in-cells/image-in-cell.xlsx`
+    - observed workbook → cellImages: `http://schemas.microsoft.com/office/2023/02/relationships/cellImage` (synthetic fixture)
+     - still unknown: worksheet-level relationship variants (if any)
+6. Confirm how `=IMAGE(...)` worksheet cells are encoded across Excel versions and input types (URL vs local file).
+   - Observed in the real Excel fixture `fixtures/xlsx/images-in-cells/image-in-cell.xlsx`:
+     - formula cell: `<f>_xlfn.IMAGE("...")</f>`
+     - `c/@vm` is present and the cached value is numeric (`<v>0</v>`, not `t="e"` / `#VALUE!`).
 
 ## Round-trip constraints for Formula
 
