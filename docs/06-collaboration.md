@@ -20,6 +20,7 @@ If you are editing collaboration code, start here and keep this doc in sync with
 
 - Session orchestration: [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts) (`createCollabSession`)
 - Workbook roots/schema helpers: [`packages/collab/workbook/src/index.ts`](../packages/collab/workbook/src/index.ts) (`getWorkbookRoots`, `ensureWorkbookSchema`)
+- Workbook metadata managers: [`packages/collab/workbook/src/index.ts`](../packages/collab/workbook/src/index.ts) (`SheetManager`, `MetadataManager`, `NamedRangeManager`, `create*ForSession`)
 - Cell key helpers: [`packages/collab/session/src/cell-key.js`](../packages/collab/session/src/cell-key.js) (`makeCellKey`, `parseCellKey`, `normalizeCellKey`)
 - Desktop binder: [`packages/collab/binder/index.js`](../packages/collab/binder/index.js) (`bindYjsToDocumentController`)
 - Presence (Awareness wrapper): [`packages/collab/presence/src/presenceManager.js`](../packages/collab/presence/src/presenceManager.js) (`PresenceManager`)
@@ -458,6 +459,42 @@ Semantics note:
 - Per-user ephemeral state (cursor/selection/active sheet/viewport) should use Awareness/presence.
 
 See: [`docs/adr/ADR-0004-collab-sheet-view-and-undo.md`](./adr/ADR-0004-collab-sheet-view-and-undo.md)
+
+---
+
+## Managing shared workbook metadata (`@formula/collab-workbook`)
+
+Edits that aren’t simple cell value/formula writes (e.g. sheet creation/rename/order, named ranges, workbook metadata) should still be treated as **shared document state** and written into the same Yjs doc.
+
+`@formula/collab-workbook` provides small helper managers that encapsulate common mutations and (when you use the `create*ForSession(session)` helpers) run them inside `session.transactLocal(...)` so they:
+
+- sync to other collaborators like any other Yjs change
+- participate correctly in collaborative undo (when enabled)
+
+Example:
+
+```ts
+import {
+  createSheetManagerForSession,
+  createNamedRangeManagerForSession,
+  createMetadataManagerForSession,
+} from "@formula/collab-workbook";
+
+const sheets = createSheetManagerForSession(session);
+const namedRanges = createNamedRangeManagerForSession(session);
+const metadata = createMetadataManagerForSession(session);
+
+// Sheets
+sheets.addSheet({ id: "Sheet2", name: "Plan", index: 1 });
+sheets.renameSheet("Sheet2", "Plan v2");
+sheets.moveSheet("Sheet2", 0);
+
+// Metadata / named ranges
+metadata.set("locale", "en-US");
+namedRanges.set("Revenue", { sheetId: "Sheet1", startRow: 0, startCol: 0, endRow: 9, endCol: 0 });
+```
+
+Note: the desktop `bindYjsToDocumentController` binder is currently cell-focused and does not project sheet list changes into `DocumentController`. If the desktop UI needs live sheet list syncing, it should observe the Yjs `sheets` array directly (or via a dedicated binder).
 
 ---
 
