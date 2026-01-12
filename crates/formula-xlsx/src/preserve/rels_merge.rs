@@ -333,6 +333,41 @@ mod tests {
     }
 
     #[test]
+    fn ensure_rels_uses_root_prefix_when_prefixed_root_has_no_relationship_elements() {
+        let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships">
+</pr:Relationships>"#;
+
+        let (updated, _) = ensure_rels_has_relationships(
+            Some(rels_xml),
+            "xl/_rels/workbook.xml.rels",
+            "xl/workbook.xml",
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet",
+            &[RelationshipStub {
+                rel_id: "rId1".to_string(),
+                target: "worksheets/sheet1.xml".to_string(),
+            }],
+        )
+        .expect("repair rels");
+
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+        let doc = roxmltree::Document::parse(updated_str).unwrap();
+        let inserted = doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "Relationship" && n.attribute("Id") == Some("rId1"))
+            .expect("inserted relationship");
+        assert_eq!(inserted.tag_name().namespace(), Some(PACKAGE_REL_NS));
+        assert!(
+            updated_str.contains(r#"<pr:Relationship Id="rId1""#),
+            "expected inserted <pr:Relationship>, got:\n{updated_str}"
+        );
+        assert!(
+            !updated_str.contains("<Relationship"),
+            "should not introduce unprefixed <Relationship> tags in prefix-only .rels, got:\n{updated_str}"
+        );
+    }
+
+    #[test]
     fn ensure_rels_conflicting_rid_allocates_new_id_and_returns_map() {
         // Note: the close tag contains whitespace (`</Relationships >`) which used to break the
         // naive string search used by relationship insertion.
