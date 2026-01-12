@@ -695,6 +695,26 @@ pub fn build_note_comment_txo_cch_text_offset_4_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a NOTE/OBJ/TXO comment where the NOTE record's
+/// `grbit`/`idObj` fields are effectively swapped.
+///
+/// Some `.xls` producers appear to place the drawing object id in the NOTE `grbit` field (offset 4)
+/// rather than the spec-defined `idObj` field (offset 6). Our importer should still join the NOTE
+/// to its TXO payload by trying both fields.
+pub fn build_note_comment_note_obj_id_swapped_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_note_obj_id_swapped_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single external hyperlink on `A1`.
 ///
 /// This is used to ensure we preserve BIFF `HLINK` records when importing `.xls` workbooks.
@@ -1302,6 +1322,14 @@ fn build_note_comment_txo_cch_text_offset_4_workbook_stream() -> Vec<u8> {
     )
 }
 
+fn build_note_comment_note_obj_id_swapped_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "NotesObjIdSwapped",
+        &build_note_comment_note_obj_id_swapped_sheet_stream(),
+        1252,
+    )
+}
+
 fn build_single_sheet_workbook_stream(sheet_name: &str, sheet_stream: &[u8], codepage: u16) -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -1625,6 +1653,51 @@ fn build_note_comment_txo_cch_text_offset_4_sheet_stream() -> Vec<u8> {
     sheet
 }
 
+fn build_note_comment_note_obj_id_swapped_sheet_stream() -> Vec<u8> {
+    const OBJ_ID_IN_OBJ_TCO: u16 = 2;
+    const NOTE_PRIMARY_OBJ_ID: u16 = 1;
+    const AUTHOR: &str = "Alice";
+    const TEXT: &str = "Hello from swapped obj id";
+    const XF_GENERAL_CELL: u16 = 16;
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes());
+    dims.extend_from_slice(&1u32.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Ensure the anchor cell exists in the calamine value grid.
+    push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
+
+    // NOTE record with mismatched candidate object ids:
+    // - bytes[6..8] (primary) doesn't match any TXO payload
+    // - bytes[4..6] (secondary) matches the OBJ/TXO id (simulating a swapped field ordering).
+    push_record(
+        &mut sheet,
+        RECORD_NOTE,
+        &note_record_with_obj_id_candidates(
+            0u16,
+            0u16,
+            /*secondary_obj_id=*/ OBJ_ID_IN_OBJ_TCO,
+            /*primary_obj_id=*/ NOTE_PRIMARY_OBJ_ID,
+            AUTHOR,
+        ),
+    );
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJ_ID_IN_OBJ_TCO));
+    push_txo_logical_record(&mut sheet, TEXT);
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
 fn build_note_comment_sheet_stream_with_compressed_txo(
     include_merged_region: bool,
     object_id: u16,
@@ -1704,6 +1777,26 @@ fn note_record(row: u16, col: u16, object_id: u16, author: &str) -> Vec<u8> {
     out.extend_from_slice(&col.to_le_bytes());
     out.extend_from_slice(&object_id.to_le_bytes()); // grbit (or idObj)
     out.extend_from_slice(&object_id.to_le_bytes()); // idObj (or grbit)
+    write_short_unicode_string(&mut out, author);
+    out
+}
+
+fn note_record_with_obj_id_candidates(
+    row: u16,
+    col: u16,
+    secondary_obj_id: u16,
+    primary_obj_id: u16,
+    author: &str,
+) -> Vec<u8> {
+    // NOTE record (BIFF8): [rw: u16][col: u16][grbit: u16][idObj: u16][stAuthor]
+    //
+    // Our parser treats the field at offset 6 as the primary `obj_id` and the field at offset 4 as
+    // the secondary candidate (some files appear to swap them).
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&row.to_le_bytes());
+    out.extend_from_slice(&col.to_le_bytes());
+    out.extend_from_slice(&secondary_obj_id.to_le_bytes()); // grbit (or idObj)
+    out.extend_from_slice(&primary_obj_id.to_le_bytes()); // idObj (or grbit)
     write_short_unicode_string(&mut out, author);
     out
 }
