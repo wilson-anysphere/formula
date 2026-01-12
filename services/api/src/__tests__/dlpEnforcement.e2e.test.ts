@@ -164,7 +164,8 @@ describe("API e2e: DLP enforcement on external share links", () => {
       payload: { visibility: "public", role: "viewer" },
     });
     expect(blockedShareLink.statusCode).toBe(403);
-    expect(blockedShareLink.json()).toMatchObject({ error: "dlp_blocked" });
+    // Avoid leaking classification/policy thresholds in the response.
+    expect(blockedShareLink.json()).toEqual({ error: "dlp_blocked" });
 
     const audit = await db.query(
       "SELECT event_type, details FROM audit_log WHERE event_type = 'dlp.blocked' ORDER BY created_at DESC LIMIT 1"

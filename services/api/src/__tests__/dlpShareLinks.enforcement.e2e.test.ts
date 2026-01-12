@@ -134,7 +134,8 @@ describe("API e2e: DLP enforcement on public share links", () => {
       payload: { visibility: "public", role: "viewer" }
     });
     expect(createLink.statusCode).toBe(403);
-    expect(createLink.json()).toMatchObject({ error: "dlp_blocked" });
+    // Avoid leaking classification/policy thresholds in the response.
+    expect(createLink.json()).toEqual({ error: "dlp_blocked" });
 
     const links = await db.query("SELECT id FROM document_share_links WHERE document_id = $1", [docId]);
     expect(links.rowCount).toBe(0);
@@ -212,7 +213,8 @@ describe("API e2e: DLP enforcement on public share links", () => {
       payload: { visibility: "public", role: "viewer" }
     });
     expect(createLink.statusCode).toBe(403);
-    expect(createLink.json()).toMatchObject({ error: "dlp_blocked" });
+    // Avoid leaking classification/policy thresholds in the response.
+    expect(createLink.json()).toEqual({ error: "dlp_blocked" });
 
     const links = await db.query("SELECT id FROM document_share_links WHERE document_id = $1", [docId]);
     expect(links.rowCount).toBe(0);
@@ -328,7 +330,8 @@ describe("API e2e: DLP enforcement on public share links", () => {
       headers: { cookie: externalCookie }
     });
     expect(redeem.statusCode).toBe(403);
-    expect(redeem.json()).toMatchObject({ error: "dlp_blocked" });
+    // Avoid leaking classification/policy thresholds in the response.
+    expect(redeem.json()).toEqual({ error: "dlp_blocked" });
 
     const orgMembership = await db.query("SELECT 1 FROM org_members WHERE org_id = $1 AND user_id = $2", [
       ownerOrgId,
