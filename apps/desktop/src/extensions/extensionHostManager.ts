@@ -9,6 +9,7 @@ import { validateExtensionManifest } from "../../../../packages/extension-host/s
 
 import { MarketplaceClient, WebExtensionManager } from "@formula/extension-marketplace";
 import { getMarketplaceBaseUrl } from "../panels/marketplace/getMarketplaceBaseUrl.ts";
+import { verifyExtensionPackageV2Desktop } from "../panels/marketplace/verifyExtensionPackageV2Desktop.ts";
 
 import sampleHelloManifestJson from "../../../../extensions/sample-hello/package.json";
 import sampleHelloEntrypointSource from "../../../../extensions/sample-hello/dist/extension.mjs?raw";
@@ -137,6 +138,7 @@ export class DesktopExtensionHostManager {
         marketplaceClient: this.getMarketplaceClient(),
         host: this.host as any,
         engineVersion: this.engineVersion,
+        verifyPackage: verifyExtensionPackageV2Desktop,
       });
     }
     return this._marketplaceExtensionManager;

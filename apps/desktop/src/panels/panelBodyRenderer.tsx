@@ -31,6 +31,7 @@ import { YjsBranchStore } from "../../../../packages/versioning/branches/src/sto
 import { applyDocumentStateToYjsDoc, yjsDocToDocumentState } from "../../../../packages/versioning/branches/src/yjs/index.js";
 import { BRANCHING_APPLY_ORIGIN } from "../collab/conflict-monitors.js";
 import { getMarketplaceBaseUrl } from "./marketplace/getMarketplaceBaseUrl.ts";
+import { verifyExtensionPackageV2Desktop } from "./marketplace/verifyExtensionPackageV2Desktop.ts";
 import { showInputBox } from "../extensions/ui.js";
 import * as nativeDialogs from "../tauri/nativeDialogs.js";
 
@@ -434,6 +435,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
         marketplaceClient,
         host: (options.extensionHostManager?.host as any) ?? null,
         engineVersion: options.extensionHostManager?.engineVersion ?? "1.0.0",
+        verifyPackage: verifyExtensionPackageV2Desktop,
       });
     }
 
