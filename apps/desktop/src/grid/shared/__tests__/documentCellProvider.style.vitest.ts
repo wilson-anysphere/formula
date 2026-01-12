@@ -109,6 +109,33 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect((cell as any).style?.fill).toBe("rgba(255,0,0,0.502)");
   });
 
+  it("supports theme/indexed color reference objects when mapping fill + font colors", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", "Color refs");
+    doc.setRangeFormat(sheetId, "A1", {
+      fill: { fgColor: { theme: 4 } },
+      font: { color: { indexed: 2 } }
+    });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell).not.toBeNull();
+    expect((cell as any).style?.fill).toBe("#5b9bd5"); // Office 2013 theme accent1
+    expect((cell as any).style?.color).toBe("#ff0000"); // Excel indexed color 2
+  });
+
   it("prefers camelCase overrides when both snake_case + camelCase fields exist (imported style then user edits)", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";
