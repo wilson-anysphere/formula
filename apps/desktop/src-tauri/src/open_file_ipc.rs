@@ -86,27 +86,61 @@ mod tests {
         // Use a simple source-level check so this test runs in headless CI.
         let main_rs = include_str!("main.rs");
 
-        // Ensure the ready signal is listened for, and that the queue/flush helpers are used.
+        // Ensure runtime open-file requests route through the queue.
+        let handle_open_start = main_rs
+            .find("fn handle_open_file_request")
+            .expect("desktop main.rs missing handle_open_file_request()");
+        let handle_open_end = main_rs[handle_open_start..]
+            .find("fn handle_oauth_redirect_request")
+            .map(|idx| handle_open_start + idx)
+            .expect("desktop main.rs missing handle_oauth_redirect_request() (used to bound open-file handler)");
+        let handle_open_body = &main_rs[handle_open_start..handle_open_end];
         assert!(
-            main_rs.contains("listen(OPEN_FILE_READY_EVENT"),
-            "desktop main.rs must listen for OPEN_FILE_READY_EVENT"
+            handle_open_body.contains(".queue_or_emit("),
+            "handle_open_file_request must call OpenFileState::queue_or_emit"
         );
+
+        // Ensure cold-start argv open-file requests are queued too.
+        let init_start = main_rs
+            .find("let initial_paths")
+            .expect("desktop main.rs missing initial_paths extraction");
+        let init_window = main_rs
+            .get(init_start..init_start.saturating_add(800))
+            .unwrap_or(&main_rs[init_start..]);
         assert!(
-            main_rs.contains(".queue_or_emit("),
-            "desktop main.rs must queue open-file requests via OpenFileState::queue_or_emit"
+            init_window.contains(".queue_or_emit("),
+            "desktop main.rs must queue initial argv open-file requests via OpenFileState::queue_or_emit"
         );
+
+        // Ensure the ready signal is listened for, and that readiness is flipped + flushed from
+        // within that listener.
+        let ready_start = main_rs
+            .find("listen(OPEN_FILE_READY_EVENT")
+            .expect("desktop main.rs must listen for OPEN_FILE_READY_EVENT");
+        let ready_after = &main_rs[ready_start..];
+        let ready_end = ready_after
+            .find("});")
+            .map(|idx| idx + 3)
+            .expect("failed to locate end of OPEN_FILE_READY_EVENT listener (expected `});`)");
+        let ready_body = &ready_after[..ready_end];
+
         assert!(
-            main_rs.contains(".mark_ready_and_drain("),
-            "desktop main.rs must flush pending open-file requests via OpenFileState::mark_ready_and_drain"
+            ready_body.contains(".mark_ready_and_drain("),
+            "OPEN_FILE_READY_EVENT listener must call OpenFileState::mark_ready_and_drain"
+        );
+        let ready_calls_in_listener = ready_body.matches(".mark_ready_and_drain(").count();
+        assert_eq!(
+            ready_calls_in_listener, 1,
+            "expected exactly one mark_ready_and_drain call inside OPEN_FILE_READY_EVENT listener, found {ready_calls_in_listener}"
         );
 
         // Extra guardrail: the backend should only flip readiness in response to the frontend
         // readiness signal. If `mark_ready_and_drain` starts getting called elsewhere (e.g. during
         // startup), cold-start file-open events can be emitted before the JS listener exists.
-        let ready_calls = main_rs.matches(".mark_ready_and_drain(").count();
+        let total_ready_calls = main_rs.matches(".mark_ready_and_drain(").count();
         assert_eq!(
-            ready_calls, 1,
-            "expected exactly one mark_ready_and_drain call in desktop main.rs, found {ready_calls}"
+            total_ready_calls, 1,
+            "expected exactly one mark_ready_and_drain call in desktop main.rs, found {total_ready_calls}"
         );
     }
 }
