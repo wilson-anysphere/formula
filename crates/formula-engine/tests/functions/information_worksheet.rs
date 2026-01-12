@@ -73,8 +73,13 @@ fn error_type_matches_excel_error_kind_codes() {
     assert_number(&sheet.eval("=ERROR.TYPE(#NAME?)"), 5.0);
     assert_number(&sheet.eval("=ERROR.TYPE(#NUM!)"), 6.0);
     assert_number(&sheet.eval("=ERROR.TYPE(#N/A)"), 7.0);
+    assert_number(&sheet.eval("=ERROR.TYPE(#GETTING_DATA)"), 8.0);
     assert_number(&sheet.eval("=ERROR.TYPE(#SPILL!)"), 9.0);
     assert_number(&sheet.eval("=ERROR.TYPE(#CALC!)"), 10.0);
+    assert_number(&sheet.eval("=ERROR.TYPE(#FIELD!)"), 11.0);
+    assert_number(&sheet.eval("=ERROR.TYPE(#CONNECT!)"), 12.0);
+    assert_number(&sheet.eval("=ERROR.TYPE(#BLOCKED!)"), 13.0);
+    assert_number(&sheet.eval("=ERROR.TYPE(#UNKNOWN!)"), 14.0);
 
     assert_eq!(sheet.eval("=ERROR.TYPE(1)"), Value::Error(ErrorKind::NA));
 }
@@ -110,4 +115,3 @@ fn n_and_t_match_excel_coercions() {
     assert_eq!(sheet.eval("=T(TRUE)"), Value::Text(String::new()));
     assert_eq!(sheet.eval("=T(#DIV/0!)"), Value::Error(ErrorKind::Div0));
 }
-
