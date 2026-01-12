@@ -19596,6 +19596,106 @@
       "id": "skew_p_8705cedc427f"
     },
     {
+      "formula": "=NORM.DIST(0,0,1,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "NORM.DIST"
+      ],
+      "id": "norm_dist_14f32f6ffe67"
+    },
+    {
+      "formula": "=NORM.S.DIST(1,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "NORM.S.DIST"
+      ],
+      "id": "norm_s_dist_2e3e09e819d4"
+    },
+    {
+      "formula": "=NORM.INV(0.5,1,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "NORM.INV"
+      ],
+      "id": "norm_inv_e45aeb73cd30"
+    },
+    {
+      "formula": "=NORM.S.INV(0.975)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "NORM.S.INV"
+      ],
+      "id": "norm_s_inv_3903c8de89f3"
+    },
+    {
+      "formula": "=NORMDIST(0,0,1,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "NORMDIST"
+      ],
+      "id": "normdist_45f7d1640334"
+    },
+    {
+      "formula": "=NORMSDIST(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "NORMSDIST"
+      ],
+      "id": "normsdist_da44a1aa561d"
+    },
+    {
+      "formula": "=NORMINV(0.5,1,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "NORMINV"
+      ],
+      "id": "norminv_758ce637b22b"
+    },
+    {
+      "formula": "=NORMSINV(0.975)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "NORMSINV"
+      ],
+      "id": "normsinv_314be3984012"
+    },
+    {
+      "formula": "=PHI(0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "PHI"
+      ],
+      "id": "phi_059c1ffdb7ac"
+    },
+    {
+      "formula": "=GAUSS(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "GAUSS"
+      ],
+      "id": "gauss_7376976e7474"
+    },
+    {
       "formula": "=LARGE({1,2,3,4},2)",
       "outputCell": "C1",
       "inputs": [],

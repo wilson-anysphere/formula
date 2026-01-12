@@ -861,6 +861,18 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="skew", tags=["stat", "SKEW"], formula="=SKEW({3,4,5,2,3,4,5,6,4,7})")
     _add_case(cases, prefix="skew_p", tags=["stat", "SKEW.P"], formula="=SKEW.P({3,4,5,2,3,4,5,6,4,7})")
 
+    # Normal distribution helpers (CDF/PDF/INV + transforms + legacy aliases).
+    _add_case(cases, prefix="norm_dist", tags=["stat", "NORM.DIST"], formula="=NORM.DIST(0,0,1,TRUE)")
+    _add_case(cases, prefix="norm_s_dist", tags=["stat", "NORM.S.DIST"], formula="=NORM.S.DIST(1,TRUE)")
+    _add_case(cases, prefix="norm_inv", tags=["stat", "NORM.INV"], formula="=NORM.INV(0.5,1,2)")
+    _add_case(cases, prefix="norm_s_inv", tags=["stat", "NORM.S.INV"], formula="=NORM.S.INV(0.975)")
+    _add_case(cases, prefix="normdist", tags=["stat", "NORMDIST"], formula="=NORMDIST(0,0,1,TRUE)")
+    _add_case(cases, prefix="normsdist", tags=["stat", "NORMSDIST"], formula="=NORMSDIST(1)")
+    _add_case(cases, prefix="norminv", tags=["stat", "NORMINV"], formula="=NORMINV(0.5,1,2)")
+    _add_case(cases, prefix="normsinv", tags=["stat", "NORMSINV"], formula="=NORMSINV(0.975)")
+    _add_case(cases, prefix="phi", tags=["stat", "PHI"], formula="=PHI(0)")
+    _add_case(cases, prefix="gauss", tags=["stat", "GAUSS"], formula="=GAUSS(1)")
+
     _add_case(cases, prefix="large", tags=["stat", "LARGE"], formula="=LARGE({1,2,3,4},2)")
     _add_case(cases, prefix="small", tags=["stat", "SMALL"], formula="=SMALL({1,2,3,4},2)")
 

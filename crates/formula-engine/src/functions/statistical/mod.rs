@@ -3,6 +3,8 @@ use std::cmp::Ordering;
 
 mod moments;
 pub use moments::{kurt, skew, skew_p};
+mod normal;
+pub use normal::{gauss, norm_dist, norm_inv, norm_s_dist, norm_s_inv, phi};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RankMethod {

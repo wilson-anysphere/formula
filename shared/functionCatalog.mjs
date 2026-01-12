@@ -932,6 +932,16 @@ export default {
       ]
     },
     {
+      "name": "GAUSS",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "GCD",
       "min_args": 1,
       "max_args": 255,
@@ -1680,6 +1690,97 @@ export default {
       ]
     },
     {
+      "name": "NORM.DIST",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "NORM.INV",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "NORM.S.DIST",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "NORM.S.INV",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "NORMDIST",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "NORMINV",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "NORMSDIST",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "NORMSINV",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "NOT",
       "min_args": 1,
       "max_args": 1,
@@ -1863,6 +1964,16 @@ export default {
       "return_type": "number",
       "arg_types": [
         "number",
+        "number"
+      ]
+    },
+    {
+      "name": "PHI",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
         "number"
       ]
     },

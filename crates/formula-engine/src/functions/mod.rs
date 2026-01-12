@@ -49,6 +49,7 @@ mod builtins_select;
 mod builtins_reference;
 mod builtins_statistical;
 mod builtins_statistical_moments;
+mod builtins_statistical_distributions;
 mod builtins_text;
 mod builtins_text_dbcs;
 
