@@ -15,6 +15,7 @@ import {
   toA1,
   type Range0
 } from "@formula/spreadsheet-frontend";
+import { formatA1Range, parseGoTo, type GoToWorkbookLookup } from "../../../packages/search/index.js";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent } from "react";
 
 import { CellEditorOverlay } from "./CellEditorOverlay";
@@ -104,6 +105,13 @@ function EngineDemoApp() {
 
   const [activeValue, setActiveValue] = useState<CellScalar>(null);
 
+  const focusGrid = () => {
+    const host = gridContainerRef.current;
+    if (!host) return;
+    const grid = host.querySelector<HTMLElement>('[data-testid="canvas-grid"]');
+    grid?.focus({ preventScroll: true });
+  };
+
   const setActiveSheetFrozen = (next: { frozenRows: number; frozenCols: number }) => {
     setFrozenBySheet((prev) => ({ ...prev, [activeSheet]: next }));
   };
@@ -152,11 +160,71 @@ function EngineDemoApp() {
     return haystack.includes(query);
   });
 
+  const goToWorkbook = useMemo<GoToWorkbookLookup>(
+    () => ({
+      getTable: () => null,
+      getName: () => null,
+    }),
+    [],
+  );
+
+  const goToSuggestion = useMemo(() => {
+    const trimmed = commandPaletteQuery.trim();
+    if (!trimmed) return null;
+    try {
+      return parseGoTo(trimmed, { workbook: goToWorkbook, currentSheetName: activeSheet });
+    } catch {
+      return null;
+    }
+  }, [commandPaletteQuery, goToWorkbook, activeSheet]);
+
+  const commandPaletteResults = useMemo(() => {
+    const trimmed = commandPaletteQuery.trim();
+    const results: Array<{ id: string; title: string; secondaryText?: string; run: () => void }> = [];
+
+    if (trimmed && goToSuggestion) {
+      const resolved = `${goToSuggestion.sheetName}!${formatA1Range(goToSuggestion.range)}`;
+      results.push({
+        id: "goTo",
+        title: `Go to ${trimmed}`,
+        secondaryText: resolved,
+        run: () => {
+          const api = gridApiRef.current;
+          if (!api) return;
+
+          if (goToSuggestion.sheetName !== activeSheet) {
+            setActiveSheet(goToSuggestion.sheetName);
+          }
+
+          const { range } = goToSuggestion;
+          const startRow = range.startRow + headerRowOffset;
+          const startCol = range.startCol + headerColOffset;
+          const endRow = range.endRow + 1 + headerRowOffset;
+          const endCol = range.endCol + 1 + headerColOffset;
+
+          if (range.startRow === range.endRow && range.startCol === range.endCol) {
+            api.setSelection(startRow, startCol);
+          } else {
+            api.setSelectionRange({ startRow, startCol, endRow, endCol });
+          }
+
+          focusGrid();
+        },
+      });
+    }
+
+    for (const cmd of filteredCommandPalette) {
+      results.push({ id: cmd.id, title: cmd.title, run: cmd.run });
+    }
+
+    return results;
+  }, [commandPaletteQuery, goToSuggestion, filteredCommandPalette, activeSheet, headerRowOffset, headerColOffset, focusGrid]);
+
   const clampedCommandPaletteIndex = Math.max(
     0,
-    Math.min(commandPaletteSelectedIndex, Math.max(0, filteredCommandPalette.length - 1)),
+    Math.min(commandPaletteSelectedIndex, Math.max(0, commandPaletteResults.length - 1)),
   );
-  const selectedCommand = filteredCommandPalette[clampedCommandPaletteIndex];
+  const selectedCommand = commandPaletteResults[clampedCommandPaletteIndex];
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -559,19 +627,12 @@ function EngineDemoApp() {
       : { sheet: activeSheet, address: activeAddress, value: nextValue };
     provider.applyRecalcChanges(directChange ? [...changes, directChange] : changes);
 
-    const updated = await engine.getCell(activeAddress, activeSheet);
-    const inputText = scalarToDisplayString(updated.input as CellScalar);
-    rangeInsertionRef.current = null;
-    draftRef.current = inputText;
-    setDraft(inputText);
-    setActiveValue(updated.value as CellScalar);
-  };
-
-  const focusGrid = () => {
-    const host = gridContainerRef.current;
-    if (!host) return;
-    const grid = host.querySelector<HTMLElement>('[data-testid="canvas-grid"]');
-    grid?.focus({ preventScroll: true });
+  const updated = await engine.getCell(activeAddress, activeSheet);
+  const inputText = scalarToDisplayString(updated.input as CellScalar);
+  rangeInsertionRef.current = null;
+  draftRef.current = inputText;
+  setDraft(inputText);
+  setActiveValue(updated.value as CellScalar);
   };
 
   const beginCellEdit = (request: { row: number; col: number; initialKey?: string }) => {
@@ -1514,7 +1575,7 @@ function EngineDemoApp() {
               }}
             />
             <ul style={{ margin: "10px 0 0", padding: 0, listStyle: "none" }}>
-              {filteredCommandPalette.map((cmd, idx) => (
+              {commandPaletteResults.map((cmd, idx) => (
                 <li
                   key={cmd.id}
                   style={{
@@ -1530,7 +1591,12 @@ function EngineDemoApp() {
                     cmd.run();
                   }}
                 >
-                  {cmd.title}
+                  <div>{cmd.title}</div>
+                  {cmd.secondaryText ? (
+                    <div style={{ marginTop: 2, fontSize: 12, color: "#64748b", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}>
+                      {cmd.secondaryText}
+                    </div>
+                  ) : null}
                 </li>
               ))}
             </ul>
