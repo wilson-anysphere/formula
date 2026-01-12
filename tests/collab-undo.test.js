@@ -44,6 +44,17 @@ function getFormula(cells, cellKey) {
 }
 
 /**
+ * @param {Y.Array<any>} sheets
+ */
+function getFrozenFromSheets(sheets) {
+  const sheet = /** @type {Y.Map<any>|undefined} */ (sheets.get(0));
+  const view = /** @type {Y.Map<any>|undefined} */ (sheet?.get("view"));
+  const frozenRows = Number(view?.get("frozenRows") ?? 0);
+  const frozenCols = Number(view?.get("frozenCols") ?? 0);
+  return { frozenRows, frozenCols };
+}
+
+/**
  * @param {object} opts
  * @param {Y.Map<any>} opts.cells
  * @param {ReturnType<typeof createUndoService>} opts.undo
@@ -121,4 +132,59 @@ test("collab undo batches rapid typing into a single undo step", () => {
 
   // If the edits were captured as a single step, undo should return to empty.
   assert.equal(getFormula(cells, "sheet:0:0"), "");
+});
+
+test("collab undo/redo only affects local sheet view changes (frozen panes)", () => {
+  const doc1 = new Y.Doc();
+  const doc2 = new Y.Doc();
+  const sheets1 = doc1.getArray("sheets");
+  const sheets2 = doc2.getArray("sheets");
+
+  const undo1 = createUndoService({ mode: "collab", doc: doc1, scope: sheets1 });
+  const undo2 = createUndoService({ mode: "collab", doc: doc2, scope: sheets2 });
+
+  connectDocs(doc1, doc2);
+
+  // Initialize a Sheet1 entry with a nested view map (so view keys can merge).
+  doc1.transact(() => {
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    const view = new Y.Map();
+    view.set("frozenRows", 0);
+    view.set("frozenCols", 0);
+    sheet.set("view", view);
+    sheets1.push([sheet]);
+  });
+
+  // Local edits from each user (different origins).
+  undo1.perform({
+    redo: () => {
+      const sheet = /** @type {Y.Map<any>|undefined} */ (sheets1.get(0));
+      const view = /** @type {Y.Map<any>|undefined} */ (sheet?.get("view"));
+      view?.set("frozenRows", 2);
+    },
+  });
+
+  undo2.perform({
+    redo: () => {
+      const sheet = /** @type {Y.Map<any>|undefined} */ (sheets2.get(0));
+      const view = /** @type {Y.Map<any>|undefined} */ (sheet?.get("view"));
+      view?.set("frozenCols", 1);
+    },
+  });
+
+  assert.deepEqual(getFrozenFromSheets(sheets1), { frozenRows: 2, frozenCols: 1 });
+  assert.deepEqual(getFrozenFromSheets(sheets2), { frozenRows: 2, frozenCols: 1 });
+
+  undo1.undo();
+
+  // Undo should revert only local frozenRows; remote frozenCols must remain.
+  assert.deepEqual(getFrozenFromSheets(sheets1), { frozenRows: 0, frozenCols: 1 });
+  assert.deepEqual(getFrozenFromSheets(sheets2), { frozenRows: 0, frozenCols: 1 });
+
+  undo1.redo();
+
+  assert.deepEqual(getFrozenFromSheets(sheets1), { frozenRows: 2, frozenCols: 1 });
+  assert.deepEqual(getFrozenFromSheets(sheets2), { frozenRows: 2, frozenCols: 1 });
 });
