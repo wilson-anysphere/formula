@@ -31,7 +31,8 @@ This document captures the part relationships and (most importantly) the **index
 > Note: The exact element/type names inside `<rv>` for image payloads vary by Excel version and are not
 > fully specified in the public ECMA-376 base schema. This repo contains **real Excel fixtures** showing
 > concrete shapes/namespaces for:
-> - the unprefixed **`richValue*`** variant (see `fixtures/xlsx/rich-data/images-in-cell.xlsx`), and
+> - the unprefixed **`richValue*`** variant (see `fixtures/xlsx/rich-data/images-in-cell.xlsx` and
+>   `fixtures/xlsx/images-in-cells/image-in-cell.xlsx`), and
 > - the **`rdRichValue*`** variant (see `fixtures/xlsx/basic/image-in-cell.xlsx`),
 > plus minimal synthetic fixtures for regression tests. See
 > [Observed in fixtures](#observed-in-fixtures-in-repo) and [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md).
@@ -74,6 +75,8 @@ Observed (in this repo) relationship type URIs:
 - Workbook → rich value store (Microsoft-specific, versioned):
   - `http://schemas.microsoft.com/office/2017/06/relationships/richValue`
   - `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel`
+  - `http://schemas.microsoft.com/office/2017/06/relationships/richValueTypes`
+  - `http://schemas.microsoft.com/office/2017/06/relationships/richValueStructure`
   - (variant, when the richData parts are related from `xl/metadata.xml` via `xl/_rels/metadata.xml.rels`)
     - `http://schemas.microsoft.com/office/2017/relationships/richValue`
     - `http://schemas.microsoft.com/office/2017/relationships/richValueRel`
@@ -113,6 +116,7 @@ sheetN.xml: <c vm="VM_INDEX">…</c>
 - **`vm` is ambiguous (0-based or 1-based).** Both appear in this repo:
   - 1-based: `fixtures/xlsx/metadata/rich-values-vm.xlsx` (synthetic Formula fixture; see `crates/formula-xlsx/tests/metadata_rich_value_roundtrip.rs`)
   - 1-based: `fixtures/xlsx/basic/image-in-cell.xlsx` (Excel-generated “Place in Cell” fixture; `vm="1"`/`vm="2"`)
+  - 1-based: `fixtures/xlsx/images-in-cells/image-in-cell.xlsx` (Excel-generated “Place in Cell” + `_xlfn.IMAGE()` fixture; `vm="1"`/`vm="2"`)
   - 0-based: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
 - Rich value indices are **0-based**.
 - `xl/metadata.xml` schemas vary:
@@ -169,6 +173,19 @@ Notable shape differences vs the minimal/synthetic `image-in-cell-richdata.xlsx`
 
 Treat Excel-generated fixtures as the primary ground truth for Excel’s current on-disk schema. Synthetic
 fixtures are still useful for exercising edge cases and ensuring we preserve unknown parts/attributes.
+
+### Fixture: `fixtures/xlsx/images-in-cells/image-in-cell.xlsx` (Excel Place in Cell + `_xlfn.IMAGE()`)
+
+See also: [`fixtures/xlsx/images-in-cells/image-in-cell.md`](../fixtures/xlsx/images-in-cells/image-in-cell.md).
+
+This fixture is a minimal Excel workbook that includes:
+
+* an in-cell image value (Place in Cell), and
+* an `_xlfn.IMAGE(...)` formula cell
+
+Both are represented as normal numeric cached values (`<v>0</v>`) with `vm="..."` metadata pointers (not
+`t="e"`/cached `#VALUE!`). The workbook also includes `xl/cellimages.xml` and the unprefixed `richValue*`
+table set under `xl/richData/`.
 
 ### Fixture: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (synthetic; `richValue.xml` + `richValueRel.xml` 2017 variant)
 

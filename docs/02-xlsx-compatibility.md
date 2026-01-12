@@ -29,7 +29,7 @@ workbook.xlsx (ZIP archive)
 │   ├── workbook.xml             # Workbook structure, sheet refs
 │   ├── styles.xml               # All cell formatting
 │   ├── sharedStrings.xml        # Deduplicated text strings
-│   ├── cellimages.xml           # (optional) workbook-level cell image store (name/casing varies; may also appear as xl/cellImages.xml; observed in the real Excel fixture fixtures/xlsx/rich-data/images-in-cell.xlsx)
+│   ├── cellimages.xml           # (optional) workbook-level cell image store (name/casing varies; may also appear as xl/cellImages.xml; observed in real Excel fixtures: fixtures/xlsx/rich-data/images-in-cell.xlsx; fixtures/xlsx/images-in-cells/image-in-cell.xlsx)
 │   ├── calcChain.xml            # Calculation order hints
 │   ├── metadata.xml             # Cell/value metadata (Excel "Rich Data")
 │   ├── richData/                # Excel 365+ rich values (data types, in-cell images; naming/casing varies)
