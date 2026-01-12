@@ -14,6 +14,8 @@ NS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 NS_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 NS_CT = "http://schemas.openxmlformats.org/package/2006/content-types"
 
+_CELLIMAGES_BASENAME_RE = re.compile(r"^cellimages\d*\.xml$")
+
 
 def qn(ns: str, tag: str) -> str:
     return f"{{{ns}}}{tag}"
@@ -407,6 +409,14 @@ def _sanitize_cell_images(xml: bytes, *, options: SanitizeOptions) -> bytes:
         _sanitize_xml_text_elements(root, options=options, local_names={"t"})
         _sanitize_xml_attributes(root, options=options, attr_names={"name", "descr", "title"})
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _is_cellimages_xml_part(part_name: str) -> bool:
+    """Return True for any `xl/**/cellimages*.xml` part (case-insensitive)."""
+
+    if not part_name.casefold().startswith("xl/"):
+        return False
+    return _CELLIMAGES_BASENAME_RE.fullmatch(posixpath.basename(part_name).casefold()) is not None
 
 
 def _sanitize_vml_drawing(xml: bytes, *, options: SanitizeOptions) -> bytes:
@@ -1460,7 +1470,7 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                             sheet_rename_map=sheet_rename_map or None,
                         )
                         rewritten.append(name)
-                    elif name.lower() == "xl/cellimages.xml" and (options.scrub_metadata or options.hash_strings):
+                    elif _is_cellimages_xml_part(name) and (options.scrub_metadata or options.hash_strings):
                         new = _sanitize_cell_images(raw, options=options)
                         rewritten.append(name)
                     elif name.startswith("xl/drawings/") and name.endswith(".xml") and (
@@ -1472,12 +1482,6 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                         options.scrub_metadata or options.hash_strings or options.remove_secrets
                     ):
                         new = _sanitize_vml_drawing(raw, options=options)
-                        rewritten.append(name)
-                    elif (
-                        name.lower().startswith("xl/") and name.lower().endswith("/cellimages.xml")
-                        and (options.scrub_metadata or options.hash_strings)
-                    ):
-                        new = _sanitize_cell_images(raw, options=options)
                         rewritten.append(name)
                     elif name.startswith("xl/charts/") and name.endswith(".xml") and (
                         options.redact_cell_values

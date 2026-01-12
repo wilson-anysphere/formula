@@ -146,6 +146,44 @@ def _make_minimal_xlsx_with_cell_images_metadata() -> bytes:
     return buf.getvalue()
 
 
+def _make_minimal_xlsx_with_cell_images_metadata_numeric_suffix() -> bytes:
+    """Minimal XLSX with a forward-compatible `cellimages*.xml` part name.
+
+    Some producers (and our parser for forward compatibility) accept `cellimages1.xml`,
+    `cellimages2.xml`, ... in addition to the canonical `cellImages.xml`. The sanitizer
+    should treat these as the same leak surface and scrub metadata accordingly.
+    """
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/richData/cellimages1.xml" ContentType="application/vnd.ms-excel.cellImages+xml"/>
+</Types>
+""",
+        )
+        z.writestr(
+            "xl/richData/cellimages1.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cellImages xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <xdr:pic>
+    <xdr:nvPicPr>
+      <xdr:cNvPr id="1" name="Alice" descr="alice@example.com"/>
+    </xdr:nvPicPr>
+  </xdr:pic>
+  <a:txBody>
+    <a:p><a:r><a:t>Secret</a:t></a:r></a:p>
+  </a:txBody>
+</cellImages>
+""",
+        )
+    return buf.getvalue()
+
+
 def _make_minimal_xlsx_for_sheet_rename() -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
@@ -871,6 +909,19 @@ class SanitizeTests(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(sanitized), "r") as z:
             self.assertIn("xl/cellImages.xml", z.namelist())
             cell_images = z.read("xl/cellImages.xml").decode("utf-8", errors="ignore")
+            self.assertNotIn("Alice", cell_images)
+            self.assertNotIn("alice@example.com", cell_images)
+            self.assertNotIn("Secret", cell_images)
+
+    def test_sanitize_scrubs_cell_images_metadata_with_numeric_suffix(self) -> None:
+        original = _make_minimal_xlsx_with_cell_images_metadata_numeric_suffix()
+        sanitized, _ = sanitize_xlsx_bytes(
+            original, options=SanitizeOptions(scrub_metadata=True, remove_secrets=False)
+        )
+
+        with zipfile.ZipFile(io.BytesIO(sanitized), "r") as z:
+            self.assertIn("xl/richData/cellimages1.xml", z.namelist())
+            cell_images = z.read("xl/richData/cellimages1.xml").decode("utf-8", errors="ignore")
             self.assertNotIn("Alice", cell_images)
             self.assertNotIn("alice@example.com", cell_images)
             self.assertNotIn("Secret", cell_images)
