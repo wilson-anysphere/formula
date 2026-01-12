@@ -19,7 +19,6 @@ use crate::XlsxError;
 type Result<T> = std::result::Result<T, XlsxError>;
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-const REL_TYPE_IMAGE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
 /// Best-effort loader for workbook-level "in-cell" images.
 ///
