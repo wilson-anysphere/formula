@@ -1,6 +1,6 @@
 # Marketplace HTTP API
 
-The marketplace service is a small HTTP API used by the desktop client and the extension publisher CLI.
+The marketplace service is a small HTTP API used by the web + desktop clients and the extension publisher CLI.
 
 ## Content types
 

@@ -32,10 +32,11 @@ Formula extensions are distributed as a single binary “package” blob downloa
 - Algorithm: **Ed25519** (`signature.json.algorithm === "ed25519"`)
 - Signed bytes: canonical JSON encoding of `{ manifest, checksums }`
 
-## Browser installation model (web runtime)
+## Browser/WebView installation model (Web + Desktop/Tauri)
 
-The web app does **not** load extension module graphs directly from the network. Instead it uses an
-install flow that keeps the initial code load fully verified:
+The Web runtime and the Desktop/Tauri WebView runtime do **not** load extension module graphs directly from the network.
+Instead they use the `WebExtensionManager` install flow (`packages/extension-marketplace/src/WebExtensionManager.ts`)
+which keeps the initial code load fully verified:
 
 1. Download the `.fextpkg` bytes from the Marketplace (`/api/extensions/:id/download/:version`).
 2. Verify the v2 package **client-side**:
@@ -45,7 +46,11 @@ install flow that keeps the initial code load fully verified:
    - verify the Ed25519 signature (WebCrypto Ed25519)
 3. Persist the verified package bytes + verification metadata in IndexedDB (keyed by `{id, version}`).
 4. Extract the entrypoint (`manifest.browser`, falling back to `module`/`main`) from the archive,
-   create a `blob:` URL for that module, and load it into `BrowserExtensionHost`.
+    create a `blob:` URL for that module, and load it into `BrowserExtensionHost`.
+
+This same model is used in Desktop/Tauri builds: verified packages persist in IndexedDB
+(`formula.webExtensions`) and are loaded from in-memory `blob:`/`data:` module URLs (no Node runtime, no extracted
+extension directory on disk).
 
 **Entrypoint requirement:** module loading from `blob:` URLs cannot resolve relative imports, so
 `manifest.browser` should be a **single-file ESM bundle** (no `./` imports). Remote `http(s):` imports

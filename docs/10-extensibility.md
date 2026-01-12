@@ -257,9 +257,9 @@ system *and* the WebView CSP).
 The repository still contains Node-only marketplace/host code paths that rely on `node:fs` / `worker_threads` and are
 **not used by the desktop renderer**:
 
-- `apps/desktop/src/marketplace/extensionManager.js`
-- `apps/desktop/src/marketplace/client.js`
-- `apps/desktop/src/extensions/ExtensionHostManager.js`
+- `apps/desktop/tools/marketplace/extensionManager.js`
+- `apps/desktop/tools/marketplace/client.js`
+- `apps/desktop/tools/extensions/ExtensionHostManager.js`
 
 ---
 
@@ -1233,8 +1233,9 @@ loading will fail and reinstalling the extension fixes the issue.
 The repository still contains a Node-only installer/runtime that extracted extensions to disk and performed per-file
 integrity checks + quarantine. This flow is **not used by the desktop renderer**, but remains for Node test harnesses:
 
-- `apps/desktop/src/marketplace/extensionManager.js`
-- `apps/desktop/src/extensions/ExtensionHostManager.js`
+- `apps/desktop/tools/marketplace/extensionManager.js`
+- `apps/desktop/tools/marketplace/client.js`
+- `apps/desktop/tools/extensions/ExtensionHostManager.js`
 
 --- 
 
