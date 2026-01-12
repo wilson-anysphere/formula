@@ -3183,6 +3183,10 @@ export class SpreadsheetApp {
     return this.sharedProvider;
   }
 
+  getGridLimits(): GridLimits {
+    return { ...this.limits };
+  }
+
   /**
    * Callbacks that allow a shared-grid instance (e.g. split-view secondary pane) to drive the
    * formula bar range-selection UX.

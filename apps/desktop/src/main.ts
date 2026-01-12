@@ -994,8 +994,7 @@ window.addEventListener("formula:zoom-changed", () => {
 });
 
 function getGridLimitsForFormatting(): GridLimits {
-  const anyApp = app as any;
-  const raw = anyApp.limits ?? { maxRows: DEFAULT_DESKTOP_LOAD_MAX_ROWS, maxCols: DEFAULT_DESKTOP_LOAD_MAX_COLS };
+  const raw = app.getGridLimits();
   const maxRows =
     Number.isInteger(raw?.maxRows) && raw.maxRows > 0 ? raw.maxRows : DEFAULT_DESKTOP_LOAD_MAX_ROWS;
   const maxCols =
@@ -3521,8 +3520,7 @@ if (
 
       // Use the same DocumentController / computed value cache as the primary grid so
       // the secondary pane stays live with edits and formula recalculation.
-      const anyApp = app as any;
-      const limits = anyApp.limits ?? { maxRows: DEFAULT_DESKTOP_LOAD_MAX_ROWS, maxCols: DEFAULT_DESKTOP_LOAD_MAX_COLS };
+      const limits = app.getGridLimits();
       const rowCount = Number.isInteger(limits.maxRows) ? limits.maxRows + 1 : DEFAULT_DESKTOP_LOAD_MAX_ROWS + 1;
       const colCount = Number.isInteger(limits.maxCols) ? limits.maxCols + 1 : DEFAULT_DESKTOP_LOAD_MAX_COLS + 1;
 
