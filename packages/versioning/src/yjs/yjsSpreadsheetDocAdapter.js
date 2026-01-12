@@ -43,20 +43,31 @@ function isYMap(value) {
   if (value instanceof Y.Map) return true;
   if (!value || typeof value !== "object") return false;
   const maybe = /** @type {any} */ (value);
-  if (maybe.constructor?.name !== "YMap") return false;
-  return typeof maybe.forEach === "function" && typeof maybe.get === "function" && typeof maybe.set === "function";
+  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
+  // module instances (ESM + CJS). Avoid relying on `constructor.name`; prefer a
+  // structural check instead.
+  if (typeof maybe.forEach !== "function") return false;
+  if (typeof maybe.get !== "function") return false;
+  if (typeof maybe.set !== "function") return false;
+  if (typeof maybe.delete !== "function") return false;
+  // Plain JS Maps also have get/set/delete/forEach, so additionally require Yjs'
+  // deep observer APIs.
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
+  return true;
 }
 
 function isYArray(value) {
   if (value instanceof Y.Array) return true;
   if (!value || typeof value !== "object") return false;
   const maybe = /** @type {any} */ (value);
-  if (maybe.constructor?.name !== "YArray") return false;
   return (
     typeof maybe.toArray === "function" &&
     typeof maybe.get === "function" &&
     typeof maybe.push === "function" &&
-    typeof maybe.delete === "function"
+    typeof maybe.delete === "function" &&
+    typeof maybe.observeDeep === "function" &&
+    typeof maybe.unobserveDeep === "function"
   );
 }
 
@@ -64,12 +75,13 @@ function isYText(value) {
   if (value instanceof Y.Text) return true;
   if (!value || typeof value !== "object") return false;
   const maybe = /** @type {any} */ (value);
-  if (maybe.constructor?.name !== "YText") return false;
   return (
     typeof maybe.toDelta === "function" &&
     typeof maybe.applyDelta === "function" &&
     typeof maybe.insert === "function" &&
-    typeof maybe.delete === "function"
+    typeof maybe.delete === "function" &&
+    typeof maybe.observeDeep === "function" &&
+    typeof maybe.unobserveDeep === "function"
   );
 }
 
@@ -80,7 +92,6 @@ function isYAbstractType(value) {
   // When different Yjs module instances are loaded (ESM vs CJS), `instanceof`
   // checks can fail even though the object is a valid Yjs type. Use a small
   // duck-type check so restores/snapshots work regardless of module loader.
-  if (maybe.constructor?.name === "AbstractType") return true;
   return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
 }
 

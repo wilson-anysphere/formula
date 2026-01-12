@@ -117,10 +117,13 @@ function getYMap(value) {
   // See CollabSession#getYMapCell for why we can't rely solely on instanceof.
   if (!value || typeof value !== "object") return null;
   const maybe = /** @type {any} */ (value);
-  if (maybe.constructor?.name !== "YMap") return null;
   if (typeof maybe.get !== "function") return null;
   if (typeof maybe.set !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
+  // Plain JS Maps also have get/set/delete, so additionally require Yjs' deep
+  // observer APIs.
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
   return /** @type {Y.Map<any>} */ (maybe);
 }
 
@@ -132,11 +135,12 @@ function getYArray(value) {
   if (value instanceof Y.Array) return value;
   if (!value || typeof value !== "object") return null;
   const maybe = /** @type {any} */ (value);
-  if (maybe.constructor?.name !== "YArray") return null;
   if (typeof maybe.get !== "function") return null;
   if (typeof maybe.toArray !== "function") return null;
   if (typeof maybe.push !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
   return /** @type {Y.Array<any>} */ (maybe);
 }
 

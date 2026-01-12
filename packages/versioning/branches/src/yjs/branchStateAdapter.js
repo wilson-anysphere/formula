@@ -29,10 +29,15 @@ function getYMap(value) {
   // Duck-type to handle multiple `yjs` module instances.
   if (!value || typeof value !== "object") return null;
   const maybe = /** @type {any} */ (value);
-  if (maybe.constructor?.name !== "YMap") return null;
   if (typeof maybe.get !== "function") return null;
   if (typeof maybe.set !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.keys !== "function") return null;
+  if (typeof maybe.forEach !== "function") return null;
+  // Plain JS Maps also have get/set/delete/keys/forEach, so additionally require
+  // Yjs' deep observer APIs.
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
   return /** @type {Y.Map<any>} */ (maybe);
 }
 
@@ -46,10 +51,11 @@ function getYArray(value) {
   // Duck-type to handle multiple `yjs` module instances.
   if (!value || typeof value !== "object") return null;
   const maybe = /** @type {any} */ (value);
-  if (maybe.constructor?.name !== "YArray") return null;
   if (typeof maybe.toArray !== "function") return null;
   if (typeof maybe.push !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
   return /** @type {Y.Array<any>} */ (maybe);
 }
 
@@ -61,8 +67,13 @@ function isYText(value) {
   if (value instanceof Y.Text) return true;
   if (!value || typeof value !== "object") return false;
   const maybe = /** @type {any} */ (value);
-  if (maybe.constructor?.name !== "YText") return false;
   if (typeof maybe.toString !== "function") return false;
+  if (typeof maybe.toDelta !== "function") return false;
+  if (typeof maybe.applyDelta !== "function") return false;
+  if (typeof maybe.insert !== "function") return false;
+  if (typeof maybe.delete !== "function") return false;
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
   return true;
 }
 
