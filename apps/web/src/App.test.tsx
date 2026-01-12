@@ -112,6 +112,10 @@ vi.mock("@formula/engine", () => ({
   }
 }));
 
+// Import the App once at module-evaluation time so Vite/Vitest transform + module init
+// does not count toward the per-test timeout under full-suite load.
+const { App } = await import("./App");
+
 function createMock2dContext(
   canvas: HTMLCanvasElement,
   drawnText: Array<{ text: string; x: number; y: number }>
@@ -220,8 +224,6 @@ describe("App (web preview)", () => {
     HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
       return createMock2dContext(this, drawnText);
     }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
-
-    const { App } = await import("./App");
 
     const host = document.createElement("div");
     document.body.appendChild(host);
