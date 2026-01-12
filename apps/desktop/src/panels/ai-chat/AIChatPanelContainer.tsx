@@ -152,6 +152,12 @@ function AIChatPanelRuntime(props: AIChatPanelContainerProps) {
     workbookId,
   ]);
 
+  useEffect(() => {
+    return () => {
+      void orchestrator.dispose();
+    };
+  }, [orchestrator]);
+
   const sendMessage: AIChatPanelSendMessage = useMemo(() => {
     return async (args) => {
       let abortListener: (() => void) | null = null;

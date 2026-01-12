@@ -492,6 +492,8 @@ describe("ai chat orchestrator", () => {
 
     const firstRequest = mock.requests[0];
     expect(firstRequest.messages?.[0]?.content).toContain("WORKBOOK_CONTEXT");
+
+    await orchestrator.dispose();
   });
 
   it("executes create_chart when chart host support is provided (no approval needed for zero-cell-change preview)", async () => {

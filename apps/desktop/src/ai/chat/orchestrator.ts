@@ -222,19 +222,38 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
   const spreadsheet = new DocumentControllerSpreadsheetApi(options.documentController, { createChart: options.createChart });
 
-  const contextProvider:
-    | ContextManager
-    | DesktopRagService = options.contextManager ??
-    options.ragService ??
-    createDesktopRagService({
+  // If no context provider is passed, we create a default DesktopRagService backed by
+  // persistent local storage + DocumentController listeners. In that case the
+  // orchestrator owns it and must dispose it when torn down.
+  let ownedRagService: DesktopRagService | null = null;
+  const providedContextProvider = options.contextManager ?? options.ragService;
+  const contextProvider: ContextManager | DesktopRagService =
+    providedContextProvider ??
+    (ownedRagService = createDesktopRagService({
       documentController: options.documentController,
       workbookId: options.workbookId,
       ...(options.ragOptions ?? {}),
-    });
+    }));
 
   const baseSystemPrompt =
     options.systemPrompt ??
     "You are an AI assistant inside a spreadsheet app. Prefer using tools to read data before making claims.";
+
+  let disposePromise: Promise<void> | null = null;
+  async function dispose(): Promise<void> {
+    if (disposePromise) return disposePromise;
+    disposePromise = (async () => {
+      // Future: clear any long-lived workbook context caches kept by the orchestrator.
+      try {
+        await ownedRagService?.dispose();
+      } catch {
+        // Ignore disposal errors; we never want teardown to crash a UI unmount path.
+      } finally {
+        ownedRagService = null;
+      }
+    })();
+    return disposePromise;
+  }
 
   function createAbortError(message = "Aborted"): Error {
     const err = new Error(message);
@@ -489,7 +508,8 @@ export function createAiChatOrchestrator(options: AiChatOrchestratorOptions) {
 
   return {
     sessionId,
-    sendMessage
+    sendMessage,
+    dispose
   };
 }
 
