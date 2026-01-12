@@ -368,6 +368,31 @@ test("getUsedRange(includeFormat) rescans stored-cell format bounds only when cl
   assert.equal(sheet.__formatBoundsRecomputeCount, 1);
 });
 
+test("getUsedRange(includeFormat) returns full grid when sheet-level default formatting is set", () => {
+  const doc = new DocumentController();
+
+  doc.setSheetFormat("Sheet1", { font: { bold: true } });
+
+  // Sheet-level formatting should not affect the default used-range semantics.
+  assert.equal(doc.getUsedRange("Sheet1"), null);
+
+  // But includeFormat=true treats sheet-level formatting as applying to every cell.
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 0,
+    endRow: 1_048_575,
+    startCol: 0,
+    endCol: 16_383,
+  });
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 0);
+
+  // Clearing sheet-level formatting returns to empty used range.
+  doc.setSheetFormat("Sheet1", null);
+  assert.equal(doc.getUsedRange("Sheet1", { includeFormat: true }), null);
+});
+
 test("getCellFormatStyleIds exposes layered style id tuple (sheet/row/col/cell)", () => {
   const doc = new DocumentController();
 
