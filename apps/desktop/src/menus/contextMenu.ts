@@ -36,43 +36,37 @@ export type ContextMenuOpenOptions = {
   focusFirst?: boolean;
 };
 
+type ContextMenuButtonItem = ContextMenuActionItem | ContextMenuSubmenuItem;
+
+type Point = { x: number; y: number };
+
 export class ContextMenu {
   private readonly overlay: HTMLDivElement;
   private readonly menu: HTMLDivElement;
+
   private submenu: HTMLDivElement | null = null;
   private submenuParent: HTMLButtonElement | null = null;
   private isShown = false;
+  private lastAnchor: Point | null = null;
+
   private readonly onClose: (() => void) | null;
   private keydownListener: ((e: KeyboardEvent) => void) | null = null;
-  private lastAnchor: { x: number; y: number } | null = null;
+
+  private readonly buttonItems = new WeakMap<HTMLButtonElement, ContextMenuButtonItem>();
 
   constructor(options: { onClose?: () => void } = {}) {
     this.onClose = options.onClose ?? null;
 
     const overlay = document.createElement("div");
     overlay.dataset.testid = "context-menu";
-    overlay.style.position = "fixed";
-    overlay.style.inset = "0";
-    overlay.style.display = "none";
-    overlay.style.zIndex = "900";
-    // Use a transparent overlay so outside clicks can dismiss the menu without
-    // triggering underlying UI clicks.
-    overlay.style.background = "transparent";
+    overlay.className = "context-menu-overlay";
 
     const menu = document.createElement("div");
-    menu.style.position = "absolute";
-    menu.style.display = "flex";
-    menu.style.flexDirection = "column";
-    menu.style.minWidth = "220px";
-    menu.style.maxWidth = "360px";
-    menu.style.maxHeight = "calc(100vh - 16px)";
-    menu.style.overflowY = "auto";
-    menu.style.padding = "6px";
-    menu.style.borderRadius = "10px";
-    menu.style.border = "1px solid var(--border)";
-    menu.style.background = "var(--dialog-bg)";
-    menu.style.boxShadow = "var(--dialog-shadow)";
-    menu.style.zIndex = "901";
+    menu.className = "context-menu";
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-orientation", "vertical");
+    // Let us focus the menu container as a fallback when there are no enabled items.
+    menu.tabIndex = -1;
 
     overlay.appendChild(menu);
     document.body.appendChild(overlay);
@@ -90,6 +84,10 @@ export class ContextMenu {
     this.menu = menu;
   }
 
+  isOpen(): boolean {
+    return this.isShown;
+  }
+
   open({ x, y, items, focusFirst }: ContextMenuOpenOptions): void {
     this.close();
     this.isShown = true;
@@ -98,360 +96,63 @@ export class ContextMenu {
     this.menu.replaceChildren();
     this.closeSubmenu();
 
-    for (const item of items) {
-      if (item.type === "separator") {
-        const sep = document.createElement("div");
-        sep.setAttribute("role", "separator");
-        sep.style.height = "1px";
-        sep.style.margin = "6px 6px";
-        sep.style.background = "var(--border)";
-        this.menu.appendChild(sep);
-        continue;
-      }
-
-      const enabled = item.enabled ?? true;
-
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.disabled = !enabled;
-
-      btn.style.display = "flex";
-      btn.style.alignItems = "center";
-      btn.style.justifyContent = "space-between";
-      btn.style.gap = "16px";
-      btn.style.width = "100%";
-      btn.style.textAlign = "left";
-      btn.style.padding = "8px 10px";
-      btn.style.borderRadius = "8px";
-      btn.style.border = "1px solid transparent";
-      btn.style.background = "transparent";
-      btn.style.color = enabled ? "var(--text-primary)" : "var(--text-secondary)";
-      btn.style.cursor = enabled ? "pointer" : "default";
-
-      const label = document.createElement("span");
-      label.textContent = item.label;
-      label.style.flex = "1";
-      label.style.minWidth = "0";
-      label.style.overflow = "hidden";
-      label.style.textOverflow = "ellipsis";
-      label.style.whiteSpace = "nowrap";
-      btn.appendChild(label);
-
-      if (item.shortcut) {
-        const shortcut = document.createElement("span");
-        shortcut.setAttribute("aria-hidden", "true");
-        shortcut.textContent = item.shortcut;
-        shortcut.style.color = "var(--text-secondary)";
-        shortcut.style.fontSize = "12px";
-        shortcut.style.flex = "none";
-        btn.appendChild(shortcut);
-      }
-
-      if (item.type === "submenu") {
-        btn.dataset.contextMenuSubmenu = "true";
-        const arrow = document.createElement("span");
-        arrow.textContent = "›";
-        arrow.style.color = "var(--text-secondary)";
-        arrow.style.fontSize = "14px";
-        arrow.style.flex = "none";
-        btn.appendChild(arrow);
-      }
-
-      btn.addEventListener("mousedown", (e) => {
-        // Prevent focus from moving off the grid before we close/execute.
-        e.preventDefault();
-      });
-
-      if (item.type === "submenu") {
-        const openSub = () => {
-          if (!enabled) return;
-          this.openSubmenu(btn, item.items);
-        };
-        btn.addEventListener("mouseenter", openSub);
-        btn.addEventListener("click", (e) => {
-          e.preventDefault();
-          openSub();
-        });
-      } else {
-        btn.addEventListener("click", () => {
-          if (!enabled) return;
-          this.close();
-          void Promise.resolve(item.onSelect()).catch((err) => {
-            console.error("Context menu action failed:", err);
-          });
-        });
-      }
-
-      btn.addEventListener("mouseenter", () => {
-        if (!enabled) return;
-        if (item.type !== "submenu") {
-          // Moving onto a non-submenu item should close any open submenu.
-          this.closeSubmenu();
-        }
-        btn.style.background = "var(--bg-hover)";
-        btn.style.borderColor = "var(--border)";
-      });
-      btn.addEventListener("mouseleave", () => {
-        // If this is the active submenu parent, keep it highlighted while the
-        // submenu is visible.
-        if (this.submenu && this.submenuParent === btn) return;
-        btn.style.background = "transparent";
-        btn.style.borderColor = "transparent";
-      });
-
-      this.menu.appendChild(btn);
-    }
+    this.buildMenuContents(this.menu, items, { level: "menu" });
 
     this.overlay.style.display = "block";
     this.positionMenu(x, y);
 
-    this.keydownListener = (e) => {
-      if (!this.isShown) return;
-
-      const activeEl = document.activeElement as HTMLElement | null;
-      const focusInSubmenu = Boolean(this.submenu && activeEl && this.submenu.contains(activeEl));
-      const focusContainer = focusInSubmenu ? this.submenu : this.menu;
-
-      const focusableButtons = (container: HTMLElement | null): HTMLButtonElement[] => {
-        if (!container) return [];
-        return Array.from(container.querySelectorAll<HTMLButtonElement>("button")).filter((btn) => !btn.disabled);
-      };
-
-      const focusButtonByDelta = (delta: number) => {
-        const buttons = focusableButtons(focusContainer);
-        if (buttons.length === 0) return;
-
-        // Navigating the main menu should close any open submenu.
-        if (!focusInSubmenu) this.closeSubmenu();
-
-        const active = document.activeElement as HTMLElement | null;
-        const activeBtn = active instanceof HTMLButtonElement ? active : null;
-        const idx = activeBtn ? buttons.indexOf(activeBtn) : -1;
-        const next = idx === -1 ? (delta > 0 ? 0 : buttons.length - 1) : (idx + delta + buttons.length) % buttons.length;
-        buttons[next]?.focus({ preventScroll: true });
-      };
-
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        this.close();
-        return;
-      }
-
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        e.stopPropagation();
-        focusButtonByDelta(1);
-        return;
-      }
-
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        e.stopPropagation();
-        focusButtonByDelta(-1);
-        return;
-      }
-
-      if (e.key === "Home") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!focusInSubmenu) this.closeSubmenu();
-        const buttons = focusableButtons(focusContainer);
-        buttons[0]?.focus({ preventScroll: true });
-        return;
-      }
-
-      if (e.key === "End") {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!focusInSubmenu) this.closeSubmenu();
-        const buttons = focusableButtons(focusContainer);
-        buttons[buttons.length - 1]?.focus({ preventScroll: true });
-        return;
-      }
-
-      if (e.key === "Enter" || e.key === " ") {
-        const active = document.activeElement as HTMLElement | null;
-        const activeBtn = active instanceof HTMLButtonElement ? active : null;
-        if (!activeBtn) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const opensSubmenu = activeBtn.dataset.contextMenuSubmenu === "true";
-        activeBtn.click();
-        if (opensSubmenu) {
-          queueMicrotask(() => {
-            if (!this.isShown || !this.submenu) return;
-            const buttons = focusableButtons(this.submenu);
-            buttons[0]?.focus({ preventScroll: true });
-          });
-        }
-        return;
-      }
-
-      if (e.key === "ArrowRight") {
-        if (focusInSubmenu) return;
-        const active = document.activeElement as HTMLElement | null;
-        const activeBtn = active instanceof HTMLButtonElement ? active : null;
-        if (!activeBtn) return;
-        if (activeBtn.dataset.contextMenuSubmenu !== "true") return;
-        e.preventDefault();
-        e.stopPropagation();
-        activeBtn.click();
-        queueMicrotask(() => {
-          if (!this.isShown || !this.submenu) return;
-          const buttons = focusableButtons(this.submenu);
-          buttons[0]?.focus({ preventScroll: true });
-        });
-        return;
-      }
-
-      if (e.key === "ArrowLeft") {
-        if (!this.submenu) return;
-        if (!focusInSubmenu) {
-          e.preventDefault();
-          e.stopPropagation();
-          this.closeSubmenu();
-          return;
-        }
-        const parent = this.submenuParent;
-        if (!parent) return;
-        e.preventDefault();
-        e.stopPropagation();
-        this.closeSubmenu({ keepParent: true });
-        parent.focus({ preventScroll: true });
-      }
-    };
+    this.keydownListener = (e) => this.onKeyDown(e);
     window.addEventListener("keydown", this.keydownListener, true);
 
-    if (items.length > 0 && focusFirst) {
-      this.focusFirst();
-    }
-  }
-
-  isOpen(): boolean {
-    return this.isShown;
+    if (focusFirst) this.focusFirst();
   }
 
   focusFirst(): void {
     if (!this.isShown) return;
-    const first = this.menu.querySelector<HTMLButtonElement>("button:not(:disabled)");
-    first?.focus({ preventScroll: true });
+    this.focusFirstItem(this.menu);
   }
 
+  /**
+   * Re-render the menu in-place (used when the item model changes while open).
+   */
   update(items: ContextMenuItem[]): void {
     if (!this.isShown) return;
     if (!this.lastAnchor) return;
 
+    const active = document.activeElement;
+    const activeIsMenuButton = active instanceof HTMLButtonElement && this.menu.contains(active);
+    const activeLabelText = activeIsMenuButton
+      ? (active.querySelector<HTMLElement>(".context-menu__label")?.textContent ?? active.textContent ?? "")
+      : "";
+
     this.menu.replaceChildren();
     this.closeSubmenu();
-
-    // Re-render in place without touching the global event listeners.
-    for (const item of items) {
-      if (item.type === "separator") {
-        const sep = document.createElement("div");
-        sep.setAttribute("role", "separator");
-        sep.style.height = "1px";
-        sep.style.margin = "6px 6px";
-        sep.style.background = "var(--border)";
-        this.menu.appendChild(sep);
-        continue;
-      }
-
-      const enabled = item.enabled ?? true;
-
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.disabled = !enabled;
-
-      btn.style.display = "flex";
-      btn.style.alignItems = "center";
-      btn.style.justifyContent = "space-between";
-      btn.style.gap = "16px";
-      btn.style.width = "100%";
-      btn.style.textAlign = "left";
-      btn.style.padding = "8px 10px";
-      btn.style.borderRadius = "8px";
-      btn.style.border = "1px solid transparent";
-      btn.style.background = "transparent";
-      btn.style.color = enabled ? "var(--text-primary)" : "var(--text-secondary)";
-      btn.style.cursor = enabled ? "pointer" : "default";
-
-      const label = document.createElement("span");
-      label.textContent = item.label;
-      label.style.flex = "1";
-      label.style.minWidth = "0";
-      label.style.overflow = "hidden";
-      label.style.textOverflow = "ellipsis";
-      label.style.whiteSpace = "nowrap";
-      btn.appendChild(label);
-
-      if (item.shortcut) {
-        const shortcut = document.createElement("span");
-        shortcut.textContent = item.shortcut;
-        shortcut.style.color = "var(--text-secondary)";
-        shortcut.style.fontSize = "12px";
-        shortcut.style.flex = "none";
-        btn.appendChild(shortcut);
-      }
-
-      if (item.type === "submenu") {
-        btn.dataset.contextMenuSubmenu = "true";
-        const arrow = document.createElement("span");
-        arrow.textContent = "›";
-        arrow.style.color = "var(--text-secondary)";
-        arrow.style.fontSize = "14px";
-        arrow.style.flex = "none";
-        btn.appendChild(arrow);
-      }
-
-      btn.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-      });
-
-      if (item.type === "submenu") {
-        const openSub = () => {
-          if (!enabled) return;
-          this.openSubmenu(btn, item.items);
-        };
-        btn.addEventListener("mouseenter", openSub);
-        btn.addEventListener("click", (e) => {
-          e.preventDefault();
-          openSub();
-        });
-      } else {
-        btn.addEventListener("click", () => {
-          if (!enabled) return;
-          this.close();
-          void Promise.resolve(item.onSelect()).catch((err) => {
-            console.error("Context menu action failed:", err);
-          });
-        });
-      }
-
-      btn.addEventListener("mouseenter", () => {
-        if (!enabled) return;
-        if (item.type !== "submenu") {
-          this.closeSubmenu();
-        }
-        btn.style.background = "var(--bg-hover)";
-        btn.style.borderColor = "var(--border)";
-      });
-      btn.addEventListener("mouseleave", () => {
-        if (this.submenu && this.submenuParent === btn) return;
-        btn.style.background = "transparent";
-        btn.style.borderColor = "transparent";
-      });
-
-      this.menu.appendChild(btn);
-    }
-
+    this.buildMenuContents(this.menu, items, { level: "menu" });
     this.positionMenu(this.lastAnchor.x, this.lastAnchor.y);
+
+    if (activeIsMenuButton) {
+      const enabled = this.getEnabledButtons(this.menu);
+      const match =
+        activeLabelText.trim() === ""
+          ? null
+          : enabled.find((btn) => {
+              const label = btn.querySelector<HTMLElement>(".context-menu__label")?.textContent ?? btn.textContent ?? "";
+              return label === activeLabelText;
+            }) ?? null;
+      if (match) {
+        this.setRovingTabIndex(enabled, match);
+        match.focus({ preventScroll: true });
+        return;
+      }
+      this.focusFirstItem(this.menu);
+    }
   }
 
   close(): void {
     if (!this.isShown) return;
     this.isShown = false;
     this.lastAnchor = null;
+
     this.overlay.style.display = "none";
     this.menu.replaceChildren();
     this.closeSubmenu();
@@ -468,91 +169,214 @@ export class ContextMenu {
     }
   }
 
-  private openSubmenu(parent: HTMLButtonElement, items: ContextMenuItem[]): void {
+  private onKeyDown(e: KeyboardEvent): void {
     if (!this.isShown) return;
 
-    if (this.submenuParent && this.submenuParent !== parent) {
-      // Clear hover state of the previous parent.
-      this.submenuParent.style.background = "transparent";
-      this.submenuParent.style.borderColor = "transparent";
+    const activeEl = document.activeElement as HTMLElement | null;
+    const focusInSubmenu = Boolean(this.submenu && activeEl && this.submenu.contains(activeEl));
+    const focusContainer = focusInSubmenu ? this.submenu : this.menu;
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.close();
+      return;
     }
 
-    // Rebuild submenu each time so it stays in sync with the parent items.
-    this.closeSubmenu({ keepParent: true });
-    this.submenuParent = parent;
+    if (e.key === "Tab") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.close();
+      return;
+    }
 
-    const submenu = document.createElement("div");
-    submenu.style.position = "absolute";
-    submenu.style.display = "flex";
-    submenu.style.flexDirection = "column";
-    submenu.style.minWidth = "200px";
-    submenu.style.maxWidth = "360px";
-    submenu.style.maxHeight = "calc(100vh - 16px)";
-    submenu.style.overflowY = "auto";
-    submenu.style.padding = "6px";
-    submenu.style.borderRadius = "10px";
-    submenu.style.border = "1px solid var(--border)";
-    submenu.style.background = "var(--dialog-bg)";
-    submenu.style.boxShadow = "var(--dialog-shadow)";
-    submenu.style.zIndex = "902";
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.moveFocus(1);
+      return;
+    }
 
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      e.stopPropagation();
+      this.moveFocus(-1);
+      return;
+    }
+
+    if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!focusInSubmenu) this.closeSubmenu();
+
+      const enabled = this.getEnabledButtons(focusContainer);
+      if (enabled.length === 0) return;
+      const next = e.key === "Home" ? enabled[0]! : enabled[enabled.length - 1]!;
+      this.setRovingTabIndex(enabled, next);
+      next.focus({ preventScroll: true });
+      return;
+    }
+
+    if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+      const activeBtn = activeEl instanceof HTMLButtonElement ? activeEl : null;
+      if (!activeBtn || activeBtn.disabled) return;
+      const inMenu = this.menu.contains(activeBtn);
+      const inSubmenu = this.submenu != null && this.submenu.contains(activeBtn);
+      if (!inMenu && !inSubmenu) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      activeBtn.click();
+      return;
+    }
+
+    if (e.key === "ArrowRight") {
+      if (focusInSubmenu) return;
+      const activeBtn = activeEl instanceof HTMLButtonElement ? activeEl : null;
+      if (!activeBtn || activeBtn.disabled) return;
+
+      const item = this.buttonItems.get(activeBtn);
+      if (item?.type !== "submenu") return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      this.openSubmenu(activeBtn, item.items, { focus: true });
+      return;
+    }
+
+    if (e.key === "ArrowLeft") {
+      if (!this.submenu) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (!focusInSubmenu) {
+        this.closeSubmenu();
+        return;
+      }
+
+      const parent = this.submenuParent;
+      this.closeSubmenu();
+      parent?.focus({ preventScroll: true });
+    }
+  }
+
+  private moveFocus(delta: 1 | -1): void {
+    const active = document.activeElement;
+    const inSubmenu = this.submenu != null && active instanceof Node && this.submenu.contains(active);
+    const container = inSubmenu ? this.submenu : this.menu;
+
+    const enabled = this.getEnabledButtons(container);
+    if (enabled.length === 0) return;
+
+    // Navigating the main menu should close any open submenu.
+    if (!inSubmenu) this.closeSubmenu();
+
+    const activeBtn = active instanceof HTMLButtonElement ? active : null;
+    const idx = activeBtn ? enabled.indexOf(activeBtn) : -1;
+    const nextIdx = idx === -1 ? (delta > 0 ? 0 : enabled.length - 1) : (idx + delta + enabled.length) % enabled.length;
+    const next = enabled[nextIdx]!;
+
+    this.setRovingTabIndex(enabled, next);
+    next.focus({ preventScroll: true });
+  }
+
+  private focusFirstItem(container: HTMLDivElement): void {
+    const enabled = this.getEnabledButtons(container);
+    if (enabled.length === 0) {
+      container.focus();
+      return;
+    }
+
+    this.setRovingTabIndex(enabled, enabled[0]!);
+    enabled[0]!.focus({ preventScroll: true });
+  }
+
+  private getEnabledButtons(container: HTMLDivElement): HTMLButtonElement[] {
+    return Array.from(container.querySelectorAll<HTMLButtonElement>(".context-menu__item:not(:disabled)"));
+  }
+
+  private setRovingTabIndex(buttons: HTMLButtonElement[], active: HTMLButtonElement): void {
+    for (const btn of buttons) {
+      btn.tabIndex = btn === active ? 0 : -1;
+    }
+  }
+
+  private buildMenuContents(container: HTMLDivElement, items: ContextMenuItem[], opts: { level: "menu" | "submenu" }): void {
     for (const item of items) {
       if (item.type === "separator") {
         const sep = document.createElement("div");
+        sep.className = "context-menu__separator";
         sep.setAttribute("role", "separator");
-        sep.style.height = "1px";
-        sep.style.margin = "6px 6px";
-        sep.style.background = "var(--border)";
-        submenu.appendChild(sep);
+        container.appendChild(sep);
         continue;
       }
 
-      // Only one-level submenus are supported; if a submenu item itself contains
-      // a submenu, render it as disabled text.
       const enabled = item.enabled ?? true;
+      const isSubmenu = opts.level === "menu" && item.type === "submenu";
+      // Only one-level submenus are supported; if a submenu item itself contains a
+      // submenu, render it as disabled text.
+      const shouldDisable = !enabled || (opts.level === "submenu" && item.type === "submenu");
 
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.disabled = !enabled || item.type === "submenu";
+      btn.className = "context-menu__item";
+      btn.setAttribute("role", "menuitem");
+      btn.tabIndex = -1;
 
-      btn.style.display = "flex";
-      btn.style.alignItems = "center";
-      btn.style.justifyContent = "space-between";
-      btn.style.gap = "16px";
-      btn.style.width = "100%";
-      btn.style.textAlign = "left";
-      btn.style.padding = "8px 10px";
-      btn.style.borderRadius = "8px";
-      btn.style.border = "1px solid transparent";
-      btn.style.background = "transparent";
-      btn.style.color = btn.disabled ? "var(--text-secondary)" : "var(--text-primary)";
-      btn.style.cursor = btn.disabled ? "default" : "pointer";
+      this.buttonItems.set(btn, item);
+
+      btn.disabled = shouldDisable;
+      if (shouldDisable) {
+        btn.classList.add("context-menu__item--disabled");
+        btn.setAttribute("aria-disabled", "true");
+      }
+
+      if (isSubmenu) {
+        btn.dataset.contextMenuSubmenu = "true";
+        btn.setAttribute("aria-haspopup", "menu");
+        btn.setAttribute("aria-expanded", "false");
+      }
 
       const label = document.createElement("span");
+      label.className = "context-menu__label";
       label.textContent = item.label;
-      label.style.flex = "1";
-      label.style.minWidth = "0";
-      label.style.overflow = "hidden";
-      label.style.textOverflow = "ellipsis";
-      label.style.whiteSpace = "nowrap";
       btn.appendChild(label);
 
       if (item.shortcut) {
         const shortcut = document.createElement("span");
+        shortcut.className = "context-menu__shortcut";
+        shortcut.setAttribute("aria-hidden", "true");
         shortcut.textContent = item.shortcut;
-        shortcut.style.color = "var(--text-secondary)";
-        shortcut.style.fontSize = "12px";
-        shortcut.style.flex = "none";
         btn.appendChild(shortcut);
       }
 
-      btn.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-      });
+      if (isSubmenu) {
+        const arrow = document.createElement("span");
+        arrow.className = "context-menu__submenu-arrow";
+        arrow.setAttribute("aria-hidden", "true");
+        arrow.textContent = "›";
+        btn.appendChild(arrow);
 
-      if (item.type === "item") {
+        btn.addEventListener("mouseenter", () => {
+          if (btn.disabled) return;
+          this.openSubmenu(btn, item.items, { focus: false });
+        });
+        btn.addEventListener("click", (e) => {
+          // Keep the menu open and show the submenu.
+          e.preventDefault();
+          if (btn.disabled) return;
+          this.openSubmenu(btn, item.items, { focus: true });
+        });
+      } else if (item.type === "item") {
+        if (opts.level === "menu") {
+          btn.addEventListener("mouseenter", () => {
+            // Moving onto a non-submenu item should close any open submenu.
+            this.closeSubmenu();
+          });
+        }
         btn.addEventListener("click", () => {
-          if (!enabled) return;
+          if (btn.disabled) return;
           this.close();
           void Promise.resolve(item.onSelect()).catch((err) => {
             console.error("Context menu action failed:", err);
@@ -560,18 +384,28 @@ export class ContextMenu {
         });
       }
 
-      btn.addEventListener("mouseenter", () => {
-        if (btn.disabled) return;
-        btn.style.background = "var(--bg-hover)";
-        btn.style.borderColor = "var(--border)";
-      });
-      btn.addEventListener("mouseleave", () => {
-        btn.style.background = "transparent";
-        btn.style.borderColor = "transparent";
-      });
-
-      submenu.appendChild(btn);
+      container.appendChild(btn);
     }
+  }
+
+  private openSubmenu(parent: HTMLButtonElement, items: ContextMenuItem[], opts: { focus: boolean }): void {
+    if (!this.isShown) return;
+    if (parent.disabled) return;
+
+    // Rebuild submenu each time so it stays in sync with the parent items.
+    this.closeSubmenu();
+
+    parent.classList.add("context-menu__item--submenu-open");
+    parent.setAttribute("aria-expanded", "true");
+    this.submenuParent = parent;
+
+    const submenu = document.createElement("div");
+    submenu.className = "context-menu__submenu";
+    submenu.setAttribute("role", "menu");
+    submenu.setAttribute("aria-orientation", "vertical");
+    submenu.tabIndex = -1;
+
+    this.buildMenuContents(submenu, items, { level: "submenu" });
 
     this.overlay.appendChild(submenu);
     this.submenu = submenu;
@@ -598,15 +432,19 @@ export class ContextMenu {
 
     submenu.style.left = `${left}px`;
     submenu.style.top = `${top}px`;
+
+    if (opts.focus) {
+      this.focusFirstItem(submenu);
+    }
   }
 
-  private closeSubmenu(options: { keepParent?: boolean } = {}): void {
+  private closeSubmenu(): void {
     this.submenu?.remove();
     this.submenu = null;
 
-    if (this.submenuParent && !options.keepParent) {
-      this.submenuParent.style.background = "transparent";
-      this.submenuParent.style.borderColor = "transparent";
+    if (this.submenuParent) {
+      this.submenuParent.classList.remove("context-menu__item--submenu-open");
+      this.submenuParent.setAttribute("aria-expanded", "false");
       this.submenuParent = null;
     }
   }

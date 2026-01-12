@@ -1,0 +1,114 @@
+/*
+  Right-click / keyboard context menu.
+
+  Styled entirely via design tokens defined in tokens.css.
+*/
+
+.context-menu-overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  z-index: 900;
+  /* Transparent overlay so outside clicks dismiss the menu without leaking through. */
+  background: transparent;
+}
+
+.context-menu,
+.context-menu__submenu {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-width: 360px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--dialog-bg);
+  box-shadow: var(--dialog-shadow);
+  gap: 2px;
+}
+
+.context-menu {
+  z-index: 901;
+}
+
+.context-menu__submenu {
+  min-width: 200px;
+  z-index: 902;
+}
+
+.context-menu__separator {
+  height: 1px;
+  margin: 6px 6px;
+  background: var(--border);
+}
+
+.context-menu__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+
+.context-menu__item:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.context-menu__item:focus-visible,
+.context-menu__item--submenu-open {
+  background: var(--selection-bg);
+  border-color: var(--selection-border);
+  color: var(--selection-text);
+  outline: none;
+}
+
+.context-menu__item:disabled,
+.context-menu__item--disabled {
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.context-menu__item:disabled:hover,
+.context-menu__item--disabled:hover,
+.context-menu__item:disabled:focus-visible,
+.context-menu__item--disabled:focus-visible {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-secondary);
+}
+
+.context-menu__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-menu__shortcut {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.context-menu__submenu-arrow {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
