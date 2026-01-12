@@ -66,6 +66,13 @@ def get_sheet(name: str) -> "Sheet":
 
 
 def create_sheet(name: str, index: Optional[int] = None) -> "Sheet":
+    """
+    Create a new sheet.
+
+    By default, Formula inserts the new sheet after the active sheet. Pass `index`
+    to insert at a specific 0-based sheet position instead.
+    """
+
     bridge = _require_bridge()
     if index is not None:
         if not isinstance(index, int) or isinstance(index, bool):
