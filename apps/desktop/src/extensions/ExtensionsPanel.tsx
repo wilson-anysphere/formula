@@ -184,7 +184,7 @@ export function ExtensionsPanel({
             cursor: "pointer",
           }}
         >
-          Reset all permissions
+          Reset all extensions permissions
         </button>
         <button
           type="button"
@@ -387,7 +387,7 @@ export function ExtensionsPanel({
                       cursor: "pointer",
                     }}
                   >
-                    Reset permissions for this extension
+                    Revoke all permissions
                   </button>
                 </div>
               </div>
