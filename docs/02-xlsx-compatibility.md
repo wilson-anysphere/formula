@@ -216,7 +216,8 @@ Indexing note:
 - Other common cell attributes (unrelated to the image binding) still apply, e.g. `r="A1"` (cell reference) and `s="…"` (style index).
 
 Note on `IMAGE()` vs “Place in Cell”:
-- “Place in Cell” pictures have been observed to use the `t="e"` / `#VALUE!` encoding above.
+- “Place in Cell” pictures have been observed to use multiple encodings (including both variants shown
+  above), depending on Excel build / producer.
 - `IMAGE()` function results may instead be stored as a normal formula cell (e.g. `<f>_xlfn.IMAGE(...)</f>`) with `vm` metadata attached; preserve `vm`/`cm` and rich-data parts the same way.
 
 ##### Mapping chain (high-level)
