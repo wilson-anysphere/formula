@@ -49,7 +49,7 @@ pub fn init(app: &mut App) -> tauri::Result<()> {
                 show_main_window(app);
             }
             ITEM_CHECK_UPDATES => {
-                crate::updater::spawn_update_check(app, crate::updater::UpdateCheckSource::Manual)
+                crate::updater::spawn_update_check(app, crate::updater::UpdateCheckSource::Manual);
             }
             ITEM_QUIT => {
                 // Delegate quit-handling to the frontend so it can:

@@ -21,10 +21,7 @@ pub fn spawn_update_check(app: &AppHandle, source: UpdateCheckSource) {
                 let _ = handle.emit("update-available", payload);
             }
             Ok(None) => {
-                let _ = handle.emit(
-                    "update-not-available",
-                    serde_json::json!({ "source": source }),
-                );
+                let _ = handle.emit("update-not-available", serde_json::json!({ "source": source }));
             }
             Err(err) => {
                 let msg = err.to_string();
@@ -51,3 +48,4 @@ async fn check_for_updates(
         })
     }))
 }
+

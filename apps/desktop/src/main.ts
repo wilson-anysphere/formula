@@ -39,6 +39,7 @@ import { startWorkbookSync } from "./tauri/workbookSync";
 import { TauriWorkbookBackend } from "./tauri/workbookBackend";
 import * as nativeDialogs from "./tauri/nativeDialogs";
 import { setTrayStatus } from "./tauri/trayStatus";
+import { installUpdaterUi } from "./tauri/updaterUi";
 import type { WorkbookInfo } from "@formula/workbook-backend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
@@ -3012,6 +3013,8 @@ try {
       }
     });
   };
+
+  installUpdaterUi(listen);
 
   // When the Rust host receives a close request, it asks the frontend to flush any pending
   // workbook-sync operations and to sync macro UI context before it runs `Workbook_BeforeClose`.
