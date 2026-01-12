@@ -52,14 +52,14 @@ fn bytes_to_utf8(bytes: &[u8]) -> Option<String> {
 }
 
 #[cfg(feature = "desktop")]
-mod gtk_backend {
-    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    mod gtk_backend {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
 
-    use super::super::{normalize_base64_str, string_within_limit, MAX_PNG_BYTES, MAX_TEXT_BYTES};
-    use super::{
-        bytes_to_utf8, choose_best_target, ClipboardContent, ClipboardError, ClipboardWritePayload,
-    };
-    use crate::clipboard_fallback;
+        use super::super::{normalize_base64_str, string_within_limit, MAX_PNG_BYTES, MAX_TEXT_BYTES};
+        use super::{
+            bytes_to_utf8, choose_best_target, ClipboardContent, ClipboardError, ClipboardWritePayload,
+        };
+        use crate::clipboard_fallback;
 
     // GTK clipboard APIs must be called on the GTK main thread.
     //
@@ -187,29 +187,39 @@ mod gtk_backend {
             let read_from_clipboard = |clipboard: &gtk::Clipboard| {
                 let targets = clipboard_target_names(clipboard);
 
-                // `wait_for_text` covers many common plaintext targets (UTF8_STRING, STRING, TEXT),
-                // but some producers only advertise MIME-like targets (e.g. `text/plain;charset=utf-8`).
-                // Fall back to reading `text/plain*` via the same target-selection logic used for
-                // rich formats so we don't incorrectly treat the clipboard as empty and fall back
-                // to PRIMARY.
-                let text = clipboard
-                    .wait_for_text()
-                    .map(|s| s.to_string())
-                    .filter(|s| !s.is_empty())
-                    .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES))
-                    .or_else(|| match targets.as_deref() {
-                        Some(targets) => choose_best_target(targets, &["text/plain"])
-                            .and_then(|t| wait_for_utf8_targets(clipboard, &[t], MAX_TEXT_BYTES)),
-                        None => wait_for_utf8_targets(
-                            clipboard,
-                            &[
-                                "text/plain",
-                                "text/plain;charset=utf-8",
-                                "text/plain; charset=utf-8",
-                            ],
-                            MAX_TEXT_BYTES,
-                        ),
-                    });
+                // Read plain text in a size-limited way.
+                //
+                // Different apps advertise text using different targets (e.g. X11 atoms like
+                // `UTF8_STRING`/`STRING`/`TEXT`, or MIME-like targets like
+                // `text/plain;charset=utf-8`). We prefer using `wait_for_contents` so we can check
+                // the `SelectionData` length before copying large buffers into Rust.
+                let text = match targets.as_deref() {
+                    Some(targets) => choose_best_target(
+                        targets,
+                        &[
+                            "text/plain;charset=utf-8",
+                            "text/plain; charset=utf-8",
+                            "text/plain",
+                            "utf8_string",
+                            "string",
+                            "text",
+                        ],
+                    )
+                    .and_then(|t| wait_for_utf8_targets(clipboard, &[t], MAX_TEXT_BYTES)),
+                    None => wait_for_utf8_targets(
+                        clipboard,
+                        &[
+                            "text/plain;charset=utf-8",
+                            "text/plain; charset=utf-8",
+                            "text/plain",
+                            "UTF8_STRING",
+                            "STRING",
+                            "TEXT",
+                        ],
+                        MAX_TEXT_BYTES,
+                    ),
+                }
+                .and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
                 let html = match targets.as_deref() {
                     Some(targets) => choose_best_target(targets, &["text/html"])
                         .and_then(|t| wait_for_utf8_targets(clipboard, &[t], MAX_TEXT_BYTES)),
@@ -486,6 +496,13 @@ mod tests {
         let targets = vec!["text/plain;charset=utf-8", "UTF8_STRING"];
         let best = choose_best_target(&targets, &["text/plain"]);
         assert_eq!(best, Some("text/plain;charset=utf-8"));
+    }
+
+    #[test]
+    fn choose_best_target_supports_text_plain_with_charset_suffix_with_space() {
+        let targets = vec!["text/plain; charset=utf-8", "UTF8_STRING"];
+        let best = choose_best_target(&targets, &["text/plain"]);
+        assert_eq!(best, Some("text/plain; charset=utf-8"));
     }
 
     #[test]
