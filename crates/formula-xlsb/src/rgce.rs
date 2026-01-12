@@ -2782,6 +2782,12 @@ mod encode_ast {
         let s = name.name_upper.as_str();
 
         let mut chars = s.chars().peekable();
+        let abs_col = if chars.peek() == Some(&'$') {
+            chars.next();
+            true
+        } else {
+            false
+        };
         let mut col_letters = String::new();
         while let Some(&ch) = chars.peek() {
             if ch.is_ascii_alphabetic() {
@@ -2795,6 +2801,12 @@ mod encode_ast {
             return Ok(None);
         }
 
+        let abs_row = if chars.peek() == Some(&'$') {
+            chars.next();
+            true
+        } else {
+            false
+        };
         let mut row_digits = String::new();
         while let Some(&ch) = chars.peek() {
             if ch.is_ascii_digit() {
@@ -2832,8 +2844,8 @@ mod encode_ast {
             sheet: SheetSpec::Current,
             row,
             col,
-            abs_row: false,
-            abs_col: false,
+            abs_row,
+            abs_col,
         }))
     }
 
