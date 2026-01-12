@@ -147,6 +147,10 @@ impl Vm {
                 }
                 OpCode::JumpIfFalseOrError => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
+                    // Match the evaluator semantics used by logical functions like IF/IFS:
+                    // a single-cell reference should behave like a scalar value (while multi-cell
+                    // references still surface #SPILL! via array coercion).
+                    let v = super::runtime::deref_value_dynamic(v, grid, base);
                     match super::runtime::coerce_to_bool(&v) {
                         Ok(true) => {}
                         Ok(false) => {

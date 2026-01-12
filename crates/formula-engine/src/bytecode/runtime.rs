@@ -354,6 +354,9 @@ fn eval_ast_inner(
                     }
                     let cond_val =
                         eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);
+                    // Match the bytecode VM: dereference single-cell ranges before coercing to bool
+                    // so expressions like `IF(CHOOSE(1, A1, FALSE), ...)` behave like `IF(A1, ...)`.
+                    let cond_val = deref_value_dynamic(cond_val, grid, base);
                     let cond = match coerce_to_bool(&cond_val) {
                         Ok(b) => b,
                         Err(e) => return Value::Error(e),
@@ -422,6 +425,7 @@ fn eval_ast_inner(
                     for pair in args.chunks_exact(2) {
                         let cond_val =
                             eval_ast_inner(&pair[0], grid, sheet_id, base, locale, lexical_scopes);
+                        let cond_val = deref_value_dynamic(cond_val, grid, base);
                         let cond = match coerce_to_bool(&cond_val) {
                             Ok(b) => b,
                             Err(e) => return Value::Error(e),
@@ -1419,7 +1423,7 @@ pub fn call_function(
         Function::Concat => fn_concat(args),
         Function::Rand => fn_rand(args, base),
         Function::RandBetween => fn_randbetween(args, base),
-        Function::Not => fn_not(args),
+        Function::Not => fn_not(args, grid, base),
         Function::IsBlank => fn_isblank(args, grid, base),
         Function::IsNumber => fn_isnumber(args, grid, base),
         Function::IsText => fn_istext(args, grid, base),
@@ -2822,14 +2826,14 @@ fn fn_sign(args: &[Value]) -> Value {
     }
 }
 
-fn fn_not(args: &[Value]) -> Value {
+fn fn_not(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    match coerce_to_bool(&args[0]) {
+    map_arg(&args[0], grid, base, |v| match coerce_to_bool(v) {
         Ok(b) => Value::Bool(!b),
         Err(e) => Value::Error(e),
-    }
+    })
 }
 
 fn fn_if(args: &[Value]) -> Value {

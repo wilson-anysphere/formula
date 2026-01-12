@@ -148,6 +148,57 @@ fn bytecode_eval_ast_choose_matches_vm_reference_semantics() {
 }
 
 #[test]
+fn bytecode_choose_selected_cell_ref_coerces_in_if_condition() {
+    // CHOOSE can return a reference value (even for single cells). When used as a logical
+    // condition, that single-cell reference should behave like a scalar (matching the evaluator's
+    // `eval_arg` behavior for IF conditions).
+    let origin = CellCoord::new(0, 0);
+    let expr =
+        bytecode::parse_formula("=IF(CHOOSE(1, A1, FALSE), 1, 0)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("choose_if_condition"), &expr);
+    let locale = formula_engine::LocaleConfig::en_us();
+
+    for (label, a1, expected) in [
+        ("false", Value::Bool(false), Value::Number(0.0)),
+        ("true", Value::Bool(true), Value::Number(1.0)),
+    ] {
+        let grid = TextGrid {
+            coord: CellCoord::new(0, 0),
+            value: a1,
+        };
+
+        let mut vm = bytecode::Vm::with_capacity(64);
+        let vm_value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(vm_value, expected, "vm ({label})");
+
+        let ast_value = bytecode::eval_ast(&expr, &grid, 0, origin, &locale);
+        assert_eq!(ast_value, expected, "eval_ast ({label})");
+    }
+}
+
+#[test]
+fn bytecode_choose_selected_cell_ref_coerces_in_not() {
+    // NOT uses boolean coercion on its argument. When CHOOSE selects a single-cell reference,
+    // that reference should be dereferenced before coercion so NOT behaves like `NOT(A1)`.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=NOT(CHOOSE(1, A1, TRUE))", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("choose_not"), &expr);
+    let locale = formula_engine::LocaleConfig::en_us();
+
+    let grid = TextGrid {
+        coord: CellCoord::new(0, 0),
+        value: Value::Bool(false),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(64);
+    let vm_value = vm.eval(&program, &grid, 0, origin, &locale);
+    assert_eq!(vm_value, Value::Bool(true));
+
+    let ast_value = bytecode::eval_ast(&expr, &grid, 0, origin, &locale);
+    assert_eq!(ast_value, Value::Bool(true));
+}
+
+#[test]
 fn bytecode_choose_nan_index_is_value_error_and_does_not_evaluate_choices() {
     // NaN should coerce to an invalid CHOOSE index (0) and yield #VALUE!, without evaluating any
     // choice expressions.
