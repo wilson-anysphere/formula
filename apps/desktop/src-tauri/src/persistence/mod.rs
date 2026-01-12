@@ -514,6 +514,7 @@ mod write_xlsx_from_storage_tests {
     use anyhow::Context;
     use formula_storage::ImportModelWorkbookOptions;
     use formula_xlsx::print::{CellRange, ColRange, Orientation, PrintTitles, RowRange, Scaling};
+    use std::io::Cursor;
     use std::path::Path;
 
     fn import_app_workbook(storage: &formula_storage::Storage, workbook: &AppWorkbook) -> anyhow::Result<Uuid> {
@@ -865,6 +866,40 @@ mod write_xlsx_from_storage_tests {
             expected_cache_def.as_slice(),
             "expected pivot cache definition part to be copied byte-for-byte"
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn write_xlsx_from_storage_sets_date1904_for_xlsx_family_outputs() -> anyhow::Result<()> {
+        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+
+        let mut workbook_meta = AppWorkbook::new_empty(None);
+        workbook_meta.date_system = formula_model::DateSystem::Excel1904;
+        workbook_meta.add_sheet("Sheet1".to_string());
+        workbook_meta.ensure_sheet_ids();
+        workbook_meta.sheets[0].set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(1.0))),
+        );
+
+        let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
+        let tmp = tempfile::tempdir().context("temp dir")?;
+
+        for ext in ["xlsx", "xlsm", "xltx", "xltm", "xlam"] {
+            let out_path = tmp.path().join(format!("date1904.{ext}"));
+            let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
+                .with_context(|| format!("export .{ext}"))?;
+
+            let reread = formula_xlsx::read_workbook_from_reader(Cursor::new(bytes.as_ref()))
+                .with_context(|| format!("read exported workbook model for .{ext}"))?;
+            assert_eq!(
+                reread.date_system,
+                formula_model::DateSystem::Excel1904,
+                "expected exported workbook to use the 1904 date system for .{ext}"
+            );
+        }
 
         Ok(())
     }

@@ -17,7 +17,7 @@ fn loaded_state_with_two_sheets() -> (AppState, String, String) {
 fn add_sheet_rejects_invalid_character() {
     let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
     let err = state
-        .add_sheet("Bad/Name".to_string(), None, None)
+        .add_sheet("Bad/Name".to_string(), None, None, None)
         .expect_err("expected invalid sheet name error");
     match err {
         AppStateError::WhatIf(msg) => {
@@ -34,7 +34,7 @@ fn add_sheet_rejects_invalid_character() {
 fn add_sheet_rejects_empty_string() {
     let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
     let err = state
-        .add_sheet("   ".to_string(), None, None)
+        .add_sheet("   ".to_string(), None, None, None)
         .expect_err("expected empty sheet name error");
     match err {
         AppStateError::WhatIf(msg) => assert!(
@@ -51,7 +51,7 @@ fn add_sheet_rejects_leading_or_trailing_apostrophe() {
 
     for name in ["'Leading", "Trailing'"] {
         let err = state
-            .add_sheet(name.to_string(), None, None)
+            .add_sheet(name.to_string(), None, None, None)
             .expect_err("expected invalid sheet name error");
         match err {
             AppStateError::WhatIf(msg) => assert!(
@@ -68,7 +68,7 @@ fn add_sheet_rejects_names_longer_than_31_chars() {
     let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
     let long_name = "a".repeat(32);
     let err = state
-        .add_sheet(long_name, None, None)
+        .add_sheet(long_name, None, None, None)
         .expect_err("expected sheet name too long error");
     match err {
         AppStateError::WhatIf(msg) => assert!(
@@ -90,7 +90,7 @@ fn add_sheet_truncates_base_name_to_fit_unique_suffix() {
     state.load_workbook(workbook);
 
     let added = state
-        .add_sheet(long, None, None)
+        .add_sheet(long, None, None, None)
         .expect("expected add_sheet to succeed with a unique suffix");
     assert_eq!(added.name, format!("{} 2", "a".repeat(29)));
     assert_eq!(added.name.len(), 31);
@@ -110,7 +110,7 @@ fn add_sheet_truncates_base_name_by_utf16_units_to_fit_unique_suffix() {
     state.load_workbook(workbook);
 
     let added = state
-        .add_sheet(long, None, None)
+        .add_sheet(long, None, None, None)
         .expect("expected add_sheet to succeed with a unique suffix");
 
     // Suffix " 2" uses 2 UTF-16 code units, leaving 29 for the base; we can only fit 14 emojis

@@ -14,7 +14,7 @@ fn add_sheet_creates_persistence_mapping_for_cell_edits() {
         .expect("load workbook");
 
     let sheet = state
-        .add_sheet("Sheet".to_string(), None, None)
+        .add_sheet("Sheet".to_string(), None, None, None)
         .expect("add sheet");
 
     let updates = state

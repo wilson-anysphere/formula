@@ -888,7 +888,7 @@ impl AppState {
         {
             // Avoid `self.get_workbook()` here: it borrows the entire `AppState` immutably for the
             // lifetime of the returned reference, which prevents us from mutably borrowing the
-            // independent `macro_host` field below.
+            // disjoint `macro_host` field below.
             let workbook = self
                 .workbook
                 .as_ref()
