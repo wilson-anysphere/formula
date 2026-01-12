@@ -117,6 +117,20 @@ fn database_functions_computed_criteria_basic() {
 }
 
 #[test]
+fn database_functions_computed_criteria_with_nonmatching_header() {
+    let mut sheet = TestSheet::new();
+    seed_database(&mut sheet);
+
+    // Excel also allows computed criteria when the header is any label that does not match a
+    // database field name.
+    sheet.set("F1", "Criteria");
+    sheet.set_formula("F2", "=C2>30");
+
+    // Matches Bob (35) and Dan (40) => Salary sum = 1500 + 2000.
+    assert_number(&sheet.eval("=DSUM(A1:D5,\"Salary\",F1:F2)"), 3500.0);
+}
+
+#[test]
 fn database_functions_computed_criteria_or_with_standard_criteria() {
     let mut sheet = TestSheet::new();
     seed_database(&mut sheet);

@@ -186,7 +186,11 @@ fn parse_criteria_range(
     }
 
     // Map each criteria column to either a database column index (standard criteria) or a
-    // computed-criteria column (blank header).
+    // computed-criteria column (formula criteria).
+    //
+    // Excel supports "computed criteria" by placing a formula in the criteria range whose header
+    // does *not* match any database field name. A blank header is the most common pattern, but
+    // any non-matching header label should be treated as computed criteria.
     let mut col_map: Vec<CriteriaColumn> = Vec::with_capacity(array.cols);
     for col in 0..array.cols {
         let header_cell = array.get(0, col).unwrap_or(&Value::Blank);
@@ -196,14 +200,14 @@ fn parse_criteria_range(
             if key.is_empty() {
                 return Err(ErrorKind::Value);
             }
-            let db_col = table
-                .header_map
-                .get(&key)
-                .copied()
-                .ok_or(ErrorKind::Value)?;
-            col_map.push(CriteriaColumn::Standard(db_col));
+            if let Some(db_col) = table.header_map.get(&key).copied() {
+                col_map.push(CriteriaColumn::Standard(db_col));
+            } else {
+                col_map.push(CriteriaColumn::Computed);
+            }
         } else {
-            // Excel uses blank criteria headers for "computed criteria" (criteria formulas).
+            // Excel uses blank criteria headers for "computed criteria" (criteria formulas), but
+            // also allows any label that doesn't match a database field name.
             col_map.push(CriteriaColumn::Computed);
         }
     }
