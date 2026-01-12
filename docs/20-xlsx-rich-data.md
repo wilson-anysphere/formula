@@ -28,6 +28,24 @@ In OOXML this is implemented using **Rich Values** (“richData”) plus **cell 
 
 This document captures the part relationships and (most importantly) the **index mappings** needed to implement full support (reader → model → writer) and to avoid compatibility regressions when round-tripping unknown rich-data content.
 
+## Two observed rich value stores
+
+Excel’s “image in cell” feature has been observed using two rich value store families:
+
+1. **Legacy / unprefixed store:** `xl/richData/richValue*.xml`
+   - Optional supporting tables:
+     - `xl/richData/richValueTypes.xml`
+     - `xl/richData/richValueStructure.xml`
+2. **Modern embedded-image (“Place in Cell”) store:** `xl/richData/rdrichvalue*.xml`
+   - Typically includes:
+     - `xl/richData/rdrichvalue.xml`
+     - `xl/richData/rdrichvaluestructure.xml` (defines positional `<v>` field meanings)
+     - `xl/richData/rdRichValueTypes.xml`
+
+Both variants still resolve media using the shared **relationship-slot table**:
+
+- `xl/richData/richValueRel.xml` → `xl/richData/_rels/richValueRel.xml.rels` → `xl/media/*`.
+
 > Note: The exact element/type names inside `<rv>` for image payloads vary by Excel version and are not
 > fully specified in the public ECMA-376 base schema. This repo contains **real Excel fixtures** showing
 > concrete shapes/namespaces for:
@@ -110,6 +128,29 @@ sheetN.xml: <c vm="VM_INDEX">…</c>
                                      └─> xl/richData/_rels/richValueRel*.xml.rels: Relationship Id="rIdX"
                                           └─> Target="../media/imageY.png" => xl/media/imageY.png bytes
 ```
+
+### Confirmed “Place in Cell” (`rdrichvalue.xml`) mapping chain (Excel + `rust_xlsxwriter`)
+
+This is the **verified** mapping chain for embedded “Place in Cell” images (observed in the real Excel
+fixture `fixtures/xlsx/basic/image-in-cell.xlsx` and in `rust_xlsxwriter::Worksheet::embed_image(...)`
+output used by repo tests):
+
+1. Worksheet cell uses an error cache + value metadata index (note: `vm` is **1-based** in this variant):
+
+   ```xml
+   <c r="A1" t="e" vm="1"><v>#VALUE!</v></c>
+   ```
+
+2. `c/@vm` selects a `<valueMetadata><bk>` record in `xl/metadata.xml`.
+3. That record’s `<rc v="…"/>` indexes into `<futureMetadata name="XLRICHVALUE">`’s `<bk>` list.
+4. That future-metadata `<bk>` contains `<xlrd:rvb i="…"/>`, where:
+   - `xlrd:rvb/@i` is the **0-based** rich value index.
+5. The rich value index selects an `<rv>` record in `xl/richData/rdrichvalue.xml`.
+6. Using `xl/richData/rdrichvaluestructure.xml`, read the `_rvRel:LocalImageIdentifier` field from the
+   positional `<v>` list (for `_localImage` this is the **first** `<v>` in our verified samples):
+   - that value is the **0-based** relationship-slot index into `xl/richData/richValueRel.xml`.
+7. The slot selects `<rel r:id="rIdX"/>`, which resolves via `xl/richData/_rels/richValueRel.xml.rels` to
+   a concrete image target (typically `Target="../media/imageN.png"`).
 
 ### Indexing notes (practical assumptions)
 

@@ -23,6 +23,53 @@ For a **concrete, confirmed** “Place in Cell” (embedded local image) package
 
 ---
 
+## Two observed rich value stores (legacy `richValue*` vs modern `rdRichValue*`)
+
+Excel images-in-cell are backed by the RichData (rich value) system, but the **rich value store parts**
+come in (at least) two observed families:
+
+1. **Legacy / unprefixed store:** `xl/richData/richValue*.xml`
+   - Often accompanied by:
+     - `xl/richData/richValueTypes.xml`
+     - `xl/richData/richValueStructure.xml`
+   - Observed in this repo in both:
+     - the real Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx` (plus `xl/cellimages.xml`), and
+     - the synthetic regression fixture `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`.
+2. **Modern embedded-image (“Place in Cell”) store:** `xl/richData/rdrichvalue*.xml`
+   - Typically includes:
+     - `xl/richData/rdrichvalue.xml`
+     - `xl/richData/rdrichvaluestructure.xml` (defines the meaning of positional `<v>` fields)
+     - `xl/richData/rdRichValueTypes.xml`
+   - Observed in this repo in the real Excel fixture `fixtures/xlsx/basic/image-in-cell.xlsx` and in
+     `rust_xlsxwriter` output (used by tests like `embedded_images_place_in_cell_roundtrip.rs`).
+
+Both families:
+
+- use worksheet cell metadata indices (`c/@vm` and sometimes `c/@cm`) via `xl/metadata.xml`, and
+- ultimately resolve embedded images via the **relationship-slot table**:
+  - `xl/richData/richValueRel.xml` + `xl/richData/_rels/richValueRel.xml.rels` → `xl/media/*`.
+
+### Modern “Place in Cell” mapping chain (confirmed)
+
+For the `rdrichvalue.xml` embedded-image variant, the concrete reference chain is:
+
+1. Worksheet cell has `vm="…"` (in our verified “Place in Cell” samples: **1-based**) and an error cache:
+
+   ```xml
+   <c r="B2" t="e" vm="1"><v>#VALUE!</v></c>
+   ```
+
+2. `c/@vm` selects a `<valueMetadata><bk>` record in `xl/metadata.xml`.
+3. `valueMetadata/bk/rc/@v` selects an entry in `futureMetadata name="XLRICHVALUE"`.
+4. That future-metadata `<bk>` contains `<xlrd:rvb i="…"/>`, where:
+   - `i` is a **0-based** rich value index.
+5. The rich value index selects an `<rv>` record in `xl/richData/rdrichvalue.xml`.
+6. Using `xl/richData/rdrichvaluestructure.xml`, locate the `_rvRel:LocalImageIdentifier` field for that
+   `<rv>` (in the `_localImage` structure this is the **first** `<v>` in our verified samples):
+   - value is a **0-based** relationship-slot index into `xl/richData/richValueRel.xml`.
+7. That slot selects `<rel r:id="rIdX"/>` in `richValueRel.xml`, which is resolved via:
+   - `xl/richData/_rels/richValueRel.xml.rels` → `Target="../media/imageN.png"`.
+
 ## Expected part set (workbook-level)
 
 When a workbook contains at least one RichData value (including images-in-cell), Excel typically adds:
@@ -428,7 +475,7 @@ From `xl/worksheets/sheet1.xml` (excerpt):
 
 Notes:
 
- * In this fixture, `vm` is **1-based** (`vm="1"` selects the first `<valueMetadata><bk>`).
+* In this fixture, `vm` is **1-based** (`vm="1"` selects the first `<valueMetadata><bk>`).
 
 **`xl/metadata.xml` (`futureMetadata name="XLRICHVALUE"` + `xlrd:rvb i="..."`)**
 

@@ -656,7 +656,23 @@ Representative skeleton (SpreadsheetML namespace is expected, but element detail
 
 Excel stores non-primitive “rich” cell values using a set of XML parts under `xl/richData/`.
 For images-in-cells, these rich values ultimately resolve to an **image binary** under `xl/media/*`,
-but there are multiple packaging patterns in the ecosystem:
+but there are multiple schemas and packaging patterns in the ecosystem.
+
+### Two observed rich value stores (richValue* vs rdRichValue*)
+
+This repo currently has fixtures/tests covering two rich value store families:
+
+1. **Legacy / unprefixed store:** `xl/richData/richValue*.xml` (often with optional `richValueTypes.xml` /
+   `richValueStructure.xml`).
+2. **Modern embedded-image (“Place in Cell”) store:** `xl/richData/rdrichvalue*.xml` +
+   `xl/richData/rdrichvaluestructure.xml` + `xl/richData/rdRichValueTypes.xml`.
+
+Both stores use `xl/metadata.xml` + worksheet `c/@vm` to map cells to rich value indices, and both resolve
+media via the shared relationship-slot table:
+
+- `xl/richData/richValueRel.xml` → `xl/richData/_rels/richValueRel.xml.rels` → `xl/media/*`.
+
+### Packaging patterns (how the media is wired)
 
 1. **RichData → RichValueRel → media (no `cellimages.xml` part)**
    - Observed in this repo in both:
