@@ -8,6 +8,7 @@
 //!
 //! This module exposes best-effort parsing helpers without integrating into `formula-model` yet.
 
+mod discovery;
 pub mod metadata;
 pub mod rich_value;
 pub mod rich_value_rel;
@@ -18,6 +19,7 @@ mod media_parts;
 mod rich_value_images;
 mod worksheet_scan;
 
+pub use discovery::discover_rich_data_part_names;
 pub use images::resolve_rich_value_image_targets;
 pub use worksheet_scan::scan_cells_with_metadata_indices;
 pub use rich_value_images::{ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning};
