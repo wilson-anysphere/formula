@@ -208,6 +208,14 @@ export interface WorkbookContextBuildStats {
 export interface WorkbookContextPayload {
   version: 1;
   workbookId: string;
+  /**
+   * Version counter for workbook-level schema metadata (named ranges / explicit tables),
+   * as reported by the active `WorkbookSchemaProvider` (or 0 when unavailable).
+   *
+   * This is intended as a cheap cache key component for higher-level context caching
+   * (e.g. avoiding hashing the full namedRanges/tables arrays).
+   */
+  schemaVersion: number;
   activeSheetId: string;
   /**
    * Optional selection passed by the caller (inline edit, attachments, etc).
@@ -701,6 +709,7 @@ export class WorkbookContextBuilder {
     const payload: WorkbookContextPayload = {
       version: 1,
       workbookId: this.options.workbookId,
+      schemaVersion: schemaMetadata.schemaVersion,
       activeSheetId: input.activeSheetId,
       ...(selection
          ? { selection: { sheetId: selection.sheetId, range: this.rangeRef(selection.sheetId, selection.range) } }

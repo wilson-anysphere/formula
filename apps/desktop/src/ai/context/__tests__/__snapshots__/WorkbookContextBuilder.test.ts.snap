@@ -75,6 +75,7 @@ exports[`WorkbookContextBuilder > serializes a stable payload snapshot 1`] = `
     "retrievedChunkIds": [],
     "retrievedRanges": []
   },
+  "schemaVersion": 0,
   "selection": {
     "range": "Sheet1!A1:B3",
     "sheetId": "Sheet1"
