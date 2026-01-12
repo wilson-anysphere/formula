@@ -51,7 +51,26 @@ fn main() -> Result<()> {
 
     let expected = xlsx_diff::WorkbookArchive::open(&args.original)?;
     let actual = xlsx_diff::WorkbookArchive::open(&args.modified)?;
-    let report = xlsx_diff::diff_archives_with_options(&expected, &actual, &options);
+    let mut report = xlsx_diff::diff_archives_with_options(&expected, &actual, &options);
+    report.differences.sort_by(|a, b| {
+        let rank = |s: xlsx_diff::Severity| match s {
+            xlsx_diff::Severity::Critical => 0u8,
+            xlsx_diff::Severity::Warning => 1u8,
+            xlsx_diff::Severity::Info => 2u8,
+        };
+        (
+            rank(a.severity),
+            a.part.as_str(),
+            a.path.as_str(),
+            a.kind.as_str(),
+        )
+            .cmp(&(
+                rank(b.severity),
+                b.part.as_str(),
+                b.path.as_str(),
+                b.kind.as_str(),
+            ))
+    });
 
     println!("Workbook diff report (OPC parts)");
     println!("  original: {}", args.original.display());
