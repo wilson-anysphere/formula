@@ -1916,7 +1916,7 @@ mod tests {
     #[test]
     fn decodes_whole_row_area_with_3fff_max_col_as_row_range() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -2045,7 +2045,8 @@ mod tests {
     #[test]
     fn decodes_whole_row_area3d_with_3fff_max_col_as_row_range() {
         let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
-        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -2216,7 +2217,8 @@ mod tests {
     #[test]
     fn decodes_ptg_refn3d_with_base() {
         let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
-        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -2245,7 +2247,8 @@ mod tests {
     #[test]
     fn decodes_ptg_arean3d_with_base() {
         let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
-        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
             itab_first: 0,
             itab_last: 0,
         }];
@@ -2340,7 +2343,7 @@ mod tests {
     #[test]
     fn decodes_stack_underflow_to_unknown_error_literal_with_ptg_warning() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
@@ -2364,7 +2367,7 @@ mod tests {
     #[test]
     fn decodes_truncated_ptg_payload_to_unknown_error_literal_with_ptg_warning() {
         let sheet_names: Vec<String> = Vec::new();
-        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 

@@ -4968,6 +4968,8 @@ fn fn_sumif(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::MultiRange(_) => {}
                 }
             }
@@ -5139,6 +5141,8 @@ fn fn_sumifs(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::MultiRange(_) => {}
                 }
             }
@@ -5549,6 +5553,8 @@ fn fn_averageif(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::MultiRange(_) => {}
                 }
             }
@@ -5743,6 +5749,8 @@ fn fn_averageifs(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::MultiRange(_) => {}
                 }
             }
@@ -6001,6 +6009,8 @@ fn fn_minifs(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::MultiRange(_) => {}
                 }
             }
@@ -6217,6 +6227,8 @@ fn fn_maxifs(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::MultiRange(_) => {}
                 }
             }

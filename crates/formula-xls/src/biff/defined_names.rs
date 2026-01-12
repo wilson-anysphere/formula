@@ -200,13 +200,26 @@ fn parse_biff8_name_record(
 
         let id = match (id_from_name, ch_key) {
             (Some(id_from_name), ch_key) if ch_key != 0 && id_from_name != ch_key => {
-                // `chKey` is documented as a keyboard shortcut, but some producers may populate
-                // both fields. Prefer the `rgchName` id when present to match Excel / POI
-                // behavior, while surfacing a debug hint for corrupt/ambiguous files.
-                log::debug!(
-                    "NAME record built-in id mismatch: rgchName=0x{id_from_name:02X} chKey=0x{ch_key:02X} (using rgchName)"
-                );
-                id_from_name
+                // [MS-XLS] defines `chKey` as a keyboard shortcut for user-defined names, but when
+                // `fBuiltin` is set some producers appear to store the built-in name id in `chKey`
+                // instead of (or in addition to) `rgchName`.
+                //
+                // Heuristic:
+                // - If `chKey` looks like a known built-in name id, prefer it (fixes real-world
+                //   corrupt/mismatched `rgchName` payloads).
+                // - Otherwise treat it as a keyboard shortcut and fall back to `rgchName`.
+                let prefer_ch_key = matches!(ch_key, 0x00..=0x0D);
+                if prefer_ch_key {
+                    log::debug!(
+                        "NAME record built-in id mismatch: rgchName=0x{id_from_name:02X} chKey=0x{ch_key:02X} (using chKey)"
+                    );
+                    ch_key
+                } else {
+                    log::debug!(
+                        "NAME record built-in id mismatch: rgchName=0x{id_from_name:02X} chKey=0x{ch_key:02X} (using rgchName)"
+                    );
+                    id_from_name
+                }
             }
             (Some(id_from_name), _) => id_from_name,
             (None, ch_key) => ch_key,
