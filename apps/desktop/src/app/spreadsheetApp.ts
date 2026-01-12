@@ -80,7 +80,7 @@ import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../grid/shar
 import { openExternalHyperlink } from "../hyperlinks/openExternal.js";
 import * as nativeDialogs from "../tauri/nativeDialogs.js";
 import { shellOpen } from "../tauri/shellOpen.js";
-import { applyFillCommitToDocumentController } from "../fill/applyFillCommit";
+import { applyFillCommitToDocumentController, applyFillCommitToDocumentControllerWithFormulaRewrite } from "../fill/applyFillCommit";
 import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@formula/fill-engine";
 import { bindSheetViewToCollabSession, type SheetViewBinder } from "../collab/sheetViewBinder";
 import { loadCollabConnectionForWorkbook } from "../sharing/collabConnectionStore.js";
@@ -1362,17 +1362,51 @@ export class SpreadsheetApp {
             }
 
             const fillCoordScratch = { row: 0, col: 0 };
+            const getCellComputedValue = (row: number, col: number) => {
+              fillCoordScratch.row = row;
+              fillCoordScratch.col = col;
+              return this.getCellComputedValue(fillCoordScratch) as any;
+            };
+
+            // Prefer engine-backed formula shifting when available (handles A:A / 1:1 / ranges, etc).
+            const wasm = this.wasmEngine;
+            if (wasm && mode !== "copy") {
+              const task = applyFillCommitToDocumentControllerWithFormulaRewrite({
+                document: this.document,
+                sheetId: this.sheetId,
+                sourceRange: source,
+                targetRange: target,
+                mode,
+                getCellComputedValue,
+                rewriteFormulasForCopyDelta: (requests) => wasm.rewriteFormulasForCopyDelta(requests),
+              })
+                .catch(() => {
+                  // Fall back to the legacy best-effort fill engine if the worker is unavailable.
+                  applyFillCommitToDocumentController({
+                    document: this.document,
+                    sheetId: this.sheetId,
+                    sourceRange: source,
+                    targetRange: target,
+                    mode,
+                    getCellComputedValue,
+                  });
+                })
+                .finally(() => {
+                  // Ensure non-grid overlays (charts, auditing) refresh after the mutation.
+                  this.refresh();
+                  this.focus();
+                });
+              this.idle.track(task);
+              return;
+            }
+
             applyFillCommitToDocumentController({
               document: this.document,
               sheetId: this.sheetId,
               sourceRange: source,
               targetRange: target,
               mode,
-              getCellComputedValue: (row, col) => {
-                fillCoordScratch.row = row;
-                fillCoordScratch.col = col;
-                return this.getCellComputedValue(fillCoordScratch) as any;
-              }
+              getCellComputedValue,
             });
 
             // Ensure non-grid overlays (charts, auditing) refresh after the mutation.
