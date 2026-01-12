@@ -1271,8 +1271,15 @@ export class WebExtensionManager {
       }
     }
 
-    // Preferred behavior: call host.startup() exactly once so existing extensions don't receive
-    // duplicate startup events.
+    // Preferred behavior: call host.startup() once during boot so extensions that rely on
+    // `onStartupFinished` are activated and receive the initial `workbookOpened` event.
+    //
+    // We intentionally avoid calling `startup()` when the host already appears to have active
+    // extensions (to prevent re-broadcasting `workbookOpened` to already-running extensions).
+    //
+    // Additionally, for older hosts without `startupExtension()`, we allow a second `startup()`
+    // call when startup previously ran with *zero* loaded extensions and we just loaded the first
+    // installed extension (safe: no existing extensions can be spammed).
     if (
       this.host.startup &&
       (!this._didHostStartup || (initialHostExtensionCount === 0 && newlyLoaded.length > 0)) &&
