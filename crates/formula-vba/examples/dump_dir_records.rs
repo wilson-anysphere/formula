@@ -209,6 +209,7 @@ fn record_name(id: u16) -> Option<&'static str> {
         // ---- Reference records (used by ContentNormalizedData / ProjectNormalizedData) ----
         0x000D => "REFERENCEREGISTERED",
         0x000E => "REFERENCEPROJECT",
+        0x0016 => "REFERENCENAME",
         0x002F => "REFERENCECONTROL",
         0x0030 => "REFERENCEEXTENDED",
         0x0033 => "REFERENCEORIGINAL",
@@ -216,7 +217,6 @@ fn record_name(id: u16) -> Option<&'static str> {
 
         // ---- Module records ----
         0x0015 => "MODULECOUNT",
-        0x0016 => "PROJECTMODULES",
         0x0019 => "MODULENAME",
         0x001A => "MODULESTREAMNAME",
         0x001C => "MODULEDOCSTRING",
