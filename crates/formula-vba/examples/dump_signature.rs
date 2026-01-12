@@ -1,5 +1,4 @@
 use std::ffi::OsString;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -7,6 +6,9 @@ use formula_vba::{
     extract_signer_certificate_info, extract_vba_signature_signed_digest,
     list_vba_digital_signatures, verify_vba_digital_signature,
 };
+
+#[path = "shared/zip_util.rs"]
+mod zip_util;
 
 fn main() -> ExitCode {
     match run() {
@@ -172,24 +174,14 @@ fn extract_vba_project_bin_from_zip(path: &Path) -> Result<Vec<u8>, String> {
         Err(e) => return Err(format!("failed to open zip {}: {e}", path.display())),
     };
 
-    let mut entry = match archive.by_name("xl/vbaProject.bin") {
-        Ok(f) => f,
-        Err(zip::result::ZipError::FileNotFound) => {
-            return Err(format!(
-                "{} is a zip, but does not contain xl/vbaProject.bin",
-                path.display()
-            ));
-        }
-        Err(e) => return Err(format!("failed to read zip {}: {e}", path.display())),
-    };
-
-    let mut buf = Vec::new();
-    entry.read_to_end(&mut buf).map_err(|e| {
-        format!(
-            "failed to read xl/vbaProject.bin from {}: {e}",
+    let Some(buf) = zip_util::read_zip_entry_bytes(&mut archive, "xl/vbaProject.bin")
+        .map_err(|e| format!("failed to read zip {}: {e}", path.display()))?
+    else {
+        return Err(format!(
+            "{} is a zip, but does not contain xl/vbaProject.bin",
             path.display()
-        )
-    })?;
+        ));
+    };
     Ok(buf)
 }
 

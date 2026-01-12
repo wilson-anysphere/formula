@@ -1,9 +1,11 @@
 use std::ffi::OsString;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use formula_vba::{project_normalized_data_v3_transcript, v3_content_normalized_data};
+
+#[path = "shared/zip_util.rs"]
+mod zip_util;
 
 const DEFAULT_HEAD_BYTES: usize = 64;
 
@@ -220,21 +222,14 @@ fn try_extract_vba_project_bin_from_zip(path: &Path) -> Result<Option<Vec<u8>>, 
         Err(_) => return Ok(None),
     };
 
-    let mut entry = match archive.by_name("xl/vbaProject.bin") {
-        Ok(f) => f,
-        Err(zip::result::ZipError::FileNotFound) => {
-            return Err(format!(
-                "{} is a zip, but does not contain xl/vbaProject.bin",
-                path.display()
-            ));
-        }
-        Err(e) => return Err(format!("failed to read zip {}: {e}", path.display())),
+    let Some(buf) = zip_util::read_zip_entry_bytes(&mut archive, "xl/vbaProject.bin")
+        .map_err(|e| format!("failed to read zip {}: {e}", path.display()))?
+    else {
+        return Err(format!(
+            "{} is a zip, but does not contain xl/vbaProject.bin",
+            path.display()
+        ));
     };
-
-    let mut buf = Vec::new();
-    entry
-        .read_to_end(&mut buf)
-        .map_err(|e| format!("failed to read xl/vbaProject.bin from {}: {e}", path.display()))?;
     Ok(Some(buf))
 }
 
