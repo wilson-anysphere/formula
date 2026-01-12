@@ -727,10 +727,19 @@ pub fn verify_vba_signature_binding_with_stream_path(
 
         let signed_digest = signed.digest.as_slice();
 
-        if matches!(
-            signature_path_stream_kind(signature_stream_path),
-            Some(VbaSignatureStreamKind::DigitalSignatureExt)
-        ) {
+        let stream_kind = signature_path_stream_kind(signature_stream_path);
+        // Prefer v3 when the stream kind indicates `DigitalSignatureExt`. If the stream kind is
+        // unknown (or not provided), fall back to a digest-length heuristic (v3 digests are
+        // typically 32-byte SHA-256; legacy binding digests are always 16-byte MD5 per MS-OSHARED
+        // §4.3).
+        let treat_as_v3 = match stream_kind {
+            Some(VbaSignatureStreamKind::DigitalSignatureExt) => true,
+            Some(VbaSignatureStreamKind::DigitalSignature)
+            | Some(VbaSignatureStreamKind::DigitalSignatureEx) => false,
+            Some(VbaSignatureStreamKind::Unknown) | None => signed_digest.len() != 16,
+        };
+
+        if treat_as_v3 {
             let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) else {
                 return VbaSignatureBinding::Unknown;
             };

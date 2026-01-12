@@ -6,8 +6,8 @@ use formula_vba::{
     agile_content_hash_md5, compress_container, compute_vba_project_digest_v3, content_hash_md5,
     verify_vba_digital_signature,
     verify_vba_digital_signature_bound, verify_vba_project_signature_binding,
-    verify_vba_signature_binding_with_stream_path, DigestAlg, VbaProjectBindingVerification,
-    VbaSignatureBinding, VbaSignatureVerification,
+    verify_vba_signature_binding, verify_vba_signature_binding_with_stream_path, DigestAlg,
+    VbaProjectBindingVerification, VbaSignatureBinding, VbaSignatureVerification,
 };
 
 mod signature_test_utils;
@@ -238,6 +238,11 @@ fn digital_signature_ext_uses_v3_project_digest_for_binding() {
         VbaSignatureBinding::Bound,
         "expected binding to remain Bound for prefixed stream path {prefixed_path}"
     );
+
+    // If callers don't know the original OLE stream name, we still try to infer v3 binding via the
+    // digest length (v3 signatures are typically non-16-byte digests).
+    let binding2 = verify_vba_signature_binding(&signed, &signature_stream);
+    assert_eq!(binding2, VbaSignatureBinding::Bound);
 
     let bound = verify_vba_digital_signature_bound(&signed)
         .expect("bound verify")
