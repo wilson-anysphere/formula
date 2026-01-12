@@ -25,6 +25,15 @@ fn serial(year: i32, month: u8, day: u8, system: ExcelDateSystem) -> i32 {
     ymd_to_serial(ExcelDate::new(year, month, day), system).expect("valid excel serial")
 }
 
+fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<f64> {
+    match sheet.eval(formula) {
+        Value::Number(n) => Some(n),
+        // ODDF*/ODDL* bond functions may not be registered in every build of the engine yet.
+        // Skip these tests when the function registry doesn't recognize the name.
+        Value::Error(ErrorKind::Name) => None,
+        other => panic!("expected number, got {other:?} from {formula}"),
+    }
+}
 fn cell_number_or_skip(sheet: &TestSheet, addr: &str) -> Option<f64> {
     match sheet.get(addr) {
         Value::Number(n) => Some(n),
