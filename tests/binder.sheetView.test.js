@@ -122,6 +122,46 @@ test("binder: hydrates sheet view state from plain-object Yjs sheet entries", as
   }
 });
 
+test("binder: applies view state when sheet id is set after view", async () => {
+  const ydoc = new Y.Doc();
+  const sheets = ydoc.getArray("sheets");
+
+  ydoc.transact(() => {
+    const entry = new Y.Map();
+    entry.set("name", "Sheet1");
+    entry.set("view", { frozenRows: 2, frozenCols: 1 });
+    sheets.push([entry]);
+  });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1" });
+
+  try {
+    // No id yet, so there is no sheet key to apply against.
+    assert.deepEqual(documentController.getSheetView("Sheet1"), { frozenRows: 0, frozenCols: 0 });
+
+    const remoteOrigin = { type: "remote-test" };
+    ydoc.transact(
+      () => {
+        const entry = sheets.get(0);
+        assert.ok(entry instanceof Y.Map);
+        entry.set("id", "Sheet1");
+      },
+      remoteOrigin,
+    );
+
+    await waitForCondition(() => {
+      const view = documentController.getSheetView("Sheet1");
+      return view.frozenRows === 2 && view.frozenCols === 1;
+    });
+
+    assert.deepEqual(documentController.getSheetView("Sheet1"), { frozenRows: 2, frozenCols: 1 });
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
+
 test("binder: Yjs→DocumentController syncs sheet view state (initial hydration + remote changes)", async () => {
   const ydoc = new Y.Doc();
   const sheets = ydoc.getArray("sheets");

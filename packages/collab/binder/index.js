@@ -897,6 +897,7 @@ export function bindYjsToDocumentController(options) {
       const hasPotentialViewChange =
         changes &&
         (changes.has("view") ||
+          changes.has("id") ||
           changes.has("frozenRows") ||
           changes.has("frozenCols") ||
           changes.has("colWidths") ||
