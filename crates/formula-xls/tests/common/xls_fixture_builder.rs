@@ -26,6 +26,13 @@ const RECORD_MERGEDCELLS: u16 = 0x00E5;
 const RECORD_BLANK: u16 = 0x0201;
 const RECORD_NUMBER: u16 = 0x0203;
 const RECORD_HLINK: u16 = 0x01B8;
+const RECORD_ROW: u16 = 0x0208;
+const RECORD_COLINFO: u16 = 0x007D;
+
+const ROW_OPTION_HIDDEN: u16 = 0x0020;
+const ROW_OPTION_COLLAPSED: u16 = 0x1000;
+const COLINFO_OPTION_HIDDEN: u16 = 0x0001;
+const COLINFO_OPTION_COLLAPSED: u16 = 0x1000;
 
 const BOF_VERSION_BIFF8: u16 = 0x0600;
 const BOF_DT_WORKBOOK_GLOBALS: u16 = 0x0005;
@@ -155,6 +162,24 @@ pub fn build_out_of_range_xf_no_formats_fixture_xls() -> Vec<u8> {
 /// This exercises the importer’s handling of continued BIFF8 `FORMAT` records.
 pub fn build_continued_format_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_continued_format_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture with grouped rows/columns and collapsed outline groups.
+///
+/// This is used to validate that the importer preserves Excel outline metadata (levels,
+/// collapsed summary rows/cols, and derived outline-hidden state).
+pub fn build_outline_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_outline_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -584,6 +609,46 @@ fn build_unknown_builtin_numfmtid_workbook_stream() -> Vec<u8> {
 
     let sheet_offset = globals.len();
     let sheet = build_unknown_builtin_numfmtid_sheet_stream(xf_unknown);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_outline_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Outline");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_outline_sheet_stream(xf_general);
 
     // Patch BoundSheet offset.
     globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
@@ -1231,6 +1296,42 @@ fn build_unknown_builtin_numfmtid_sheet_stream(xf: u16) -> Vec<u8> {
     sheet
 }
 
+fn build_outline_sheet_stream(xf: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 4) cols [0, 4) (A..D, rows 1..4)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&4u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&4u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Outline rows:
+    // - Rows 2-3 (1-based) are detail rows: outline level 1 and hidden (collapsed).
+    // - Row 4 (1-based) is the collapsed summary row (level 0, collapsed).
+    push_record(&mut sheet, RECORD_ROW, &row_record(1, true, 1, false));
+    push_record(&mut sheet, RECORD_ROW, &row_record(2, true, 1, false));
+    push_record(&mut sheet, RECORD_ROW, &row_record(3, false, 0, true));
+
+    // Outline columns:
+    // - Columns B-C (1-based) are detail columns: outline level 1 and hidden (collapsed).
+    // - Column D (1-based) is the collapsed summary column.
+    push_record(&mut sheet, RECORD_COLINFO, &colinfo_record(1, 2, true, 1, false));
+    push_record(&mut sheet, RECORD_COLINFO, &colinfo_record(3, 3, false, 0, true));
+
+    // A1: number cell with a General XF.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf, 1.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
 fn build_merged_non_anchor_conflicting_blank_formats_sheet_stream(
     xf_percent: u16,
     xf_duration: u16,
@@ -1408,6 +1509,54 @@ fn blank_cell(row: u16, col: u16, xf: u16) -> [u8; 6] {
     out[0..2].copy_from_slice(&row.to_le_bytes());
     out[2..4].copy_from_slice(&col.to_le_bytes());
     out[4..6].copy_from_slice(&xf.to_le_bytes());
+    out
+}
+
+fn row_record(row: u16, hidden: bool, outline_level: u8, collapsed: bool) -> [u8; 16] {
+    // ROW record payload (BIFF8, 16 bytes).
+    let mut out = [0u8; 16];
+    out[0..2].copy_from_slice(&row.to_le_bytes());
+    // colMic=0, colMac=4 (A..D)
+    out[2..4].copy_from_slice(&0u16.to_le_bytes());
+    out[4..6].copy_from_slice(&4u16.to_le_bytes());
+    // miyRw: default height flag set (0x8000).
+    out[6..8].copy_from_slice(&0x8000u16.to_le_bytes());
+
+    let mut options: u16 = 0;
+    if hidden {
+        options |= ROW_OPTION_HIDDEN;
+    }
+    options |= ((outline_level as u16) & 0x0007) << 8;
+    if collapsed {
+        options |= ROW_OPTION_COLLAPSED;
+    }
+    out[12..14].copy_from_slice(&options.to_le_bytes());
+    out
+}
+
+fn colinfo_record(
+    first_col: u16,
+    last_col: u16,
+    hidden: bool,
+    outline_level: u8,
+    collapsed: bool,
+) -> [u8; 12] {
+    // COLINFO record payload (BIFF8, 12 bytes).
+    let mut out = [0u8; 12];
+    out[0..2].copy_from_slice(&first_col.to_le_bytes());
+    out[2..4].copy_from_slice(&last_col.to_le_bytes());
+    // cx: arbitrary non-zero width (8.0 characters * 256).
+    out[4..6].copy_from_slice(&2048u16.to_le_bytes());
+
+    let mut options: u16 = 0;
+    if hidden {
+        options |= COLINFO_OPTION_HIDDEN;
+    }
+    options |= ((outline_level as u16) & 0x0007) << 8;
+    if collapsed {
+        options |= COLINFO_OPTION_COLLAPSED;
+    }
+    out[8..10].copy_from_slice(&options.to_le_bytes());
     out
 }
 

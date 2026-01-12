@@ -1,9 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use formula_model::{
-    CellRef, ColProperties, Hyperlink, HyperlinkTarget, Range, RowProperties, EXCEL_MAX_COLS,
-    EXCEL_MAX_ROWS,
-};
+use formula_model::{CellRef, Hyperlink, HyperlinkTarget, OutlinePr, Range, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 
 use super::records;
 use super::strings;
@@ -17,6 +14,7 @@ use super::strings;
 // - MULBLANK: 2.4.140
 const RECORD_ROW: u16 = 0x0208;
 const RECORD_COLINFO: u16 = 0x007D;
+const RECORD_WSBOOL: u16 = 0x0081;
 /// MERGEDCELLS [MS-XLS 2.4.139]
 const RECORD_MERGEDCELLS: u16 = 0x00E5;
 
@@ -35,14 +33,48 @@ const RECORD_HLINK: u16 = 0x01B8;
 
 const ROW_HEIGHT_TWIPS_MASK: u16 = 0x7FFF;
 const ROW_HEIGHT_DEFAULT_FLAG: u16 = 0x8000;
-const ROW_OPTION_HIDDEN: u32 = 0x0000_0020;
+const ROW_OPTION_HIDDEN: u16 = 0x0020;
+const ROW_OPTION_OUTLINE_LEVEL_MASK: u16 = 0x0700;
+const ROW_OPTION_OUTLINE_LEVEL_SHIFT: u16 = 8;
+const ROW_OPTION_COLLAPSED: u16 = 0x1000;
 
 const COLINFO_OPTION_HIDDEN: u16 = 0x0001;
+const COLINFO_OPTION_OUTLINE_LEVEL_MASK: u16 = 0x0700;
+const COLINFO_OPTION_OUTLINE_LEVEL_SHIFT: u16 = 8;
+const COLINFO_OPTION_COLLAPSED: u16 = 0x1000;
+
+const WSBOOL_OPTION_ROW_SUMMARY_BELOW: u16 = 0x0040;
+const WSBOOL_OPTION_COL_SUMMARY_RIGHT: u16 = 0x0080;
+const WSBOOL_OPTION_SHOW_OUTLINE_SYMBOLS: u16 = 0x0200;
+
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct SheetRowProperties {
+    pub(crate) height: Option<f32>,
+    /// Raw hidden bit from BIFF.
+    ///
+    /// Excel uses this for both user-hidden rows and rows hidden by a collapsed outline group.
+    /// Callers should derive `OutlineEntry.hidden.user` vs `hidden.outline` using the outline
+    /// metadata (collapsed summary rows + levels).
+    pub(crate) hidden: bool,
+    pub(crate) outline_level: u8,
+    pub(crate) collapsed: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct SheetColProperties {
+    pub(crate) width: Option<f32>,
+    /// Raw hidden bit from BIFF.
+    pub(crate) hidden: bool,
+    pub(crate) outline_level: u8,
+    pub(crate) collapsed: bool,
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct SheetRowColProperties {
-    pub(crate) rows: BTreeMap<u32, RowProperties>,
-    pub(crate) cols: BTreeMap<u32, ColProperties>,
+    pub(crate) rows: BTreeMap<u32, SheetRowProperties>,
+    pub(crate) cols: BTreeMap<u32, SheetColProperties>,
+    pub(crate) outline_pr: OutlinePr,
+    pub(crate) warnings: Vec<String>,
 }
 
 pub(crate) fn parse_biff_sheet_row_col_properties(
@@ -51,25 +83,51 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
 ) -> Result<SheetRowColProperties, String> {
     let mut props = SheetRowColProperties::default();
 
-    for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, start)? {
+    let mut saw_eof = false;
+    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
+    while let Some(next) = iter.next() {
+        let record = match next {
+            Ok(record) => record,
+            Err(err) => {
+                props
+                    .warnings
+                    .push(format!("malformed BIFF record in sheet stream: {err}"));
+                break;
+            }
+        };
+
+        // BOF indicates the start of a new substream; stop before yielding the next BOF in case the
+        // worksheet is missing its EOF.
+        if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+
         match record.record_id {
             // ROW [MS-XLS 2.4.184]
             RECORD_ROW => {
                 let data = record.data;
                 if data.len() < 16 {
+                    props.warnings.push(format!(
+                        "malformed ROW record at offset {}: expected >=16 bytes, got {}",
+                        record.offset,
+                        data.len()
+                    ));
                     continue;
                 }
                 let row = u16::from_le_bytes([data[0], data[1]]) as u32;
                 let height_options = u16::from_le_bytes([data[6], data[7]]);
                 let height_twips = height_options & ROW_HEIGHT_TWIPS_MASK;
                 let default_height = (height_options & ROW_HEIGHT_DEFAULT_FLAG) != 0;
-                let options = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+                let options = u16::from_le_bytes([data[12], data[13]]);
                 let hidden = (options & ROW_OPTION_HIDDEN) != 0;
+                let outline_level = ((options & ROW_OPTION_OUTLINE_LEVEL_MASK)
+                    >> ROW_OPTION_OUTLINE_LEVEL_SHIFT) as u8;
+                let collapsed = (options & ROW_OPTION_COLLAPSED) != 0;
 
                 let height =
                     (!default_height && height_twips > 0).then_some(height_twips as f32 / 20.0);
 
-                if hidden || height.is_some() {
+                if hidden || height.is_some() || outline_level > 0 || collapsed {
                     let entry = props.rows.entry(row).or_default();
                     if let Some(height) = height {
                         entry.height = Some(height);
@@ -77,12 +135,23 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                     if hidden {
                         entry.hidden = true;
                     }
+                    if outline_level > 0 {
+                        entry.outline_level = outline_level;
+                    }
+                    if collapsed {
+                        entry.collapsed = true;
+                    }
                 }
             }
             // COLINFO [MS-XLS 2.4.48]
             RECORD_COLINFO => {
                 let data = record.data;
                 if data.len() < 12 {
+                    props.warnings.push(format!(
+                        "malformed COLINFO record at offset {}: expected >=12 bytes, got {}",
+                        record.offset,
+                        data.len()
+                    ));
                     continue;
                 }
                 let first_col = u16::from_le_bytes([data[0], data[1]]) as u32;
@@ -90,10 +159,20 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 let width_raw = u16::from_le_bytes([data[4], data[5]]);
                 let options = u16::from_le_bytes([data[8], data[9]]);
                 let hidden = (options & COLINFO_OPTION_HIDDEN) != 0;
+                let outline_level = ((options & COLINFO_OPTION_OUTLINE_LEVEL_MASK)
+                    >> COLINFO_OPTION_OUTLINE_LEVEL_SHIFT) as u8;
+                let collapsed = (options & COLINFO_OPTION_COLLAPSED) != 0;
 
                 let width = (width_raw > 0).then_some(width_raw as f32 / 256.0);
 
-                if hidden || width.is_some() {
+                if hidden || width.is_some() || outline_level > 0 || collapsed {
+                    if first_col > last_col {
+                        props.warnings.push(format!(
+                            "malformed COLINFO record at offset {}: first_col ({first_col}) > last_col ({last_col})",
+                            record.offset
+                        ));
+                        continue;
+                    }
                     for col in first_col..=last_col {
                         let entry = props.cols.entry(col).or_default();
                         if let Some(width) = width {
@@ -102,13 +181,47 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                         if hidden {
                             entry.hidden = true;
                         }
+                        if outline_level > 0 {
+                            entry.outline_level = outline_level;
+                        }
+                        if collapsed {
+                            entry.collapsed = true;
+                        }
                     }
                 }
             }
+            // WSBOOL [MS-XLS 2.4.376]
+            RECORD_WSBOOL => {
+                let data = record.data;
+                if data.len() < 2 {
+                    props.warnings.push(format!(
+                        "malformed WSBOOL record at offset {}: expected >=2 bytes, got {}",
+                        record.offset,
+                        data.len()
+                    ));
+                    continue;
+                }
+                let options = u16::from_le_bytes([data[0], data[1]]);
+                props.outline_pr.summary_below = (options & WSBOOL_OPTION_ROW_SUMMARY_BELOW) != 0;
+                props.outline_pr.summary_right = (options & WSBOOL_OPTION_COL_SUMMARY_RIGHT) != 0;
+                props.outline_pr.show_outline_symbols =
+                    (options & WSBOOL_OPTION_SHOW_OUTLINE_SYMBOLS) != 0;
+            }
             // EOF terminates the sheet substream.
-            records::RECORD_EOF => break,
+            records::RECORD_EOF => {
+                saw_eof = true;
+                break;
+            }
             _ => {}
         }
+    }
+
+    if !saw_eof {
+        // Some `.xls` files in the wild omit worksheet EOF records. Treat this as best-effort and
+        // return partial state.
+        props
+            .warnings
+            .push("unexpected end of worksheet stream (missing EOF)".to_string());
     }
 
     Ok(props)

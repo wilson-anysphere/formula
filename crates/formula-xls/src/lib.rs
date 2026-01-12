@@ -262,7 +262,16 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 }
 
                 match biff::parse_biff_sheet_row_col_properties(workbook_stream, sheet.offset) {
-                    Ok(props) => props_by_sheet.push(props),
+                    Ok(mut props) => {
+                        warnings.extend(props.warnings.drain(..).map(|warning| {
+                            ImportWarning::new(format!(
+                                "failed to fully import `.xls` row/column properties for BIFF sheet index {} (`{}`): {warning}",
+                                props_by_sheet.len(),
+                                sheet.name
+                            ))
+                        }));
+                        props_by_sheet.push(props);
+                    }
                     Err(parse_err) => {
                         warnings.push(ImportWarning::new(format!(
                             "failed to import `.xls` row/column properties for BIFF sheet index {} (`{}`): {parse_err}",
@@ -433,6 +442,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 .and_then(|props_by_sheet| props_by_sheet.get(biff_idx))
             {
                 apply_row_col_properties(sheet, props);
+                apply_outline_properties(sheet, props);
             }
         }
 
@@ -839,22 +849,83 @@ fn apply_row_col_properties(
     props: &biff::SheetRowColProperties,
 ) {
     for (&row, row_props) in &props.rows {
+        if row >= EXCEL_MAX_ROWS {
+            continue;
+        }
         if row_props.height.is_some() {
             sheet.set_row_height(row, row_props.height);
-        }
-        if row_props.hidden {
-            sheet.set_row_hidden(row, true);
         }
     }
 
     for (&col, col_props) in &props.cols {
+        if col >= EXCEL_MAX_COLS {
+            continue;
+        }
         if col_props.width.is_some() {
             sheet.set_col_width(col, col_props.width);
         }
-        if col_props.hidden {
-            sheet.set_col_hidden(col, true);
-        }
     }
+}
+fn apply_outline_properties(sheet: &mut formula_model::Worksheet, props: &biff::SheetRowColProperties) {
+    sheet.outline.pr = props.outline_pr;
+
+    for (&row, row_props) in &props.rows {
+        if row >= EXCEL_MAX_ROWS {
+            continue;
+        }
+        if row_props.outline_level == 0 && !row_props.collapsed {
+            continue;
+        }
+        let row_1based = row.saturating_add(1);
+        let entry = sheet.outline.rows.entry_mut(row_1based);
+        entry.level = row_props.outline_level.min(7);
+        entry.collapsed = row_props.collapsed;
+    }
+
+    for (&col, col_props) in &props.cols {
+        if col >= EXCEL_MAX_COLS {
+            continue;
+        }
+        if col_props.outline_level == 0 && !col_props.collapsed {
+            continue;
+        }
+        let col_1based = col.saturating_add(1);
+        let entry = sheet.outline.cols.entry_mut(col_1based);
+        entry.level = col_props.outline_level.min(7);
+        entry.collapsed = col_props.collapsed;
+    }
+
+    // Derive which rows/columns are hidden because they live inside a collapsed outline group.
+    sheet.outline.recompute_outline_hidden_rows();
+    sheet.outline.recompute_outline_hidden_cols();
+
+    // BIFF uses the same hidden bit for user-hidden and outline-hidden rows/columns. Prefer the
+    // derived outline state, and treat any remaining hidden flags as user-hidden.
+    for (&row, row_props) in &props.rows {
+        if !row_props.hidden || row >= EXCEL_MAX_ROWS {
+            continue;
+        }
+        let row_1based = row.saturating_add(1);
+        if sheet.outline.rows.entry(row_1based).hidden.outline {
+            continue;
+        }
+        sheet.set_row_hidden(row, true);
+    }
+
+    for (&col, col_props) in &props.cols {
+        if !col_props.hidden || col >= EXCEL_MAX_COLS {
+            continue;
+        }
+        let col_1based = col.saturating_add(1);
+        if sheet.outline.cols.entry(col_1based).hidden.outline {
+            continue;
+        }
+        sheet.set_col_hidden(col, true);
+    }
+
+    // Ensure outline-hidden flags are up to date after any user-hidden state mutations.
+    sheet.outline.recompute_outline_hidden_rows();
+    sheet.outline.recompute_outline_hidden_cols();
 }
 
 fn truncate_to_utf16_len(value: &str, max_len: usize) -> String {
