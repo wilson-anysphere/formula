@@ -231,15 +231,17 @@ At a high level:
 Reference record normalization note:
 
 - `ContentNormalizedData` (v1/v2) and `V3ContentNormalizedData` (v3) each incorporate only a subset
-  of reference-related `VBA/dir` records, but the allowlist differs between versions.
+  of reference-related `VBA/dir` records, but the allowlist and normalization rules differ between
+  versions.
 - v1/v2 (`ContentNormalizedData`) excludes `REFERENCENAME` (`0x0016`) and includes only the
   reference-record allowlist in MS-OVBA §2.4.2.1.
+  - `REFERENCEPROJECT` (`0x000E`), `REFERENCECONTROL` (`0x002F`), and `REFERENCEORIGINAL` (`0x0033`)
+    are normalized via MS-OVBA’s TempBuffer + “copy until first NUL byte” rule.
+  - `REFERENCEEXTENDED` (`0x0030`) is included verbatim.
 - v3 (`V3ContentNormalizedData`) includes `REFERENCENAME` (`0x0016`) and its optional UTF-16LE
   `NameUnicode` record (`0x003E`) in record order.
-- `REFERENCECONTROL` (`0x002F`) and `REFERENCEORIGINAL` (`0x0033`) are **not** included verbatim; they
-  follow MS-OVBA’s field-selection + TempBuffer / “copy until first NUL byte” behavior.
-- `REFERENCEEXTENDED` (`0x0030`) is included verbatim (record payload fields only; the outer record
-  length is excluded).
+  - Reference record bytes are incorporated per MS-OVBA §2.4.2.5, which uses field-selection rules
+    (for example, some records include their `Id` but omit the outer record `Size` field).
 
 V3 spec references:
 
