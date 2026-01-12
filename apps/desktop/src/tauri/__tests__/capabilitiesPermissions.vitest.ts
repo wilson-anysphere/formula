@@ -113,8 +113,6 @@ describe("Tauri capabilities", () => {
       ...walk(path.join(root, "shared/extension-package")),
     ].sort();
 
-    const runtimeText = runtimeFiles.map((p) => readFileSync(p, "utf8")).join("\n");
-
     const invokedCommands = new Set<string>();
     // Capture command invocations from helpers like:
     // - invoke("...")
@@ -122,24 +120,29 @@ describe("Tauri capabilities", () => {
     // - invokeFn("...")
     // - args.invoke("...") (the `.invoke` segment still matches)
     const invokeCall = /\b[\w$]*invoke[\w$]*\s*\(\s*(["'])([^"']+)\1/gim;
-    for (const match of runtimeText.matchAll(invokeCall)) {
-      const cmd = match[2].trim();
-      // Tauri `#[tauri::command]` names in this repo are snake_case.
-      // Filter out unrelated `*invoke*("...")` calls that happen to appear in runtime code.
-      if (/^[a-z0-9_]+$/.test(cmd)) {
-        invokedCommands.add(cmd);
-      }
-    }
-
     // Some code uses indirection (e.g. VBA event macros pass the command name into a helper).
-    {
-      const eventMacrosPath = path.join(root, "apps/desktop/src/macros/event_macros.ts");
-      const eventMacrosText = readFileSync(eventMacrosPath, "utf8");
-      const runEventMacroCall = /runEventMacro\s*\(\s*[^,]+,\s*(["'])([^"']+)\1/gm;
-      for (const match of eventMacrosText.matchAll(runEventMacroCall)) {
+    const runEventMacroCall = /runEventMacro\s*\(\s*[^,]+,\s*(["'])([^"']+)\1/gm;
+
+    // Avoid concatenating all runtime source into one giant string (perf/memory).
+    for (const runtimePath of runtimeFiles) {
+      const runtimeText = readFileSync(runtimePath, "utf8");
+
+      for (const match of runtimeText.matchAll(invokeCall)) {
         const cmd = match[2].trim();
+        // Tauri `#[tauri::command]` names in this repo are snake_case.
+        // Filter out unrelated `*invoke*("...")` calls that happen to appear in runtime code.
         if (/^[a-z0-9_]+$/.test(cmd)) {
           invokedCommands.add(cmd);
+        }
+      }
+
+      // Only `apps/desktop/src/macros/event_macros.ts` uses `runEventMacro(..., "command_name")`.
+      if (runtimePath.replace(/\\/g, "/").endsWith("/macros/event_macros.ts")) {
+        for (const match of runtimeText.matchAll(runEventMacroCall)) {
+          const cmd = match[2].trim();
+          if (/^[a-z0-9_]+$/.test(cmd)) {
+            invokedCommands.add(cmd);
+          }
         }
       }
     }
