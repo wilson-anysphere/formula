@@ -63,7 +63,11 @@ fn writer_emits_vm_cm_on_added_sheet() {
     );
 
     // Inject value/cell metadata that should be serialized onto the `<c>` element.
-    let meta = doc.meta.cell_meta.entry((sheet_id, cell)).or_default();
+    let meta = doc
+        .xlsx_meta_mut()
+        .cell_meta
+        .entry((sheet_id, cell))
+        .or_default();
     meta.vm = Some("1".to_string());
     meta.cm = Some("2".to_string());
 
