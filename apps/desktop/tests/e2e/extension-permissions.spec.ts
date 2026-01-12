@@ -27,7 +27,7 @@ test.describe("Extension permission prompts (desktop UI)", () => {
       },
     });
 
-    await page.getByTestId("open-extensions-panel").click();
+    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
     const runButton = page.getByTestId("run-command-sampleHello.copySumToClipboard");
     await expect(runButton).toBeVisible({ timeout: 30_000 });
     // Avoid hit-target flakiness from fixed overlays (status bar/sheet tabs) by

@@ -33,7 +33,7 @@ test.describe("Extensions permissions UI", () => {
 
       await gotoDesktop(page);
 
-      await page.getByTestId("open-extensions-panel").click();
+      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible();
@@ -107,7 +107,7 @@ test.describe("Extensions permissions UI", () => {
 
       await gotoDesktop(page);
 
-      await page.getByTestId("open-extensions-panel").click();
+      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible();
@@ -181,7 +181,7 @@ test.describe("Extensions permissions UI", () => {
         }
       });
 
-      await page.getByTestId("open-extensions-panel").click();
+      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
@@ -202,7 +202,7 @@ test.describe("Extensions permissions UI", () => {
       await page.reload();
       await waitForDesktopReady(page);
 
-      await page.getByTestId("open-extensions-panel").click();
+      await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("127.0.0.1");

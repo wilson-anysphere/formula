@@ -2,6 +2,13 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { gotoDesktop, waitForDesktopReady } from "./helpers";
 
+function getOpenExtensionsPanelButton(page: Page) {
+  // `index.html` includes a fallback toolbar with `data-testid="open-extensions-panel"`, and the
+  // ribbon UI also exposes a command button with the same test id. Prefer the ribbon button to
+  // keep selectors stable.
+  return page.getByTestId("ribbon-root").getByTestId("open-extensions-panel");
+}
+
 async function grantSampleHelloPermissions(page: Page): Promise<void> {
   await page.evaluate(() => {
     const extensionId = "formula.sample-hello";
@@ -55,7 +62,7 @@ test.describe("Extensions UI integration", () => {
     await gotoDesktop(page);
     await grantSampleHelloPermissions(page);
 
-    await page.getByTestId("open-extensions-panel").click();
+    await getOpenExtensionsPanelButton(page).click();
     const openPanelBtn = page.getByTestId("run-command-sampleHello.openPanel");
     await expect(openPanelBtn).toBeVisible({ timeout: 30_000 });
     // Avoid hit-target flakiness from fixed overlays by dispatching a click directly.
@@ -133,7 +140,7 @@ test.describe("Extensions UI integration", () => {
       });
     });
 
-    await page.getByTestId("open-extensions-panel").click();
+    await getOpenExtensionsPanelButton(page).click();
     const sumSelectionBtn = page.getByTestId("run-command-sampleHello.sumSelection");
     await expect(sumSelectionBtn).toBeVisible({ timeout: 30_000 });
     await sumSelectionBtn.dispatchEvent("click");
@@ -163,7 +170,7 @@ test.describe("Extensions UI integration", () => {
       });
     });
 
-    await page.getByTestId("open-extensions-panel").click();
+    await getOpenExtensionsPanelButton(page).click();
     await page.getByTestId("run-command-sampleHello.copySumToClipboard").click();
 
     await expect
@@ -175,7 +182,7 @@ test.describe("Extensions UI integration", () => {
     await gotoDesktop(page);
     await grantSampleHelloPermissions(page);
 
-    await page.getByTestId("open-extensions-panel").click();
+    await getOpenExtensionsPanelButton(page).click();
     const openPanelBtn = page.getByTestId("run-command-sampleHello.openPanel");
     await expect(openPanelBtn).toBeVisible({ timeout: 30_000 });
     await openPanelBtn.dispatchEvent("click");
@@ -227,7 +234,7 @@ test.describe("Extensions UI integration", () => {
       });
     });
 
-    await page.getByTestId("open-extensions-panel").click();
+    await getOpenExtensionsPanelButton(page).click();
     await expect(page.getByTestId("run-command-sampleHello.sumSelection")).toBeVisible();
 
     await page.keyboard.press("Control+Shift+Y");
@@ -247,7 +254,7 @@ test.describe("Extensions UI integration", () => {
       doc.setCellValue(sheetId, { row: 0, col: 0 }, 5);
     });
 
-    await page.getByTestId("open-extensions-panel").click();
+    await getOpenExtensionsPanelButton(page).click();
     await expect(page.getByTestId("run-command-sampleHello.sumSelection")).toBeVisible();
 
     const before = await page.evaluate(() => {
@@ -314,7 +321,7 @@ test.describe("Extensions UI integration", () => {
       });
     });
 
-    await page.getByTestId("open-extensions-panel").click();
+    await getOpenExtensionsPanelButton(page).click();
     await expect(page.getByTestId("run-command-sampleHello.sumSelection")).toBeVisible();
 
     // Right-click inside the selection so the selection remains intact and `hasSelection` stays true.
@@ -361,7 +368,7 @@ test.describe("Extensions UI integration", () => {
     await expect(page.getByTestId("selection-range")).toHaveText("A1:B2");
 
     // Ensure the extensions host is running so the contributed context menu renders.
-    await page.getByTestId("open-extensions-panel").click();
+    await getOpenExtensionsPanelButton(page).click();
     await expect(page.getByTestId("run-command-sampleHello.openPanel")).toBeVisible();
 
     // Ensure the grid has a usable hit-test surface. In headless e2e environments the
@@ -468,7 +475,7 @@ test.describe("Extensions UI integration", () => {
     });
 
     // Ensure the extensions host is running so the contributed context menu renders.
-    await page.getByTestId("open-extensions-panel").click();
+    await getOpenExtensionsPanelButton(page).click();
     await expect(page.getByTestId("panel-extensions")).toBeVisible();
     await expect(page.getByTestId("run-command-sampleHello.openPanel")).toBeVisible();
 
