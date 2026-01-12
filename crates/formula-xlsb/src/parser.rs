@@ -19,6 +19,37 @@ use crate::strings::{
     ParsedXlsbString,
 };
 
+#[cfg(test)]
+use std::cell::Cell as ThreadCell;
+
+#[cfg(test)]
+thread_local! {
+    static FORMULA_DECODE_ATTEMPTS: ThreadCell<usize> = ThreadCell::new(0);
+}
+
+#[cfg(test)]
+fn reset_formula_decode_attempts() {
+    FORMULA_DECODE_ATTEMPTS.with(|c| c.set(0));
+}
+
+#[cfg(test)]
+fn formula_decode_attempts() -> usize {
+    FORMULA_DECODE_ATTEMPTS.with(|c| c.get())
+}
+
+fn decode_formula_text(
+    rgce: &[u8],
+    rgcb: &[u8],
+    ctx: &WorkbookContext,
+    base: crate::rgce::CellCoord,
+) -> crate::rgce::DecodedFormula {
+    // Formula decoding is best-effort and can be expensive. Avoid multi-pass fallback decoding
+    // here because large worksheets can contain millions of formula cells.
+    #[cfg(test)]
+    FORMULA_DECODE_ATTEMPTS.with(|c| c.set(c.get().saturating_add(1)));
+    crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(rgce, rgcb, ctx, base)
+}
+
 // Record IDs (BIFF12 / MS-XLSB). Values taken from pyxlsb (public domain-ish) and MS-XLSB.
 #[allow(dead_code)]
 pub(crate) mod biff12 {
@@ -611,12 +642,13 @@ pub(crate) fn parse_workbook<R: Read>(
                             // use `A1` as a best-effort base to surface something in the UI and allow
                             // downstream consumers to attempt evaluation.
                             let base = crate::rgce::CellCoord::new(0, 0);
-                            let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
-                                &formula.rgce,
-                                &formula.extra,
-                                &ctx,
-                                base,
-                            );
+                            let decoded =
+                                crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
+                                    &formula.rgce,
+                                    &formula.extra,
+                                    &ctx,
+                                    base,
+                                );
                             let decoded = if decoded.text.is_some() {
                                 decoded
                             } else {
@@ -628,11 +660,12 @@ pub(crate) fn parse_workbook<R: Read>(
                                 if decoded.text.is_some() {
                                     decoded
                                 } else {
-                                    let decoded = crate::rgce::decode_formula_rgce_with_rgcb_and_base(
-                                        &formula.rgce,
-                                        &formula.extra,
-                                        base,
-                                    );
+                                    let decoded =
+                                        crate::rgce::decode_formula_rgce_with_rgcb_and_base(
+                                            &formula.rgce,
+                                            &formula.extra,
+                                            base,
+                                        );
                                     if decoded.text.is_some() {
                                         decoded
                                     } else {
@@ -786,11 +819,11 @@ mod tests {
         // BIFF8 ExternSheet table (incorrectly maps both ixti entries to Sheet1).
         let mut extern_sheet_biff8 = Vec::new();
         extern_sheet_biff8.extend_from_slice(&2u16.to_le_bytes()); // cxti
-        // ixti 0: Sheet1
+                                                                   // ixti 0: Sheet1
         extern_sheet_biff8.extend_from_slice(&0u16.to_le_bytes()); // supbook index
         extern_sheet_biff8.extend_from_slice(&0u16.to_le_bytes()); // sheet first
         extern_sheet_biff8.extend_from_slice(&0u16.to_le_bytes()); // sheet last
-        // ixti 1: (wrongly) also Sheet1
+                                                                   // ixti 1: (wrongly) also Sheet1
         extern_sheet_biff8.extend_from_slice(&0u16.to_le_bytes()); // supbook index
         extern_sheet_biff8.extend_from_slice(&0u16.to_le_bytes()); // sheet first
         extern_sheet_biff8.extend_from_slice(&0u16.to_le_bytes()); // sheet last
@@ -799,11 +832,11 @@ mod tests {
         // MS-XLSB BrtExternSheet table (corrects ixti 1 -> Sheet2).
         let mut extern_sheet_brt = Vec::new();
         extern_sheet_brt.extend_from_slice(&2u32.to_le_bytes()); // cxti
-        // ixti 0: Sheet1
+                                                                 // ixti 0: Sheet1
         extern_sheet_brt.extend_from_slice(&0u32.to_le_bytes()); // supbook index
         extern_sheet_brt.extend_from_slice(&0u32.to_le_bytes()); // sheet first
         extern_sheet_brt.extend_from_slice(&0u32.to_le_bytes()); // sheet last
-        // ixti 1: Sheet2
+                                                                 // ixti 1: Sheet2
         extern_sheet_brt.extend_from_slice(&0u32.to_le_bytes()); // supbook index
         extern_sheet_brt.extend_from_slice(&1u32.to_le_bytes()); // sheet first
         extern_sheet_brt.extend_from_slice(&1u32.to_le_bytes()); // sheet last
@@ -1177,6 +1210,95 @@ mod tests {
         assert_eq!(si.run_formats[1], vec![1, 0, 0, 0]);
         assert_eq!(si.run_formats[2], vec![2, 0, 0, 0]);
     }
+
+    #[test]
+    fn parse_sheet_stream_decodes_each_formula_cell_once() {
+        reset_formula_decode_attempts();
+
+        let ctx = WorkbookContext::default();
+        let shared_strings: Vec<String> = Vec::new();
+
+        let mut sheet_bin = Vec::new();
+        write_record(&mut sheet_bin, biff12::SHEETDATA, &[]);
+
+        // Row 0.
+        let mut row = Vec::new();
+        row.extend_from_slice(&0u32.to_le_bytes());
+        write_record(&mut sheet_bin, biff12::ROW, &row);
+
+        // Col 0: =1+2 (cached value 3.0)
+        let encoded = encode_rgce_with_context("=1+2", &ctx, CellCoord::new(0, 0)).expect("encode");
+        let mut fmla_num = Vec::new();
+        fmla_num.extend_from_slice(&0u32.to_le_bytes()); // col
+        fmla_num.extend_from_slice(&0u32.to_le_bytes()); // style
+        fmla_num.extend_from_slice(&3.0f64.to_le_bytes()); // cached value
+        fmla_num.extend_from_slice(&0u16.to_le_bytes()); // grbitFmla
+        fmla_num.extend_from_slice(&(encoded.rgce.len() as u32).to_le_bytes());
+        fmla_num.extend_from_slice(&encoded.rgce);
+        fmla_num.extend_from_slice(&encoded.rgcb);
+        write_record(&mut sheet_bin, biff12::FORMULA_FLOAT, &fmla_num);
+
+        // Col 1: =SUM({1,2}) (cached value 3.0, includes rgcb)
+        let encoded =
+            encode_rgce_with_context("=SUM({1,2})", &ctx, CellCoord::new(0, 1)).expect("encode");
+        let mut fmla_num = Vec::new();
+        fmla_num.extend_from_slice(&1u32.to_le_bytes()); // col
+        fmla_num.extend_from_slice(&0u32.to_le_bytes()); // style
+        fmla_num.extend_from_slice(&3.0f64.to_le_bytes()); // cached value
+        fmla_num.extend_from_slice(&0u16.to_le_bytes()); // grbitFmla
+        fmla_num.extend_from_slice(&(encoded.rgce.len() as u32).to_le_bytes());
+        fmla_num.extend_from_slice(&encoded.rgce);
+        fmla_num.extend_from_slice(&encoded.rgcb);
+        write_record(&mut sheet_bin, biff12::FORMULA_FLOAT, &fmla_num);
+
+        // Col 2: =TRUE (cached value 1). Encode directly since the formula parser treats TRUE as
+        // an identifier rather than a boolean literal.
+        let rgce = vec![
+            0x1D, // PtgBool
+            0x01, // TRUE
+        ];
+        let mut fmla_bool = Vec::new();
+        fmla_bool.extend_from_slice(&2u32.to_le_bytes()); // col
+        fmla_bool.extend_from_slice(&0u32.to_le_bytes()); // style
+        fmla_bool.push(1); // cached value
+        fmla_bool.extend_from_slice(&0u16.to_le_bytes()); // grbitFmla
+        fmla_bool.extend_from_slice(&(rgce.len() as u32).to_le_bytes());
+        fmla_bool.extend_from_slice(&rgce);
+        write_record(&mut sheet_bin, biff12::FORMULA_BOOL, &fmla_bool);
+
+        write_record(&mut sheet_bin, biff12::SHEETDATA_END, &[]);
+
+        let mut cells = Vec::new();
+        parse_sheet_stream(
+            &mut Cursor::new(&sheet_bin),
+            &shared_strings,
+            &ctx,
+            false,
+            true,
+            |cell| {
+                cells.push(cell);
+                ControlFlow::Continue(())
+            },
+        )
+        .expect("parse sheet");
+
+        assert_eq!(cells.len(), 3);
+        assert_eq!(
+            cells[0].formula.as_ref().and_then(|f| f.text.as_deref()),
+            Some("1+2")
+        );
+        assert_eq!(
+            cells[1].formula.as_ref().and_then(|f| f.text.as_deref()),
+            Some("SUM({1,2})")
+        );
+        assert_eq!(
+            cells[2].formula.as_ref().and_then(|f| f.text.as_deref()),
+            Some("TRUE")
+        );
+
+        // The worksheet parser should only attempt rgce decoding once per formula cell.
+        assert_eq!(formula_decode_attempts(), 3);
+    }
 }
 
 pub(crate) fn parse_shared_strings<R: Read>(
@@ -1533,476 +1655,250 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                 let col = rr.read_u32()?;
                 let style = rr.read_u32()?;
 
-                let (value, formula, preserved_string) =
-                    match rec.id {
-                        biff12::BLANK => (CellValue::Blank, None, None),
-                        biff12::NUM => (CellValue::Number(rr.read_rk_number()?), None, None),
-                        biff12::BOOLERR => (CellValue::Error(rr.read_u8()?), None, None),
-                        biff12::BOOL => (CellValue::Bool(rr.read_u8()? != 0), None, None),
-                        biff12::FLOAT => (CellValue::Number(rr.read_f64()?), None, None),
-                        biff12::CELL_ST => {
-                            // BrtCellSt inline strings appear in the wild in at least two layouts:
-                            // - simple wide string: [cch: u32][utf16 chars...]
-                            // - rich/phonetic wide string: [cch: u32][flags: u8][utf16 chars...][extras...]
-                            //
-                            // When patch-writing we currently emit the simple layout, so the reader
-                            // must accept both.
-                            let start_offset = rr.offset;
-                            let parsed = if preserve_parsed_parts {
-                                match read_xl_wide_string(&mut rr, FlagsWidth::U8) {
-                                    Ok(parsed) => parsed,
-                                    Err(Error::UnexpectedEof) => {
-                                        rr.offset = start_offset;
-                                        ParsedXlsbString {
-                                            text: rr.read_utf16_string()?,
-                                            rich: None,
-                                            phonetic: None,
-                                        }
-                                    }
-                                    Err(e) => return Err(e),
-                                }
-                            } else {
-                                match read_xl_wide_string_impl(&mut rr, FlagsWidth::U8, false) {
-                                    Ok(parsed) => parsed,
-                                    Err(Error::UnexpectedEof) => {
-                                        rr.offset = start_offset;
-                                        ParsedXlsbString {
-                                            text: rr.read_utf16_string()?,
-                                            rich: None,
-                                            phonetic: None,
-                                        }
-                                    }
-                                    Err(e) => return Err(e),
-                                }
-                            };
-
-                            if preserve_parsed_parts
-                                && (parsed.rich.is_some() || parsed.phonetic.is_some())
-                            {
-                                (CellValue::Text(parsed.text.clone()), None, Some(parsed))
-                            } else {
-                                (CellValue::Text(parsed.text), None, None)
-                            }
-                        }
-                        biff12::STRING => {
-                            let idx = rr.read_u32()? as usize;
-                            let s = shared_strings.get(idx).cloned().unwrap_or_default();
-                            (CellValue::Text(s), None, None)
-                        }
-                        biff12::FORMULA_STRING => {
-                            // BrtFmlaString stores the cached string value as an XLWideString-like
-                            // payload (cch + flags + utf16 + optional rich/phonetic blocks),
-                            // followed by the formula token stream ([cce][rgce...]).
-                            //
-                            // In practice, some writers appear to set the "rich/phonetic" bits in
-                            // the flags field without supplying the corresponding extra blocks
-                            // (reusing those bits for unrelated formula flags). Use a heuristic:
-                            // prefer parsing rich/phonetic payloads when they keep the trailing
-                            // `[cce][rgce]` fields in-bounds; otherwise, fall back to treating the
-                            // cached value as a plain UTF-16 string.
-                            let start_offset = rr.offset;
-                            let mut parsed = None;
-                            match read_xl_wide_string_with_flags(
-                                &mut rr,
-                                FlagsWidth::U16,
-                                preserve_parsed_parts,
-                            ) {
-                                Ok((flags, candidate)) => {
-                                    let cce_offset = rr.offset;
-                                    let mut accept = false;
-                                    if let Some(raw) = rr.data.get(cce_offset..cce_offset + 4) {
-                                        let cce =
-                                            u32::from_le_bytes(raw.try_into().unwrap()) as usize;
-                                        let rgce_offset = cce_offset + 4;
-                                        if let Some(rgce_end) = rgce_offset.checked_add(cce) {
-                                            if rgce_end <= rr.data.len() {
-                                                accept = true;
-                                            }
-                                        }
-                                    }
-                                    if accept {
-                                        parsed = Some((flags, candidate));
-                                    } else {
-                                        rr.offset = start_offset;
-                                    }
-                                }
+                let (value, formula, preserved_string) = match rec.id {
+                    biff12::BLANK => (CellValue::Blank, None, None),
+                    biff12::NUM => (CellValue::Number(rr.read_rk_number()?), None, None),
+                    biff12::BOOLERR => (CellValue::Error(rr.read_u8()?), None, None),
+                    biff12::BOOL => (CellValue::Bool(rr.read_u8()? != 0), None, None),
+                    biff12::FLOAT => (CellValue::Number(rr.read_f64()?), None, None),
+                    biff12::CELL_ST => {
+                        // BrtCellSt inline strings appear in the wild in at least two layouts:
+                        // - simple wide string: [cch: u32][utf16 chars...]
+                        // - rich/phonetic wide string: [cch: u32][flags: u8][utf16 chars...][extras...]
+                        //
+                        // When patch-writing we currently emit the simple layout, so the reader
+                        // must accept both.
+                        let start_offset = rr.offset;
+                        let parsed = if preserve_parsed_parts {
+                            match read_xl_wide_string(&mut rr, FlagsWidth::U8) {
+                                Ok(parsed) => parsed,
                                 Err(Error::UnexpectedEof) => {
                                     rr.offset = start_offset;
+                                    ParsedXlsbString {
+                                        text: rr.read_utf16_string()?,
+                                        rich: None,
+                                        phonetic: None,
+                                    }
                                 }
                                 Err(e) => return Err(e),
                             }
+                        } else {
+                            match read_xl_wide_string_impl(&mut rr, FlagsWidth::U8, false) {
+                                Ok(parsed) => parsed,
+                                Err(Error::UnexpectedEof) => {
+                                    rr.offset = start_offset;
+                                    ParsedXlsbString {
+                                        text: rr.read_utf16_string()?,
+                                        rich: None,
+                                        phonetic: None,
+                                    }
+                                }
+                                Err(e) => return Err(e),
+                            }
+                        };
 
-                            let (flags, v, preserved) = if let Some((flags, parsed)) = parsed {
-                                if preserve_parsed_parts
-                                    && (parsed.rich.is_some() || parsed.phonetic.is_some())
-                                {
-                                    (flags, parsed.text.clone(), Some(parsed))
-                                } else {
-                                    (flags, parsed.text, None)
+                        if preserve_parsed_parts
+                            && (parsed.rich.is_some() || parsed.phonetic.is_some())
+                        {
+                            (CellValue::Text(parsed.text.clone()), None, Some(parsed))
+                        } else {
+                            (CellValue::Text(parsed.text), None, None)
+                        }
+                    }
+                    biff12::STRING => {
+                        let idx = rr.read_u32()? as usize;
+                        let s = shared_strings.get(idx).cloned().unwrap_or_default();
+                        (CellValue::Text(s), None, None)
+                    }
+                    biff12::FORMULA_STRING => {
+                        // BrtFmlaString stores the cached string value as an XLWideString-like
+                        // payload (cch + flags + utf16 + optional rich/phonetic blocks),
+                        // followed by the formula token stream ([cce][rgce...]).
+                        //
+                        // In practice, some writers appear to set the "rich/phonetic" bits in
+                        // the flags field without supplying the corresponding extra blocks
+                        // (reusing those bits for unrelated formula flags). Use a heuristic:
+                        // prefer parsing rich/phonetic payloads when they keep the trailing
+                        // `[cce][rgce]` fields in-bounds; otherwise, fall back to treating the
+                        // cached value as a plain UTF-16 string.
+                        let start_offset = rr.offset;
+                        let mut parsed = None;
+                        match read_xl_wide_string_with_flags(
+                            &mut rr,
+                            FlagsWidth::U16,
+                            preserve_parsed_parts,
+                        ) {
+                            Ok((flags, candidate)) => {
+                                let cce_offset = rr.offset;
+                                let mut accept = false;
+                                if let Some(raw) = rr.data.get(cce_offset..cce_offset + 4) {
+                                    let cce = u32::from_le_bytes(raw.try_into().unwrap()) as usize;
+                                    let rgce_offset = cce_offset + 4;
+                                    if let Some(rgce_end) = rgce_offset.checked_add(cce) {
+                                        if rgce_end <= rr.data.len() {
+                                            accept = true;
+                                        }
+                                    }
                                 }
-                            } else {
-                                let cch = rr.read_u32()? as usize;
-                                let flags = rr.read_u16()?;
-                                (flags, rr.read_utf16_chars(cch)?, None)
-                            };
-                            let cce = rr.read_u32()? as usize;
-                            let mut rgce = rr.read_slice(cce)?.to_vec();
-                            let extra = rr.data[rr.offset..].to_vec();
-                            let mut rgcb_for_decode: &[u8] = &extra;
-                            if let Some(materialized) =
-                                materialize_shared_formula(&rgce, row, col, &shared_formulas)
-                            {
-                                rgce = materialized.rgce;
-                                if rgcb_for_decode.is_empty() {
-                                    rgcb_for_decode = materialized.rgcb;
+                                if accept {
+                                    parsed = Some((flags, candidate));
+                                } else {
+                                    rr.offset = start_offset;
                                 }
                             }
+                            Err(Error::UnexpectedEof) => {
+                                rr.offset = start_offset;
+                            }
+                            Err(e) => return Err(e),
+                        }
 
-                            let (text, warnings) = if decode_formulas {
-                                let base = crate::rgce::CellCoord::new(row, col);
-                                let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
-                                    &rgce,
-                                    rgcb_for_decode,
-                                    ctx,
-                                    base,
-                                );
-                                let decoded = if decoded.text.is_some() {
-                                    decoded
-                                } else {
-                                    let decoded =
-                                        decode_formula_rgce_with_context_and_base(&rgce, ctx, base);
-                                    if decoded.text.is_some() {
-                                        decoded
-                                    } else {
-                                        let decoded = crate::rgce::decode_formula_rgce_with_rgcb_and_base(
-                                            &rgce,
-                                            rgcb_for_decode,
-                                            base,
-                                        );
-                                        if decoded.text.is_some() {
-                                            decoded
-                                        } else {
-                                            let decoded =
-                                                decode_formula_rgce_with_base(&rgce, base);
-                                            if decoded.text.is_some() {
-                                                decoded
-                                            } else {
-                                                let decoded =
-                                                    crate::rgce::decode_formula_rgce_with_context_and_rgcb(
-                                                        &rgce,
-                                                        rgcb_for_decode,
-                                                        ctx,
-                                                    );
-                                                if decoded.text.is_some() {
-                                                    decoded
-                                                } else {
-                                                    let decoded =
-                                                        decode_formula_rgce_with_context(&rgce, ctx);
-                                                    if decoded.text.is_some() {
-                                                        decoded
-                                                    } else {
-                                                        let decoded =
-                                                            crate::rgce::decode_formula_rgce_with_rgcb(
-                                                                &rgce,
-                                                                rgcb_for_decode,
-                                                            );
-                                                        if decoded.text.is_some() {
-                                                            decoded
-                                                        } else {
-                                                            decode_formula_rgce(&rgce)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                };
-                                (decoded.text, decoded.warnings)
-                            } else {
-                                (None, Vec::new())
-                            };
-                            (
-                                CellValue::Text(v),
-                                Some(Formula {
-                                    rgce,
-                                    text,
-                                    flags,
-                                    extra,
-                                    warnings,
-                                }),
-                                preserved,
-                            )
-                        }
-                        biff12::FORMULA_FLOAT => {
-                            // BrtFmlaNum: [value: f64][flags: u16][cce: u32][rgce bytes...]
-                            let v = rr.read_f64()?;
-                            let flags = rr.read_u16()?;
-                            let cce = rr.read_u32()? as usize;
-                            let mut rgce = rr.read_slice(cce)?.to_vec();
-                            let extra = rr.data[rr.offset..].to_vec();
-                            let mut rgcb_for_decode: &[u8] = &extra;
-                            if let Some(materialized) =
-                                materialize_shared_formula(&rgce, row, col, &shared_formulas)
+                        let (flags, v, preserved) = if let Some((flags, parsed)) = parsed {
+                            if preserve_parsed_parts
+                                && (parsed.rich.is_some() || parsed.phonetic.is_some())
                             {
-                                rgce = materialized.rgce;
-                                if rgcb_for_decode.is_empty() {
-                                    rgcb_for_decode = materialized.rgcb;
-                                }
-                            }
-                            let (text, warnings) = if decode_formulas {
-                                let base = crate::rgce::CellCoord::new(row, col);
-                                let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
-                                    &rgce,
-                                    rgcb_for_decode,
-                                    ctx,
-                                    base,
-                                );
-                                let decoded = if decoded.text.is_some() {
-                                    decoded
-                                } else {
-                                    let decoded =
-                                        decode_formula_rgce_with_context_and_base(&rgce, ctx, base);
-                                    if decoded.text.is_some() {
-                                        decoded
-                                    } else {
-                                        let decoded = crate::rgce::decode_formula_rgce_with_rgcb_and_base(
-                                            &rgce,
-                                            rgcb_for_decode,
-                                            base,
-                                        );
-                                        if decoded.text.is_some() {
-                                            decoded
-                                        } else {
-                                            let decoded =
-                                                decode_formula_rgce_with_base(&rgce, base);
-                                            if decoded.text.is_some() {
-                                                decoded
-                                            } else {
-                                                let decoded =
-                                                    crate::rgce::decode_formula_rgce_with_context_and_rgcb(
-                                                        &rgce,
-                                                        rgcb_for_decode,
-                                                        ctx,
-                                                    );
-                                                if decoded.text.is_some() {
-                                                    decoded
-                                                } else {
-                                                    let decoded =
-                                                        decode_formula_rgce_with_context(&rgce, ctx);
-                                                    if decoded.text.is_some() {
-                                                        decoded
-                                                    } else {
-                                                        let decoded =
-                                                            crate::rgce::decode_formula_rgce_with_rgcb(
-                                                                &rgce,
-                                                                rgcb_for_decode,
-                                                            );
-                                                        if decoded.text.is_some() {
-                                                            decoded
-                                                        } else {
-                                                            decode_formula_rgce(&rgce)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                };
-                                (decoded.text, decoded.warnings)
+                                (flags, parsed.text.clone(), Some(parsed))
                             } else {
-                                (None, Vec::new())
-                            };
-                            (
-                                CellValue::Number(v),
-                                Some(Formula {
-                                    rgce,
-                                    text,
-                                    flags,
-                                    extra,
-                                    warnings,
-                                }),
-                                None,
-                            )
-                        }
-                        biff12::FORMULA_BOOL => {
-                            // BrtFmlaBool: [value: u8][flags: u16][cce: u32][rgce bytes...]
-                            let v = rr.read_u8()? != 0;
+                                (flags, parsed.text, None)
+                            }
+                        } else {
+                            let cch = rr.read_u32()? as usize;
                             let flags = rr.read_u16()?;
-                            let cce = rr.read_u32()? as usize;
-                            let mut rgce = rr.read_slice(cce)?.to_vec();
-                            let extra = rr.data[rr.offset..].to_vec();
-                            let mut rgcb_for_decode: &[u8] = &extra;
-                            if let Some(materialized) =
-                                materialize_shared_formula(&rgce, row, col, &shared_formulas)
-                            {
-                                rgce = materialized.rgce;
-                                if rgcb_for_decode.is_empty() {
-                                    rgcb_for_decode = materialized.rgcb;
-                                }
+                            (flags, rr.read_utf16_chars(cch)?, None)
+                        };
+                        let cce = rr.read_u32()? as usize;
+                        let mut rgce = rr.read_slice(cce)?.to_vec();
+                        let extra = rr.data[rr.offset..].to_vec();
+                        let mut rgcb_for_decode: &[u8] = &extra;
+                        if let Some(materialized) =
+                            materialize_shared_formula(&rgce, row, col, &shared_formulas)
+                        {
+                            rgce = materialized.rgce;
+                            if rgcb_for_decode.is_empty() {
+                                rgcb_for_decode = materialized.rgcb;
                             }
-                            let (text, warnings) = if decode_formulas {
-                                let base = crate::rgce::CellCoord::new(row, col);
-                                let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
-                                    &rgce,
-                                    rgcb_for_decode,
-                                    ctx,
-                                    base,
-                                );
-                                let decoded = if decoded.text.is_some() {
-                                    decoded
-                                } else {
-                                    let decoded =
-                                        decode_formula_rgce_with_context_and_base(&rgce, ctx, base);
-                                    if decoded.text.is_some() {
-                                        decoded
-                                    } else {
-                                        let decoded = crate::rgce::decode_formula_rgce_with_rgcb_and_base(
-                                            &rgce,
-                                            rgcb_for_decode,
-                                            base,
-                                        );
-                                        if decoded.text.is_some() {
-                                            decoded
-                                        } else {
-                                            let decoded =
-                                                decode_formula_rgce_with_base(&rgce, base);
-                                            if decoded.text.is_some() {
-                                                decoded
-                                            } else {
-                                                let decoded =
-                                                    crate::rgce::decode_formula_rgce_with_context_and_rgcb(
-                                                        &rgce,
-                                                        rgcb_for_decode,
-                                                        ctx,
-                                                    );
-                                                if decoded.text.is_some() {
-                                                    decoded
-                                                } else {
-                                                    let decoded =
-                                                        decode_formula_rgce_with_context(&rgce, ctx);
-                                                    if decoded.text.is_some() {
-                                                        decoded
-                                                    } else {
-                                                        let decoded =
-                                                            crate::rgce::decode_formula_rgce_with_rgcb(
-                                                                &rgce,
-                                                                rgcb_for_decode,
-                                                            );
-                                                        if decoded.text.is_some() {
-                                                            decoded
-                                                        } else {
-                                                            decode_formula_rgce(&rgce)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                };
-                                (decoded.text, decoded.warnings)
-                            } else {
-                                (None, Vec::new())
-                            };
-                            (
-                                CellValue::Bool(v),
-                                Some(Formula {
-                                    rgce,
-                                    text,
-                                    flags,
-                                    extra,
-                                    warnings,
-                                }),
-                                None,
-                            )
                         }
-                        biff12::FORMULA_BOOLERR => {
-                            // BrtFmlaError: [value: u8][flags: u16][cce: u32][rgce bytes...]
-                            let v = rr.read_u8()?;
-                            let flags = rr.read_u16()?;
-                            let cce = rr.read_u32()? as usize;
-                            let mut rgce = rr.read_slice(cce)?.to_vec();
-                            let extra = rr.data[rr.offset..].to_vec();
-                            let mut rgcb_for_decode: &[u8] = &extra;
-                            if let Some(materialized) =
-                                materialize_shared_formula(&rgce, row, col, &shared_formulas)
-                            {
-                                rgce = materialized.rgce;
-                                if rgcb_for_decode.is_empty() {
-                                    rgcb_for_decode = materialized.rgcb;
-                                }
+
+                        let (text, warnings) = if decode_formulas {
+                            let base = crate::rgce::CellCoord::new(row, col);
+                            let decoded = decode_formula_text(&rgce, rgcb_for_decode, ctx, base);
+                            (decoded.text, decoded.warnings)
+                        } else {
+                            (None, Vec::new())
+                        };
+                        (
+                            CellValue::Text(v),
+                            Some(Formula {
+                                rgce,
+                                text,
+                                flags,
+                                extra,
+                                warnings,
+                            }),
+                            preserved,
+                        )
+                    }
+                    biff12::FORMULA_FLOAT => {
+                        // BrtFmlaNum: [value: f64][flags: u16][cce: u32][rgce bytes...]
+                        let v = rr.read_f64()?;
+                        let flags = rr.read_u16()?;
+                        let cce = rr.read_u32()? as usize;
+                        let mut rgce = rr.read_slice(cce)?.to_vec();
+                        let extra = rr.data[rr.offset..].to_vec();
+                        let mut rgcb_for_decode: &[u8] = &extra;
+                        if let Some(materialized) =
+                            materialize_shared_formula(&rgce, row, col, &shared_formulas)
+                        {
+                            rgce = materialized.rgce;
+                            if rgcb_for_decode.is_empty() {
+                                rgcb_for_decode = materialized.rgcb;
                             }
-                            let (text, warnings) = if decode_formulas {
-                                let base = crate::rgce::CellCoord::new(row, col);
-                                let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
-                                    &rgce,
-                                    rgcb_for_decode,
-                                    ctx,
-                                    base,
-                                );
-                                let decoded = if decoded.text.is_some() {
-                                    decoded
-                                } else {
-                                    let decoded =
-                                        decode_formula_rgce_with_context_and_base(&rgce, ctx, base);
-                                    if decoded.text.is_some() {
-                                        decoded
-                                    } else {
-                                        let decoded = crate::rgce::decode_formula_rgce_with_rgcb_and_base(
-                                            &rgce,
-                                            rgcb_for_decode,
-                                            base,
-                                        );
-                                        if decoded.text.is_some() {
-                                            decoded
-                                        } else {
-                                            let decoded =
-                                                decode_formula_rgce_with_base(&rgce, base);
-                                            if decoded.text.is_some() {
-                                                decoded
-                                            } else {
-                                                let decoded =
-                                                    crate::rgce::decode_formula_rgce_with_context_and_rgcb(
-                                                        &rgce,
-                                                        rgcb_for_decode,
-                                                        ctx,
-                                                    );
-                                                if decoded.text.is_some() {
-                                                    decoded
-                                                } else {
-                                                    let decoded =
-                                                        decode_formula_rgce_with_context(&rgce, ctx);
-                                                    if decoded.text.is_some() {
-                                                        decoded
-                                                    } else {
-                                                        let decoded =
-                                                            crate::rgce::decode_formula_rgce_with_rgcb(
-                                                                &rgce,
-                                                                rgcb_for_decode,
-                                                            );
-                                                        if decoded.text.is_some() {
-                                                            decoded
-                                                        } else {
-                                                            decode_formula_rgce(&rgce)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                };
-                                (decoded.text, decoded.warnings)
-                            } else {
-                                (None, Vec::new())
-                            };
+                        }
+                        let (text, warnings) = if decode_formulas {
+                            let base = crate::rgce::CellCoord::new(row, col);
+                            let decoded = decode_formula_text(&rgce, rgcb_for_decode, ctx, base);
+                            (decoded.text, decoded.warnings)
+                        } else {
+                            (None, Vec::new())
+                        };
+                        (
+                            CellValue::Number(v),
+                            Some(Formula {
+                                rgce,
+                                text,
+                                flags,
+                                extra,
+                                warnings,
+                            }),
+                            None,
+                        )
+                    }
+                    biff12::FORMULA_BOOL => {
+                        // BrtFmlaBool: [value: u8][flags: u16][cce: u32][rgce bytes...]
+                        let v = rr.read_u8()? != 0;
+                        let flags = rr.read_u16()?;
+                        let cce = rr.read_u32()? as usize;
+                        let mut rgce = rr.read_slice(cce)?.to_vec();
+                        let extra = rr.data[rr.offset..].to_vec();
+                        let mut rgcb_for_decode: &[u8] = &extra;
+                        if let Some(materialized) =
+                            materialize_shared_formula(&rgce, row, col, &shared_formulas)
+                        {
+                            rgce = materialized.rgce;
+                            if rgcb_for_decode.is_empty() {
+                                rgcb_for_decode = materialized.rgcb;
+                            }
+                        }
+                        let (text, warnings) = if decode_formulas {
+                            let base = crate::rgce::CellCoord::new(row, col);
+                            let decoded = decode_formula_text(&rgce, rgcb_for_decode, ctx, base);
+                            (decoded.text, decoded.warnings)
+                        } else {
+                            (None, Vec::new())
+                        };
+                        (
+                            CellValue::Bool(v),
+                            Some(Formula {
+                                rgce,
+                                text,
+                                flags,
+                                extra,
+                                warnings,
+                            }),
+                            None,
+                        )
+                    }
+                    biff12::FORMULA_BOOLERR => {
+                        // BrtFmlaError: [value: u8][flags: u16][cce: u32][rgce bytes...]
+                        let v = rr.read_u8()?;
+                        let flags = rr.read_u16()?;
+                        let cce = rr.read_u32()? as usize;
+                        let mut rgce = rr.read_slice(cce)?.to_vec();
+                        let extra = rr.data[rr.offset..].to_vec();
+                        let mut rgcb_for_decode: &[u8] = &extra;
+                        if let Some(materialized) =
+                            materialize_shared_formula(&rgce, row, col, &shared_formulas)
+                        {
+                            rgce = materialized.rgce;
+                            if rgcb_for_decode.is_empty() {
+                                rgcb_for_decode = materialized.rgcb;
+                            }
+                        }
+                        let (text, warnings) = if decode_formulas {
+                            let base = crate::rgce::CellCoord::new(row, col);
+                            let decoded = decode_formula_text(&rgce, rgcb_for_decode, ctx, base);
+                            (decoded.text, decoded.warnings)
+                        } else {
+                            (None, Vec::new())
+                        };
                         (
                             CellValue::Error(v),
                             Some(Formula {
-                                    rgce,
-                                    text,
-                                    flags,
-                                    extra,
-                                    warnings,
-                                }),
+                                rgce,
+                                text,
+                                flags,
+                                extra,
+                                warnings,
+                            }),
                             None,
                         )
                     }
@@ -2183,7 +2079,11 @@ fn parse_ptg_exp_candidates(rgce: &[u8]) -> Option<Vec<(u32, u32)>> {
 
     // Prefer candidates that consume more bytes (newer formats), but always keep all viable ones.
     candidates.sort_by_key(|(_, _, n)| *n);
-    let out: Vec<(u32, u32)> = candidates.into_iter().rev().map(|(r, c, _)| (r, c)).collect();
+    let out: Vec<(u32, u32)> = candidates
+        .into_iter()
+        .rev()
+        .map(|(r, c, _)| (r, c))
+        .collect();
     Some(out)
 }
 
