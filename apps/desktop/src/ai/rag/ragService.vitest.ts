@@ -1,11 +1,37 @@
 import { describe, expect, it } from "vitest";
 
 import { DocumentController } from "../../document/documentController.js";
+import { HashEmbedder } from "../../../../../packages/ai-rag/src/index.js";
 
 import { createDesktopRagService } from "./ragService.js";
 import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpreadsheetApi.js";
 
 describe("createDesktopRagService (embedder config)", () => {
+  it("uses HashEmbedder by default", async () => {
+    const controller = new DocumentController();
+    let observedEmbedder: unknown = null;
+
+    const service = createDesktopRagService({
+      documentController: controller,
+      workbookId: "wb_embedder_default",
+      createRag: async (opts: any) => {
+        observedEmbedder = opts?.embedder;
+        return {
+          vectorStore: { close: async () => {} },
+          contextManager: {},
+          indexWorkbook: async () => ({ indexed: 0 }),
+        } as any;
+      },
+    });
+
+    try {
+      await service.getContextManager();
+      expect(observedEmbedder).toBeInstanceOf(HashEmbedder);
+    } finally {
+      await service.dispose();
+    }
+  });
+
   it("rejects non-hash embedder types", () => {
     const controller = new DocumentController();
 
