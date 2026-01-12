@@ -14,8 +14,8 @@ export type MarketplacePanelDeps = {
     syncInstalledExtensions?: () => Promise<void> | void;
     reloadExtension?: (id: string) => Promise<void> | void;
     unloadExtension?: (id: string) => Promise<void> | void;
+    resetExtensionState?: (id: string) => Promise<void> | void;
   } | null;
 };
 
 export function createMarketplacePanel(args: MarketplacePanelDeps): { dispose: () => void };
-

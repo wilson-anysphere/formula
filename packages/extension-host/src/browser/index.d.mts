@@ -17,8 +17,8 @@ export type ClipboardApi = {
 
 export class BrowserExtensionHost {
   constructor(options: {
-    engineVersion: string;
     spreadsheetApi: any;
+    engineVersion?: string;
     uiApi?: any;
     permissionPrompt?: (...args: any[]) => unknown;
     permissionStorage?: any;
@@ -33,7 +33,29 @@ export class BrowserExtensionHost {
   });
 
   loadExtensionFromUrl(manifestUrl: string): Promise<string>;
+  loadExtension(args: {
+    extensionId: string;
+    extensionPath: string;
+    manifest: Record<string, any>;
+    mainUrl: string;
+  }): Promise<string>;
+  unloadExtension(extensionId: string): Promise<boolean>;
+  updateExtension(args: {
+    extensionId: string;
+    extensionPath: string;
+    manifest: Record<string, any>;
+    mainUrl: string;
+  }): Promise<string>;
+
+  /**
+   * Clears persisted state owned by an extension (permission grants + extension storage).
+   * Intended for uninstall flows so a reinstall behaves like a clean install.
+   */
+  resetExtensionState(extensionId: string): Promise<void>;
   startup(): Promise<void>;
+  startupExtension(extensionId: string): Promise<void>;
+  activateView(viewId: string): Promise<void>;
+  activateCustomFunction(functionName: string): Promise<void>;
 
   getContributedCommands(): ContributedCommand[];
   getContributedPanels(): any[];
@@ -47,5 +69,12 @@ export class BrowserExtensionHost {
   resetPermissions(extensionId: string): Promise<void>;
   resetAllPermissions(): Promise<void>;
 
+  clearExtensionStorage(extensionId: string): Promise<void>;
+
   executeCommand(commandId: string, ...args: any[]): Promise<any>;
+  invokeCustomFunction(functionName: string, ...args: any[]): Promise<any>;
+  invokeDataConnector(connectorId: string, method: string, ...args: any[]): Promise<any>;
+
+  getMessages(): Array<{ message: string; type: string }>;
+  dispose(): Promise<void>;
 }
