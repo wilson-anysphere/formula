@@ -1,25 +1,22 @@
+import { resolveCssVar } from "../theme/cssVars.js";
+
 export type CollabUserIdentity = { id: string; name: string; color: string };
 
 export const COLLAB_USER_STORAGE_KEY = "formula:collab:user";
 
-// Keep palette values as concatenations so `test/noHardcodedColors.test.js` (which
-// flags UI hex literals outside tokens.css) does not treat these data-driven
-// collaboration colors as hardcoded UI styling.
-const DEFAULT_COLOR = "#" + "4c8bf5"; // blue (Formula default)
-
-const COLOR_PALETTE: ReadonlyArray<string> = [
-  DEFAULT_COLOR,
-  "#" + "ff2d55", // pink/red
-  "#" + "34c759", // green
-  "#" + "ff9500", // orange
-  "#" + "af52de", // purple
-  "#" + "5ac8fa", // light blue
-  "#" + "ffcc00", // yellow
-  "#" + "5856d6", // indigo
-  "#" + "ff3b30", // red
-  "#" + "00c7be", // teal
-  "#" + "32ade6", // cyan
-  "#" + "ff6482", // rose
+const COLOR_TOKEN_PALETTE: ReadonlyArray<string> = [
+  "--formula-grid-remote-presence-1",
+  "--formula-grid-remote-presence-2",
+  "--formula-grid-remote-presence-3",
+  "--formula-grid-remote-presence-4",
+  "--formula-grid-remote-presence-5",
+  "--formula-grid-remote-presence-6",
+  "--formula-grid-remote-presence-7",
+  "--formula-grid-remote-presence-8",
+  "--formula-grid-remote-presence-9",
+  "--formula-grid-remote-presence-10",
+  "--formula-grid-remote-presence-11",
+  "--formula-grid-remote-presence-12",
 ];
 
 let inMemoryIdentity: CollabUserIdentity | null = null;
@@ -55,9 +52,11 @@ function hashStringToUInt32(value: string): number {
 }
 
 function colorFromId(id: string): string {
-  if (COLOR_PALETTE.length === 0) return DEFAULT_COLOR;
-  const idx = hashStringToUInt32(id) % COLOR_PALETTE.length;
-  return COLOR_PALETTE[idx]!;
+  const fallback = resolveCssVar("--formula-grid-remote-presence-default", { fallback: "blue" });
+  if (COLOR_TOKEN_PALETTE.length === 0) return fallback;
+  const idx = hashStringToUInt32(id) % COLOR_TOKEN_PALETTE.length;
+  const token = COLOR_TOKEN_PALETTE[idx]!;
+  return resolveCssVar(token, { fallback });
 }
 
 function defaultNameFromId(id: string): string {

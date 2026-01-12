@@ -85,6 +85,19 @@
   --formula-grid-comment-indicator: var(--warning);
   --formula-grid-comment-indicator-resolved: var(--text-secondary);
   --formula-grid-remote-presence-default: var(--accent);
+  /* Remote presence palette (collaboration cursors/selections). */
+  --formula-grid-remote-presence-1: #4c8bf5;
+  --formula-grid-remote-presence-2: #ff2d55;
+  --formula-grid-remote-presence-3: #34c759;
+  --formula-grid-remote-presence-4: #ff9500;
+  --formula-grid-remote-presence-5: #af52de;
+  --formula-grid-remote-presence-6: #5ac8fa;
+  --formula-grid-remote-presence-7: #ffcc00;
+  --formula-grid-remote-presence-8: #5856d6;
+  --formula-grid-remote-presence-9: #ff3b30;
+  --formula-grid-remote-presence-10: #00c7be;
+  --formula-grid-remote-presence-11: #32ade6;
+  --formula-grid-remote-presence-12: #ff6482;
 
   /* Charts */
   --chart-bg: var(--bg-primary);
