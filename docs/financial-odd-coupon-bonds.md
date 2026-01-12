@@ -50,14 +50,13 @@ function registry) typically live under:
 
 ### Unit tests
 
-Primary targeted tests live at:
+Primary targeted tests (and some boundary validations) live at:
 
 - `crates/formula-engine/tests/functions/financial_odd_coupon.rs`
 
 Date-ordering equality edge cases and other boundary validations are locked via:
 
 - `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`
-- `crates/formula-engine/tests/functions/financial_odd_coupon.rs`
 - `crates/formula-engine/tests/functions/financial_oddcoupons.rs`
 
 These tests currently focus on invariants that should *always* hold (e.g. independence from the
