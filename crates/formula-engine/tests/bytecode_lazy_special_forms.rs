@@ -492,6 +492,57 @@ fn bytecode_choose_does_not_eval_choices_when_index_is_out_of_range() {
 }
 
 #[test]
+fn bytecode_choose_does_not_eval_choices_when_index_is_out_of_range_from_cell() {
+    // If the index is out of range (even when provided via a cell value), CHOOSE should return
+    // #VALUE! without evaluating any choices.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=CHOOSE(B1, A2, 7)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("choose_index_oob_from_cell_lazy"), &expr);
+
+    let grid = PanicGridWithNumber {
+        // B1 relative to origin (A1) => (row=0, col=1)
+        number_coord: CellCoord::new(0, 1),
+        number: 3.0,
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Value));
+}
+
+#[test]
+fn bytecode_eval_ast_choose_does_not_eval_choices_when_index_is_out_of_range_from_cell() {
+    // Ensure `bytecode::eval_ast` matches VM semantics when the CHOOSE index is out-of-range.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=CHOOSE(B1, A2, 7)", origin).expect("parse");
+
+    let grid = PanicGridWithNumber {
+        // B1 relative to origin (A1) => (row=0, col=1)
+        number_coord: CellCoord::new(0, 1),
+        number: 3.0,
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let value = bytecode::eval_ast(
+        &expr,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Value));
+}
+
+#[test]
 fn bytecode_ifs_does_not_eval_values_for_false_conditions() {
     // IFS(FALSE, <unused_value>, TRUE, 7) must not evaluate the first value argument.
     let origin = CellCoord::new(0, 0);
