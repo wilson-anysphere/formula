@@ -9142,7 +9142,7 @@ mountRibbon(ribbonReactRoot, {
         queueMicrotask(() => app.focus());
         return;
       case "home.clipboard.paste.transpose":
-        showToast("Paste Transpose not implemented");
+        void app.clipboardPasteSpecial("all", { transpose: true });
         queueMicrotask(() => app.focus());
         return;
       case "home.clipboard.pasteSpecial":
@@ -9173,7 +9173,7 @@ mountRibbon(ribbonReactRoot, {
         queueMicrotask(() => app.focus());
         return;
       case "home.clipboard.pasteSpecial.transpose":
-        showToast("Paste Transpose not implemented");
+        void app.clipboardPasteSpecial("all", { transpose: true });
         queueMicrotask(() => app.focus());
         return;
 

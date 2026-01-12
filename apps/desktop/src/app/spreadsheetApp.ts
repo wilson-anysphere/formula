@@ -2421,13 +2421,16 @@ export class SpreadsheetApp {
     await this.pasteClipboardToSelection();
   }
 
-  async clipboardPasteSpecial(mode: "all" | "values" | "formulas" | "formats" = "all"): Promise<void> {
+  async clipboardPasteSpecial(
+    mode: "all" | "values" | "formulas" | "formats" = "all",
+    options: { transpose?: boolean } = {}
+  ): Promise<void> {
     if (!this.shouldHandleSpreadsheetClipboardCommand()) return;
 
     const normalized: "all" | "values" | "formulas" | "formats" =
       mode === "values" || mode === "formulas" || mode === "formats" ? mode : "all";
 
-    const promise = this.pasteClipboardToSelection({ mode: normalized });
+    const promise = this.pasteClipboardToSelection({ mode: normalized, transpose: options.transpose === true });
     this.idle.track(promise);
     await promise;
   }
@@ -9246,13 +9249,16 @@ export class SpreadsheetApp {
     }
   }
 
-  async pasteClipboardToSelection(options: { mode?: "all" | "values" | "formulas" | "formats" } = {}): Promise<void> {
+  async pasteClipboardToSelection(
+    options: { mode?: "all" | "values" | "formulas" | "formats"; transpose?: boolean } = {}
+  ): Promise<void> {
     try {
       const provider = await this.getClipboardProvider();
       const content = await provider.read();
       const start = { ...this.selection.active };
       const ctx = this.clipboardCopyContext;
       const mode = options.mode ?? "all";
+      const transpose = options.transpose === true;
       let deltaRow = 0;
       let deltaCol = 0;
 
@@ -9260,7 +9266,7 @@ export class SpreadsheetApp {
       this.clipboardCopyContext = nextContext;
 
       const externalGrid = mode === "all" && isInternalPaste ? null : parseClipboardContentToCellGrid(content);
-      const internalCells = isInternalPaste ? ctx.cells : null;
+      const internalCells = isInternalPaste ? ctx?.cells : null;
       const rowCount = internalCells ? internalCells.length : externalGrid?.length ?? 0;
       const colCount = Math.max(
         0,
@@ -9285,8 +9291,8 @@ export class SpreadsheetApp {
       if (
         isInternalPaste
       ) {
-        deltaRow = start.row - ctx.range.startRow;
-        deltaCol = start.col - ctx.range.startCol;
+        deltaRow = start.row - (ctx as any).range.startRow;
+        deltaCol = start.col - (ctx as any).range.startCol;
       }
 
       const rewrittenInternalFormulas = new Map<number, string>();
@@ -9328,6 +9334,100 @@ export class SpreadsheetApp {
       }
 
       const values = (() => {
+        if (transpose) {
+          const srcRowCount = rowCount;
+          const srcColCount = colCount;
+
+          const makeTransposedGrid = (cellBuilder: (srcRow: number, srcCol: number) => any): any[][] => {
+            const out: any[][] = [];
+            for (let dstRow = 0; dstRow < srcColCount; dstRow += 1) {
+              const outRow: any[] = [];
+              for (let dstCol = 0; dstCol < srcRowCount; dstCol += 1) {
+                // Transpose mapping: (srcRow, srcCol) -> (dstRow=srcCol, dstCol=srcRow)
+                outRow.push(cellBuilder(dstCol, dstRow));
+              }
+              out.push(outRow);
+            }
+            return out;
+          };
+
+          const shiftInternalFormulaForTranspose = (rawFormula: string, srcRow: number, srcCol: number): string => {
+            // Each source cell moves from:
+            //  (srcStartRow + srcRow, srcStartCol + srcCol)
+            // to (dstStartRow + srcCol, dstStartCol + srcRow)
+            // so the required relative reference shift depends on the cell's original offset.
+            const deltaRowForCell = deltaRow + srcCol - srcRow;
+            const deltaColForCell = deltaCol + srcRow - srcCol;
+            if (deltaRowForCell === 0 && deltaColForCell === 0) return rawFormula;
+            return shiftA1References(rawFormula, deltaRowForCell, deltaColForCell);
+          };
+
+          if (mode === "all") {
+            if (isInternalPaste) {
+              return makeTransposedGrid((srcRow, srcCol) => {
+                const cell = internalCells?.[srcRow]?.[srcCol];
+                const rawFormula = cell?.formula ?? null;
+                const formula =
+                  rawFormula != null ? shiftInternalFormulaForTranspose(rawFormula, srcRow, srcCol) : null;
+                if (formula != null) {
+                  return { formula, styleId: cell?.styleId ?? 0 };
+                }
+                return { value: cell?.value ?? null, styleId: cell?.styleId ?? 0 };
+              });
+            }
+
+            return makeTransposedGrid((srcRow, srcCol) => {
+              const cell: any = externalGrid?.[srcRow]?.[srcCol] ?? null;
+              const format = clipboardFormatToDocStyle(cell?.format ?? null);
+              if (cell?.formula != null) {
+                return { formula: cell.formula, format };
+              }
+              return { value: cell?.value ?? null, format };
+            });
+          }
+
+          if (mode === "formats") {
+            if (isInternalPaste) {
+              return makeTransposedGrid((srcRow, srcCol) => {
+                const cell = internalCells?.[srcRow]?.[srcCol];
+                return { styleId: cell?.styleId ?? 0 };
+              });
+            }
+
+            return makeTransposedGrid((srcRow, srcCol) => {
+              const cell: any = externalGrid?.[srcRow]?.[srcCol] ?? null;
+              return { format: clipboardFormatToDocStyle(cell?.format ?? null) };
+            });
+          }
+
+          if (mode === "formulas") {
+            if (isInternalPaste) {
+              return makeTransposedGrid((srcRow, srcCol) => {
+                const cell = internalCells?.[srcRow]?.[srcCol];
+                const rawFormula = cell?.formula ?? null;
+                const formula =
+                  rawFormula != null ? shiftInternalFormulaForTranspose(rawFormula, srcRow, srcCol) : null;
+                if (formula != null) return { formula };
+                return { value: cell?.value ?? null };
+              });
+            }
+
+            return makeTransposedGrid((srcRow, srcCol) => {
+              const cell: any = externalGrid?.[srcRow]?.[srcCol] ?? null;
+              if (cell?.formula != null) return { formula: cell.formula };
+              return { value: cell?.value ?? null };
+            });
+          }
+
+          // mode === "values"
+          const source = externalGrid ?? (isInternalPaste ? (internalCells as any) : null);
+          if (!source) return [];
+          return makeTransposedGrid((srcRow, srcCol) => {
+            const cell: any = source?.[srcRow]?.[srcCol] ?? null;
+            return { value: cell?.value ?? null };
+          });
+        }
+
         if (mode === "all") {
           if (isInternalPaste) {
             return internalCells!.map((row, r) =>
@@ -9402,11 +9502,15 @@ export class SpreadsheetApp {
 
       this.document.setRangeValues(this.sheetId, start, values, { label: t("clipboard.paste") });
 
+      const pastedRowCount = values.length;
+      const pastedColCount = Math.max(0, ...values.map((row: any) => (Array.isArray(row) ? row.length : 0)));
+      if (pastedRowCount === 0 || pastedColCount === 0) return;
+
       const range: Range = {
         startRow: start.row,
-        endRow: start.row + rowCount - 1,
+        endRow: start.row + pastedRowCount - 1,
         startCol: start.col,
-        endCol: start.col + colCount - 1
+        endCol: start.col + pastedColCount - 1
       };
       this.selection = buildSelection({ ranges: [range], active: start, anchor: start, activeRangeIndex: 0 }, this.limits);
 

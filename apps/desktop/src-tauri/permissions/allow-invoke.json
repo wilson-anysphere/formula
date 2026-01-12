@@ -6,7 +6,6 @@
       "commands": {
         "allow": [
           "add_sheet",
-          "add_sheet_with_id",
           "check_for_updates",
           "clipboard_read",
           "clipboard_write",
