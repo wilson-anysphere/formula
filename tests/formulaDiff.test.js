@@ -93,3 +93,24 @@ test("diffFormula: normalization ensures leading '=' by default", () => {
   ]);
 });
 
+test("diffFormula: supports absolute references ($A$10 -> $A$12)", () => {
+  const result = diffFormula("=SUM($A$1:$A$10)", "=SUM($A$1:$A$12)");
+  assert.equal(result.equal, false);
+  assert.deepEqual(simplifyOps(result.ops), [
+    { type: "equal", tokens: ["op:=", "ident:SUM", "punct:(", "ident:$A$1", "op::"] },
+    { type: "delete", tokens: ["ident:$A$10"] },
+    { type: "insert", tokens: ["ident:$A$12"] },
+    { type: "equal", tokens: ["punct:)"] },
+  ]);
+});
+
+test("diffFormula: supports comparison operators (>, >=)", () => {
+  const result = diffFormula("=IF(A1>0,1,0)", "=IF(A1>=0,1,0)");
+  assert.equal(result.equal, false);
+  assert.deepEqual(simplifyOps(result.ops), [
+    { type: "equal", tokens: ["op:=", "ident:IF", "punct:(", "ident:A1"] },
+    { type: "delete", tokens: ["op:>"] },
+    { type: "insert", tokens: ["op:>="] },
+    { type: "equal", tokens: ["number:0", "punct:,", "number:1", "punct:,", "number:0", "punct:)"] },
+  ]);
+});

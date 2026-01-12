@@ -21,6 +21,24 @@ export function tokenizeFormula(input) {
   const tokens = [];
   let i = 0;
 
+  const punct = new Set([",", "(", ")", ";", "{", "}", "[", "]"]);
+  const singleCharOps = new Set([
+    "+",
+    "-",
+    "*",
+    "/",
+    "^",
+    ":",
+    "!",
+    "=",
+    "%",
+    "<",
+    ">",
+    "&",
+    "@",
+    "#",
+  ]);
+
   const push = (type, value) => {
     tokens.push({ type, value });
   };
@@ -124,12 +142,13 @@ export function tokenizeFormula(input) {
       continue;
     }
 
-    // identifiers: letters/_ + digits/_/./
+    // identifiers: letters/_/./$ + digits/_/./$
     if (
       (ch >= "A" && ch <= "Z") ||
       (ch >= "a" && ch <= "z") ||
       ch === "_" ||
-      ch === "."
+      ch === "." ||
+      ch === "$"
     ) {
       let j = i + 1;
       while (j < input.length) {
@@ -153,18 +172,43 @@ export function tokenizeFormula(input) {
     }
 
     // operators / punctuation
-    const singleCharOps = ["+", "-", "*", "/", "^", ":", "!", ",", "(", ")", "=", "%"];
-    if (singleCharOps.includes(ch)) {
+    // Common multi-char operators
+    if (ch === "<") {
+      const nextCh = input[i + 1];
+      if (nextCh === "=" || nextCh === ">") {
+        push("op", `${ch}${nextCh}`);
+        i += 2;
+        continue;
+      }
+    }
+    if (ch === ">") {
+      const nextCh = input[i + 1];
+      if (nextCh === "=") {
+        push("op", `${ch}${nextCh}`);
+        i += 2;
+        continue;
+      }
+    }
+
+    if (punct.has(ch)) {
+      push("punct", ch);
+      i += 1;
+      continue;
+    }
+    if (singleCharOps.has(ch)) {
       // Treat % as a postfix operator.
-      push(ch === "," || ch === "(" || ch === ")" ? "punct" : "op", ch);
+      push("op", ch);
       i += 1;
       continue;
     }
 
-    throw new Error(`Unexpected character in formula: ${JSON.stringify(ch)}`);
+    // Be permissive: keep unknown characters as operators so callers (diff UI)
+    // can still render something, and higher-level parsers can decide whether
+    // they understand the token stream.
+    push("op", ch);
+    i += 1;
   }
 
   push("eof", "");
   return tokens;
 }
-
