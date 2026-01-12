@@ -6,9 +6,24 @@ test.describe("sheet navigation shortcuts", () => {
   test("Ctrl+PageDown / Ctrl+PageUp switches the active sheet (wraps)", async ({ page }) => {
     await gotoDesktop(page);
 
-    // Ensure the grid has focus and the status bar reflects A1 values.
-    await page.click("#grid", { position: { x: 5, y: 5 } });
     await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+
+    // Ensure the grid has focus by clicking the center of A1 once the layout is ready.
+    await page.waitForFunction(() => {
+      const app = (window as any).__formulaApp;
+      const rect = app?.getCellRectA1?.("A1");
+      return rect && rect.width > 0 && rect.height > 0;
+    });
+    const a1 = (await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"))) as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+    await page
+      .locator("#grid")
+      .click({ position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
     // Lazily create Sheet2 by writing a value into it.
     await page.evaluate(() => {
@@ -40,4 +55,3 @@ test.describe("sheet navigation shortcuts", () => {
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
   });
 });
-
