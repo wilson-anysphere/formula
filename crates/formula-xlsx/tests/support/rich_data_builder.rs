@@ -19,6 +19,9 @@ pub struct RichDataXlsxBuilder {
     // Optional richData/metadata parts.
     metadata_xml: Option<String>,
     rich_value_parts: BTreeMap<u32, String>,
+    rd_rich_value_parts: BTreeMap<u32, String>,
+    rd_rich_value_structure_xml: Option<String>,
+    rd_rich_value_types_xml: Option<String>,
     rich_value_rel_xml: Option<String>,
     rich_value_rel_rels_xml: Option<String>,
 
@@ -93,6 +96,9 @@ impl Default for RichDataXlsxBuilder {
             sheets: Vec::new(),
             metadata_xml: None,
             rich_value_parts: BTreeMap::new(),
+            rd_rich_value_parts: BTreeMap::new(),
+            rd_rich_value_structure_xml: None,
+            rd_rich_value_types_xml: None,
             rich_value_rel_xml: None,
             rich_value_rel_rels_xml: None,
             media_parts: BTreeMap::new(),
@@ -231,9 +237,35 @@ impl RichDataXlsxBuilder {
         self
     }
 
-    /// Add a `xl/richData/richValue{n}.xml` part.
+    /// Add a `xl/richData/richValue*.xml` part.
+    ///
+    /// Excel's naming convention uses:
+    /// - `index == 0` → `xl/richData/richValue.xml` (no numeric suffix)
+    /// - `index >= 1` → `xl/richData/richValue{index}.xml`
     pub fn rich_value_xml(mut self, index: u32, xml: impl Into<String>) -> Self {
         self.rich_value_parts.insert(index, xml.into());
+        self
+    }
+
+    /// Add a `xl/richData/rdrichvalue*.xml` part.
+    ///
+    /// This naming scheme is used by newer Excel rich data payloads:
+    /// - `index == 0` → `xl/richData/rdrichvalue.xml` (no numeric suffix)
+    /// - `index >= 1` → `xl/richData/rdrichvalue{index}.xml`
+    pub fn rd_rich_value_xml(mut self, index: u32, xml: impl Into<String>) -> Self {
+        self.rd_rich_value_parts.insert(index, xml.into());
+        self
+    }
+
+    /// Set `xl/richData/rdrichvaluestructure.xml`.
+    pub fn rd_rich_value_structure_xml(mut self, xml: impl Into<String>) -> Self {
+        self.rd_rich_value_structure_xml = Some(xml.into());
+        self
+    }
+
+    /// Set `xl/richData/rdRichValueTypes.xml`.
+    pub fn rd_rich_value_types_xml(mut self, xml: impl Into<String>) -> Self {
+        self.rd_rich_value_types_xml = Some(xml.into());
         self
     }
 
@@ -328,9 +360,27 @@ impl RichDataXlsxBuilder {
 
         for (idx, xml) in self.rich_value_parts {
             parts.insert(
-                format!("xl/richData/richValue{idx}.xml"),
+                rich_value_part_name(idx),
                 xml.into_bytes(),
             );
+        }
+
+        for (idx, xml) in self.rd_rich_value_parts {
+            parts.insert(
+                rd_rich_value_part_name(idx),
+                xml.into_bytes(),
+            );
+        }
+
+        if let Some(xml) = self.rd_rich_value_structure_xml {
+            parts.insert(
+                "xl/richData/rdrichvaluestructure.xml".to_string(),
+                xml.into_bytes(),
+            );
+        }
+
+        if let Some(xml) = self.rd_rich_value_types_xml {
+            parts.insert("xl/richData/rdRichValueTypes.xml".to_string(), xml.into_bytes());
         }
 
         if let Some(xml) = self.rich_value_rel_xml {
@@ -364,7 +414,23 @@ const REL_TYPE_METADATA: &str =
 
 // Excel rich data types (linked data types / images) use a Microsoft-specific relationship.
 // This URI is widely observed in the wild; tests can override if needed.
-const REL_TYPE_RICH_VALUE: &str = "http://schemas.microsoft.com/office/2017/10/relationships/richValue";
+const REL_TYPE_RICH_VALUE: &str = "http://schemas.microsoft.com/office/2017/06/relationships/richValue";
+
+fn rich_value_part_name(index: u32) -> String {
+    if index == 0 {
+        "xl/richData/richValue.xml".to_string()
+    } else {
+        format!("xl/richData/richValue{index}.xml")
+    }
+}
+
+fn rd_rich_value_part_name(index: u32) -> String {
+    if index == 0 {
+        "xl/richData/rdrichvalue.xml".to_string()
+    } else {
+        format!("xl/richData/rdrichvalue{index}.xml")
+    }
+}
 
 fn minimal_worksheet_xml() -> String {
     r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

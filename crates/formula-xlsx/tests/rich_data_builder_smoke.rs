@@ -17,6 +17,7 @@ fn rich_data_xlsx_builder_emits_expected_parts() {
     let bytes = RichDataXlsxBuilder::new()
         .add_sheet("Sheet1", worksheet_xml)
         .metadata_xml(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><metadata/>"#)
+        .rich_value_xml(0, r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><rv0/>"#)
         .rich_value_xml(1, r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><rv/>"#)
         .rich_value_rel_xml(
             r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><rvRel/>"#,
@@ -36,6 +37,7 @@ fn rich_data_xlsx_builder_emits_expected_parts() {
     assert!(pkg.part("xl/worksheets/sheet1.xml").is_some());
 
     assert!(pkg.part("xl/metadata.xml").is_some());
+    assert!(pkg.part("xl/richData/richValue.xml").is_some());
     assert!(pkg.part("xl/richData/richValue1.xml").is_some());
     assert!(pkg.part("xl/richData/richValueRel.xml").is_some());
     assert!(pkg.part("xl/richData/_rels/richValueRel.xml.rels").is_some());
