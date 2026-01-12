@@ -338,16 +338,16 @@ fn oddf_equation(
     // ODDF* accepts the boundary equalities `issue == settlement` and `settlement == first_coupon`
     // (both yield finite results), while still rejecting `issue == first_coupon`.
     //
-    // Model this as:
+    // Chronology:
     // - `issue <= settlement <= first_coupon <= maturity`
-    // - `issue < first_coupon`
-    // - `settlement < maturity`
+    // - `issue < first_coupon` (reject `issue == first_coupon`)
+    // - `settlement < maturity` (reject `settlement == maturity`)
     //
     // Boundary behaviors are locked in `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
     if !(issue <= settlement
         && settlement <= first_coupon
-        && issue < first_coupon
         && first_coupon <= maturity
+        && issue < first_coupon
         && settlement < maturity)
     {
         return Err(ExcelError::Num);
