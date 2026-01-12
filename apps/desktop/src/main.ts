@@ -3715,7 +3715,12 @@ if (
           }));
 
           for (const [key, cell] of cells.entries()) {
-            if (!cell || (cell.value == null && cell.formula == null)) continue;
+            if (!cell) continue;
+            const value = normalizeExtensionCellValue(cell.value ?? null);
+            const formula = typeof cell.formula === "string" ? cell.formula : null;
+            const cellHasValue =
+              (value != null && String(value).trim().length > 0) || (formula != null && formula.trim().length > 0);
+            if (!cellHasValue) continue;
             const [rowStr, colStr] = String(key).split(",", 2);
             const row = Number(rowStr);
             const col = Number(colStr);
