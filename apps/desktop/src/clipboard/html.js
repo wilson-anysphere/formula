@@ -532,6 +532,11 @@ function parseHtmlToCellGridFallback(html) {
         raw = decodeHtmlEntities(
           inner
             .replace(/<!--[\s\S]*?-->/g, "")
+            // Some clipboard producers pretty-print HTML and include a newline immediately after
+            // `<br>`. Treat that as markup formatting (not cell content) so we don't double-count
+            // line breaks (`<br>` already becomes `\n`).
+            .replace(/<br\s*\/?>\r?\n/gi, "\n")
+            .replace(/<br\s*\/?>\r/gi, "\n")
             .replace(/<br\s*\/?>/gi, "\n")
             .replace(/<[^>]+>/g, "")
         ).replaceAll("\u00a0", " ");

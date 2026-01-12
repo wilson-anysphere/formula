@@ -95,6 +95,15 @@ test("clipboard HTML parses Google Sheets-style data attributes", () => {
   assert.equal(grid[1][1].format.backgroundColor, "yellow");
 });
 
+test("clipboard HTML fallback parser does not double-count newlines after <br>", () => {
+  const html = `<!DOCTYPE html><html><body><table><tr><td>Line1<br>
+Line2</td></tr></table></body></html>`;
+
+  const grid = parseHtmlToCellGrid(html);
+  assert.ok(grid);
+  assert.equal(grid[0][0].value, "Line1\nLine2");
+});
+
 test("clipboard HTML parses Windows CF_HTML payloads", () => {
   const cfHtml = buildCfHtmlPayload("<table><tr><td>1</td><td>two</td></tr></table>");
 
