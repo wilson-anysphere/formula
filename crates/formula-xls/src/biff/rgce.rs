@@ -939,7 +939,12 @@ fn unsupported(ptg: u8, warnings: Vec<String>) -> DecodeRgceResult {
         warnings.push(msg);
     }
     DecodeRgceResult {
-        text: "#UNKNOWN!".to_string(),
+        // Use a *real* Excel error literal so callers can round-trip the decoded formula through
+        // `formula-engine` and other Excel-compatible parsers.
+        //
+        // `#NAME?` is a reasonable generic fallback for “something in the formula is unknown /
+        // unsupported”.
+        text: "#NAME?".to_string(),
         warnings,
     }
 }
@@ -1723,7 +1728,7 @@ mod tests {
         // PtgExp (0x01) is not supported by this best-effort NAME rgce printer.
         let rgce = [0x01];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
-        assert_eq!(decoded.text, "#UNKNOWN!");
+        assert_eq!(decoded.text, "#NAME?");
         assert!(!decoded.warnings.is_empty(), "expected warnings");
         assert_parseable(&decoded.text);
     }
@@ -2766,7 +2771,7 @@ mod tests {
 
         let rgce = [0x00];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
-        assert_eq!(decoded.text, "#UNKNOWN!");
+        assert_eq!(decoded.text, "#NAME?");
         assert!(
             decoded.warnings.iter().any(|w| w.contains("0x00")),
             "expected warning to include original ptg id, warnings={:?}",
@@ -2785,7 +2790,7 @@ mod tests {
         // PtgAdd requires two operands; with an empty stack this triggers stack underflow.
         let rgce = [0x03];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
-        assert_eq!(decoded.text, "#UNKNOWN!");
+        assert_eq!(decoded.text, "#NAME?");
         assert!(
             decoded.warnings.iter().any(|w| w.contains("stack underflow")),
             "expected stack underflow warning, warnings={:?}",
@@ -2809,7 +2814,7 @@ mod tests {
         // PtgInt expects 2 bytes of payload; provide only 1 to trigger unexpected EOF.
         let rgce = [0x1E, 0x01];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
-        assert_eq!(decoded.text, "#UNKNOWN!");
+        assert_eq!(decoded.text, "#NAME?");
         assert!(
             decoded
                 .warnings
