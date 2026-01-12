@@ -211,16 +211,19 @@ export class ContextManager {
         const maxAllowedRank = dlpDecision.maxAllowed === null ? null : classificationRank(dlpDecision.maxAllowed);
         const index = buildDlpRangeIndex({ documentId, sheetId, range: normalizedRange }, records, {
           maxAllowedRank: maxAllowedRank ?? DEFAULT_CLASSIFICATION_RANK,
+          signal,
         });
         const policyAllowsRestrictedContent = Boolean(dlp.policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent);
-        const cellCheck = { index, maxAllowedRank, includeRestrictedContent, policyAllowsRestrictedContent };
+        const cellCheck = { index, maxAllowedRank, includeRestrictedContent, policyAllowsRestrictedContent, signal };
 
         // Redact at cell level (deterministic placeholder).
         nextValues = [];
         for (let r = 0; r < valuesForContext.length; r++) {
+          throwIfAborted(signal);
           const row = valuesForContext[r] ?? [];
           const nextRow = [];
           for (let c = 0; c < row.length; c++) {
+            throwIfAborted(signal);
             if (isDlpCellAllowedFromIndex(cellCheck, r, c)) {
               nextRow.push(row[c]);
               continue;
@@ -391,7 +394,7 @@ export class ContextManager {
       if (!dlp) return null;
       if (!classificationRecords.length) return null;
       if (!dlpDocumentIndex) {
-        dlpDocumentIndex = buildDlpDocumentIndex({ documentId: dlp.documentId, records: classificationRecords });
+        dlpDocumentIndex = buildDlpDocumentIndex({ documentId: dlp.documentId, records: classificationRecords, signal });
       }
       return dlpDocumentIndex;
     };
@@ -458,14 +461,14 @@ export class ContextManager {
                 // Fold in structured DLP classifications for the chunk's sheet + rect metadata.
                 let recordClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
                 const range = rectToRange(record.metadata?.rect);
-                 const sheetName = record.metadata?.sheetName;
-                 const sheetId = sheetName ? resolveDlpSheetId(sheetName) : "";
-                 if (range && sheetId) {
-                   const index = getDlpDocumentIndex();
-                   recordClassification = index
-                     ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range })
-                     : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
-                 }
+                const sheetName = record.metadata?.sheetName;
+                const sheetId = sheetName ? resolveDlpSheetId(sheetName) : "";
+                if (range && sheetId) {
+                  const index = getDlpDocumentIndex();
+                  recordClassification = index
+                    ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range }, signal)
+                    : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
+                }
 
                 const classification = maxClassification(recordClassification, heuristicClassification);
 
@@ -595,14 +598,14 @@ export class ContextManager {
       let recordClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
       if (dlp) {
         const range = rectToRange(meta.rect);
-         const sheetName = meta.sheetName;
-         const sheetId = sheetName ? resolveDlpSheetId(sheetName) : "";
-         if (range && sheetId) {
-           const index = getDlpDocumentIndex();
-           recordClassification = index
-             ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range })
-             : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
-         }
+        const sheetName = meta.sheetName;
+        const sheetId = sheetName ? resolveDlpSheetId(sheetName) : "";
+        if (range && sheetId) {
+          const index = getDlpDocumentIndex();
+          recordClassification = index
+            ? effectiveRangeClassificationFromDocumentIndex(index, { documentId: dlp.documentId, sheetId, range }, signal)
+            : effectiveRangeClassification({ documentId: dlp.documentId, sheetId, range }, classificationRecords);
+        }
       }
 
       const classification = maxClassification(recordClassification, heuristicClassification);
@@ -885,6 +888,8 @@ function rangesIntersectNormalized(a, b) {
 }
 
 function buildDlpRangeIndex(ref, records, opts) {
+  const signal = opts?.signal;
+  throwIfAborted(signal);
   const selectionRange = ref.range;
   const startRow = selectionRange.start.row;
   const startCol = selectionRange.start.col;
@@ -908,6 +913,7 @@ function buildDlpRangeIndex(ref, records, opts) {
   let rangeRankMax = DEFAULT_CLASSIFICATION_RANK;
 
   for (const record of records || []) {
+    throwIfAborted(signal);
     if (!record || !record.selector || typeof record.selector !== "object") continue;
     const selector = record.selector;
     if (selector.documentId !== ref.documentId) continue;
@@ -987,6 +993,7 @@ function buildDlpRangeIndex(ref, records, opts) {
   }
 
   if (rangeRecords.length > 1) {
+    throwIfAborted(signal);
     rangeRecords.sort((a, b) => b.rank - a.rank);
   }
 
@@ -1006,7 +1013,8 @@ function buildDlpRangeIndex(ref, records, opts) {
 }
 
 function isDlpCellAllowedFromIndex(params, row0, col0) {
-  const { index, maxAllowedRank, includeRestrictedContent, policyAllowsRestrictedContent } = params;
+  const { index, maxAllowedRank, includeRestrictedContent, policyAllowsRestrictedContent, signal } = params;
+  throwIfAborted(signal);
   if (maxAllowedRank === null) return false;
 
   // If we're explicitly including restricted content and policy allows it, a cell can become
@@ -1045,6 +1053,7 @@ function isDlpCellAllowedFromIndex(params, row0, col0) {
     (!restrictedAllowed && index.rangeRankMax === RESTRICTED_CLASSIFICATION_RANK);
   if (rangeCanAffectDecision && index.rangeRankMax > rank) {
     for (const record of index.rangeRecords) {
+      throwIfAborted(signal);
       if (record.rank <= rank) break;
       if (row0 < record.startRow || row0 > record.endRow || col0 < record.startCol || col0 > record.endCol) continue;
       rank = record.rank;
@@ -1059,6 +1068,8 @@ function isDlpCellAllowedFromIndex(params, row0, col0) {
 }
 
 function buildDlpDocumentIndex(params) {
+  const signal = params.signal;
+  throwIfAborted(signal);
   let docClassificationMax = { ...DEFAULT_CLASSIFICATION };
   const sheetClassificationMaxBySheetId = new Map();
   const columnClassificationBySheetId = new Map();
@@ -1110,6 +1121,7 @@ function buildDlpDocumentIndex(params) {
   }
 
   for (const record of params.records || []) {
+    throwIfAborted(signal);
     if (!record || !record.selector || typeof record.selector !== "object") continue;
     const selector = record.selector;
     if (selector.documentId !== params.documentId) continue;
@@ -1169,7 +1181,8 @@ function buildDlpDocumentIndex(params) {
   };
 }
 
-function effectiveRangeClassificationFromDocumentIndex(index, rangeRef) {
+function effectiveRangeClassificationFromDocumentIndex(index, rangeRef, signal) {
+  throwIfAborted(signal);
   if (!index || rangeRef.documentId !== index.documentId) return { ...DEFAULT_CLASSIFICATION };
 
   let classification = { ...DEFAULT_CLASSIFICATION };
@@ -1185,6 +1198,7 @@ function effectiveRangeClassificationFromDocumentIndex(index, rangeRef) {
   const colMap = index.columnClassificationBySheetId.get(rangeRef.sheetId);
   if (colMap) {
     for (let col = normalized.start.col; col <= normalized.end.col; col++) {
+      throwIfAborted(signal);
       const colClassification = colMap.get(col);
       if (!colClassification) continue;
       classification = maxClassification(classification, colClassification);
@@ -1194,6 +1208,7 @@ function effectiveRangeClassificationFromDocumentIndex(index, rangeRef) {
 
   const rangeRecords = index.rangeRecordsBySheetId.get(rangeRef.sheetId) ?? [];
   for (const record of rangeRecords) {
+    throwIfAborted(signal);
     if (!rangesIntersectNormalized(record.range, normalized)) continue;
     classification = maxClassification(classification, record.classification);
     if (classification.level === CLASSIFICATION_LEVEL.RESTRICTED) return classification;
@@ -1210,7 +1225,9 @@ function effectiveRangeClassificationFromDocumentIndex(index, rangeRef) {
     // Use the smaller side if the caller ever passes a very large range.
     if (rangeCells <= cellMap.size) {
       for (let row = normalized.start.row; row <= normalized.end.row; row++) {
+        throwIfAborted(signal);
         for (let col = normalized.start.col; col <= normalized.end.col; col++) {
+          throwIfAborted(signal);
           const cellClassification = cellMap.get(`${row},${col}`);
           if (!cellClassification) continue;
           classification = maxClassification(classification, cellClassification);
@@ -1219,6 +1236,7 @@ function effectiveRangeClassificationFromDocumentIndex(index, rangeRef) {
       }
     } else {
       for (const [key, cellClassification] of cellMap.entries()) {
+        throwIfAborted(signal);
         const [rowRaw, colRaw] = String(key).split(",");
         const row = Number(rowRaw);
         const col = Number(colRaw);
