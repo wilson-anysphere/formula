@@ -1,15 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
-import { HttpConnector } from "../../../../../packages/power-query/src/connectors/http.js";
+import { HttpConnector, MS_PER_DAY, PqDateTimeZone, PqDecimal, PqDuration, PqTime, QueryEngine } from "@formula/power-query";
 
 import { DocumentController } from "../../document/documentController.js";
 import { MockEngine } from "../../document/engine.js";
 
 import { applyQueryToDocument } from "../applyToDocument.ts";
 import { dateToExcelSerial } from "../../shared/valueParsing.js";
-import { MS_PER_DAY, PqDateTimeZone, PqDecimal, PqDuration, PqTime } from "../../../../../packages/power-query/src/values.js";
 
 test("applyQueryToDocument requests non-materializing streaming execution", async () => {
   const engine = {

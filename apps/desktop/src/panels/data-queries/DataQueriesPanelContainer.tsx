@@ -1,10 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { Query } from "../../../../../packages/power-query/src/model.js";
-import { CredentialManager } from "../../../../../packages/power-query/src/credentials/manager.js";
-import { randomId } from "../../../../../packages/power-query/src/credentials/utils.js";
-import { httpScope, oauth2Scope } from "../../../../../packages/power-query/src/credentials/scopes.js";
-import { normalizeScopes } from "../../../../../packages/power-query/src/oauth2/tokenStore.js";
+import { CredentialManager, httpScope, normalizeScopes, oauth2Scope, randomId, type Query } from "@formula/power-query";
 
 import { oauthBroker } from "../../power-query/oauthBroker.js";
 import { createPowerQueryRefreshStateStore } from "../../power-query/refreshStateStore.js";

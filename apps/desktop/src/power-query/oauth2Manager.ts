@@ -1,6 +1,4 @@
-import { InMemoryCredentialStore } from "../../../../packages/power-query/src/credentials/stores/inMemory.js";
-import { CredentialStoreOAuthTokenStore } from "../../../../packages/power-query/src/oauth2/credentialStoreTokenStore.js";
-import { OAuth2Manager } from "../../../../packages/power-query/src/oauth2/manager.js";
+import { CredentialStoreOAuthTokenStore, InMemoryCredentialStore, OAuth2Manager } from "@formula/power-query";
 
 import { oauthBroker } from "./oauthBroker.ts";
 import { hasTauriInvoke, TauriCredentialStore } from "./tauriCredentialStore.ts";
@@ -28,4 +26,3 @@ export function createDesktopOAuth2Manager(opts?: {
 
   return { oauth2, broker: oauthBroker, store, tokenStore };
 }
-

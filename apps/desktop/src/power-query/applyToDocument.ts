@@ -1,11 +1,8 @@
-import type { Query } from "../../../../packages/power-query/src/model.js";
-import type { QueryExecutionContext, QueryEngine } from "../../../../packages/power-query/src/engine.js";
-import { ArrowTableAdapter } from "../../../../packages/power-query/src/arrowTable.js";
-import { DataTable } from "../../../../packages/power-query/src/table.js";
+import { ArrowTableAdapter, DataTable, MS_PER_DAY, PqDateTimeZone, PqDecimal, PqDuration, PqTime } from "@formula/power-query";
+import type { Query, QueryExecutionContext, QueryEngine } from "@formula/power-query";
 
 import type { DocumentController } from "../document/documentController.js";
 import { dateToExcelSerial } from "../shared/valueParsing.js";
-import { MS_PER_DAY, PqDateTimeZone, PqDecimal, PqDuration, PqTime } from "../../../../packages/power-query/src/values.js";
 
 export type QuerySheetDestination = {
   sheetId: string;

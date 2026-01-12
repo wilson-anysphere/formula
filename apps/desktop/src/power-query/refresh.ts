@@ -1,7 +1,5 @@
-import type { Query, RefreshPolicy } from "../../../../packages/power-query/src/model.js";
-import type { QueryExecutionContext, QueryEngine } from "../../../../packages/power-query/src/engine.js";
-import { RefreshManager } from "../../../../packages/power-query/src/refresh.js";
-import { RefreshOrchestrator } from "../../../../packages/power-query/src/refreshGraph.js";
+import { RefreshManager, RefreshOrchestrator } from "@formula/power-query";
+import type { Query, QueryExecutionContext, QueryEngine, RefreshPolicy } from "@formula/power-query";
 
 import type { DocumentController } from "../document/documentController.js";
 
@@ -305,16 +303,16 @@ export class DesktopPowerQueryRefreshManager {
           label: `Refresh query: ${query.name}`,
           queryId,
           onProgress: async (progress) => {
-              if (progress.type === "batch") {
-                this.emitter.emit({
-                  type: "apply:progress",
-                  jobId,
-                  queryId,
-                  rowsWritten: progress.totalRowsWritten,
-                  sessionId,
-                });
-              }
-            },
+            if (progress.type === "batch") {
+              this.emitter.emit({
+                type: "apply:progress",
+                jobId,
+                queryId,
+                rowsWritten: progress.totalRowsWritten,
+                sessionId,
+              });
+            }
+          },
           });
         this.emitter.emit({ type: "apply:completed", jobId, queryId, result, sessionId });
       } catch (error) {

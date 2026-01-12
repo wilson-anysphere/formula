@@ -8,7 +8,7 @@ import { MS_PER_DAY, PqDateTimeZone, PqDecimal, PqDuration, PqTime, parseIsoLike
 /** @type {((columns: Record<string, any[] | ArrayLike<any>>) => any) | null} */
 let arrowTableFromColumns = null;
 try {
-  ({ arrowTableFromColumns } = await import("../../data-io/src/index.js"));
+  ({ arrowTableFromColumns } = await import("@formula/data-io"));
 
   // `@formula/data-io` can be present without the heavy optional `apache-arrow`
   // dependency installed (e.g. in some test sandboxes). In that case the module

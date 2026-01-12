@@ -1,9 +1,4 @@
-import type { Query, RefreshPolicy } from "../../../../packages/power-query/src/model.js";
-import { QueryEngine } from "../../../../packages/power-query/src/engine.js";
-import { OAuth2Manager } from "../../../../packages/power-query/src/oauth2/manager.js";
-import { CredentialStoreOAuthTokenStore } from "../../../../packages/power-query/src/oauth2/credentialStoreTokenStore.js";
-
-import type { QueryExecutionContext } from "../../../../packages/power-query/src/engine.js";
+import { CredentialStoreOAuthTokenStore, OAuth2Manager, QueryEngine, type Query, type QueryExecutionContext, type RefreshPolicy } from "@formula/power-query";
 
 import type { DocumentController } from "../document/documentController.js";
 

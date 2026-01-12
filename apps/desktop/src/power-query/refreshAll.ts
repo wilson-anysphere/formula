@@ -1,7 +1,4 @@
-import type { Query } from "../../../../packages/power-query/src/model.js";
-import type { QueryExecutionContext, QueryEngine } from "../../../../packages/power-query/src/engine.js";
-import type { QueryExecutionResult } from "../../../../packages/power-query/src/engine.js";
-import { RefreshOrchestrator } from "../../../../packages/power-query/src/refreshGraph.js";
+import { RefreshOrchestrator, type Query, type QueryExecutionContext, type QueryEngine, type QueryExecutionResult } from "@formula/power-query";
 
 import type { DocumentController } from "../document/documentController.js";
 

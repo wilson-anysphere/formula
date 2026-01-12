@@ -3,7 +3,7 @@ import { Buffer } from "node:buffer";
 import test from "node:test";
 
 import { createDesktopQueryEngine } from "../engine.ts";
-import { EncryptedCacheStore } from "../../../../../packages/power-query/src/cache/encryptedStore.js";
+import { EncryptedCacheStore } from "@formula/power-query";
 
 let indexedDbAvailable = true;
 /** @type {import("fake-indexeddb").indexedDB | null} */

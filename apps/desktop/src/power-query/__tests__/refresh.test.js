@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DataTable } from "../../../../../packages/power-query/src/table.js";
-import { RefreshManager } from "../../../../../packages/power-query/src/refresh.js";
+import { DataTable, QueryEngine, RefreshManager } from "@formula/power-query";
 
 import { DocumentController } from "../../document/documentController.js";
 import { MockEngine } from "../../document/engine.js";
 
 import { DesktopPowerQueryRefreshManager } from "../refresh.ts";
-import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
 import { createPowerQueryRefreshStateStore } from "../refreshStateStore.ts";
 
 function makeMeta(queryId, table) {

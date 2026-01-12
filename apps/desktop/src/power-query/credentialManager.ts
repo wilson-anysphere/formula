@@ -1,5 +1,4 @@
-import { CredentialManager } from "../../../../packages/power-query/src/credentials/manager.js";
-import { InMemoryCredentialStore } from "../../../../packages/power-query/src/credentials/stores/inMemory.js";
+import { CredentialManager, InMemoryCredentialStore } from "@formula/power-query";
 import { hasTauriInvoke, TauriCredentialStore } from "./tauriCredentialStore.ts";
 
 export type PowerQueryCredentialPrompt = (args: {

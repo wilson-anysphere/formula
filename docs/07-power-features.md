@@ -338,7 +338,7 @@ In Formula, this is handled by a dependency-aware refresh orchestrator that:
 - Cancels only downstream dependents on failure, while allowing independent subgraphs to continue (Excel-like Refresh All UX)
 
 ```js
-import { QueryEngine, RefreshOrchestrator } from "../packages/power-query/src/index.js";
+import { QueryEngine, RefreshOrchestrator } from "@formula/power-query";
 
 const engine = new QueryEngine({
   onCredentialRequest: async (connectorId, details) => {
@@ -399,7 +399,7 @@ Cache stores:
 Provider helpers:
 
 - `createWebCryptoCacheProvider({ keyVersion, keyBytes })`: create an AES-256-GCM provider backed by `crypto.subtle` (browser / WebView contexts)
-- `createNodeCryptoCacheProvider({ keyVersion, keyBytes })`: create an AES-256-GCM provider backed by `node:crypto` (Node contexts; exported from `../packages/power-query/src/node.js`)
+- `createNodeCryptoCacheProvider({ keyVersion, keyBytes })`: create an AES-256-GCM provider backed by `node:crypto` (Node contexts; exported from `@formula/power-query/node`)
 
 Desktop integration notes:
 
@@ -408,7 +408,7 @@ Desktop integration notes:
   - The AES-256-GCM key is generated once and stored in the OS keychain (via a Tauri command), so cached results remain decryptable across restarts.
   - Older plaintext cache databases are best-effort cleared/deleted on startup to avoid leaving behind readable cache data.
 
-Note: Node-only helpers are available from the `../packages/power-query/src/node.js` entrypoint (for example `EncryptedFileSystemCacheStore` and `createNodeCryptoCacheProvider`).
+Note: Node-only helpers are available from the `@formula/power-query/node` entrypoint (for example `EncryptedFileSystemCacheStore` and `createNodeCryptoCacheProvider`).
 
 Maintenance:
 
@@ -426,7 +426,7 @@ import {
   QueryEngine,
   CacheManager,
   MemoryCacheStore,
-} from "../packages/power-query/src/index.js";
+} from "@formula/power-query";
 
 const cache = new CacheManager({ store: new MemoryCacheStore() });
 

@@ -30,12 +30,12 @@ import { getPrivacyLevel } from "./privacy/levels.js";
  * sources). Keeping this import lazy avoids hard-failing in environments where
  * optional Arrow dependencies are not present.
  *
- * @returns {Promise<typeof import("../../data-io/src/index.js")>}
+ * @returns {Promise<typeof import("@formula/data-io")>}
  */
 let dataIoModulePromise = null;
 async function loadDataIoModule() {
   if (!dataIoModulePromise) {
-    dataIoModulePromise = import("../../data-io/src/index.js");
+    dataIoModulePromise = import("@formula/data-io");
   }
   return dataIoModulePromise;
 }

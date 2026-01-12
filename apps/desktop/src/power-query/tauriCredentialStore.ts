@@ -1,4 +1,4 @@
-import { credentialScopeKey } from "../../../../packages/power-query/src/credentials/store.js";
+import { credentialScopeKey } from "@formula/power-query";
 
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 

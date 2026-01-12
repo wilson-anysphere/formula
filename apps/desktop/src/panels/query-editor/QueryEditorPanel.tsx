@@ -1,9 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-import type { Query, QueryOperation, QueryStep } from "../../../../../packages/power-query/src/model.js";
-import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
-import type { DataTable } from "../../../../../packages/power-query/src/table.js";
-import type { ArrowTableAdapter } from "../../../../../packages/power-query/src/arrowTable.js";
+import type { ArrowTableAdapter, DataTable, Query, QueryEngine, QueryOperation, QueryStep } from "@formula/power-query";
 
 import { StepsList } from "./components/StepsList";
 import { PreviewGrid } from "./components/PreviewGrid";

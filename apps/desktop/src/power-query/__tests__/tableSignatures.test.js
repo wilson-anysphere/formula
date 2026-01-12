@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CacheManager } from "../../../../../packages/power-query/src/cache/cache.js";
-import { MemoryCacheStore } from "../../../../../packages/power-query/src/cache/memory.js";
-import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
-import { DataTable } from "../../../../../packages/power-query/src/table.js";
+import { CacheManager, DataTable, MemoryCacheStore, QueryEngine } from "@formula/power-query";
 
 import { DocumentController } from "../../document/documentController.js";
 

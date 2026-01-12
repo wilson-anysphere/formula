@@ -1,19 +1,20 @@
-import { CacheManager } from "../../../../packages/power-query/src/cache/cache.js";
-import { hashValue } from "../../../../packages/power-query/src/cache/key.js";
-import { EncryptedCacheStore } from "../../../../packages/power-query/src/cache/encryptedStore.js";
-import { IndexedDBCacheStore } from "../../../../packages/power-query/src/cache/indexeddb.js";
-import { MemoryCacheStore } from "../../../../packages/power-query/src/cache/memory.js";
-import { createWebCryptoCacheProvider } from "../../../../packages/power-query/src/cache/webCryptoProvider.js";
-import { HttpConnector } from "../../../../packages/power-query/src/connectors/http.js";
-import { ODataConnector } from "../../../../packages/power-query/src/connectors/odata.js";
-import { SharePointConnector } from "../../../../packages/power-query/src/connectors/sharepoint.js";
-import { SqlConnector } from "../../../../packages/power-query/src/connectors/sql.js";
-import { QueryEngine } from "../../../../packages/power-query/src/engine.js";
-import { DataTable } from "../../../../packages/power-query/src/table.js";
+import {
+  CacheManager,
+  DataTable,
+  EncryptedCacheStore,
+  HttpConnector,
+  IndexedDBCacheStore,
+  MemoryCacheStore,
+  ODataConnector,
+  QueryEngine,
+  SharePointConnector,
+  SqlConnector,
+  createWebCryptoCacheProvider,
+  hashValue,
+  normalizeFilePath,
+} from "@formula/power-query";
+import type { OAuth2Manager, QueryExecutionContext } from "@formula/power-query";
 import { parseA1Range, splitSheetQualifier } from "../../../../packages/search/index.js";
-import type { OAuth2Manager } from "../../../../packages/power-query/src/oauth2/manager.js";
-import type { QueryExecutionContext } from "../../../../packages/power-query/src/engine.js";
-import { normalizeFilePath } from "../../../../packages/power-query/src/privacy/sourceId.js";
 
 import { enforceExternalConnector } from "../dlp/enforceExternalConnector.js";
 import { DLP_ACTION } from "../../../../packages/security/dlp/src/actions.js";

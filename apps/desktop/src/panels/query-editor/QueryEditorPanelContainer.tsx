@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-import type { Query } from "../../../../../packages/power-query/src/model.js";
-import { parseCronExpression } from "../../../../../packages/power-query/src/cron.js";
+import { parseCronExpression, type Query } from "@formula/power-query";
 
 import { parseA1 } from "../../document/coords.js";
 

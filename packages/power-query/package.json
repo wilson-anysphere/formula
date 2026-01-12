@@ -1,0 +1,37 @@
+{
+  "name": "@formula/power-query",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.js",
+  "types": "./src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./connectors": {
+      "types": "./src/connectors/index.d.ts",
+      "default": "./src/connectors/index.js"
+    },
+    "./m": {
+      "types": "./src/m/index.d.ts",
+      "default": "./src/m/index.js"
+    },
+    "./node": {
+      "types": "./src/node.d.ts",
+      "default": "./src/node.js"
+    }
+  },
+  "peerDependencies": {
+    "@formula/data-io": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@formula/data-io": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@formula/data-io": "workspace:*"
+  }
+}

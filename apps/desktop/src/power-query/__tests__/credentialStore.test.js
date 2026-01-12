@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CacheManager } from "../../../../../packages/power-query/src/cache/cache.js";
-import { MemoryCacheStore } from "../../../../../packages/power-query/src/cache/memory.js";
-import { httpScope } from "../../../../../packages/power-query/src/credentials/scopes.js";
-import { QueryEngine } from "../../../../../packages/power-query/src/engine.js";
+import { CacheManager, MemoryCacheStore, QueryEngine, httpScope } from "@formula/power-query";
 
 import { createPowerQueryCredentialManager } from "../credentialManager.ts";
 import { createDesktopOAuth2Manager } from "../oauth2Manager.ts";
@@ -154,4 +151,3 @@ test("OAuth2 refresh tokens persist via CredentialStoreOAuthTokenStore (desktop)
     globalThis.__TAURI__ = originalTauri;
   }
 });
-

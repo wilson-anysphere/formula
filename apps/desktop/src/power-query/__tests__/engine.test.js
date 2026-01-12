@@ -4,8 +4,7 @@ import test from "node:test";
 import { createDesktopQueryEngine } from "../engine.ts";
 import { createDefaultOrgPolicy } from "../../../../../packages/security/dlp/src/policy.js";
 import { DLP_ACTION } from "../../../../../packages/security/dlp/src/actions.js";
-import { getHttpSourceId } from "../../../../../packages/power-query/src/privacy/sourceId.js";
-import { DataTable } from "../../../../../packages/power-query/src/table.js";
+import { DataTable, getHttpSourceId } from "@formula/power-query";
 
 test("createDesktopQueryEngine uses Tauri invoke file commands when FS plugin is unavailable", async () => {
   const originalTauri = globalThis.__TAURI__;

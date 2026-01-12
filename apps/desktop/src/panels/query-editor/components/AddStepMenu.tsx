@@ -1,8 +1,6 @@
 import React, { useState } from "react";
 
-import type { Query, QueryOperation } from "../../../../../../packages/power-query/src/model.js";
-import type { DataTable } from "../../../../../../packages/power-query/src/table.js";
-import type { ArrowTableAdapter } from "../../../../../../packages/power-query/src/arrowTable.js";
+import type { ArrowTableAdapter, DataTable, Query, QueryOperation } from "@formula/power-query";
 import { t } from "../../../i18n/index.js";
 
 export function AddStepMenu(props: {

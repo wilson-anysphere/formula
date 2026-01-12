@@ -6,7 +6,7 @@ let arrowTableFromIPC = null;
 let arrowTableFromColumns = null;
 
 try {
-  ({ arrowTableFromIPC, arrowTableToIPC, arrowTableFromColumns } = await import("../../../data-io/src/index.js"));
+  ({ arrowTableFromIPC, arrowTableToIPC, arrowTableFromColumns } = await import("@formula/data-io"));
 
   // `@formula/data-io` can be present without the heavy optional `apache-arrow`
   // dependency installed (e.g. in some test sandboxes). In that case the module

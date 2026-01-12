@@ -1,4 +1,4 @@
-import { hashValue } from "../../../../packages/power-query/src/cache/key.js";
+import { hashValue } from "@formula/power-query";
 import { parseA1Range, splitSheetQualifier } from "../../../../packages/search/index.js";
 
 import type { DocumentController } from "../document/documentController.js";

@@ -1,4 +1,4 @@
-import type { RefreshPolicy } from "../../../../packages/power-query/src/model.js";
+import type { RefreshPolicy } from "@formula/power-query";
 
 export type RefreshStateEntry = { policy: RefreshPolicy; lastRunAtMs?: number };
 export type RefreshState = Record<string, RefreshStateEntry>;

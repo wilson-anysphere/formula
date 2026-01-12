@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DataTable } from "../../../../../packages/power-query/src/table.js";
+import { DataTable } from "@formula/power-query";
 
 import { DocumentController } from "../../document/documentController.js";
 import { MockEngine } from "../../document/engine.js";

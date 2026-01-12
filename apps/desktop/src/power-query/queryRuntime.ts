@@ -1,4 +1,4 @@
-import type { Query } from "../../../../packages/power-query/src/model.js";
+import type { Query } from "@formula/power-query";
 import { formatDlpDecisionMessage } from "../../../../packages/security/dlp/src/errors.js";
 
 export type QueryRunStatus = "idle" | "queued" | "refreshing" | "applying" | "success" | "error" | "cancelled";
