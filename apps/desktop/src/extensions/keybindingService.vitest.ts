@@ -11,6 +11,7 @@ function makeKeydownEvent(opts: {
   metaKey?: boolean;
   shiftKey?: boolean;
   altKey?: boolean;
+  repeat?: boolean;
   target?: any;
 }): KeyboardEvent {
   const event: any = {
@@ -20,6 +21,7 @@ function makeKeydownEvent(opts: {
     metaKey: Boolean(opts.metaKey),
     shiftKey: Boolean(opts.shiftKey),
     altKey: Boolean(opts.altKey),
+    repeat: Boolean(opts.repeat),
     target: opts.target ?? null,
     defaultPrevented: false,
   };
@@ -131,5 +133,45 @@ describe("KeybindingService", () => {
     expect(handled).toBe(true);
     expect(event.defaultPrevented).toBe(true);
     expect(extRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not dispatch on repeated keydown events", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const builtinRun = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.repeatTest", "Builtin", builtinRun);
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
+    service.setBuiltinKeybindings([{ command: "builtin.repeatTest", key: "ctrl+k" }]);
+
+    const event = makeKeydownEvent({ key: "k", ctrlKey: true, repeat: true });
+    const handled = await service.dispatchKeydown(event);
+
+    expect(handled).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+    expect(builtinRun).not.toHaveBeenCalled();
+  });
+
+  it("ignores keybindings when the target is an input/textarea/contenteditable", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const builtinRun = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.inputGuard", "Builtin", builtinRun);
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
+    service.setBuiltinKeybindings([{ command: "builtin.inputGuard", key: "ctrl+k" }]);
+
+    const event = makeKeydownEvent({
+      key: "k",
+      ctrlKey: true,
+      target: { tagName: "INPUT", isContentEditable: false },
+    });
+    const handled = await service.dispatchKeydown(event);
+
+    expect(handled).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+    expect(builtinRun).not.toHaveBeenCalled();
   });
 });
