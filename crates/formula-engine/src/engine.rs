@@ -9535,6 +9535,74 @@ mod tests {
         assert_eq!(engine.bytecode_program_count(), 0);
     }
 
+    fn assert_bytecode_matches_ast(formula: &str, expected: Value) {
+        let addr = "A1";
+
+        // Bytecode-enabled engine.
+        let mut engine_bc = Engine::new();
+        engine_bc.set_cell_formula("Sheet1", addr, formula).unwrap();
+        assert_eq!(
+            engine_bc.bytecode_program_count(),
+            1,
+            "expected formula to compile to bytecode"
+        );
+        let sheet_id = engine_bc.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let key = CellKey {
+            sheet: sheet_id,
+            addr: parse_a1(addr).unwrap(),
+        };
+        assert!(
+            matches!(
+                engine_bc.workbook.get_cell(key).and_then(|c| c.compiled.as_ref()),
+                Some(CompiledFormula::Bytecode(_))
+            ),
+            "expected compiled formula to take the bytecode path"
+        );
+        engine_bc.recalculate_single_threaded();
+        let value_bc = engine_bc.get_cell_value("Sheet1", addr);
+        assert_eq!(value_bc, expected);
+
+        // Bytecode-disabled engine (AST-only).
+        let mut engine_ast = Engine::new();
+        engine_ast.set_bytecode_enabled(false);
+        engine_ast.set_cell_formula("Sheet1", addr, formula).unwrap();
+        assert_eq!(
+            engine_ast.bytecode_program_count(),
+            0,
+            "bytecode-disabled engine should not compile programs"
+        );
+        engine_ast.recalculate_single_threaded();
+        let value_ast = engine_ast.get_cell_value("Sheet1", addr);
+        assert_eq!(value_ast, expected);
+
+        assert_eq!(value_bc, value_ast);
+    }
+
+    #[test]
+    fn bytecode_if_is_lazy_in_false_branch() {
+        assert_bytecode_matches_ast("=IF(TRUE, \"x\", 1/0)", Value::Text("x".to_string()));
+    }
+
+    #[test]
+    fn bytecode_if_is_lazy_in_true_branch() {
+        assert_bytecode_matches_ast("=IF(FALSE, 1/0, 7)", Value::Number(7.0));
+    }
+
+    #[test]
+    fn bytecode_iferror_is_lazy_in_fallback() {
+        assert_bytecode_matches_ast("=IFERROR(1, 1/0)", Value::Number(1.0));
+    }
+
+    #[test]
+    fn bytecode_iferror_evaluates_fallback_on_error() {
+        assert_bytecode_matches_ast("=IFERROR(1/0, 7)", Value::Number(7.0));
+    }
+
+    #[test]
+    fn bytecode_ifna_evaluates_fallback_on_na() {
+        assert_bytecode_matches_ast("=IFNA(NA(), 7)", Value::Number(7.0));
+    }
+
     #[test]
     fn bytecode_compiler_allows_huge_ranges_for_implicit_intersection() {
         let mut engine = Engine::new();
