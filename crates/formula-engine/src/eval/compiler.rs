@@ -581,15 +581,15 @@ fn compile_expr_inner(
                     sheet_dimensions,
                 )),
             },
-            crate::UnaryOp::ImplicitIntersection => Expr::ImplicitIntersection(Box::new(
-                compile_expr_inner(
+            crate::UnaryOp::ImplicitIntersection => {
+                Expr::ImplicitIntersection(Box::new(compile_expr_inner(
                     &u.expr,
                     current_sheet,
                     current_cell,
                     resolve_sheet,
                     sheet_dimensions,
-                ),
-            )),
+                )))
+            }
         },
         crate::Expr::Postfix(p) => match p.op {
             crate::PostfixOp::Percent => Expr::Postfix {
@@ -610,9 +610,13 @@ fn compile_expr_inner(
                 sheet_dimensions,
             ))),
         },
-        crate::Expr::Binary(b) => {
-            compile_binary(b, current_sheet, current_cell, resolve_sheet, sheet_dimensions)
-        }
+        crate::Expr::Binary(b) => compile_binary(
+            b,
+            current_sheet,
+            current_cell,
+            resolve_sheet,
+            sheet_dimensions,
+        ),
     }
 }
 
@@ -934,22 +938,20 @@ fn try_compile_static_range_ref(
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
     sheet_dimensions: &mut impl FnMut(usize) -> (u32, u32),
 ) -> Option<RangeRef<usize>> {
-    let left_op =
-        try_compile_static_range_operand(
-            left,
-            current_sheet,
-            current_cell,
-            resolve_sheet,
-            sheet_dimensions,
-        )?;
-    let right_op =
-        try_compile_static_range_operand(
-            right,
-            current_sheet,
-            current_cell,
-            resolve_sheet,
-            sheet_dimensions,
-        )?;
+    let left_op = try_compile_static_range_operand(
+        left,
+        current_sheet,
+        current_cell,
+        resolve_sheet,
+        sheet_dimensions,
+    )?;
+    let right_op = try_compile_static_range_operand(
+        right,
+        current_sheet,
+        current_cell,
+        resolve_sheet,
+        sheet_dimensions,
+    )?;
     if left_op.sheet == right_op.sheet {
         let (start, end) = bounding_rect(left_op.start, left_op.end, right_op.start, right_op.end);
         return Some(RangeRef {
@@ -978,22 +980,20 @@ fn try_compile_static_range_ref(
 
     match explicit_sheet {
         SheetReference::Sheet(merged_sheet) => {
-            let left_op =
-                try_compile_static_range_operand(
-                    left,
-                    merged_sheet,
-                    current_cell,
-                    resolve_sheet,
-                    sheet_dimensions,
-                )?;
-            let right_op =
-                try_compile_static_range_operand(
-                    right,
-                    merged_sheet,
-                    current_cell,
-                    resolve_sheet,
-                    sheet_dimensions,
-                )?;
+            let left_op = try_compile_static_range_operand(
+                left,
+                merged_sheet,
+                current_cell,
+                resolve_sheet,
+                sheet_dimensions,
+            )?;
+            let right_op = try_compile_static_range_operand(
+                right,
+                merged_sheet,
+                current_cell,
+                resolve_sheet,
+                sheet_dimensions,
+            )?;
             if left_op.sheet != right_op.sheet {
                 return None;
             }

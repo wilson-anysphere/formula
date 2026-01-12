@@ -2564,9 +2564,7 @@ impl<'a> Parser<'a> {
     fn parse_array_literal_best_effort(&mut self) -> Expr {
         if self.array_depth >= EXCEL_MAX_NESTED_CALLS {
             self.record_error(ParseError::new(
-                format!(
-                    "Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"
-                ),
+                format!("Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"),
                 self.current_span(),
             ));
             // Consume the `{` (if present) to avoid infinite loops.
@@ -3266,9 +3264,7 @@ impl<'a> Parser<'a> {
     fn parse_array_literal(&mut self) -> Result<Expr, ParseError> {
         if self.array_depth >= EXCEL_MAX_NESTED_CALLS {
             return Err(ParseError::new(
-                format!(
-                    "Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"
-                ),
+                format!("Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"),
                 self.current_span(),
             ));
         }

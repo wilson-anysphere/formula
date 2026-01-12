@@ -239,8 +239,7 @@ pub fn decode_rgce(rgce: &[u8]) -> Result<String, DecodeRgceError> {
                             return Err(DecodeRgceError::UnexpectedEof);
                         }
 
-                        let table_id =
-                            u32::from_le_bytes([input[0], input[1], input[2], input[3]]);
+                        let table_id = u32::from_le_bytes([input[0], input[1], input[2], input[3]]);
                         let flags = u16::from_le_bytes([input[4], input[5]]);
                         let col_first = u16::from_le_bytes([input[6], input[7]]);
                         let col_last = u16::from_le_bytes([input[8], input[9]]);
@@ -576,11 +575,17 @@ fn structured_columns_from_ids(col_first: u16, col_last: u16) -> StructuredColum
     }
 }
 
-fn structured_ref_is_single_cell(item: Option<StructuredRefItem>, cols: &StructuredColumns) -> bool {
+fn structured_ref_is_single_cell(
+    item: Option<StructuredRefItem>,
+    cols: &StructuredColumns,
+) -> bool {
     match (item, cols) {
         (Some(StructuredRefItem::ThisRow), StructuredColumns::Single(_)) => true,
         // `Table1[[#Headers],[Col]]` and `Table1[[#Totals],[Col]]` resolve to a single cell.
-        (Some(StructuredRefItem::Headers | StructuredRefItem::Totals), StructuredColumns::Single(_)) => true,
+        (
+            Some(StructuredRefItem::Headers | StructuredRefItem::Totals),
+            StructuredColumns::Single(_),
+        ) => true,
         _ => false,
     }
 }
@@ -843,11 +848,15 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                     }
                     let (col, col_abs) = match &r.col {
                         Coord::A1 { index, abs } => (*index, *abs),
-                        Coord::Offset(_) => return Err(EncodeRgceError::Unsupported("relative offsets")),
+                        Coord::Offset(_) => {
+                            return Err(EncodeRgceError::Unsupported("relative offsets"))
+                        }
                     };
                     let (row, row_abs) = match &r.row {
                         Coord::A1 { index, abs } => (*index, *abs),
-                        Coord::Offset(_) => return Err(EncodeRgceError::Unsupported("relative offsets")),
+                        Coord::Offset(_) => {
+                            return Err(EncodeRgceError::Unsupported("relative offsets"))
+                        }
                     };
 
                     // Encode `@A1` by emitting a value-class reference token (PtgRefV). Excel
@@ -878,8 +887,12 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                                     out.push(0x45); // PtgAreaV
                                     out.extend_from_slice(&r1.to_le_bytes());
                                     out.extend_from_slice(&r2.to_le_bytes());
-                                    out.extend_from_slice(&encode_col_with_flags(c1, c1_abs, r1_abs));
-                                    out.extend_from_slice(&encode_col_with_flags(c2, c2_abs, r2_abs));
+                                    out.extend_from_slice(&encode_col_with_flags(
+                                        c1, c1_abs, r1_abs,
+                                    ));
+                                    out.extend_from_slice(&encode_col_with_flags(
+                                        c2, c2_abs, r2_abs,
+                                    ));
                                     return Ok(());
                                 }
                             }
@@ -965,11 +978,11 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
             }
         }
         Expr::Call(_) => return Err(EncodeRgceError::Unsupported("call expressions")),
+        Expr::FieldAccess(_) => return Err(EncodeRgceError::Unsupported("field access")),
         Expr::Missing => {
             out.push(0x16); // PtgMissArg
         }
         Expr::NameRef(_) => return Err(EncodeRgceError::Unsupported("named references")),
-        Expr::FieldAccess(_) => return Err(EncodeRgceError::Unsupported("field access")),
         Expr::ColRef(_) => return Err(EncodeRgceError::Unsupported("column references")),
         Expr::RowRef(_) => return Err(EncodeRgceError::Unsupported("row references")),
         Expr::StructuredRef(_) => {

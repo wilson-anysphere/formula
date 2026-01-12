@@ -3293,6 +3293,15 @@ impl Engine {
         }
 
         match expr {
+            crate::Expr::FieldAccess(access) => crate::Expr::FieldAccess(crate::FieldAccessExpr {
+                base: Box::new(self.inline_static_defined_names_for_bytecode_inner(
+                    access.base.as_ref(),
+                    current_sheet,
+                    visiting,
+                    lexical_scopes,
+                )),
+                field: access.field.clone(),
+            }),
             crate::Expr::NameRef(nref) => {
                 let name_key = normalize_defined_name(&nref.name);
                 if name_key.is_empty() {
@@ -3317,15 +3326,6 @@ impl Engine {
                 )
                 .unwrap_or_else(|| expr.clone())
             }
-            crate::Expr::FieldAccess(access) => crate::Expr::FieldAccess(crate::FieldAccessExpr {
-                base: Box::new(self.inline_static_defined_names_for_bytecode_inner(
-                    access.base.as_ref(),
-                    current_sheet,
-                    visiting,
-                    lexical_scopes,
-                )),
-                field: access.field.clone(),
-            }),
             crate::Expr::Array(arr) => crate::Expr::Array(crate::ArrayLiteral {
                 rows: arr
                     .rows
@@ -5939,13 +5939,16 @@ fn canonical_expr_collect_defined_name_prefix_errors_for_name(
         NameDefinition::Constant(_) => {}
         NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
             if let Ok(ast) = crate::parse_formula(formula, crate::ParseOptions::default()) {
-                flags.external_reference |=
-                    canonical_expr_contains_external_workbook_refs(&ast.expr);
+                flags.external_reference |= canonical_expr_contains_external_workbook_refs(&ast.expr);
                 canonical_expr_collect_sheet_prefix_errors(&ast.expr, sheet_id, workbook, flags);
 
                 if !flags.external_reference && !canonical_expr_contains_let_or_lambda(&ast.expr) {
                     canonical_expr_collect_defined_name_prefix_errors(
-                        &ast.expr, sheet_id, workbook, visiting, flags,
+                        &ast.expr,
+                        sheet_id,
+                        workbook,
+                        visiting,
+                        flags,
                     );
                 }
             }
@@ -6595,9 +6598,7 @@ fn rewrite_defined_name_constants_for_bytecode(
         lexical_scopes: &mut Vec<HashSet<String>>,
     ) -> Option<crate::Expr> {
         match expr {
-            crate::Expr::NameRef(nref) => {
-                inline_name_ref(nref, current_sheet, workbook, lexical_scopes)
-            }
+            crate::Expr::NameRef(nref) => inline_name_ref(nref, current_sheet, workbook, lexical_scopes),
             crate::Expr::FieldAccess(access) => rewrite_inner(
                 access.base.as_ref(),
                 current_sheet,
