@@ -55,6 +55,15 @@ function normalizeCssColor(value) {
   return normalizeHexToCssColor(trimmed) ?? trimmed;
 }
 
+function stableStringify(value) {
+  if (value === undefined) return "undefined";
+  if (value == null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const keys = Object.keys(value).sort();
+  const entries = keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`);
+  return `{${entries.join(",")}}`;
+}
+
 /**
  * Convert a DocumentController style table entry to the clipboard's lightweight format.
  *
@@ -158,7 +167,7 @@ export function getCellGridFromRange(doc, sheetId, range) {
 
   /** @type {CellGrid} */
   const grid = [];
-  /** @type {Map<number, any>} */
+  /** @type {Map<string, any>} */
   const formatCache = new Map();
 
   for (let row = r.start.row; row <= r.end.row; row++) {
@@ -166,17 +175,20 @@ export function getCellGridFromRange(doc, sheetId, range) {
     const outRow = [];
     for (let col = r.start.col; col <= r.end.col; col++) {
       const cell = doc.getCell(sheetId, { row, col });
-      const styleId = typeof cell?.styleId === "number" ? cell.styleId : 0;
+      const style =
+        doc?.getCellFormat && typeof doc.getCellFormat === "function"
+          ? doc.getCellFormat(sheetId, { row, col })
+          : doc?.styleTable?.get && typeof doc.styleTable.get === "function"
+            ? doc.styleTable.get(typeof cell?.styleId === "number" ? cell.styleId : 0)
+            : null;
+
+      const cacheKey = stableStringify(style);
       let format = null;
-      if (styleId !== 0) {
-        if (formatCache.has(styleId)) {
-          format = formatCache.get(styleId) ?? null;
-        } else {
-          const style =
-            doc?.styleTable?.get && typeof doc.styleTable.get === "function" ? doc.styleTable.get(styleId) : null;
-          format = styleToClipboardFormat(style);
-          formatCache.set(styleId, format);
-        }
+      if (formatCache.has(cacheKey)) {
+        format = formatCache.get(cacheKey) ?? null;
+      } else {
+        format = styleToClipboardFormat(style);
+        formatCache.set(cacheKey, format);
       }
       outRow.push({ value: cell.value, formula: cell.formula, format });
     }

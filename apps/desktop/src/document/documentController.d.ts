@@ -16,10 +16,14 @@ export class DocumentController {
   setFrozen(sheetId: string, frozenRows: number, frozenCols: number, options?: unknown): void;
 
   getCell(sheetId: string, coord: unknown): any;
+  getCellFormat(sheetId: string, coord: unknown): Record<string, any>;
 
   setCellValue(sheetId: string, coord: unknown, value: unknown, options?: unknown): void;
   setCellFormula(sheetId: string, coord: unknown, formula: string | null, options?: unknown): void;
   setRangeFormat(sheetId: string, range: unknown, stylePatch: Record<string, any> | null, options?: unknown): void;
+  setSheetFormat(sheetId: string, stylePatch: Record<string, any> | null, options?: unknown): void;
+  setRowFormat(sheetId: string, row: number, stylePatch: Record<string, any> | null, options?: unknown): void;
+  setColFormat(sheetId: string, col: number, stylePatch: Record<string, any> | null, options?: unknown): void;
 
   beginBatch(options?: unknown): void;
   endBatch(): void;

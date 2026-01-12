@@ -15,6 +15,10 @@ function mapKey(sheetId, row, col) {
   return `${sheetId}:${row},${col}`;
 }
 
+function formatKey(sheetId, layer, index) {
+  return `${sheetId}:${layer}:${index == null ? "" : index}`;
+}
+
 function sortKey(sheetId, row, col) {
   return `${sheetId}\u0000${row.toString().padStart(10, "0")}\u0000${col
     .toString()
@@ -221,12 +225,32 @@ function sheetViewStateEquals(a, b) {
  */
 
 /**
+ * Style id deltas for layered formatting.
+ *
+ * Layer precedence (for conflicts) is defined in `getCellFormat()`:
+ * `sheet < col < row < cell`.
+ *
+ * @typedef {{
+ *   sheetId: string,
+ *   layer: "sheet" | "row" | "col",
+ *   /**
+ *    * Row/col index for `layer: "row"`/`"col"`.
+ *    * Omitted for `layer: "sheet"`.
+ *    *\/
+ *   index?: number,
+ *   beforeStyleId: number,
+ *   afterStyleId: number,
+ * }} FormatDelta
+ */
+
+/**
  * @typedef {{
  *   label?: string,
  *   mergeKey?: string,
  *   timestamp: number,
  *   deltasByCell: Map<string, CellDelta>,
  *   deltasBySheetView: Map<string, SheetViewDelta>,
+ *   deltasByFormat: Map<string, FormatDelta>,
  * }} HistoryEntry
  */
 
@@ -253,6 +277,21 @@ function cloneSheetViewDelta(delta) {
 }
 
 /**
+ * @param {FormatDelta} delta
+ * @returns {FormatDelta}
+ */
+function cloneFormatDelta(delta) {
+  const out = {
+    sheetId: delta.sheetId,
+    layer: delta.layer,
+    beforeStyleId: delta.beforeStyleId,
+    afterStyleId: delta.afterStyleId,
+  };
+  if (delta.index != null) out.index = delta.index;
+  return out;
+}
+
+/**
  * @param {HistoryEntry} entry
  * @returns {CellDelta[]}
  */
@@ -273,6 +312,23 @@ function entryCellDeltas(entry) {
 function entrySheetViewDeltas(entry) {
   const deltas = Array.from(entry.deltasBySheetView.values()).map(cloneSheetViewDelta);
   deltas.sort((a, b) => (a.sheetId < b.sheetId ? -1 : a.sheetId > b.sheetId ? 1 : 0));
+  return deltas;
+}
+
+/**
+ * @param {HistoryEntry} entry
+ * @returns {FormatDelta[]}
+ */
+function entryFormatDeltas(entry) {
+  const deltas = Array.from(entry.deltasByFormat.values()).map(cloneFormatDelta);
+  const layerOrder = (layer) => (layer === "sheet" ? 0 : layer === "col" ? 1 : 2);
+  deltas.sort((a, b) => {
+    if (a.sheetId !== b.sheetId) return a.sheetId < b.sheetId ? -1 : 1;
+    if (a.layer !== b.layer) return layerOrder(a.layer) - layerOrder(b.layer);
+    const ai = a.index ?? -1;
+    const bi = b.index ?? -1;
+    return ai - bi;
+  });
   return deltas;
 }
 
@@ -302,12 +358,43 @@ function invertSheetViewDeltas(deltas) {
   }));
 }
 
+/**
+ * @param {FormatDelta[]} deltas
+ * @returns {FormatDelta[]}
+ */
+function invertFormatDeltas(deltas) {
+  return deltas.map((d) => {
+    const out = {
+      sheetId: d.sheetId,
+      layer: d.layer,
+      beforeStyleId: d.afterStyleId,
+      afterStyleId: d.beforeStyleId,
+    };
+    if (d.index != null) out.index = d.index;
+    return out;
+  });
+}
+
 class SheetModel {
   constructor() {
     /** @type {Map<string, CellState>} */
     this.cells = new Map();
     /** @type {SheetViewState} */
     this.view = emptySheetViewState();
+
+    /**
+     * Layered formatting.
+     *
+     * We store formatting at multiple granularities (sheet/col/row/cell) so the UI can apply
+     * formatting to whole rows/columns without eagerly materializing every cell.
+     *
+     * The per-cell layer continues to live on `CellState.styleId`. The remaining layers live here.
+     */
+    this.sheetStyleId = 0;
+    /** @type {Map<number, number>} */
+    this.rowStyles = new Map();
+    /** @type {Map<number, number>} */
+    this.colStyles = new Map();
   }
 
   /**
@@ -451,11 +538,17 @@ export class DocumentController {
   /**
    * Subscribe to controller events.
    *
-   * Events:
-   * - `change`: { deltas: CellDelta[], sheetViewDeltas?: SheetViewDelta[], source?: string, recalc?: boolean }
-   * - `history`: { canUndo: boolean, canRedo: boolean }
-   * - `dirty`: { isDirty: boolean }
-   * - `update`: emitted after any applied change (including undo/redo) for versioning adapters
+    * Events:
+    * - `change`: {
+    *     deltas: CellDelta[],
+    *     sheetViewDeltas?: SheetViewDelta[],
+    *     formatDeltas?: FormatDelta[],
+    *     source?: string,
+    *     recalc?: boolean,
+    *   }
+    * - `history`: { canUndo: boolean, canRedo: boolean }
+    * - `dirty`: { isDirty: boolean }
+    * - `update`: emitted after any applied change (including undo/redo) for versioning adapters
    *
    * @template {string} T
    * @param {T} event
@@ -515,7 +608,9 @@ export class DocumentController {
     if (
       this.batchDepth > 0 &&
       this.activeBatch &&
-      (this.activeBatch.deltasByCell.size > 0 || this.activeBatch.deltasBySheetView.size > 0)
+      (this.activeBatch.deltasByCell.size > 0 ||
+        this.activeBatch.deltasBySheetView.size > 0 ||
+        this.activeBatch.deltasByFormat.size > 0)
     ) {
       return true;
     }
@@ -581,6 +676,39 @@ export class DocumentController {
   getCell(sheetId, coord) {
     const c = typeof coord === "string" ? parseA1(coord) : coord;
     return this.model.getCell(sheetId, c.row, c.col);
+  }
+
+  /**
+   * Return the effective formatting for a cell, taking layered styles into account.
+   *
+   * Merge semantics:
+   * - Non-conflicting keys compose via deep merge (e.g. `{ font: { bold:true } }` + `{ font: { italic:true } }`).
+   * - Conflicts resolve deterministically by layer precedence:
+   *   `sheet < col < row < cell` (later layers override earlier layers for the same property).
+   *
+   * This mirrors the common spreadsheet model where cell-level formatting always wins, and
+   * row formatting overrides column formatting when both specify the same property.
+   *
+   * @param {string} sheetId
+   * @param {CellCoord | string} coord
+   * @returns {Record<string, any>}
+   */
+  getCellFormat(sheetId, coord) {
+    const c = typeof coord === "string" ? parseA1(coord) : coord;
+
+    // Ensure the sheet is materialized (DocumentController is lazily sheet-creating).
+    const cell = this.model.getCell(sheetId, c.row, c.col);
+    const sheet = this.model.sheets.get(sheetId);
+
+    const sheetStyle = this.styleTable.get(sheet?.sheetStyleId ?? 0);
+    const colStyle = this.styleTable.get(sheet?.colStyles.get(c.col) ?? 0);
+    const rowStyle = this.styleTable.get(sheet?.rowStyles.get(c.row) ?? 0);
+    const cellStyle = this.styleTable.get(cell.styleId ?? 0);
+
+    // Precedence: sheet < col < row < cell.
+    const sheetCol = applyStylePatch(sheetStyle, colStyle);
+    const sheetColRow = applyStylePatch(sheetCol, rowStyle);
+    return applyStylePatch(sheetColRow, cellStyle);
   }
 
   /**
@@ -877,6 +1005,89 @@ export class DocumentController {
   }
 
   /**
+   * Apply a formatting patch to the sheet-level formatting layer.
+   *
+   * @param {string} sheetId
+   * @param {Record<string, any> | null} stylePatch
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  setSheetFormat(sheetId, stylePatch, options = {}) {
+    // Ensure sheet exists.
+    this.model.getCell(sheetId, 0, 0);
+    const sheet = this.model.sheets.get(sheetId);
+    if (!sheet) return;
+
+    const beforeStyleId = sheet.sheetStyleId ?? 0;
+    const baseStyle = this.styleTable.get(beforeStyleId);
+    const merged = applyStylePatch(baseStyle, stylePatch);
+    const afterStyleId = this.styleTable.intern(merged);
+
+    if (beforeStyleId === afterStyleId) return;
+    this.#applyUserFormatDeltas(
+      [{ sheetId, layer: "sheet", beforeStyleId, afterStyleId }],
+      options,
+    );
+  }
+
+  /**
+   * Apply a formatting patch to a single row formatting layer (0-based row index).
+   *
+   * @param {string} sheetId
+   * @param {number} row
+   * @param {Record<string, any> | null} stylePatch
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  setRowFormat(sheetId, row, stylePatch, options = {}) {
+    const rowIdx = Number(row);
+    if (!Number.isInteger(rowIdx) || rowIdx < 0) return;
+
+    // Ensure sheet exists.
+    this.model.getCell(sheetId, 0, 0);
+    const sheet = this.model.sheets.get(sheetId);
+    if (!sheet) return;
+
+    const beforeStyleId = sheet.rowStyles.get(rowIdx) ?? 0;
+    const baseStyle = this.styleTable.get(beforeStyleId);
+    const merged = applyStylePatch(baseStyle, stylePatch);
+    const afterStyleId = this.styleTable.intern(merged);
+
+    if (beforeStyleId === afterStyleId) return;
+    this.#applyUserFormatDeltas(
+      [{ sheetId, layer: "row", index: rowIdx, beforeStyleId, afterStyleId }],
+      options,
+    );
+  }
+
+  /**
+   * Apply a formatting patch to a single column formatting layer (0-based column index).
+   *
+   * @param {string} sheetId
+   * @param {number} col
+   * @param {Record<string, any> | null} stylePatch
+   * @param {{ label?: string, mergeKey?: string, source?: string }} [options]
+   */
+  setColFormat(sheetId, col, stylePatch, options = {}) {
+    const colIdx = Number(col);
+    if (!Number.isInteger(colIdx) || colIdx < 0) return;
+
+    // Ensure sheet exists.
+    this.model.getCell(sheetId, 0, 0);
+    const sheet = this.model.sheets.get(sheetId);
+    if (!sheet) return;
+
+    const beforeStyleId = sheet.colStyles.get(colIdx) ?? 0;
+    const baseStyle = this.styleTable.get(beforeStyleId);
+    const merged = applyStylePatch(baseStyle, stylePatch);
+    const afterStyleId = this.styleTable.intern(merged);
+
+    if (beforeStyleId === afterStyleId) return;
+    this.#applyUserFormatDeltas(
+      [{ sheetId, layer: "col", index: colIdx, beforeStyleId, afterStyleId }],
+      options,
+    );
+  }
+
+  /**
    * Return the currently frozen pane counts for a sheet.
    *
    * @param {string} sheetId
@@ -1042,6 +1253,29 @@ export class DocumentController {
       const out = { id, frozenRows: view.frozenRows, frozenCols: view.frozenCols, cells };
       if (view.colWidths && Object.keys(view.colWidths).length > 0) out.colWidths = view.colWidths;
       if (view.rowHeights && Object.keys(view.rowHeights).length > 0) out.rowHeights = view.rowHeights;
+
+      // Layered formatting (sheet/col/row).
+      if (sheet && sheet.sheetStyleId && sheet.sheetStyleId !== 0) {
+        out.sheetFormat = this.styleTable.get(sheet.sheetStyleId);
+      }
+      if (sheet && sheet.colStyles && sheet.colStyles.size > 0) {
+        /** @type {Record<string, any>} */
+        const colFormats = {};
+        for (const [col, styleId] of sheet.colStyles.entries()) {
+          if (!styleId || styleId === 0) continue;
+          colFormats[String(col)] = this.styleTable.get(styleId);
+        }
+        if (Object.keys(colFormats).length > 0) out.colFormats = colFormats;
+      }
+      if (sheet && sheet.rowStyles && sheet.rowStyles.size > 0) {
+        /** @type {Record<string, any>} */
+        const rowFormats = {};
+        for (const [row, styleId] of sheet.rowStyles.entries()) {
+          if (!styleId || styleId === 0) continue;
+          rowFormats[String(row)] = this.styleTable.get(styleId);
+        }
+        if (Object.keys(rowFormats).length > 0) out.rowFormats = rowFormats;
+      }
       return out;
     });
 
@@ -1064,6 +1298,37 @@ export class DocumentController {
     const nextSheets = new Map();
     /** @type {Map<string, SheetViewState>} */
     const nextViews = new Map();
+    /** @type {Map<string, { sheetStyleId: number, rowStyles: Map<number, number>, colStyles: Map<number, number> }>} */
+    const nextFormats = new Map();
+
+    const normalizeFormatOverrides = (raw) => {
+      /** @type {Map<number, number>} */
+      const out = new Map();
+      if (!raw) return out;
+
+      if (Array.isArray(raw)) {
+        for (const entry of raw) {
+          const index = Array.isArray(entry) ? entry[0] : entry?.index;
+          const format = Array.isArray(entry) ? entry[1] : entry?.format;
+          const idx = Number(index);
+          if (!Number.isInteger(idx) || idx < 0) continue;
+          const styleId = format == null ? 0 : this.styleTable.intern(format);
+          if (styleId !== 0) out.set(idx, styleId);
+        }
+        return out;
+      }
+
+      if (typeof raw === "object") {
+        for (const [key, value] of Object.entries(raw)) {
+          const idx = Number(key);
+          if (!Number.isInteger(idx) || idx < 0) continue;
+          const styleId = value == null ? 0 : this.styleTable.intern(value);
+          if (styleId !== 0) out.set(idx, styleId);
+        }
+      }
+
+      return out;
+    };
     for (const sheet of sheets) {
       if (!sheet?.id) continue;
       const cellList = Array.isArray(sheet.cells) ? sheet.cells : [];
@@ -1087,6 +1352,13 @@ export class DocumentController {
       }
       nextSheets.set(sheet.id, cellMap);
       nextViews.set(sheet.id, view);
+
+      const sheetStyleId = sheet?.sheetFormat == null ? 0 : this.styleTable.intern(sheet.sheetFormat);
+      nextFormats.set(sheet.id, {
+        sheetStyleId,
+        rowStyles: normalizeFormatOverrides(sheet?.rowFormats),
+        colStyles: normalizeFormatOverrides(sheet?.colFormats),
+      });
     }
 
     const existingSheetIds = new Set(this.model.sheets.keys());
@@ -1121,6 +1393,45 @@ export class DocumentController {
       sheetViewDeltas.push({ sheetId, before, after });
     }
 
+    /** @type {FormatDelta[]} */
+    const formatDeltas = [];
+    for (const sheetId of allSheetIds) {
+      const existingSheet = this.model.sheets.get(sheetId);
+      const beforeSheetStyleId = existingSheet?.sheetStyleId ?? 0;
+      const beforeRowStyles = existingSheet?.rowStyles ?? new Map();
+      const beforeColStyles = existingSheet?.colStyles ?? new Map();
+
+      const next = nextFormats.get(sheetId);
+      const afterSheetStyleId = next?.sheetStyleId ?? 0;
+      const afterRowStyles = next?.rowStyles ?? new Map();
+      const afterColStyles = next?.colStyles ?? new Map();
+
+      if (beforeSheetStyleId !== afterSheetStyleId) {
+        formatDeltas.push({
+          sheetId,
+          layer: "sheet",
+          beforeStyleId: beforeSheetStyleId,
+          afterStyleId: afterSheetStyleId,
+        });
+      }
+
+      const rowKeys = new Set([...beforeRowStyles.keys(), ...afterRowStyles.keys()]);
+      for (const row of rowKeys) {
+        const beforeStyleId = beforeRowStyles.get(row) ?? 0;
+        const afterStyleId = afterRowStyles.get(row) ?? 0;
+        if (beforeStyleId === afterStyleId) continue;
+        formatDeltas.push({ sheetId, layer: "row", index: row, beforeStyleId, afterStyleId });
+      }
+
+      const colKeys = new Set([...beforeColStyles.keys(), ...afterColStyles.keys()]);
+      for (const col of colKeys) {
+        const beforeStyleId = beforeColStyles.get(col) ?? 0;
+        const afterStyleId = afterColStyles.get(col) ?? 0;
+        if (beforeStyleId === afterStyleId) continue;
+        formatDeltas.push({ sheetId, layer: "col", index: col, beforeStyleId, afterStyleId });
+      }
+    }
+
     // Ensure all snapshot sheet ids exist even when they contain no cells (the model is otherwise
     // lazily materialized via reads/writes).
     for (const sheetId of nextSheetIds) {
@@ -1138,7 +1449,7 @@ export class DocumentController {
 
     // Apply changes as a single engine batch.
     this.engine?.beginBatch?.();
-    this.#applyEdits(deltas, sheetViewDeltas, { recalc: false, emitChange: true, source: "applyState" });
+    this.#applyEdits(deltas, sheetViewDeltas, formatDeltas, { recalc: false, emitChange: true, source: "applyState" });
     this.engine?.endBatch?.();
     this.engine?.recalculate();
 
@@ -1172,7 +1483,7 @@ export class DocumentController {
 
     const recalc = options.recalc ?? true;
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyEdits(deltas, [], { recalc, emitChange: true, source });
+    this.#applyEdits(deltas, [], [], { recalc, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     //
@@ -1299,6 +1610,7 @@ export class DocumentController {
         timestamp: Date.now(),
         deltasByCell: new Map(),
         deltasBySheetView: new Map(),
+        deltasByFormat: new Map(),
       };
       this.engine?.beginBatch?.();
       this.#emitHistory();
@@ -1317,7 +1629,10 @@ export class DocumentController {
     this.activeBatch = null;
     this.engine?.endBatch?.();
 
-    if (!batch || (batch.deltasByCell.size === 0 && batch.deltasBySheetView.size === 0)) {
+    if (
+      !batch ||
+      (batch.deltasByCell.size === 0 && batch.deltasBySheetView.size === 0 && batch.deltasByFormat.size === 0)
+    ) {
       this.#emitHistory();
       this.#emitDirty();
       return;
@@ -1331,7 +1646,7 @@ export class DocumentController {
     if (shouldRecalc) {
       this.engine?.recalculate();
       // Emit a follow-up change so observers know formula results may have changed.
-      this.#emit("change", { deltas: [], sheetViewDeltas: [], source: "endBatch", recalc: true });
+      this.#emit("change", { deltas: [], sheetViewDeltas: [], formatDeltas: [], source: "endBatch", recalc: true });
     }
   }
 
@@ -1347,7 +1662,9 @@ export class DocumentController {
     if (this.batchDepth === 0) return false;
 
     const batch = this.activeBatch;
-    const hadDeltas = Boolean(batch && (batch.deltasByCell.size > 0 || batch.deltasBySheetView.size > 0));
+    const hadDeltas = Boolean(
+      batch && (batch.deltasByCell.size > 0 || batch.deltasBySheetView.size > 0 || batch.deltasByFormat.size > 0),
+    );
 
     // Reset batching state first so observers see consistent canUndo/canRedo.
     this.batchDepth = 0;
@@ -1358,7 +1675,12 @@ export class DocumentController {
     if (hadDeltas && batch) {
       const inverseCells = invertDeltas(entryCellDeltas(batch));
       const inverseViews = invertSheetViewDeltas(entrySheetViewDeltas(batch));
-      this.#applyEdits(inverseCells, inverseViews, { recalc: false, emitChange: true, source: "cancelBatch" });
+      const inverseFormats = invertFormatDeltas(entryFormatDeltas(batch));
+      this.#applyEdits(inverseCells, inverseViews, inverseFormats, {
+        recalc: false,
+        emitChange: true,
+        source: "cancelBatch",
+      });
     }
 
     this.engine?.endBatch?.();
@@ -1367,7 +1689,7 @@ export class DocumentController {
     const shouldRecalc = Boolean(batch && batch.deltasByCell.size > 0);
     if (shouldRecalc) {
       this.engine?.recalculate();
-      this.#emit("change", { deltas: [], sheetViewDeltas: [], source: "cancelBatch", recalc: true });
+      this.#emit("change", { deltas: [], sheetViewDeltas: [], formatDeltas: [], source: "cancelBatch", recalc: true });
     }
 
     this.#emitHistory();
@@ -1384,15 +1706,21 @@ export class DocumentController {
     const entry = this.history[this.cursor - 1];
     const cellDeltas = entryCellDeltas(entry);
     const viewDeltas = entrySheetViewDeltas(entry);
+    const formatDeltas = entryFormatDeltas(entry);
     const inverseCells = invertDeltas(cellDeltas);
     const inverseViews = invertSheetViewDeltas(viewDeltas);
+    const inverseFormats = invertFormatDeltas(formatDeltas);
     this.cursor -= 1;
 
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
     const shouldRecalc = cellDeltas.length > 0;
-    this.#applyEdits(inverseCells, inverseViews, { recalc: shouldRecalc, emitChange: true, source: "undo" });
+    this.#applyEdits(inverseCells, inverseViews, inverseFormats, {
+      recalc: shouldRecalc,
+      emitChange: true,
+      source: "undo",
+    });
     this.#emitHistory();
     this.#emitDirty();
     return true;
@@ -1407,13 +1735,18 @@ export class DocumentController {
     const entry = this.history[this.cursor];
     const cellDeltas = entryCellDeltas(entry);
     const viewDeltas = entrySheetViewDeltas(entry);
+    const formatDeltas = entryFormatDeltas(entry);
     this.cursor += 1;
 
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
     const shouldRecalc = cellDeltas.length > 0;
-    this.#applyEdits(cellDeltas, viewDeltas, { recalc: shouldRecalc, emitChange: true, source: "redo" });
+    this.#applyEdits(cellDeltas, viewDeltas, formatDeltas, {
+      recalc: shouldRecalc,
+      emitChange: true,
+      source: "redo",
+    });
     this.#emitHistory();
     this.#emitDirty();
     return true;
@@ -1434,7 +1767,7 @@ export class DocumentController {
     }
 
     const source = typeof options?.source === "string" ? options.source : undefined;
-    this.#applyEdits(deltas, [], { recalc: this.batchDepth === 0, emitChange: true, source });
+    this.#applyEdits(deltas, [], [], { recalc: this.batchDepth === 0, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       this.#mergeIntoBatch(deltas);
@@ -1442,7 +1775,7 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry(deltas, [], options);
+    this.#commitOrMergeHistoryEntry(deltas, [], [], options);
   }
 
   /**
@@ -1451,7 +1784,12 @@ export class DocumentController {
   #mergeIntoBatch(deltas) {
     if (!this.activeBatch) {
       // Should be unreachable, but avoid dropping history silently.
-      this.activeBatch = { timestamp: Date.now(), deltasByCell: new Map(), deltasBySheetView: new Map() };
+      this.activeBatch = {
+        timestamp: Date.now(),
+        deltasByCell: new Map(),
+        deltasBySheetView: new Map(),
+        deltasByFormat: new Map(),
+      };
     }
     for (const delta of deltas) {
       const key = mapKey(delta.sheetId, delta.row, delta.col);
@@ -1469,7 +1807,12 @@ export class DocumentController {
    */
   #mergeSheetViewIntoBatch(deltas) {
     if (!this.activeBatch) {
-      this.activeBatch = { timestamp: Date.now(), deltasByCell: new Map(), deltasBySheetView: new Map() };
+      this.activeBatch = {
+        timestamp: Date.now(),
+        deltasByCell: new Map(),
+        deltasBySheetView: new Map(),
+        deltasByFormat: new Map(),
+      };
     }
     for (const delta of deltas) {
       const existing = this.activeBatch.deltasBySheetView.get(delta.sheetId);
@@ -1482,6 +1825,29 @@ export class DocumentController {
   }
 
   /**
+   * @param {FormatDelta[]} deltas
+   */
+  #mergeFormatIntoBatch(deltas) {
+    if (!this.activeBatch) {
+      this.activeBatch = {
+        timestamp: Date.now(),
+        deltasByCell: new Map(),
+        deltasBySheetView: new Map(),
+        deltasByFormat: new Map(),
+      };
+    }
+    for (const delta of deltas) {
+      const key = formatKey(delta.sheetId, delta.layer, delta.index);
+      const existing = this.activeBatch.deltasByFormat.get(key);
+      if (!existing) {
+        this.activeBatch.deltasByFormat.set(key, cloneFormatDelta(delta));
+      } else {
+        existing.afterStyleId = delta.afterStyleId;
+      }
+    }
+  }
+
+  /**
    * @param {SheetViewDelta[]} deltas
    * @param {{ label?: string, mergeKey?: string, source?: string }} options
    */
@@ -1489,7 +1855,7 @@ export class DocumentController {
     if (!deltas || deltas.length === 0) return;
 
     const source = typeof options?.source === "string" ? options.source : undefined;
-    this.#applyEdits([], deltas, { recalc: false, emitChange: true, source });
+    this.#applyEdits([], deltas, [], { recalc: false, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       this.#mergeSheetViewIntoBatch(deltas);
@@ -1497,15 +1863,35 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry([], deltas, options);
+    this.#commitOrMergeHistoryEntry([], deltas, [], options);
+  }
+
+  /**
+   * @param {FormatDelta[]} deltas
+   * @param {{ label?: string, mergeKey?: string, source?: string }} options
+   */
+  #applyUserFormatDeltas(deltas, options) {
+    if (!deltas || deltas.length === 0) return;
+
+    const source = typeof options?.source === "string" ? options.source : undefined;
+    this.#applyEdits([], [], deltas, { recalc: false, emitChange: true, source });
+
+    if (this.batchDepth > 0) {
+      this.#mergeFormatIntoBatch(deltas);
+      this.#emitDirty();
+      return;
+    }
+
+    this.#commitOrMergeHistoryEntry([], [], deltas, options);
   }
 
   /**
    * @param {CellDelta[]} cellDeltas
    * @param {SheetViewDelta[]} sheetViewDeltas
+   * @param {FormatDelta[]} formatDeltas
    * @param {{ label?: string, mergeKey?: string }} options
    */
-  #commitOrMergeHistoryEntry(cellDeltas, sheetViewDeltas, options) {
+  #commitOrMergeHistoryEntry(cellDeltas, sheetViewDeltas, formatDeltas, options) {
     // If we have redo history, truncate it before pushing a new edit.
     if (this.cursor < this.history.length) {
       if (this.savedCursor != null && this.savedCursor > this.cursor) {
@@ -1548,6 +1934,16 @@ export class DocumentController {
           existing.after = cloneSheetViewState(delta.after);
         }
       }
+
+      for (const delta of formatDeltas) {
+        const key = formatKey(delta.sheetId, delta.layer, delta.index);
+        const existing = entry.deltasByFormat.get(key);
+        if (!existing) {
+          entry.deltasByFormat.set(key, cloneFormatDelta(delta));
+        } else {
+          existing.afterStyleId = delta.afterStyleId;
+        }
+      }
       entry.timestamp = now;
       entry.mergeKey = mergeKey;
       entry.label = options.label ?? entry.label;
@@ -1566,6 +1962,7 @@ export class DocumentController {
       timestamp: now,
       deltasByCell: new Map(),
       deltasBySheetView: new Map(),
+      deltasByFormat: new Map(),
     };
 
     for (const delta of cellDeltas) {
@@ -1574,6 +1971,10 @@ export class DocumentController {
 
     for (const delta of sheetViewDeltas) {
       entry.deltasBySheetView.set(delta.sheetId, cloneSheetViewDelta(delta));
+    }
+
+    for (const delta of formatDeltas) {
+      entry.deltasByFormat.set(formatKey(delta.sheetId, delta.layer, delta.index), cloneFormatDelta(delta));
     }
 
     this.#commitHistoryEntry(entry);
@@ -1591,7 +1992,7 @@ export class DocumentController {
    * @param {HistoryEntry} entry
    */
   #commitHistoryEntry(entry) {
-    if (entry.deltasByCell.size === 0 && entry.deltasBySheetView.size === 0) return;
+    if (entry.deltasByCell.size === 0 && entry.deltasBySheetView.size === 0 && entry.deltasByFormat.size === 0) return;
     this.history.push(entry);
     this.cursor += 1;
     this.#emitHistory();
@@ -1603,10 +2004,32 @@ export class DocumentController {
    *
    * @param {CellDelta[]} cellDeltas
    * @param {SheetViewDelta[]} sheetViewDeltas
+   * @param {FormatDelta[]} formatDeltas
    * @param {{ recalc: boolean, emitChange: boolean, source?: string }} options
    */
-  #applyEdits(cellDeltas, sheetViewDeltas, options) {
+  #applyEdits(cellDeltas, sheetViewDeltas, formatDeltas, options) {
     // Apply to the canonical model first.
+    for (const delta of formatDeltas) {
+      // Ensure sheet exists for format-only changes.
+      this.model.getCell(delta.sheetId, 0, 0);
+      const sheet = this.model.sheets.get(delta.sheetId);
+      if (!sheet) continue;
+      if (delta.layer === "sheet") {
+        sheet.sheetStyleId = delta.afterStyleId;
+        continue;
+      }
+      const index = delta.index;
+      if (index == null) continue;
+      if (delta.layer === "row") {
+        if (delta.afterStyleId === 0) sheet.rowStyles.delete(index);
+        else sheet.rowStyles.set(index, delta.afterStyleId);
+        continue;
+      }
+      if (delta.layer === "col") {
+        if (delta.afterStyleId === 0) sheet.colStyles.delete(index);
+        else sheet.colStyles.set(index, delta.afterStyleId);
+      }
+    }
     for (const delta of sheetViewDeltas) {
       this.model.setSheetView(delta.sheetId, delta.after);
     }
@@ -1630,6 +2053,26 @@ export class DocumentController {
       if (options.recalc) this.engine?.recalculate();
     } catch (err) {
       // Roll back the canonical model if the engine rejects a change.
+      for (const delta of formatDeltas) {
+        this.model.getCell(delta.sheetId, 0, 0);
+        const sheet = this.model.sheets.get(delta.sheetId);
+        if (!sheet) continue;
+        if (delta.layer === "sheet") {
+          sheet.sheetStyleId = delta.beforeStyleId;
+          continue;
+        }
+        const index = delta.index;
+        if (index == null) continue;
+        if (delta.layer === "row") {
+          if (delta.beforeStyleId === 0) sheet.rowStyles.delete(index);
+          else sheet.rowStyles.set(index, delta.beforeStyleId);
+          continue;
+        }
+        if (delta.layer === "col") {
+          if (delta.beforeStyleId === 0) sheet.colStyles.delete(index);
+          else sheet.colStyles.set(index, delta.beforeStyleId);
+        }
+      }
       for (const delta of sheetViewDeltas) {
         this.model.setSheetView(delta.sheetId, delta.before);
       }
@@ -1643,6 +2086,7 @@ export class DocumentController {
       const payload = {
         deltas: cellDeltas.map(cloneDelta),
         sheetViewDeltas: sheetViewDeltas.map(cloneSheetViewDelta),
+        formatDeltas: formatDeltas.map(cloneFormatDelta),
         recalc: options.recalc,
       };
       if (options.source) payload.source = options.source;

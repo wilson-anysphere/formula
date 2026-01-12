@@ -10,8 +10,7 @@ function allCellsMatch(doc, sheetId, rangeOrRanges, predicate) {
     const r = typeof range === "string" ? parseRangeA1(range) : range;
     for (let row = r.start.row; row <= r.end.row; row++) {
       for (let col = r.start.col; col <= r.end.col; col++) {
-        const cell = doc.getCell(sheetId, { row, col });
-        const style = doc.styleTable.get(cell.styleId);
+        const style = doc.getCellFormat(sheetId, { row, col });
         if (!predicate(style)) return false;
       }
     }
