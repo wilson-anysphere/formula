@@ -3,6 +3,7 @@
 //! Modern Excel features like "Place in Cell" images and the `IMAGE()` function
 //! appear to rely on a workbook-level `xl/cellimages*.xml` part containing
 //! DrawingML `<pic>` payloads that reference media via relationships.
+
 mod part_info;
 
 pub use part_info::{CellImageEmbed, CellImagesPartInfo};
@@ -15,7 +16,6 @@ use roxmltree::Document;
 use crate::drawings::{content_type_for_extension, REL_TYPE_IMAGE};
 use crate::path::resolve_target;
 use crate::XlsxError;
-
 type Result<T> = std::result::Result<T, XlsxError>;
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -120,7 +120,6 @@ impl CellImagesPart {
         parse_cell_images_part(&part_path, parts).map(Some)
     }
 }
-
 fn is_cell_images_part(path: &str) -> bool {
     let Some(rest) = path.strip_prefix("xl/") else {
         return false;

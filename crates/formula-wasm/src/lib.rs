@@ -2769,13 +2769,15 @@ mod tests {
     #[test]
     fn engine_value_to_json_degrades_rich_values_to_display_string() {
         // The JS worker protocol expects scalar-ish JSON values today. Rich values like
-        // references/lambdas (and future entity/record values) should degrade to their display
-        // strings so existing callers never have to handle structured JSON objects.
-        let value = EngineValue::Spill {
-            origin: CellRef::new(0, 0),
-        };
-        let expected = value.to_string();
-        assert_eq!(engine_value_to_json(value), JsonValue::String(expected));
+        // entities/records should degrade to their display strings so existing callers never have
+        // to handle structured JSON objects.
+        let entity =
+            EngineValue::Entity(formula_engine::value::EntityValue::new("Apple Inc."));
+        assert_eq!(engine_value_to_json(entity), json!("Apple Inc."));
+
+        let record =
+            EngineValue::Record(formula_engine::value::RecordValue::new("My record"));
+        assert_eq!(engine_value_to_json(record), json!("My record"));
     }
 
     #[test]
