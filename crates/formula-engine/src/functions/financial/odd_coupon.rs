@@ -334,14 +334,19 @@ fn oddf_equation(
         return Err(ExcelError::Num);
     }
 
-    // Excel-style chronology constraints (pinned by excel-oracle parity cases and unit tests):
+    // Excel-style chronology constraints (pinned by excel-oracle parity cases and unit tests).
+    //
+    // Allowed boundary equalities:
+    // - `issue == settlement` (zero accrued interest)
+    // - `settlement == first_coupon` (settlement on the first coupon date)
+    // - `first_coupon == maturity` (single odd stub period paid at maturity)
     //
     // Chronology:
     // - `issue <= settlement <= first_coupon <= maturity`
     // - `issue < first_coupon` (reject `issue == first_coupon`)
     // - `settlement < maturity` (reject `settlement == maturity`)
     //
-    // Boundary behaviors are locked in `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
+    // See `crates/formula-engine/tests/odd_coupon_date_boundaries.rs` for pinned boundary behavior.
     if !(issue <= settlement
         && settlement <= first_coupon
         && first_coupon <= maturity
