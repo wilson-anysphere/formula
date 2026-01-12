@@ -255,8 +255,9 @@ V3 spec references:
 
 ### ProjectNormalizedData (MS-OVBA §2.4.2, ContentsHashV3)
 
-This section documents **MS-OVBA §2.4.2.6 `ProjectNormalizedData`**, which is used as a building
-block for the **v3 / `DigitalSignatureExt`** contents-hash transcript.
+This section documents **MS-OVBA §2.4.2.6 `ProjectNormalizedData`** (normalized project/module
+metadata derived from selected `VBA/dir` records), which is used as a building block for the
+**v3 / `DigitalSignatureExt`** contents-hash transcript.
 
 In MS-OVBA v3, the overall SHA-256 transcript is:
 
@@ -267,7 +268,7 @@ V3ContentHash      = SHA-256(V3ContentHashInput)
 
 In this repo:
 
-- The `ProjectNormalizedData` **dir-record** portion is exposed as
+- The `ProjectNormalizedData` bytes derived from the `VBA/dir` record allowlist are exposed as
   `formula_vba::project_normalized_data_v3_dir_records` (implemented in
   `crates/formula-vba/src/project_normalized_data.rs`).
 
