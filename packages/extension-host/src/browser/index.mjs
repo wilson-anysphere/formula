@@ -55,6 +55,133 @@ const API_PERMISSIONS = {
   "config.update": ["storage"]
 };
 
+const MAX_TAINTED_RANGES_PER_EXTENSION = 50;
+
+function normalizeTaintedRange(range) {
+  if (!range || typeof range !== "object") return null;
+
+  const sheetId = typeof range.sheetId === "string" && range.sheetId.trim().length > 0 ? range.sheetId : null;
+  if (!sheetId) return null;
+
+  const startRow = Number(range.startRow);
+  const startCol = Number(range.startCol);
+  const endRow = Number(range.endRow);
+  const endCol = Number(range.endCol);
+  if (![startRow, startCol, endRow, endCol].every((v) => Number.isFinite(v))) return null;
+
+  const sr = Math.max(0, Math.min(startRow, endRow));
+  const er = Math.max(0, Math.max(startRow, endRow));
+  const sc = Math.max(0, Math.min(startCol, endCol));
+  const ec = Math.max(0, Math.max(startCol, endCol));
+
+  return {
+    sheetId,
+    startRow: Math.trunc(sr),
+    startCol: Math.trunc(sc),
+    endRow: Math.trunc(er),
+    endCol: Math.trunc(ec)
+  };
+}
+
+function rangeContains(a, b) {
+  return (
+    a.sheetId === b.sheetId &&
+    a.startRow <= b.startRow &&
+    a.endRow >= b.endRow &&
+    a.startCol <= b.startCol &&
+    a.endCol >= b.endCol
+  );
+}
+
+function rangesOverlapOrTouch1D(aStart, aEnd, bStart, bEnd) {
+  return aStart <= bEnd + 1 && bStart <= aEnd + 1;
+}
+
+function canMergeTaintedRanges(a, b) {
+  if (a.sheetId !== b.sheetId) return false;
+
+  if (rangeContains(a, b) || rangeContains(b, a)) return true;
+
+  // Merge rectangles only when the union is still a perfect rectangle (no L-shapes),
+  // to avoid over-tainting cells that weren't read.
+  const sameCols = a.startCol === b.startCol && a.endCol === b.endCol;
+  if (sameCols && rangesOverlapOrTouch1D(a.startRow, a.endRow, b.startRow, b.endRow)) return true;
+
+  const sameRows = a.startRow === b.startRow && a.endRow === b.endRow;
+  if (sameRows && rangesOverlapOrTouch1D(a.startCol, a.endCol, b.startCol, b.endCol)) return true;
+
+  return false;
+}
+
+function unionTaintedRanges(a, b) {
+  return {
+    sheetId: a.sheetId,
+    startRow: Math.min(a.startRow, b.startRow),
+    startCol: Math.min(a.startCol, b.startCol),
+    endRow: Math.max(a.endRow, b.endRow),
+    endCol: Math.max(a.endCol, b.endCol)
+  };
+}
+
+function compressTaintedRangesToLimit(ranges, limit) {
+  const max = Number.isFinite(limit) ? Math.max(0, limit) : MAX_TAINTED_RANGES_PER_EXTENSION;
+  if (ranges.length <= max) return ranges;
+
+  /** @type {Array<any>} */
+  const out = [...ranges];
+  while (out.length > max) {
+    const counts = new Map();
+    for (const range of out) {
+      counts.set(range.sheetId, (counts.get(range.sheetId) ?? 0) + 1);
+    }
+
+    const sheetToMerge = [...counts.entries()].find(([, count]) => count > 1)?.[0] ?? null;
+    if (!sheetToMerge) {
+      // Degenerate case: lots of single ranges across sheets. Prefer dropping oldest
+      // entries over unbounded growth.
+      out.shift();
+      continue;
+    }
+
+    const firstIdx = out.findIndex((r) => r.sheetId === sheetToMerge);
+    const secondIdx = out.findIndex((r, idx) => idx > firstIdx && r.sheetId === sheetToMerge);
+    if (firstIdx === -1 || secondIdx === -1) {
+      out.shift();
+      continue;
+    }
+
+    const merged = unionTaintedRanges(out[firstIdx], out[secondIdx]);
+    out[firstIdx] = merged;
+    out.splice(secondIdx, 1);
+  }
+
+  return out;
+}
+
+function addTaintedRangeToList(ranges, nextRange) {
+  const normalized = normalizeTaintedRange(nextRange);
+  if (!normalized) return ranges;
+
+  const existing = Array.isArray(ranges) ? ranges : [];
+
+  /** @type {Array<any>} */
+  const out = [];
+  let merged = normalized;
+  for (const item of existing) {
+    const normalizedItem = normalizeTaintedRange(item);
+    if (!normalizedItem) continue;
+
+    if (canMergeTaintedRanges(normalizedItem, merged)) {
+      merged = unionTaintedRanges(normalizedItem, merged);
+    } else {
+      out.push(normalizedItem);
+    }
+  }
+
+  out.push(merged);
+  return compressTaintedRangesToLimit(out, MAX_TAINTED_RANGES_PER_EXTENSION);
+}
+
 function normalizeStringArray(value) {
   if (!Array.isArray(value)) return [];
   return value
@@ -291,6 +418,7 @@ class BrowserExtensionHost {
     permissionStorageKey,
     spreadsheetApi,
     clipboardApi,
+    clipboardWriteGuard,
     storageApi,
     uiApi,
     activationTimeoutMs = 5000,
@@ -339,6 +467,7 @@ class BrowserExtensionHost {
         this._clipboardText = String(text ?? "");
       }
     };
+    this._clipboardWriteGuard = typeof clipboardWriteGuard === "function" ? clipboardWriteGuard : null;
 
     if (storageApi) {
       this._storageApi = storageApi;
@@ -511,6 +640,7 @@ class BrowserExtensionHost {
       active: false,
       registeredCommands: new Set(),
       pendingRequests: new Map(),
+      taintedRanges: [],
       workerData: {
         extensionId,
         extensionPath,
@@ -1109,6 +1239,11 @@ class BrowserExtensionHost {
     const worker = extension.worker;
 
     extension.active = false;
+    try {
+      extension.taintedRanges = [];
+    } catch {
+      // ignore
+    }
 
     // Best-effort cleanup for runtime registrations that were tied to the crashed worker.
     // Contributed commands stay registered so the app can still route them for future activations.
@@ -1313,15 +1448,68 @@ class BrowserExtensionHost {
         }
         return this._sheets.find((s) => s.id === this._activeSheetId) ?? { id: "sheet1", name: "Sheet1" };
 
-      case "cells.getSelection":
-        return this._spreadsheet.getSelection();
-      case "cells.getRange":
-        if (typeof this._spreadsheet.getRange === "function") {
-          return this._spreadsheet.getRange(args[0]);
+      case "cells.getSelection": {
+        const result = await this._spreadsheet.getSelection();
+        const sheetId = await this._resolveActiveSheetId();
+        if (result && typeof result === "object") {
+          this._taintExtensionRange(extension, {
+            sheetId,
+            startRow: result.startRow,
+            startCol: result.startCol,
+            endRow: result.endRow,
+            endCol: result.endCol
+          });
         }
-        return this._defaultGetRange(args[0]);
-      case "cells.getCell":
-        return this._spreadsheet.getCell(args[0], args[1]);
+        return result;
+      }
+      case "cells.getRange": {
+        const ref = args[0];
+        const { sheetName, ref: a1Ref } = this._splitSheetQualifier(ref);
+        const sheetId = await this._resolveSheetId(sheetName);
+        const result =
+          typeof this._spreadsheet.getRange === "function"
+            ? await this._spreadsheet.getRange(ref)
+            : await this._defaultGetRange(a1Ref);
+
+        if (result && typeof result === "object") {
+          const coords = {
+            startRow: result.startRow,
+            startCol: result.startCol,
+            endRow: result.endRow,
+            endCol: result.endCol
+          };
+          const hasNumeric =
+            [coords.startRow, coords.startCol, coords.endRow, coords.endCol].every((v) =>
+              Number.isInteger(v)
+            );
+          let normalizedCoords = null;
+          if (hasNumeric) {
+            normalizedCoords = coords;
+          } else {
+            try {
+              normalizedCoords = this._parseA1RangeRef(a1Ref);
+            } catch {
+              normalizedCoords = null;
+            }
+          }
+
+          if (normalizedCoords) {
+            this._taintExtensionRange(extension, { sheetId, ...normalizedCoords });
+          }
+        }
+
+        return result;
+      }
+      case "cells.getCell": {
+        const row = args[0];
+        const col = args[1];
+        const sheetId = await this._resolveActiveSheetId();
+        const value = await this._spreadsheet.getCell(row, col);
+        if (Number.isInteger(row) && row >= 0 && Number.isInteger(col) && col >= 0) {
+          this._taintExtensionRange(extension, { sheetId, startRow: row, startCol: col, endRow: row, endCol: col });
+        }
+        return value;
+      }
       case "cells.setCell":
         await this._spreadsheet.setCell(args[0], args[1], args[2]);
         return null;
@@ -1595,9 +1783,14 @@ class BrowserExtensionHost {
 
       case "clipboard.readText":
         return this._clipboardApi.readText();
-      case "clipboard.writeText":
+      case "clipboard.writeText": {
+        if (this._clipboardWriteGuard) {
+          const taintedRanges = Array.isArray(extension?.taintedRanges) ? extension.taintedRanges : [];
+          await this._clipboardWriteGuard({ extensionId: extension.id, taintedRanges: taintedRanges.map((r) => ({ ...r })) });
+        }
         await this._clipboardApi.writeText(String(args[0] ?? ""));
         return null;
+      }
 
       case "storage.get": {
         const store = this._storageApi.getExtensionStore(extension.id);
@@ -1645,6 +1838,89 @@ class BrowserExtensionHost {
 
       default:
         throw new Error(`Unknown API method: ${namespace}.${method}`);
+    }
+  }
+
+  _splitSheetQualifier(input) {
+    const s = String(input ?? "").trim();
+
+    const quoted = s.match(/^'((?:[^']|'')+)'!(.+)$/);
+    if (quoted) {
+      return {
+        sheetName: quoted[1].replace(/''/g, "'"),
+        ref: quoted[2]
+      };
+    }
+
+    const unquoted = s.match(/^([^!]+)!(.+)$/);
+    if (unquoted) {
+      return { sheetName: unquoted[1], ref: unquoted[2] };
+    }
+
+    return { sheetName: null, ref: s };
+  }
+
+  async _resolveActiveSheetId() {
+    if (typeof this._spreadsheet.getActiveSheet === "function") {
+      try {
+        const sheet = await this._spreadsheet.getActiveSheet();
+        const id =
+          sheet && typeof sheet === "object" && sheet.id != null ? String(sheet.id).trim() : "";
+        if (id) return id;
+      } catch {
+        // ignore
+      }
+    }
+
+    const fallback = typeof this._activeSheetId === "string" && this._activeSheetId ? this._activeSheetId : null;
+    if (fallback) return fallback;
+
+    const sheet = Array.isArray(this._sheets) ? this._sheets[0] : null;
+    const sheetId = sheet && typeof sheet?.id === "string" ? sheet.id : null;
+    return sheetId ?? "sheet1";
+  }
+
+  async _resolveSheetId(sheetName) {
+    if (sheetName == null) return this._resolveActiveSheetId();
+
+    const name = String(sheetName).trim();
+    if (!name) return this._resolveActiveSheetId();
+
+    if (typeof this._spreadsheet.getSheet === "function") {
+      try {
+        const sheet = await this._spreadsheet.getSheet(name);
+        const id =
+          sheet && typeof sheet === "object" && sheet.id != null ? String(sheet.id).trim() : "";
+        if (id) return id;
+      } catch {
+        // ignore
+      }
+    }
+
+    const candidateLists = [
+      typeof this._spreadsheet.listSheets === "function" ? this._spreadsheet.listSheets() : null,
+      Array.isArray(this._sheets) ? this._sheets : null
+    ];
+
+    for (const list of candidateLists) {
+      if (!Array.isArray(list)) continue;
+      for (const sheet of list) {
+        if (!sheet || typeof sheet !== "object") continue;
+        const id = sheet.id != null ? String(sheet.id).trim() : "";
+        const sheetDisplayName = sheet.name != null ? String(sheet.name).trim() : "";
+        if (!id) continue;
+        if (sheetDisplayName === name || id === name) return id;
+      }
+    }
+
+    return name;
+  }
+
+  _taintExtensionRange(extension, range) {
+    try {
+      extension.taintedRanges = addTaintedRangeToList(extension.taintedRanges, range);
+    } catch {
+      // ignore - taint tracking should never interfere with extension execution
     }
   }
 

@@ -15,6 +15,16 @@ export type ClipboardApi = {
   writeText: (text: string) => Promise<void>;
 };
 
+export type TaintedRange = {
+  sheetId: string;
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+};
+
+export type ClipboardWriteGuard = (params: { extensionId: string; taintedRanges: TaintedRange[] }) => Promise<void> | void;
+
 export class BrowserExtensionHost {
   constructor(options: {
     spreadsheetApi: any;
@@ -24,6 +34,7 @@ export class BrowserExtensionHost {
     permissionStorage?: any;
     permissionStorageKey?: string;
     clipboardApi?: ClipboardApi;
+    clipboardWriteGuard?: ClipboardWriteGuard;
     storageApi?: any;
     activationTimeoutMs?: number;
     commandTimeoutMs?: number;

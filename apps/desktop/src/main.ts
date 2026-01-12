@@ -148,6 +148,8 @@ import {
 } from "./tauri/startupMetrics.js";
 import { openExternalHyperlink } from "./hyperlinks/openExternal.js";
 import { clampUsedRange, resolveWorkbookLoadLimits } from "./workbook/load/clampUsedRange.js";
+import { createDesktopDlpContext } from "./dlp/desktopDlp.js";
+import { enforceClipboardCopy } from "./dlp/enforceClipboardCopy.js";
 
 // Best-effort: older desktop builds persisted provider selection + API keys in localStorage.
 // Cursor desktop no longer supports user-provided keys; proactively delete stale secrets on startup.
@@ -3358,6 +3360,30 @@ if (
         clearLastExtensionSelection();
         extensionReadTaint.clear();
       },
+    },
+    clipboardWriteGuard: async ({ taintedRanges }) => {
+      if (!Array.isArray(taintedRanges) || taintedRanges.length === 0) return;
+
+      const dlp = createDesktopDlpContext({ documentId: workbookId });
+
+      for (const range of taintedRanges) {
+        try {
+          enforceClipboardCopy({
+            documentId: dlp.documentId,
+            sheetId: range.sheetId,
+            range: {
+              start: { row: range.startRow, col: range.startCol },
+              end: { row: range.endRow, col: range.endCol },
+            },
+            classificationStore: dlp.classificationStore,
+            policy: dlp.policy,
+          });
+        } catch (err) {
+          const message = String((err as any)?.message ?? err ?? "Clipboard write blocked by policy.");
+          showToast(message, "error");
+          throw err;
+        }
+      }
     },
     uiApi: {
       showMessage: async (message: string, type?: string) => {

@@ -30,6 +30,19 @@ type ClipboardApi = {
   writeText: (text: string) => Promise<void>;
 };
 
+type TaintedRange = {
+  sheetId: string;
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+};
+
+type ClipboardWriteGuard = (params: {
+  extensionId: string;
+  taintedRanges: TaintedRange[];
+}) => Promise<void> | void;
+
 export class DesktopExtensionHostManager {
   readonly host: InstanceType<typeof BrowserExtensionHost>;
   readonly engineVersion: string;
@@ -46,6 +59,7 @@ export class DesktopExtensionHostManager {
     engineVersion: string;
     spreadsheetApi: any;
     clipboardApi?: ClipboardApi;
+    clipboardWriteGuard?: ClipboardWriteGuard;
     uiApi: ExtensionHostUiApi;
     permissionPrompt?: any;
   }) {
@@ -69,6 +83,7 @@ export class DesktopExtensionHostManager {
       engineVersion: this.engineVersion,
       spreadsheetApi: params.spreadsheetApi,
       clipboardApi: params.clipboardApi,
+      clipboardWriteGuard: params.clipboardWriteGuard,
       uiApi: params.uiApi,
       permissionPrompt,
     });
