@@ -3089,24 +3089,6 @@ if (
   const gridSecondaryEl = gridSecondary;
   const gridSplitterEl = gridSplitter;
 
-  // --- Split view secondary pane keyboard shortcuts ---------------------------------
-  //
-  // Most Excel-style shortcuts are now handled by the global KeybindingService /
-  // CommandRegistry (see `./commands/builtinKeybindings.ts` and `registerBuiltinCommands.ts`).
-  //
-  // Keep only the pieces that cannot yet be expressed as commands (e.g. canceling an
-  // in-progress fill-handle drag, which is owned by the secondary renderer).
-  gridSecondaryEl.addEventListener("keydown", (e) => {
-    if (e.defaultPrevented) return;
-
-    // Cancel an in-progress fill handle drag (matches primary-grid Escape semantics).
-    if (e.key === "Escape") {
-      if (secondaryGridView?.grid.cancelFillHandleDrag()) {
-        e.preventDefault();
-      }
-    }
-  });
-
   const workspaceManager = new LayoutWorkspaceManager({ storage: localStorage, panelRegistry });
   const layoutController = new LayoutController({
     workbookId,

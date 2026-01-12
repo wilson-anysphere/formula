@@ -732,6 +732,14 @@ export class DesktopSharedGrid {
         if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
       }
 
+      // Match primary-grid behavior: Escape cancels an in-progress fill handle drag.
+      // (In the primary pane this is handled by SpreadsheetApp.onKeyDown; this shared-grid
+      // renderer is used directly by split-view secondary panes.)
+      if (event.key === "Escape" && this.cancelFillHandleDrag()) {
+        event.preventDefault();
+        return;
+      }
+
       if (this.interactionMode === "rangeSelection") return;
 
       const renderer = this.renderer;
