@@ -347,6 +347,7 @@ type CellResolutionCandidateRow = {
   scope: string;
   selector_key: string;
   classification: unknown;
+  table_id: string | null;
   start_row: number | null;
   start_col: number | null;
   end_row: number | null;
@@ -364,11 +365,11 @@ async function queryCandidatesForCell(
 ): Promise<CellResolutionCandidateRow[]> {
   const res = await db.query(
     `
-      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
+      SELECT scope, selector_key, classification, table_id, start_row, start_col, end_row, end_col
       FROM document_classifications
       WHERE document_id = $1 AND scope = 'cell' AND sheet_id = $2 AND row = $3 AND col = $4
       UNION ALL
-      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
+      SELECT scope, selector_key, classification, table_id, start_row, start_col, end_row, end_col
       FROM document_classifications
       WHERE
         document_id = $1
@@ -377,7 +378,7 @@ async function queryCandidatesForCell(
         AND start_row <= $3 AND end_row >= $3
         AND start_col <= $4 AND end_col >= $4
       UNION ALL
-      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
+      SELECT scope, selector_key, classification, table_id, start_row, start_col, end_row, end_col
       FROM document_classifications
       WHERE
         document_id = $1
@@ -386,7 +387,7 @@ async function queryCandidatesForCell(
         AND table_id IS NULL
         AND column_index = $4
       UNION ALL
-      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
+      SELECT scope, selector_key, classification, table_id, start_row, start_col, end_row, end_col
       FROM document_classifications
       WHERE
         document_id = $1
@@ -395,7 +396,7 @@ async function queryCandidatesForCell(
         AND table_id IS NULL
         AND column_id = $6
       UNION ALL
-      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
+      SELECT scope, selector_key, classification, table_id, start_row, start_col, end_row, end_col
       FROM document_classifications
       WHERE
         document_id = $1
@@ -404,7 +405,7 @@ async function queryCandidatesForCell(
         AND table_id = $5
         AND column_index = $4
       UNION ALL
-      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
+      SELECT scope, selector_key, classification, table_id, start_row, start_col, end_row, end_col
       FROM document_classifications
       WHERE
         document_id = $1
@@ -413,11 +414,11 @@ async function queryCandidatesForCell(
         AND table_id = $5
         AND column_id = $6
       UNION ALL
-      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
+      SELECT scope, selector_key, classification, table_id, start_row, start_col, end_row, end_col
       FROM document_classifications
       WHERE document_id = $1 AND scope = 'sheet' AND sheet_id = $2
       UNION ALL
-      SELECT scope, selector_key, classification, start_row, start_col, end_row, end_col
+      SELECT scope, selector_key, classification, table_id, start_row, start_col, end_row, end_col
       FROM document_classifications
       WHERE document_id = $1 AND scope = 'document'
     `,
@@ -577,10 +578,20 @@ export async function getEffectiveClassificationForSelector(
       const rangeResolved = resolveFromContainingRanges(rangeRows);
       if (rangeResolved) return rangeResolved;
 
-      const columnRows = candidateRows
-        .filter((row) => row.scope === "column")
+      const columnCandidates = candidateRows.filter((row) => row.scope === "column");
+      const tableColumnRows = columnCandidates
+        .filter((row) => row.table_id !== null)
         .map((row) => ({ selector_key: row.selector_key, classification: row.classification, scope: "column" }));
-      const columnResolved = resolveFromExactRows(columnRows);
+      const sheetColumnRows = columnCandidates
+        .filter((row) => row.table_id === null)
+        .map((row) => ({ selector_key: row.selector_key, classification: row.classification, scope: "column" }));
+
+      if (normalized.tableId) {
+        const tableColumnResolved = resolveFromExactRows(tableColumnRows);
+        if (tableColumnResolved) return tableColumnResolved;
+      }
+
+      const columnResolved = resolveFromExactRows(sheetColumnRows);
       if (columnResolved) return columnResolved;
 
       const sheetRows = candidateRows

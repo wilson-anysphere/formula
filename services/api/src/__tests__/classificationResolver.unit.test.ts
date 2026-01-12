@@ -295,8 +295,12 @@ describe("classificationResolver: selector precedence", () => {
     });
   });
 
-  it("table column classification (tableId + columnId) applies to cells when table context is provided", async () => {
+  it("table column classification (tableId + columnId) overrides sheet column classification when table context is provided", async () => {
     await insertClassification({ scope: "document", documentId: docId }, { level: "Restricted", labels: ["Doc"] });
+    await insertClassification(
+      { scope: "column", documentId: docId, sheetId: "Sheet1", columnIndex: 3 },
+      { level: "Restricted", labels: ["SheetCol"] }
+    );
 
     const tableColumnSelector = {
       scope: "column",
