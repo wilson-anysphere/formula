@@ -109,4 +109,73 @@ describe("createDesktopRagService (embedder config)", () => {
 
     await service.dispose();
   });
+
+  it("does not start concurrent DLP indexing when a request aborts while indexing is still running", async () => {
+    const controller = new DocumentController();
+    controller.setRangeValues("Sheet1", "A1", [["Header"], ["Value"]]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(controller);
+
+    const abortController = new AbortController();
+
+    let resolveIndex: (value: any) => void = () => {};
+    const indexDeferred = new Promise<any>((resolve) => {
+      resolveIndex = resolve;
+    });
+
+    const calls: any[] = [];
+    let aborted = false;
+
+    const service = createDesktopRagService({
+      documentController: controller,
+      workbookId: "wb_dlp_abort_concurrency",
+      createRag: async () =>
+        ({
+          vectorStore: { close: async () => {} },
+          contextManager: {
+            buildWorkbookContextFromSpreadsheetApi: async (params: any) => {
+              calls.push(params);
+              if (params.skipIndexing) {
+                return { promptContext: "", retrieved: [], indexStats: null };
+              }
+              if (!aborted) {
+                aborted = true;
+                abortController.abort();
+              }
+              return indexDeferred;
+            },
+          },
+          indexWorkbook: async () => ({ indexed: 0 }),
+        }) as any,
+    });
+
+    try {
+      const first = service.buildWorkbookContextFromSpreadsheetApi({
+        spreadsheet,
+        workbookId: "wb_dlp_abort_concurrency",
+        query: "hello",
+        dlp: { documentId: "doc", policy: {} },
+        signal: abortController.signal,
+      });
+
+      await expect(first).rejects.toMatchObject({ name: "AbortError" });
+
+      const second = service.buildWorkbookContextFromSpreadsheetApi({
+        spreadsheet,
+        workbookId: "wb_dlp_abort_concurrency",
+        query: "hello again",
+        dlp: { documentId: "doc", policy: {} },
+      });
+
+      // Give the second call a chance to run. If `indexPromise` was cleared early, this
+      // would kick off a second concurrent indexing run (skipIndexing=false).
+      await Promise.resolve();
+      expect(calls.filter((c) => !c.skipIndexing).length).toBe(1);
+
+      resolveIndex({ promptContext: "", retrieved: [], indexStats: null });
+      await expect(second).resolves.toMatchObject({ promptContext: "" });
+    } finally {
+      await service.dispose();
+    }
+  });
 });

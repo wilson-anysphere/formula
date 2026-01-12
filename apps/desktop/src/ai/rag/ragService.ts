@@ -378,13 +378,18 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
       })();
 
       indexPromise = run;
-      try {
-        const ctx = await awaitWithAbort(run, signal);
-        if (ctx && ctx.indexStats == null) ctx.indexStats = lastIndexStats;
-        return ctx;
-      } finally {
-        if (indexPromise === run) indexPromise = null;
-      }
+      // Ensure we don't clear `indexPromise` early if a caller aborts while waiting.
+      // The indexing run should still be considered in-flight until it settles, otherwise
+      // subsequent calls may kick off concurrent indexing work.
+      run
+        .finally(() => {
+          if (indexPromise === run) indexPromise = null;
+        })
+        .catch(() => {});
+
+      const ctx = await awaitWithAbort(run, signal);
+      if (ctx && ctx.indexStats == null) ctx.indexStats = lastIndexStats;
+      return ctx;
     }
 
     const ctx = await rag.contextManager.buildWorkbookContextFromSpreadsheetApi({
