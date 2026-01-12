@@ -20,6 +20,14 @@ test("desktop main.ts avoids static inline style assignments", () => {
   const mainPath = path.join(__dirname, "..", "src", "main.ts");
   const source = fs.readFileSync(mainPath, "utf8");
 
+  for (const legacyClass of ["dock-panel__mount", "panel-mount--fill-column", "dock-panel__body--fill"]) {
+    assert.equal(
+      source.includes(legacyClass),
+      false,
+      `main.ts should not reference legacy CSS class ${legacyClass}; use panel-body__container/panel-body--fill instead`,
+    );
+  }
+
   const hiddenColorInputSection = extractSection(
     source,
     "function createHiddenColorInput()",
