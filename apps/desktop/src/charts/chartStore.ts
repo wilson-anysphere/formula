@@ -1,6 +1,7 @@
 import { parseA1Range } from "./a1.js";
 
 import type { ChartType, CreateChartResult, CreateChartSpec } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
+import type { SheetNameResolver } from "../sheet/sheetNameResolver";
 
 export type ChartSeriesDef = {
   name?: string | null;
@@ -59,6 +60,13 @@ export interface ChartStoreOptions {
    */
   getCellValue: (sheetId: string, row: number, col: number) => unknown;
   onChange?: () => void;
+  /**
+   * Optional sheet display-name resolver.
+   *
+   * When provided, sheet-qualified range strings like `Budget!A1:B2` are resolved to
+   * stable sheet ids before reading values.
+   */
+  sheetNameResolver?: SheetNameResolver | null;
 }
 
 const DEFAULT_ANCHOR_GAP_COLS = 2;
@@ -119,6 +127,23 @@ export class ChartStore {
     this.options = options;
   }
 
+  private resolveSheetIdFromToken(sheetToken: string): string | null {
+    const trimmed = String(sheetToken ?? "").trim();
+    if (!trimmed) return null;
+    const resolver = this.options.sheetNameResolver ?? null;
+    if (!resolver) return trimmed;
+
+    const byName = resolver.getSheetIdByName(trimmed);
+    if (byName) return byName;
+
+    // Back-compat: allow stored chart ranges to continue using stable ids even after
+    // the sheet has been renamed (id != name).
+    const byId = resolver.getSheetNameById(trimmed);
+    if (byId) return trimmed;
+
+    return null;
+  }
+
   listCharts(): readonly ChartRecord[] {
     return this.charts;
   }
@@ -136,7 +161,12 @@ export class ChartStore {
       throw new Error(`Invalid data_range: ${spec.data_range}`);
     }
 
-    const dataSheetId = parsed.sheetName ?? this.options.defaultSheet;
+    const dataSheetId = (() => {
+      if (!parsed.sheetName) return this.options.defaultSheet;
+      const resolved = this.resolveSheetIdFromToken(parsed.sheetName);
+      if (!resolved) throw new Error(`Unknown sheet: ${parsed.sheetName}`);
+      return resolved;
+    })();
     const rowCount = parsed.endRow - parsed.startRow + 1;
     const colCount = parsed.endCol - parsed.startCol + 1;
 
@@ -209,7 +239,12 @@ export class ChartStore {
           })()
         : null;
 
-    const sheetId = positionParsed?.sheetName ?? dataSheetId;
+    const sheetId = (() => {
+      if (!positionParsed?.sheetName) return dataSheetId;
+      const resolved = this.resolveSheetIdFromToken(positionParsed.sheetName);
+      if (!resolved) throw new Error(`Unknown sheet: ${positionParsed.sheetName}`);
+      return resolved;
+    })();
     const anchor = this.resolveAnchor(parsed, positionParsed);
     const id = `chart_${this.nextId++}`;
 

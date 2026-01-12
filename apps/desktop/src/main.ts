@@ -282,7 +282,7 @@ const sheetNameResolver: SheetNameResolver = {
   getSheetNameById(id: string): string | null {
     const key = String(id ?? "").trim();
     if (!key) return null;
-    return workbookSheetStore.getName(key) ?? key;
+    return workbookSheetStore.getName(key) ?? null;
   },
   getSheetIdByName(name: string): string | null {
     const trimmed = String(name ?? "").trim();

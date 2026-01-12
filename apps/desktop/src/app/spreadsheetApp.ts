@@ -801,6 +801,7 @@ export class SpreadsheetApp {
 
     this.chartStore = new ChartStore({
       defaultSheet: this.sheetId,
+      sheetNameResolver: this.sheetNameResolver,
       getCellValue: (sheetId, row, col) => {
         const state = this.document.getCell(sheetId, { row, col }) as {
           value: unknown;
@@ -4001,7 +4002,8 @@ export class SpreadsheetApp {
       getRange: (rangeRef: string) => {
         const parsed = parseA1Range(rangeRef);
         if (!parsed) return [];
-        const sheetId = parsed.sheetName ?? this.sheetId;
+        const sheetId = parsed.sheetName ? this.resolveSheetIdByName(parsed.sheetName) : this.sheetId;
+        if (!sheetId) return [];
 
         const out: unknown[][] = [];
         for (let r = parsed.startRow; r <= parsed.endRow; r += 1) {
