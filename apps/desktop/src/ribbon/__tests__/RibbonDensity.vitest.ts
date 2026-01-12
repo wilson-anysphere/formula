@@ -151,6 +151,54 @@ describe("Ribbon density + collapse toggle", () => {
     act(() => root.unmount());
   });
 
+  it("shows a hamburger-style tab menu when width is below 800px", async () => {
+    vi.stubGlobal("localStorage", createStorageMock());
+    const { root, ribbonRoot, container } = renderRibbon();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      setRibbonWidth(ribbonRoot, 700);
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(ribbonRoot.dataset.density).toBe("hidden");
+
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="ribbon-tab-menu-toggle"]');
+    expect(toggle).toBeInstanceOf(HTMLButtonElement);
+    if (!toggle) throw new Error("Missing ribbon tab menu toggle");
+
+    await act(async () => {
+      toggle.click();
+      await Promise.resolve();
+    });
+
+    const menu = container.querySelector<HTMLElement>('[data-testid="ribbon-tab-menu"]');
+    expect(menu).toBeInstanceOf(HTMLElement);
+    if (!menu) throw new Error("Missing ribbon tab menu");
+
+    const insertItem = Array.from(menu.querySelectorAll<HTMLButtonElement>("button")).find(
+      (button) => button.textContent?.trim() === "Insert",
+    );
+    expect(insertItem).toBeInstanceOf(HTMLButtonElement);
+    if (!insertItem) throw new Error("Missing Insert tab menu item");
+
+    await act(async () => {
+      insertItem.click();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="ribbon-tab-menu"]')).toBeNull();
+    expect(ribbonRoot.dataset.flyoutOpen).toBe("true");
+
+    const content = container.querySelector<HTMLElement>(".ribbon__content");
+    if (!content) throw new Error("Missing ribbon content");
+    expect(content.hidden).toBe(false);
+
+    act(() => root.unmount());
+  });
+
   it("moves focus into the flyout panel when pressing Tab on an active tab (density hidden)", async () => {
     vi.stubGlobal("localStorage", createStorageMock());
     const { root, ribbonRoot, container } = renderRibbon();

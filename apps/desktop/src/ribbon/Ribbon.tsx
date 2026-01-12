@@ -100,9 +100,18 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
   const [ribbonWidth, setRibbonWidth] = React.useState<number>(0);
   const [userCollapsed, setUserCollapsed] = React.useState<boolean>(() => readRibbonCollapsedFromStorage());
   const [flyoutOpen, setFlyoutOpen] = React.useState(false);
+  const [tabMenuOpen, setTabMenuOpen] = React.useState(false);
 
   const toggleUserCollapsed = React.useCallback(() => {
     setUserCollapsed((prev) => !prev);
+  }, []);
+
+  const tabMenuButtonRef = React.useRef<HTMLButtonElement | null>(null);
+  const tabMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const tabMenuId = React.useMemo(() => `ribbon-tab-menu-${domInstanceId}`, [domInstanceId]);
+
+  const closeTabMenu = React.useCallback(() => {
+    setTabMenuOpen(false);
   }, []);
 
   React.useEffect(() => {
@@ -233,12 +242,94 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
   const responsiveDensity = React.useMemo(() => densityFromWidth(ribbonWidth), [ribbonWidth]);
   const density: RibbonDensity = responsiveDensity === "hidden" ? "hidden" : userCollapsed ? "hidden" : responsiveDensity;
   const contentVisible = density !== "hidden";
+  const showTabMenuToggle = responsiveDensity === "hidden";
   const collapseLabel = userCollapsed ? "Expand ribbon" : "Collapse ribbon";
   const showContent = contentVisible || flyoutOpen;
 
   React.useEffect(() => {
+    if (showTabMenuToggle) return;
+    setTabMenuOpen(false);
+  }, [showTabMenuToggle]);
+
+  React.useEffect(() => {
     if (contentVisible) setFlyoutOpen(false);
   }, [contentVisible]);
+
+  const selectTabFromMenu = React.useCallback(
+    (tabId: string) => {
+      const tab = tabs.find((candidate) => candidate.id === tabId);
+      if (!tab) return;
+      closeTabMenu();
+      setActiveTabId(tab.id);
+      if (tab.isFile) {
+        setBackstageOpen(true);
+        setFlyoutOpen(false);
+        actions.onTabChange?.(tab.id);
+        return;
+      }
+      setBackstageOpen(false);
+      actions.onTabChange?.(tab.id);
+      if (!contentVisible) {
+        setFlyoutOpen(true);
+        requestAnimationFrame(() => focusFirstControl(tab.id));
+      }
+    },
+    [actions, closeTabMenu, contentVisible, focusFirstControl, tabs],
+  );
+
+  const focusActiveTabMenuItem = React.useCallback(() => {
+    const menu = tabMenuRef.current;
+    if (!menu) return;
+    const items = Array.from(menu.querySelectorAll<HTMLButtonElement>(".ribbon__tab-menuitem:not(:disabled)"));
+    if (items.length === 0) return;
+    const activeItem = items.find((item) => item.dataset.tabId === activeTabId) ?? items[0];
+    activeItem?.focus();
+  }, [activeTabId]);
+
+  React.useEffect(() => {
+    if (!tabMenuOpen) return;
+    requestAnimationFrame(() => focusActiveTabMenuItem());
+  }, [focusActiveTabMenuItem, tabMenuOpen]);
+
+  React.useEffect(() => {
+    if (!tabMenuOpen) return;
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      const menu = tabMenuRef.current;
+      const button = tabMenuButtonRef.current;
+      if (menu?.contains(target)) return;
+      if (button?.contains(target)) return;
+      closeTabMenu();
+    };
+
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      const menu = tabMenuRef.current;
+      const button = tabMenuButtonRef.current;
+      if (menu?.contains(target)) return;
+      if (button?.contains(target)) return;
+      closeTabMenu();
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeTabMenu();
+      tabMenuButtonRef.current?.focus();
+    };
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [closeTabMenu, tabMenuOpen]);
 
   React.useEffect(() => {
     if (!flyoutOpen) return;
@@ -323,6 +414,95 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
       }}
     >
       <div className="ribbon__tabstrip">
+        {showTabMenuToggle ? (
+          <div className="ribbon__tabstrip-left">
+            <button
+              type="button"
+              className="ribbon__tab-menu-toggle"
+              aria-label="Open ribbon menu"
+              title="Open ribbon menu"
+              aria-haspopup="menu"
+              aria-expanded={tabMenuOpen}
+              aria-controls={tabMenuOpen ? tabMenuId : undefined}
+              data-testid="ribbon-tab-menu-toggle"
+              ref={tabMenuButtonRef}
+              onClick={() => {
+                setTabMenuOpen((prev) => !prev);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setTabMenuOpen(true);
+                }
+              }}
+            >
+              ☰
+            </button>
+            {tabMenuOpen ? (
+              <div
+                id={tabMenuId}
+                className="ribbon__tab-menu"
+                role="menu"
+                aria-label="Ribbon tabs"
+                data-testid="ribbon-tab-menu"
+                ref={tabMenuRef}
+                onKeyDown={(event) => {
+                  const menu = tabMenuRef.current;
+                  if (!menu) return;
+                  const items = Array.from(
+                    menu.querySelectorAll<HTMLButtonElement>(".ribbon__tab-menuitem:not(:disabled)"),
+                  );
+                  if (items.length === 0) return;
+                  const currentIndex = items.findIndex((el) => el === document.activeElement);
+
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    const next = currentIndex >= 0 ? (currentIndex + 1) % items.length : 0;
+                    items[next]?.focus();
+                    return;
+                  }
+
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    const next =
+                      currentIndex >= 0 ? (currentIndex - 1 + items.length) % items.length : items.length - 1;
+                    items[next]?.focus();
+                    return;
+                  }
+
+                  if (event.key === "Home") {
+                    event.preventDefault();
+                    items[0]?.focus();
+                    return;
+                  }
+
+                  if (event.key === "End") {
+                    event.preventDefault();
+                    items.at(-1)?.focus();
+                  }
+                }}
+              >
+                {tabs.map((tab) => {
+                  const isActive = tab.id === activeTabId;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={isActive}
+                      className={["ribbon__tab-menuitem", isActive ? "is-active" : null].filter(Boolean).join(" ")}
+                      title={tab.label}
+                      data-tab-id={tab.id}
+                      onClick={() => selectTabFromMenu(tab.id)}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <div className="ribbon__tabs" role="tablist" aria-label="Ribbon tabs" aria-orientation="horizontal">
           {tabs.map((tab, index) => {
             const isActive = tab.id === activeTabId;
