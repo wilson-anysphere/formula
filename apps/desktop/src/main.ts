@@ -7235,10 +7235,24 @@ mountRibbon(ribbonReactRoot, {
 //
 // SpreadsheetApp may attach collaboration support asynchronously, so we check
 // `getCollabSession()` at prompt time instead of only once at startup.
+function isCollabSessionActive(): boolean {
+  const anyApp = app as any;
+  try {
+    return typeof anyApp.getCollabSession === "function" && anyApp.getCollabSession() != null;
+  } catch {
+    // Ignore collab detection failures and fall back to normal dirty tracking.
+    return false;
+  }
+}
+
+function isDirtyForUnsavedChangesPrompts(): boolean {
+  if (isCollabSessionActive()) return false;
+  return app.getDocument().isDirty;
+}
+
 const collabAwareDirtyController = {
   get isDirty(): boolean {
-    if (isCollabModeActive()) return false;
-    return app.getDocument().isDirty;
+    return isDirtyForUnsavedChangesPrompts();
   },
 };
 
@@ -7395,21 +7409,11 @@ function normalizeSheetList(info: WorkbookInfo): { id: string; name: string }[] 
     .filter((s) => s.id.trim() !== "");
 }
 
-function isCollabModeActive(): boolean {
-  try {
-    return typeof (app as any).getCollabSession === "function" && Boolean((app as any).getCollabSession());
-  } catch {
-    return false;
-  }
-}
-
 async function confirmDiscardDirtyState(actionLabel: string): Promise<boolean> {
   // If the user triggers File commands while editing, the document may not yet be dirty
   // (the edit is still in the UI editor). Commit first so discard prompts are correct.
   app.commitPendingEditsForCommand();
-  const doc = app.getDocument();
-  if (!doc.isDirty) return true;
-  if (isCollabModeActive()) return true;
+  if (!isDirtyForUnsavedChangesPrompts()) return true;
   return nativeDialogs.confirm(`You have unsaved changes. Discard them and ${actionLabel}?`);
 }
 
@@ -8034,7 +8038,7 @@ try {
   const updaterUiListeners = installUpdaterUi(listen);
 
   registerAppQuitHandlers({
-    isDirty: () => app.getDocument().isDirty && !isCollabModeActive(),
+    isDirty: () => isDirtyForUnsavedChangesPrompts(),
     runWorkbookBeforeClose: async () => {
       app.commitPendingEditsForCommand();
       if (!queuedInvoke) return;
@@ -8752,8 +8756,7 @@ try {
         }
       }
 
-      const doc = app.getDocument();
-      if (doc.isDirty && !isCollabModeActive()) {
+      if (isDirtyForUnsavedChangesPrompts()) {
         const discard = await nativeDialogs.confirm(t("prompt.unsavedChangesDiscardConfirm"));
         if (!discard) return;
       }
