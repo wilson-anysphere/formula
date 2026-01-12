@@ -6,18 +6,28 @@ describe("desktop updater listener consolidation", () => {
     const mainUrl = new URL("../../main.ts", import.meta.url);
     const source = readFileSync(mainUrl, "utf8");
 
+    const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const listenCallRe = (eventName: string) =>
+      new RegExp(String.raw`\blisten\(\s*['"]${escapeRegExp(eventName)}['"]`, "g");
+    const listenCallCount = (eventName: string) => (source.match(listenCallRe(eventName)) ?? []).length;
+
     // These updater UX events should be handled by `tauri/updaterUi.ts` so that manual checks
     // don't produce duplicate toasts and startup checks don't accidentally surface dialogs/toasts.
-    expect(source).not.toContain('listen("update-not-available"');
-    expect(source).not.toContain('listen("update-check-error"');
-    expect(source).not.toContain('listen("update-available"');
+    expect(listenCallCount("update-not-available")).toBe(0);
+    expect(listenCallCount("update-check-error")).toBe(0);
+    expect(listenCallCount("update-available")).toBe(0);
 
     // `main.ts` may listen to some updater events for non-UX bookkeeping, but it should not
-    // install inline handlers that could easily re-introduce user-facing toast duplication.
-    expect(source).not.toMatch(/listen\("update-check-started",\s*(?:async\s*)?\(/);
-    expect(source).not.toMatch(/listen\("update-check-started",\s*function\b/);
-    expect(source).not.toMatch(/listen\("update-check-already-running",\s*(?:async\s*)?\(/);
-    expect(source).not.toMatch(/listen\("update-check-already-running",\s*function\b/);
+    // install toast-producing listeners. Only the dedicated `recordManualUpdateCheckEvent` listener
+    // (used to suppress duplicate backend checks) is permitted.
+    expect(listenCallCount("update-check-started")).toBe(1);
+    expect(source).toMatch(
+      /\blisten\(\s*['"]update-check-started['"]\s*,\s*recordManualUpdateCheckEvent\b/,
+    );
+
+    expect(listenCallCount("update-check-already-running")).toBe(1);
+    expect(source).toMatch(
+      /\blisten\(\s*['"]update-check-already-running['"]\s*,\s*recordManualUpdateCheckEvent\b/,
+    );
   });
 });
-
