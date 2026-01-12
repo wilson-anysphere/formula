@@ -20,7 +20,7 @@ function isPlainObject(value: unknown): value is Record<string, any> {
  *
  * This intentionally matches the clipboard’s permissive behavior:
  * - accepts `#RRGGBB` / `RRGGBB`
- * - accepts Excel/OOXML ARGB `#AARRGGBB` / `AARRGGBB` (converts to `#RRGGBB` or `rgba(...)`)
+ * - accepts Excel/OOXML ARGB `#AARRGGBB` / `AARRGGBB` (converts to `#RRGGBB` or `rgba(r,g,b,a)`)
  */
 function normalizeHexToCssColor(hex: string): string | null {
   const normalized = hex.trim().replace(/^#/, "");
