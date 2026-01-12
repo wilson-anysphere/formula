@@ -378,6 +378,16 @@ Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`:
 </richValueRel>
 ```
 
+Another observed variant (inspected `rust_xlsxwriter` output; see [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md)) uses a different root name + namespace:
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValueRels xmlns="http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rel r:id="rId1"/>
+</richValueRels>
+```
+
 Some variants may wrap the entries (e.g. `<rels><rel .../></rels>`); match on element local-names and
 preserve unknown structure when round-tripping.
 
