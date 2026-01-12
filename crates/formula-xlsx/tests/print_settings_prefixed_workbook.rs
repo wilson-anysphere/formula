@@ -231,6 +231,29 @@ fn print_settings_reads_defined_names_in_cdata() -> Result<(), Box<dyn std::erro
 }
 
 #[test]
+fn print_settings_ignores_xmlns_id_namespace_declaration() -> Result<(), Box<dyn std::error::Error>>
+{
+    // Regression test: attribute matching by local-name should ignore namespace declarations.
+    //
+    // Without this, `xmlns:id="..."` could be mistaken for the sheet relationship id (local-name
+    // `id`), causing the sheet part lookup via workbook.xml.rels to fail.
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+ xmlns:id="urn:example:dummy">
+  <x:sheets>
+    <x:sheet name="Sheet1" sheetId="1" rel:id="rId1"/>
+  </x:sheets>
+</x:workbook>"#;
+
+    let bytes = build_prefixed_workbook_xlsx(workbook_xml);
+    let settings = read_workbook_print_settings(&bytes)?;
+    assert_eq!(settings.sheets.len(), 1);
+    assert_eq!(settings.sheets[0].sheet_name, "Sheet1");
+    Ok(())
+}
+
+#[test]
 fn print_settings_inserts_into_self_closing_defined_names() -> Result<(), Box<dyn std::error::Error>>
 {
     // Excel sometimes writes an empty `<definedNames/>` element instead of omitting it. When we need
