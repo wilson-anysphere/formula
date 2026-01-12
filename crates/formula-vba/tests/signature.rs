@@ -135,6 +135,32 @@ fn extracts_signer_certificate_metadata_from_pkcs7() {
     );
 }
 
+fn wrap_in_digsig_info_serialized(pkcs7: &[u8]) -> Vec<u8> {
+    // Synthetic DigSigInfoSerialized-like blob:
+    // [cbSignature, cbSigningCertStore, cchProjectName] (LE u32)
+    // [projectName UTF-16LE] [certStore bytes] [signature bytes]
+    let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
+    let mut project_name_bytes = Vec::new();
+    for ch in &project_name_utf16 {
+        project_name_bytes.extend_from_slice(&ch.to_le_bytes());
+    }
+
+    let cert_store = vec![0xAA, 0xBB, 0xCC, 0xDD];
+
+    let cb_signature = pkcs7.len() as u32;
+    let cb_cert_store = cert_store.len() as u32;
+    let cch_project = project_name_utf16.len() as u32;
+
+    let mut out = Vec::new();
+    out.extend_from_slice(&cb_signature.to_le_bytes());
+    out.extend_from_slice(&cb_cert_store.to_le_bytes());
+    out.extend_from_slice(&cch_project.to_le_bytes());
+    out.extend_from_slice(&project_name_bytes);
+    out.extend_from_slice(&cert_store);
+    out.extend_from_slice(pkcs7);
+    out
+}
+
 fn build_vba_project_bin_with_signature_streams(streams: &[(&str, &[u8])]) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
@@ -200,6 +226,26 @@ fn pkcs7_signature_with_prefix_is_still_verified() {
     let mut prefixed = b"VBA\0SIG\0".to_vec();
     prefixed.extend_from_slice(&pkcs7);
     let vba = build_vba_project_bin_with_signature(Some(&prefixed));
+
+    let sig = verify_vba_digital_signature(&vba)
+        .expect("signature inspection should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert!(
+        sig.signer_subject
+            .as_deref()
+            .is_some_and(|s| s.contains("Formula VBA Test")),
+        "expected signer subject to mention test CN, got: {:?}",
+        sig.signer_subject
+    );
+}
+
+#[test]
+fn pkcs7_signature_wrapped_in_digsig_info_serialized_is_still_verified() {
+    let pkcs7 = make_pkcs7_signed_message(b"formula-vba-test");
+    let wrapped = wrap_in_digsig_info_serialized(&pkcs7);
+    let vba = build_vba_project_bin_with_signature(Some(&wrapped));
 
     let sig = verify_vba_digital_signature(&vba)
         .expect("signature inspection should succeed")

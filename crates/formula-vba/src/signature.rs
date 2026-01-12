@@ -434,6 +434,19 @@ fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, u
         return Some((pkcs7, 0));
     }
 
+    // Office commonly wraps the PKCS#7 blob in a [MS-OFFCRYPTO] DigSigInfoSerialized structure.
+    // Parsing the header is deterministic and avoids the worst-case behavior of scanning/parsing
+    // from every 0x30 offset.
+    if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(signature) {
+        let end = info.pkcs7_offset.saturating_add(info.pkcs7_len);
+        if end <= signature.len() {
+            let slice = &signature[info.pkcs7_offset..end];
+            if let Ok(pkcs7) = Pkcs7::from_der(slice) {
+                return Some((pkcs7, info.pkcs7_offset));
+            }
+        }
+    }
+
     for start in 0..signature.len() {
         if signature[start] != 0x30 {
             continue;

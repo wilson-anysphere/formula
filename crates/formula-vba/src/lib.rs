@@ -10,6 +10,7 @@
 mod authenticode;
 mod compression;
 mod dir;
+mod offcrypto;
 mod ole;
 mod project_digest;
 mod signature;
