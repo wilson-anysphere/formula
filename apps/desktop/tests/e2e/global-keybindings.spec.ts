@@ -163,6 +163,38 @@ test.describe("global keybindings", () => {
     await page.waitForTimeout(100);
     await expect(page.getByTestId("command-palette")).not.toBeVisible();
 
+    // Comments shortcuts should not fire while typing in an input.
+    await page.evaluate(() => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "F2",
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await page.waitForTimeout(100);
+    await expect(page.getByTestId("comments-panel")).not.toBeVisible();
+
+    await page.evaluate((isMac) => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "M",
+          code: "KeyM",
+          ctrlKey: !isMac,
+          metaKey: isMac,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, process.platform === "darwin");
+    await page.waitForTimeout(100);
+    await expect(page.getByTestId("comments-panel")).not.toBeVisible();
+
     // Extension keybinding should not fire while typing in an input.
     await page.keyboard.press(`${primary}+Shift+Y`);
     await page.waitForTimeout(250);
