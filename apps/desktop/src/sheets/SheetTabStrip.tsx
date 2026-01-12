@@ -145,6 +145,17 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
     onActivateSheet(sheetId);
   };
 
+  const beginRenameWithGuard = (sheet: SheetMeta) => {
+    if (editingSheetId && editingSheetId !== sheet.id) {
+      const ok = commitRename(editingSheetId);
+      if (!ok) return;
+    }
+
+    setEditingSheetId(sheet.id);
+    setDraftName(sheet.name);
+    setRenameError(null);
+  };
+
   const updateScrollButtons = useCallback(() => {
     const el = containerRef.current;
     if (!el) {
@@ -316,11 +327,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
             renameInputRef={renameInputRef}
             tabRef={sheet.id === activeSheetId ? activeTabRef : undefined}
             onActivate={() => activateSheetWithRenameGuard(sheet.id)}
-            onBeginRename={() => {
-              setEditingSheetId(sheet.id);
-              setDraftName(sheet.name);
-              setRenameError(null);
-            }}
+            onBeginRename={() => beginRenameWithGuard(sheet)}
             onCommitRename={() => commitRename(sheet.id)}
             onCancelRename={() => {
               setEditingSheetId(null);
