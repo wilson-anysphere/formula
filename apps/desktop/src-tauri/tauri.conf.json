@@ -97,6 +97,7 @@
       "windows": {
         "installMode": "passive"
       }
-    }
+    },
+    "notification": {}
   }
 }

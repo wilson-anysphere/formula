@@ -40,6 +40,7 @@ import { TauriWorkbookBackend } from "./tauri/workbookBackend";
 import * as nativeDialogs from "./tauri/nativeDialogs";
 import { setTrayStatus } from "./tauri/trayStatus";
 import { installUpdaterUi } from "./tauri/updaterUi";
+import { notify } from "./tauri/notifications";
 import type { WorkbookInfo } from "@formula/workbook-backend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
@@ -2111,6 +2112,17 @@ if (
         app.focus();
       },
     },
+    ...(import.meta.env.DEV
+      ? ([
+          {
+            id: "debugShowSystemNotification",
+            label: "Debug: Show system notification",
+            run: () => {
+              void notify({ title: "Formula", body: "This is a test system notification." });
+            },
+          },
+        ] satisfies PaletteCommand[])
+      : []),
   ];
 
   let paletteQuery = "";
@@ -3126,6 +3138,20 @@ try {
 
   void listen("shortcut-command-palette", () => {
     openCommandPalette?.();
+  });
+
+  void listen("update-available", (event) => {
+    const payload = (event as any)?.payload;
+    const version = typeof payload?.version === "string" ? payload.version.trim() : "";
+    const body = typeof payload?.body === "string" ? payload.body.trim() : "";
+    const message =
+      version && body
+        ? `Formula ${version} is available.\n\n${body}`
+        : version
+          ? `Formula ${version} is available.`
+          : body || "A new version of Formula is available.";
+
+    void notify({ title: "Update available", body: message });
   });
 
   let closeInFlight = false;

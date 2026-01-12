@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Listener, Manager};
+use tauri_plugin_notification::NotificationExt;
 use tokio::sync::oneshot;
 use tokio::time::{timeout, Duration};
 use uuid::Uuid;
@@ -186,6 +187,32 @@ fn cell_update_from_state(update: CellUpdateData) -> commands::CellUpdate {
     }
 }
 
+#[tauri::command]
+async fn show_system_notification(
+    window: tauri::WebviewWindow,
+    title: String,
+    body: Option<String>,
+) -> Result<(), String> {
+    // Restrict notification triggers to the main application window. This avoids
+    // accidental abuse if we ever embed untrusted content in secondary webviews.
+    if window.label() != "main" {
+        return Err("notifications are only allowed from the main window".to_string());
+    }
+
+    let mut builder = window
+        .app_handle()
+        .notification()
+        .builder()
+        .title(title);
+
+    if let Some(body) = body {
+        builder = builder.body(body);
+    }
+
+    builder.show().map_err(|err| err.to_string())?;
+    Ok(())
+}
+
 fn main() {
     let state: SharedAppState = Arc::new(Mutex::new(AppState::new()));
     let macro_trust: SharedMacroTrustStore = Arc::new(Mutex::new(
@@ -230,6 +257,7 @@ fn main() {
                 .build(),
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .manage(state)
         .manage(macro_trust)
         .manage(open_file_state)
@@ -292,6 +320,7 @@ fn main() {
             commands::fire_worksheet_change,
             commands::fire_selection_change,
             tray_status::set_tray_status,
+            show_system_notification,
         ])
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
