@@ -2,6 +2,20 @@
 
 Canvas-based virtualized spreadsheet grid renderer.
 
+## Dev harness
+
+For manual verification while developing:
+
+```bash
+pnpm --dir packages/grid dev
+```
+
+Then open one of:
+
+- `http://localhost:5173/?demo=style` — cell formatting demo (Excel-style rendering)
+- `http://localhost:5173/?demo=merged` — merged cells + text overflow demo
+- `http://localhost:5173/?demo=perf` — performance harness
+
 ## Theming
 
 `CanvasGrid` / `CanvasGridRenderer` use a `GridTheme` token set (no hard-coded UI colors). You can theme the grid in two ways:

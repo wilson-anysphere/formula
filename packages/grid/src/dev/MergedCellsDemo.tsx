@@ -112,11 +112,11 @@ export function MergedCellsDemo(): React.ReactElement {
         <div style={{ marginTop: 4, color: "var(--formula-grid-cell-text, #4b5563)", opacity: 0.75 }}>
           Try clicking inside merged regions (selection snaps to the anchor) and observe text overflowing into empty neighbors.
           Switch demos:{" "}
-          <a href="?demo=style" style={{ color: "inherit" }}>
+          <a href="?demo=style" style={{ color: "inherit", textDecoration: "none" }}>
             <code>?demo=style</code>
           </a>{" "}
           (cell formatting),{" "}
-          <a href="?demo=perf" style={{ color: "inherit" }}>
+          <a href="?demo=perf" style={{ color: "inherit", textDecoration: "none" }}>
             <code>?demo=perf</code>
           </a>{" "}
           (performance).

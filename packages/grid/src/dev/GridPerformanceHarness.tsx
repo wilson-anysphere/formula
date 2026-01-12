@@ -144,11 +144,11 @@ export function GridPerformanceHarness(props?: {
       >
         <div style={{ marginBottom: 8, opacity: 0.9 }}>
           Demos:{" "}
-          <a href="?demo=style" style={{ color: "inherit" }}>
+          <a href="?demo=style" style={{ color: "inherit", textDecoration: "none" }}>
             <code>?demo=style</code>
           </a>{" "}
           (cell formatting) ·{" "}
-          <a href="?demo=merged" style={{ color: "inherit" }}>
+          <a href="?demo=merged" style={{ color: "inherit", textDecoration: "none" }}>
             <code>?demo=merged</code>
           </a>{" "}
           (merged cells)

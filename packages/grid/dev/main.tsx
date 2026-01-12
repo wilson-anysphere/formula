@@ -5,12 +5,14 @@ import { CellFormattingDemo, GridPerformanceHarness, MergedCellsDemo } from "../
 const params = new URLSearchParams(window.location.search);
 const demo = params.get("demo");
 
-const Root =
-  demo === "perf"
-    ? GridPerformanceHarness
-    : demo === "style" || demo === "formatting"
-      ? CellFormattingDemo
-      : MergedCellsDemo;
+const DEMOS: Record<string, React.ComponentType> = {
+  perf: GridPerformanceHarness,
+  merged: MergedCellsDemo,
+  style: CellFormattingDemo,
+  formatting: CellFormattingDemo
+};
+
+const Root = (demo ? DEMOS[demo] : undefined) ?? MergedCellsDemo;
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
