@@ -167,8 +167,12 @@ function shouldScanFile(filePath) {
  * @returns {boolean}
  */
 function isTestFile(relativePath) {
-  // Match `*.test.*` and `*.spec.*`.
-  return /\.test\.[^.\\/]+$/i.test(relativePath) || /\.spec\.[^.\\/]+$/i.test(relativePath);
+  // Match `*.test.*`, `*.spec.*`, and `*.vitest.*`.
+  return (
+    /\.test\.[^.\\/]+$/i.test(relativePath) ||
+    /\.spec\.[^.\\/]+$/i.test(relativePath) ||
+    /\.vitest\.[^.\\/]+$/i.test(relativePath)
+  );
 }
 
 const CONTENT_SUBSTRING_RULES = [
