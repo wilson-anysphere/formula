@@ -24,6 +24,8 @@ desktop = [
     "dep:tauri-plugin-single-instance",
     "dep:tauri-plugin-notification",
     "dep:tauri-plugin-updater",
+    "dep:http-range",
+    "dep:percent-encoding",
 ]
 # Enable Parquet/Arrow-backed columnar imports.
 #
@@ -63,6 +65,8 @@ tauri-plugin-single-instance = { version = "2.2", optional = true }
 tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-updater = { version = "2.9", optional = true }
 thiserror = "1.0"
+http-range = { version = "0.1", optional = true }
+percent-encoding = { version = "2", optional = true }
 
 [dev-dependencies]
 cfb = "0.10"

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Formula - Tauri asset: protocol test</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        margin: 24px;
+        max-width: 900px;
+      }
+      input[type="text"] {
+        width: 100%;
+        max-width: 860px;
+        padding: 8px 10px;
+        font-size: 14px;
+      }
+      button {
+        padding: 8px 12px;
+        font-size: 14px;
+        margin-top: 8px;
+      }
+      img {
+        display: block;
+        margin-top: 12px;
+        border: 1px solid #ddd;
+        max-width: 320px;
+        max-height: 320px;
+        background: #fafafa;
+      }
+      pre {
+        margin-top: 12px;
+        background: #0b1020;
+        color: #d7e2ff;
+        padding: 12px;
+        border-radius: 6px;
+        overflow: auto;
+      }
+      code {
+        background: #f2f2f2;
+        padding: 0 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Tauri <code>asset:</code> protocol test</h1>
+    <p>
+      This page validates that an <code>&lt;img&gt;</code> pointing at a
+      <code>convertFileSrc(...)</code> URL still renders when the main document is loaded with
+      <code>Cross-Origin-Embedder-Policy: require-corp</code> (crossOriginIsolated).
+    </p>
+    <p>
+      <strong>crossOriginIsolated:</strong>
+      <span id="coi"></span>
+    </p>
+    <p>
+      Enter an absolute path to an image file (PNG/JPEG) and click "Load".
+      <br />
+      Note: this requires the desktop build to have <code>app.security.assetProtocol.enable</code> enabled and the file path to be
+      allowed by the asset protocol scope.
+    </p>
+    <label for="path">Image path</label>
+    <input id="path" type="text" placeholder="/absolute/path/to/image.png" />
+    <div>
+      <button id="load">Load</button>
+    </div>
+    <p><strong>Generated URL:</strong> <code id="url"></code></p>
+    <img id="img" alt="asset protocol preview" />
+    <pre id="log"></pre>
+    <script>
+      const logEl = document.getElementById("log");
+      function log(line) {
+        logEl.textContent += line + "\n";
+      }
+
+      document.getElementById("coi").textContent = String(globalThis.crossOriginIsolated === true);
+
+      const convertFileSrc = globalThis.__TAURI__?.core?.convertFileSrc;
+      if (!convertFileSrc) {
+        log("Tauri core API not available (are you running inside the desktop app/webview?).");
+      }
+
+      document.getElementById("load").addEventListener("click", () => {
+        logEl.textContent = "";
+        const p = document.getElementById("path").value.trim();
+        if (!p) {
+          log("Missing file path.");
+          return;
+        }
+        if (!convertFileSrc) {
+          log("Tauri core API not available.");
+          return;
+        }
+
+        const url = convertFileSrc(p);
+        document.getElementById("url").textContent = url;
+
+        const img = document.getElementById("img");
+        img.onload = () => log("img.onload: loaded successfully");
+        img.onerror = (e) => log("img.onerror: failed to load (check COEP/CORP + asset protocol scope)");
+        // Important: do NOT set img.crossOrigin here. The COEP breakage we care about happens
+        // for the default no-cors image request; if this loads with COEP enabled, CORP is working.
+        img.src = url;
+      });
+    </script>
+  </body>
+</html>
+

@@ -4,6 +4,7 @@
 )]
 
 mod shortcuts;
+mod asset_protocol;
 mod tray;
 mod updater;
 
@@ -236,6 +237,9 @@ fn main() {
     }
 
     let app = tauri::Builder::default()
+        // Override Tauri's default `asset:` protocol handler to attach COEP-friendly headers.
+        // See `asset_protocol.rs` for details.
+        .register_uri_scheme_protocol("asset", asset_protocol::handler)
         .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
             let cwd = cwd_from_single_instance_callback(cwd);
             let paths = extract_open_file_paths(&argv, cwd.as_deref());
