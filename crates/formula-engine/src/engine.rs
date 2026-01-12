@@ -8722,6 +8722,35 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_compile_report_classifies_not_thread_safe_formulas() {
+        let mut engine = Engine::new();
+        // RTD is volatile + not thread-safe (requires an external data provider).
+        engine
+            .set_cell_formula("Sheet1", "A1", "=RTD(\"prog\",\"server\",\"topic\")")
+            .unwrap();
+
+        let report = engine.bytecode_compile_report(10);
+        assert_eq!(report.len(), 1);
+        assert_eq!(report[0].reason, BytecodeCompileReason::NotThreadSafe);
+    }
+
+    #[test]
+    fn bytecode_compile_report_classifies_non_default_sheet_dimensions() {
+        let mut engine = Engine::new();
+        engine
+            .set_sheet_dimensions("Sheet1", 100, EXCEL_MAX_COLS)
+            .unwrap();
+        engine.set_cell_formula("Sheet1", "A1", "=1+1").unwrap();
+
+        let report = engine.bytecode_compile_report(10);
+        assert_eq!(report.len(), 1);
+        assert_eq!(
+            report[0].reason,
+            BytecodeCompileReason::NonDefaultSheetDimensions
+        );
+    }
+
+    #[test]
     fn bytecode_compile_report_classifies_range_size_limit_exceeded() {
         let mut engine = Engine::new();
         engine
