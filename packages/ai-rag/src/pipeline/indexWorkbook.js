@@ -14,6 +14,11 @@ export function approximateTokenCount(text) {
  * Index a workbook into a vector store, incrementally updating embeddings when
  * chunks change.
  *
+ * Note: Formula's desktop workbook RAG uses deterministic, offline hash embeddings
+ * (`HashEmbedder`) by default. Embeddings are not user-configurable (no API keys /
+ * no local model configuration). A future Cursor-managed embedding service can
+ * replace this to improve retrieval quality.
+ *
  * @param {{
  *   workbook: import('../workbook/workbookTypes').Workbook,
  *   vectorStore: any,
