@@ -763,6 +763,7 @@ export class SpreadsheetApp {
   private renderScheduled = false;
   private pendingRenderMode: "full" | "scroll" = "full";
   private statusUpdateScheduled = false;
+  private selectionStatsFormatter: Intl.NumberFormat | null = null;
   private chartContentRefreshScheduled = false;
   private windowKeyDownListener: ((e: KeyboardEvent) => void) | null = null;
   private clipboardProviderPromise: ReturnType<typeof createClipboardProvider> | null = null;
@@ -5491,7 +5492,8 @@ export class SpreadsheetApp {
     const sum = summary.sum ?? 0;
     const avg = summary.average ?? 0;
     const count = summary.countNonEmpty;
-    const formatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+    const formatter =
+      this.selectionStatsFormatter ?? (this.selectionStatsFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }));
 
     if (sumEl) sumEl.textContent = `Sum: ${formatter.format(sum)}`;
     if (avgEl) avgEl.textContent = `Avg: ${formatter.format(avg)}`;
