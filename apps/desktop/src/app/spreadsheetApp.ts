@@ -1599,11 +1599,12 @@ export class SpreadsheetApp {
             return cell?.formula != null ? { formula: cell.formula } : cell?.value ?? null;
           }
 
-          if (normalized === "formats") return { format: cell?.format ?? null };
+          if (normalized === "formats") return { format: clipboardFormatToDocStyle(cell?.format ?? null) };
 
           // normalized === "all"
-          if (cell?.formula != null) return { formula: cell.formula, value: null, format: cell?.format ?? null };
-          return { value: cell?.value ?? null, format: cell?.format ?? null };
+          const format = clipboardFormatToDocStyle(cell?.format ?? null);
+          if (cell?.formula != null) return { formula: cell.formula, value: null, format };
+          return { value: cell?.value ?? null, format };
         });
       });
 
