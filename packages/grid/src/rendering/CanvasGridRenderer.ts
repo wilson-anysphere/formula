@@ -2507,6 +2507,14 @@ export class CanvasGridRenderer {
 
     const hasMerges = quadrantMergedRanges.length > 0;
 
+    // Reuse a single object for merged range lookups to avoid per-cell allocations in hot paths.
+    const mergedCellRef = { row: 0, col: 0 };
+    const mergedRangeAt = (row: number, col: number): CellRange | null => {
+      mergedCellRef.row = row;
+      mergedCellRef.col = col;
+      return mergedIndex.rangeAt(mergedCellRef);
+    };
+
     const useLinearKeys = this.frameCacheUsesLinearKeys && this.frameCacheColCount === colCount;
 
     const getCellCached: (row: number, col: number) => CellData | null = useLinearKeys
@@ -2537,7 +2545,7 @@ export class CanvasGridRenderer {
           const key = row * colCount + col;
           if (this.frameBlockedCache.has(key)) return this.frameBlockedCache.get(key) ?? false;
 
-          if (mergedRanges.length > 0 && mergedIndex.rangeAt({ row, col })) {
+          if (mergedRanges.length > 0 && mergedRangeAt(row, col)) {
             this.frameBlockedCache.set(key, true);
             return true;
           }
@@ -2559,7 +2567,7 @@ export class CanvasGridRenderer {
           }
           if (rowCache.has(col)) return rowCache.get(col) ?? false;
 
-          if (mergedRanges.length > 0 && mergedIndex.rangeAt({ row, col })) {
+          if (mergedRanges.length > 0 && mergedRangeAt(row, col)) {
             rowCache.set(col, true);
             return true;
           }
@@ -3444,7 +3452,7 @@ export class CanvasGridRenderer {
         const colWidth = colAxis.getSize(col);
         const x = colXSheet - quadrant.scrollBaseX + quadrant.originX;
 
-        if (hasMerges && mergedIndex.rangeAt({ row, col })) {
+        if (hasMerges && mergedRangeAt(row, col)) {
           if (fillRunColor && fillRunWidth > 0) {
             if (fillRunColor !== currentGridFill) {
               gridCtx.fillStyle = fillRunColor;
@@ -3670,7 +3678,7 @@ export class CanvasGridRenderer {
           const colWidth = colAxis.getSize(col);
           const x = borderColXSheet - quadrant.scrollBaseX + quadrant.originX;
 
-          if (hasMerges && mergedIndex.rangeAt({ row, col })) {
+          if (hasMerges && mergedRangeAt(row, col)) {
             borderColXSheet += colWidth;
             continue;
           }
