@@ -33,7 +33,8 @@ describe("desktop updater listener consolidation", () => {
     // The `updater-ui-ready` handshake should be tied to the updater UI listeners being installed,
     // without adding extra updater listeners (like a second `update-available` handler).
     expect(source).toMatch(/\bemit\(\s*['"]updater-ui-ready['"]/);
-    expect(source).toMatch(/void\s+updaterUiListeners[\s\S]{0,600}emit\(\s*['"]updater-ui-ready['"]/);
+    // Use a lazy match so this doesn't become brittle as `main.ts` grows.
+    expect(source).toMatch(/void\s+updaterUiListeners[\s\S]*?emit\(\s*['"]updater-ui-ready['"]/);
     expect(source).not.toMatch(/Promise\.all\(\s*\[\s*updaterUiListeners\s*,/);
   });
 });
