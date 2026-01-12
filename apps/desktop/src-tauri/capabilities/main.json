@@ -24,7 +24,7 @@
     },
     {
       "identifier": "event:allow-emit",
-      "allow": [{ "event": "close-prep-done" }, { "event": "close-handled" }]
+      "allow": [{ "event": "close-prep-done" }, { "event": "close-handled" }, { "event": "updater-ui-ready" }]
     },
     "dialog:allow-open",
     "dialog:allow-save",

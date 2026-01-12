@@ -720,7 +720,44 @@ fn main() {
             // Auto-update is configured via `tauri.conf.json`. We do a lightweight startup check
             // in release builds; users can also trigger checks from the tray menu.
             #[cfg(not(debug_assertions))]
-            updater::spawn_update_check(app.handle(), updater::UpdateCheckSource::Startup);
+            {
+                // Tauri does not guarantee that emitted events are queued before JS listeners are
+                // registered. To avoid dropping fast startup update notifications, the frontend
+                // emits `updater-ui-ready` once it has installed its updater event listeners.
+                // Only then do we run the startup update check.
+                let handle = app.handle().clone();
+                let started = Arc::new(AtomicBool::new(false));
+                let listener = Arc::new(Mutex::new(None));
+
+                let started_for_listener = started.clone();
+                let listener_for_listener = listener.clone();
+                let handle_for_listener = handle.clone();
+
+                let id = handle.listen_global("updater-ui-ready", move |_| {
+                    if started_for_listener.swap(true, Ordering::SeqCst) {
+                        return;
+                    }
+
+                    if let Some(id) = listener_for_listener.lock().unwrap().take() {
+                        handle_for_listener.unlisten(id);
+                    }
+
+                    updater::spawn_update_check(
+                        &handle_for_listener,
+                        updater::UpdateCheckSource::Startup,
+                    );
+                });
+
+                *listener.lock().unwrap() = Some(id);
+
+                // Extremely defensive: if the readiness signal fires before we store `id`, make
+                // sure the listener is still unregistered.
+                if started.load(Ordering::SeqCst) {
+                    if let Some(id) = listener.lock().unwrap().take() {
+                        handle.unlisten(id);
+                    }
+                }
+            }
 
             // Best-effort: if the app was launched via a deep-link URL (e.g. the first
             // instance after an OAuth redirect), forward it to the frontend.

@@ -3796,7 +3796,10 @@ try {
     openCommandPalette?.();
   });
 
-  void listen("update-available", (event) => {
+  // Updater events can fire very early (e.g. a fast startup update check). `listen()` is async,
+  // so we wait for registration before signaling readiness to the backend. The Rust host will
+  // defer the startup update check until it receives `updater-ui-ready`.
+  const updateAvailableListener = listen("update-available", (event) => {
     const payload = (event as any)?.payload;
     const version = typeof payload?.version === "string" ? payload.version.trim() : "";
     const body = typeof payload?.body === "string" ? payload.body.trim() : "";
@@ -3809,6 +3812,15 @@ try {
 
     void notify({ title: "Update available", body: message });
   });
+
+  void updateAvailableListener
+    .then(() => {
+      if (!emit) return;
+      return Promise.resolve(emit("updater-ui-ready"));
+    })
+    .catch((err) => {
+      console.error("Failed to install updater listeners or signal updater-ui-ready:", err);
+    });
 
   let closeInFlight = false;
   type RawCellUpdate = {
