@@ -150,10 +150,15 @@ test.describe("split view", () => {
 
     // Scroll the secondary pane so A1 is offscreen.
     await secondary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(100 * 100, 0);
+    await expect.poll(async () => Number((await secondary.getAttribute("data-scroll-x")) ?? 0)).toBeGreaterThan(0);
     await page.mouse.wheel(0, 200 * 24);
     await expect.poll(async () => Number((await secondary.getAttribute("data-scroll-y")) ?? 0)).toBeGreaterThan(0);
 
-    const secondaryScrollBefore = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
+    const secondaryScrollBefore = {
+      x: Number((await secondary.getAttribute("data-scroll-x")) ?? 0),
+      y: Number((await secondary.getAttribute("data-scroll-y")) ?? 0),
+    };
 
     const rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("B2"));
     if (!rect) throw new Error("Missing B2 rect");
@@ -163,8 +168,12 @@ test.describe("split view", () => {
     await expect(page.getByTestId("formula-address")).toHaveValue("B2");
     // The secondary pane should mirror selection state without being scrolled to reveal it.
     await expect(secondary.getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell B2");
-    const secondaryScrollAfter = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
-    expect(Math.abs(secondaryScrollAfter - secondaryScrollBefore)).toBeLessThan(0.1);
+    const secondaryScrollAfter = {
+      x: Number((await secondary.getAttribute("data-scroll-x")) ?? 0),
+      y: Number((await secondary.getAttribute("data-scroll-y")) ?? 0),
+    };
+    expect(Math.abs(secondaryScrollAfter.x - secondaryScrollBefore.x)).toBeLessThan(0.1);
+    expect(Math.abs(secondaryScrollAfter.y - secondaryScrollBefore.y)).toBeLessThan(0.1);
   });
 
   test("secondary drag selection preserves active cell semantics and does not scroll primary", async ({ page }) => {
@@ -183,10 +192,12 @@ test.describe("split view", () => {
     // Scroll the primary pane so we're verifying drag selection from secondary does not disturb it.
     const primary = page.locator("#grid");
     await primary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(100 * 100, 0);
+    await expect.poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().x)).toBeGreaterThan(0);
     await page.mouse.wheel(0, 200 * 24);
     await expect.poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().y)).toBeGreaterThan(0);
 
-    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll());
 
     const secondaryBox = await secondary.boundingBox();
     if (!secondaryBox) throw new Error("Missing secondary grid bounding box");
@@ -211,8 +222,9 @@ test.describe("split view", () => {
     await expect(page.getByTestId("formula-address")).toHaveValue("D4");
     await expect(page.locator("#grid").getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell D4");
 
-    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
-    expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
+    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll());
+    expect(Math.abs(scrollAfter.x - scrollBefore.x)).toBeLessThan(0.1);
+    expect(Math.abs(scrollAfter.y - scrollBefore.y)).toBeLessThan(0.1);
   });
 
   test("secondary multi-range selection syncs to primary without scrolling", async ({ page }) => {
@@ -231,10 +243,12 @@ test.describe("split view", () => {
     // Scroll the primary pane so the selected cells are offscreen (sync should not scroll it back).
     const primary = page.locator("#grid");
     await primary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(100 * 100, 0);
+    await expect.poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().x)).toBeGreaterThan(0);
     await page.mouse.wheel(0, 200 * 24);
     await expect.poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().y)).toBeGreaterThan(0);
 
-    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
+    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll());
 
     // Create a multi-range selection from the secondary pane: A1, then Ctrl/Cmd+click C3.
     await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
@@ -246,8 +260,9 @@ test.describe("split view", () => {
     await expect(page.getByTestId("formula-address")).toHaveValue("C3");
     await expect(page.locator("#grid").getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell C3");
 
-    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
-    expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
+    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll());
+    expect(Math.abs(scrollAfter.x - scrollBefore.x)).toBeLessThan(0.1);
+    expect(Math.abs(scrollAfter.y - scrollBefore.y)).toBeLessThan(0.1);
   });
 
   test("primary multi-range selection sync does not scroll the secondary pane", async ({ page }) => {
@@ -265,10 +280,15 @@ test.describe("split view", () => {
 
     // Scroll the secondary pane so A1 is offscreen; syncing selection from primary should not scroll it back.
     await secondary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(100 * 100, 0);
+    await expect.poll(async () => Number((await secondary.getAttribute("data-scroll-x")) ?? 0)).toBeGreaterThan(0);
     await page.mouse.wheel(0, 200 * 24);
     await expect.poll(async () => Number((await secondary.getAttribute("data-scroll-y")) ?? 0)).toBeGreaterThan(0);
 
-    const secondaryScrollBefore = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
+    const secondaryScrollBefore = {
+      x: Number((await secondary.getAttribute("data-scroll-x")) ?? 0),
+      y: Number((await secondary.getAttribute("data-scroll-y")) ?? 0),
+    };
 
     const primary = page.locator("#grid");
     const rectA1 = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"));
@@ -287,8 +307,12 @@ test.describe("split view", () => {
     await expect(page.getByTestId("formula-address")).toHaveValue("C3");
     await expect(secondary.getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell C3");
 
-    const secondaryScrollAfter = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
-    expect(Math.abs(secondaryScrollAfter - secondaryScrollBefore)).toBeLessThan(0.1);
+    const secondaryScrollAfter = {
+      x: Number((await secondary.getAttribute("data-scroll-x")) ?? 0),
+      y: Number((await secondary.getAttribute("data-scroll-y")) ?? 0),
+    };
+    expect(Math.abs(secondaryScrollAfter.x - secondaryScrollBefore.x)).toBeLessThan(0.1);
+    expect(Math.abs(secondaryScrollAfter.y - secondaryScrollBefore.y)).toBeLessThan(0.1);
   });
 
   test("primary pane persists + restores scroll/zoom (parity with secondary)", async ({ page }) => {
