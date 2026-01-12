@@ -10,6 +10,12 @@ pub(crate) struct BoundSheetInfo {
     pub(crate) offset: usize,
 }
 
+fn strip_embedded_nuls(s: &mut String) {
+    if s.contains('\0') {
+        s.retain(|c| c != '\0');
+    }
+}
+
 fn biff_codepage(workbook_stream: &[u8]) -> u16 {
     let Ok(iter) = records::BestEffortSubstreamIter::from_offset(workbook_stream, 0) else {
         return 1252;
@@ -59,9 +65,7 @@ pub(crate) fn parse_biff_bound_sheets(
                 else {
                     continue;
                 };
-                // Some `.xls` files store sheet names with embedded NUL bytes; strip them to match
-                // Excel's display behavior and keep downstream sheet-name matching predictable.
-                name = name.replace('\0', "");
+                strip_embedded_nuls(&mut name);
                 out.push(BoundSheetInfo {
                     name,
                     offset: sheet_offset,
@@ -298,8 +302,8 @@ fn parse_biff_format_record_strict(
         _ => return Err(format!("unexpected FORMAT record id 0x{record_id:04X}")),
     };
 
-    // Excel stores some strings with embedded NUL bytes; follow BoundSheet parsing and strip them.
-    code = code.replace('\0', "");
+    // Excel stores some strings with embedded NUL bytes; strip them for stable formatting.
+    strip_embedded_nuls(&mut code);
     Ok((num_fmt_id, code))
 }
 
@@ -319,7 +323,7 @@ fn parse_biff_format_record_best_effort(
         0x001E => strings::parse_biff5_short_string_best_effort(rest, codepage)?,
         _ => return None,
     };
-    code = code.replace('\0', "");
+    strip_embedded_nuls(&mut code);
     Some((num_fmt_id, code))
 }
 
@@ -356,6 +360,31 @@ mod tests {
             sheets,
             vec![BoundSheetInfo {
                 name: "A".to_string(),
+                offset: 0x1234
+            }]
+        );
+    }
+
+    #[test]
+    fn boundsheet_strips_embedded_nuls() {
+        // BoundSheet8 with a compressed 8-bit name containing an embedded NUL byte.
+        let mut bs_payload = Vec::new();
+        bs_payload.extend_from_slice(&0x1234u32.to_le_bytes()); // sheet offset
+        bs_payload.extend_from_slice(&[0, 0]); // visibility/type
+        bs_payload.push(3); // cch
+        bs_payload.push(0); // flags (compressed)
+        bs_payload.extend_from_slice(&[b'A', 0x00, b'B']);
+
+        let stream = [
+            record(0x0085, &bs_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
+        assert_eq!(
+            sheets,
+            vec![BoundSheetInfo {
+                name: "AB".to_string(),
                 offset: 0x1234
             }]
         );
