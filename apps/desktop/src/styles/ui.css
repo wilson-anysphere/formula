@@ -572,6 +572,11 @@
   font-size: 11px;
 }
 
+.command-palette__signature-name {
+  color: var(--success);
+  font-weight: 600;
+}
+
 .command-palette__item-shortcut {
   font-size: 12px;
   color: var(--text-secondary);

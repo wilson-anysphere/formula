@@ -652,7 +652,15 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
         if (fn.signature) {
           const signature = document.createElement("div");
           signature.className = "command-palette__item-description command-palette__item-description--mono";
-          signature.textContent = fn.signature;
+          if (fn.signature.startsWith(fn.name)) {
+            const fnName = document.createElement("span");
+            fnName.className = "command-palette__signature-name";
+            fnName.textContent = fn.name;
+            signature.appendChild(fnName);
+            signature.appendChild(document.createTextNode(fn.signature.slice(fn.name.length)));
+          } else {
+            signature.textContent = fn.signature;
+          }
           main.appendChild(signature);
         }
 
