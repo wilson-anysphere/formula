@@ -1896,10 +1896,12 @@ fn is_filter_database_defined_name(name: &str) -> bool {
     // some decoders) omit the `_xlnm.` prefix and use Excel's visible built-in name
     // `_FilterDatabase` instead. Treat both spellings as the AutoFilter name.
     //
-    // Calamine has been observed to surface `_FilterDatabase` with the final `e` truncated (i.e.
-    // `_FilterDatabas`) for some BIFF NAME encodings; accept that variant as well so we still
-    // preserve AutoFilter ranges when BIFF parsing is unavailable.
+    // Calamine has been observed to surface `_FilterDatabase` / `_xlnm._FilterDatabase` with the
+    // final `e` truncated (i.e. `_FilterDatabas` / `_xlnm._FilterDatabas`) for some BIFF NAME
+    // encodings; accept those variants as well so we still preserve AutoFilter ranges when BIFF
+    // parsing is unavailable.
     name.eq_ignore_ascii_case(XLNM_FILTER_DATABASE)
+        || name.eq_ignore_ascii_case("_xlnm._FilterDatabas")
         || name.eq_ignore_ascii_case("_FilterDatabase")
         || name.eq_ignore_ascii_case("_FilterDatabas")
 }
@@ -1920,7 +1922,9 @@ fn infer_sheet_name_from_workbook_scoped_defined_name(
     // can infer sheet scope from dynamic-array era implicit intersection prefixes as well.
     let refers_to = refers_to.trim();
     let refers_to = refers_to.strip_prefix('=').unwrap_or(refers_to).trim();
+    let refers_to = strip_wrapping_parentheses(refers_to);
     let refers_to = refers_to.strip_prefix('@').unwrap_or(refers_to).trim();
+    let refers_to = strip_wrapping_parentheses(refers_to);
     if refers_to.is_empty() {
         return None;
     }
@@ -2913,6 +2917,7 @@ fn strip_wrapping_parentheses(mut expr: &str) -> &str {
 fn parse_autofilter_range_from_defined_name(refers_to: &str) -> Result<Range, String> {
     let refers_to = refers_to.trim();
     let refers_to = refers_to.strip_prefix('=').unwrap_or(refers_to).trim();
+    let refers_to = strip_wrapping_parentheses(refers_to);
     let refers_to = refers_to.strip_prefix('@').unwrap_or(refers_to).trim();
     let refers_to = strip_wrapping_parentheses(refers_to);
     if refers_to.is_empty() {
@@ -3582,5 +3587,40 @@ mod tests {
             err.contains("union"),
             "expected union error, got {err:?}"
         );
+    }
+
+    #[test]
+    fn parse_autofilter_range_strips_wrapping_parentheses_around_implicit_intersection_prefix() {
+        // Calamine (and some BIFF formula decoders) can render implicit intersection (`@`) with
+        // redundant parentheses.
+        let range = parse_autofilter_range_from_defined_name("=(@$A$1:$B$3)")
+            .expect("expected parenthesized implicit intersection range to parse");
+        assert_eq!(range, Range::from_a1("A1:B3").unwrap());
+
+        let range = parse_autofilter_range_from_defined_name("=(@(Sheet1!$A$1:$B$3))")
+            .expect("expected parenthesized sheet-qualified implicit intersection range to parse");
+        assert_eq!(range, Range::from_a1("A1:B3").unwrap());
+    }
+
+    #[test]
+    fn infer_sheet_scope_strips_wrapping_parentheses() {
+        let mut workbook = Workbook::new();
+        workbook.add_sheet("Sheet1").unwrap();
+        workbook.add_sheet("Sheet2").unwrap();
+
+        let mut warnings = Vec::new();
+        let sheet = infer_sheet_name_from_workbook_scoped_defined_name(
+            &workbook,
+            XLNM_FILTER_DATABASE,
+            "=(Sheet1!$A$1:$B$3)",
+            &mut warnings,
+        );
+        assert_eq!(sheet.as_deref(), Some("Sheet1"));
+        assert!(warnings.is_empty(), "warnings={warnings:?}");
+    }
+
+    #[test]
+    fn filter_database_defined_name_accepts_truncated_canonical_spelling() {
+        assert!(is_filter_database_defined_name("_xlnm._FilterDatabas"));
     }
 }
