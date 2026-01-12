@@ -12,7 +12,8 @@ struct RecordRange {
     end: usize,
 }
 
-/// Shared strings (`xl/sharedStrings.bin`) patcher that preserves existing records byte-for-byte.
+/// Shared strings (workbook shared strings part, typically `xl/sharedStrings.bin`) patcher that
+/// preserves existing records byte-for-byte.
 ///
 /// The shared string table is a BIFF12 record stream containing:
 /// - `BrtSST` (`0x009F`) header with `[totalCount:u32][uniqueCount:u32]`

@@ -43,7 +43,7 @@ pub struct CellEdit {
     /// When patching an existing `BrtCellIsst` record, providing `shared_string_index` lets the
     /// patcher keep the cell as a shared-string reference. When this is `None`, the patcher
     /// falls back to writing an inline string because it has no access to (or ability to update)
-    /// `xl/sharedStrings.bin`.
+    /// the workbook's shared strings part.
     pub shared_string_index: Option<u32>,
 }
 

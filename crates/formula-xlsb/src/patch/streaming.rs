@@ -312,8 +312,8 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             //
                             // NOTE: When writing a text value, this converts `BrtCellIsst` (shared
                             // string reference) cells into `BrtCellSt` (inline string) because the
-                            // streaming patcher cannot update `xl/sharedStrings.bin`. Use the
-                            // shared-strings-aware workbook APIs
+                            // streaming patcher cannot update the workbook shared strings part.
+                            // Use the shared-strings-aware workbook APIs
                             // (`XlsbWorkbook::save_with_cell_edits_shared_strings` or
                             // `XlsbWorkbook::save_with_cell_edits_streaming_shared_strings`) to
                             // keep shared-string semantics.

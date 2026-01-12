@@ -266,15 +266,15 @@ impl XlsbWorkbook {
         &self.defined_names
     }
 
-    /// Workbook styles parsed from `xl/styles.bin`.
+    /// Workbook styles parsed from the styles part (typically `xl/styles.bin`).
     pub fn styles(&self) -> &Styles {
         &self.styles
     }
 
-    /// Parse `xl/styles.bin` using locale-aware built-in number formats.
+    /// Parse the styles part using locale-aware built-in number formats.
     ///
     /// This is a convenience wrapper around [`Styles::parse_with_locale`] that
-    /// uses the preserved `xl/styles.bin` bytes from this workbook.
+    /// uses the preserved styles part bytes from this workbook.
     pub fn styles_with_locale(
         &self,
         locale: formula_format::Locale,
@@ -293,7 +293,7 @@ impl XlsbWorkbook {
         &self.preserved_parts
     }
 
-    /// Raw `xl/styles.bin`, preserved for round-trip.
+    /// Raw styles part bytes, preserved for round-trip.
     pub fn styles_bin(&self) -> Option<&[u8]> {
         let part = self.styles_part.as_deref()?;
         self.preserved_parts.get(part).map(|v| v.as_slice())
@@ -382,8 +382,9 @@ impl XlsbWorkbook {
     /// How [`OpenOptions`] affects `save_as`:
     /// - `preserve_unknown_parts`: stores raw bytes for unknown ZIP entries in `preserved_parts`,
     ///   but `save_as` will still copy them from the source file even when this is `false`.
-    /// - `preserve_parsed_parts`: stores raw bytes for `xl/workbook.bin` and `xl/sharedStrings.bin`
-    ///   so they can be re-emitted without re-reading those ZIP entries.
+    /// - `preserve_parsed_parts`: stores raw bytes for `xl/workbook.bin` and the shared strings
+    ///   part (typically `xl/sharedStrings.bin`) so they can be re-emitted without re-reading
+    ///   those ZIP entries.
     /// - `preserve_worksheets`: stores raw bytes for worksheet `.bin` parts (can be large). When
     ///   `false`, worksheets are streamed from the source ZIP during `save_as`.
     ///
@@ -454,8 +455,8 @@ impl XlsbWorkbook {
         self.save_with_part_overrides(dest, &HashMap::from([(sheet_part, patched)]))
     }
 
-    /// Save the workbook with a set of edits for a single worksheet, updating `xl/sharedStrings.bin`
-    /// as needed so shared-string (`BrtCellIsst`) cells can stay as shared-string references.
+    /// Save the workbook with a set of edits for a single worksheet, updating the shared strings
+    /// part as needed so shared-string (`BrtCellIsst`) cells can stay as shared-string references.
     pub fn save_with_cell_edits_shared_strings(
         &self,
         dest: impl AsRef<Path>,
@@ -538,7 +539,7 @@ impl XlsbWorkbook {
                 }
                 None => {
                     // Newly inserted text cells can also use the shared string table, since we're
-                    // already updating `xl/sharedStrings.bin`.
+                    // already updating the shared strings part.
                     edit.shared_string_index = Some(sst.intern_plain(text)?);
                 }
                 _ => {}

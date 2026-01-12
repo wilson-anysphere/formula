@@ -1,6 +1,7 @@
 use formula_model::rich_text::RichText;
 
-/// A shared string table entry (`BrtSI`) from `xl/sharedStrings.bin`.
+/// A shared string table entry (`BrtSI`) from the workbook shared strings part (typically
+/// `xl/sharedStrings.bin`).
 ///
 /// XLSB shared strings can contain rich text runs and/or phonetic (ruby) data.
 /// We preserve the rich structure (and raw bytes for rich/phonetic values) so
@@ -29,4 +30,3 @@ impl SharedString {
         self.rich_text.plain_text()
     }
 }
-
