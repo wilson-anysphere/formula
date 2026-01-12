@@ -716,3 +716,60 @@ const FUTURE_UDF_FUNCTIONS: &[&str] = &[
     "XOR",
     "Z.TEST",
 ];
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::{FTAB, FUTURE_UDF_FUNCTIONS};
+
+    #[test]
+    fn future_udf_functions_are_sorted_and_unique() {
+        let mut prev: Option<&str> = None;
+        let mut seen = HashSet::with_capacity(FUTURE_UDF_FUNCTIONS.len());
+        for &name in FUTURE_UDF_FUNCTIONS {
+            if let Some(prev) = prev {
+                assert!(
+                    prev < name,
+                    "FUTURE_UDF_FUNCTIONS must be ASCII-sorted; found out-of-order entries: {prev} then {name}"
+                );
+            }
+            assert!(
+                seen.insert(name),
+                "FUTURE_UDF_FUNCTIONS must not contain duplicates; duplicate entry: {name}"
+            );
+            prev = Some(name);
+        }
+    }
+
+    #[test]
+    fn future_udf_functions_do_not_overlap_ftab() {
+        let ftab_names: HashSet<&str> = FTAB.iter().copied().filter(|name| !name.is_empty()).collect();
+        for &name in FUTURE_UDF_FUNCTIONS {
+            assert!(
+                !ftab_names.contains(name),
+                "FUTURE_UDF_FUNCTIONS should not contain FTAB entries; {name} is already in FTAB"
+            );
+        }
+    }
+
+    #[test]
+    fn future_udf_functions_cover_formula_engine_non_ftab_functions() {
+        // This list exists so `function_id_from_name(\"NAME\")` can still return the BIFF UDF sentinel
+        // (255) in no-`encode` builds where we cannot consult `formula-engine` at runtime.
+        let ftab_names: HashSet<&str> = FTAB.iter().copied().filter(|name| !name.is_empty()).collect();
+        let future_names: HashSet<&str> = FUTURE_UDF_FUNCTIONS.iter().copied().collect();
+
+        for spec in formula_engine::functions::iter_function_specs() {
+            let upper = spec.name.to_ascii_uppercase();
+            let name = upper.strip_prefix("_XLFN.").unwrap_or(&upper);
+            if ftab_names.contains(name) {
+                continue;
+            }
+            assert!(
+                future_names.contains(name),
+                "missing FUTURE_UDF_FUNCTIONS entry for formula-engine function {name}"
+            );
+        }
+    }
+}
