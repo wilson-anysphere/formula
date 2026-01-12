@@ -90,6 +90,7 @@ fn row_and_array_lift_return_spill_for_huge_whole_column_outputs() {
 
     engine.set_cell_formula("Sheet1", "B1", "=ROW(A:A)").unwrap();
     engine.set_cell_formula("Sheet1", "B2", "=ABS(A:A)").unwrap();
+    engine.set_cell_formula("Sheet1", "B3", "=VALUE(A:A)").unwrap();
 
     engine.recalculate();
     assert_eq!(
@@ -98,6 +99,10 @@ fn row_and_array_lift_return_spill_for_huge_whole_column_outputs() {
     );
     assert_eq!(
         engine.get_cell_value("Sheet1", "B2"),
+        Value::Error(ErrorKind::Spill)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B3"),
         Value::Error(ErrorKind::Spill)
     );
 }

@@ -1084,7 +1084,17 @@ fn eval_matrix_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<Mat
             }
             let rows = (r.end.row - r.start.row + 1) as usize;
             let cols = (r.end.col - r.start.col + 1) as usize;
-            let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+            let total = match rows.checked_mul(cols) {
+                Some(v) => v,
+                None => return Err(ErrorKind::Spill),
+            };
+            if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+                return Err(ErrorKind::Spill);
+            }
+            let mut values = Vec::new();
+            values
+                .try_reserve_exact(total)
+                .map_err(|_| ErrorKind::Num)?;
             for addr in r.iter_cells() {
                 values.push(ctx.get_cell_value(&r.sheet_id, addr));
             }
@@ -1118,7 +1128,21 @@ fn elementwise_unary(arg: MatrixArg, f: impl Fn(&Value) -> Value) -> Value {
     match arg {
         MatrixArg::Scalar(v) => f(&v),
         MatrixArg::Array(arr) => {
-            Value::Array(Array::new(arr.rows, arr.cols, arr.iter().map(f).collect()))
+            let total = match arr.rows.checked_mul(arr.cols) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Spill),
+            };
+            if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
+            let mut values = Vec::new();
+            if values.try_reserve_exact(total).is_err() {
+                return Value::Error(ErrorKind::Num);
+            }
+            for v in arr.iter() {
+                values.push(f(v));
+            }
+            Value::Array(Array::new(arr.rows, arr.cols, values))
         }
     }
 }
@@ -1142,7 +1166,17 @@ fn elementwise_binary(
             scalar
         };
     }
-    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    let total = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut values = Vec::new();
+    if values.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
     for r in 0..rows {
         for c in 0..cols {
             values.push(f(left.get(r, c), right.get(r, c)));
@@ -1173,7 +1207,17 @@ fn elementwise_ternary(
             scalar
         };
     }
-    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    let total = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut values = Vec::new();
+    if values.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
     for r in 0..rows {
         for c in 0..cols {
             values.push(f(first.get(r, c), second.get(r, c), third.get(r, c)));
@@ -1211,7 +1255,17 @@ fn elementwise_quaternary(
             scalar
         };
     }
-    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    let total = match rows.checked_mul(cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut values = Vec::new();
+    if values.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
     for r in 0..rows {
         for c in 0..cols {
             values.push(f(
