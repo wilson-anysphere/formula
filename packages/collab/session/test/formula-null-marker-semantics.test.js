@@ -18,6 +18,28 @@ test("CollabSession writes formula=null markers when clearing formulas without c
   }
 });
 
+test("CollabSession.getCell treats formula=null the same as an absent formula key", async () => {
+  const session = createCollabSession();
+  try {
+    await session.setCellFormula("Sheet1:0:0", "=1");
+    await session.setCellFormula("Sheet1:0:0", null);
+
+    // Explicit marker should read back as `formula: null`.
+    assert.equal((await session.getCell("Sheet1:0:0"))?.formula, null);
+
+    // Simulate a legacy writer that deletes the formula key entirely: read API
+    // should still return `formula: null`.
+    session.doc.transact(() => {
+      const cell = session.cells.get("Sheet1:0:0");
+      cell?.delete?.("formula");
+    });
+    assert.equal((await session.getCell("Sheet1:0:0"))?.formula, null);
+  } finally {
+    session.destroy();
+    session.doc.destroy();
+  }
+});
+
 test("CollabSession clears formulas via formula=null markers when writing literal values without conflict monitors", async () => {
   const session = createCollabSession();
   try {
