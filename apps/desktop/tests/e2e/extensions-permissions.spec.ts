@@ -576,4 +576,71 @@ test.describe("Extensions permissions UI", () => {
       await page.unroute("http://allowed.example/**").catch(() => {});
     }
   });
+
+  test("revoking clipboard permission blocks copySumToClipboard", async ({ page }) => {
+    const extensionId = "formula.sample-hello";
+
+    await page.addInitScript(() => {
+      try {
+        localStorage.removeItem("formula.extensionHost.permissions");
+      } catch {
+        // ignore
+      }
+    });
+
+    await gotoDesktop(page);
+
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+
+      doc.setCellValue(sheetId, { row: 0, col: 0 }, 1);
+      doc.setCellValue(sheetId, { row: 0, col: 1 }, 2);
+      doc.setCellValue(sheetId, { row: 1, col: 0 }, 3);
+      doc.setCellValue(sheetId, { row: 1, col: 1 }, 4);
+
+      app.selectRange({
+        sheetId,
+        range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+      });
+    });
+
+    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
+    await expect(page.getByTestId("panel-extensions")).toBeVisible();
+
+    await expect(page.getByTestId(`permission-row-${extensionId}-clipboard`)).toContainText("not granted");
+
+    await page.getByTestId("run-command-sampleHello.copySumToClipboard").click();
+
+    await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+    await expect(page.getByTestId("extension-permission-ui.commands")).toBeVisible();
+    await page.getByTestId("extension-permission-allow").click();
+    await expect(page.getByTestId("extension-permission-ui.commands")).toHaveCount(0);
+
+    await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+    await expect(page.getByTestId("extension-permission-cells.read")).toBeVisible();
+    await page.getByTestId("extension-permission-allow").click();
+    await expect(page.getByTestId("extension-permission-cells.read")).toHaveCount(0);
+
+    await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+    await expect(page.getByTestId("extension-permission-clipboard")).toBeVisible();
+    await page.getByTestId("extension-permission-allow").click();
+    await expect(page.getByTestId("extension-permission-clipboard")).toHaveCount(0);
+
+    await expect(page.getByTestId(`permission-row-${extensionId}-clipboard`)).toContainText("granted");
+
+    await page.getByTestId(`revoke-permission-${extensionId}-clipboard`).click();
+    await expect(page.getByTestId(`permission-row-${extensionId}-clipboard`)).toContainText("not granted");
+
+    await page.getByTestId("run-command-sampleHello.copySumToClipboard").click();
+    await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+    await expect(page.getByTestId("extension-permission-clipboard")).toBeVisible();
+    await page.getByTestId("extension-permission-deny").click();
+
+    await expect(page.getByTestId("toast-root")).toContainText("Permission denied");
+    await expect(page.getByTestId(`permission-row-${extensionId}-clipboard`)).toContainText("not granted");
+  });
 });
