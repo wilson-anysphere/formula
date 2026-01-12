@@ -7,6 +7,11 @@ use quick_xml::Reader;
 use zip::write::FileOptions;
 use zip::{ZipArchive, ZipWriter};
 
+// Regression test: workbook sheet structure edits (add/delete) must not drop the
+// linked-data-type infrastructure parts used by Excel rich data types
+// (`xl/metadata.xml` + `xl/richData/*`) nor their workbook-level relationship and
+// content type overrides.
+
 fn build_fixture_xlsx() -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
