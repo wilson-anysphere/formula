@@ -165,6 +165,47 @@ test.describe("tauri workbook integration", () => {
     await expect(switcher.locator("option")).toHaveText(["Sheet1", "Sheet2", "Sheet3"]);
   });
 
+  test("veryHidden sheets are excluded and not offered in the unhide menu", async ({ page }) => {
+    await page.addInitScript(installTauriStubForTests, {
+      sheets: [
+        { id: "Sheet1", name: "Sheet1", visibility: "visible" },
+        { id: "Sheet2", name: "Sheet2", visibility: "hidden" },
+        { id: "Sheet3", name: "Sheet3", visibility: "veryHidden" },
+        { id: "Sheet4", name: "Sheet4", visibility: "visible" },
+      ],
+    });
+
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
+    });
+
+    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
+    await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveCount(0);
+    await expect(page.getByTestId("sheet-tab-Sheet4")).toBeVisible();
+
+    const switcher = page.getByTestId("sheet-switcher");
+    await expect(switcher.locator("option")).toHaveText(["Sheet1", "Sheet4"]);
+
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+
+    await expect(menu.getByRole("button", { name: "Unhide Sheet2" })).toBeVisible();
+    await expect(menu.getByRole("button", { name: "Unhide Sheet3" })).toHaveCount(0);
+
+    await menu.getByRole("button", { name: "Unhide Sheet2" }).click();
+
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveCount(0);
+    await expect(switcher.locator("option")).toHaveText(["Sheet1", "Sheet2", "Sheet4"]);
+  });
+
   test("warns when workbook exceeds the current load limit", async ({ page }) => {
     await page.addInitScript(installTauriStubForTests, {
       // Exceeds the default maxRows cap (10,000). Keep end_col small so the test avoids
