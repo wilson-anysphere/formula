@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 formula-engine = { path = "../formula-engine" }
 formula-model = { path = "../formula-model" }
 formula-xlsx = { path = "../formula-xlsx" }
+getrandom = { version = "0.2", features = ["js"] }
 js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde-wasm-bindgen = "0.6"

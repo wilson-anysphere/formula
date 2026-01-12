@@ -320,65 +320,110 @@ test.describe("Content Security Policy (Tauri parity)", () => {
         const { BrowserExtensionHost } = await import(hostModuleUrl);
         const { WebExtensionManager } = await import(managerModuleUrl);
 
-        const writes: Array<{ row: number; col: number; value: unknown }> = [];
-        const cellMap = new Map<string, unknown>();
+        const canBlobModuleUrls =
+          typeof URL !== "undefined" && typeof URL.createObjectURL === "function" && typeof Blob !== "undefined";
 
-        const spreadsheetApi = {
-          async getSelection() {
-            return {
-              startRow: 0,
-              startCol: 0,
-              endRow: 1,
-              endCol: 1,
-              values: [
-                [1, 2],
-                [3, 4]
-              ]
-            };
-          },
-          async getCell(row: number, col: number) {
-            const key = `${row},${col}`;
-            return cellMap.has(key) ? cellMap.get(key) : null;
-          },
-          async setCell(row: number, col: number, value: unknown) {
-            const key = `${row},${col}`;
-            cellMap.set(key, value);
-            writes.push({ row, col, value });
-          }
+        const run = async () => {
+          const writes: Array<{ row: number; col: number; value: unknown }> = [];
+          const cellMap = new Map<string, unknown>();
+
+          const spreadsheetApi = {
+            async getSelection() {
+              return {
+                startRow: 0,
+                startCol: 0,
+                endRow: 1,
+                endCol: 1,
+                values: [
+                  [1, 2],
+                  [3, 4]
+                ]
+              };
+            },
+            async getCell(row: number, col: number) {
+              const key = `${row},${col}`;
+              return cellMap.has(key) ? cellMap.get(key) : null;
+            },
+            async setCell(row: number, col: number, value: unknown) {
+              const key = `${row},${col}`;
+              cellMap.set(key, value);
+              writes.push({ row, col, value });
+            }
+          };
+
+          const host = new BrowserExtensionHost({
+            engineVersion: "1.0.0",
+            spreadsheetApi,
+            permissionPrompt: async () => true
+          });
+
+          const manager = new WebExtensionManager({ host });
+          await manager.install("formula.sample-hello");
+          const id = await manager.loadInstalled("formula.sample-hello");
+
+          const loadedMainUrl = (manager as any)?._loadedMainUrls?.get(id)?.mainUrl ?? null;
+
+          const sum = await host.executeCommand("sampleHello.sumSelection");
+          const fetched = await host.executeCommand("sampleHello.fetchText", "https://example.test/hello");
+          const outCell = await spreadsheetApi.getCell(2, 0);
+          const messages = host.getMessages();
+          await manager.dispose();
+          await host.dispose();
+
+          return { id, loadedMainUrl, sum, fetched, outCell, writes, messages };
         };
 
-        const host = new BrowserExtensionHost({
-          engineVersion: "1.0.0",
-          spreadsheetApi,
-          permissionPrompt: async () => true
-        });
+        const blob = await run();
 
-        const manager = new WebExtensionManager({ host });
-        await manager.install("formula.sample-hello");
-        const id = await manager.loadInstalled("formula.sample-hello");
+        const originalCreateObjectURL = URL.createObjectURL;
+        let forcedData = false;
+        try {
+          // Force the marketplace loader to fall back to `data:` module URLs so we can
+          // validate that the configured CSP permits both `blob:` and `data:` entrypoints.
+          // (In Chromium, `URL.createObjectURL` is usually available so the default path is `blob:`.)
+          (URL as any).createObjectURL = undefined;
+          forcedData = true;
+        } catch {
+          // ignore
+        }
 
-        const loadedMainUrl = (manager as any)?._loadedMainUrls?.get(id)?.mainUrl ?? null;
-
-        const sum = await host.executeCommand("sampleHello.sumSelection");
-        const fetched = await host.executeCommand("sampleHello.fetchText", "https://example.test/hello");
-        const outCell = await spreadsheetApi.getCell(2, 0);
-        const messages = host.getMessages();
-        await manager.dispose();
-        await host.dispose();
-
-        return { id, loadedMainUrl, sum, fetched, outCell, writes, messages };
+        try {
+          const data = await run();
+          return { canBlobModuleUrls, forcedData, blob, data };
+        } finally {
+          try {
+            (URL as any).createObjectURL = originalCreateObjectURL;
+          } catch {
+            // ignore
+          }
+        }
       },
       { hostModuleUrl, managerModuleUrl }
     );
 
-    expect(result.id).toBe("formula.sample-hello");
-    expect(result.loadedMainUrl).toMatch(/^(blob:|data:)/);
-    expect(result.sum).toBe(10);
-    expect(result.fetched).toBe("hello");
-    expect(result.outCell).toBe(10);
-    expect(result.writes).toEqual([{ row: 2, col: 0, value: 10 }]);
-    expect(result.messages.some((m: any) => String(m.message).includes("Sum: 10"))).toBe(true);
-    expect(result.messages.some((m: any) => String(m.message).includes("Fetched: hello"))).toBe(true);
+    expect(result.blob.id).toBe("formula.sample-hello");
+    expect(result.blob.loadedMainUrl).toMatch(/^(blob:|data:)/);
+    if (result.canBlobModuleUrls) {
+      expect(result.blob.loadedMainUrl).toMatch(/^blob:/);
+    }
+    expect(result.blob.sum).toBe(10);
+    expect(result.blob.fetched).toBe("hello");
+    expect(result.blob.outCell).toBe(10);
+    expect(result.blob.writes).toEqual([{ row: 2, col: 0, value: 10 }]);
+    expect(result.blob.messages.some((m: any) => String(m.message).includes("Sum: 10"))).toBe(true);
+    expect(result.blob.messages.some((m: any) => String(m.message).includes("Fetched: hello"))).toBe(true);
+
+    expect(result.data.id).toBe("formula.sample-hello");
+    expect(result.data.loadedMainUrl).toMatch(/^(blob:|data:)/);
+    if (result.forcedData) {
+      expect(result.data.loadedMainUrl).toMatch(/^data:/);
+    }
+    expect(result.data.sum).toBe(10);
+    expect(result.data.fetched).toBe("hello");
+    expect(result.data.outCell).toBe(10);
+    expect(result.data.writes).toEqual([{ row: 2, col: 0, value: 10 }]);
+    expect(result.data.messages.some((m: any) => String(m.message).includes("Sum: 10"))).toBe(true);
+    expect(result.data.messages.some((m: any) => String(m.message).includes("Fetched: hello"))).toBe(true);
 
     expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
   });

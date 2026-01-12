@@ -2060,6 +2060,7 @@ dependencies = [
  "formula-engine",
  "formula-model",
  "formula-xlsx",
+ "getrandom 0.2.16",
  "js-sys",
  "serde",
  "serde-wasm-bindgen",
