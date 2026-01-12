@@ -86,7 +86,124 @@ def _scan_features(zip_names: list[str]) -> dict[str, Any]:
     features["has_connections"] = "xl/connections.xml" in zip_names
     features["has_shared_strings"] = "xl/sharedStrings.xml" in zip_names
     features["sheet_xml_count"] = len([n for n in zip_names if n.startswith("xl/worksheets/sheet")])
+    zip_names_lower = [n.lower() for n in zip_names]
+    features["has_cell_images"] = any(n == "xl/cellimages.xml" for n in zip_names_lower) or any(
+        n.endswith("/cellimages.xml") for n in zip_names_lower
+    )
     return features
+
+
+def _find_zip_entry_case_insensitive(zip_names: list[str], wanted: str) -> str | None:
+    wanted_lower = wanted.lower()
+    for n in zip_names:
+        if n.lower() == wanted_lower:
+            return n
+    return None
+
+
+def _split_etree_tag(tag: str) -> tuple[str, str | None]:
+    if tag.startswith("{") and "}" in tag:
+        ns, local = tag[1:].split("}", 1)
+        return local, ns
+    return tag, None
+
+
+def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, Any] | None:
+    part_name: str | None = None
+    for n in zip_names:
+        if n.lower() == "xl/cellimages.xml":
+            part_name = n
+            break
+    if part_name is None:
+        for n in zip_names:
+            if n.lower().endswith("/cellimages.xml"):
+                part_name = n
+                break
+    if part_name is None:
+        return None
+
+    content_type: str | None = None
+    content_types_name = _find_zip_entry_case_insensitive(zip_names, "[Content_Types].xml")
+    if content_types_name:
+        try:
+            from xml.etree import ElementTree as ET
+
+            ct_root = ET.fromstring(z.read(content_types_name))
+            for el in ct_root.iter():
+                if el.tag.split("}")[-1] != "Override":
+                    continue
+                part = el.attrib.get("PartName") or ""
+                if part.lower().endswith("/cellimages.xml"):
+                    content_type = el.attrib.get("ContentType")
+                    break
+        except Exception:
+            content_type = None
+
+    workbook_rel_type: str | None = None
+    workbook_rels_name = _find_zip_entry_case_insensitive(zip_names, "xl/_rels/workbook.xml.rels")
+    if workbook_rels_name:
+        try:
+            from xml.etree import ElementTree as ET
+
+            rels_root = ET.fromstring(z.read(workbook_rels_name))
+            for el in rels_root.iter():
+                if el.tag.split("}")[-1] != "Relationship":
+                    continue
+                target = el.attrib.get("Target") or ""
+                if target.lower().endswith("cellimages.xml"):
+                    workbook_rel_type = el.attrib.get("Type")
+                    break
+        except Exception:
+            workbook_rel_type = None
+
+    root_local_name: str | None = None
+    root_namespace: str | None = None
+    embed_rids_count: int | None = None
+    try:
+        from xml.etree import ElementTree as ET
+
+        cellimages_root = ET.fromstring(z.read(part_name))
+        root_local_name, root_namespace = _split_etree_tag(cellimages_root.tag)
+        embed_rids_count = 0
+        for el in cellimages_root.iter():
+            if el.tag.split("}")[-1] != "blip":
+                continue
+            for attr_name in el.attrib:
+                # Count `r:embed` (or any namespace-qualified `embed`) attributes on blips.
+                if attr_name.split("}")[-1] == "embed":
+                    embed_rids_count += 1
+    except Exception:
+        root_local_name = None
+        root_namespace = None
+        embed_rids_count = None
+
+    rels_types: list[str] = []
+    cellimages_rels_name = _find_zip_entry_case_insensitive(zip_names, "xl/_rels/cellimages.xml.rels")
+    if cellimages_rels_name:
+        try:
+            from xml.etree import ElementTree as ET
+
+            rels_root = ET.fromstring(z.read(cellimages_rels_name))
+            types: set[str] = set()
+            for el in rels_root.iter():
+                if el.tag.split("}")[-1] != "Relationship":
+                    continue
+                t = el.attrib.get("Type")
+                if t:
+                    types.add(t)
+            rels_types = sorted(types)
+        except Exception:
+            rels_types = []
+
+    return {
+        "part_name": part_name,
+        "content_type": content_type,
+        "workbook_rel_type": workbook_rel_type,
+        "root_local_name": root_local_name,
+        "root_namespace": root_namespace,
+        "embed_rids_count": embed_rids_count,
+        "rels_types": rels_types,
+    }
 
 
 def _extract_function_counts(z: zipfile.ZipFile) -> Counter[str]:
@@ -246,7 +363,12 @@ def triage_workbook(
     try:
         with zipfile.ZipFile(io.BytesIO(workbook.data), "r") as z:
             zip_names = [info.filename for info in z.infolist() if not info.is_dir()]
-            report["features"] = _scan_features(zip_names)
+            features = _scan_features(zip_names)
+            report["features"] = features
+            if features.get("has_cell_images") is True:
+                cell_images = _extract_cell_images(z, zip_names)
+                if cell_images is not None:
+                    report["cell_images"] = cell_images
             report["functions"] = dict(_extract_function_counts(z))
     except Exception as e:  # noqa: BLE001 (triage tool)
         report["features_error"] = str(e)
