@@ -1561,9 +1561,11 @@ fn prepare_lambda_call(call_name: &str, arg_count: usize) -> LambdaCall {
     LambdaCall {
         name: call_name.to_string(),
         arg_names,
-        expr: Expr::FunctionCall {
-            name: call_name.to_string(),
-            original_name: call_name.to_string(),
+        expr: Expr::Call {
+            callee: Box::new(Expr::NameRef(NameRef {
+                sheet: SheetReference::Current,
+                name: call_name.to_string(),
+            })),
             args,
         },
     }
