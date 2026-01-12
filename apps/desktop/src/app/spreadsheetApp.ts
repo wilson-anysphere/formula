@@ -351,7 +351,8 @@ function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
     const token = params.get("token") ?? undefined;
     const userId = params.get("userId") ?? `user_${Math.random().toString(16).slice(2)}`;
     const userName = params.get("userName") ?? t("presence.anonymous");
-    const userColor = params.get("userColor") ?? "#4c8bf5";
+    const defaultUserColor = resolveCssVar("--accent", { fallback: "dodgerblue" });
+    const userColor = params.get("userColor") ?? defaultUserColor;
     return {
       wsUrl,
       docId,
@@ -1312,7 +1313,7 @@ export class SpreadsheetApp {
         dialogRoot.style.border = "1px solid var(--dialog-border)";
         dialogRoot.style.borderRadius = "10px";
         dialogRoot.style.padding = "12px";
-        dialogRoot.style.boxShadow = "0 6px 24px rgba(0,0,0,0.18)";
+        dialogRoot.style.boxShadow = "var(--dialog-shadow)";
       }
 
       const presence = this.collabSession.presence;
@@ -1325,6 +1326,7 @@ export class SpreadsheetApp {
 
         // Render remote presences.
         this.collabPresenceUnsubscribe = presence.subscribe((presences: any[]) => {
+          const defaultPresenceColor = resolveCssVar("--accent", { fallback: "dodgerblue" });
           this.remotePresences = (Array.isArray(presences) ? presences : []).map((p) => {
             const cursor =
               p?.cursor && typeof p.cursor.row === "number" && typeof p.cursor.col === "number"
@@ -1352,7 +1354,7 @@ export class SpreadsheetApp {
             return {
               id: String(p?.id ?? ""),
               name: String(p?.name ?? t("presence.anonymous")),
-              color: String(p?.color ?? "#4c8bf5"),
+              color: String(p?.color ?? defaultPresenceColor),
               cursor,
               selections,
             } satisfies GridPresence;
