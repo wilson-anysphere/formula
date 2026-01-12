@@ -141,9 +141,17 @@ mod gtk_backend {
                     None => wait_for_utf8_targets(clipboard, &["text/html"]),
                 };
                 let rtf = match targets.as_deref() {
-                    Some(targets) => choose_best_target(targets, &["text/rtf", "application/rtf"])
-                        .and_then(|t| wait_for_utf8_targets(clipboard, &[t])),
-                    None => wait_for_utf8_targets(clipboard, &["text/rtf", "application/rtf"]),
+                    Some(targets) => {
+                        choose_best_target(
+                            targets,
+                            &["text/rtf", "application/rtf", "application/x-rtf"],
+                        )
+                            .and_then(|t| wait_for_utf8_targets(clipboard, &[t]))
+                    }
+                    None => wait_for_utf8_targets(
+                        clipboard,
+                        &["text/rtf", "application/rtf", "application/x-rtf"],
+                    ),
                 };
                 let png_base64 = wait_for_bytes_base64(clipboard, "image/png").or_else(|| {
                     // Some applications expose images on the clipboard without an `image/png` target.
@@ -238,6 +246,7 @@ mod gtk_backend {
             if rtf.is_some() {
                 targets.push(gtk::TargetEntry::new("text/rtf", flags, INFO_RTF));
                 targets.push(gtk::TargetEntry::new("application/rtf", flags, INFO_RTF));
+                targets.push(gtk::TargetEntry::new("application/x-rtf", flags, INFO_RTF));
             }
 
             if png_bytes.is_some() {
@@ -339,8 +348,15 @@ mod tests {
     #[test]
     fn choose_best_target_supports_rtf_aliases() {
         let targets = vec!["application/rtf", "text/rtf;charset=utf-8"];
-        let best = choose_best_target(&targets, &["text/rtf", "application/rtf"]);
+        let best = choose_best_target(&targets, &["text/rtf", "application/rtf", "application/x-rtf"]);
         assert_eq!(best, Some("text/rtf;charset=utf-8"));
+    }
+
+    #[test]
+    fn choose_best_target_supports_x_rtf_alias() {
+        let targets = vec!["application/x-rtf", "text/plain"];
+        let best = choose_best_target(&targets, &["text/rtf", "application/rtf", "application/x-rtf"]);
+        assert_eq!(best, Some("application/x-rtf"));
     }
 
     #[test]
