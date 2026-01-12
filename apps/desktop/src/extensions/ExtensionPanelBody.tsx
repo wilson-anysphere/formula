@@ -249,7 +249,7 @@ export function ExtensionPanelBody({ panelId, bridge }: { panelId: string; bridg
       title={panelId}
       data-testid={`extension-webview-${panelId}`}
       sandbox="allow-scripts"
-      allow="clipboard-read 'none'; clipboard-write 'none'"
+      allow="clipboard-read 'none'; clipboard-write 'none'; camera 'none'; microphone 'none'; geolocation 'none'"
       referrerPolicy="no-referrer"
       src={src ?? undefined}
       className="extension-webview"
