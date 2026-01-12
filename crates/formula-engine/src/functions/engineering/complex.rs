@@ -21,7 +21,12 @@ fn parse_component(text: &str, locale: NumberLocale) -> Result<f64, ErrorKind> {
     let mut cfg = LocaleConfig::en_us();
     cfg.decimal_separator = locale.decimal_separator;
     cfg.thousands_separator = locale.group_separator;
-    cfg.parse_number(text).ok_or(ErrorKind::Num)
+    let n = cfg.parse_number(text).ok_or(ErrorKind::Num)?;
+    if n.is_finite() {
+        Ok(n)
+    } else {
+        Err(ErrorKind::Num)
+    }
 }
 
 /// Parse an Excel-style complex number string (engineering functions).

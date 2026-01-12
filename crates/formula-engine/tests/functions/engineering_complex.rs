@@ -39,6 +39,7 @@ fn complex_error_mapping() {
     let mut sheet = TestSheet::new();
     assert_eq!(sheet.eval(r#"=IMREAL("nope")"#), Value::Error(ErrorKind::Num));
     assert_eq!(sheet.eval(r#"=IMREAL("3+4")"#), Value::Error(ErrorKind::Num));
+    assert_eq!(sheet.eval(r#"=IMREAL("1e9999+0i")"#), Value::Error(ErrorKind::Num));
     assert_eq!(sheet.eval(r#"=COMPLEX(1,2,"k")"#), Value::Error(ErrorKind::Value));
     assert_eq!(sheet.eval(r#"=IMDIV("1+i","0")"#), Value::Error(ErrorKind::Div0));
     assert_eq!(sheet.eval(r#"=IMARGUMENT("0")"#), Value::Error(ErrorKind::Div0));
