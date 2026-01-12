@@ -30,6 +30,12 @@ describe("builtin keybinding catalog", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("includes explicit AutoSum Shift variants for layouts where '=' requires Shift", () => {
+    const autosum = builtinKeybindings.filter((kb) => kb.command === "edit.autoSum");
+    expect(autosum.map((kb) => kb.key)).toEqual(expect.arrayContaining(["alt+=", "alt+shift+="]));
+    expect(autosum.map((kb) => kb.mac)).toEqual(expect.arrayContaining(["option+=", "option+shift+="]));
+  });
+
   it("gates representative keybindings via focus/edit context keys (capture-phase safe)", () => {
     // Fail-closed behavior is important while migrating to capture-phase routing: if context
     // keys haven't been initialized yet, spreadsheet-affecting shortcuts should not fire.
