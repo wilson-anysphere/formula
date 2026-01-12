@@ -1281,11 +1281,21 @@ to the app-level CSP (`apps/desktop/src-tauri/tauri.conf.json`, `connect-src`).
      --private-key ./publisher-private.pem
    ```
 
-3. Run the desktop app:
+3. Run the desktop UI:
 
-   ```bash
-   pnpm -C apps/desktop dev
-   ```
+   - Quick in-browser dev (same WebWorker/IndexedDB extension runtime model):
+
+     ```bash
+     pnpm -C apps/desktop dev
+     ```
+
+   - Real Tauri/WebView run (for CSP/capabilities parity): see [`docs/11-desktop-shell.md`](./11-desktop-shell.md).
+     In agent environments this is typically:
+
+     ```bash
+     cd apps/desktop
+     bash ../../scripts/cargo_agent.sh tauri dev
+     ```
 
 4. Point Desktop at your local marketplace API (note the `/api` suffix) and reload:
 
