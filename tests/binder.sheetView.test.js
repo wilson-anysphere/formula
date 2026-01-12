@@ -252,6 +252,10 @@ test("binder: Yjs→DocumentController syncs sheet view state (initial hydration
   const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1" });
 
   try {
+    // Remote hydration should not create undo history entries.
+    assert.deepEqual(documentController.getStackDepths(), { undo: 0, redo: 0 });
+    assert.equal(documentController.canUndo, false);
+
     await waitForCondition(() => {
       const view = documentController.getSheetView("Sheet1");
       return view.frozenRows === 1 && view.frozenCols === 1 && view.colWidths?.["0"] === 111;
@@ -262,6 +266,8 @@ test("binder: Yjs→DocumentController syncs sheet view state (initial hydration
       frozenCols: 1,
       colWidths: { "0": 111 },
     });
+    assert.deepEqual(documentController.getStackDepths(), { undo: 0, redo: 0 });
+    assert.equal(documentController.canUndo, false);
 
     // Simulate a remote collaborator updating the view object.
     const remoteOrigin = { type: "remote-test" };
@@ -291,6 +297,8 @@ test("binder: Yjs→DocumentController syncs sheet view state (initial hydration
       frozenCols: 2,
       rowHeights: { "10": 55 },
     });
+    assert.deepEqual(documentController.getStackDepths(), { undo: 0, redo: 0 });
+    assert.equal(documentController.canUndo, false);
   } finally {
     binder.destroy();
     ydoc.destroy();
