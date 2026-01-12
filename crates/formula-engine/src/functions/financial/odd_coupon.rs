@@ -412,9 +412,6 @@ fn oddl_equation(
     if !(settlement < maturity) {
         return Err(ExcelError::Num);
     }
-    if !(last_interest < maturity) {
-        return Err(ExcelError::Num);
-    }
 
     // Ensure inputs are representable dates in this system.
     let _ = crate::date::serial_to_ymd(last_interest, system)?;

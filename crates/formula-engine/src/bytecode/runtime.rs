@@ -4113,6 +4113,39 @@ fn format_r1c1_address(row_num: i64, col_num: i64, row_abs: bool, col_abs: bool)
     out
 }
 fn xor_range(grid: &dyn Grid, range: ResolvedRange, acc: &mut bool) -> Option<ErrorKind> {
+    if !range_in_bounds(grid, range) {
+        return Some(ErrorKind::Ref);
+    }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut best_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                match v {
+                    Value::Error(e) => record_error_row_major(&mut best_error, coord, e),
+                    Value::Number(n) => *acc ^= n != 0.0,
+                    Value::Bool(b) => *acc ^= b,
+                    // Text/blanks in references are ignored.
+                    Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
+                    | Value::Empty
+                    | Value::Missing
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+            if let Some((_, _, err)) = best_error {
+                return Some(err);
+            }
+            return None;
+        }
+    }
+
     for row in range.row_start..=range.row_end {
         for col in range.col_start..=range.col_end {
             match grid.get_value(CellCoord { row, col }) {
@@ -4154,6 +4187,39 @@ fn xor_range_on_sheet(
     range: ResolvedRange,
     acc: &mut bool,
 ) -> Option<ErrorKind> {
+    if !range_in_bounds_on_sheet(grid, sheet, range) {
+        return Some(ErrorKind::Ref);
+    }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells_on_sheet(sheet) {
+            let mut best_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                match v {
+                    Value::Error(e) => record_error_row_major(&mut best_error, coord, e),
+                    Value::Number(n) => *acc ^= n != 0.0,
+                    Value::Bool(b) => *acc ^= b,
+                    // Text/blanks in references are ignored.
+                    Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
+                    | Value::Empty
+                    | Value::Missing
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
+                }
+            }
+            if let Some((_, _, err)) = best_error {
+                return Some(err);
+            }
+            return None;
+        }
+    }
+
     for row in range.row_start..=range.row_end {
         for col in range.col_start..=range.col_end {
             match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
@@ -8860,5 +8926,118 @@ mod tests {
         let eq_zero = NumericCriteria::new(CmpOp::Eq, 0.0);
         // NaN == 0 => false, explicit 0 == 0 => true, empty(0) == 0 => true.
         assert_eq!(count_if_array_numeric_criteria(&arr, eq_zero), 2);
+    }
+
+    #[test]
+    fn and_or_xor_use_sparse_iteration_for_large_sheet_ranges() {
+        struct PanicGrid {
+            bounds: (i32, i32),
+            cells: Vec<(CellCoord, Value)>,
+        }
+
+        impl Grid for PanicGrid {
+            fn get_value(&self, _coord: CellCoord) -> Value {
+                panic!("unexpected get_value call (expected sparse iteration)");
+            }
+
+            fn get_value_on_sheet(&self, _sheet: usize, _coord: CellCoord) -> Value {
+                panic!("unexpected get_value_on_sheet call (expected sparse iteration)");
+            }
+
+            fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+                None
+            }
+
+            fn iter_cells(&self) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
+                Some(Box::new(self.cells.iter().cloned()))
+            }
+
+            fn iter_cells_on_sheet(
+                &self,
+                sheet: usize,
+            ) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
+                if sheet == 0 {
+                    Some(Box::new(self.cells.iter().cloned()))
+                } else {
+                    None
+                }
+            }
+
+            fn bounds(&self) -> (i32, i32) {
+                self.bounds
+            }
+
+            fn bounds_on_sheet(&self, _sheet: usize) -> (i32, i32) {
+                self.bounds
+            }
+        }
+
+        let row_end = BYTECODE_SPARSE_RANGE_ROW_THRESHOLD; // rows() == threshold + 1
+        let range = ResolvedRange {
+            row_start: 0,
+            row_end,
+            col_start: 0,
+            col_end: 0,
+        };
+
+        // AND: ignore text, observe `0` as false.
+        let grid = PanicGrid {
+            bounds: (row_end + 1, 1),
+            cells: vec![
+                (CellCoord { row: 2, col: 0 }, Value::Text(Arc::from("x"))),
+                (CellCoord { row: 1, col: 0 }, Value::Bool(true)),
+                (CellCoord { row: 0, col: 0 }, Value::Number(0.0)),
+            ],
+        };
+        let mut all_true = true;
+        let mut any = false;
+        assert_eq!(and_range(&grid, range, &mut all_true, &mut any), None);
+        assert!(!all_true);
+        assert!(any);
+
+        // OR: ignore text, observe `TRUE` as true.
+        let grid = PanicGrid {
+            bounds: (row_end + 1, 1),
+            cells: vec![
+                (CellCoord { row: 2, col: 0 }, Value::Text(Arc::from("y"))),
+                (CellCoord { row: 1, col: 0 }, Value::Bool(true)),
+                (CellCoord { row: 0, col: 0 }, Value::Number(0.0)),
+            ],
+        };
+        let mut any_true = false;
+        let mut any = false;
+        assert_eq!(
+            or_range_on_sheet(&grid, 0, range, &mut any_true, &mut any),
+            None
+        );
+        assert!(any_true);
+        assert!(any);
+
+        // XOR: parity across non-zero/TRUE values.
+        let grid = PanicGrid {
+            bounds: (row_end + 1, 1),
+            cells: vec![
+                (CellCoord { row: 2, col: 0 }, Value::Number(1.0)),
+                (CellCoord { row: 1, col: 0 }, Value::Bool(true)),
+            ],
+        };
+        let mut acc = false;
+        assert_eq!(xor_range_on_sheet(&grid, 0, range, &mut acc), None);
+        assert!(!acc, "TRUE XOR 1 should yield FALSE");
+
+        // Error precedence: row-major (smaller row wins) regardless of iteration order.
+        let grid = PanicGrid {
+            bounds: (row_end + 1, 1),
+            cells: vec![
+                (CellCoord { row: 10, col: 0 }, Value::Error(ErrorKind::Div0)),
+                (CellCoord { row: 5, col: 0 }, Value::Error(ErrorKind::Num)),
+            ],
+        };
+        let mut all_true = true;
+        let mut any = false;
+        assert_eq!(
+            and_range_on_sheet(&grid, 0, range, &mut all_true, &mut any),
+            Some(ErrorKind::Num)
+        );
     }
 }

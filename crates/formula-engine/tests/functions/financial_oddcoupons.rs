@@ -213,7 +213,8 @@ fn odd_coupon_settlement_boundary_behavior() {
     );
     assert_eq!(result, Err(ExcelError::Num));
 
-    // ODDF*: settlement > first_coupon => #NUM! (excel-oracle case id prefix: fin_oddfprice_settle_after_first_b0_*)
+    // ODDF*: settlement > first_coupon => #NUM! (excel-oracle case id prefix:
+    // fin_oddfprice_settle_after_first_b0_*)
     let settlement_after_first = ymd_to_serial(ExcelDate::new(2023, 2, 1), system).unwrap();
     let result = oddfprice(
         settlement_after_first,

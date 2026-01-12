@@ -40,6 +40,7 @@ pub mod what_if;
 pub const EXCEL_MAX_ARGS: usize = 255;
 
 mod engine;
+mod parallel;
 mod perf;
 pub mod structured_refs;
 

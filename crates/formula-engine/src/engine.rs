@@ -2145,41 +2145,30 @@ impl Engine {
             if mode == RecalcMode::MultiThreaded {
                 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
                 {
-                    results.extend(
-                        parallel_tasks
-                            .par_iter()
-                            .map_init(
-                                || {
-                                    (
-                                        bytecode::Vm::with_capacity(32),
-                                        bytecode::runtime::set_thread_eval_context(
-                                            date_system,
-                                            value_locale,
-                                            recalc_ctx.now_utc.clone(),
-                                            recalc_ctx.recalc_id,
-                                        ),
-                                    )
-                                },
-                                |(vm, _eval_ctx_guard), (k, compiled)| {
-                                    let ctx = crate::eval::EvalContext {
-                                        current_sheet: k.sheet,
-                                        current_cell: k.addr,
-                                    };
-                                    match compiled {
-                                        CompiledFormula::Ast(expr) => {
-                                            let evaluator =
-                                                crate::eval::Evaluator::new_with_date_system_and_locales(
-                                                    &snapshot,
-                                                    ctx,
-                                                    recalc_ctx,
-                                                    date_system,
-                                                    value_locale,
-                                                    locale_config.clone(),
-                                                );
-                                            (*k, evaluator.eval_formula(expr))
-                                        }
-                                        CompiledFormula::Bytecode(bc) => {
-                                            if !bytecode_default_bounds {
+                    if let Some(pool) = crate::parallel::rayon_pool() {
+                        results.extend(pool.install(|| {
+                            parallel_tasks
+                                .par_iter()
+                                .map_init(
+                                    || {
+                                        (
+                                            bytecode::Vm::with_capacity(32),
+                                            bytecode::runtime::set_thread_eval_context(
+                                                date_system,
+                                                value_locale,
+                                                recalc_ctx.now_utc.clone(),
+                                                recalc_ctx.recalc_id,
+                                            ),
+                                        )
+                                    },
+                                    |(vm, _eval_ctx_guard), (k, compiled)| {
+                                        let ctx = crate::eval::EvalContext {
+                                            current_sheet: k.sheet,
+                                            current_cell: k.addr,
+                                        };
+
+                                        match compiled {
+                                            CompiledFormula::Ast(expr) => {
                                                 let evaluator =
                                                     crate::eval::Evaluator::new_with_date_system_and_locales(
                                                         &snapshot,
@@ -2189,33 +2178,58 @@ impl Engine {
                                                         value_locale,
                                                         locale_config.clone(),
                                                     );
-                                                (*k, evaluator.eval_formula(&bc.ast))
-                                            } else {
-                                                let cols = column_cache
-                                                    .by_sheet
-                                                    .get(k.sheet)
-                                                    .unwrap_or(&empty_cols);
-                                                let slice_mode = slice_mode_for_program(&bc.program);
-                                                let grid = EngineBytecodeGrid {
-                                                    snapshot: &snapshot,
-                                                    sheet: k.sheet,
-                                                    cols,
-                                                    cols_by_sheet: &column_cache.by_sheet,
-                                                    slice_mode,
-                                                };
-                                                let base = bytecode::CellCoord {
-                                                    row: k.addr.row as i32,
-                                                    col: k.addr.col as i32,
-                                                };
-                                                let v = vm.eval(&bc.program, &grid, k.sheet, base, &locale_config);
-                                                (*k, bytecode_value_to_engine(v))
+                                                (*k, evaluator.eval_formula(expr))
+                                            }
+                                            CompiledFormula::Bytecode(bc) => {
+                                                if !bytecode_default_bounds {
+                                                    let evaluator =
+                                                        crate::eval::Evaluator::new_with_date_system_and_locales(
+                                                            &snapshot,
+                                                            ctx,
+                                                            recalc_ctx,
+                                                            date_system,
+                                                            value_locale,
+                                                            locale_config.clone(),
+                                                        );
+                                                    (*k, evaluator.eval_formula(&bc.ast))
+                                                } else {
+                                                    let cols = column_cache
+                                                        .by_sheet
+                                                        .get(k.sheet)
+                                                        .unwrap_or(&empty_cols);
+                                                    let slice_mode = slice_mode_for_program(&bc.program);
+                                                    let grid = EngineBytecodeGrid {
+                                                        snapshot: &snapshot,
+                                                        sheet: k.sheet,
+                                                        cols,
+                                                        cols_by_sheet: &column_cache.by_sheet,
+                                                        slice_mode,
+                                                    };
+                                                    let base = bytecode::CellCoord {
+                                                        row: k.addr.row as i32,
+                                                        col: k.addr.col as i32,
+                                                    };
+                                                    let v = vm.eval(
+                                                        &bc.program,
+                                                        &grid,
+                                                        k.sheet,
+                                                        base,
+                                                        &locale_config,
+                                                    );
+                                                    (*k, bytecode_value_to_engine(v))
+                                                }
                                             }
                                         }
-                                    }
-                                },
-                            )
-                            .collect::<Vec<_>>(),
-                    );
+                                    },
+                                )
+                                .collect::<Vec<_>>()
+                        }));
+                    } else {
+                        // If we can't initialize a thread pool (e.g. under thread-constrained CI
+                        // environments), fall back to single-threaded evaluation rather than
+                        // panicking inside Rayon.
+                        eval_parallel_tasks_serial(&mut results);
+                    }
                 }
 
                 #[cfg(not(all(feature = "parallel", not(target_arch = "wasm32"))))]
