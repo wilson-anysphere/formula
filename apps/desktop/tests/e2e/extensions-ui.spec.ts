@@ -143,6 +143,10 @@ test.describe("Extensions UI integration", () => {
       frame.locator('meta[http-equiv="Content-Security-Policy"]'),
       "webview should inject a restrictive CSP meta tag",
     ).toHaveCount(1);
+    await expect(
+      frame.locator('script[src^="data:text/javascript"]'),
+      "webview should inject a hardening script via a data: URL (not inline)",
+    ).toHaveCount(1);
     const cspContent = await frame.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute("content");
     expect(cspContent).toContain("default-src 'none'");
     expect(cspContent).toContain("connect-src 'none'");
