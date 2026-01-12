@@ -80,6 +80,32 @@ fn add_sheet_rejects_names_longer_than_31_chars() {
 }
 
 #[test]
+fn add_sheet_rejects_names_longer_than_31_utf16_units() {
+    let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
+    // 🙂 is a non-BMP character (2 UTF-16 code units). 16 of them => 32 UTF-16 units.
+    let long_name = "🙂".repeat(16);
+    let err = state
+        .add_sheet(long_name, None, None, None)
+        .expect_err("expected sheet name too long error");
+    match err {
+        AppStateError::WhatIf(msg) => assert!(
+            msg.contains("cannot exceed"),
+            "expected length error, got {msg:?}"
+        ),
+        other => panic!("expected WhatIf error, got {other:?}"),
+    }
+}
+
+#[test]
+fn add_sheet_disambiguates_ascii_duplicate() {
+    let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
+    let added = state
+        .add_sheet("Sheet1".to_string(), None, None, None)
+        .expect("expected add_sheet to disambiguate duplicate");
+    assert_eq!(added.name, "Sheet1 2");
+}
+
+#[test]
 fn add_sheet_truncates_base_name_to_fit_unique_suffix() {
     let long = "a".repeat(31);
     let mut workbook = Workbook::new_empty(None);
