@@ -266,4 +266,42 @@ describe("DocumentCellProvider (shared grid)", () => {
     expect(doc.getCellFormatStyleIds).toHaveBeenCalledTimes(1);
     expect(cacheGetSpy).not.toHaveBeenCalled();
   });
+
+  it("caches sheet-only formatting without using the resolved-format LRU cache", () => {
+    const sheetId = "sheet-1";
+    const styleTableGet = vi.fn((id: number) => {
+      if (id === 1) return { numberFormat: "0%" };
+      return {};
+    });
+    const doc = {
+      getCell: vi.fn(() => ({ value: 1, formula: null, styleId: 0 })),
+      getCellFormatStyleIds: vi.fn(() => [1, 0, 0, 0, 0]),
+      styleTable: { get: styleTableGet },
+    };
+
+    const provider = new DocumentCellProvider({
+      document: doc as any,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+    });
+
+    const cacheGetSpy = vi.spyOn((provider as any).resolvedFormatCache, "get");
+
+    const a1 = provider.getCell(1, 1);
+    const b2 = provider.getCell(2, 2);
+
+    expect(a1?.value).toBe("100%");
+    expect(b2?.value).toBe("100%");
+
+    // `getCellFormatStyleIds` is still consulted per cell, but resolved formatting is cached by sheet default style id.
+    expect(doc.getCellFormatStyleIds).toHaveBeenCalledTimes(2);
+    // Only the first cell should require reading the style table; the second should hit the cached resolved format.
+    expect(styleTableGet).toHaveBeenCalledTimes(2); // once for sheetStyle, once for resolveStyle cache
+    expect(cacheGetSpy).not.toHaveBeenCalled();
+  });
 });

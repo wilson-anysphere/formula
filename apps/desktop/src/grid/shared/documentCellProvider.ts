@@ -86,6 +86,7 @@ export class DocumentCellProvider implements CellProvider {
   private lastSheetCache: LruCache<number, CellData | null> | null = null;
   private readonly coordScratch = { row: 0, col: 0 };
   private readonly styleCache = new Map<number, CellStyle | undefined>();
+  private readonly sheetDefaultResolvedFormatCache = new Map<number, { style: CellStyle | undefined; numberFormat: string | null }>();
   // Cache resolved layered formats by contributing style ids (sheet/col/row/range-run/cell). This avoids
   // re-merging OOXML-ish style objects for every cell when large regions share the same
   // formatting layers (e.g. column formatting).
@@ -164,8 +165,29 @@ export class DocumentCellProvider implements CellProvider {
         const cellStyleId = normalizeId(ids[3]);
         const rangeRunStyleId = normalizeId(ids[4]);
 
-        if (sheetDefaultStyleId === 0 && colStyleId === 0 && rowStyleId === 0 && rangeRunStyleId === 0 && cellStyleId === 0) {
-          return DEFAULT_RESOLVED_FORMAT;
+        // Fast paths:
+        // - Completely default formatting (`0` everywhere) is common for unformatted workbooks.
+        // - Sheet-level default formatting (`sheetDefaultStyleId != 0`, others `0`) is common after
+        //   applying global formatting (default font / number format).
+        if (colStyleId === 0 && rowStyleId === 0 && rangeRunStyleId === 0 && cellStyleId === 0) {
+          if (sheetDefaultStyleId === 0) return DEFAULT_RESOLVED_FORMAT;
+          const cached = this.sheetDefaultResolvedFormatCache.get(sheetDefaultStyleId);
+          if (cached) return cached;
+
+          if (typeof styleTable?.get === "function") {
+            const sheetStyle = styleTable.get(sheetDefaultStyleId);
+            const out = { style: this.resolveStyle(sheetDefaultStyleId), numberFormat: getNumberFormat(sheetStyle) };
+            this.sheetDefaultResolvedFormatCache.set(sheetDefaultStyleId, out);
+            return out;
+          }
+
+          if (typeof controller.getCellFormat === "function") {
+            const resolvedDocStyle: unknown = controller.getCellFormat(sheetId, coord);
+            const docStyle: DocStyle = isPlainObject(resolvedDocStyle) ? (resolvedDocStyle as DocStyle) : {};
+            const out = { style: this.convertDocStyleToGridStyle(docStyle), numberFormat: getNumberFormat(docStyle) };
+            this.sheetDefaultResolvedFormatCache.set(sheetDefaultStyleId, out);
+            return out;
+          }
         }
 
         // Key order matches merge precedence `sheet < col < row < range-run < cell`.
