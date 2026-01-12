@@ -1,6 +1,7 @@
 use formula_engine::{ErrorKind, Value};
 
 use super::harness::{assert_number, TestSheet};
+use formula_engine::locale::ValueLocaleConfig;
 
 #[test]
 fn row_and_column_without_args_use_current_cell() {
@@ -109,6 +110,13 @@ fn address_formats_a1_and_r1c1_styles() {
     assert_eq!(
         sheet.eval("=ADDRESS(1,1,1,TRUE,\"2024\")"),
         Value::Text("'2024'!$A$1".to_string())
+    );
+
+    // `sheet_text` is coerced to text using the workbook value locale.
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+    assert_eq!(
+        sheet.eval("=ADDRESS(1,1,1,TRUE,1.5)"),
+        Value::Text("'1,5'!$A$1".to_string())
     );
 
     assert_eq!(sheet.eval("=ADDRESS(0,1)"), Value::Error(ErrorKind::Value));

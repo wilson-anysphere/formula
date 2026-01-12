@@ -852,7 +852,7 @@ fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if let Value::Error(e) = data_field_value {
         return Value::Error(e);
     }
-    let data_field = match data_field_value.coerce_to_string() {
+    let data_field = match data_field_value.coerce_to_string_with_ctx(ctx) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
@@ -885,7 +885,7 @@ fn getpivotdata_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         if let Value::Error(e) = item_value {
             return Value::Error(e);
         }
-        let field = match field_value.coerce_to_string() {
+        let field = match field_value.coerce_to_string_with_ctx(ctx) {
             Ok(s) => s,
             Err(e) => return Value::Error(e),
         };

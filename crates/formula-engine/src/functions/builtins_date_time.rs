@@ -518,7 +518,7 @@ fn datedif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 return Value::Error(ErrorKind::Num);
             }
         }
-        let unit = match unit.coerce_to_string() {
+        let unit = match unit.coerce_to_string_with_ctx(ctx) {
             Ok(s) => s,
             Err(e) => return Value::Error(e),
         };

@@ -309,7 +309,7 @@ fn address_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 return Value::Error(ErrorKind::Value)
             }
             other => {
-                let raw = match other.coerce_to_string() {
+                let raw = match other.coerce_to_string_with_ctx(ctx) {
                     Ok(s) => s,
                     Err(e) => return Value::Error(e),
                 };
@@ -459,7 +459,7 @@ inventory::submit! {
 }
 
 fn indirect_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
+    let text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };

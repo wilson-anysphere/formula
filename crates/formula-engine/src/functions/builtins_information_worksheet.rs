@@ -19,7 +19,7 @@ inventory::submit! {
 }
 
 fn info_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let type_text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
+    let type_text = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
@@ -41,7 +41,7 @@ inventory::submit! {
 }
 
 fn cell_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let info_type = match eval_scalar_arg(ctx, &args[0]).coerce_to_string() {
+    let info_type = match eval_scalar_arg(ctx, &args[0]).coerce_to_string_with_ctx(ctx) {
         Ok(s) => s,
         Err(e) => return Value::Error(e),
     };
@@ -61,4 +61,3 @@ fn cell_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     worksheet::cell(ctx, &info_type, reference)
 }
-
