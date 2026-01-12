@@ -5,7 +5,7 @@ import { gotoDesktop } from "./helpers";
 function installTauriStubForTests(
   options: {
     usedRange?: { start_row: number; end_row: number; start_col: number; end_col: number };
-    sheets?: Array<{ id: string; name: string }>;
+    sheets?: Array<{ id: string; name: string; visibility?: string }>;
   } = {},
 ) {
   const listeners: Record<string, any> = {};
@@ -127,6 +127,42 @@ test.describe("tauri workbook integration", () => {
 
     const a1 = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(a1).toBe("Hello");
+  });
+
+  test("hidden sheets are excluded from sheet switcher options", async ({ page }) => {
+    await page.addInitScript(installTauriStubForTests, {
+      sheets: [
+        { id: "Sheet1", name: "Sheet1", visibility: "visible" },
+        { id: "Sheet2", name: "Sheet2", visibility: "hidden" },
+        { id: "Sheet3", name: "Sheet3", visibility: "visible" },
+      ],
+    });
+
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
+    });
+
+    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
+    await expect(page.getByTestId("sheet-tab-Sheet3")).toBeVisible();
+
+    const switcher = page.getByTestId("sheet-switcher");
+    await expect(switcher).toHaveValue("Sheet1");
+    await expect(switcher.locator("option")).toHaveText(["Sheet1", "Sheet3"]);
+
+    // Unhide Sheet2 and ensure it appears again in the correct order.
+    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Unhide Sheet2" }).click();
+
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    await expect(switcher.locator("option")).toHaveText(["Sheet1", "Sheet2", "Sheet3"]);
   });
 
   test("warns when workbook exceeds the current load limit", async ({ page }) => {
