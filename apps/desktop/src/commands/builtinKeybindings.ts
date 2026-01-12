@@ -122,4 +122,10 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     mac: "cmd+pagedown",
     when: null,
   },
+  {
+    command: "comments.addComment",
+    key: "shift+f2",
+    mac: "shift+f2",
+    when: null,
+  },
 ];

@@ -28,4 +28,34 @@ test.describe("comments", () => {
     await thread.getByTestId("resolve-comment").click();
     await expect(thread).toHaveAttribute("data-resolved", "true");
   });
+
+  test("cell context menu > Add Comment opens the panel and focuses the input", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => {
+      const app = (window as any).__formulaApp;
+      const rect = app?.getCellRectA1?.("A1");
+      return rect && rect.width > 0 && rect.height > 0;
+    });
+
+    const a1 = (await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"))) as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+
+    const grid = page.locator("#grid");
+    await grid.click({ position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await grid.click({ button: "right", position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
+    const menu = page.getByTestId("context-menu");
+    await expect(menu).toBeVisible();
+
+    await menu.getByRole("button", { name: "Add Comment" }).click();
+
+    await expect(page.getByTestId("comments-panel")).toBeVisible();
+    await expect(page.getByTestId("new-comment-input")).toBeFocused();
+  });
 });

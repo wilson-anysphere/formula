@@ -1108,11 +1108,18 @@ export class SpreadsheetApp {
     this.resizeObserver = new ResizeObserver(() => this.onResize());
     this.resizeObserver.observe(this.root);
 
+    const emitCommentsChanged = () => {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("formula:comments-changed"));
+      }
+    };
+
     if (!collabEnabled) {
       // Save so we can detach cleanly in `destroy()`.
       this.commentsDocUpdateListener = () => {
         this.reindexCommentCells();
         this.refresh();
+        emitCommentsChanged();
       };
       this.commentsDoc.on("update", this.commentsDocUpdateListener);
     } else {
@@ -1136,6 +1143,7 @@ export class SpreadsheetApp {
           const handler = () => {
             this.reindexCommentCells();
             this.refresh();
+            emitCommentsChanged();
           };
 
           if (root.kind === "map") {
@@ -1149,6 +1157,7 @@ export class SpreadsheetApp {
           // Initial index after hydration.
           this.reindexCommentCells();
           this.refresh();
+          emitCommentsChanged();
         };
 
         if (provider && typeof provider.on === "function") {
@@ -2970,14 +2979,56 @@ export class SpreadsheetApp {
     this.renderAuditing();
   }
 
+  isCommentsPanelVisible(): boolean {
+    return this.commentsPanelVisible;
+  }
+
+  /**
+   * Opens the comments panel (idempotent).
+   *
+   * NOTE: This intentionally does not close the panel if it's already open.
+   */
+  openCommentsPanel(): void {
+    if (this.commentsPanelVisible) return;
+    this.toggleCommentsPanel();
+  }
+
+  /**
+   * Best-effort focus for the "new comment" input.
+   */
+  focusNewCommentInput(): void {
+    try {
+      const input =
+        this.root.querySelector<HTMLInputElement>('[data-testid="new-comment-input"]') ??
+        (this.newCommentInput as HTMLInputElement | undefined);
+      input?.focus();
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Returns true if the active cell currently has at least one comment thread.
+   */
+  activeCellHasComment(): boolean {
+    return this.commentCells.has(cellToA1(this.selection.active));
+  }
+
   toggleCommentsPanel(): void {
     this.commentsPanelVisible = !this.commentsPanelVisible;
     this.commentsPanel.classList.toggle("comments-panel--visible", this.commentsPanelVisible);
     if (this.commentsPanelVisible) {
       this.renderCommentsPanel();
-      this.newCommentInput.focus();
+      this.focusNewCommentInput();
     } else {
       this.focus();
+    }
+
+    // Broadcast for consumers like extension context keys (best-effort).
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("formula:comments-panel-visibility-changed", { detail: { visible: this.commentsPanelVisible } })
+      );
     }
   }
 
@@ -6082,6 +6133,14 @@ export class SpreadsheetApp {
     if (this.handleAutoSumShortcut(e)) return;
 
     // Editing
+    // Excel-style: Shift+F2 adds/edits a comment (we wire this to "Add Comment").
+    if (e.key === "F2" && e.shiftKey) {
+      e.preventDefault();
+      this.openCommentsPanel();
+      this.focusNewCommentInput();
+      return;
+    }
+
     if (e.key === "F2") {
       e.preventDefault();
       const cell = this.selection.active;

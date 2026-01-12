@@ -1665,6 +1665,8 @@ if (
       sheetName,
       ...selectionKeys,
       cellHasValue: (value != null && String(value).trim().length > 0) || (formula != null && formula.trim().length > 0),
+      commentsPanelVisible: app.isCommentsPanelVisible(),
+      cellHasComment: app.activeCellHasComment(),
     });
   };
 
@@ -1673,6 +1675,8 @@ if (
     updateContextKeys(selection);
   });
   app.getDocument().on("change", () => updateContextKeys());
+  window.addEventListener("formula:comments-panel-visibility-changed", () => updateContextKeys());
+  window.addEventListener("formula:comments-changed", () => updateContextKeys());
 
   let extensionPanelBridge: ExtensionPanelBridge | null = null;
 
@@ -2125,6 +2129,36 @@ if (
     { category: "Format" },
   );
 
+  // --- Built-in commands (Task 28) --------------------------------------------
+  commandRegistry.registerBuiltinCommand(
+    "comments.togglePanel",
+    "Toggle Comments Panel",
+    () => {
+      app.toggleCommentsPanel();
+    },
+    {
+      category: "Comments",
+      icon: null,
+      description: "Toggle the comments side panel",
+      keywords: ["comments", "panel"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "comments.addComment",
+    "Add Comment",
+    () => {
+      app.openCommentsPanel();
+      app.focusNewCommentInput();
+    },
+    {
+      category: "Comments",
+      icon: null,
+      description: "Open the comments panel and focus the new comment input",
+      keywords: ["comment", "add comment", "new comment"],
+    },
+  );
+
   extensionPanelBridge = new ExtensionPanelBridge({
     host: extensionHostManager.host as any,
     panelRegistry,
@@ -2544,6 +2578,13 @@ if (
             onSelect: () => executeBuiltinCommand("format.openFormatCells"),
           },
         ],
+      },
+      { type: "separator" },
+      {
+        type: "item",
+        label: "Add Comment",
+        shortcut: getPrimaryCommandKeybindingDisplay("comments.addComment", commandKeybindingDisplayIndex) ?? undefined,
+        onSelect: () => executeBuiltinCommand("comments.addComment"),
       },
     ];
 
@@ -3517,6 +3558,7 @@ if (
     () => {
       void checkForUpdatesFromCommandPalette().catch((err) => {
         console.error("Failed to check for updates:", err);
+        showToast(`Failed to check for updates: ${String((err as any)?.message ?? err)}`, "error");
       });
     },
     { category: "Help" },
