@@ -43,7 +43,7 @@ function updateUsedRange(map: Map<string, UsedRangeState>, sheetId: string, row:
 }
 
 type EngineWorkbookJson = {
-  sheets?: Record<string, { cells?: Record<string, unknown> }>;
+  sheets?: Record<string, { cells?: Record<string, unknown>; rowCount?: number; colCount?: number }>;
 };
 
 export class WasmWorkbookBackend implements WorkbookBackend {
