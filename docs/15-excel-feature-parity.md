@@ -89,10 +89,10 @@ To regenerate: run the command above and replace the block between the markers b
 ```text
 Function parity report (catalog ↔ BIFF FTAB)
 
-Catalog functions (shared/functionCatalog.json): 345
+Catalog functions (shared/functionCatalog.json): 349
 FTAB functions (crates/formula-biff/src/ftab.rs): 478
-Catalog ∩ FTAB (case-insensitive name match): 260
-FTAB \ Catalog (missing from catalog): 218
+Catalog ∩ FTAB (case-insensitive name match): 264
+FTAB \ Catalog (missing from catalog): 214
 Catalog \ FTAB (not present in FTAB): 85
 ```
 <!-- END GENERATED: report-function-parity -->
