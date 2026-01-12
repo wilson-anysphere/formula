@@ -4223,6 +4223,7 @@ fn ensure_workbook_rels_has_relationship(
 
     let mut root_prefix: Option<String> = None;
     let mut root_has_default_ns = false;
+    let mut root_declared_prefixes: HashSet<String> = HashSet::new();
     let mut relationship_prefix: Option<String> = None;
 
     loop {
@@ -4237,12 +4238,16 @@ fn ensure_workbook_rels_has_relationship(
                         .and_then(|p| std::str::from_utf8(p).ok())
                         .map(|s| s.to_string());
                 }
-                if !root_has_default_ns {
+                if !root_has_default_ns || root_declared_prefixes.is_empty() {
                     for attr in e.attributes() {
                         let attr = attr?;
-                        if attr.key.as_ref() == b"xmlns" {
+                        let key = attr.key.as_ref();
+                        if key == b"xmlns" {
                             root_has_default_ns = true;
-                            break;
+                        } else if let Some(prefix) = key.strip_prefix(b"xmlns:") {
+                            if let Ok(prefix) = std::str::from_utf8(prefix) {
+                                root_declared_prefixes.insert(prefix.to_string());
+                            }
                         }
                     }
                 }
@@ -4271,13 +4276,20 @@ fn ensure_workbook_rels_has_relationship(
             Event::End(ref e)
                 if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
             {
-                let prefix = relationship_prefix.as_deref().or_else(|| {
-                    if root_has_default_ns {
-                        None
-                    } else {
-                        root_prefix.as_deref()
-                    }
-                });
+                let prefix = relationship_prefix
+                    .as_deref()
+                    // Only reuse the existing Relationship element prefix if it is declared on the
+                    // root element. Otherwise, we could emit a new sibling with an out-of-scope
+                    // prefix (invalid XML), e.g. if the input declares `xmlns:pr` on each
+                    // `<pr:Relationship>` element instead of the root.
+                    .filter(|p| root_declared_prefixes.contains(*p))
+                    .or_else(|| {
+                        if root_has_default_ns {
+                            None
+                        } else {
+                            root_prefix.as_deref()
+                        }
+                    });
                 let relationship_tag = prefixed_tag(prefix, "Relationship");
                 let mut rel = quick_xml::events::BytesStart::new(relationship_tag.as_str());
                 rel.push_attribute(("Id", id.as_str()));
@@ -4315,6 +4327,7 @@ fn patch_workbook_rels_for_sheet_edits(
 
     let mut root_prefix: Option<String> = None;
     let mut root_has_default_ns = false;
+    let mut root_declared_prefixes: HashSet<String> = HashSet::new();
     let mut relationship_prefix: Option<String> = None;
 
     let mut skipping = false;
@@ -4330,12 +4343,16 @@ fn patch_workbook_rels_for_sheet_edits(
                         .and_then(|p| std::str::from_utf8(p).ok())
                         .map(|s| s.to_string());
                 }
-                if !root_has_default_ns {
+                if !root_has_default_ns || root_declared_prefixes.is_empty() {
                     for attr in e.attributes() {
                         let attr = attr?;
-                        if attr.key.as_ref() == b"xmlns" {
+                        let key = attr.key.as_ref();
+                        if key == b"xmlns" {
                             root_has_default_ns = true;
-                            break;
+                        } else if let Some(prefix) = key.strip_prefix(b"xmlns:") {
+                            if let Ok(prefix) = std::str::from_utf8(prefix) {
+                                root_declared_prefixes.insert(prefix.to_string());
+                            }
                         }
                     }
                 }
@@ -4438,13 +4455,16 @@ fn patch_workbook_rels_for_sheet_edits(
             Event::End(ref e)
                 if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
             {
-                let prefix = relationship_prefix.as_deref().or_else(|| {
-                    if root_has_default_ns {
-                        None
-                    } else {
-                        root_prefix.as_deref()
-                    }
-                });
+                let prefix = relationship_prefix
+                    .as_deref()
+                    .filter(|p| root_declared_prefixes.contains(*p))
+                    .or_else(|| {
+                        if root_has_default_ns {
+                            None
+                        } else {
+                            root_prefix.as_deref()
+                        }
+                    });
                 let relationship_tag = prefixed_tag(prefix, "Relationship");
                 for sheet in added {
                     let target = relationship_target_from_workbook(&sheet.path);

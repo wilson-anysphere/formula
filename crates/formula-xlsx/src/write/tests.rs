@@ -745,3 +745,83 @@ fn sheet_structure_patchers_expand_self_closing_prefix_only_roots() {
         );
     }
 }
+
+#[test]
+fn ensure_workbook_rels_has_relationship_handles_relationship_scoped_prefix_declaration() {
+    // Prefix `pr` is declared on the Relationship element, not on the root. Writers must not
+    // insert a new `pr:Relationship` sibling without ensuring the prefix is in scope.
+    let rels = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <pr:Relationship xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships" Id="rId1" Type="{REL_TYPE_STYLES}" Target="styles.xml"/>
+</Relationships>"#
+    );
+
+    let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    parts.insert(WORKBOOK_RELS_PART.to_string(), rels.into_bytes());
+
+    ensure_workbook_rels_has_relationship(&mut parts, REL_TYPE_SHARED_STRINGS, "sharedStrings.xml")
+        .expect("patch workbook rels");
+
+    let out = String::from_utf8(
+        parts
+            .get(WORKBOOK_RELS_PART)
+            .expect("workbook rels present")
+            .clone(),
+    )
+    .expect("utf8");
+    assert!(
+        out.contains(REL_TYPE_SHARED_STRINGS),
+        "expected sharedStrings relationship to be inserted"
+    );
+    Document::parse(&out).expect("output rels should be valid xml");
+}
+
+#[test]
+fn patch_workbook_rels_for_sheet_edits_handles_relationship_scoped_prefix_declaration() {
+    // Prefix `pr` is declared on the Relationship element, not on the root. Writers must not
+    // insert a new `pr:Relationship` sibling without ensuring the prefix is in scope.
+    let rels = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <pr:Relationship xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships" Id="rId1" Type="{WORKSHEET_REL_TYPE}" Target="worksheets/sheet1.xml"/>
+</Relationships>"#
+    );
+
+    let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    parts.insert(WORKBOOK_RELS_PART.to_string(), rels.into_bytes());
+
+    let removed = vec![SheetMeta {
+        worksheet_id: 1,
+        sheet_id: 1,
+        relationship_id: "rId1".to_string(),
+        state: None,
+        path: "xl/worksheets/sheet1.xml".to_string(),
+    }];
+    let added = vec![SheetMeta {
+        worksheet_id: 2,
+        sheet_id: 2,
+        relationship_id: "rId2".to_string(),
+        state: None,
+        path: "xl/worksheets/sheet2.xml".to_string(),
+    }];
+
+    patch_workbook_rels_for_sheet_edits(&mut parts, &removed, &added).expect("patch rels");
+
+    let out = String::from_utf8(
+        parts
+            .get(WORKBOOK_RELS_PART)
+            .expect("workbook rels present")
+            .clone(),
+    )
+    .expect("utf8");
+    Document::parse(&out).expect("output rels should be valid xml");
+    assert!(
+        out.contains(r#"Id="rId2""#),
+        "expected added sheet relationship to be inserted"
+    );
+    assert!(
+        !out.contains(r#"Id="rId1""#),
+        "expected removed sheet relationship to be dropped"
+    );
+}
