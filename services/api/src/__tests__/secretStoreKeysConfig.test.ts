@@ -123,4 +123,22 @@ describe("secret store keyring config", () => {
       } as any)
     ).toThrow(/duplicate/i);
   });
+
+  it("rejects SECRET_STORE_KEYS_JSON when keys is null", () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "test",
+        SECRET_STORE_KEYS_JSON: JSON.stringify({ currentKeyId: "k1", keys: null })
+      } as any)
+    ).toThrow(/SECRET_STORE_KEYS_JSON\.keys must be an object/i);
+  });
+
+  it("reports direct-map key validation errors as SECRET_STORE_KEYS_JSON.<keyId>", () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: "test",
+        SECRET_STORE_KEYS_JSON: JSON.stringify({ k1: "" })
+      } as any)
+    ).toThrow(/SECRET_STORE_KEYS_JSON\.k1/i);
+  });
 });

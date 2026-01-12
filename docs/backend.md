@@ -163,6 +163,9 @@ SECRET_STORE_KEYS="k2025-12:<base64(32-byte key)>,k2026-01:<base64(32-byte key)>
 }
 ```
 
+Note: `SECRET_STORE_KEYS_JSON` also accepts `{ current, keys }`, direct maps like `{ "k1": "...", "k2": "..." }`
+(current defaults to the last entry), or arrays like `[ { "id": "k1", "key": "..." }, ... ]`.
+
 To generate a new 32-byte key value:
 
 ```bash
