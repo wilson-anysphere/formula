@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DocumentController } from "../../../document/documentController.js";
 import { applyNumberFormatPreset } from "../../../formatting/toolbar.js";
+import { dateToExcelSerial } from "../../../shared/valueParsing.js";
 import { DocumentCellProvider } from "../documentCellProvider.js";
 
 describe("DocumentCellProvider numberFormat display rendering", () => {
@@ -14,6 +15,9 @@ describe("DocumentCellProvider numberFormat display rendering", () => {
 
     doc.setCellValue(sheetId, "A2", 0.5);
     applyNumberFormatPreset(doc, sheetId, "A2", "percent");
+
+    doc.setCellValue(sheetId, "A3", dateToExcelSerial(new Date(Date.UTC(2024, 0, 2))));
+    applyNumberFormatPreset(doc, sheetId, "A3", "date");
 
     const provider = new DocumentCellProvider({
       document: doc,
@@ -36,6 +40,9 @@ describe("DocumentCellProvider numberFormat display rendering", () => {
     const a2 = provider.getCell(2, 1);
     expect(a2?.value).toBe("50%");
     expect(a2?.style?.textAlign).toBe("end");
+
+    const a3 = provider.getCell(3, 1);
+    expect(a3?.value).toBe("1/2/2024");
+    expect(a3?.style?.textAlign).toBe("end");
   });
 });
-

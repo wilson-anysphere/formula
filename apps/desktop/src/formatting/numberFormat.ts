@@ -43,9 +43,11 @@ function hasThousandsSeparators(format: string): boolean {
   return integerSection.includes(",");
 }
 
-function looksLikeDateFormat(format: string): boolean {
-  // Keep v1 conservative: treat presence of Y/M/D tokens as a date/time format.
-  return /[ymdhis]/i.test(format);
+function isSupportedDateFormat(format: string): boolean {
+  // v1 only supports a couple of known presets. Avoid treating arbitrary numeric
+  // formats containing letters (e.g. `0.0,"M"`) as dates.
+  const lower = format.toLowerCase();
+  return lower.includes("m/d/yyyy") || lower.includes("yyyy-mm-dd");
 }
 
 function formatExcelDate(serial: number, format: string): string {
@@ -115,10 +117,9 @@ export function formatValueWithNumberFormat(value: number, numberFormat: string)
   const section = (raw.split(";")[0] ?? "").trim();
   if (section === "" || section.toLowerCase() === "general") return formatNumberGeneral(value);
 
-  if (looksLikeDateFormat(section)) {
+  if (isSupportedDateFormat(section)) {
     return formatExcelDate(value, section);
   }
 
   return formatNumeric(value, section);
 }
-
