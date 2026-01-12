@@ -46,11 +46,12 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     // Note: `VBA/dir` stores records as: u16 id, u32 len, `len` bytes of record data.
     const PROJECTSYSKIND: u16 = 0x0001;
     // PROJECTCOMPATVERSION (0x004A) is present in many real-world `VBA/dir` streams and must be
-    // incorporated into `ProjectNormalizedData` (see `tests/project_normalized_data.rs`).
+    // incorporated into this legacy `ProjectNormalizedData` transcript (see
+    // `tests/project_normalized_data.rs`).
     //
-    // Note: 0x004A is also used by some module-level Unicode records; we only treat it as
-    // PROJECTCOMPATVERSION while still in the ProjectInformation section (before any MODULENAME
-    // records).
+    // We only consider it while parsing the ProjectInformation section (before the first
+    // MODULENAME record). Once the first module record group begins, we stop incorporating `VBA/dir`
+    // records into the project-info prefix.
     const PROJECTCOMPATVERSION: u16 = 0x004A;
     const PROJECTLCID: u16 = 0x0002;
     const PROJECTCODEPAGE: u16 = 0x0003;
