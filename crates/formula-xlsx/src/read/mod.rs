@@ -132,12 +132,10 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         .unwrap_or_else(|| "xl/styles.xml".to_string());
     let styles_bytes = read_zip_part_optional(archive, &styles_part_name)?;
     let styles_part = StylesPart::parse_or_default(styles_bytes.as_deref(), &mut workbook.styles)?;
-    let conditional_formatting_dxfs: Vec<formula_model::CfStyleOverride> = styles_bytes
-        .as_deref()
-        .and_then(|bytes| std::str::from_utf8(bytes).ok())
-        .and_then(|xml| crate::styles::Styles::parse(xml).ok())
-        .map(|s| s.dxfs)
-        .unwrap_or_default();
+    // Conditional formatting dxfs are only needed if a worksheet contains conditional
+    // formatting rules. Parse them lazily to avoid unnecessary DOM parsing for workbooks
+    // without conditional formatting.
+    let mut conditional_formatting_dxfs: Option<Vec<formula_model::CfStyleOverride>> = None;
 
     let shared_strings_part_name = rels_info
         .shared_strings_target
@@ -179,7 +177,9 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         if let Ok(parsed) = parse_worksheet_conditional_formatting_streaming(sheet_xml_str) {
             if !parsed.rules.is_empty() {
                 ws.conditional_formatting_rules = parsed.rules;
-                ws.conditional_formatting_dxfs = conditional_formatting_dxfs.clone();
+                let dxfs = conditional_formatting_dxfs
+                    .get_or_insert_with(|| parse_conditional_formatting_dxfs(styles_bytes.as_deref()));
+                ws.conditional_formatting_dxfs = dxfs.clone();
             }
         }
 
@@ -386,12 +386,10 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         .as_deref()
         .map(|target| resolve_target(WORKBOOK_PART, target))
         .unwrap_or_else(|| "xl/styles.xml".to_string());
-    let conditional_formatting_dxfs: Vec<formula_model::CfStyleOverride> = parts
-        .get(&styles_part_name)
-        .and_then(|bytes| std::str::from_utf8(bytes).ok())
-        .and_then(|xml| crate::styles::Styles::parse(xml).ok())
-        .map(|s| s.dxfs)
-        .unwrap_or_default();
+    // Conditional formatting dxfs are only needed if a worksheet contains conditional
+    // formatting rules. Parse them lazily to avoid unnecessary DOM parsing for workbooks
+    // without conditional formatting.
+    let mut conditional_formatting_dxfs: Option<Vec<formula_model::CfStyleOverride>> = None;
     let styles_part = StylesPart::parse_or_default(
         parts.get(&styles_part_name).map(|b| b.as_slice()),
         &mut workbook.styles,
@@ -440,7 +438,10 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             .unwrap_or_default();
         if !parsed_cf.rules.is_empty() {
             ws.conditional_formatting_rules = parsed_cf.rules;
-            ws.conditional_formatting_dxfs = conditional_formatting_dxfs.clone();
+            let dxfs = conditional_formatting_dxfs.get_or_insert_with(|| {
+                parse_conditional_formatting_dxfs(parts.get(&styles_part_name).map(|b| b.as_slice()))
+            });
+            ws.conditional_formatting_dxfs = dxfs.clone();
         }
 
         // Merged cells (must be parsed before cell content so we don't treat interior
@@ -1368,6 +1369,16 @@ fn parse_table_part_ids(xml: &[u8]) -> Result<Vec<String>, ReadError> {
     }
 
     Ok(out)
+}
+
+fn parse_conditional_formatting_dxfs(
+    styles_bytes: Option<&[u8]>,
+) -> Vec<formula_model::CfStyleOverride> {
+    styles_bytes
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        .and_then(|xml| crate::styles::Styles::parse(xml).ok())
+        .map(|s| s.dxfs)
+        .unwrap_or_default()
 }
 
 fn parse_inline_is_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<String, ReadError> {
