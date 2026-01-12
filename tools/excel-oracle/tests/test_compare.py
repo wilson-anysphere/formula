@@ -619,6 +619,86 @@ class CompareArrayShapeMismatchDetailTests(unittest.TestCase):
             self.assertEqual(m.get("mismatchDetail"), {"expectedRows": 2, "actualRows": 1})
 
 
+class CompareDuplicateCaseIdTests(unittest.TestCase):
+    def test_duplicate_case_ids_fail_fast(self) -> None:
+        compare_py = Path(__file__).resolve().parents[1] / "compare.py"
+        self.assertTrue(compare_py.is_file(), f"compare.py not found at {compare_py}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            cases_path = tmp_path / "cases.json"
+            expected_path = tmp_path / "expected.json"
+            actual_path = tmp_path / "actual.json"
+            report_path = tmp_path / "report.json"
+
+            cases_payload = {
+                "schemaVersion": 1,
+                "cases": [
+                    {"id": "case-a", "formula": "=1", "inputs": []},
+                    {"id": "case-b", "formula": "=2", "inputs": []},
+                ],
+            }
+            cases_path.write_text(
+                json.dumps(cases_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            expected_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "excel", "note": "synthetic test fixture"},
+                "caseSet": {"path": str(cases_path), "count": 2},
+                "results": [
+                    {"caseId": "case-a", "result": {"t": "n", "v": 1}},
+                    {"caseId": "case-b", "result": {"t": "n", "v": 2}},
+                ],
+            }
+            expected_path.write_text(
+                json.dumps(expected_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            # Duplicate case-a entry.
+            actual_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "engine", "note": "synthetic test fixture"},
+                "caseSet": {"path": str(cases_path), "count": 2},
+                "results": [
+                    {"caseId": "case-a", "result": {"t": "n", "v": 1}},
+                    {"caseId": "case-a", "result": {"t": "n", "v": 1}},
+                ],
+            }
+            actual_path.write_text(
+                json.dumps(actual_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(compare_py),
+                    "--cases",
+                    str(cases_path),
+                    "--expected",
+                    str(expected_path),
+                    "--actual",
+                    str(actual_path),
+                    "--report",
+                    str(report_path),
+                    "--max-mismatch-rate",
+                    "1.0",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("duplicate caseId", proc.stderr)
+
+
 class CompareDryRunTests(unittest.TestCase):
     def test_dry_run_does_not_write_report(self) -> None:
         compare_py = Path(__file__).resolve().parents[1] / "compare.py"

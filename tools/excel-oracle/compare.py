@@ -37,13 +37,24 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def _index_results(results: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _index_results(
+    results: Iterable[dict[str, Any]], *, label: str
+) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
+    duplicates: set[str] = set()
     for r in results:
         cid = r.get("caseId")
         if not isinstance(cid, str):
             continue
+        if cid in out:
+            duplicates.add(cid)
         out[cid] = r
+    if duplicates:
+        preview = ", ".join(sorted(list(duplicates))[:25])
+        suffix = "" if len(duplicates) <= 25 else f" (+{len(duplicates) - 25} more)"
+        raise SystemExit(
+            f"{label} dataset contains duplicate caseId entries ({len(duplicates)}): {preview}{suffix}"
+        )
     return out
 
 
@@ -355,8 +366,8 @@ def main() -> int:
             "re-run compare.py with the same filters, or regenerate the engine results without filtering."
         )
 
-    expected_index = _index_results(expected_results)
-    actual_index = _index_results(actual_results)
+    expected_index = _index_results(expected_results, label="Expected")
+    actual_index = _index_results(actual_results, label="Actual")
 
     default_cfg = CompareConfig(abs_tol=args.abs_tol, rel_tol=args.rel_tol)
     tag_abs_tol = _parse_tag_tolerances(args.tag_abs_tol, flag_name="--tag-abs-tol")
