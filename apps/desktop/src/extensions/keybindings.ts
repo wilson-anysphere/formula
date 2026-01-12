@@ -143,6 +143,10 @@ function formatKeyTokenForDisplay(keyToken: string, platform: "mac" | "other"): 
       return "Space";
     case "tab":
       return platform === "mac" ? "⇥" : "Tab";
+    case "pageup":
+      return platform === "mac" ? "⇞" : "PgUp";
+    case "pagedown":
+      return platform === "mac" ? "⇟" : "PgDn";
     default:
       break;
   }
