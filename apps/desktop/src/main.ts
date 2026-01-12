@@ -1147,15 +1147,14 @@ if (
       },
       { type: "separator" },
       {
-        type: "item",
-        label: "Paste Special…",
+        type: "submenu",
+        label: "Paste Special",
         shortcut: isMac ? "⌘⌥V" : "Ctrl+Alt+V",
-        onSelect: async () => {
-          const options = getPasteSpecialMenuItems().map((item) => ({ label: item.label, value: item.mode }));
-          const selected = await showQuickPick(options, { placeHolder: "Paste Special" });
-          if (!selected) return;
-          executeBuiltinCommand("clipboard.pasteSpecial", selected);
-        },
+        items: getPasteSpecialMenuItems().map((item) => ({
+          type: "item",
+          label: item.label,
+          onSelect: () => executeBuiltinCommand("clipboard.pasteSpecial", item.mode),
+        })),
       },
       { type: "separator" },
       {
