@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{OleError, OleFile};
+use crate::{project_digest::compute_vba_project_digest, project_digest::DigestAlg, OleError, OleFile};
 
 /// Metadata extracted from the signer certificate embedded in a VBA digital signature.
 ///
@@ -38,6 +38,20 @@ pub struct VbaDigitalSignature {
     pub signature: Vec<u8>,
     /// Verification state (best-effort).
     pub verification: VbaSignatureVerification,
+    /// Whether the signature is bound to the VBA project streams via the MS-OVBA "project digest"
+    /// mechanism.
+    pub binding: VbaSignatureBinding,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VbaSignatureBinding {
+    /// The signature's signed digest matches the computed digest of the project streams.
+    Bound,
+    /// We extracted the signed digest and computed a project digest, but they do not match.
+    NotBound,
+    /// Binding could not be verified (unsupported/unknown format, missing data, or signature not
+    /// cryptographically verified).
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,8 +59,8 @@ pub enum VbaSignatureVerification {
     /// Signature is present and the PKCS#7/CMS blob verifies successfully.
     ///
     /// Note: this verifies the CMS structure is internally consistent (the signature matches the
-    /// embedded content / signed attributes). It does **not** currently verify that the signature
-    /// content corresponds to the rest of the VBA project per MS-OVBA.
+    /// embedded content / signed attributes). Use [`VbaDigitalSignature::binding`] to determine
+    /// whether the signature is bound to the VBA project streams per MS-OVBA.
     SignedVerified,
     /// Signature stream exists and parses as CMS/PKCS#7, but verification failed.
     SignedInvalid,
@@ -135,6 +149,7 @@ pub fn parse_vba_digital_signature(
         signer_subject,
         signature,
         verification: VbaSignatureVerification::SignedButUnverified,
+        binding: VbaSignatureBinding::Unknown,
     }))
 }
 
@@ -144,8 +159,9 @@ pub fn parse_vba_digital_signature(
 ///
 /// Verification is "internal" CMS/PKCS#7 verification only: we validate that the signature blob
 /// is well-formed and that the signature matches the signed attributes / embedded content. We do
-/// **not** currently validate that the signature is bound to the rest of the VBA project streams
-/// as Excel does per MS-OVBA.
+/// best-effort binding verification by extracting the signed project digest (Authenticode-style
+/// `SpcIndirectDataContent`) and comparing it to a freshly computed digest over the project's OLE
+/// streams (excluding any signature streams).
 ///
 /// If multiple signature streams are present, we return the first one (by Excel's preferred stream
 /// name ordering) that verifies successfully, falling back to the first candidate if none verify.
@@ -171,11 +187,18 @@ pub fn verify_vba_digital_signature(
         let signature = ole.read_stream_opt(&path)?.unwrap_or_default();
         let signer_subject = extract_first_certificate_subject(&signature);
         let verification = verify_signature_blob(&signature);
+        let binding = match verification {
+            VbaSignatureVerification::SignedVerified => {
+                verify_signature_binding(vba_project_bin, &signature)
+            }
+            _ => VbaSignatureBinding::Unknown,
+        };
         let sig = VbaDigitalSignature {
             stream_path: path,
             signer_subject,
             signature,
             verification,
+            binding,
         };
         if sig.verification == VbaSignatureVerification::SignedVerified {
             return Ok(Some(sig));
@@ -186,6 +209,123 @@ pub fn verify_vba_digital_signature(
     }
 
     Ok(first)
+}
+
+fn verify_signature_binding(vba_project_bin: &[u8], signature: &[u8]) -> VbaSignatureBinding {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (vba_project_bin, signature);
+        return VbaSignatureBinding::Unknown;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some((alg, signed_digest)) = extract_signed_project_digest(signature) else {
+            return VbaSignatureBinding::Unknown;
+        };
+
+        let Ok(computed) = compute_vba_project_digest(vba_project_bin, alg) else {
+            return VbaSignatureBinding::Unknown;
+        };
+
+        if computed == signed_digest {
+            VbaSignatureBinding::Bound
+        } else {
+            VbaSignatureBinding::NotBound
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn extract_signed_project_digest(signature: &[u8]) -> Option<(DigestAlg, Vec<u8>)> {
+    use openssl::pkcs7::Pkcs7Flags;
+    use openssl::stack::Stack;
+    use openssl::x509::store::X509StoreBuilder;
+    use openssl::x509::X509;
+
+    let (pkcs7, pkcs7_offset) = parse_pkcs7_with_offset(signature)?;
+
+    // Create a store for signature verification (chain validation skipped below).
+    let store = X509StoreBuilder::new().ok()?.build();
+    let empty_certs = Stack::<X509>::new().ok()?;
+    let certs = pkcs7
+        .signed()
+        .and_then(|s| s.certificates())
+        .unwrap_or(&empty_certs);
+
+    // Prefer embedded content if present by asking OpenSSL to write the verified content.
+    let flags = Pkcs7Flags::NOVERIFY | Pkcs7Flags::BINARY;
+    let mut embedded = Vec::new();
+    let signed_content = if pkcs7
+        .verify(certs, &store, None, Some(&mut embedded), flags)
+        .is_ok()
+    {
+        embedded
+    } else if pkcs7_offset > 0 {
+        signature[..pkcs7_offset].to_vec()
+    } else {
+        return None;
+    };
+
+    parse_spc_indirect_data_content(&signed_content)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_spc_indirect_data_content(content: &[u8]) -> Option<(DigestAlg, Vec<u8>)> {
+    // SpcIndirectDataContent ::= SEQUENCE {
+    //   data          ANY,
+    //   messageDigest DigestInfo
+    // }
+    //
+    // DigestInfo ::= SEQUENCE {
+    //   digestAlgorithm AlgorithmIdentifier,
+    //   digest          OCTET STRING
+    // }
+    //
+    // AlgorithmIdentifier ::= SEQUENCE {
+    //   algorithm   OBJECT IDENTIFIER,
+    //   parameters  ANY OPTIONAL
+    // }
+    let parsed = yasna::parse_der(content, |reader| {
+        reader.read_sequence(|reader| {
+            // Ignore `data`.
+            let _ = reader.next().read_der()?;
+            // DigestInfo
+            reader.next().read_sequence(|reader| {
+                // AlgorithmIdentifier
+                let oid = reader.next().read_sequence(|reader| {
+                    let oid = reader.next().read_oid()?;
+                    // Optional parameters, usually NULL.
+                    let _ = reader.read_optional(|reader| reader.read_der())?;
+                    Ok(oid)
+                })?;
+                let digest = reader.next().read_bytes()?;
+                Ok((oid, digest))
+            })
+        })
+    })
+    .ok()?;
+
+    let (oid, digest) = parsed;
+    let alg = digest_alg_from_oid(&oid)?;
+    Some((alg, digest))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn digest_alg_from_oid(oid: &yasna::models::ObjectIdentifier) -> Option<DigestAlg> {
+    // SHA-1: 1.3.14.3.2.26
+    if oid == &yasna::models::ObjectIdentifier::from_slice(&[1, 3, 14, 3, 2, 26]) {
+        return Some(DigestAlg::Sha1);
+    }
+
+    // SHA-256: 2.16.840.1.101.3.4.2.1
+    if oid == &yasna::models::ObjectIdentifier::from_slice(&[
+        2, 16, 840, 1, 101, 3, 4, 2, 1,
+    ]) {
+        return Some(DigestAlg::Sha256);
+    }
+
+    None
 }
 
 fn is_signature_component(component: &str) -> bool {
