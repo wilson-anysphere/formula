@@ -34,6 +34,10 @@ describe("sheetFormulaRewrite", () => {
         '="Sheet1!A1"&#REF!',
       );
     });
+
+    it("rewrites sheet-qualified refs using Unicode NFKC matching (e.g. Å == Å)", () => {
+      expect(rewriteDeletedSheetReferencesInFormula("='Å'!A1+1", "Å", ["Å"])).toBe("=#REF!+1");
+    });
   });
 
   describe("rewriteDocumentFormulasForSheetRename", () => {
@@ -67,6 +71,16 @@ describe("sheetFormulaRewrite", () => {
       rewriteDocumentFormulasForSheetRename(doc, "Sheet3", "End");
 
       expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("=SUM(Sheet1:End!A1)");
+    });
+
+    it("matches old sheet names using Unicode NFKC semantics when rewriting", () => {
+      const doc = new DocumentController();
+      doc.setCellFormula("S1", { row: 0, col: 0 }, "='Å'!A1");
+
+      // Angstrom sign (U+212B) NFKC-normalizes to Å (U+00C5).
+      rewriteDocumentFormulasForSheetRename(doc, "Å", "Budget");
+
+      expect(doc.getCell("S1", { row: 0, col: 0 }).formula).toBe("=Budget!A1");
     });
   });
 

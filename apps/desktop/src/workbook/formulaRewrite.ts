@@ -58,6 +58,17 @@ export function rewriteSheetNamesInFormula(
   return out.join("");
 }
 
+function normalizeSheetNameForCaseInsensitiveCompare(name: string): string {
+  // Excel compares sheet names case-insensitively with Unicode NFKC normalization.
+  //
+  // Match the semantics used by `@formula/workbook-backend` and the Rust backend.
+  try {
+    return String(name ?? "").normalize("NFKC").toUpperCase();
+  } catch {
+    return String(name ?? "").toUpperCase();
+  }
+}
+
 /**
  * Rewrite sheet references inside a formula after deleting a sheet.
  *
@@ -242,7 +253,7 @@ function split3d(remainder: string): [string, string | null] {
 }
 
 function startEquals(a: string, b: string): boolean {
-  return a.toLowerCase() === b.toLowerCase();
+  return normalizeSheetNameForCaseInsensitiveCompare(a) === normalizeSheetNameForCaseInsensitiveCompare(b);
 }
 
 function quoteSheetSpec(sheetSpec: string): string {
@@ -334,9 +345,10 @@ function rewriteSheetSpecForDelete(
 }
 
 function sheetIndexInOrder(sheetOrder: string[], name: string): number | null {
-  const target = name.toLowerCase();
+  const target = normalizeSheetNameForCaseInsensitiveCompare(name);
   for (let i = 0; i < sheetOrder.length; i += 1) {
-    if (sheetOrder[i]?.toLowerCase() === target) return i;
+    const candidate = sheetOrder[i];
+    if (candidate && normalizeSheetNameForCaseInsensitiveCompare(candidate) === target) return i;
   }
   return null;
 }
@@ -437,4 +449,3 @@ function sheetRefTailEnd(formula: string, startIndex: number): number {
 
   return i;
 }
-
