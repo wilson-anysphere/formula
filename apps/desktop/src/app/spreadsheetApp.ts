@@ -392,7 +392,6 @@ function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
 export class SpreadsheetApp {
   private sheetId = "Sheet1";
   private readonly idle = new IdleTracker();
-  private readonly computedValues = new Map<string, SpreadsheetValue>();
   private readonly computedValuesByCoord = new Map<string, Map<number, SpreadsheetValue>>();
   private uiReady = false;
   private readonly sheetNameResolver: SheetNameResolver | null;
@@ -2466,7 +2465,6 @@ export class SpreadsheetApp {
     try {
       // Ensure any in-flight sync operations finish before we replace the workbook.
       await this.wasmSyncPromise;
-      this.computedValues.clear();
       this.computedValuesByCoord.clear();
       this.document.applyState(snapshot);
       const sheetIds = this.document.getSheetIds();
@@ -2539,7 +2537,6 @@ export class SpreadsheetApp {
             // navigation.
             for (let attempt = 0; attempt < 2; attempt += 1) {
               changedDuringInit = false;
-              this.computedValues.clear();
               this.computedValuesByCoord.clear();
               const changes = await engineHydrateFromDocument(engine, this.document);
               this.applyComputedChanges(changes);
@@ -2556,7 +2553,6 @@ export class SpreadsheetApp {
               if (!this.wasmEngine || this.wasmSyncSuspended) return;
 
               if (source === "applyState") {
-                this.computedValues.clear();
                 this.computedValuesByCoord.clear();
                 void this.enqueueWasmSync(async (worker) => {
                   const changes = await engineHydrateFromDocument(worker, this.document);
@@ -2602,7 +2598,6 @@ export class SpreadsheetApp {
             this.wasmEngine = null;
             this.wasmUnsubscribe?.();
             this.wasmUnsubscribe = null;
-            this.computedValues.clear();
             this.computedValuesByCoord.clear();
           }
       })
@@ -7860,13 +7855,6 @@ export class SpreadsheetApp {
           return sheetCache.get(key) ?? null;
         }
       }
-
-      // Backwards/defensive fallback: string-keyed cache.
-      const address = cellToA1(cell);
-      const cacheKey = this.computedKey(sheetId, address);
-      if (this.computedValues.has(cacheKey)) {
-        return this.computedValues.get(cacheKey) ?? null;
-      }
     }
 
     const memo = new Map<string, SpreadsheetValue>();
@@ -7943,19 +7931,14 @@ export class SpreadsheetApp {
         const key = row * COMPUTED_COORD_COL_STRIDE + col;
         this.computedValuesByCoord.get(sheetId)?.delete(key);
       }
-
-      if (!address && row !== undefined && col !== undefined) {
-        address = cellToA1({ row, col });
-      }
-      if (!address) continue;
-      this.computedValues.delete(this.computedKey(sheetId, address));
     }
   }
 
   private applyComputedChanges(changes: unknown): void {
     if (!Array.isArray(changes)) return;
     let updated = false;
-    const shouldInvalidate = this.document.getSheetIds().length <= 1;
+    const sheetCount = (this.document as any)?.model?.sheets?.size;
+    const shouldInvalidate = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
 
     let minRow = Infinity;
     let maxRow = -Infinity;
@@ -7971,13 +7954,9 @@ export class SpreadsheetApp {
       if (!sheetId) sheetId = this.sheetId;
 
       let address = typeof ref.address === "string" ? ref.address : undefined;
-      if (!address && isInteger(ref.row) && isInteger(ref.col)) {
-        address = cellToA1({ row: ref.row, col: ref.col });
-      }
-      if (!address) continue;
 
       // Support "Sheet1!A1" style addresses if a sheet name was embedded.
-      if (address.includes("!")) {
+      if (address && address.includes("!")) {
         const [maybeSheet, cell] = address.split("!", 2);
         if (maybeSheet && cell) {
           sheetId = this.resolveSheetIdByName(maybeSheet) ?? maybeSheet;
@@ -8005,7 +7984,9 @@ export class SpreadsheetApp {
         continue;
       }
 
-      if (row !== undefined && col !== undefined && col >= 0 && col < COMPUTED_COORD_COL_STRIDE) {
+      if (row === undefined || col === undefined) continue;
+
+      if (row >= 0 && col >= 0 && col < COMPUTED_COORD_COL_STRIDE) {
         const key = row * COMPUTED_COORD_COL_STRIDE + col;
         let sheetCache = this.computedValuesByCoord.get(sheetId);
         if (!sheetCache) {
@@ -8015,16 +7996,14 @@ export class SpreadsheetApp {
         sheetCache.set(key, value);
       }
 
-      this.computedValues.set(this.computedKey(sheetId, address), value);
       updated = true;
 
       if (shouldInvalidate && sheetId === this.sheetId) {
-        const coord = parseA1(address.replaceAll("$", ""));
         sawActiveSheet = true;
-        minRow = Math.min(minRow, coord.row);
-        maxRow = Math.max(maxRow, coord.row);
-        minCol = Math.min(minCol, coord.col);
-        maxCol = Math.max(maxCol, coord.col);
+        minRow = Math.min(minRow, row);
+        maxRow = Math.max(maxRow, row);
+        minCol = Math.min(minCol, col);
+        maxCol = Math.max(maxCol, col);
       }
     }
 
@@ -8055,11 +8034,18 @@ export class SpreadsheetApp {
     stack: Set<string>,
     options: { useEngineCache: boolean }
   ): SpreadsheetValue {
+    if (options.useEngineCache) {
+      const sheetCache = this.computedValuesByCoord.get(sheetId);
+      if (sheetCache && cell.col >= 0 && cell.col < COMPUTED_COORD_COL_STRIDE && cell.row >= 0) {
+        const key = cell.row * COMPUTED_COORD_COL_STRIDE + cell.col;
+        if (sheetCache.has(key)) {
+          return sheetCache.get(key) ?? null;
+        }
+      }
+    }
+
     const address = cellToA1(cell);
     const computedKey = this.computedKey(sheetId, address);
-    if (options.useEngineCache && this.computedValues.has(computedKey)) {
-      return this.computedValues.get(computedKey) ?? null;
-    }
     const cached = memo.get(computedKey);
     if (cached !== undefined || memo.has(computedKey)) return cached ?? null;
     if (stack.has(computedKey)) return "#REF!";
