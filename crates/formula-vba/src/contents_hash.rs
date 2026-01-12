@@ -70,6 +70,16 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
         offset += len;
 
         match id {
+            // PROJECTNAME
+            0x0004 => {
+                out.extend_from_slice(data);
+            }
+
+            // PROJECTCONSTANTS
+            0x000C => {
+                out.extend_from_slice(data);
+            }
+
             // REFERENCEREGISTERED
             0x000D => {
                 out.extend_from_slice(data);

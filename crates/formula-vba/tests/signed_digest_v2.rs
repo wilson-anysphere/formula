@@ -3,8 +3,8 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    compute_vba_project_digest, extract_vba_signature_signed_digest, verify_vba_digital_signature,
-    DigestAlg, OleFile, VbaSignatureBinding, VbaSignatureVerification,
+    compress_container, compute_vba_project_digest, extract_vba_signature_signed_digest,
+    verify_vba_digital_signature, DigestAlg, OleFile, VbaSignatureBinding, VbaSignatureVerification,
 };
 
 mod signature_test_utils;
@@ -199,7 +199,8 @@ fn v2_parser_rejects_plain_16_byte_octet_string_instead_of_sigdata() {
     //
     // Ensure we only accept properly shaped SigDataV1Serialized structures.
     let plain_16 = (0u8..16).collect::<Vec<_>>();
-    let spc_v2 = build_spc_indirect_data_content_v2_with_sigdata_element(der_octet_string(&plain_16));
+    let spc_v2 =
+        build_spc_indirect_data_content_v2_with_sigdata_element(der_octet_string(&plain_16));
     let pkcs7 = make_pkcs7_signed_message(&spc_v2);
 
     assert!(
@@ -238,6 +239,12 @@ fn extracts_signed_digest_from_v2_when_wrapped_in_digsig_info_serialized() {
     assert_eq!(got.digest, source_hash);
 }
 
+fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
+    out.extend_from_slice(&id.to_le_bytes());
+    out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    out.extend_from_slice(data);
+}
+
 fn build_minimal_vba_project_bin(module1: &[u8], signature_blob: Option<&[u8]>) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -251,13 +258,34 @@ fn build_minimal_vba_project_bin(module1: &[u8], signature_blob: Option<&[u8]>) 
     ole.create_storage("VBA").expect("VBA storage");
 
     {
+        // Minimal decompressed `VBA/dir` stream that `content_normalized_data` can parse.
+        let dir_decompressed = {
+            let mut out = Vec::new();
+            // PROJECTNAME
+            push_record(&mut out, 0x0004, b"VBAProject");
+            // MODULENAME
+            push_record(&mut out, 0x0019, b"Module1");
+            // MODULESTREAMNAME + reserved u16
+            let mut stream_name = Vec::new();
+            stream_name.extend_from_slice(b"Module1");
+            stream_name.extend_from_slice(&0u16.to_le_bytes());
+            push_record(&mut out, 0x001A, &stream_name);
+            // MODULETYPE (standard)
+            push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+            // MODULETEXTOFFSET (0)
+            push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+            out
+        };
+        let dir_container = compress_container(&dir_decompressed);
+
         let mut s = ole.create_stream("VBA/dir").expect("dir stream");
-        s.write_all(b"dir-stream").expect("write dir");
+        s.write_all(&dir_container).expect("write dir");
     }
 
     {
         let mut s = ole.create_stream("VBA/Module1").expect("module stream");
-        s.write_all(module1).expect("write module");
+        let module_container = compress_container(module1);
+        s.write_all(&module_container).expect("write module");
     }
 
     if let Some(sig) = signature_blob {

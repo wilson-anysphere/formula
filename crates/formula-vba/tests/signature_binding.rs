@@ -113,7 +113,10 @@ fn build_minimal_vba_project_bin(module1: &[u8], signature_blob: Option<&[u8]>) 
 
     let dir_decompressed = {
         let mut out = Vec::new();
-        // Minimal module record group.
+        // PROJECTNAME (included in ContentNormalizedData).
+        push_record(&mut out, 0x0004, b"VBAProject");
+
+        // Single module record group.
         push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
 
         // MODULESTREAMNAME + reserved u16.

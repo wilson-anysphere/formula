@@ -18,6 +18,9 @@ fn build_minimal_vba_project_bin_with_signature_streams(
 
     let dir_decompressed = {
         let mut out = Vec::new();
+        // PROJECTNAME (included in ContentNormalizedData).
+        push_record(&mut out, 0x0004, b"VBAProject");
+
         push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
         let mut stream_name = Vec::new();
         stream_name.extend_from_slice(b"Module1");

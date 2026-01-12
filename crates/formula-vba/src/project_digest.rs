@@ -3,7 +3,12 @@ use sha1::Sha1;
 use sha2::Digest as _;
 use sha2::Sha256;
 
-use crate::{contents_hash::project_normalized_data_v3, signature::SignatureError, OleFile, ParseError};
+use crate::{
+    contents_hash::project_normalized_data_v3,
+    signature::SignatureError,
+    OleError,
+    ParseError,
+};
 
 /// Digest algorithm used by [`compute_vba_project_digest`].
 ///
@@ -51,53 +56,30 @@ impl Hasher {
     }
 }
 
-/// Deterministic fallback digest over the VBA project's OLE streams.
+/// Compute a digest over a VBA project's MS-OVBA §2.4.2 digest transcript.
 ///
-/// This is **not** the primary Office/MS-OVBA "Contents Hash" algorithm (which operates over
-/// `ContentNormalizedData` and optional `FormsNormalizedData`). It exists as a best-effort fallback
-/// for synthetic or partially-parseable `vbaProject.bin` files where MS-OVBA normalization cannot be
-/// computed.
+/// Transcript (deterministic):
 ///
-/// Transcript (deterministic and collision-resistant):
+/// `transcript = ContentNormalizedData || FormsNormalizedData`
 ///
-/// 1. Enumerate all streams in the OLE file.
-/// 2. Exclude any `DigitalSignature*` stream/storage.
-/// 3. Sort remaining stream paths in a deterministic, case-insensitive order.
-/// 4. Hash each stream as:
-///    `UTF-16LE(path) || 0x0000 || u32_le(len(bytes)) || bytes`.
+/// Where:
+/// - `ContentNormalizedData` is computed by [`crate::content_normalized_data`] (MS-OVBA §2.4.2.1)
+/// - `FormsNormalizedData` is computed by [`crate::forms_normalized_data`] (MS-OVBA §2.4.2.2)
+///
+/// The transcript is then hashed using the requested `alg` (MD5/SHA-1/SHA-256). Even though Office
+/// signature *binding* uses MD5, callers may request other algorithms for debugging or comparison.
 pub fn compute_vba_project_digest(
     vba_project_bin: &[u8],
     alg: DigestAlg,
 ) -> Result<Vec<u8>, SignatureError> {
-    let mut ole = OleFile::open(vba_project_bin)?;
-    let streams = ole.list_streams()?;
-
-    let mut paths = streams
-        .into_iter()
-        .filter(|path| !path.split('/').any(is_signature_component))
-        .collect::<Vec<_>>();
-
-    // Canonical, deterministic ordering:
-    // - case-insensitive compare on the full path
-    // - tie-break with the original path bytes
-    paths.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()).then(a.cmp(b)));
-
     let mut hasher = Hasher::new(alg);
 
-    for path in paths {
-        let bytes = ole.read_stream_opt(&path)?.unwrap_or_default();
+    let content = crate::content_normalized_data(vba_project_bin)
+        .map_err(parse_error_to_signature_error)?;
+    hasher.update(&content);
 
-        // Stream name (UTF-16LE) + NUL terminator.
-        for unit in path.encode_utf16() {
-            hasher.update(&unit.to_le_bytes());
-        }
-        hasher.update(&0u16.to_le_bytes());
-
-        // Stream length (little-endian) followed by bytes.
-        let len_u32 = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
-        hasher.update(&len_u32.to_le_bytes());
-        hasher.update(&bytes);
-    }
+    let forms = crate::forms_normalized_data(vba_project_bin).map_err(parse_error_to_signature_error)?;
+    hasher.update(&forms);
 
     Ok(hasher.finalize())
 }
@@ -117,10 +99,12 @@ pub fn compute_vba_project_digest_v3(
     Ok(hasher.finalize())
 }
 
-fn is_signature_component(component: &str) -> bool {
-    let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
-    matches!(
-        trimmed,
-        "DigitalSignature" | "DigitalSignatureEx" | "DigitalSignatureExt"
-    )
+fn parse_error_to_signature_error(err: ParseError) -> SignatureError {
+    // `compute_vba_project_digest` is used by signature binding verification APIs which currently
+    // surface [`SignatureError`]. Map parsing/normalization errors into a generic I/O-like error so
+    // callers get a consistent "unable to compute digest" signal.
+    SignatureError::Ole(OleError::Io(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        err,
+    )))
 }
