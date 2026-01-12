@@ -184,4 +184,29 @@ describe("createCommandPalette recents integration", () => {
 
     controller.dispose();
   });
+
+  it("prunes ignored commands from existing recents on install", () => {
+    localStorage.setItem(
+      COMMAND_RECENTS_STORAGE_KEY,
+      JSON.stringify([
+        { commandId: "clipboard.copy", lastUsedMs: 2, count: 1 },
+        { commandId: "edit.undo", lastUsedMs: 1, count: 1 },
+        { commandId: "cmd.normal", lastUsedMs: 0, count: 1 },
+      ]),
+    );
+
+    const commandRegistry = new CommandRegistry();
+    const controller = createCommandPalette({
+      commandRegistry,
+      contextKeys: new ContextKeyService(),
+      keybindingIndex: new Map(),
+      ensureExtensionsLoaded: async () => {},
+      onCloseFocus: () => {},
+      extensionLoadDelayMs: 60_000,
+    });
+
+    expect(readCommandRecents(localStorage).map((entry) => entry.commandId)).toEqual(["cmd.normal"]);
+
+    controller.dispose();
+  });
 });
