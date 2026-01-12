@@ -75,6 +75,24 @@ impl CellImages {
     }
 }
 
+/// Best-effort loader for workbook-level "in-cell" images (`xl/cellimages*.xml`).
+///
+/// Missing parts / parse errors are ignored by design so workbook loading never fails due to
+/// optional in-cell image metadata.
+pub fn load_cell_images_from_parts(
+    parts: &BTreeMap<String, Vec<u8>>,
+    workbook: &mut formula_model::Workbook,
+) {
+    for path in parts.keys() {
+        if !is_cell_images_part(path) {
+            continue;
+        }
+
+        // Best-effort: ignore parse errors/missing parts so we don't fail workbook loads.
+        let _ = parse_cell_images_part(path, parts, workbook);
+    }
+}
+
 fn is_cell_images_part(path: &str) -> bool {
     let Some(rest) = path.strip_prefix("xl/") else {
         return false;
