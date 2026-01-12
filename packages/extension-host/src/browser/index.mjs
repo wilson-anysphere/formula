@@ -442,7 +442,18 @@ class LocalStorageExtensionStorage {
 
   _persist(extensionId, target) {
     if (!this._storage) return;
-    this._storage.setItem(this._key(extensionId), JSON.stringify(target));
+    const key = this._key(extensionId);
+    // When the per-extension store becomes empty, remove the record entirely so localStorage
+    // doesn't accumulate noisy `"{}"` entries.
+    if (Object.keys(target).length === 0) {
+      if (typeof this._storage.removeItem === "function") {
+        this._storage.removeItem(key);
+      } else {
+        this._storage.setItem(key, JSON.stringify(target));
+      }
+      return;
+    }
+    this._storage.setItem(key, JSON.stringify(target));
   }
 
   /**

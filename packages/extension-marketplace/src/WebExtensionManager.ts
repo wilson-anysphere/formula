@@ -194,6 +194,12 @@ function removeContributedPanelSeedsForExtension(storage: Storage, extensionId: 
   const owner = String(extensionId ?? "").trim();
   if (!owner) return;
   const current = readContributedPanelSeedStore(storage);
+  // If the contributed panel seed store key exists but is already empty (e.g. persisted as `"{}"`
+  // by an older client), remove it entirely so uninstall leaves a clean slate.
+  if (Object.keys(current).length === 0) {
+    storage.removeItem(CONTRIBUTED_PANELS_SEED_STORE_KEY);
+    return;
+  }
   const next: Record<string, ContributedPanelSeed> = {};
   let changed = false;
   for (const [panelId, seed] of Object.entries(current)) {

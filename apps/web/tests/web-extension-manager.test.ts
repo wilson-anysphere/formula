@@ -1991,6 +1991,34 @@ test("uninstall removes contributed panel seed store key when empty", async () =
   await manager.dispose();
 });
 
+test("uninstall removes contributed panel seed store key when it is already empty", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+  });
+
+  const manager = new WebExtensionManager({ marketplaceClient, host: null, engineVersion: "1.0.0" });
+
+  await manager.install("formula.sample-hello");
+
+  // Simulate an older client leaving behind an empty `"{}"` seed store record.
+  const seedKey = "formula.extensions.contributedPanels.v1";
+  globalThis.localStorage.setItem(seedKey, "{}");
+  expect(globalThis.localStorage.getItem(seedKey)).toBe("{}");
+
+  await manager.uninstall("formula.sample-hello");
+
+  expect(globalThis.localStorage.getItem(seedKey)).toBeNull();
+
+  await manager.dispose();
+});
+
 test("uninstall removes all IndexedDB package records for an extension id", async () => {
   const keys = generateEd25519KeyPair();
   const extensionDir = path.resolve("extensions/sample-hello");

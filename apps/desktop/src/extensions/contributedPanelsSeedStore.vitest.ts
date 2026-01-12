@@ -66,6 +66,19 @@ describe("contributedPanelsSeedStore", () => {
     expect(storage.getItem(CONTRIBUTED_PANELS_SEED_STORE_KEY)).toBeNull();
   });
 
+  it("removes the seed store key when it is already empty", () => {
+    const storage = new MemoryStorage();
+
+    storage.setItem(CONTRIBUTED_PANELS_SEED_STORE_KEY, "{}");
+    expect(storage.getItem(CONTRIBUTED_PANELS_SEED_STORE_KEY)).toBe("{}");
+
+    // `removeSeedPanelsForExtension` is called by uninstall flows; it should clean up empty legacy
+    // `"{}"` records even when no panels were removed.
+    removeSeedPanelsForExtension(storage as any, "acme.foo");
+
+    expect(storage.getItem(CONTRIBUTED_PANELS_SEED_STORE_KEY)).toBeNull();
+  });
+
   it("rejects conflicting panel ids across extensions without mutating the store", () => {
     const storage = new MemoryStorage();
 

@@ -182,7 +182,14 @@ export function removeSeedPanelsForExtension(storage: StorageLike, extensionId: 
     }
     next[panelId] = seed;
   }
-  if (!changed) return;
+  if (!changed) {
+    // If the seed store key exists but is already empty (e.g. persisted as `"{}"` by an older
+    // client), remove it entirely so uninstall leaves a clean slate.
+    if (Object.keys(current).length === 0) {
+      safeRemoveItem(storage, CONTRIBUTED_PANELS_SEED_STORE_KEY);
+    }
+    return;
+  }
   writeContributedPanelsSeedStore(storage, next);
 }
 

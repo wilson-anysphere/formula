@@ -73,3 +73,42 @@ test("browser BrowserExtensionHost.resetExtensionState clears LocalStorageExtens
   const storeAfter = host._storageApi.getExtensionStore(extensionId);
   assert.equal(storeAfter.foo, undefined);
 });
+
+test("browser LocalStorageExtensionStorage removes the record when the last key is deleted", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  const storage = createMemoryStorage();
+  const originalDescriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", {
+    value: storage,
+    configurable: true,
+    writable: true
+  });
+
+  t.after(() => {
+    try {
+      if (originalDescriptor) {
+        Object.defineProperty(globalThis, "localStorage", originalDescriptor);
+        return;
+      }
+      delete globalThis.localStorage;
+    } catch {
+      // ignore
+    }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => true
+  });
+
+  const extension = { id: "pub.ext" };
+  const storageKey = "formula.extensionHost.storage.pub.ext";
+
+  await host._executeApi("storage", "set", ["foo", "bar"], extension);
+  assert.ok(storage.getItem(storageKey), "expected storage key to be persisted");
+
+  await host._executeApi("storage", "delete", ["foo"], extension);
+  assert.equal(storage.getItem(storageKey), null);
+});
