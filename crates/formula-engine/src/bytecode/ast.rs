@@ -27,6 +27,7 @@ pub enum BinaryOp {
 pub enum Function {
     Let,
     If,
+    Choose,
     Ifs,
     And,
     Or,
@@ -119,6 +120,7 @@ impl Function {
         match base {
             "LET" => Function::Let,
             "IF" => Function::If,
+            "CHOOSE" => Function::Choose,
             "IFS" => Function::Ifs,
             "AND" => Function::And,
             "OR" => Function::Or,
@@ -209,6 +211,7 @@ impl Function {
         match self {
             Function::Let => "LET",
             Function::If => "IF",
+            Function::Choose => "CHOOSE",
             Function::Ifs => "IFS",
             Function::And => "AND",
             Function::Or => "OR",

@@ -6518,6 +6518,15 @@ impl BytecodeColumnCache {
                         let v = locals.get(idx).copied().unwrap_or(StackValue::Other);
                         stack.push(v);
                     }
+                    bytecode::OpCode::Jump => {
+                        // Control flow: conservatively ignore jumps when scanning for range refs
+                        // passed to functions. This analysis is used only to decide whether
+                        // building a column cache is necessary; over-approximating is acceptable.
+                    }
+                    bytecode::OpCode::JumpIfFalseOrError => {
+                        let _ = stack.pop();
+                    }
+                    bytecode::OpCode::JumpIfNotError | bytecode::OpCode::JumpIfNotNaError => {}
                     bytecode::OpCode::UnaryPlus
                     | bytecode::OpCode::UnaryNeg
                     | bytecode::OpCode::ImplicitIntersection
@@ -6554,11 +6563,6 @@ impl BytecodeColumnCache {
                         }
                         stack.push(StackValue::Other);
                     }
-                    bytecode::OpCode::Jump => {}
-                    bytecode::OpCode::JumpIfFalseOrError => {
-                        let _ = stack.pop();
-                    }
-                    bytecode::OpCode::JumpIfNotError | bytecode::OpCode::JumpIfNotNaError => {}
                 }
             }
 
@@ -7396,7 +7400,17 @@ fn bytecode_expr_is_eligible_inner(
                     bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
                 })
             }
-            bytecode::ast::Function::And | bytecode::ast::Function::Or | bytecode::ast::Function::Xor => {
+            bytecode::ast::Function::Choose => {
+                if args.len() < 2 {
+                    return false;
+                }
+                args.iter().all(|arg| {
+                    bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
+                })
+            }
+            bytecode::ast::Function::And
+            | bytecode::ast::Function::Or
+            | bytecode::ast::Function::Xor => {
                 // Excel limits AND/OR/XOR to 255 arguments.
                 if args.is_empty() || args.len() > 255 {
                     return false;

@@ -2940,7 +2940,7 @@ fn bytecode_backend_matches_ast_for_information_functions_with_error_literals() 
 }
 
 #[test]
-fn bytecode_backend_matches_ast_for_ifs_and_switch() {
+fn bytecode_backend_matches_ast_for_choose_ifs_and_switch() {
     let mut engine = Engine::new();
     engine
         .set_cell_formula("Sheet1", "B1", "=IFS(TRUE, 1, 1/0, 2)")
@@ -2965,9 +2965,22 @@ fn bytecode_backend_matches_ast_for_ifs_and_switch() {
         .set_cell_formula("Sheet1", "B7", "=SWITCH(3, 1, 10, 2, 20)")
         .unwrap();
 
+    engine
+        .set_cell_formula("Sheet1", "B8", "=CHOOSE(2, 1/0, 7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B9", "=CHOOSE(1, 1/0, 7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B10", "=CHOOSE(3, 1, 2)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B11", "=CHOOSE(1/0, 1, 2)")
+        .unwrap();
+
     assert_eq!(
         engine.bytecode_program_count(),
-        7,
+        11,
         "expected all formulas to compile to bytecode"
     );
 
@@ -2981,6 +2994,10 @@ fn bytecode_backend_matches_ast_for_ifs_and_switch() {
         ("=SWITCH(2, 1, 1/0, 2, 20)", "B5"),
         ("=SWITCH(3, 1, 10, 2, 20, 99)", "B6"),
         ("=SWITCH(3, 1, 10, 2, 20)", "B7"),
+        ("=CHOOSE(2, 1/0, 7)", "B8"),
+        ("=CHOOSE(1, 1/0, 7)", "B9"),
+        ("=CHOOSE(3, 1, 2)", "B10"),
+        ("=CHOOSE(1/0, 1, 2)", "B11"),
     ] {
         assert_engine_matches_ast(&engine, formula, cell);
     }

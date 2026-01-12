@@ -79,6 +79,10 @@ impl Vm {
                     let v = self.locals.get(idx).cloned().unwrap_or(Value::Empty);
                     self.stack.push(v);
                 }
+                OpCode::Jump => {
+                    pc = inst.a() as usize;
+                    continue;
+                }
                 OpCode::UnaryPlus => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
                     self.stack.push(apply_unary(UnaryOp::Plus, v, grid, base));
@@ -140,10 +144,6 @@ impl Vm {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
                     self.stack
                         .push(super::runtime::apply_spill_range(v, grid, sheet_id, base));
-                }
-                OpCode::Jump => {
-                    pc = inst.a() as usize;
-                    continue;
                 }
                 OpCode::JumpIfFalseOrError => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);

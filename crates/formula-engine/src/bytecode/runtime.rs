@@ -371,7 +371,37 @@ fn eval_ast_inner(
                         );
                     }
                     // Engine behavior: missing false branch defaults to FALSE (not blank).
-                    return Value::Bool(false);
+                     return Value::Bool(false);
+                 }
+                Function::Choose => {
+                    if args.len() < 2 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+                    let idx_val =
+                        eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);
+                    let idx = match coerce_to_i64(&idx_val) {
+                        Ok(i) => i,
+                        Err(e) => return Value::Error(e),
+                    };
+                    // CHOOSE is 1-indexed.
+                    if idx < 1 {
+                        return Value::Error(ErrorKind::Value);
+                    }
+                    let idx_usize = match usize::try_from(idx) {
+                        Ok(i) => i,
+                        Err(_) => return Value::Error(ErrorKind::Value),
+                    };
+                    if idx_usize >= args.len() {
+                        return Value::Error(ErrorKind::Value);
+                    }
+                    return eval_ast_inner(
+                        &args[idx_usize],
+                        grid,
+                        sheet_id,
+                        base,
+                        locale,
+                        lexical_scopes,
+                    );
                 }
                 Function::Ifs => {
                     if args.len() % 2 != 0 {
@@ -535,6 +565,7 @@ fn eval_ast_inner(
                     Function::XLookup => arg_idx == 1 || arg_idx == 2,
                     Function::Row | Function::Column | Function::Rows | Function::Columns => true,
                     Function::If
+                    | Function::Choose
                     | Function::Ifs
                     | Function::IfError
                     | Function::IfNa
@@ -1274,6 +1305,7 @@ pub fn call_function(
         // generic function-call path (its "name" arguments are not evaluated values).
         Function::Let => Value::Error(ErrorKind::Value),
         Function::If => fn_if(args),
+        Function::Choose => fn_choose(args),
         Function::Ifs => fn_ifs(args),
         Function::And => fn_and(args, grid, base),
         Function::Or => fn_or(args, grid, base),
@@ -2550,6 +2582,27 @@ fn fn_if(args: &[Value]) -> Value {
         // Engine behavior: missing false branch defaults to FALSE (not blank).
         Value::Bool(false)
     }
+}
+
+fn fn_choose(args: &[Value]) -> Value {
+    if args.len() < 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let idx = match coerce_to_i64(&args[0]) {
+        Ok(i) => i,
+        Err(e) => return Value::Error(e),
+    };
+    if idx < 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let idx_usize = match usize::try_from(idx) {
+        Ok(i) => i,
+        Err(_) => return Value::Error(ErrorKind::Value),
+    };
+    if idx_usize >= args.len() {
+        return Value::Error(ErrorKind::Value);
+    }
+    args[idx_usize].clone()
 }
 
 fn fn_ifs(args: &[Value]) -> Value {
