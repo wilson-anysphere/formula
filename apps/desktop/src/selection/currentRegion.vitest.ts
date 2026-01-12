@@ -113,6 +113,34 @@ describe("computeCurrentRegionRange", () => {
     expect(rangeToA1(range)).toBe("A1:B1");
   });
 
+  it("keeps the active cell in the result even when the flood fill hits the maxVisitedCells guard", () => {
+    const cells = new Map<string, { value: unknown; formula: string | null }>();
+    const setValue = (row: number, col: number, value: unknown, formula: string | null = null) => {
+      cells.set(`${row},${col}`, { value, formula });
+    };
+
+    // Used range is just A1, but active cell is B1 (empty, adjacent to region).
+    setValue(0, 0, "A1");
+
+    const data = {
+      getUsedRange(): Range | null {
+        return { startRow: 0, endRow: 0, startCol: 0, endCol: 0 };
+      },
+      isCellEmpty(cell: CellCoord): boolean {
+        const entry = cells.get(`${cell.row},${cell.col}`);
+        return entry == null || (entry.value == null && entry.formula == null);
+      },
+    };
+
+    const range = computeCurrentRegionRange(
+      { row: 0, col: 1 },
+      data,
+      { maxRows: 100, maxCols: 100 },
+      { maxVisitedCells: 0 },
+    );
+    expect(rangeToA1(range)).toBe("A1:B1");
+  });
+
   it("does not connect cells diagonally (4-neighborhood only)", () => {
     const cells = new Map<string, { value: unknown; formula: string | null }>();
     const setValue = (row: number, col: number, value: unknown, formula: string | null = null) => {

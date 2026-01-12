@@ -129,7 +129,14 @@ export function computeCurrentRegionRange(
     if (visitedCount > maxVisitedCells) {
       // Fail-safe: avoid pathological traversal costs. For very large regions,
       // selecting the whole used range is a reasonable approximation.
-      return { ...used };
+      const range = { ...used };
+      if (includeActiveInBounds) {
+        range.startRow = Math.min(range.startRow, active.row);
+        range.endRow = Math.max(range.endRow, active.row);
+        range.startCol = Math.min(range.startCol, active.col);
+        range.endCol = Math.max(range.endCol, active.col);
+      }
+      return range;
     }
 
     const rowOffset = Math.floor(id / width);
