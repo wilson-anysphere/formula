@@ -26,44 +26,73 @@ function injectWebviewCsp(html: string): string {
 (() => {
   "use strict";
   const keys = ["__TAURI__", "__TAURI_IPC__", "__TAURI_INTERNALS__", "__TAURI_METADATA__"];
-  const presentKeys = [];
-  for (const key of keys) {
-    try {
-      if (key in window) presentKeys.push(key);
-    } catch {
-      // Ignore.
+  let tauriGlobalsPresent = false;
+
+  const scrubTauriGlobals = () => {
+    for (const key of keys) {
+      let hasKey = false;
+      try {
+        hasKey = key in window;
+      } catch {
+        // Ignore.
+      }
+      if (!hasKey) continue;
+
+      tauriGlobalsPresent = true;
+      try {
+        // Some environments (including strict mode) throw if the property is non-configurable.
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete window[key];
+      } catch {
+        // Ignore.
+      }
+      try {
+        // If deletion fails, fall back to overwriting.
+        window[key] = undefined;
+      } catch {
+        // Ignore.
+      }
+      try {
+        // If a global is present and configurable, attempt to lock it down to undefined so it
+        // can't be re-populated later in the page lifecycle.
+        Object.defineProperty(window, key, {
+          value: undefined,
+          writable: false,
+          configurable: false,
+        });
+      } catch {
+        // Ignore.
+      }
     }
+  };
+
+  // Run immediately, then schedule a few additional scrubs in case globals are injected after
+  // the initial script executes (best-effort defense-in-depth).
+  scrubTauriGlobals();
+  try {
+    Promise.resolve().then(scrubTauriGlobals);
+  } catch {
+    // Ignore.
   }
-  const tauriGlobalsPresent = presentKeys.length > 0;
-  for (const key of presentKeys) {
-    try {
-      // Some environments (including strict mode) throw if the property is non-configurable.
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete window[key];
-    } catch {
-      // Ignore.
-    }
-    try {
-      // If deletion fails, fall back to overwriting.
-      window[key] = undefined;
-    } catch {
-      // Ignore.
-    }
-    try {
-      // If a global is present and configurable, attempt to lock it down to undefined so it
-      // can't be re-populated later in the page lifecycle.
-      Object.defineProperty(window, key, {
-        value: undefined,
-        writable: false,
-        configurable: false,
-      });
-    } catch {
-      // Ignore.
-    }
+  try {
+    setTimeout(scrubTauriGlobals, 0);
+    setTimeout(scrubTauriGlobals, 50);
+    document.addEventListener("DOMContentLoaded", scrubTauriGlobals, { once: true });
+    window.addEventListener("load", scrubTauriGlobals, { once: true });
+  } catch {
+    // Ignore.
   }
   try {
     // Marker used by desktop e2e tests to verify the hardening script ran in the iframe.
-    const marker = { tauriGlobalsPresent };
+    const marker = {};
+    try {
+      Object.defineProperty(marker, "tauriGlobalsPresent", {
+        enumerable: true,
+        get: () => tauriGlobalsPresent,
+      });
+    } catch {
+      marker.tauriGlobalsPresent = tauriGlobalsPresent;
+    }
     try {
       Object.freeze(marker);
     } catch {
