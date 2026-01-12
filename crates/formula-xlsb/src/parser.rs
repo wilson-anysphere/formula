@@ -1935,14 +1935,88 @@ fn materialize_rgce(
             }
             0x3A | 0x5A | 0x7A => {
                 // PtgRef3d: [ixti: u16][row: u32][col+flags: u16]
+                //
+                // Like `PtgRef`, the row/col fields are absolute coordinates with relative flags
+                // in the high bits. Shared formulas can contain 3D references, so we need to
+                // shift relative refs when materializing across the shared range.
+                let ixti = u16::from_le_bytes(base.get(i..i + 2)?.try_into().ok()?);
+                let row_raw = u32::from_le_bytes(base.get(i + 2..i + 6)?.try_into().ok()?) as i64;
+                let col_raw_u16 = u16::from_le_bytes(base.get(i + 6..i + 8)?.try_into().ok()?);
+                let col_raw = (col_raw_u16 & 0x3FFF) as i64;
+                let row_rel = (col_raw_u16 & 0x4000) != 0;
+                let col_rel = (col_raw_u16 & 0x8000) != 0;
+
+                let new_row = if row_rel {
+                    row_raw + delta_row
+                } else {
+                    row_raw
+                };
+                let new_col = if col_rel {
+                    col_raw + delta_col
+                } else {
+                    col_raw
+                };
+
+                if new_row < 0 || new_row > MAX_ROW || new_col < 0 || new_col > MAX_COL {
+                    out.push(ptg.saturating_add(0x02)); // PtgRef3d* -> PtgRefErr3d*
+                    out.extend_from_slice(base.get(i..i + 8)?);
+                    i += 8;
+                    continue;
+                }
+
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 8)?);
+                out.extend_from_slice(&ixti.to_le_bytes());
+                out.extend_from_slice(&(new_row as u32).to_le_bytes());
+                let new_col_u16 = pack_col_flags(new_col as u32, row_rel, col_rel)?;
+                out.extend_from_slice(&new_col_u16.to_le_bytes());
                 i += 8;
             }
             0x3B | 0x5B | 0x7B => {
                 // PtgArea3d: [ixti: u16][r1: u32][r2: u32][c1+flags: u16][c2+flags: u16]
+                //
+                // Like `PtgArea`, area endpoints have independent relative flags. Materialize by
+                // shifting any relative endpoints by the shared-formula delta.
+                let ixti = u16::from_le_bytes(base.get(i..i + 2)?.try_into().ok()?);
+                let r1_raw = u32::from_le_bytes(base.get(i + 2..i + 6)?.try_into().ok()?) as i64;
+                let r2_raw = u32::from_le_bytes(base.get(i + 6..i + 10)?.try_into().ok()?) as i64;
+                let c1_u16 = u16::from_le_bytes(base.get(i + 10..i + 12)?.try_into().ok()?);
+                let c2_u16 = u16::from_le_bytes(base.get(i + 12..i + 14)?.try_into().ok()?);
+
+                let c1_raw = (c1_u16 & 0x3FFF) as i64;
+                let c2_raw = (c2_u16 & 0x3FFF) as i64;
+                let r1_rel = (c1_u16 & 0x4000) != 0;
+                let c1_rel = (c1_u16 & 0x8000) != 0;
+                let r2_rel = (c2_u16 & 0x4000) != 0;
+                let c2_rel = (c2_u16 & 0x8000) != 0;
+
+                let new_r1 = if r1_rel { r1_raw + delta_row } else { r1_raw };
+                let new_c1 = if c1_rel { c1_raw + delta_col } else { c1_raw };
+                let new_r2 = if r2_rel { r2_raw + delta_row } else { r2_raw };
+                let new_c2 = if c2_rel { c2_raw + delta_col } else { c2_raw };
+
+                if new_r1 < 0
+                    || new_r1 > MAX_ROW
+                    || new_r2 < 0
+                    || new_r2 > MAX_ROW
+                    || new_c1 < 0
+                    || new_c1 > MAX_COL
+                    || new_c2 < 0
+                    || new_c2 > MAX_COL
+                {
+                    out.push(ptg.saturating_add(0x02)); // PtgArea3d* -> PtgAreaErr3d*
+                    out.extend_from_slice(base.get(i..i + 14)?);
+                    i += 14;
+                    continue;
+                }
+
                 out.push(ptg);
-                out.extend_from_slice(base.get(i..i + 14)?);
+                out.extend_from_slice(&ixti.to_le_bytes());
+                out.extend_from_slice(&(new_r1 as u32).to_le_bytes());
+                out.extend_from_slice(&(new_r2 as u32).to_le_bytes());
+                let new_c1_u16 = pack_col_flags(new_c1 as u32, r1_rel, c1_rel)?;
+                let new_c2_u16 = pack_col_flags(new_c2 as u32, r2_rel, c2_rel)?;
+                out.extend_from_slice(&new_c1_u16.to_le_bytes());
+                out.extend_from_slice(&new_c2_u16.to_le_bytes());
                 i += 14;
             }
             0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69

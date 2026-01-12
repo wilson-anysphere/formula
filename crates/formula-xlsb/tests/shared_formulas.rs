@@ -1,7 +1,8 @@
-use formula_xlsb::{biff12_varint, parse_sheet_bin, CellValue};
+use formula_xlsb::{biff12_varint, parse_sheet_bin, parse_sheet_bin_with_context, CellValue};
 use pretty_assertions::assert_eq;
 use std::collections::HashMap;
 use std::io::Cursor;
+use formula_xlsb::workbook_context::WorkbookContext;
 
 fn push_record(out: &mut Vec<u8>, id: u32, data: &[u8]) {
     biff12_varint::write_record_id(out, id).expect("write record id");
@@ -468,6 +469,128 @@ fn materializes_shared_formulas_out_of_bounds_refs_as_ref_error() {
     // Ensure we stored a materialized rgce (not just PtgExp), starting with PtgRefErr.
     let b2_rgce = &b2.formula.as_ref().unwrap().rgce;
     assert_eq!(b2_rgce.first().copied(), Some(0x2A)); // PtgRefErr
+}
+
+#[test]
+fn materializes_shared_formulas_with_ptgref3d() {
+    // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
+    const WORKSHEET_BEGIN: u32 = 0x0181;
+    const WORKSHEET_END: u32 = 0x0182;
+    const SHEETDATA_BEGIN: u32 = 0x0191;
+    const SHEETDATA_END: u32 = 0x0192;
+    const DIMENSION: u32 = 0x0194;
+
+    const ROW: u32 = 0x0000;
+    const FMLA_NUM: u32 = 0x0009;
+    const SHR_FMLA: u32 = 0x0010;
+
+    // Provide workbook context so `PtgRef3d` can decode to a sheet name.
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
+
+    let mut sheet = Vec::new();
+    push_record(&mut sheet, WORKSHEET_BEGIN, &[]);
+
+    // BrtWsDim: r1, r2, c1, c2 (all u32). Cover B1:B2.
+    let mut dim = Vec::new();
+    dim.extend_from_slice(&0u32.to_le_bytes());
+    dim.extend_from_slice(&1u32.to_le_bytes());
+    dim.extend_from_slice(&1u32.to_le_bytes());
+    dim.extend_from_slice(&1u32.to_le_bytes());
+    push_record(&mut sheet, DIMENSION, &dim);
+
+    push_record(&mut sheet, SHEETDATA_BEGIN, &[]);
+
+    // Row 0
+    push_record(&mut sheet, ROW, &0u32.to_le_bytes());
+
+    // Shared formula over B1:B2:
+    //   B1: Sheet2!A1+1
+    //   B2: Sheet2!A2+1
+    //
+    // Shared formulas can encode 3D references using `PtgRef3d` with the same row/col relative
+    // flags as `PtgRef`. Materialization must shift those refs across the range.
+    let mut shr_fmla = Vec::new();
+    // Range: r1=0, r2=1, c1=1, c2=1.
+    shr_fmla.extend_from_slice(&0u32.to_le_bytes());
+    shr_fmla.extend_from_slice(&1u32.to_le_bytes());
+    shr_fmla.extend_from_slice(&1u32.to_le_bytes());
+    shr_fmla.extend_from_slice(&1u32.to_le_bytes());
+
+    // Base rgce: PtgRef3d(Sheet2!A1, relative row/col) + 1 + +
+    let base_rgce: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x3A); // PtgRef3d
+        v.extend_from_slice(&0u16.to_le_bytes()); // ixti (Sheet2)
+        v.extend_from_slice(&0u32.to_le_bytes()); // row=0 (A1)
+        v.extend_from_slice(&0xC000u16.to_le_bytes()); // col=A, row+col relative
+        v.push(0x1E); // PtgInt
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.push(0x03); // PtgAdd
+        v
+    };
+    shr_fmla.extend_from_slice(&(base_rgce.len() as u32).to_le_bytes());
+    shr_fmla.extend_from_slice(&base_rgce);
+    push_record(&mut sheet, SHR_FMLA, &shr_fmla);
+
+    // B1 full formula (same as base rgce).
+    let mut b1 = Vec::new();
+    b1.extend_from_slice(&1u32.to_le_bytes()); // col B
+    b1.extend_from_slice(&0u32.to_le_bytes()); // style
+    b1.extend_from_slice(&0.0f64.to_le_bytes()); // cached value
+    b1.extend_from_slice(&0u16.to_le_bytes()); // flags
+    b1.extend_from_slice(&(base_rgce.len() as u32).to_le_bytes());
+    b1.extend_from_slice(&base_rgce);
+    push_record(&mut sheet, FMLA_NUM, &b1);
+
+    // Row 1
+    push_record(&mut sheet, ROW, &1u32.to_le_bytes());
+
+    // B2 uses PtgExp to reference base cell B1 (row=0,col=1).
+    let ptgexp: [u8; 5] = [0x01, 0x00, 0x00, 0x01, 0x00];
+    let mut b2 = Vec::new();
+    b2.extend_from_slice(&1u32.to_le_bytes()); // col B
+    b2.extend_from_slice(&0u32.to_le_bytes()); // style
+    b2.extend_from_slice(&0.0f64.to_le_bytes()); // cached value
+    b2.extend_from_slice(&0u16.to_le_bytes()); // flags
+    b2.extend_from_slice(&(ptgexp.len() as u32).to_le_bytes());
+    b2.extend_from_slice(&ptgexp);
+    push_record(&mut sheet, FMLA_NUM, &b2);
+
+    push_record(&mut sheet, SHEETDATA_END, &[]);
+    push_record(&mut sheet, WORKSHEET_END, &[]);
+
+    let parsed =
+        parse_sheet_bin_with_context(&mut Cursor::new(sheet), &[], &ctx).expect("parse sheet");
+    let mut cells: HashMap<(u32, u32), _> =
+        parsed.cells.iter().map(|c| ((c.row, c.col), c)).collect();
+
+    let b1 = cells.remove(&(0, 1)).expect("B1 present");
+    assert_eq!(
+        b1.formula.as_ref().and_then(|f| f.text.as_deref()),
+        Some("Sheet2!A1+1")
+    );
+
+    let b2 = cells.remove(&(1, 1)).expect("B2 present");
+    assert_eq!(
+        b2.formula.as_ref().and_then(|f| f.text.as_deref()),
+        Some("Sheet2!A2+1")
+    );
+
+    // Ensure we stored a materialized rgce with an adjusted row field (A2).
+    let b2_rgce = &b2.formula.as_ref().unwrap().rgce;
+    assert_eq!(
+        b2_rgce,
+        &vec![
+            0x3A, // PtgRef3d
+            0x00, 0x00, // ixti (Sheet2)
+            0x01, 0x00, 0x00, 0x00, // row=1 (A2)
+            0x00, 0xC0, // col=A, row+col relative
+            0x1E, // PtgInt
+            0x01, 0x00, // 1
+            0x03, // +
+        ]
+    );
 }
 
 #[test]
