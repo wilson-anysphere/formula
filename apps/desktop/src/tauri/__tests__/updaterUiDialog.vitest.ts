@@ -217,6 +217,32 @@ describe("updaterUi (dialog + download)", () => {
   );
 
   it(
+    "disables the manual download button and shows progress when a background download is in flight",
+    async () => {
+      const { handleUpdaterEvent } = await import("../updaterUi");
+
+      await handleUpdaterEvent("update-download-started", { source: "startup", version: "1.2.3" });
+      await handleUpdaterEvent("update-download-progress", { source: "startup", version: "1.2.3", percent: 50 });
+
+      await handleUpdaterEvent("update-available", { source: "manual", version: "1.2.3", body: "notes" });
+      await flushMicrotasks();
+
+      const downloadBtn = document.querySelector<HTMLButtonElement>('[data-testid="updater-download"]');
+      expect(downloadBtn).not.toBeNull();
+      expect(downloadBtn?.disabled).toBe(true);
+
+      const progressWrap = document.querySelector<HTMLElement>('[data-testid="updater-progress-wrap"]');
+      expect(progressWrap).not.toBeNull();
+      expect(progressWrap?.hidden).toBe(false);
+
+      const progress = document.querySelector<HTMLProgressElement>('[data-testid="updater-progress"]');
+      expect(progress).not.toBeNull();
+      expect(progress?.value).toBe(50);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
     "keeps the update dialog open if the user cancels the unsaved-changes prompt on restart",
     async () => {
       const handlers = new Map<string, (event: any) => void>();

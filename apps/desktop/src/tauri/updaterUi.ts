@@ -105,6 +105,7 @@ let progressPercent: number | null = null;
 
 let updateReadyToastShownForVersion: string | null = null;
 let backendDownloadedVersion: string | null = null;
+let backendDownloadInFlightVersion: string | null = null;
 function getLocalStorageOrNull(): StorageLike | null {
   try {
     // Prefer `window.localStorage` when available (jsdom/webview), but fall back to
@@ -564,6 +565,9 @@ function ensureUpdateDialog(): DialogElements {
 function renderUpdateDialog(): void {
   const els = ensureUpdateDialog();
   const info = updateInfo;
+  const backendDownloadInFlight =
+    backendDownloadInFlightVersion != null && backendDownloadInFlightVersion === info?.version;
+  const anyDownloadInFlight = downloadInFlight || backendDownloadInFlight;
 
   els.title.textContent = t("updater.updateAvailableTitle");
   els.version.textContent = info ? tWithVars("updater.updateAvailableMessage", { version: info.version }) : "";
@@ -571,22 +575,23 @@ function renderUpdateDialog(): void {
   els.releaseNotesTitle.textContent = t("updater.releaseNotes");
   els.releaseNotesTitle.hidden = !info?.body;
 
-  els.laterBtn.disabled = downloadInFlight;
-  els.viewVersionsBtn.disabled = downloadInFlight;
+  els.laterBtn.disabled = anyDownloadInFlight;
+  els.viewVersionsBtn.disabled = anyDownloadInFlight;
   els.downloadBtn.disabled =
-    downloadInFlight ||
+    anyDownloadInFlight ||
     !!downloadedUpdate ||
     (backendDownloadedVersion != null && backendDownloadedVersion === info?.version);
   els.laterBtn.textContent = t("updater.later");
   els.viewVersionsBtn.textContent = t("updater.openReleasePage");
-  els.downloadBtn.textContent = downloadInFlight ? t("updater.downloading") : t("updater.download");
+  els.downloadBtn.textContent = anyDownloadInFlight ? t("updater.downloading") : t("updater.download");
 
   const readyToInstall =
-    !downloadInFlight && (!!downloadedUpdate || (backendDownloadedVersion != null && backendDownloadedVersion === info?.version));
+    !anyDownloadInFlight &&
+    (!!downloadedUpdate || (backendDownloadedVersion != null && backendDownloadedVersion === info?.version));
   els.restartBtn.hidden = !readyToInstall;
   els.restartBtn.disabled = false;
 
-  if (downloadInFlight) {
+  if (anyDownloadInFlight) {
     els.status.textContent = t("updater.downloadInProgress");
     els.progressWrap.hidden = false;
     renderProgress();
@@ -744,6 +749,9 @@ function openUpdateAvailableDialog(payload: UpdaterEventPayload): void {
     if (backendDownloadedVersion !== version) {
       backendDownloadedVersion = null;
     }
+    if (backendDownloadInFlightVersion !== version) {
+      backendDownloadInFlightVersion = null;
+    }
   }
 
   const body = payload?.body == null ? null : String(payload.body);
@@ -883,6 +891,7 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
   // the user can approve a restart/apply step when they're ready.
   if (name === "update-downloaded") {
     const version = typeof payload?.version === "string" && payload.version.trim() !== "" ? payload.version.trim() : "unknown";
+    backendDownloadInFlightVersion = null;
     backendDownloadedVersion = version;
     showUpdateReadyToast({ version });
     return;
@@ -952,13 +961,55 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
       break;
     }
     case "update-download-started": {
-      // Manual-check UX already shows an update dialog; keep download events quiet for now.
+      const version = typeof payload?.version === "string" ? payload.version.trim() : "";
+      if (!version) break;
+      backendDownloadInFlightVersion = version;
+      progressDownloaded = 0;
+      progressTotal = null;
+      progressPercent = null;
+
+      // Only re-render if a dialog is already open for this version; avoid creating UI on startup.
+      if (updateDialog && updateInfo?.version === version) {
+        renderUpdateDialog();
+      }
       break;
     }
     case "update-download-progress": {
+      const version = typeof payload?.version === "string" ? payload.version.trim() : "";
+      if (!version) break;
+      if (backendDownloadInFlightVersion !== version) break;
+
+      const percent = extractNumber(payload?.percent);
+      if (typeof percent === "number") {
+        progressPercent = clampPercent(percent);
+        progressTotal = 100;
+        progressDownloaded = progressPercent;
+      } else {
+        const total = extractNumber(payload?.total);
+        const downloaded = extractNumber(payload?.downloaded);
+        if (typeof total === "number") progressTotal = total;
+        if (typeof downloaded === "number") progressDownloaded = downloaded;
+      }
+
+      if (updateDialog && updateInfo?.version === version) {
+        renderUpdateDialog();
+      }
       break;
     }
     case "update-download-error": {
+      const version = typeof payload?.version === "string" ? payload.version.trim() : "";
+      if (!version) break;
+      if (backendDownloadInFlightVersion === version) {
+        backendDownloadInFlightVersion = null;
+      }
+
+      // Only surface the error inside an already-open dialog for this version; otherwise keep
+      // startup background download failures quiet.
+      if (updateDialog && updateInfo?.version === version) {
+        lastUpdateError =
+          typeof payload?.message === "string" && payload.message.trim() !== "" ? payload.message : t("updater.unknownError");
+        renderUpdateDialog();
+      }
       break;
     }
     case "update-downloaded": {
@@ -1059,6 +1110,7 @@ export function __resetUpdaterUiStateForTests(): void {
 
   updateReadyToastShownForVersion = null;
   backendDownloadedVersion = null;
+  backendDownloadInFlightVersion = null;
   try {
     document.querySelectorAll?.('[data-testid="update-ready-toast"]').forEach((el) => el.remove());
   } catch {
