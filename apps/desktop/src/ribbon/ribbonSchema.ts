@@ -260,7 +260,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "file.save.saveAs.download", label: "Download a Copy", ariaLabel: "Download a Copy", iconId: "arrowDown" },
               ],
             },
-            { id: "file.save.autoSave", label: "AutoSave", ariaLabel: "AutoSave", iconId: "clock", kind: "toggle", defaultPressed: false },
+            { id: "file.save.autoSave", label: "AutoSave", ariaLabel: "AutoSave", iconId: "cloud", kind: "toggle", defaultPressed: false },
           ],
         },
         {
