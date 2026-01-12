@@ -128,3 +128,29 @@ test("desktop renderer Node-free guards catch comment-wrapped require()", async 
     await fs.rm(filePath, { force: true }).catch(() => {});
   }
 });
+
+test("desktop check-no-node catches process.versions.node usage (TS cast + optional chaining)", async () => {
+  const filename = `__node_process_versions_test__.${process.pid}.${Date.now()}.ts`;
+  const filePath = path.join(desktopSrcDir, filename);
+  const relToDesktop = `src/${filename}`;
+
+  await fs.writeFile(
+    filePath,
+    [
+      "// intentionally invalid for the desktop renderer bundle",
+      'export const isNode = typeof (process as any)?.versions?.node === "string";',
+      "",
+    ].join("\n"),
+  );
+
+  try {
+    // The import-based guard may not catch this (it isn't an import), but the desktop runtime
+    // guard must.
+    const checkNoNode = runNode(checkNoNodeScript);
+    assert.notEqual(checkNoNode.status, 0, "expected apps/desktop/scripts/check-no-node.mjs to fail");
+    assert.match(checkNoNode.stderr ?? "", /process\.versions\.node/);
+    assert.match(checkNoNode.stderr ?? "", new RegExp(relToDesktop.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")));
+  } finally {
+    await fs.rm(filePath, { force: true }).catch(() => {});
+  }
+});

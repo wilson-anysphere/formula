@@ -64,7 +64,12 @@ const requireCallRe = new RegExp(`\\brequire\\(${optWsOrComment}["']([^"']+)["']
 
 // Catch `process.versions.node` in a few variants (including optional chaining and TS casts),
 // but keep it line-local to reduce false positives.
-const processVersionsNodeRe = /\bprocess\b[^\n]{0,120}\.versions(?:\?\.)?\.node\b/g;
+//
+// Supported forms include:
+// - process.versions.node
+// - process?.versions?.node
+// - (process as any)?.versions?.node
+const processVersionsNodeRe = /\bprocess\b[^\n]{0,120}(?:\.|\?\.)versions(?:\.|\?\.)node\b/g;
 
 /** @type {Map<string, boolean>} */
 const isFileCache = new Map();
