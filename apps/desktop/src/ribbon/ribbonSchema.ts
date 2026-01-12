@@ -506,6 +506,14 @@ export const defaultRibbonSchema: RibbonSchema = {
               testId: "open-panel-ai-chat",
               size: "icon",
             },
+            {
+              id: "open-ai-panel",
+              label: "AI (legacy)",
+              ariaLabel: "Toggle AI panel",
+              icon: "🤖",
+              testId: "open-ai-panel",
+              size: "icon",
+            },
           ],
         },
         {
@@ -795,6 +803,14 @@ export const defaultRibbonSchema: RibbonSchema = {
               ariaLabel: "Toggle AI audit log panel",
               icon: "🧾",
               testId: "open-panel-ai-audit",
+              size: "icon",
+            },
+            {
+              id: "open-ai-audit-panel",
+              label: "Audit log (legacy)",
+              ariaLabel: "Toggle AI audit log panel",
+              icon: "🧾",
+              testId: "open-ai-audit-panel",
               size: "icon",
             },
             {

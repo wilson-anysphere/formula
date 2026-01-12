@@ -6437,9 +6437,11 @@ mountRibbon(ribbonReactRoot, {
 
       // --- Debug / dev controls migrated from the legacy status bar ---------------
       // Keep these command ids stable because Playwright e2e depends on their `data-testid`s.
+      case "open-ai-panel":
       case "open-panel-ai-chat":
         toggleDockPanel(PanelIds.AI_CHAT);
         return;
+      case "open-ai-audit-panel":
       case "open-panel-ai-audit":
         toggleDockPanel(PanelIds.AI_AUDIT);
         return;
