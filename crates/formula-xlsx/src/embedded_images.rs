@@ -8,6 +8,7 @@ use quick_xml::Reader;
 use crate::openxml;
 use crate::package::{XlsxError, XlsxPackage};
 use crate::path;
+use crate::rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map;
 use crate::rich_data::{scan_cells_with_metadata_indices, RichDataError};
 use crate::rich_data::rich_value::parse_rich_value_relationship_indices;
 
@@ -132,7 +133,34 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
         .as_deref()
         .and_then(|part| pkg.part(part).map(|bytes| (part, bytes)))
     {
-        Some((_part, bytes)) => parse_vm_to_rich_value_index(bytes)?,
+        Some((part, bytes)) => {
+            let primary =
+                parse_value_metadata_vm_to_rich_value_index_map(bytes).map_err(|err| match err {
+                    crate::xml::XmlDomError::Utf8(source) => XlsxError::Invalid(format!(
+                        "xml part {part} is not valid UTF-8: {source}"
+                    )),
+                    crate::xml::XmlDomError::Parse(source) => {
+                        XlsxError::Invalid(format!("xml parse error in {part}: {source}"))
+                    }
+                })?;
+
+            // Excel's `vm` appears in the wild as both 0-based and 1-based. To be tolerant, insert
+            // both the original key and its 0-based equivalent.
+            //
+            // Note: `primary` is a `HashMap`, so iteration order is not deterministic. Insert in two
+            // passes so the canonical (1-based) `vm` keys always win when the shifted `vm-1` entries
+            // collide.
+            let mut out = HashMap::new();
+            for (&vm, &rv) in primary.iter() {
+                out.entry(vm).or_insert(rv);
+            }
+            for (vm, rv) in primary {
+                if vm > 0 {
+                    out.entry(vm - 1).or_insert(rv);
+                }
+            }
+            out
+        }
         None => HashMap::new(),
     };
 
@@ -281,286 +309,6 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
     }
 
     Ok(out)
-}
-
-fn parse_vm_to_rich_value_index(xml: &[u8]) -> Result<HashMap<u32, u32>, XlsxError> {
-    #[derive(Debug, Clone, Copy)]
-    struct BkRun<T> {
-        count: u32,
-        value: T,
-    }
-
-    fn parse_bk_count(e: &quick_xml::events::BytesStart<'_>) -> Result<u32, XlsxError> {
-        for attr in e.attributes() {
-            let attr = attr?;
-            if openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"count") {
-                return Ok(attr
-                    .unescape_value()?
-                    .trim()
-                    .parse::<u32>()
-                    .ok()
-                    .filter(|v| *v >= 1)
-                    .unwrap_or(1));
-            }
-        }
-        Ok(1)
-    }
-
-    fn resolve_bk_run<T: Copy>(runs: &[BkRun<T>], idx: u32) -> Option<T> {
-        let mut cursor: u32 = 0;
-        for run in runs {
-            let count = run.count.max(1);
-            let end = cursor.saturating_add(count);
-            if idx < end {
-                return Some(run.value);
-            }
-            cursor = end;
-        }
-        None
-    }
-
-    let mut reader = Reader::from_reader(Cursor::new(xml));
-    reader.config_mut().trim_text(true);
-
-    let mut buf = Vec::new();
-    let mut xlr_type_index: Option<u32> = None;
-    // Excel has been observed to emit `<rc t="...">` as either 0-based or 1-based indices into
-    // the `<metadataTypes>` list. Track the 0-based index while parsing and accept both later.
-    let mut next_metadata_type_index = 0u32;
-
-    // `futureMetadata` bk entries in order: each entry contains `xlrd:rvb i="..."`
-    let mut future_bk_rich_value_index: Vec<BkRun<Option<u32>>> = Vec::new();
-    let mut in_future_xlrichvalue = false;
-    let mut current_future_bk: Option<usize> = None;
-
-    // `valueMetadata` bk entries in order: each contains `rc t="..." v="..."`
-    let mut value_bk_rc_records: Vec<BkRun<Vec<(u32, u32)>>> = Vec::new();
-    let mut in_value_metadata = false;
-    let mut current_value_bk: Option<usize> = None;
-
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Eof => break,
-            Event::Start(e) | Event::Empty(e) => {
-                let name = e.local_name();
-                let name = name.as_ref();
-
-                if name.eq_ignore_ascii_case(b"metadataType") {
-                    let mut type_name: Option<String> = None;
-                    for attr in e.attributes() {
-                        let attr = attr?;
-                        if openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"name") {
-                            type_name = Some(attr.unescape_value()?.into_owned());
-                            break;
-                        }
-                    }
-
-                    if type_name
-                        .as_deref()
-                        .is_some_and(|v| v.trim().eq_ignore_ascii_case("XLRICHVALUE"))
-                    {
-                        xlr_type_index = Some(next_metadata_type_index);
-                    }
-                    next_metadata_type_index = next_metadata_type_index.saturating_add(1);
-                } else if name.eq_ignore_ascii_case(b"futureMetadata") {
-                    let mut future_name: Option<String> = None;
-                    for attr in e.attributes() {
-                        let attr = attr?;
-                        if openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"name") {
-                            future_name = Some(attr.unescape_value()?.into_owned());
-                            break;
-                        }
-                    }
-                    in_future_xlrichvalue = future_name
-                        .as_deref()
-                        .is_some_and(|v| v.trim().eq_ignore_ascii_case("XLRICHVALUE"));
-                    current_future_bk = None;
-                } else if in_future_xlrichvalue && name.eq_ignore_ascii_case(b"bk") {
-                    let count = parse_bk_count(&e)?;
-                    future_bk_rich_value_index.push(BkRun { count, value: None });
-                    current_future_bk = Some(future_bk_rich_value_index.len() - 1);
-                } else if in_future_xlrichvalue && name.eq_ignore_ascii_case(b"rvb") {
-                    let mut i_value: Option<u32> = None;
-                    for attr in e.attributes() {
-                        let attr = attr?;
-                        if openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"i") {
-                            i_value = attr
-                                .unescape_value()?
-                                .parse::<u32>()
-                                .ok();
-                            break;
-                        }
-                    }
-                    if let (Some(idx), Some(i_value)) = (current_future_bk, i_value) {
-                        if future_bk_rich_value_index
-                            .get(idx)
-                            .is_some_and(|run| run.value.is_none())
-                        {
-                            future_bk_rich_value_index[idx].value = Some(i_value);
-                        }
-                    }
-                } else if name.eq_ignore_ascii_case(b"valueMetadata") {
-                    in_value_metadata = true;
-                    current_value_bk = None;
-                } else if in_value_metadata && name.eq_ignore_ascii_case(b"bk") {
-                    let count = parse_bk_count(&e)?;
-                    value_bk_rc_records.push(BkRun {
-                        count,
-                        value: Vec::new(),
-                    });
-                    current_value_bk = Some(value_bk_rc_records.len() - 1);
-                } else if in_value_metadata && name.eq_ignore_ascii_case(b"rc") {
-                    let mut t: Option<u32> = None;
-                    let mut v: Option<u32> = None;
-                    for attr in e.attributes() {
-                        let attr = attr?;
-                        let key = openxml::local_name(attr.key.as_ref());
-                        if key.eq_ignore_ascii_case(b"t") {
-                            t = attr.unescape_value()?.parse::<u32>().ok();
-                        } else if key.eq_ignore_ascii_case(b"v") {
-                            v = attr.unescape_value()?.parse::<u32>().ok();
-                        }
-                    }
-
-                    if let (Some(current), Some(t), Some(v)) = (current_value_bk, t, v) {
-                        if let Some(list) = value_bk_rc_records.get_mut(current) {
-                            list.value.push((t, v));
-                        }
-                    }
-                }
-            }
-            Event::End(e) => {
-                let name = e.local_name();
-                let name = name.as_ref();
-
-                if name.eq_ignore_ascii_case(b"futureMetadata") {
-                    in_future_xlrichvalue = false;
-                    current_future_bk = None;
-                } else if in_future_xlrichvalue && name.eq_ignore_ascii_case(b"bk") {
-                    current_future_bk = None;
-                } else if name.eq_ignore_ascii_case(b"valueMetadata") {
-                    in_value_metadata = false;
-                    current_value_bk = None;
-                } else if in_value_metadata && name.eq_ignore_ascii_case(b"bk") {
-                    current_value_bk = None;
-                }
-            }
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    let Some(xlr_type_index) = xlr_type_index else {
-        return Ok(HashMap::new());
-    };
-
-    let mut vm_to_rich_value_index: HashMap<u32, u32> = HashMap::new();
-    let mut vm_idx_1_based: u32 = 1;
-    for bk in value_bk_rc_records {
-        let count = bk.count.max(1);
-        // Excel emits `rc/@t` (metadata type index) as either 0-based *or* 1-based depending on
-        // version/producer. We derive a 0-based index from the `<metadataTypes>` list, so accept
-        // both the exact value and its 1-based equivalent.
-        let xlr_type_index_0 = xlr_type_index;
-        let xlr_type_index_1 = xlr_type_index.saturating_add(1);
-        let Some(future_idx) = bk.value.iter().find_map(|(t, v)| {
-            (*t == xlr_type_index_0 || *t == xlr_type_index_1).then_some(*v)
-        }) else {
-            vm_idx_1_based = vm_idx_1_based.saturating_add(count);
-            continue;
-        };
-
-        // In most workbooks, `rc/@v` is an index into the `<futureMetadata name="XLRICHVALUE">`
-        // `<bk>` list and we must dereference `rvb/@i` to get the rich value record index.
-        //
-        // Some producers omit `<futureMetadata name="XLRICHVALUE">` entirely and store the rich
-        // value record index directly in `rc/@v`. If we didn't find any `futureMetadata` rich-value
-        // blocks, treat `rc/@v` as the record index.
-        let rich_value_index = if future_bk_rich_value_index.is_empty() {
-            Some(future_idx)
-        } else {
-            resolve_bk_run(&future_bk_rich_value_index, future_idx)
-                .or_else(|| {
-                    future_idx
-                        .checked_sub(1)
-                        .and_then(|idx| resolve_bk_run(&future_bk_rich_value_index, idx))
-                })
-                .flatten()
-        };
-        let Some(rich_value_index) = rich_value_index else {
-            vm_idx_1_based = vm_idx_1_based.saturating_add(count);
-            continue;
-        };
-
-        for offset in 0..count {
-            let vm = vm_idx_1_based.saturating_add(offset);
-            vm_to_rich_value_index.insert(vm, rich_value_index);
-            if vm > 0 {
-                vm_to_rich_value_index.entry(vm - 1).or_insert(rich_value_index);
-            }
-        }
-        vm_idx_1_based = vm_idx_1_based.saturating_add(count);
-    }
-
-    Ok(vm_to_rich_value_index)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_vm_to_rich_value_index;
-
-    #[test]
-    fn metadata_bk_count_is_respected_for_embedded_images_vm_mapping() {
-        // Ensure `<bk count="N">` acts as run-length encoding for both:
-        // - valueMetadata `vm` indices
-        // - futureMetadata `rc/@v` indices
-        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
-  <metadataTypes count="1">
-    <metadataType name="XLRICHVALUE"/>
-  </metadataTypes>
-  <futureMetadata name="XLRICHVALUE">
-    <bk count="2">
-      <extLst>
-        <ext uri="{00000000-0000-0000-0000-000000000000}">
-          <xlrd:rvb i="5"/>
-        </ext>
-      </extLst>
-    </bk>
-  </futureMetadata>
-  <valueMetadata count="3">
-    <bk count="3"><rc t="1" v="1"/></bk>
-  </valueMetadata>
-</metadata>
-"#;
-
-        let map = parse_vm_to_rich_value_index(xml).expect("parse vm->rich value");
-        assert_eq!(map.get(&1), Some(&5));
-        assert_eq!(map.get(&2), Some(&5));
-        assert_eq!(map.get(&3), Some(&5));
-    }
-
-    #[test]
-    fn metadata_rc_v_can_store_rich_value_index_directly_when_futuremetadata_missing() {
-        // Some producers omit `<futureMetadata name="XLRICHVALUE">` and store the rich value index
-        // directly in `rc/@v`. Ensure we still build a vm->rich-value mapping in that case.
-        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <metadataTypes count="1">
-    <metadataType name="XLRICHVALUE"/>
-  </metadataTypes>
-  <valueMetadata count="1">
-    <bk>
-      <rc t="1" v="7"/>
-    </bk>
-  </valueMetadata>
-</metadata>
-"#;
-
-        let map = parse_vm_to_rich_value_index(xml).expect("parse vm->rich value");
-        assert_eq!(map.get(&1), Some(&7));
-    }
 }
 
 fn parse_local_image_structure_positions(

@@ -309,10 +309,19 @@ fn parse_value_metadata_mappings(
             continue;
         };
 
-        let Some(v) = rc
-            .attribute("v")
-            .and_then(|v| v.parse::<u32>().ok())
-            .and_then(|idx| resolve_bk_run(future_bk_indices, idx))
+        let Some(v_idx) = rc.attribute("v").and_then(|v| v.parse::<u32>().ok()) else {
+            vm_start_1_based = vm_start_1_based.saturating_add(count);
+            continue;
+        };
+
+        let Some(v) = resolve_bk_run(future_bk_indices, v_idx)
+            // Some producers have been observed to use 1-based indices into the `<futureMetadata>`
+            // `<bk>` list. If the 0-based interpretation doesn't resolve, fall back to `v-1`.
+            .or_else(|| {
+                v_idx
+                    .checked_sub(1)
+                    .and_then(|idx| resolve_bk_run(future_bk_indices, idx))
+            })
             .flatten()
         else {
             vm_start_1_based = vm_start_1_based.saturating_add(count);
@@ -562,5 +571,54 @@ mod tests {
         assert_eq!(map.get(&1), Some(&5));
         assert_eq!(map.get(&3), Some(&5));
         assert_eq!(map.len(), 3);
+    }
+
+    #[test]
+    fn parses_vm_to_rich_value_indices_one_based_v() {
+        // Some producers use 1-based indices into the `<futureMetadata name="XLRICHVALUE">` `<bk>`
+        // list. This should still resolve to the `rvb/@i` rich value index.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <futureMetadata name="XLRICHVALUE" count="1">
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000000}">
+          <xlrd:rvb i="7"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+  <valueMetadata count="1">
+    <bk><rc t="1" v="1"/></bk>
+  </valueMetadata>
+</metadata>
+"#;
+
+        let map = parse_value_metadata_vm_to_rich_value_index_map(xml.as_bytes()).unwrap();
+        assert_eq!(map.get(&1), Some(&7));
+    }
+
+    #[test]
+    fn parses_direct_rich_value_indices_when_futuremetadata_missing() {
+        // Some producers omit `<futureMetadata name="XLRICHVALUE">` entirely and store the rich
+        // value index directly in `<valueMetadata><bk><rc ... v="..."/>`.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <valueMetadata count="1">
+    <bk><rc t="1" v="42"/></bk>
+  </valueMetadata>
+</metadata>
+"#;
+
+        let map = parse_value_metadata_vm_to_rich_value_index_map(xml.as_bytes()).unwrap();
+        assert_eq!(map.get(&1), Some(&42));
+        assert_eq!(map.len(), 1);
     }
 }
