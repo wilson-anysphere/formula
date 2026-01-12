@@ -71,15 +71,24 @@ Top-level keys in `tauri.conf.json` define the packaged app identity:
 
 ### `app.security.csp`
 
-The CSP is set in `app.security.csp`.
+The CSP is set in `app.security.csp` (see `apps/desktop/src-tauri/tauri.conf.json`).
 
-Current policy allows:
+Current policy (exact):
 
-- `script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:` (WASM + JS evaluation used by scripting/macro tooling)
-- `worker-src 'self' blob:` and `child-src 'self' blob:` (Workers; some bundlers bootstrap via `blob:` URLs)
-- `connect-src 'self' https: wss: blob: data:` (current policy)
-  - `https:`/`wss:` are allowed because the app needs to talk to remote services (e.g. collaboration over WebSockets, and remote connectors).
-  - In dev you may also want to allow localhost endpoints (e.g. Ollama at `http://localhost:11434`) by adding them to `connect-src` in `apps/desktop/src-tauri/tauri.conf.json`.
+```text
+default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* blob: data:
+```
+
+Rationale:
+
+- The Rust engine runs as **WebAssembly inside a module Worker**, so CSP must allow:
+  - `script-src 'wasm-unsafe-eval'` for WASM compilation/instantiation.
+  - `worker-src 'self' blob:` for module workers (Vite may use `blob:` URLs for worker bootstrapping).
+- We also rely on `script-src 'unsafe-eval'` for the scripting sandbox (`new Function`-based evaluation in a Worker).
+- `connect-src` stays narrow but must allow:
+  - `https:` for remote APIs and user-driven Power Query fetches.
+  - `wss:` for collaboration WebSocket connections.
+  - loopback (`http://localhost:*`, `http://127.0.0.1:*`, `ws://localhost:*`, `ws://127.0.0.1:*`) for optional local-model providers like Ollama.
 
 ### `app.windows[].capabilities` (Tauri permissions)
 

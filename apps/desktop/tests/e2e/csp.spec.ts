@@ -23,6 +23,25 @@ function viteFsUrl(absPath: string) {
   return `/@fs${absPath}`;
 }
 
+function getCspDirectiveSources(cspHeader: string, directive: string): string[] {
+  // Very small CSP parser: enough for the e2e parity checks.
+  // Example: "default-src 'self'; connect-src 'self' https:".
+  const parts = cspHeader
+    .split(";")
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  const directivePrefix = `${directive} `;
+  const directiveValue = parts.find((part) => part === directive || part.startsWith(directivePrefix));
+  if (!directiveValue) return [];
+
+  return directiveValue
+    .slice(directive.length)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
 test.describe("Content Security Policy (Tauri parity)", () => {
   test("startup has no CSP violations and allows WASM-in-worker execution", async ({ page }) => {
     const cspViolations: string[] = [];
@@ -40,6 +59,15 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     const response = await page.goto("/");
     const cspHeader = response?.headers()["content-security-policy"];
     expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
+
+    const connectSrc = getCspDirectiveSources(String(cspHeader), "connect-src");
+    expect(connectSrc, "CSP `connect-src` should allow remote APIs, collab, and loopback providers").toContain("'self'");
+    expect(connectSrc).toContain("https:");
+    expect(connectSrc).toContain("wss:");
+    expect(connectSrc).toContain("http://localhost:*");
+    expect(connectSrc).toContain("http://127.0.0.1:*");
+    expect(connectSrc).toContain("ws://localhost:*");
+    expect(connectSrc).toContain("ws://127.0.0.1:*");
 
     // The CSP smoke test doesn't need the full UI to render; it only needs the
     // document to load so we can validate WASM + Worker execution under the
