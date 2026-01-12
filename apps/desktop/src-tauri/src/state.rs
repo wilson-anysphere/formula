@@ -1358,6 +1358,7 @@ impl AppState {
         // macro-enabled.
         if ext.is_some_and(Self::is_macro_free_extension) {
             workbook.vba_project_bin = None;
+            workbook.vba_project_signature_bin = None;
             workbook.macro_fingerprint = None;
         }
         self.dirty = false;
@@ -4411,6 +4412,7 @@ mod tests {
         let mut workbook = Workbook::new_empty(Some("/tmp/original.xlsm".to_string()));
         workbook.add_sheet("Sheet1".to_string());
         workbook.vba_project_bin = Some(vec![1u8, 2, 3]);
+        workbook.vba_project_signature_bin = Some(vec![4u8, 5, 6]);
         workbook.macro_fingerprint = Some("abc".to_string());
 
         let mut state = AppState::new();
@@ -4422,6 +4424,7 @@ mod tests {
 
         let workbook = state.get_workbook().expect("workbook loaded");
         assert_eq!(workbook.vba_project_bin, None);
+        assert_eq!(workbook.vba_project_signature_bin, None);
         assert_eq!(workbook.macro_fingerprint, None);
     }
 
