@@ -12,7 +12,8 @@ This package is intentionally lightweight and bridge-driven: the host applicatio
 ### Native Python (desktop / Node)
 
 ```js
-import { NativePythonRuntime, MockWorkbook } from "@formula/python-runtime";
+import { NativePythonRuntime } from "@formula/python-runtime";
+import { MockWorkbook } from "@formula/python-runtime/test-utils";
 
 const workbook = new MockWorkbook(); // example bridge (tests)
 const runtime = new NativePythonRuntime();
@@ -39,7 +40,8 @@ included adapter:
 
 ```js
 import { DocumentController } from "../../apps/desktop/src/document/documentController.js";
-import { DocumentControllerBridge, NativePythonRuntime } from "@formula/python-runtime";
+import { NativePythonRuntime } from "@formula/python-runtime";
+import { DocumentControllerBridge } from "@formula/python-runtime/document-controller";
 
 const doc = new DocumentController();
 const api = new DocumentControllerBridge(doc);
