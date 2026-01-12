@@ -149,6 +149,16 @@ fn preserves_vm_cell_attribute_and_cellimages_parts_through_document_roundtrip()
         .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
         .expect("expected A1 cell");
 
+    let v = cell
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "v")
+        .expect("expected <v> in A1");
+    assert_eq!(
+        v.text(),
+        Some("2"),
+        "expected edited cell value to be written, got: {sheet_xml_str}"
+    );
+
     assert_eq!(
         cell.attribute("vm"),
         Some("9"),
@@ -176,4 +186,3 @@ fn preserves_vm_cell_attribute_and_cellimages_parts_through_document_roundtrip()
         "expected xl/media/image1.png to be preserved byte-for-byte"
     );
 }
-
