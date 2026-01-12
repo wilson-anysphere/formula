@@ -7699,6 +7699,65 @@ fn bytecode_expr_is_eligible_inner(
 
                 array_ok && lookup_ok && match_type_ok
             }
+            bytecode::ast::Function::CoupDayBs
+            | bytecode::ast::Function::CoupDays
+            | bytecode::ast::Function::CoupDaysNc
+            | bytecode::ast::Function::CoupNcd
+            | bytecode::ast::Function::CoupNum
+            | bytecode::ast::Function::CoupPcd => {
+                if args.len() != 3 && args.len() != 4 {
+                    return false;
+                }
+                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+            }
+            bytecode::ast::Function::Price | bytecode::ast::Function::Yield => {
+                if args.len() != 6 && args.len() != 7 {
+                    return false;
+                }
+                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+            }
+            bytecode::ast::Function::Duration | bytecode::ast::Function::MDuration => {
+                if args.len() != 5 && args.len() != 6 {
+                    return false;
+                }
+                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+            }
+            bytecode::ast::Function::Accrintm => {
+                if args.len() != 4 && args.len() != 5 {
+                    return false;
+                }
+                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+            }
+            bytecode::ast::Function::Accrint => {
+                if !(6..=8).contains(&args.len()) {
+                    return false;
+                }
+                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+            }
+            bytecode::ast::Function::Disc
+            | bytecode::ast::Function::PriceDisc
+            | bytecode::ast::Function::YieldDisc
+            | bytecode::ast::Function::Intrate
+            | bytecode::ast::Function::Received => {
+                if args.len() != 4 && args.len() != 5 {
+                    return false;
+                }
+                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+            }
+            bytecode::ast::Function::PriceMat | bytecode::ast::Function::YieldMat => {
+                if args.len() != 5 && args.len() != 6 {
+                    return false;
+                }
+                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+            }
+            bytecode::ast::Function::TbillEq
+            | bytecode::ast::Function::TbillPrice
+            | bytecode::ast::Function::TbillYield => {
+                if args.len() != 3 {
+                    return false;
+                }
+                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+            }
             bytecode::ast::Function::Abs
             | bytecode::ast::Function::Now
             | bytecode::ast::Function::Today

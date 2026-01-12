@@ -552,6 +552,28 @@ fn eval_ast_inner(
                     | Function::Sign
                     | Function::Db
                     | Function::Vdb
+                    | Function::CoupDayBs
+                    | Function::CoupDays
+                    | Function::CoupDaysNc
+                    | Function::CoupNcd
+                    | Function::CoupNum
+                    | Function::CoupPcd
+                    | Function::Price
+                    | Function::Yield
+                    | Function::Duration
+                    | Function::MDuration
+                    | Function::Accrint
+                    | Function::Accrintm
+                    | Function::Disc
+                    | Function::PriceDisc
+                    | Function::YieldDisc
+                    | Function::Intrate
+                    | Function::Received
+                    | Function::PriceMat
+                    | Function::YieldMat
+                    | Function::TbillEq
+                    | Function::TbillPrice
+                    | Function::TbillYield
                     | Function::Concat
                     | Function::Rand
                     | Function::RandBetween
@@ -665,6 +687,97 @@ pub(crate) fn coerce_to_bool(v: &Value) -> Result<bool, ErrorKind> {
         }
         Value::Error(e) => Err(*e),
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Spill),
+    }
+}
+
+fn excel_error_kind(e: ExcelError) -> ErrorKind {
+    match e {
+        ExcelError::Div0 => ErrorKind::Div0,
+        ExcelError::Value => ErrorKind::Value,
+        ExcelError::Num => ErrorKind::Num,
+    }
+}
+
+fn excel_result_number(res: Result<f64, ExcelError>) -> Value {
+    match res {
+        Ok(n) => Value::Number(n),
+        Err(e) => Value::Error(excel_error_kind(e)),
+    }
+}
+
+fn excel_result_serial(res: Result<i32, ExcelError>) -> Value {
+    match res {
+        Ok(n) => Value::Number(n as f64),
+        Err(e) => Value::Error(excel_error_kind(e)),
+    }
+}
+
+fn coerce_to_finite_number(v: &Value) -> Result<f64, ErrorKind> {
+    let n = coerce_to_number(v)?;
+    if !n.is_finite() {
+        return Err(ErrorKind::Num);
+    }
+    Ok(n)
+}
+
+fn coerce_number_to_i32_trunc(n: f64) -> Result<i32, ErrorKind> {
+    let t = n.trunc();
+    if t < (i32::MIN as f64) || t > (i32::MAX as f64) {
+        return Err(ErrorKind::Num);
+    }
+    Ok(t as i32)
+}
+
+fn coerce_to_i32_trunc(v: &Value) -> Result<i32, ErrorKind> {
+    let n = coerce_to_finite_number(v)?;
+    coerce_number_to_i32_trunc(n)
+}
+
+fn datevalue_from_value(value: &Value) -> Result<i32, ErrorKind> {
+    match value {
+        Value::Text(s) => crate::functions::date_time::datevalue(
+            s,
+            thread_value_locale(),
+            thread_now_utc(),
+            thread_date_system(),
+        )
+        .map_err(excel_error_kind),
+        _ => {
+            let n = coerce_to_finite_number(value)?;
+            let serial = n.floor();
+            if serial < (i32::MIN as f64) || serial > (i32::MAX as f64) {
+                return Err(ErrorKind::Num);
+            }
+            Ok(serial as i32)
+        }
+    }
+}
+
+fn basis_from_optional_arg(arg: Option<&Value>) -> Result<i32, ErrorKind> {
+    let Some(arg) = arg else {
+        return Ok(0);
+    };
+    if matches!(arg, Value::Empty) {
+        return Ok(0);
+    }
+
+    let n = coerce_to_finite_number(arg)?;
+    let basis = coerce_number_to_i32_trunc(n)?;
+    if !(0..=4).contains(&basis) {
+        return Err(ErrorKind::Num);
+    }
+    Ok(basis)
+}
+
+fn coerce_to_bool_finite(v: &Value) -> Result<bool, ErrorKind> {
+    match v {
+        Value::Number(n) => {
+            if !n.is_finite() {
+                return Err(ErrorKind::Num);
+            }
+            Ok(*n != 0.0)
+        }
+        other => coerce_to_bool(other),
     }
 }
 
@@ -1199,6 +1312,28 @@ pub fn call_function(
         Function::Sign => fn_sign(args),
         Function::Db => fn_db(args),
         Function::Vdb => fn_vdb(args),
+        Function::CoupDayBs => fn_coupdaybs(args),
+        Function::CoupDays => fn_coupdays(args),
+        Function::CoupDaysNc => fn_coupdaysnc(args),
+        Function::CoupNcd => fn_coupncd(args),
+        Function::CoupNum => fn_coupnum(args),
+        Function::CoupPcd => fn_couppcd(args),
+        Function::Price => fn_price(args),
+        Function::Yield => fn_yield(args),
+        Function::Duration => fn_duration(args),
+        Function::MDuration => fn_mduration(args),
+        Function::Accrint => fn_accrint(args),
+        Function::Accrintm => fn_accrintm(args),
+        Function::Disc => fn_disc(args),
+        Function::PriceDisc => fn_pricedisc(args),
+        Function::YieldDisc => fn_yielddisc(args),
+        Function::Intrate => fn_intrate(args),
+        Function::Received => fn_received(args),
+        Function::PriceMat => fn_pricemat(args),
+        Function::YieldMat => fn_yieldmat(args),
+        Function::TbillEq => fn_tbilleq(args),
+        Function::TbillPrice => fn_tbillprice(args),
+        Function::TbillYield => fn_tbillyield(args),
         Function::Concat => fn_concat(args),
         Function::Rand => fn_rand(args, base),
         Function::RandBetween => fn_randbetween(args, base),
@@ -1431,6 +1566,830 @@ fn fn_vdb(args: &[Value]) -> Value {
             crate::error::ExcelError::Num => ErrorKind::Num,
         }),
     }
+}
+
+// ---------------------------------------------------------------------
+// Securities / bond / day-count financial functions
+// ---------------------------------------------------------------------
+
+fn fn_coupdaybs(args: &[Value]) -> Value {
+    if args.len() != 3 && args.len() != 4 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match coerce_to_i32_trunc(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match args.get(3) {
+        Some(v) => match coerce_to_i32_trunc(v) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_number(crate::functions::financial::coupdaybs(
+        settlement,
+        maturity,
+        frequency,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_coupdays(args: &[Value]) -> Value {
+    if args.len() != 3 && args.len() != 4 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match coerce_to_i32_trunc(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match args.get(3) {
+        Some(v) => match coerce_to_i32_trunc(v) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_number(crate::functions::financial::coupdays(
+        settlement,
+        maturity,
+        frequency,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_coupdaysnc(args: &[Value]) -> Value {
+    if args.len() != 3 && args.len() != 4 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match coerce_to_i32_trunc(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match args.get(3) {
+        Some(v) => match coerce_to_i32_trunc(v) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_number(crate::functions::financial::coupdaysnc(
+        settlement,
+        maturity,
+        frequency,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_coupncd(args: &[Value]) -> Value {
+    if args.len() != 3 && args.len() != 4 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match coerce_to_i32_trunc(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match args.get(3) {
+        Some(v) => match coerce_to_i32_trunc(v) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_serial(crate::functions::financial::coupncd(
+        settlement,
+        maturity,
+        frequency,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_coupnum(args: &[Value]) -> Value {
+    if args.len() != 3 && args.len() != 4 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match coerce_to_i32_trunc(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match args.get(3) {
+        Some(v) => match coerce_to_i32_trunc(v) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_number(crate::functions::financial::coupnum(
+        settlement,
+        maturity,
+        frequency,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_couppcd(args: &[Value]) -> Value {
+    if args.len() != 3 && args.len() != 4 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match coerce_to_i32_trunc(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match args.get(3) {
+        Some(v) => match coerce_to_i32_trunc(v) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_serial(crate::functions::financial::couppcd(
+        settlement,
+        maturity,
+        frequency,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_price(args: &[Value]) -> Value {
+    if args.len() != 6 && args.len() != 7 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let rate = match coerce_to_finite_number(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let yld = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let redemption = match coerce_to_finite_number(&args[4]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match coerce_to_i32_trunc(&args[5]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match args.get(6) {
+        Some(v) => match coerce_to_i32_trunc(v) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_number(crate::functions::financial::price(
+        settlement,
+        maturity,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_yield(args: &[Value]) -> Value {
+    if args.len() != 6 && args.len() != 7 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let rate = match coerce_to_finite_number(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let pr = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let redemption = match coerce_to_finite_number(&args[4]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match coerce_to_i32_trunc(&args[5]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match args.get(6) {
+        Some(v) => match coerce_to_i32_trunc(v) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_number(crate::functions::financial::yield_rate(
+        settlement,
+        maturity,
+        rate,
+        pr,
+        redemption,
+        frequency,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_duration(args: &[Value]) -> Value {
+    if args.len() != 5 && args.len() != 6 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let coupon = match coerce_to_finite_number(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let yld = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match coerce_to_i32_trunc(&args[4]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match args.get(5) {
+        Some(v) => match coerce_to_i32_trunc(v) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_number(crate::functions::financial::duration(
+        settlement,
+        maturity,
+        coupon,
+        yld,
+        frequency,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_mduration(args: &[Value]) -> Value {
+    if args.len() != 5 && args.len() != 6 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let coupon = match coerce_to_finite_number(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let yld = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match coerce_to_i32_trunc(&args[4]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match args.get(5) {
+        Some(v) => match coerce_to_i32_trunc(v) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_number(crate::functions::financial::mduration(
+        settlement,
+        maturity,
+        coupon,
+        yld,
+        frequency,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_accrintm(args: &[Value]) -> Value {
+    if args.len() != 4 && args.len() != 5 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let issue = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let settlement = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let rate = match coerce_to_finite_number(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let par = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match args.get(4) {
+        Some(v) if matches!(v, Value::Empty) => 0,
+        Some(v) => match coerce_to_i32_trunc(v) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    excel_result_number(crate::functions::financial::accrintm(
+        issue,
+        settlement,
+        rate,
+        par,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_accrint(args: &[Value]) -> Value {
+    if args.len() < 6 || args.len() > 8 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let issue = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let first_interest = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let settlement = match datevalue_from_value(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let rate = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let par = match coerce_to_finite_number(&args[4]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let frequency = match coerce_to_i32_trunc(&args[5]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let basis = match args.get(6) {
+        Some(v) if matches!(v, Value::Empty) => 0,
+        Some(v) => match coerce_to_i32_trunc(v) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => 0,
+    };
+
+    let calc_method = match args.get(7) {
+        Some(v) if matches!(v, Value::Empty) => false,
+        Some(v) => match coerce_to_bool_finite(v) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        },
+        None => false,
+    };
+
+    excel_result_number(crate::functions::financial::accrint(
+        issue,
+        first_interest,
+        settlement,
+        rate,
+        par,
+        frequency,
+        basis,
+        calc_method,
+        thread_date_system(),
+    ))
+}
+
+fn fn_disc(args: &[Value]) -> Value {
+    if args.len() != 4 && args.len() != 5 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let pr = match coerce_to_finite_number(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let redemption = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match basis_from_optional_arg(args.get(4)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(crate::functions::financial::disc(
+        settlement,
+        maturity,
+        pr,
+        redemption,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_pricedisc(args: &[Value]) -> Value {
+    if args.len() != 4 && args.len() != 5 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let discount = match coerce_to_finite_number(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let redemption = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match basis_from_optional_arg(args.get(4)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(crate::functions::financial::pricedisc(
+        settlement,
+        maturity,
+        discount,
+        redemption,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_yielddisc(args: &[Value]) -> Value {
+    if args.len() != 4 && args.len() != 5 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let pr = match coerce_to_finite_number(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let redemption = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match basis_from_optional_arg(args.get(4)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(crate::functions::financial::yielddisc(
+        settlement,
+        maturity,
+        pr,
+        redemption,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_intrate(args: &[Value]) -> Value {
+    if args.len() != 4 && args.len() != 5 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let investment = match coerce_to_finite_number(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let redemption = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match basis_from_optional_arg(args.get(4)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(crate::functions::financial::intrate(
+        settlement,
+        maturity,
+        investment,
+        redemption,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_received(args: &[Value]) -> Value {
+    if args.len() != 4 && args.len() != 5 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let investment = match coerce_to_finite_number(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let discount = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match basis_from_optional_arg(args.get(4)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(crate::functions::financial::received(
+        settlement,
+        maturity,
+        investment,
+        discount,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_pricemat(args: &[Value]) -> Value {
+    if args.len() != 5 && args.len() != 6 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let issue = match datevalue_from_value(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let rate = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let yld = match coerce_to_finite_number(&args[4]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match basis_from_optional_arg(args.get(5)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(crate::functions::financial::pricemat(
+        settlement,
+        maturity,
+        issue,
+        rate,
+        yld,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_yieldmat(args: &[Value]) -> Value {
+    if args.len() != 5 && args.len() != 6 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let issue = match datevalue_from_value(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let rate = match coerce_to_finite_number(&args[3]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let pr = match coerce_to_finite_number(&args[4]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let basis = match basis_from_optional_arg(args.get(5)) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(crate::functions::financial::yieldmat(
+        settlement,
+        maturity,
+        issue,
+        rate,
+        pr,
+        basis,
+        thread_date_system(),
+    ))
+}
+
+fn fn_tbillprice(args: &[Value]) -> Value {
+    if args.len() != 3 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let discount = match coerce_to_finite_number(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(crate::functions::financial::tbillprice(
+        settlement, maturity, discount,
+    ))
+}
+
+fn fn_tbillyield(args: &[Value]) -> Value {
+    if args.len() != 3 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let pr = match coerce_to_finite_number(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(crate::functions::financial::tbillyield(settlement, maturity, pr))
+}
+
+fn fn_tbilleq(args: &[Value]) -> Value {
+    if args.len() != 3 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let settlement = match datevalue_from_value(&args[0]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let maturity = match datevalue_from_value(&args[1]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let discount = match coerce_to_finite_number(&args[2]) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(crate::functions::financial::tbilleq(
+        settlement, maturity, discount,
+    ))
 }
 
 fn fn_abs(args: &[Value]) -> Value {
