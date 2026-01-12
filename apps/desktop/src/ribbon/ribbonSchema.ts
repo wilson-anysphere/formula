@@ -156,7 +156,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "file.new.templates.budget", label: "Budget", ariaLabel: "Budget template", iconId: "currency" },
                 { id: "file.new.templates.invoice", label: "Invoice", ariaLabel: "Invoice template", iconId: "file" },
                 { id: "file.new.templates.calendar", label: "Calendar", ariaLabel: "Calendar template", iconId: "calendar" },
-                { id: "file.new.templates.more", label: "More…", ariaLabel: "More templates", icon: "⋯" },
+                { id: "file.new.templates.more", label: "More…", ariaLabel: "More templates", iconId: "moreFormats" },
               ],
             },
           ],
@@ -220,7 +220,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "file.open.recent.book1", label: "Book1.xlsx", ariaLabel: "Open Book1", iconId: "file" },
                 { id: "file.open.recent.budget", label: "Budget.xlsx", ariaLabel: "Open Budget", iconId: "file" },
                 { id: "file.open.recent.forecast", label: "Forecast.xlsx", ariaLabel: "Open Forecast", iconId: "file" },
-                { id: "file.open.recent.more", label: "More…", ariaLabel: "More recent files", icon: "⋯" },
+                { id: "file.open.recent.more", label: "More…", ariaLabel: "More recent files", iconId: "moreFormats" },
               ],
             },
             {
@@ -579,8 +579,8 @@ export const defaultRibbonSchema: RibbonSchema = {
               kind: "dropdown",
               size: "icon",
               menuItems: [
-                { id: "home.alignment.orientation.angleCounterclockwise", label: "Angle Counterclockwise", ariaLabel: "Angle Counterclockwise", icon: "⟲" },
-                { id: "home.alignment.orientation.angleClockwise", label: "Angle Clockwise", ariaLabel: "Angle Clockwise", icon: "⟳" },
+                { id: "home.alignment.orientation.angleCounterclockwise", label: "Angle Counterclockwise", ariaLabel: "Angle Counterclockwise", iconId: "orientation" },
+                { id: "home.alignment.orientation.angleClockwise", label: "Angle Clockwise", ariaLabel: "Angle Clockwise", iconId: "orientation" },
                 { id: "home.alignment.orientation.verticalText", label: "Vertical Text", ariaLabel: "Vertical Text", iconId: "arrowUpDown" },
                 { id: "home.alignment.orientation.rotateUp", label: "Rotate Text Up", ariaLabel: "Rotate Text Up", iconId: "arrowUp" },
                 { id: "home.alignment.orientation.rotateDown", label: "Rotate Text Down", ariaLabel: "Rotate Text Down", iconId: "arrowDown" },
@@ -792,7 +792,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "home.editing.fill.right", label: "Right", ariaLabel: "Fill Right", iconId: "arrowRight" },
                 { id: "home.editing.fill.up", label: "Up", ariaLabel: "Fill Up", iconId: "arrowUp" },
                 { id: "home.editing.fill.left", label: "Left", ariaLabel: "Fill Left", iconId: "arrowLeft" },
-                { id: "home.editing.fill.series", label: "Series…", ariaLabel: "Series", icon: "⋯" },
+                { id: "home.editing.fill.series", label: "Series…", ariaLabel: "Series", iconId: "moreFormats" },
               ],
             },
             {
@@ -1079,7 +1079,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "insert.charts.recommendedCharts.column", label: "Column", ariaLabel: "Recommended Column Charts", icon: "▮▮" },
                 { id: "insert.charts.recommendedCharts.line", label: "Line", ariaLabel: "Recommended Line Charts", iconId: "chart" },
                 { id: "insert.charts.recommendedCharts.pie", label: "Pie", ariaLabel: "Recommended Pie Charts", icon: "◔" },
-                { id: "insert.charts.recommendedCharts.more", label: "More…", ariaLabel: "More chart recommendations", icon: "⋯" },
+                { id: "insert.charts.recommendedCharts.more", label: "More…", ariaLabel: "More chart recommendations", iconId: "moreFormats" },
               ],
             },
             {
@@ -1092,7 +1092,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "insert.charts.column.clusteredColumn", label: "Clustered Column", ariaLabel: "Clustered Column", icon: "▮▮" },
                 { id: "insert.charts.column.stackedColumn", label: "Stacked Column", ariaLabel: "Stacked Column", icon: "▮▯" },
                 { id: "insert.charts.column.stackedColumn100", label: "100% Stacked Column", ariaLabel: "100% Stacked Column", icon: "▮▮" },
-                { id: "insert.charts.column.more", label: "More Column Charts…", ariaLabel: "More Column Charts", icon: "⋯" },
+                { id: "insert.charts.column.more", label: "More Column Charts…", ariaLabel: "More Column Charts", iconId: "moreFormats" },
               ],
             },
             {
@@ -1105,7 +1105,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                 { id: "insert.charts.line.line", label: "Line", ariaLabel: "Line", iconId: "chart" },
                 { id: "insert.charts.line.lineWithMarkers", label: "Line with Markers", ariaLabel: "Line with Markers", icon: "•" },
                 { id: "insert.charts.line.stackedArea", label: "Stacked Area", ariaLabel: "Stacked Area", iconId: "chart" },
-                { id: "insert.charts.line.more", label: "More Line Charts…", ariaLabel: "More Line Charts", icon: "⋯" },
+                { id: "insert.charts.line.more", label: "More Line Charts…", ariaLabel: "More Line Charts", iconId: "moreFormats" },
               ],
             },
             {
@@ -1117,7 +1117,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               menuItems: [
                 { id: "insert.charts.pie.pie", label: "Pie", ariaLabel: "Pie", icon: "◔" },
                 { id: "insert.charts.pie.doughnut", label: "Doughnut", ariaLabel: "Doughnut", icon: "◑" },
-                { id: "insert.charts.pie.more", label: "More Pie Charts…", ariaLabel: "More Pie Charts", icon: "⋯" },
+                { id: "insert.charts.pie.more", label: "More Pie Charts…", ariaLabel: "More Pie Charts", iconId: "moreFormats" },
               ],
             },
             {
@@ -1129,7 +1129,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               menuItems: [
                 { id: "insert.charts.bar.clusteredBar", label: "Clustered Bar", ariaLabel: "Clustered Bar", icon: "▭" },
                 { id: "insert.charts.bar.stackedBar", label: "Stacked Bar", ariaLabel: "Stacked Bar", icon: "▭" },
-                { id: "insert.charts.bar.more", label: "More Bar Charts…", ariaLabel: "More Bar Charts", icon: "⋯" },
+                { id: "insert.charts.bar.more", label: "More Bar Charts…", ariaLabel: "More Bar Charts", iconId: "moreFormats" },
               ],
             },
             {
@@ -1141,19 +1141,19 @@ export const defaultRibbonSchema: RibbonSchema = {
               menuItems: [
                 { id: "insert.charts.area.area", label: "Area", ariaLabel: "Area", iconId: "chart" },
                 { id: "insert.charts.area.stackedArea", label: "Stacked Area", ariaLabel: "Stacked Area", iconId: "chart" },
-                { id: "insert.charts.area.more", label: "More Area Charts…", ariaLabel: "More Area Charts", icon: "⋯" },
+                { id: "insert.charts.area.more", label: "More Area Charts…", ariaLabel: "More Area Charts", iconId: "moreFormats" },
               ],
             },
             {
               id: "insert.charts.scatter",
               label: "Scatter",
               ariaLabel: "Insert Scatter (X, Y) Chart",
-              icon: "⋯",
+              iconId: "chart",
               kind: "dropdown",
               menuItems: [
-                { id: "insert.charts.scatter.scatter", label: "Scatter", ariaLabel: "Scatter", icon: "⋯" },
+                { id: "insert.charts.scatter.scatter", label: "Scatter", ariaLabel: "Scatter", iconId: "chart" },
                 { id: "insert.charts.scatter.smoothLines", label: "Scatter with Smooth Lines", ariaLabel: "Scatter with Smooth Lines", iconId: "chart" },
-                { id: "insert.charts.scatter.more", label: "More Scatter Charts…", ariaLabel: "More Scatter Charts", icon: "⋯" },
+                { id: "insert.charts.scatter.more", label: "More Scatter Charts…", ariaLabel: "More Scatter Charts", iconId: "moreFormats" },
               ],
             },
             {
@@ -1164,7 +1164,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               kind: "dropdown",
               menuItems: [
                 { id: "insert.charts.map.filledMap", label: "Filled Map", ariaLabel: "Filled Map", iconId: "globe" },
-                { id: "insert.charts.map.more", label: "More Map Charts…", ariaLabel: "More Map Charts", icon: "⋯" },
+                { id: "insert.charts.map.more", label: "More Map Charts…", ariaLabel: "More Map Charts", iconId: "moreFormats" },
               ],
             },
             { id: "insert.charts.histogram", label: "Histogram", ariaLabel: "Insert Statistic Chart (Histogram, Pareto)", icon: "▁▃▆", kind: "dropdown" },
@@ -1383,7 +1383,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               menuItems: [
                 { id: "pageLayout.pageSetup.size.letter", label: "Letter", ariaLabel: "Letter", iconId: "file" },
                 { id: "pageLayout.pageSetup.size.a4", label: "A4", ariaLabel: "A4", iconId: "file" },
-                { id: "pageLayout.pageSetup.size.more", label: "More Paper Sizes…", ariaLabel: "More Paper Sizes", icon: "⋯" },
+                { id: "pageLayout.pageSetup.size.more", label: "More Paper Sizes…", ariaLabel: "More Paper Sizes", iconId: "moreFormats" },
               ],
             },
             {
