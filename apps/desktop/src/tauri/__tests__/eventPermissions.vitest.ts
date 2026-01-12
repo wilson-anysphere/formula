@@ -98,6 +98,9 @@ describe("tauri capability event permissions", () => {
     expect(hasPermission("core:default")).toBe(false);
     expect(hasPermission("core:event:default")).toBe(false);
     expect(hasPermission("core:window:default")).toBe(false);
+    // Guard against legacy/unprefixed identifiers too (schema drift).
+    expect(hasPermission("event:default")).toBe(false);
+    expect(hasPermission("window:default")).toBe(false);
   });
 
   it("includes the desktop shell event names used by the frontend", () => {
