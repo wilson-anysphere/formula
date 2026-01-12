@@ -4387,7 +4387,7 @@ try {
   });
 
   void listen("menu-quit", () => {
-    void handleCloseRequest({ quit: true }).catch((err) => {
+    void requestAppQuit().catch((err) => {
       console.error("Failed to quit app:", err);
     });
   });
