@@ -346,10 +346,16 @@ let result = runWasmPack({
 // `Resource temporarily unavailable` (thread or process spawn failures). If the caller didn't
 // explicitly opt into custom concurrency settings, retry once with the most conservative config.
 if ((result.status ?? 0) !== 0) {
+  const rustflagsSetsCodegenUnits =
+    typeof process.env.RUSTFLAGS === "string" && process.env.RUSTFLAGS.includes("codegen-units");
   const userProvidedConcurrency =
     process.env.CARGO_BUILD_JOBS ||
     process.env.MAKEFLAGS ||
-    process.env.RUSTFLAGS ||
+    // Treat RUSTFLAGS as a concurrency override only when it sets `-C codegen-units=...`.
+    // Many environments (including CI) set RUSTFLAGS for unrelated reasons (e.g. `-D warnings`);
+    // we still want to retry with a conservative `-j1` config when the failure is due to thread/
+    // process limits.
+    (rustflagsSetsCodegenUnits ? process.env.RUSTFLAGS : undefined) ||
     process.env.CARGO_PROFILE_RELEASE_CODEGEN_UNITS ||
     process.env.RAYON_NUM_THREADS ||
     process.env.FORMULA_RAYON_NUM_THREADS ||
