@@ -24,6 +24,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::{Emitter, Listener, Manager, State};
 use tauri_plugin_notification::NotificationExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::{timeout, Duration};
 use url::Url;
@@ -54,6 +56,13 @@ struct OauthRedirectState {
 }
 
 type SharedOauthRedirectState = Arc<Mutex<OauthRedirectState>>;
+
+#[derive(Debug, Default)]
+struct OauthLoopbackState {
+    active_redirect_uris: HashSet<String>,
+}
+
+type SharedOauthLoopbackState = Arc<Mutex<OauthLoopbackState>>;
 
 type SharedStartupMetrics = Arc<Mutex<StartupMetrics>>;
 
@@ -500,6 +509,158 @@ async fn show_system_notification(
     Ok(())
 }
 
+#[tauri::command]
+async fn oauth_loopback_listen(
+    app: tauri::AppHandle,
+    state: State<'_, SharedOauthLoopbackState>,
+    redirect_uri: String,
+) -> Result<(), String> {
+    let parsed = Url::parse(redirect_uri.trim())
+        .map_err(|err| format!("Invalid OAuth redirect URI: {err}"))?;
+
+    if parsed.scheme() != "http" {
+        return Err("Loopback OAuth redirect capture requires an http:// redirect URI".to_string());
+    }
+
+    let host = parsed.host_str().unwrap_or("");
+    if host != "127.0.0.1" {
+        return Err(
+            "Loopback OAuth redirect capture currently supports only 127.0.0.1".to_string(),
+        );
+    }
+
+    let port = parsed
+        .port()
+        .ok_or_else(|| "Loopback OAuth redirect URI must include an explicit port".to_string())?;
+
+    let expected_path = parsed.path().to_string();
+    let redirect_uri = parsed.to_string();
+
+    let shared = state.inner().clone();
+    {
+        let mut guard = shared.lock().unwrap();
+        if guard.active_redirect_uris.contains(&redirect_uri) {
+            return Ok(());
+        }
+        guard.active_redirect_uris.insert(redirect_uri.clone());
+    }
+
+    let listener = match TcpListener::bind(("127.0.0.1", port)).await {
+        Ok(listener) => listener,
+        Err(err) => {
+            if let Ok(mut guard) = shared.lock() {
+                guard.active_redirect_uris.remove(&redirect_uri);
+            }
+            return Err(format!(
+                "Failed to bind loopback OAuth redirect listener on 127.0.0.1:{port}: {err}"
+            ));
+        }
+    };
+
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        struct ActiveGuard {
+            state: SharedOauthLoopbackState,
+            key: String,
+        }
+        impl Drop for ActiveGuard {
+            fn drop(&mut self) {
+                if let Ok(mut guard) = self.state.lock() {
+                    guard.active_redirect_uris.remove(&self.key);
+                }
+            }
+        }
+        let _guard = ActiveGuard {
+            state: shared.clone(),
+            key: redirect_uri.clone(),
+        };
+
+        let overall_timeout = Duration::from_secs(5 * 60);
+        let _ = timeout(overall_timeout, async {
+            loop {
+                let (mut socket, _) = match listener.accept().await {
+                    Ok(v) => v,
+                    Err(_) => break,
+                };
+
+                let mut buf = vec![0_u8; 8192];
+                let n = match timeout(Duration::from_secs(2), socket.read(&mut buf)).await {
+                    Ok(Ok(n)) => n,
+                    _ => 0,
+                };
+                if n == 0 {
+                    continue;
+                }
+                buf.truncate(n);
+                let req = String::from_utf8_lossy(&buf);
+                let line = req.lines().next().unwrap_or("");
+                let mut parts = line.split_whitespace();
+                let method = parts.next().unwrap_or("");
+                let target = parts.next().unwrap_or("");
+
+                if method != "GET" {
+                    let _ = socket
+                        .write_all(b"HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n")
+                        .await;
+                    continue;
+                }
+
+                // The request target should be a path+query (e.g. `/callback?code=...`), but handle
+                // absolute-form targets defensively.
+                let target = if target.starts_with("http://") || target.starts_with("https://") {
+                    Url::parse(target)
+                        .ok()
+                        .map(|u| {
+                            let mut out = u.path().to_string();
+                            if let Some(q) = u.query() {
+                                out.push('?');
+                                out.push_str(q);
+                            }
+                            out
+                        })
+                        .unwrap_or_else(|| target.to_string())
+                } else {
+                    target.to_string()
+                };
+
+                let mut split = target.splitn(2, '?');
+                let path = split.next().unwrap_or("");
+                let query = split.next();
+
+                if path != expected_path {
+                    let _ = socket
+                        .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+                        .await;
+                    continue;
+                }
+
+                let mut full = match Url::parse(&redirect_uri) {
+                    Ok(u) => u,
+                    Err(_) => break,
+                };
+                full.set_query(query);
+                full.set_fragment(None);
+                let full_url = full.to_string();
+
+                handle_oauth_redirect_request(&app_handle, vec![full_url.clone()]);
+
+                let body = "<!doctype html><html><head><meta charset=\"utf-8\" /><title>Formula</title></head><body><h1>Sign-in complete</h1><p>You can close this window and return to Formula.</p></body></html>";
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = socket.write_all(resp.as_bytes()).await;
+                let _ = socket.shutdown().await;
+                break;
+            }
+        })
+        .await;
+    });
+
+    Ok(())
+}
+
 fn main() {
     // Record a monotonic startup timestamp as early as possible so we can measure
     // cold start time-to-window-visible / time-to-interactive.
@@ -518,6 +679,8 @@ fn main() {
     let open_file_state: SharedOpenFileState = Arc::new(Mutex::new(OpenFileState::default()));
     let oauth_redirect_state: SharedOauthRedirectState =
         Arc::new(Mutex::new(OauthRedirectState::default()));
+    let oauth_loopback_state: SharedOauthLoopbackState =
+        Arc::new(Mutex::new(OauthLoopbackState::default()));
     let initial_argv: Vec<String> = std::env::args().collect();
     let initial_cwd = std::env::current_dir().ok();
     let initial_paths = normalize_open_file_request_paths(extract_open_file_paths(
@@ -577,6 +740,7 @@ fn main() {
         .manage(macro_trust)
         .manage(open_file_state)
         .manage(oauth_redirect_state)
+        .manage(oauth_loopback_state)
         .manage(TrayStatusState::default())
         .manage(startup_metrics)
         // NOTE: IPC hardening / command allowlist (Tauri v2 capabilities)
@@ -655,6 +819,7 @@ fn main() {
             commands::fire_selection_change,
             tray_status::set_tray_status,
             show_system_notification,
+            oauth_loopback_listen,
             report_startup_webview_loaded,
             report_startup_tti,
         ])

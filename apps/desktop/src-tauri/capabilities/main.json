@@ -72,6 +72,7 @@
         "fire_selection_change",
         "set_tray_status",
         "show_system_notification",
+        "oauth_loopback_listen",
         "report_startup_webview_loaded",
         "report_startup_tti"
       ]

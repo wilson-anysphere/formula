@@ -117,7 +117,29 @@ export class DesktopOAuthBroker implements OAuthBroker {
     // Used to gate buffering of early redirects. We only expect redirects very
     // shortly after opening an auth URL (PKCE flow), so avoid holding onto deep
     // links indefinitely if they're delivered at unrelated times.
-    this.lastAuthUrlOpenedAtMs = parsed.searchParams.has("redirect_uri") ? Date.now() : null;
+    const redirectUri = parsed.searchParams.get("redirect_uri");
+    this.lastAuthUrlOpenedAtMs = redirectUri ? Date.now() : null;
+
+    // Loopback redirect capture (RFC 8252). When the auth URL uses a redirect URI
+    // like `http://127.0.0.1:<port>/callback`, start a local listener in the Rust
+    // host *before* opening the system browser so the redirect doesn't race ahead
+    // of server startup.
+    if (redirectUri) {
+      try {
+        const parsedRedirect = new URL(redirectUri);
+        const isLoopback =
+          parsedRedirect.protocol === "http:" && parsedRedirect.hostname === "127.0.0.1" && parsedRedirect.port !== "";
+
+        if (isLoopback) {
+          const invoke = (globalThis as any).__TAURI__?.core?.invoke as ((cmd: string, args?: any) => Promise<any>) | undefined;
+          if (typeof invoke === "function") {
+            await invoke("oauth_loopback_listen", { redirect_uri: redirectUri });
+          }
+        }
+      } catch {
+        // Ignore malformed redirect_uri values; the PKCE flow will fail later with a clearer error.
+      }
+    }
 
     if (!this.openAuthUrlHandler) {
       await shellOpen(url);

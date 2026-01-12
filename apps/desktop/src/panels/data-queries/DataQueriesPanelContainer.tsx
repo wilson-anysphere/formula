@@ -63,9 +63,20 @@ function supportsDesktopOAuthRedirectCapture(redirectUri: string): boolean {
   if (!hasTauri() || !hasTauriEventApi()) return false;
   if (typeof redirectUri !== "string" || redirectUri.trim() === "") return false;
   try {
-    // Currently we only support custom-scheme deep links (e.g. `formula://oauth/callback`).
-    // Loopback redirect capture can be added later.
-    return new URL(redirectUri).protocol.toLowerCase() === "formula:";
+    const url = new URL(redirectUri);
+    const protocol = url.protocol.toLowerCase();
+
+    // Custom-scheme deep links (e.g. `formula://oauth/callback`).
+    if (protocol === "formula:") return true;
+
+    // Loopback redirect capture (RFC 8252) for providers that support it.
+    // Note: we currently only support 127.0.0.1 (not `localhost` / `::1`) to avoid
+    // IPv6 resolution differences between platforms.
+    if (protocol === "http:" && url.hostname === "127.0.0.1" && url.port) {
+      return typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+    }
+
+    return false;
   } catch {
     return false;
   }
