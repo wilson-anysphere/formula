@@ -88,6 +88,8 @@ const SCANNED_FILE_EXTENSIONS = new Set([
   ".cjs",
   ".mts",
   ".cts",
+  ".md",
+  ".html",
   ".json",
   ".yaml",
   ".yml",
