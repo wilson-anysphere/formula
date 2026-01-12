@@ -738,6 +738,11 @@ comments.addReply({
 });
 ```
 
+Desktop note: desktop collaboration uses a *binder-origin* undo scope (DocumentController→Yjs),
+so comment edits must run inside the binder-origin transact wrapper (not `session.transactLocal`).
+Use `createCommentManagerForDoc({ doc: session.doc, transact: undoService.transact })` (see
+`apps/desktop/src/collab/documentControllerCollabUndo.ts` / `apps/desktop/src/app/spreadsheetApp.ts`).
+
 If you need to normalize legacy Array-backed docs to the canonical Map schema:
 
 - `migrateCommentsArrayToMap(doc)` (see [`packages/collab/comments/src/manager.ts`](../packages/collab/comments/src/manager.ts))
