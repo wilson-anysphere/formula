@@ -1727,6 +1727,27 @@ mod tests {
     }
 
     #[test]
+    fn range_map_splits_ranges_inside_call_expr_args_with_parentheses() {
+        // Same scenario as `range_map_splits_ranges_inside_function_args_with_parentheses`, but
+        // the range appears as an argument to a postfix call expression (lambda invocation).
+        let edit = RangeMapEdit {
+            sheet: "Sheet1".to_string(),
+            moved_region: GridRange::new(0, 2, 0, u32::MAX), // C1 and beyond shift left
+            delta_row: 0,
+            delta_col: -1,
+            deleted_region: Some(GridRange::new(0, 1, 0, 1)), // delete B1
+        };
+        let (out, changed) = rewrite_formula_for_range_map(
+            "=LAMBDA(x,x)(A1:C1)",
+            "Sheet1",
+            CellAddr::new(0, 0),
+            &edit,
+        );
+        assert!(changed);
+        assert_eq!(out, "=LAMBDA(x,x)((A1,B1))");
+    }
+
+    #[test]
     fn spill_postfix_is_dropped_when_reference_becomes_ref_error() {
         let delete_col = StructuralEdit::DeleteCols {
             sheet: "Sheet1".to_string(),
