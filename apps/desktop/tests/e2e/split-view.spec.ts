@@ -208,6 +208,21 @@ test.describe("split view", () => {
     const gridSplitter = page.locator("#grid-splitter");
     await expect(gridSplitter).toBeVisible();
 
+    // Splitter drag should *not* emit layout changes on every pointermove (that would trigger
+    // `renderLayout()` and cause jank). Expect a single layout change per completed drag.
+    await page.evaluate(() => {
+      const controller = (window as any).__layoutController;
+      (window as any).__splitRatioChangeCount = 0;
+      if (!controller || typeof controller.on !== "function") return;
+      controller.on("change", () => {
+        (window as any).__splitRatioChangeCount += 1;
+      });
+    });
+
+    const getChangeCount = async () => {
+      return await page.evaluate(() => (window as any).__splitRatioChangeCount ?? 0);
+    };
+
     const getInMemoryRatio = async () => {
       return await page.evaluate(() => (window as any).__layoutController?.layout?.splitView?.ratio ?? 0);
     };
@@ -233,6 +248,7 @@ test.describe("split view", () => {
 
     await expect.poll(getInMemoryRatio).toBeCloseTo(0.1, 3);
     await expect.poll(getPersistedRatio).toBeCloseTo(0.1, 3);
+    await expect.poll(getChangeCount).toBe(1);
 
     // Drag to a mid-range ratio and ensure it is reflected both in-memory and in persisted layout.
     const targetRatio = 0.73;
@@ -244,6 +260,7 @@ test.describe("split view", () => {
 
     await expect.poll(getInMemoryRatio).toBeCloseTo(targetRatio, 1);
     await expect.poll(getPersistedRatio).toBeCloseTo(targetRatio, 1);
+    await expect.poll(getChangeCount).toBe(2);
 
     const inMemoryRatio = await getInMemoryRatio();
     const persistedRatio = await getPersistedRatio();
