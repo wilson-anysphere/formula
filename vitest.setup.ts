@@ -31,7 +31,13 @@ function localStorageUsable(): boolean {
   try {
     // Node 22+ ships an experimental `localStorage` that throws unless started with
     // `--localstorage-file`. We only care that the storage APIs are callable.
-    globalThis.localStorage?.getItem("vitest-probe");
+    const storage = globalThis.localStorage;
+    if (!storage) return false;
+    const key = "vitest-probe";
+    storage.getItem(key);
+    storage.setItem(key, "1");
+    storage.removeItem(key);
+    storage.clear();
     return true;
   } catch {
     return false;
@@ -42,4 +48,3 @@ if (!localStorageUsable()) {
   // eslint-disable-next-line no-global-assign
   globalThis.localStorage = new MemoryLocalStorage();
 }
-

@@ -23,6 +23,45 @@ Fallback (build/dev-time):
 
 Invalid / non-positive values are ignored and fall back to the defaults above.
 
+## Collaboration (real-time sync dev)
+
+The desktop app can run in a simple real-time collaboration mode backed by the local sync server (`services/sync-server`)
+using Yjs + `@formula/collab-session`.
+
+### Start the sync server
+
+```bash
+pnpm dev:sync
+```
+
+The dev server defaults to `ws://127.0.0.1:1234` and accepts the default dev token `dev-token`.
+
+### Start the desktop dev server
+
+```bash
+pnpm -C apps/desktop dev
+```
+
+### Open two clients
+
+Open two browser windows pointing at the same `docId` with different user info:
+
+Window 1:
+
+```
+http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=demo&token=dev-token&userId=u1&userName=Alice&userColor=%234c8bf5
+```
+
+Window 2:
+
+```
+http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=demo&token=dev-token&userId=u2&userName=Bob&userColor=%23f97316
+```
+
+Edits and comments should sync in real-time.
+
+To exercise the conflict UI, edit the same cell concurrently in two windows (e.g. different formulas in the same cell).
+
 ## Pyodide / Python scripting
 
 The Pyodide-based Python runtime (`@formula/python-runtime`) supports two internal backends:

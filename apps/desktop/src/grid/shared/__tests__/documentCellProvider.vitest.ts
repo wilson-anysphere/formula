@@ -140,6 +140,8 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(cell?.style?.diagonalBorders).toEqual({
       down: { width: 1, style: "solid", color: "rgba(0,0,255,1)" }
     });
+    // Ensure we convert Excel-style `#AARRGGBB` into a canvas-compatible CSS color string.
+    expect((cell?.style as any)?.diagonalBorders?.down?.color).not.toMatch(/^#[0-9a-f]{8}$/i);
   });
 
   it("emits grid invalidation updates for format-layer-only deltas", () => {
