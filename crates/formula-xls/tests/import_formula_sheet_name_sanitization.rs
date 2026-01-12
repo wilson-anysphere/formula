@@ -14,9 +14,10 @@ fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
 }
 
 fn assert_parseable(formula_body: &str) {
-    let formula = format!("={formula_body}");
-    parse_formula(&formula, ParseOptions::default())
-        .unwrap_or_else(|e| panic!("expected formula to be parseable, formula={formula:?}, err={e:?}"));
+    let expr = formula_body.trim();
+    assert!(!expr.is_empty(), "expected formula to be non-empty");
+    parse_formula(expr, ParseOptions::default())
+        .unwrap_or_else(|e| panic!("expected formula to be parseable, expr={expr:?}, err={e:?}"));
 }
 
 #[test]

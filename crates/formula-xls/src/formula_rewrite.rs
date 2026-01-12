@@ -137,8 +137,8 @@ mod tests {
     fn assert_parseable(expr: &str) {
         let expr = expr.trim();
         assert!(!expr.is_empty(), "expected formula text to be non-empty");
-        // `formula-model` stores formulas without a leading '='. Add it for parsing.
-        parse_formula(&format!("={expr}"), ParseOptions::default()).unwrap_or_else(|err| {
+        // The formula parser accepts formulas both with and without a leading '='.
+        parse_formula(expr, ParseOptions::default()).unwrap_or_else(|err| {
             panic!("expected formula to be parseable, expr={expr:?}, err={err:?}")
         });
     }
@@ -197,8 +197,7 @@ mod tests {
         );
         assert_parseable(sheet.formula_a1("A1").unwrap().unwrap());
         assert_eq!(sheet.formula_a1("A2").unwrap(), Some("=B!A1"));
-        // `normalize_formula_text` strips only one leading '='; a formula that still starts with '='
-        // is an edge case and is not guaranteed to be accepted by the parser.
+        assert_parseable(sheet.formula_a1("A2").unwrap().unwrap());
         assert_eq!(
             sheet.formula_a1("A3").unwrap(),
             Some("'My Sheet'!A1+\"bad/name!A1\"")

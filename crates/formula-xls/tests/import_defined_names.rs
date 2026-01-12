@@ -21,7 +21,9 @@ fn import_fixture_without_biff(bytes: &[u8]) -> formula_xls::XlsImportResult {
 }
 
 fn assert_parseable_refers_to(expr: &str) {
-    parse_formula(&format!("={expr}"), ParseOptions::default())
+    let expr = expr.trim();
+    assert!(!expr.is_empty(), "expected refers_to to be non-empty");
+    parse_formula(expr, ParseOptions::default())
         .unwrap_or_else(|e| panic!("expected refers_to to be parseable, expr={expr:?}, err={e:?}"));
 }
 
@@ -146,10 +148,10 @@ fn imports_defined_names_from_biff_name_records() {
 
     // All imported name formulas should be parseable by our formula parser (stored without `=`).
     for name in &wb.defined_names {
-        let f = format!("={}", name.refers_to);
-        parse_formula(&f, ParseOptions::default()).unwrap_or_else(|err| {
+        let formula = name.refers_to.trim();
+        parse_formula(formula, ParseOptions::default()).unwrap_or_else(|err| {
             panic!(
-                "failed to parse refers_to for defined name `{}` (scope={:?}): {err}; formula={f}",
+                "failed to parse refers_to for defined name `{}` (scope={:?}): {err}; formula={formula}",
                 name.name, name.scope
             )
         });
@@ -180,10 +182,10 @@ fn defined_name_formulas_quote_sheet_names_and_are_parseable() {
     }
 
     for name in &result.workbook.defined_names {
-        let f = format!("={}", name.refers_to);
-        parse_formula(&f, ParseOptions::default()).unwrap_or_else(|err| {
+        let formula = name.refers_to.trim();
+        parse_formula(formula, ParseOptions::default()).unwrap_or_else(|err| {
             panic!(
-                "failed to parse refers_to for defined name `{}` (scope={:?}): {err}; formula={f}",
+                "failed to parse refers_to for defined name `{}` (scope={:?}): {err}; formula={formula}",
                 name.name, name.scope
             )
         });

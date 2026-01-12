@@ -9,7 +9,9 @@ mod common;
 use common::xls_fixture_builder;
 
 fn assert_parseable(expr: &str) {
-    parse_formula(&format!("={expr}"), ParseOptions::default())
+    let expr = expr.trim();
+    assert!(!expr.is_empty(), "expected expression to be non-empty");
+    parse_formula(expr, ParseOptions::default())
         .unwrap_or_else(|e| panic!("expected expression to be parseable, expr={expr:?}, err={e:?}"));
 }
 
