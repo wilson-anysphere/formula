@@ -28,8 +28,13 @@ struct ModuleInfo {
 ///   not alphabetical sorting and not OLE directory enumeration order.
 /// - **Module source normalization** treats CR and lone-LF as line breaks, ignores the LF of CRLF,
 ///   and strips `Attribute ...` lines (case-insensitive, start-of-line match).
-/// - **Reference records** are incorporated for a subset of record types (e.g. registered/project
-///   references), matching the MS-OVBA §2.4.2.1 pseudocode.
+/// - **Reference records** are incorporated for the MS-OVBA record types used by
+///   `ContentNormalizedData` / `V3ContentNormalizedData`:
+///   - `REFERENCEREGISTERED` (0x000D)
+///   - `REFERENCEPROJECT` (0x000E)
+///   - `REFERENCECONTROL` (0x002F)
+///   - `REFERENCEEXTENDED` (0x0030)
+///   - `REFERENCEORIGINAL` (0x0033)
 /// - **Project name and constants** are incorporated by appending the raw record payload bytes for
 ///   `PROJECTNAME.ProjectName` (0x0004) and `PROJECTCONSTANTS.Constants` (0x000C) in `VBA/dir`
 ///   record order.
@@ -92,6 +97,21 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
             // REFERENCEPROJECT
             0x000E => {
                 out.extend_from_slice(&normalize_reference_project(data)?);
+            }
+
+            // REFERENCECONTROL
+            0x002F => {
+                out.extend_from_slice(&normalize_reference_control(data)?);
+            }
+
+            // REFERENCEEXTENDED
+            0x0030 => {
+                out.extend_from_slice(data);
+            }
+
+            // REFERENCEORIGINAL
+            0x0033 => {
+                out.extend_from_slice(&normalize_reference_original(data)?);
             }
 
             // MODULENAME: start a new module record group.
@@ -287,12 +307,8 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
             }
 
             // REFERENCECONTROL
-            //
-            // Note: the exact record payload structure is defined in MS-OVBA, but the v3 transcript
-            // incorporates the record's raw data bytes as stored in the decompressed `VBA/dir`
-            // stream.
             0x002F => {
-                out.extend_from_slice(data);
+                out.extend_from_slice(&normalize_reference_control(data)?);
             }
 
             // REFERENCEEXTENDED
@@ -302,7 +318,7 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
 
             // REFERENCEORIGINAL
             0x0033 => {
-                out.extend_from_slice(data);
+                out.extend_from_slice(&normalize_reference_original(data)?);
             }
 
             // ---- Modules ----
@@ -427,14 +443,44 @@ fn normalize_reference_project(data: &[u8]) -> Result<Vec<u8>, ParseError> {
     temp.extend_from_slice(&major.to_le_bytes());
     temp.extend_from_slice(&minor.to_le_bytes());
 
-    let mut out = Vec::new();
-    for b in temp {
-        if b == 0x00 {
-            break;
-        }
-        out.push(b);
+    Ok(copy_until_nul(&temp))
+}
+
+fn normalize_reference_control(data: &[u8]) -> Result<Vec<u8>, ParseError> {
+    // Minimal parser for the fields used by the MS-OVBA normalization pseudocode.
+    //
+    // REFERENCECONTROL (0x002F) contains a u32-len-prefixed libid (LibidTwiddled) followed by
+    // reserved version integers. As with REFERENCEPROJECT, the MS-OVBA normalization builds a
+    // TempBuffer then copies bytes until the first NUL byte.
+    let mut cur = data;
+
+    let libid_twiddled = read_u32_len_prefixed_bytes(&mut cur)?;
+    if cur.len() < 6 {
+        return Err(DirParseError::Truncated.into());
     }
-    Ok(out)
+
+    // Reserved1 (u32 LE) + Reserved2 (u16 LE)
+    let reserved1 = u32::from_le_bytes([cur[0], cur[1], cur[2], cur[3]]);
+    let reserved2 = u16::from_le_bytes([cur[4], cur[5]]);
+
+    // TempBuffer = LibidTwiddled || Reserved1(u32le) || Reserved2(u16le)
+    // Then copy bytes until NUL.
+    let mut temp = Vec::new();
+    temp.extend_from_slice(&libid_twiddled);
+    temp.extend_from_slice(&reserved1.to_le_bytes());
+    temp.extend_from_slice(&reserved2.to_le_bytes());
+
+    Ok(copy_until_nul(&temp))
+}
+
+fn normalize_reference_original(data: &[u8]) -> Result<Vec<u8>, ParseError> {
+    // Minimal parser for MS-OVBA reference normalization.
+    //
+    // REFERENCEORIGINAL (0x0033) stores a u32-len-prefixed libid (LibidOriginal). The normalization
+    // includes the libid bytes and stops at the first NUL byte.
+    let mut cur = data;
+    let libid_original = read_u32_len_prefixed_bytes(&mut cur)?;
+    Ok(copy_until_nul(&libid_original))
 }
 
 fn read_u32_len_prefixed_bytes<'a>(cur: &mut &'a [u8]) -> Result<Vec<u8>, ParseError> {
@@ -449,6 +495,17 @@ fn read_u32_len_prefixed_bytes<'a>(cur: &mut &'a [u8]) -> Result<Vec<u8>, ParseE
     let out = cur[..len].to_vec();
     *cur = &cur[len..];
     Ok(out)
+}
+
+fn copy_until_nul(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for &b in bytes {
+        if b == 0x00 {
+            break;
+        }
+        out.push(b);
+    }
+    out
 }
 
 fn trim_reserved_u16(bytes: &[u8]) -> &[u8] {

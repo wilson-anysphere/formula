@@ -34,7 +34,15 @@ fn build_two_module_project_v3(module_order: [&str; 2]) -> Vec<u8> {
         let mut out = Vec::new();
 
         // REFERENCECONTROL (v3 includes additional reference record types).
-        push_record(&mut out, 0x002F, b"REFCTRL-V3");
+        let libid_twiddled = b"REFCTRL-V3";
+        let reserved1: u32 = 0;
+        let reserved2: u16 = 0;
+        let mut reference_control = Vec::new();
+        reference_control.extend_from_slice(&(libid_twiddled.len() as u32).to_le_bytes());
+        reference_control.extend_from_slice(libid_twiddled);
+        reference_control.extend_from_slice(&reserved1.to_le_bytes());
+        reference_control.extend_from_slice(&reserved2.to_le_bytes());
+        push_record(&mut out, 0x002F, &reference_control);
 
         for name in module_order {
             push_record(&mut out, 0x0019, name.as_bytes()); // MODULENAME

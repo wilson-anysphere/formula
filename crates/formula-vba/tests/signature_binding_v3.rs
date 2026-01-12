@@ -32,7 +32,15 @@ fn build_minimal_vba_project_bin_v3(
     let dir_decompressed = {
         let mut out = Vec::new();
         // Include a v3-specific reference record type so the transcript depends on it.
-        push_record(&mut out, 0x002F, b"REFCTRL-V3");
+        let libid_twiddled = b"REFCTRL-V3";
+        let reserved1: u32 = 0;
+        let reserved2: u16 = 0;
+        let mut reference_control = Vec::new();
+        reference_control.extend_from_slice(&(libid_twiddled.len() as u32).to_le_bytes());
+        reference_control.extend_from_slice(libid_twiddled);
+        reference_control.extend_from_slice(&reserved1.to_le_bytes());
+        reference_control.extend_from_slice(&reserved2.to_le_bytes());
+        push_record(&mut out, 0x002F, &reference_control);
 
         // MODULENAME (standard module)
         push_record(&mut out, 0x0019, b"Module1");
