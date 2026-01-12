@@ -2403,6 +2403,42 @@ fn bytecode_backend_matches_ast_for_discount_securities_and_tbill_functions() {
 }
 
 #[test]
+fn bytecode_backend_financial_date_text_uses_datevalue_semantics() {
+    let mut engine = Engine::new();
+    // For these financial functions, text date arguments must use DATEVALUE-like parsing (not VALUE).
+    // A numeric-looking string like "1" should be rejected as a date string (#VALUE!).
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=COUPDAYBS("1","2025-01-15",2)"#)
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            r#"=PRICE("1","2025-01-15",0.05,0.04,100,2)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", r#"=DISC("1","2020-12-31",97,100)"#)
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 3);
+    assert_eq!(stats.compiled, 3);
+    assert_eq!(stats.fallback, 0);
+    assert_eq!(engine.bytecode_program_count(), 3);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        (r#"=COUPDAYBS("1","2025-01-15",2)"#, "A1"),
+        (r#"=PRICE("1","2025-01-15",0.05,0.04,100,2)"#, "A2"),
+        (r#"=DISC("1","2020-12-31",97,100)"#, "A3"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_odd_coupon_bond_functions() {
     let mut engine = Engine::new();
 
