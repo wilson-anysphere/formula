@@ -392,13 +392,19 @@ pub fn patch_sheet_bin(sheet_bin: &[u8], edits: &[CellEdit]) -> Result<Vec<u8>, 
                             (&edit.new_value, edit.shared_string_index)
                         {
                             reject_formula_payload_edit(edit, row, col)?;
+                            if payload.len() < 12 {
+                                return Err(Error::UnexpectedEof);
+                            }
 
                             // BrtCellIsst: [col: u32][style: u32][isst: u32]
-                            let mut patched = [0u8; 12];
-                            patched[0..4].copy_from_slice(&col.to_le_bytes());
-                            patched[4..8].copy_from_slice(&style.to_le_bytes());
+                            //
+                            // Preserve the original record header varint bytes (including
+                            // non-canonical encodings) and any unknown trailing payload bytes.
+                            // This keeps diffs minimal while still updating the referenced `isst`.
+                            let mut patched = payload.to_vec();
                             patched[8..12].copy_from_slice(&isst.to_le_bytes());
-                            writer.write_record(biff12::STRING, &patched)?;
+                            writer.write_raw(&sheet_bin[record_start..payload_start])?;
+                            writer.write_raw(&patched)?;
                         } else {
                             // No shared-string index provided: fall back to the generic writer
                             // (FLOAT / inline string).

@@ -317,12 +317,18 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
                             super::reject_formula_payload_edit(edit, row, col)?;
 
                             changed = true;
+                            if payload.len() < 12 {
+                                return Err(Error::UnexpectedEof);
+                            }
+
                             // BrtCellIsst: [col: u32][style: u32][isst: u32]
-                            let mut patched = [0u8; 12];
-                            patched[0..4].copy_from_slice(&col.to_le_bytes());
-                            patched[4..8].copy_from_slice(&style.to_le_bytes());
-                            patched[8..12].copy_from_slice(&isst.to_le_bytes());
-                            writer.write_record(biff12::STRING, &patched)?;
+                            //
+                            // Preserve the original record header varint bytes (including
+                            // non-canonical encodings) and any unknown trailing payload bytes.
+                            // This keeps diffs minimal while still updating the referenced `isst`.
+                            payload[8..12].copy_from_slice(&isst.to_le_bytes());
+                            write_raw_header(&mut writer, &header)?;
+                            writer.write_raw(&payload)?;
                         } else {
                             // No shared-string index provided: fall back to the generic writer
                             // (FLOAT / inline string).
