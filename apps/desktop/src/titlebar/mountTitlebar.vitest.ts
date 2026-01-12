@@ -110,10 +110,21 @@ describe("mountTitlebar", () => {
             calls.maximize += 1;
           },
         },
+        undoRedo: {
+          canUndo: true,
+          canRedo: true,
+          undoLabel: null,
+          redoLabel: null,
+        },
       });
     });
 
     expect(container.querySelector('[data-testid="titlebar-actions"]')).toBeNull();
+    expect(container.querySelector('[data-testid="titlebar-quick-access"]')).toBeTruthy();
+
+    // Without callbacks, undo/redo buttons should be disabled even when canUndo/canRedo is true.
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="undo"]')?.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="redo"]')?.disabled).toBe(true);
 
     const closeButton = container.querySelector<HTMLButtonElement>('[aria-label="Close window"]');
     const minimizeButton = container.querySelector<HTMLButtonElement>('[aria-label="Minimize window"]');

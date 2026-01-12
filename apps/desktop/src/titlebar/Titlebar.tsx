@@ -106,6 +106,8 @@ export function Titlebar({
   const undoTitle = undoRedo?.undoLabel ? `Undo ${undoRedo.undoLabel}` : "Undo";
   const redoTitle = undoRedo?.redoLabel ? `Redo ${undoRedo.redoLabel}` : "Redo";
   const normalizedDocumentName = stripLeadingDocSeparator(documentName);
+  const canUndo = Boolean(undoRedo?.canUndo) && typeof undoRedo?.onUndo === "function";
+  const canRedo = Boolean(undoRedo?.canRedo) && typeof undoRedo?.onRedo === "function";
 
   return (
     <div
@@ -147,14 +149,19 @@ export function Titlebar({
       </div>
 
       {undoRedo ? (
-        <div className="formula-titlebar__quick-access" role="toolbar" aria-label="Quick access toolbar">
+        <div
+          className="formula-titlebar__quick-access"
+          role="toolbar"
+          aria-label="Quick access toolbar"
+          data-testid="titlebar-quick-access"
+        >
           <button
             type="button"
             className="formula-titlebar__quick-access-button"
             data-testid="undo"
             aria-label={undoTitle}
             title={undoTitle}
-            disabled={!undoRedo.canUndo}
+            disabled={!canUndo}
             onClick={undoRedo.onUndo}
           >
             <UndoIcon />
@@ -165,7 +172,7 @@ export function Titlebar({
             data-testid="redo"
             aria-label={redoTitle}
             title={redoTitle}
-            disabled={!undoRedo.canRedo}
+            disabled={!canRedo}
             onClick={undoRedo.onRedo}
           >
             <RedoIcon />
