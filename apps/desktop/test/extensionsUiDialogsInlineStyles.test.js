@@ -77,5 +77,9 @@ test("extension UI dialogs avoid inline style assignments", () => {
     /import\s+["']\.\/styles\/dialogs\.css["'];/,
     "main.ts should import dialogs.css so extension dialogs render correctly",
   );
+  assert.match(
+    mainSource,
+    /import\s+["']\.\/styles\/extensions-ui\.css["'];/,
+    "main.ts should import extensions-ui.css so extension dialogs render correctly",
+  );
 });
-
