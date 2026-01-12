@@ -167,6 +167,59 @@ mod tests {
     use super::*;
     use std::fs;
 
+    fn tempdir_outside_allowed_roots(allowed_roots: &[PathBuf]) -> tempfile::TempDir {
+        fn tempdir_if_outside(
+            base: Option<&Path>,
+            allowed_roots: &[PathBuf],
+        ) -> Option<tempfile::TempDir> {
+            let tmp = match base {
+                Some(base) => tempfile::tempdir_in(base).ok()?,
+                None => tempfile::tempdir().ok()?,
+            };
+            let canon = dunce::canonicalize(tmp.path()).ok()?;
+            if path_in_allowed_roots(&canon, allowed_roots) {
+                return None;
+            }
+            Some(tmp)
+        }
+
+        // 1) Default temp dir (fast path on Unix where it is typically outside `$HOME`).
+        if let Some(tmp) = tempdir_if_outside(None, allowed_roots) {
+            return tmp;
+        }
+
+        // 2) Try some OS-specific global temp locations.
+        #[cfg(windows)]
+        {
+            // `%WINDIR%\\Temp` (commonly writable for normal users).
+            if let Some(windir) = std::env::var_os("WINDIR").or_else(|| std::env::var_os("SystemRoot"))
+            {
+                let base = PathBuf::from(windir).join("Temp");
+                if let Some(tmp) = tempdir_if_outside(Some(&base), allowed_roots) {
+                    return tmp;
+                }
+            }
+
+            // `%ProgramData%` is typically outside the user profile.
+            if let Some(program_data) = std::env::var_os("ProgramData") {
+                let base = PathBuf::from(program_data);
+                if let Some(tmp) = tempdir_if_outside(Some(&base), allowed_roots) {
+                    return tmp;
+                }
+            }
+
+            // `C:\\Users\\Public` is commonly present and outside `$HOME`.
+            if let Some(public) = std::env::var_os("PUBLIC") {
+                let base = PathBuf::from(public);
+                if let Some(tmp) = tempdir_if_outside(Some(&base), allowed_roots) {
+                    return tmp;
+                }
+            }
+        }
+
+        panic!("unable to create a temporary directory outside the allowed filesystem scope");
+    }
+
     #[test]
     fn canonicalize_in_allowed_roots_allows_paths_under_root() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -223,11 +276,10 @@ mod tests {
         let in_scope_file = in_scope_tmp.path().join("in-scope.xlsx");
         fs::write(&in_scope_file, "hello").expect("write in-scope file");
 
-        let out_scope_tmp = tempfile::tempdir().expect("tempdir out-of-scope");
+        let allowed_roots = desktop_allowed_roots().expect("allowed roots");
+        let out_scope_tmp = tempdir_outside_allowed_roots(&allowed_roots);
         let out_scope_file = out_scope_tmp.path().join("out-of-scope.xlsx");
         fs::write(&out_scope_file, "secret").expect("write out-of-scope file");
-
-        let allowed_roots = desktop_allowed_roots().expect("allowed roots");
 
         let resolved_in_scope =
             canonicalize_in_allowed_roots(&in_scope_file, &allowed_roots).expect("in scope");
@@ -244,15 +296,14 @@ mod tests {
         let in_scope_dest = in_scope_tmp.path().join("new-workbook.xlsx");
         assert!(!in_scope_dest.exists());
 
-        let out_scope_tmp = tempfile::tempdir().expect("tempdir out-of-scope");
+        let allowed_roots = desktop_allowed_roots().expect("allowed roots");
+        let out_scope_tmp = tempdir_outside_allowed_roots(&allowed_roots);
         let out_scope_dest = out_scope_tmp.path().join("new-workbook.xlsx");
         assert!(!out_scope_dest.exists());
 
-        let allowed_roots = desktop_allowed_roots().expect("allowed roots");
-
         let resolved_in_scope =
             resolve_save_path_in_allowed_roots(&in_scope_dest, &allowed_roots).expect("in scope");
-        let expected_in_scope_parent = std::fs::canonicalize(in_scope_tmp.path()).expect("canon");
+        let expected_in_scope_parent = dunce::canonicalize(in_scope_tmp.path()).expect("canon");
         assert_eq!(
             resolved_in_scope,
             expected_in_scope_parent.join("new-workbook.xlsx")
