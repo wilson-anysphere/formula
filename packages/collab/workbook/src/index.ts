@@ -1,4 +1,5 @@
 import * as Y from "yjs";
+import { getSheetNameValidationErrorMessage } from "@formula/workbook-backend";
 
 export interface WorkbookSchemaOptions {
   defaultSheetName?: string;
@@ -506,6 +507,16 @@ export class SheetManager {
         throw new Error(`Sheet already exists: ${id}`);
       }
 
+      const existingNames: string[] = [];
+      for (const sheet of this.list()) {
+        // Prefer the display name but fall back to id so uniqueness checks match how other
+        // parts of the stack treat missing/legacy names.
+        const existing = sheet.name ?? sheet.id;
+        if (existing) existingNames.push(existing);
+      }
+      const nameError = getSheetNameValidationErrorMessage(name, { existingNames });
+      if (nameError) throw new Error(nameError);
+
       const sheet = new this.YMapCtor();
       sheet.set("id", id);
       sheet.set("name", name);
@@ -524,6 +535,16 @@ export class SheetManager {
     this.transact(() => {
       const sheet = this.getById(id);
       if (!sheet) throw new Error(`Sheet not found: ${id}`);
+
+      const existingNames: string[] = [];
+      for (const entry of this.list()) {
+        if (entry.id === id) continue;
+        const existing = entry.name ?? entry.id;
+        if (existing) existingNames.push(existing);
+      }
+      const nameError = getSheetNameValidationErrorMessage(name, { existingNames });
+      if (nameError) throw new Error(nameError);
+
       sheet.set("name", name);
     });
   }

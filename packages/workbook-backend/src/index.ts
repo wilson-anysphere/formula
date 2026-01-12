@@ -70,6 +70,15 @@ export type TableInfo = {
   columns: string[];
 };
 
+export {
+  EXCEL_MAX_SHEET_NAME_LEN,
+  INVALID_SHEET_NAME_CHARACTERS,
+  getSheetNameValidationError,
+  getSheetNameValidationErrorMessage,
+  type SheetNameValidationError,
+  type SheetNameValidationOptions,
+} from "./sheetNameValidation.ts";
+
 /**
  * WorkbookBackend v1
  *
@@ -145,4 +154,3 @@ export const WORKBOOK_BACKEND_REQUIRED_METHODS = [
 type _WorkbookBackendRequiredMethodsAreComplete = AssertTrue<
   IsEqual<RequiredKeys<WorkbookBackend>, (typeof WORKBOOK_BACKEND_REQUIRED_METHODS)[number]>
 >;
-

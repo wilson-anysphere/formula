@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { colToName } from "@formula/spreadsheet-frontend/a1";
+import { getSheetNameValidationErrorMessage } from "@formula/workbook-backend";
 
 import { t, tWithVars } from "../../i18n/index.js";
 import { parseA1, parseRangeA1 } from "../../document/coords.js";
@@ -377,7 +378,12 @@ export function PivotBuilderPanelContainer(props: Props) {
     void loadPivotList();
   }, [loadPivotList]);
 
-  const canCreate = !busy && !sourceError && !fieldsError && availableFields.length > 0;
+  const newSheetNameError = useMemo(() => {
+    if (destinationKind !== "new") return null;
+    return getSheetNameValidationErrorMessage(newSheetName, { existingNames: sheetIds });
+  }, [destinationKind, newSheetName, sheetIds]);
+
+  const canCreate = !busy && !sourceError && !fieldsError && availableFields.length > 0 && !newSheetNameError;
 
   const destinationSummary = useMemo(() => {
     if (destinationKind === "new") return `${newSheetName}!${destCellA1}`;
@@ -464,6 +470,14 @@ export function PivotBuilderPanelContainer(props: Props) {
       if (availableFields.length === 0) {
         setActionError(fieldsError ?? t("pivotBuilder.source.error.noHeaders"));
         return;
+      }
+
+      if (destinationKind === "new") {
+        const sheetError = getSheetNameValidationErrorMessage(newSheetName, { existingNames: sheetIds });
+        if (sheetError) {
+          setActionError(sheetError);
+          return;
+        }
       }
 
       let destinationSheetIdResolved = destSheetId;
@@ -683,6 +697,10 @@ export function PivotBuilderPanelContainer(props: Props) {
                 </select>
               </label>
             )}
+
+            {destinationKind === "new" && newSheetNameError ? (
+              <div style={{ color: "var(--error)" }}>{newSheetNameError}</div>
+            ) : null}
 
             <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("pivotBuilder.destination.startCell")}</span>

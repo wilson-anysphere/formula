@@ -300,6 +300,9 @@ importers:
 
   packages/collab/workbook:
     dependencies:
+      '@formula/workbook-backend':
+        specifier: workspace:*
+        version: link:../../workbook-backend
       yjs:
         specifier: ^13.6.27
         version: 13.6.29
