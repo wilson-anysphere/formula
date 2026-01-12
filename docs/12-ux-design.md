@@ -116,6 +116,7 @@ The user experience must honor Excel's familiar mental model while introducing m
 | Shortcut | Action |
 |----------|--------|
 | `Cmd+Shift+P` / `Ctrl+Shift+P` | Open command palette |
+| `/` (in command palette) | Shortcut search |
 | `Cmd+K` / `Ctrl+K` | Inline AI edit (transform selection) |
 
 ### Navigation
