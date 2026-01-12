@@ -567,7 +567,12 @@ Supported MIME types (read + write, best-effort):
 - `text/rtf`
 - `image/png`
 
-Tauri command contract:
+JS provider contract (normalized API):
+
+- Read: `provider.read()` → `{ text?: string, html?: string, rtf?: string, imagePng?: Uint8Array }`
+- Write: `provider.write({ text, html?, rtf?, imagePng? })` → `void`
+
+Tauri wire contract (internal, used only for `__TAURI__.core.invoke`):
 
 - Read: `invoke("clipboard_read")` → `{ text?: string, html?: string, rtf?: string, pngBase64?: string }`
 - Write: `invoke("clipboard_write", { payload: { text?, html?, rtf?, pngBase64? } })` → `void`
@@ -580,19 +585,9 @@ Provider return shape:
 
 Image wire format:
 
-- PNG bytes are transported over IPC as `pngBase64` (**raw base64**, no `data:image/png;base64,` prefix).
-- When interacting with browser APIs, convert **base64 PNG ↔ `Uint8Array`** and wrap bytes in a `Blob`:
-
-  - base64 → `Uint8Array` (for `Blob` / `ClipboardItem`)
-  - `Uint8Array` → base64 (for `invoke("clipboard_write", ...)`)
-
-```ts
-// base64 PNG (from Rust) -> Uint8Array
-const bytes = Uint8Array.from(atob(pngBase64), (c) => c.charCodeAt(0));
-
-// Uint8Array -> base64 PNG (to Rust)
-const pngBase64Out = btoa(String.fromCharCode(...bytes));
-```
+- JS-facing APIs use **raw PNG bytes** (`imagePng: Uint8Array`).
+- Over Tauri IPC, PNG bytes are transported as `pngBase64` (**raw base64**, no `data:image/png;base64,` prefix).
+- The platform provider (`apps/desktop/src/clipboard/platform/provider.js`) is responsible for converting base64 ↔ bytes when crossing the IPC boundary.
 
 Known platform limitations:
 

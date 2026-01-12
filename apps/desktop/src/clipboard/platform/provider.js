@@ -27,6 +27,21 @@ function hasTauri() {
 }
 
 /**
+ * Strip any `data:*;base64,` prefix and trim whitespace.
+ *
+ * @param {string} base64
+ * @returns {string}
+ */
+function normalizeBase64String(base64) {
+  if (typeof base64 !== "string") return "";
+  if (base64.startsWith("data:")) {
+    const commaIndex = base64.indexOf(",");
+    if (commaIndex >= 0) return base64.slice(commaIndex + 1).trim();
+  }
+  return base64.trim();
+}
+
+/**
  * Rough estimate of bytes represented by a base64 string.
  *
  * @param {string} base64
@@ -60,6 +75,26 @@ function estimateBase64Bytes(base64) {
 
   const bytes = Math.floor((len * 3) / 4) - padding;
   return bytes > 0 ? bytes : 0;
+}
+
+/**
+ * @param {any} source
+ * @returns {string | undefined}
+ */
+function readPngBase64(source) {
+  if (!source || typeof source !== "object") return undefined;
+  const raw =
+    typeof source.pngBase64 === "string"
+      ? source.pngBase64
+      : typeof source.png_base64 === "string"
+        ? source.png_base64
+        : typeof source.image_png_base64 === "string"
+          ? source.image_png_base64
+          : undefined;
+
+  if (typeof raw !== "string") return undefined;
+  const normalized = normalizeBase64String(raw);
+  return normalized ? normalized : undefined;
 }
 
 /**
@@ -99,12 +134,21 @@ function coerceUint8Array(val) {
       if (comma === -1) return undefined;
       base64 = val.slice(comma + 1);
     }
+    base64 = base64.trim();
 
     try {
-      const bin = atob(base64);
-      const out = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-      return out;
+      if (typeof atob === "function") {
+        const bin = atob(base64);
+        const out = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out;
+      }
+
+      if (typeof Buffer !== "undefined") {
+        const buf = Buffer.from(base64, "base64");
+        if (buf.byteLength > MAX_IMAGE_BYTES) return undefined;
+        return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+      }
     } catch {
       // Ignore.
     }
@@ -132,6 +176,55 @@ function normalizeImagePngBlob(val) {
 }
 
 /**
+ * Normalize an image payload into raw bytes (for Tauri IPC).
+ *
+ * @param {any} val
+ * @returns {Promise<Uint8Array | undefined>}
+ */
+async function normalizeImagePngBytes(val) {
+  if (!val) return undefined;
+
+  if (typeof Blob !== "undefined" && val instanceof Blob) {
+    if (typeof val.size === "number" && val.size > MAX_IMAGE_BYTES) return undefined;
+    try {
+      const buf = await val.arrayBuffer();
+      if (buf.byteLength > MAX_IMAGE_BYTES) return undefined;
+      return new Uint8Array(buf);
+    } catch {
+      return undefined;
+    }
+  }
+
+  return coerceUint8Array(val);
+}
+
+/**
+ * Encode bytes as base64 (no `data:` prefix).
+ *
+ * @param {Uint8Array} bytes
+ * @returns {string}
+ */
+function encodeBase64(bytes) {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes).toString("base64");
+  }
+
+  if (typeof btoa !== "function") {
+    throw new Error("base64 encoding is unavailable in this environment");
+  }
+
+  // Avoid stack overflows by chunking `fromCharCode` calls.
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    // eslint-disable-next-line unicorn/prefer-code-point
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+/**
  * Merge clipboard fields from `source` into `target`, only filling missing values.
  *
  * @param {any} target
@@ -151,25 +244,24 @@ function mergeClipboardContent(target, source) {
   }
 
   if (!(target.imagePng instanceof Uint8Array)) {
+    const pngBase64 = readPngBase64(source);
+
     const image =
       coerceUint8Array(source.imagePng) ??
       // Support snake_case bridges.
-      coerceUint8Array(source.image_png);
+      coerceUint8Array(source.image_png) ??
+      // Base64 (Tauri IPC / legacy bridges).
+      coerceUint8Array(pngBase64);
     if (image) target.imagePng = image;
-  }
-
-  if (typeof target.pngBase64 !== "string") {
-    const pngBase64 =
-      typeof source.pngBase64 === "string"
-        ? source.pngBase64
-        : typeof source.png_base64 === "string"
-          ? source.png_base64
-          : typeof source.image_png_base64 === "string"
-            ? source.image_png_base64
-            : undefined;
-
-    if (typeof pngBase64 === "string" && estimateBase64Bytes(pngBase64) <= MAX_IMAGE_BYTES) {
-      target.pngBase64 = pngBase64;
+    if (image && typeof target.pngBase64 === "string") {
+      // Maintain the invariant that callers see `imagePng` as the primary image format.
+      // (Keep base64 only on decode failures / legacy callsites.)
+      delete target.pngBase64;
+    } else if (!image && typeof target.pngBase64 !== "string" && typeof pngBase64 === "string") {
+      // Only preserve base64 when we couldn't decode it into bytes.
+      if (estimateBase64Bytes(pngBase64) <= MAX_IMAGE_BYTES) {
+        target.pngBase64 = pngBase64;
+      }
     }
   }
 }
@@ -234,24 +326,23 @@ function createTauriClipboardProvider() {
       if (typeof tauriInvoke === "function") {
         try {
           const result = await tauriInvoke("clipboard_read");
-          if (result && typeof result === "object") {
-            /** @type {any} */
-            const r = result;
-            native = {};
-            if (typeof r.text === "string") native.text = r.text;
-            if (typeof r.html === "string" && r.html.length <= MAX_RICH_TEXT_CHARS) native.html = r.html;
-            if (typeof r.rtf === "string" && r.rtf.length <= MAX_RICH_TEXT_CHARS) native.rtf = r.rtf;
+           if (result && typeof result === "object") {
+             /** @type {any} */
+             const r = result;
+             native = {};
+             if (typeof r.text === "string") native.text = r.text;
+             if (typeof r.html === "string" && r.html.length <= MAX_RICH_TEXT_CHARS) native.html = r.html;
+             if (typeof r.rtf === "string" && r.rtf.length <= MAX_RICH_TEXT_CHARS) native.rtf = r.rtf;
 
-            const pngBase64 =
-              typeof r.pngBase64 === "string"
-                ? r.pngBase64
-                : typeof r.png_base64 === "string"
-                  ? r.png_base64
-                  : typeof r.image_png_base64 === "string"
-                    ? r.image_png_base64
-                    : undefined;
-            if (typeof pngBase64 === "string" && estimateBase64Bytes(pngBase64) <= MAX_IMAGE_BYTES) {
-              native.pngBase64 = pngBase64;
+            const pngBase64 = readPngBase64(r);
+            if (pngBase64) {
+              const imagePng = coerceUint8Array(pngBase64);
+              if (imagePng) {
+                native.imagePng = imagePng;
+              } else if (estimateBase64Bytes(pngBase64) <= MAX_IMAGE_BYTES) {
+                // Preserve base64 only when decoding fails (legacy/internal).
+                native.pngBase64 = pngBase64;
+              }
             }
 
             // If we successfully read HTML from the native clipboard, we can return
@@ -312,10 +403,15 @@ function createTauriClipboardProvider() {
     async write(payload) {
       const html = typeof payload.html === "string" && payload.html.length <= MAX_RICH_TEXT_CHARS ? payload.html : undefined;
       const rtf = typeof payload.rtf === "string" && payload.rtf.length <= MAX_RICH_TEXT_CHARS ? payload.rtf : undefined;
-      const pngBase64 =
+      const imageBytes = await normalizeImagePngBytes(payload.imagePng);
+
+      const pngBase64FromImage = imageBytes ? encodeBase64(imageBytes) : undefined;
+      const legacyPngBase64 =
         typeof payload.pngBase64 === "string" && estimateBase64Bytes(payload.pngBase64) <= MAX_IMAGE_BYTES
-          ? payload.pngBase64
+          ? normalizeBase64String(payload.pngBase64)
           : undefined;
+
+      const pngBase64 = pngBase64FromImage ?? legacyPngBase64;
 
       // 1) Prefer rich writes via the native clipboard command when available (Tauri IPC).
       let wrote = false;
@@ -460,7 +556,7 @@ function createWebClipboardProvider() {
 
       const html = typeof payload.html === "string" && payload.html.length <= MAX_RICH_TEXT_CHARS ? payload.html : undefined;
       const rtf = typeof payload.rtf === "string" && payload.rtf.length <= MAX_RICH_TEXT_CHARS ? payload.rtf : undefined;
-      const imagePngBlob = normalizeImagePngBlob(payload.imagePng);
+      const imagePngBlob = normalizeImagePngBlob(payload.imagePng) ?? normalizeImagePngBlob(payload.pngBase64);
 
       // Prefer writing rich formats when possible.
       if (typeof ClipboardItem !== "undefined" && clipboard?.write) {

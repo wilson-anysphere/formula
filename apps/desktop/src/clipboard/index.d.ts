@@ -1,5 +1,24 @@
-export type ClipboardContent = { text?: string; html?: string; rtf?: string; pngBase64?: string; imagePng?: Uint8Array };
-export type ClipboardWritePayload = { text: string; html?: string; rtf?: string; pngBase64?: string; imagePng?: Uint8Array | Blob };
+/**
+ * Clipboard content returned by the platform provider.
+ *
+ * Prefer `imagePng` (raw bytes). `pngBase64` is a legacy/internal field kept only for
+ * backwards compatibility and is used as a wire format for Tauri IPC.
+ */
+export type ClipboardContent = { text?: string; html?: string; rtf?: string; imagePng?: Uint8Array; pngBase64?: string };
+
+/**
+ * Payload written by the platform provider.
+ *
+ * Prefer `imagePng` (raw bytes). `pngBase64` is a legacy/internal field kept only for
+ * backwards compatibility and is used as a wire format for Tauri IPC.
+ */
+export type ClipboardWritePayload = {
+  text: string;
+  html?: string;
+  rtf?: string;
+  imagePng?: Uint8Array | Blob;
+  pngBase64?: string;
+};
 
 export type ClipboardProvider = {
   read(): Promise<ClipboardContent>;

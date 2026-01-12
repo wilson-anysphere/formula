@@ -595,11 +595,12 @@ test("clipboard provider", async (t) => {
       async () => {
         const provider = await createClipboardProvider();
         const content = await provider.read();
+        assert.ok(content.imagePng instanceof Uint8Array);
         assert.deepEqual(content, {
           text: "tauri text",
           html: "tauri html",
           rtf: "tauri rtf",
-          pngBase64: "CQgH",
+          imagePng: new Uint8Array([0x09, 0x08, 0x07]),
         });
         assert.equal(webReadCalls, 0);
         assert.deepEqual(invokeCalls, ["clipboard_read"]);
@@ -607,7 +608,7 @@ test("clipboard provider", async (t) => {
     );
   });
 
-  await t.test("tauri: read preserves pngBase64 when native result only includes image_png_base64", async () => {
+  await t.test("tauri: read decodes image_png_base64 into imagePng bytes", async () => {
     await withGlobals(
       {
         __TAURI__: {
@@ -623,7 +624,8 @@ test("clipboard provider", async (t) => {
       async () => {
         const provider = await createClipboardProvider();
         const content = await provider.read();
-        assert.deepEqual(content, { text: undefined, pngBase64: "CQgH" });
+        assert.ok(content.imagePng instanceof Uint8Array);
+        assert.deepEqual(content, { text: undefined, imagePng: new Uint8Array([0x09, 0x08, 0x07]) });
       }
     );
   });
@@ -763,11 +765,12 @@ test("clipboard provider", async (t) => {
       async () => {
         const provider = await createClipboardProvider();
         const content = await provider.read();
+        assert.ok(content.imagePng instanceof Uint8Array);
         assert.deepEqual(content, {
           text: "legacy text",
           html: "legacy html",
           rtf: "legacy rtf",
-          pngBase64: "CQgH",
+          imagePng: new Uint8Array([0x09, 0x08, 0x07]),
         });
       }
     );
@@ -829,7 +832,12 @@ test("clipboard provider", async (t) => {
       },
       async () => {
         const provider = await createClipboardProvider();
-        await provider.write({ text: "plain", html: "<p>hello</p>", rtf: "{\\\\rtf1 hello}", pngBase64: "CQgH" });
+        await provider.write({
+          text: "plain",
+          html: "<p>hello</p>",
+          rtf: "{\\\\rtf1 hello}",
+          imagePng: new Uint8Array([0x09, 0x08, 0x07]),
+        });
 
         assert.equal(invokeCalls.length, 1);
         assert.equal(invokeCalls[0][0], "clipboard_write");
@@ -946,7 +954,7 @@ test("clipboard provider", async (t) => {
     );
   });
 
-  await t.test("tauri: write falls back to core.invoke('write_clipboard') when clipboard_write is unavailable", async () => {
+  await t.test("tauri: write base64-encodes imagePng and falls back to core.invoke('write_clipboard') when clipboard_write is unavailable", async () => {
     /** @type {any[]} */
     const invokeCalls = [];
 
@@ -975,7 +983,7 @@ test("clipboard provider", async (t) => {
       },
       async () => {
         const provider = await createClipboardProvider();
-        await provider.write({ text: "hello", html: "<p>x</p>", pngBase64: "CQgH" });
+        await provider.write({ text: "hello", html: "<p>x</p>", imagePng: new Uint8Array([0x09, 0x08, 0x07]) });
 
         assert.equal(invokeCalls.length, 2);
         assert.equal(invokeCalls[0][0], "clipboard_write");
@@ -986,6 +994,34 @@ test("clipboard provider", async (t) => {
           rtf: undefined,
           image_png_base64: "CQgH",
         });
+      }
+    );
+  });
+
+  await t.test("tauri: write omits oversized imagePng payloads (MAX_IMAGE_BYTES guard)", async () => {
+    /** @type {any[]} */
+    const invokeCalls = [];
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd, args) {
+              invokeCalls.push([cmd, args]);
+            },
+          },
+        },
+        navigator: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+
+        const oversized = new Uint8Array(11 * 1024 * 1024);
+        await provider.write({ text: "plain", imagePng: oversized });
+
+        assert.equal(invokeCalls.length, 1);
+        assert.equal(invokeCalls[0][0], "clipboard_write");
+        assert.deepEqual(invokeCalls[0][1], { payload: { text: "plain" } });
       }
     );
   });
