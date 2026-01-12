@@ -83,7 +83,13 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         let text = clipboard.wait_for_text().map(|s| s.to_string());
         let html = wait_for_utf8_targets(&clipboard, &["text/html", "text/html;charset=utf-8"]);
         let rtf = wait_for_utf8_targets(&clipboard, &["text/rtf", "application/rtf"]);
-        let png_base64 = wait_for_bytes_base64(&clipboard, "image/png");
+        let png_base64 = wait_for_bytes_base64(&clipboard, "image/png").or_else(|| {
+            // Some applications expose images on the clipboard without an `image/png` target.
+            // Fall back to GTK's pixbuf API and re-encode to PNG (requires image loaders).
+            let pixbuf = clipboard.wait_for_image()?;
+            let bytes = pixbuf.save_to_bufferv("png", &[]).ok()?;
+            Some(STANDARD.encode(bytes))
+        });
 
         Ok(ClipboardContent {
             text,
@@ -119,7 +125,9 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         const INFO_RTF: u32 = 3;
         const INFO_PNG: u32 = 4;
 
-        let flags = gtk::TargetFlags::OTHER_APP;
+        // Do not restrict targets based on app identity; we want both intra-app copy/paste and
+        // interoperability with other apps (LibreOffice, browser, image editors, etc.).
+        let flags = gtk::TargetFlags::empty();
         let mut targets: Vec<gtk::TargetEntry> = Vec::new();
 
         if text.is_some() {
