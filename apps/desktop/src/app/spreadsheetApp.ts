@@ -1303,23 +1303,51 @@ export class SpreadsheetApp {
           onRequestCellEdit: (request) => {
             this.openEditorFromSharedGrid(request);
           },
-          onAxisSizeChange: (change) => {
-            this.onSharedGridAxisSizeChange(change);
-          },
-          onRangeSelectionStart: (range) => this.onSharedRangeSelectionStart(range),
-          onRangeSelectionChange: (range) => this.onSharedRangeSelectionChange(range),
-          onRangeSelectionEnd: () => this.onSharedRangeSelectionEnd(),
-          onFillCommit: ({ sourceRange, targetRange, mode }) => {
-            const headerRows = this.sharedHeaderRows();
-            const headerCols = this.sharedHeaderCols();
-
-            const toFillRange = (range: GridCellRange): FillEngineRange | null => {
-              const startRow = Math.max(0, range.startRow - headerRows);
-              const endRow = Math.max(0, range.endRow - headerRows);
-              const startCol = Math.max(0, range.startCol - headerCols);
-              const endCol = Math.max(0, range.endCol - headerCols);
-              if (endRow <= startRow || endCol <= startCol) return null;
-              return { startRow, endRow, startCol, endCol };
+            onAxisSizeChange: (change) => {
+              this.onSharedGridAxisSizeChange(change);
+            },
+            onRangeSelectionStart: (range) => this.onSharedRangeSelectionStart(range),
+            onRangeSelectionChange: (range) => this.onSharedRangeSelectionChange(range),
+            onRangeSelectionEnd: () => this.onSharedRangeSelectionEnd(),
+            onFillCommit: ({ sourceRange, targetRange, mode }) => {
+              // Fill operations should never mutate the sheet while the user is actively editing text
+              // (cell editor, formula bar, inline edit). This mirrors the keyboard shortcut guards.
+              //
+              // Note: DesktopSharedGrid will still expand the selection to the dragged target range
+              // after this callback runs. Revert the selection on the next microtask so the UI
+              // reflects that no fill occurred.
+              if (this.isEditing()) {
+                const selectionSnapshot = {
+                  ranges: this.selection.ranges.map((r) => ({ ...r })),
+                  active: { ...this.selection.active },
+                  anchor: { ...this.selection.anchor },
+                  activeRangeIndex: this.selection.activeRangeIndex
+                };
+                queueMicrotask(() => {
+                  if (!this.sharedGrid) return;
+                  if (this.disposed) return;
+                  this.selection = buildSelection(selectionSnapshot, this.limits);
+                  this.syncSharedGridSelectionFromState({ scrollIntoView: false });
+                  this.renderSelection();
+                  this.updateStatus();
+                  if (this.formulaBar?.isEditing() || this.formulaEditCell) {
+                    this.formulaBar?.focus();
+                  } else {
+                    this.focus();
+                  }
+                });
+                return;
+              }
+              const headerRows = this.sharedHeaderRows();
+              const headerCols = this.sharedHeaderCols();
+ 
+              const toFillRange = (range: GridCellRange): FillEngineRange | null => {
+                const startRow = Math.max(0, range.startRow - headerRows);
+                const endRow = Math.max(0, range.endRow - headerRows);
+                const startCol = Math.max(0, range.startCol - headerCols);
+                const endCol = Math.max(0, range.endCol - headerCols);
+                if (endRow <= startRow || endCol <= startCol) return null;
+                return { startRow, endRow, startCol, endCol };
             };
 
             const source = toFillRange(sourceRange);
@@ -7592,6 +7620,7 @@ export class SpreadsheetApp {
   }
 
   private applyFill(sourceRange: Range, targetRange: Range, mode: FillHandleMode): boolean {
+    if (this.isEditing()) return false;
     const toFillRange = (range: Range): FillEngineRange => ({
       startRow: range.startRow,
       endRow: range.endRow + 1,
