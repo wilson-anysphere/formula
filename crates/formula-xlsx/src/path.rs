@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 pub fn rels_for_part(part: &str) -> String {
     match part.rsplit_once('/') {
         Some((dir, file_name)) => format!("{dir}/_rels/{file_name}.rels"),
@@ -6,12 +8,25 @@ pub fn rels_for_part(part: &str) -> String {
 }
 
 pub fn resolve_target(source_part: &str, target: &str) -> String {
+    // Be resilient to invalid/unescaped Windows-style path separators.
+    let source_part: Cow<'_, str> = if source_part.contains('\\') {
+        Cow::Owned(source_part.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(source_part)
+    };
+
     // Relationship targets are URIs; some producers include a URI fragment (e.g. `../media/img.png#id`).
     // OPC part names do not include fragments, so strip them before resolving.
     let target = target.split('#').next().unwrap_or(target);
+    // Be resilient to invalid/unescaped Windows-style path separators.
+    let target: Cow<'_, str> = if target.contains('\\') {
+        Cow::Owned(target.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(target)
+    };
     if target.is_empty() {
         // A target of just `#fragment` refers to the source part itself.
-        return normalize(source_part);
+        return normalize(&source_part);
     }
     if let Some(target) = target.strip_prefix('/') {
         return normalize(target);
@@ -61,6 +76,18 @@ mod tests {
     fn resolve_target_strips_fragments() {
         assert_eq!(
             resolve_target("xl/workbook.xml", "worksheets/sheet1.xml#rId1"),
+            "xl/worksheets/sheet1.xml"
+        );
+    }
+
+    #[test]
+    fn resolve_target_normalizes_backslashes() {
+        assert_eq!(
+            resolve_target("xl/worksheets/sheet1.xml", "..\\media\\image1.png"),
+            "xl/media/image1.png"
+        );
+        assert_eq!(
+            resolve_target("xl/workbook.xml", "worksheets\\sheet1.xml#rId1"),
             "xl/worksheets/sheet1.xml"
         );
     }

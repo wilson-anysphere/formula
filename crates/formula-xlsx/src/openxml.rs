@@ -1,6 +1,7 @@
 use crate::package::{XlsxError, XlsxPackage};
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use std::borrow::Cow;
 use std::io::Cursor;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,19 +56,34 @@ pub fn resolve_relationship_target(
 }
 
 pub fn resolve_target(base_part: &str, target: &str) -> String {
+    // Be resilient to invalid/unescaped Windows-style path separators.
+    let base_part: Cow<'_, str> = if base_part.contains('\\') {
+        Cow::Owned(base_part.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(base_part)
+    };
+
     // Relationship targets are URIs; some producers include a fragment (e.g. `foo.xml#bar`).
     // OPC part names do not include fragments, so strip them before resolving.
     let target = target
         .split_once('#')
         .map(|(base, _)| base)
         .unwrap_or(target);
+    // Be resilient to invalid/unescaped Windows-style path separators.
+    let target: Cow<'_, str> = if target.contains('\\') {
+        Cow::Owned(target.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(target)
+    };
     if target.is_empty() {
         // A target of just `#fragment` refers to the source part itself.
         return base_part
             .strip_prefix('/')
-            .unwrap_or(base_part)
+            .unwrap_or(base_part.as_ref())
             .to_string();
     }
+
+    let target = target.as_ref();
 
     // Relationship targets can be relative to the source part's folder (e.g. `worksheets/sheet1.xml`)
     // or absolute (e.g. `/xl/worksheets/sheet1.xml`). Absolute targets are rooted at the package
@@ -258,5 +274,21 @@ mod tests {
             "xl/richData/rd1.xml"
         );
         assert_eq!(resolve_target("/xl/metadata.xml", "#frag"), "xl/metadata.xml");
+    }
+
+    #[test]
+    fn resolve_target_normalizes_backslashes() {
+        assert_eq!(
+            resolve_target("xl/workbook.xml", "worksheets\\sheet1.xml#rId1"),
+            "xl/worksheets/sheet1.xml"
+        );
+        assert_eq!(
+            resolve_target("xl/worksheets/sheet1.xml", "..\\media\\image1.png"),
+            "xl/media/image1.png"
+        );
+        assert_eq!(
+            resolve_target("xl/_rels/workbook.xml.rels", "\\xl\\media\\image1.png#frag"),
+            "xl/media/image1.png"
+        );
     }
 }
