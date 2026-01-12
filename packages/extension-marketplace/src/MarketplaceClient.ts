@@ -13,6 +13,10 @@ export interface MarketplaceExtensionSummary {
   latestVersion: string | null;
   verified: boolean;
   featured: boolean;
+  deprecated?: boolean;
+  blocked?: boolean;
+  malicious?: boolean;
+  publisherRevoked?: boolean;
   categories: string[];
   tags: string[];
   screenshots: string[];

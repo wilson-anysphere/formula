@@ -134,7 +134,19 @@ class TestSpreadsheetApi {
   }
 }
 
-function createMockMarketplace({ extensionId, latestVersion, publicKeyPem, packages, publisherKeys = null, publisherKeyIds = null }: any) {
+function createMockMarketplace({
+  extensionId,
+  latestVersion,
+  publicKeyPem,
+  packages,
+  publisherKeys = null,
+  publisherKeyIds = null,
+  deprecated = false,
+  blocked = false,
+  malicious = false,
+  publisherRevoked = false,
+  scanStatuses = null
+}: any) {
   return {
     async getExtension(id: string) {
       if (id !== extensionId) return null;
@@ -157,9 +169,10 @@ function createMockMarketplace({ extensionId, latestVersion, publicKeyPem, packa
         publisherPublicKeyPem: publicKeyPem,
         publisherKeys: Array.isArray(publisherKeys) ? publisherKeys : undefined,
         createdAt: new Date().toISOString(),
-        deprecated: false,
-        blocked: false,
-        malicious: false
+        deprecated: Boolean(deprecated),
+        blocked: Boolean(blocked),
+        malicious: Boolean(malicious),
+        publisherRevoked: Boolean(publisherRevoked)
       };
     },
     async downloadPackage(id: string, version: string) {
@@ -176,7 +189,10 @@ function createMockMarketplace({ extensionId, latestVersion, publicKeyPem, packa
           publisherKeyIds && typeof publisherKeyIds === "object" && typeof publisherKeyIds[version] === "string"
             ? publisherKeyIds[version]
             : null,
-        scanStatus: null,
+        scanStatus:
+          scanStatuses && typeof scanStatuses === "object" && typeof scanStatuses[version] === "string"
+            ? scanStatuses[version]
+            : null,
         filesSha256: null
       };
     }
@@ -670,13 +686,13 @@ test("uninstall clears persisted permission + extension storage state (localStor
     extensionId: "formula.sample-hello",
     latestVersion: "1.0.0",
     publicKeyPem: keys.publicKeyPem,
-    packages: { "1.0.0": pkgBytes }
+    packages: { "1.0.0": pkgBytes },
   });
 
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",
     spreadsheetApi: new TestSpreadsheetApi(),
-    permissionPrompt: async () => true
+    permissionPrompt: async () => true,
   });
 
   const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
@@ -688,7 +704,7 @@ test("uninstall clears persisted permission + extension storage state (localStor
     "formula.extensionHost.permissions",
     JSON.stringify({
       "formula.sample-hello": { storage: true, network: { mode: "full" } },
-      "other.extension": { "ui.commands": true }
+      "other.extension": { "ui.commands": true },
     })
   );
   globalThis.localStorage.setItem(
@@ -800,6 +816,169 @@ test("detects IndexedDB corruption on load and supports repair()", async () => {
 
   await manager.loadInstalled("formula.sample-hello");
   expect(await host.executeCommand("sampleHello.sumSelection")).toBe(10);
+  await manager.dispose();
+  await host.dispose();
+});
+
+test("install refuses blocked extensions returned by the marketplace", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+    blocked: true,
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true,
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  await expect(manager.install("formula.sample-hello", "1.0.0")).rejects.toThrow(/blocked/i);
+  expect(await manager.listInstalled()).toEqual([]);
+
+  await manager.dispose();
+  await host.dispose();
+});
+
+test("install refuses malicious extensions returned by the marketplace", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+    malicious: true,
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true,
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  await expect(manager.install("formula.sample-hello", "1.0.0")).rejects.toThrow(/malicious/i);
+  expect(await manager.listInstalled()).toEqual([]);
+
+  await manager.dispose();
+  await host.dispose();
+});
+
+test("install warns when installing a deprecated extension", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+    deprecated: true,
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true,
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  const result = await manager.install("formula.sample-hello", "1.0.0");
+  expect(result.warnings?.some((w) => w.kind === "deprecated")).toBe(true);
+  expect(await manager.getInstalled("formula.sample-hello")).toMatchObject({ version: "1.0.0" });
+
+  await manager.dispose();
+  await host.dispose();
+});
+
+test("install enforces scanStatus when configured", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+    scanStatuses: { "1.0.0": "pending" },
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true,
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  await expect(manager.install("formula.sample-hello", "1.0.0", { scanPolicy: "enforce" })).rejects.toThrow(/scan status/i);
+  expect(await manager.listInstalled()).toEqual([]);
+
+  await manager.dispose();
+  await host.dispose();
+});
+
+test("install can allow non-passed scanStatus in dev mode when configured", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+    scanStatuses: { "1.0.0": "pending" },
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true,
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  const result = await manager.install("formula.sample-hello", "1.0.0", { scanPolicy: "allow" });
+  expect(result.warnings?.some((w) => w.kind === "scanStatus" && w.scanStatus === "pending")).toBe(true);
+  expect(await manager.getInstalled("formula.sample-hello")).toMatchObject({ version: "1.0.0" });
+
+  await manager.dispose();
+  await host.dispose();
+});
+
+test("scanStatus is allowed by default in dev/test builds (warn-only)", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+    scanStatuses: { "1.0.0": "pending" },
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true,
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  const result = await manager.install("formula.sample-hello", "1.0.0");
+  expect(result.warnings?.some((w) => w.kind === "scanStatus")).toBe(true);
 
   await manager.dispose();
   await host.dispose();

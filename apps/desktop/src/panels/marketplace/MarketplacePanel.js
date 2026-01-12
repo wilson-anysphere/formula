@@ -57,6 +57,40 @@ function updateContributedPanelSeedsFromHost(extensionHostManager, extensionId) 
   }
 }
 
+function badge(text, { tone = "neutral", title = null } = {}) {
+  const bgByTone = {
+    neutral: "rgba(148, 163, 184, 0.18)",
+    good: "rgba(34, 197, 94, 0.18)",
+    warn: "rgba(234, 179, 8, 0.18)",
+    bad: "rgba(239, 68, 68, 0.18)",
+  };
+  const fgByTone = {
+    neutral: "var(--text-secondary, #64748b)",
+    good: "#166534",
+    warn: "#92400e",
+    bad: "#991b1b",
+  };
+  const span = el(
+    "span",
+    {
+      className: "marketplace-badge",
+      style: [
+        "display:inline-flex",
+        "align-items:center",
+        "padding:2px 8px",
+        "border-radius:999px",
+        "font-size:11px",
+        "font-weight:600",
+        `background:${bgByTone[tone] || bgByTone.neutral}`,
+        `color:${fgByTone[tone] || fgByTone.neutral}`,
+      ].join(";"),
+      title: title || undefined,
+    },
+    [document.createTextNode(text)],
+  );
+  return span;
+}
+
 async function renderSearchResults({ container, marketplaceClient, extensionManager, extensionHostManager, query }) {
   container.textContent = "Searching…";
   const results = await marketplaceClient.search({ q: query, limit: 25, offset: 0 });
@@ -65,9 +99,34 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
 
   for (const item of results.results) {
     const installed = await extensionManager.getInstalled(item.id);
+    let details = null;
+    try {
+      details = await marketplaceClient.getExtension(item.id);
+    } catch {
+      details = null;
+    }
+    const latestVersion = details?.latestVersion || item.latestVersion || null;
+    const latestScanStatus =
+      latestVersion && Array.isArray(details?.versions)
+        ? details.versions.find((v) => String(v.version) === String(latestVersion))?.scanStatus || null
+        : null;
+
+    const badges = el("div", { className: "badges", style: "display:flex; gap:6px; flex-wrap:wrap; margin-top:6px;" });
+    if (item.verified) badges.append(badge("verified", { tone: "good" }));
+    if (item.featured) badges.append(badge("featured", { tone: "good" }));
+    if (item.deprecated) badges.append(badge("deprecated", { tone: "warn" }));
+    if (item.blocked) badges.append(badge("blocked", { tone: "bad" }));
+    if (item.malicious) badges.append(badge("malicious", { tone: "bad" }));
+    if (latestScanStatus) {
+      const normalized = String(latestScanStatus).trim().toLowerCase();
+      const tone = normalized === "passed" ? "good" : normalized === "pending" || normalized === "unknown" ? "warn" : "bad";
+      badges.append(badge(`scan: ${latestScanStatus}`, { tone }));
+    }
+
     const row = el("div", { className: "marketplace-result" }, [
       el("div", { className: "title" }, [document.createTextNode(`${item.displayName} (${item.id})`)]),
       el("div", { className: "desc" }, [document.createTextNode(item.description || "")]),
+      badges,
     ]);
 
     const actions = el("div", { className: "actions" });

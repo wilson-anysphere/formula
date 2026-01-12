@@ -55,6 +55,22 @@ function sha256Hex(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
+function isNodeRuntime() {
+  return typeof process !== "undefined" && typeof process?.versions?.node === "string";
+}
+
+function defaultScanPolicyFromEnv() {
+  if (!isNodeRuntime()) return "enforce";
+  const explicit = process.env.FORMULA_EXTENSION_SCAN_POLICY || process.env.FORMULA_DESKTOP_EXTENSION_SCAN_POLICY;
+  if (explicit) {
+    const normalized = String(explicit).trim().toLowerCase();
+    if (normalized === "enforce" || normalized === "allow" || normalized === "ignore") {
+      return normalized;
+    }
+  }
+  return process.env.NODE_ENV === "production" ? "enforce" : "allow";
+}
+
 export class ExtensionManager {
   constructor({ marketplaceClient, extensionsDir, statePath }) {
     if (!marketplaceClient) throw new Error("marketplaceClient is required");
@@ -127,9 +143,19 @@ export class ExtensionManager {
     await this._saveState(state);
   }
 
-  async _installInternal(id, version = null) {
+  async _installInternal(id, version = null, options = {}) {
     const ext = await this.marketplaceClient.getExtension(id);
     if (!ext) throw new Error(`Extension not found: ${id}`);
+
+    if (ext.blocked) {
+      throw new Error(`Extension is blocked and cannot be installed: ${id}`);
+    }
+    if (ext.malicious) {
+      throw new Error(`Extension is marked as malicious and cannot be installed: ${id}`);
+    }
+    if (ext.publisherRevoked) {
+      throw new Error(`Extension publisher is revoked (refusing to install): ${id}`);
+    }
 
     const resolvedVersion = version || ext.latestVersion;
     if (!resolvedVersion) throw new Error("Marketplace did not provide latestVersion");
@@ -158,6 +184,16 @@ export class ExtensionManager {
 
     const download = await this.marketplaceClient.downloadPackage(id, resolvedVersion);
     if (!download) throw new Error(`Package not found: ${id}@${resolvedVersion}`);
+
+    const scanStatus = download.scanStatus && typeof download.scanStatus === "string" ? download.scanStatus.trim() : null;
+    if (scanStatus && scanStatus.toLowerCase() !== "passed") {
+      const policy = options.scanPolicy || defaultScanPolicyFromEnv();
+      if (policy === "enforce") {
+        throw new Error(
+          `Refusing to install ${id}@${resolvedVersion}: package scan status is "${scanStatus}" (expected "passed")`
+        );
+      }
+    }
 
     const computedPackageSha256 = sha256Hex(download.bytes);
     if (download.sha256 && download.sha256 !== computedPackageSha256) {
@@ -234,6 +270,7 @@ export class ExtensionManager {
       }
 
       const scanStatus = download.scanStatus && typeof download.scanStatus === "string" ? download.scanStatus : null;
+      const deprecated = Boolean(ext.deprecated);
 
       const state = await this._loadState();
       state.installed[id] = {
@@ -244,6 +281,7 @@ export class ExtensionManager {
         packageSha256: computedPackageSha256,
         signatureBase64,
         scanStatus,
+        deprecated,
         filesSha256: expectedFilesSha256,
         files: expectedFiles,
       };
@@ -258,8 +296,8 @@ export class ExtensionManager {
     }
   }
 
-  async install(id, version = null) {
-    const record = await this._installInternal(id, version);
+  async install(id, version = null, options = {}) {
+    const record = await this._installInternal(id, version, options);
     this._emit({ action: "install", id, record });
     return record;
   }

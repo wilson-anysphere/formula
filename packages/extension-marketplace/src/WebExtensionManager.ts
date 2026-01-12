@@ -25,6 +25,7 @@ export interface InstalledExtensionRecord {
   id: string;
   version: string;
   installedAt: string;
+  warnings?: ExtensionInstallWarning[];
   /**
    * When set, the installed record has been quarantined due to an integrity
    * verification failure (e.g. IndexedDB corruption / partial write).
@@ -184,6 +185,71 @@ function prepareContributedPanelSeedsUpdate(
   }
 
   return next;
+}
+
+export type ExtensionInstallWarningKind = "deprecated" | "scanStatus";
+
+export interface ExtensionInstallWarning {
+  kind: ExtensionInstallWarningKind;
+  message: string;
+  scanStatus?: string | null;
+}
+
+export type ExtensionScanPolicy = "enforce" | "allow" | "ignore";
+
+export interface WebExtensionInstallOptions {
+  /**
+   * Policy for marketplace package scan statuses that are not "passed".
+   *
+   * - "enforce": refuse install
+   * - "allow": allow install but return a warning (and optionally require confirmation)
+   * - "ignore": ignore scan status completely
+   *
+   * Default: "enforce" in production builds, "allow" in dev/test builds.
+   */
+  scanPolicy?: ExtensionScanPolicy;
+  /**
+   * Optional confirmation callback invoked for "allowed-but-warned" install states
+   * (deprecated extensions, non-passed scan status when scanPolicy="allow").
+   *
+   * Return `true` to proceed, `false` to cancel the install.
+   */
+  confirm?: (warning: ExtensionInstallWarning) => Promise<boolean> | boolean;
+}
+
+function isNodeRuntime(): boolean {
+  return typeof process !== "undefined" && typeof (process as any)?.versions?.node === "string";
+}
+
+function defaultScanPolicyFromEnv(): ExtensionScanPolicy {
+  // Node (tests/desktop) should honor NODE_ENV for deterministic behavior.
+  if (isNodeRuntime()) {
+    const env = (process as any)?.env as Record<string, string | undefined> | undefined;
+    const explicit = env?.FORMULA_EXTENSION_SCAN_POLICY ?? env?.FORMULA_WEB_EXTENSION_SCAN_POLICY;
+    if (explicit) {
+      const normalized = String(explicit).trim().toLowerCase();
+      if (normalized === "enforce" || normalized === "allow" || normalized === "ignore") {
+        return normalized as ExtensionScanPolicy;
+      }
+    }
+    return env?.NODE_ENV === "production" ? "enforce" : "allow";
+  }
+
+  // Browser builds: prefer Vite's import.meta.env.PROD when available.
+  const metaEnv = (import.meta as any)?.env as Record<string, unknown> | undefined;
+  const explicit = metaEnv?.VITE_FORMULA_EXTENSION_SCAN_POLICY;
+  if (explicit) {
+    const normalized = String(explicit).trim().toLowerCase();
+    if (normalized === "enforce" || normalized === "allow" || normalized === "ignore") {
+      return normalized as ExtensionScanPolicy;
+    }
+  }
+  if (typeof metaEnv?.PROD === "boolean") {
+    return metaEnv.PROD ? "enforce" : "allow";
+  }
+
+  // Safe default.
+  return "enforce";
 }
 
 function isSha256Hex(value: string): boolean {
@@ -395,12 +461,18 @@ export class WebExtensionManager {
   readonly marketplaceClient: MarketplaceClient;
   readonly host: BrowserExtensionHostLike | null;
   readonly engineVersion: string;
+  readonly scanPolicy: ExtensionScanPolicy;
 
   private readonly _loadedMainUrls = new Map<string, { mainUrl: string; revoke: () => void }>();
   private _extensionApiModule: { url: string; revoke: () => void } | null = null;
 
   constructor(
-    options: { marketplaceClient?: MarketplaceClient; host?: BrowserExtensionHostLike | null; engineVersion?: string } = {}
+    options: {
+      marketplaceClient?: MarketplaceClient;
+      host?: BrowserExtensionHostLike | null;
+      engineVersion?: string;
+      scanPolicy?: ExtensionScanPolicy;
+    } = {}
   ) {
     this.marketplaceClient = options.marketplaceClient ?? new MarketplaceClient();
     this.host = options.host ?? null;
@@ -408,6 +480,7 @@ export class WebExtensionManager {
       typeof options.engineVersion === "string" && options.engineVersion.trim().length > 0
         ? options.engineVersion.trim()
         : "1.0.0";
+    this.scanPolicy = options.scanPolicy ?? defaultScanPolicyFromEnv();
   }
 
   search(params: Parameters<MarketplaceClient["search"]>[0]) {
@@ -456,9 +529,42 @@ export class WebExtensionManager {
     };
   }
 
-  async install(id: string, version: string | null = null): Promise<InstalledExtensionRecord> {
+  async install(
+    id: string,
+    version: string | null = null,
+    options: WebExtensionInstallOptions = {}
+  ): Promise<InstalledExtensionRecord> {
     const ext = await this.marketplaceClient.getExtension(id);
     if (!ext) throw new Error(`Extension not found: ${id}`);
+
+    if (ext.blocked) {
+      throw new Error(`Extension is blocked and cannot be installed: ${id}`);
+    }
+    if (ext.malicious) {
+      throw new Error(`Extension is marked as malicious and cannot be installed: ${id}`);
+    }
+    if (ext.publisherRevoked) {
+      throw new Error(`Extension publisher is revoked (refusing to install): ${id}`);
+    }
+
+    const warnings: ExtensionInstallWarning[] = [];
+    const confirm = typeof options.confirm === "function" ? options.confirm : null;
+    const addWarning = async (warning: ExtensionInstallWarning) => {
+      warnings.push(warning);
+      if (confirm) {
+        const ok = await confirm(warning);
+        if (!ok) {
+          throw new Error("Extension install cancelled");
+        }
+      }
+    };
+
+    if (ext.deprecated) {
+      await addWarning({
+        kind: "deprecated",
+        message: `Extension ${id} is deprecated. It may be unmaintained and could be removed from the marketplace.`,
+      });
+    }
 
     const resolvedVersion = version ?? ext.latestVersion;
     if (!resolvedVersion) {
@@ -488,6 +594,26 @@ export class WebExtensionManager {
 
     const download = await this.marketplaceClient.downloadPackage(id, resolvedVersion);
     if (!download) throw new Error(`Package not found: ${id}@${resolvedVersion}`);
+
+    const scanStatus =
+      typeof download.scanStatus === "string" && download.scanStatus.trim().length > 0
+        ? download.scanStatus.trim()
+        : null;
+    if (scanStatus && scanStatus.toLowerCase() !== "passed") {
+      const policy = options.scanPolicy ?? this.scanPolicy;
+      if (policy === "enforce") {
+        throw new Error(
+          `Refusing to install ${id}@${resolvedVersion}: package scan status is "${scanStatus}" (expected "passed")`
+        );
+      }
+      if (policy === "allow") {
+        await addWarning({
+          kind: "scanStatus",
+          scanStatus,
+          message: `Extension ${id}@${resolvedVersion} has package scan status "${scanStatus}". Proceed with caution.`,
+        });
+      }
+    }
 
     if (hasPublisherKeySet && download.publisherKeyId) {
       const keyId = String(download.publisherKeyId);
@@ -621,7 +747,9 @@ export class WebExtensionManager {
       }
     }
 
-    return { id, version: resolvedVersion, installedAt };
+    return warnings.length > 0
+      ? { id, version: resolvedVersion, installedAt, warnings }
+      : { id, version: resolvedVersion, installedAt };
   }
 
   async uninstall(id: string): Promise<void> {
