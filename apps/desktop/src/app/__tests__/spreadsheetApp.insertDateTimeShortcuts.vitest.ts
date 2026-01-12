@@ -135,11 +135,15 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts", () => {
     const doc = app.getDocument();
     const sheetId = app.getCurrentSheetId();
     const expected = dateToExcelSerial(new Date(Date.UTC(2020, 0, 2)));
-    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe(expected);
-    expect(doc.getCell(sheetId, { row: 0, col: 1 }).value).toBe(expected);
-    expect(doc.getCell(sheetId, { row: 1, col: 0 }).value).toBe(expected);
-    expect(doc.getCell(sheetId, { row: 1, col: 1 }).value).toBe(expected);
-    expect(doc.getCellFormat(sheetId, { row: 0, col: 0 }).numberFormat).toBe("yyyy-mm-dd");
+    for (const { row, col } of [
+      { row: 0, col: 0 },
+      { row: 0, col: 1 },
+      { row: 1, col: 0 },
+      { row: 1, col: 1 },
+    ]) {
+      expect(doc.getCell(sheetId, { row, col }).value).toBe(expected);
+      expect(doc.getCellFormat(sheetId, { row, col }).numberFormat).toBe("yyyy-mm-dd");
+    }
 
     expect(doc.undoLabel).toBe("Insert Date");
     expect(doc.undo()).toBe(true);
@@ -178,11 +182,15 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts", () => {
     const doc = app.getDocument();
     const sheetId = app.getCurrentSheetId();
     const expected = (3 * 3600 + 4 * 60 + 5) / 86_400;
-    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBeCloseTo(expected);
-    expect(doc.getCell(sheetId, { row: 0, col: 1 }).value).toBeCloseTo(expected);
-    expect(doc.getCell(sheetId, { row: 1, col: 0 }).value).toBeCloseTo(expected);
-    expect(doc.getCell(sheetId, { row: 1, col: 1 }).value).toBeCloseTo(expected);
-    expect(doc.getCellFormat(sheetId, { row: 0, col: 0 }).numberFormat).toBe("hh:mm:ss");
+    for (const { row, col } of [
+      { row: 0, col: 0 },
+      { row: 0, col: 1 },
+      { row: 1, col: 0 },
+      { row: 1, col: 1 },
+    ]) {
+      expect(doc.getCell(sheetId, { row, col }).value).toBeCloseTo(expected);
+      expect(doc.getCellFormat(sheetId, { row, col }).numberFormat).toBe("hh:mm:ss");
+    }
 
     expect(doc.undoLabel).toBe("Insert Time");
     expect(doc.undo()).toBe(true);
@@ -261,6 +269,7 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts", () => {
     const sheetId = app.getCurrentSheetId();
     const expected = dateToExcelSerial(new Date(Date.UTC(2020, 0, 2)));
     expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBe(expected);
+    expect(doc.getCellFormat(sheetId, { row: 0, col: 0 }).numberFormat).toBe("yyyy-mm-dd");
     // This cell is inside the selection, but should remain unchanged due to the safety cap.
     expect(doc.getCell(sheetId, { row: 1, col: 1 }).value).toBe(2);
 
