@@ -85,6 +85,11 @@ export function readContributedPanelsSeedStore(storage: StorageLike): Contribute
     };
   }
 
+  // Treat an empty store as a no-op and remove the key entirely to avoid leaving behind noisy
+  // `"{}"` records from older versions or partially-corrupted writes.
+  if (Object.keys(out).length === 0) {
+    safeRemoveItem(storage, CONTRIBUTED_PANELS_SEED_STORE_KEY);
+  }
   return out;
 }
 

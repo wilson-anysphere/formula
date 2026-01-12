@@ -79,6 +79,14 @@ describe("contributedPanelsSeedStore", () => {
     expect(storage.getItem(CONTRIBUTED_PANELS_SEED_STORE_KEY)).toBeNull();
   });
 
+  it("removes the seed store key when reading an empty record", () => {
+    const storage = new MemoryStorage();
+
+    storage.setItem(CONTRIBUTED_PANELS_SEED_STORE_KEY, "{}");
+    expect(readContributedPanelsSeedStore(storage as any)).toEqual({});
+    expect(storage.getItem(CONTRIBUTED_PANELS_SEED_STORE_KEY)).toBeNull();
+  });
+
   it("clears corrupted seed store JSON on read", () => {
     const storage = new MemoryStorage();
 
