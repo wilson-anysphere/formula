@@ -1651,6 +1651,48 @@ fn rich_values_typed_string_preserves_error_like_text() {
 }
 
 #[wasm_bindgen_test]
+fn set_cell_rich_null_clears_previous_value() {
+    let mut wb = WasmWorkbook::new();
+
+    let entity = json!({
+        "type": "entity",
+        "value": {
+            "displayValue": "Acme",
+            "properties": {}
+        }
+    });
+
+    wb.set_cell_rich(
+        "A1".to_string(),
+        serde_wasm_bindgen::to_value(&entity).unwrap(),
+        Some(DEFAULT_SHEET.to_string()),
+    )
+    .unwrap();
+
+    wb.set_cell_rich("A1".to_string(), JsValue::NULL, Some(DEFAULT_SHEET.to_string()))
+        .unwrap();
+
+    let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let a1: CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
+    assert!(a1.input.is_null());
+    assert!(a1.value.is_null());
+
+    let rich_js = wb
+        .get_cell_rich("A1".to_string(), Some(DEFAULT_SHEET.to_string()))
+        .unwrap();
+    let rich: JsonValue = serde_wasm_bindgen::from_value(rich_js).unwrap();
+    assert_eq!(
+        rich,
+        json!({
+            "sheet": DEFAULT_SHEET,
+            "address": "A1",
+            "input": { "type": "empty" },
+            "value": { "type": "empty" },
+        })
+    );
+}
+
+#[wasm_bindgen_test]
 fn rich_values_support_bracketed_field_access_formulas() {
     let mut wb = WasmWorkbook::new();
 
