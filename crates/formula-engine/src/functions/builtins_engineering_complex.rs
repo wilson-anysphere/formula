@@ -30,6 +30,8 @@ fn eval_complex_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<Pa
             suffix: 'i',
         }),
         Value::Text(s) => parse_complex(&s, ctx.number_locale()),
+        Value::Entity(v) => parse_complex(&v.display, ctx.number_locale()),
+        Value::Record(v) => parse_complex(&v.display, ctx.number_locale()),
         Value::Array(_) | Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => {
             Err(ErrorKind::Value)
         }

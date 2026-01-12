@@ -1577,9 +1577,14 @@ fn bytecode_backend_and_or_reference_semantics_match_ast() {
     assert_eq!(engine.bytecode_program_count(), 2);
 
     let cases: &[(Option<Value>, Value, Value)] = &[
-        // Blank and text in *references* are ignored.
+        // Blank cell refs are ignored.
         (None, Value::Bool(true), Value::Bool(false)),
-        (Some(Value::Text("hello".to_string())), Value::Bool(true), Value::Bool(false)),
+        // Text cell refs behave like scalar text arguments (#VALUE!).
+        (
+            Some(Value::Text("hello".to_string())),
+            Value::Error(ErrorKind::Value),
+            Value::Error(ErrorKind::Value),
+        ),
         // Numbers/bools are included.
         (Some(Value::Number(0.0)), Value::Bool(false), Value::Bool(false)),
         (Some(Value::Number(2.0)), Value::Bool(true), Value::Bool(true)),

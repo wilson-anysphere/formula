@@ -416,10 +416,10 @@ impl<'a> CompileCtx<'a> {
         //
         // Lower single-cell references to a range so the runtime can apply reference semantics.
         let treat_cell_as_range = match func {
-            // AND/OR have the same reference-vs-scalar semantics as the aggregate functions:
-            // a direct cell reference argument is treated as a reference, not a scalar, so blanks
-            // and text values in the referenced cell are ignored.
-            Function::And | Function::Or => true,
+            // AND/OR are *not* treated like numeric aggregates: a direct cell reference argument is
+            // treated as a scalar, so text-like values in the referenced cell behave like scalar
+            // text arguments (i.e. typically #VALUE! rather than being ignored).
+            Function::And | Function::Or => false,
             Function::Sum
             | Function::Average
             | Function::Min

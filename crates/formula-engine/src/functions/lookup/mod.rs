@@ -30,6 +30,8 @@ fn default_format_options() -> FormatOptions {
 fn coerce_to_string_with_format_options(value: &Value, options: &FormatOptions) -> Result<String, ErrorKind> {
     match value {
         Value::Text(s) => Ok(s.clone()),
+        Value::Entity(v) => Ok(v.display.clone()),
+        Value::Record(v) => Ok(v.display.clone()),
         Value::Number(n) => Ok(formula_format::format_value(FmtValue::Number(*n), None, options).text),
         Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
         Value::Blank => Ok(String::new()),
@@ -197,7 +199,7 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
     fn type_rank(v: &Value) -> u8 {
         match v {
             Value::Number(_) => 0,
-            Value::Text(_) => 1,
+            Value::Text(_) | Value::Entity(_) | Value::Record(_) => 1,
             Value::Bool(_) => 2,
             Value::Blank => 3,
             Value::Error(_) => 4,

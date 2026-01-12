@@ -218,6 +218,43 @@ impl Array {
     }
 }
 
+/// Rich value representing an Excel Entity (linked data type).
+///
+/// The engine treats entities as opaque values. Functions that accept "text-like" inputs
+/// (e.g. logical range semantics) should handle them similarly to text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EntityValue {
+    /// Display string shown in the grid UI.
+    pub display: String,
+}
+
+impl EntityValue {
+    #[must_use]
+    pub fn new(display: impl Into<String>) -> Self {
+        Self {
+            display: display.into(),
+        }
+    }
+}
+
+/// Rich value representing an Excel Record.
+///
+/// Records are treated as opaque values by the core engine for now.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordValue {
+    /// Display string shown in the grid UI.
+    pub display: String,
+}
+
+impl RecordValue {
+    #[must_use]
+    pub fn new(display: impl Into<String>) -> Self {
+        Self {
+            display: display.into(),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub struct Lambda {
     pub params: Arc<[String]>,
@@ -253,6 +290,8 @@ impl fmt::Debug for Lambda {
 pub enum Value {
     Number(f64),
     Text(String),
+    Entity(EntityValue),
+    Record(RecordValue),
     Bool(bool),
     Blank,
     Error(ErrorKind),
@@ -287,6 +326,7 @@ impl Value {
             Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
             Value::Blank => Ok(0.0),
             Value::Text(s) => coerce_text_to_number(s, ctx.value_locale(), ctx.now_utc(), ctx.date_system()),
+            Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
             Value::Reference(_)
             | Value::ReferenceUnion(_)
@@ -307,6 +347,7 @@ impl Value {
                 chrono::Utc::now(),
                 ExcelDateSystem::EXCEL_1900,
             ),
+            Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
             Value::Reference(_)
             | Value::ReferenceUnion(_)
@@ -322,6 +363,7 @@ impl Value {
             Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
             Value::Blank => Ok(0.0),
             Value::Text(s) => parse_number(s, locale).map_err(map_excel_error),
+            Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
             Value::Reference(_)
             | Value::ReferenceUnion(_)
@@ -359,6 +401,7 @@ impl Value {
                 }
                 Ok(self.coerce_to_number_with_ctx(ctx)? != 0.0)
             }
+            Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
             Value::Reference(_)
             | Value::ReferenceUnion(_)
@@ -391,6 +434,7 @@ impl Value {
                     ExcelDateSystem::EXCEL_1900,
                 )? != 0.0)
             }
+            Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
             Value::Reference(_)
             | Value::ReferenceUnion(_)
@@ -419,6 +463,7 @@ impl Value {
                 let n = parse_number(t, locale).map_err(map_excel_error)?;
                 Ok(n != 0.0)
             }
+            Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Error(e) => Err(*e),
             Value::Reference(_)
             | Value::ReferenceUnion(_)
@@ -431,6 +476,8 @@ impl Value {
     pub fn coerce_to_string(&self) -> Result<String, ErrorKind> {
         match self {
             Value::Text(s) => Ok(s.clone()),
+            Value::Entity(v) => Ok(v.display.clone()),
+            Value::Record(v) => Ok(v.display.clone()),
             Value::Number(n) => Ok(format_number_general(*n)),
             Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
             Value::Blank => Ok(String::new()),
@@ -446,6 +493,8 @@ impl Value {
     pub fn coerce_to_string_with_ctx(&self, ctx: &dyn FunctionContext) -> Result<String, ErrorKind> {
         match self {
             Value::Text(s) => Ok(s.clone()),
+            Value::Entity(v) => Ok(v.display.clone()),
+            Value::Record(v) => Ok(v.display.clone()),
             Value::Number(n) => {
                 let options = FormatOptions {
                     locale: ctx.value_locale().separators,
@@ -613,6 +662,8 @@ impl fmt::Display for Value {
         match self {
             Value::Number(n) => write!(f, "{n}"),
             Value::Text(s) => f.write_str(s),
+            Value::Entity(v) => f.write_str(&v.display),
+            Value::Record(v) => f.write_str(&v.display),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Blank => f.write_str(""),
             Value::Error(e) => write!(f, "{e}"),

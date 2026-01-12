@@ -3267,6 +3267,8 @@ fn engine_value_to_scalar(value: EngineValue) -> CellScalar {
         EngineValue::Blank => CellScalar::Empty,
         EngineValue::Number(n) => CellScalar::Number(n),
         EngineValue::Text(s) => CellScalar::Text(s),
+        EngineValue::Entity(v) => CellScalar::Text(v.display),
+        EngineValue::Record(v) => CellScalar::Text(v.display),
         EngineValue::Bool(b) => CellScalar::Bool(b),
         EngineValue::Error(e) => CellScalar::Error(e.as_code().to_string()),
         // Reference values are not meant to be stored directly in cells; when they

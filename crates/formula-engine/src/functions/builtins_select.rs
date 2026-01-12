@@ -451,15 +451,26 @@ fn excel_eq(left: &Value, right: &Value) -> Result<bool, ErrorKind> {
     if let Value::Error(e) = right {
         return Err(*e);
     }
+
+    let left = match left.clone() {
+        Value::Entity(v) => Value::Text(v.display),
+        Value::Record(v) => Value::Text(v.display),
+        other => other,
+    };
+    let right = match right.clone() {
+        Value::Entity(v) => Value::Text(v.display),
+        Value::Record(v) => Value::Text(v.display),
+        other => other,
+    };
     if matches!(
-        left,
+        &left,
         Value::Array(_)
             | Value::Lambda(_)
             | Value::Spill { .. }
             | Value::Reference(_)
             | Value::ReferenceUnion(_)
     ) || matches!(
-        right,
+        &right,
         Value::Array(_)
             | Value::Lambda(_)
             | Value::Spill { .. }
@@ -470,7 +481,7 @@ fn excel_eq(left: &Value, right: &Value) -> Result<bool, ErrorKind> {
     }
 
     // Blank coerces to the other type for comparisons.
-    let (l, r) = match (left, right) {
+    let (l, r) = match (&left, &right) {
         (Value::Blank, Value::Number(_)) => (Value::Number(0.0), right.clone()),
         (Value::Number(_), Value::Blank) => (left.clone(), Value::Number(0.0)),
         (Value::Blank, Value::Bool(_)) => (Value::Bool(false), right.clone()),
@@ -480,15 +491,30 @@ fn excel_eq(left: &Value, right: &Value) -> Result<bool, ErrorKind> {
         _ => (left.clone(), right.clone()),
     };
 
+    fn text_like_str(v: &Value) -> Option<&str> {
+        match v {
+            Value::Text(s) => Some(s),
+            Value::Entity(v) => Some(v.display.as_str()),
+            Value::Record(v) => Some(v.display.as_str()),
+            _ => None,
+        }
+    }
+
     let ord = match (&l, &r) {
         (Value::Number(a), Value::Number(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
-        (Value::Text(a), Value::Text(b)) => cmp_case_insensitive(a, b),
+        (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
+            cmp_case_insensitive(text_like_str(a).unwrap(), text_like_str(b).unwrap())
+        }
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
         // Type precedence (approximate Excel): numbers < text < booleans.
-        (Value::Number(_), Value::Text(_) | Value::Bool(_)) => Ordering::Less,
-        (Value::Text(_), Value::Bool(_)) => Ordering::Less,
-        (Value::Text(_), Value::Number(_)) => Ordering::Greater,
-        (Value::Bool(_), Value::Number(_) | Value::Text(_)) => Ordering::Greater,
+        (Value::Number(_), Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Bool(_)) => {
+            Ordering::Less
+        }
+        (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Bool(_)) => Ordering::Less,
+        (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Number(_)) => Ordering::Greater,
+        (Value::Bool(_), Value::Number(_) | Value::Text(_) | Value::Entity(_) | Value::Record(_)) => {
+            Ordering::Greater
+        }
         // Blank should have been coerced above.
         (Value::Blank, Value::Blank) => Ordering::Equal,
         (Value::Blank, _) => Ordering::Less,
@@ -506,6 +532,7 @@ fn excel_eq(left: &Value, right: &Value) -> Result<bool, ErrorKind> {
         | (_, Value::Reference(_))
         | (Value::ReferenceUnion(_), _)
         | (_, Value::ReferenceUnion(_)) => Ordering::Equal,
+        _ => Ordering::Equal,
     };
 
     Ok(ord == Ordering::Equal)

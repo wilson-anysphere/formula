@@ -17,6 +17,8 @@ pub fn format_value_for_display(
         match value {
             Value::Number(n) => FmtValue::Number(*n),
             Value::Text(s) => FmtValue::Text(s.as_str()),
+            Value::Entity(v) => FmtValue::Text(v.display.as_str()),
+            Value::Record(v) => FmtValue::Text(v.display.as_str()),
             Value::Bool(b) => FmtValue::Bool(*b),
             Value::Blank => FmtValue::Blank,
             Value::Error(e) => FmtValue::Error(e.as_code()),

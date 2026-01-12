@@ -608,6 +608,8 @@ fn normalize_engine_value(value: &EngineValue) -> NormalizedValue {
         EngineValue::Number(n) => NormalizedValue::Number(n.to_bits()),
         EngineValue::Bool(b) => NormalizedValue::Bool(*b),
         EngineValue::Text(s) => NormalizedValue::Text(s.clone()),
+        EngineValue::Entity(v) => NormalizedValue::Text(v.display.clone()),
+        EngineValue::Record(v) => NormalizedValue::Text(v.display.clone()),
         EngineValue::Error(e) => NormalizedValue::Error(e.as_code().to_string()),
         EngineValue::Reference(_)
         | EngineValue::ReferenceUnion(_)

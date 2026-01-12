@@ -228,7 +228,7 @@ fn n_value(v: &Value) -> Value {
         Value::Error(e) => Value::Error(*e),
         Value::Number(n) => Value::Number(*n),
         Value::Bool(b) => Value::Number(if *b { 1.0 } else { 0.0 }),
-        Value::Blank | Value::Text(_) => Value::Number(0.0),
+        Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => Value::Number(0.0),
         Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)
@@ -260,6 +260,8 @@ fn t_value(v: &Value) -> Value {
         Value::Error(e) => Value::Error(*e),
         Value::Text(s) => Value::Text(s.clone()),
         Value::Number(_)
+        | Value::Entity(_)
+        | Value::Record(_)
         | Value::Bool(_)
         | Value::Blank
         | Value::Reference(_)

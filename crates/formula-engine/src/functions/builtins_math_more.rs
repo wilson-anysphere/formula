@@ -681,6 +681,7 @@ fn push_numbers_from_scalar(
             out.push(Value::Text(s).coerce_to_number_with_ctx(ctx)?);
             Ok(())
         }
+        Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
         Value::Array(arr) => {
             for v in arr.iter() {
                 match v {
@@ -689,6 +690,8 @@ fn push_numbers_from_scalar(
                     Value::Lambda(_) => return Err(ErrorKind::Value),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Blank
                     | Value::Array(_)
                     | Value::Spill { .. }
@@ -718,6 +721,8 @@ fn push_numbers_from_reference(
             Value::Lambda(_) => return Err(ErrorKind::Value),
             Value::Bool(_)
             | Value::Text(_)
+            | Value::Entity(_)
+            | Value::Record(_)
             | Value::Blank
             | Value::Array(_)
             | Value::Spill { .. }
@@ -746,6 +751,8 @@ fn push_numbers_from_reference_union(
                 Value::Lambda(_) => return Err(ErrorKind::Value),
                 Value::Bool(_)
                 | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Blank
                 | Value::Array(_)
                 | Value::Spill { .. }
@@ -931,6 +938,7 @@ fn arg_to_numeric_sequence(
             Value::Bool(b) => Ok(vec![Some(if b { 1.0 } else { 0.0 })]),
             Value::Blank => Ok(vec![None]),
             Value::Text(s) => Ok(vec![Some(Value::Text(s).coerce_to_number_with_ctx(ctx)?)]),
+            Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Array(arr) => {
                 let mut out = Vec::with_capacity(arr.values.len());
                 for v in arr.iter() {
@@ -940,6 +948,8 @@ fn arg_to_numeric_sequence(
                         Value::Lambda(_) => return Err(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Spill { .. }
@@ -968,6 +978,8 @@ fn arg_to_numeric_sequence(
                     Value::Lambda(_) => return Err(ErrorKind::Value),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Blank
                     | Value::Array(_)
                     | Value::Spill { .. }
@@ -997,6 +1009,8 @@ fn arg_to_numeric_sequence(
                         Value::Lambda(_) => return Err(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Spill { .. }
@@ -1107,4 +1121,3 @@ fn sumx2py2_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => Value::Error(e),
     }
 }
-

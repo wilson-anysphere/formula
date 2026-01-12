@@ -229,7 +229,7 @@ fn header_label(ctx: &dyn FunctionContext, value: &Value) -> Result<Option<Strin
                 Ok(Some(s.clone()))
             }
         }
-        Value::Number(_) | Value::Bool(_) => {
+        Value::Number(_) | Value::Bool(_) | Value::Entity(_) | Value::Record(_) => {
             let s = value.coerce_to_string_with_ctx(ctx)?;
             if s.trim().is_empty() {
                 Ok(None)

@@ -24,6 +24,7 @@ fn push_numbers_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Erro
             out.push(n);
             Ok(())
         }
+        Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
         Value::Array(arr) => {
             for v in arr.iter() {
                 match v {
@@ -32,6 +33,8 @@ fn push_numbers_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Erro
                     Value::Lambda(_) => return Err(ErrorKind::Value),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Blank
                     | Value::Array(_)
                     | Value::Spill { .. }
@@ -60,6 +63,8 @@ fn push_numbers_from_reference(
             Value::Lambda(_) => return Err(ErrorKind::Value),
             Value::Bool(_)
             | Value::Text(_)
+            | Value::Entity(_)
+            | Value::Record(_)
             | Value::Blank
             | Value::Array(_)
             | Value::Spill { .. }
@@ -88,6 +93,8 @@ fn push_numbers_from_reference_union(
                 Value::Lambda(_) => return Err(ErrorKind::Value),
                 Value::Bool(_)
                 | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Blank
                 | Value::Array(_)
                 | Value::Spill { .. }
@@ -196,4 +203,3 @@ fn skew_p_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => Value::Error(e),
     }
 }
-

@@ -7,6 +7,10 @@ use crate::value::{ErrorKind, Value};
 
 const VAR_ARGS: usize = 255;
 
+fn is_text_like(value: &Value) -> bool {
+    matches!(value, Value::Text(_) | Value::Entity(_) | Value::Record(_))
+}
+
 inventory::submit! {
     FunctionSpec {
         name: "XOR",
@@ -34,7 +38,7 @@ fn xor_update(acc: &mut bool, value: &Value) -> Result<(), ErrorKind> {
         }
         Value::Blank => Ok(()),
         // Scalar text arguments accept TRUE/FALSE (and numeric text) coercions like NOT().
-        Value::Text(_) => {
+        Value::Text(_) | Value::Entity(_) | Value::Record(_) => {
             *acc ^= value.coerce_to_bool()?;
             Ok(())
         }
@@ -46,12 +50,20 @@ fn xor_update(acc: &mut bool, value: &Value) -> Result<(), ErrorKind> {
                     Value::Bool(b) => *acc ^= *b,
                     Value::Lambda(_) => return Err(ErrorKind::Value),
                     // Text and blanks in arrays are ignored (same as references).
-                    Value::Text(_)
-                    | Value::Blank
-                    | Value::Array(_)
-                    | Value::Spill { .. }
-                    | Value::Reference(_)
-                    | Value::ReferenceUnion(_) => {}
+                    other => {
+                        if is_text_like(other)
+                            || matches!(
+                                other,
+                                Value::Blank
+                                    | Value::Array(_)
+                                    | Value::Spill { .. }
+                                    | Value::Reference(_)
+                                    | Value::ReferenceUnion(_)
+                            )
+                        {
+                            continue;
+                        }
+                    }
                 }
             }
             Ok(())
@@ -81,12 +93,20 @@ fn xor_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         Value::Bool(b) => acc ^= b,
                         Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         // Text and blanks in references are ignored.
-                        Value::Text(_)
-                        | Value::Blank
-                        | Value::Array(_)
-                        | Value::Spill { .. }
-                        | Value::Reference(_)
-                        | Value::ReferenceUnion(_) => {}
+                        other => {
+                            if is_text_like(&other)
+                                || matches!(
+                                    other,
+                                    Value::Blank
+                                        | Value::Array(_)
+                                        | Value::Spill { .. }
+                                        | Value::Reference(_)
+                                        | Value::ReferenceUnion(_)
+                                )
+                            {
+                                continue;
+                            }
+                        }
                     }
                 }
             }
@@ -103,12 +123,20 @@ fn xor_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Number(n) => acc ^= n != 0.0,
                             Value::Bool(b) => acc ^= b,
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
-                            Value::Text(_)
-                            | Value::Blank
-                            | Value::Array(_)
-                            | Value::Spill { .. }
-                            | Value::Reference(_)
-                            | Value::ReferenceUnion(_) => {}
+                            other => {
+                                if is_text_like(&other)
+                                    || matches!(
+                                        other,
+                                        Value::Blank
+                                            | Value::Array(_)
+                                            | Value::Spill { .. }
+                                            | Value::Reference(_)
+                                            | Value::ReferenceUnion(_)
+                                    )
+                                {
+                                    continue;
+                                }
+                            }
                         }
                     }
                 }

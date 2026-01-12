@@ -110,6 +110,7 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     Ok(n) => acc += n,
                     Err(e) => return Value::Error(e),
                 },
+                Value::Entity(_) | Value::Record(_) => return Value::Error(ErrorKind::Value),
                 Value::Array(arr) => {
                     let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
                     let mut len = 0usize;
@@ -134,6 +135,8 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Spill { .. }
@@ -183,6 +186,8 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         // Excel quirk: logicals/text in references are ignored by SUM.
                         Value::Bool(_)
                         | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Spill { .. }
@@ -230,6 +235,8 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             // Excel quirk: logicals/text in references are ignored by SUM.
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Spill { .. }
@@ -309,6 +316,7 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         count += 1;
                     }
                 }
+                Value::Entity(_) | Value::Record(_) => return Value::Error(ErrorKind::Value),
                 Value::Array(arr) => {
                     let mut buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
                     let mut len = 0usize;
@@ -333,6 +341,8 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Spill { .. }
@@ -380,6 +390,8 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         // Ignore logical/text/blank in references.
                         Value::Bool(_)
                         | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Spill { .. }
@@ -426,6 +438,8 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             // Ignore logical/text/blank in references.
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Spill { .. }
@@ -502,6 +516,8 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Spill { .. }
@@ -558,6 +574,8 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Spill { .. }
@@ -606,6 +624,8 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Spill { .. }
@@ -681,6 +701,8 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Spill { .. }
@@ -737,6 +759,8 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Spill { .. }
@@ -785,6 +809,8 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Spill { .. }
@@ -893,6 +919,7 @@ fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
             Value::Blank => Some(0.0),
             Value::Text(s) => parse_number(s, locale).ok(),
+            Value::Entity(_) | Value::Record(_) => None,
             Value::Array(arr) => coerce_candidate_to_number(&arr.top_left(), locale),
             Value::Error(_)
             | Value::Reference(_)

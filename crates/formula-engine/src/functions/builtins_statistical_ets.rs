@@ -14,7 +14,7 @@ fn collect_optional_numbers_from_arg(
             Value::Blank => Ok(None),
             Value::Number(n) => Ok(Some(*n)),
             Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
-            Value::Text(_) => Ok(Some(v.coerce_to_number_with_ctx(ctx)?)),
+            Value::Text(_) | Value::Entity(_) | Value::Record(_) => Ok(Some(v.coerce_to_number_with_ctx(ctx)?)),
             Value::Array(_)
             | Value::Reference(_)
             | Value::ReferenceUnion(_)

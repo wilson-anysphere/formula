@@ -28,6 +28,7 @@ fn push_numbers_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Erro
             out.push(n);
             Ok(())
         }
+        Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
         Value::Array(arr) => {
             for v in arr.iter() {
                 match v {
@@ -36,6 +37,8 @@ fn push_numbers_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Erro
                     Value::Lambda(_) => return Err(ErrorKind::Value),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Blank
                     | Value::Array(_)
                     | Value::Spill { .. }
@@ -64,6 +67,8 @@ fn push_numbers_from_reference(
             Value::Lambda(_) => return Err(ErrorKind::Value),
             Value::Bool(_)
             | Value::Text(_)
+            | Value::Entity(_)
+            | Value::Record(_)
             | Value::Blank
             | Value::Array(_)
             | Value::Spill { .. }
@@ -92,6 +97,8 @@ fn push_numbers_from_reference_union(
                 Value::Lambda(_) => return Err(ErrorKind::Value),
                 Value::Bool(_)
                 | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Blank
                 | Value::Array(_)
                 | Value::Spill { .. }
@@ -137,7 +144,7 @@ fn push_numbers_a_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Er
             out.push(if b { 1.0 } else { 0.0 });
             Ok(())
         }
-        Value::Blank | Value::Text(_) => {
+        Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => {
             out.push(0.0);
             Ok(())
         }
@@ -147,7 +154,7 @@ fn push_numbers_a_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Er
                     Value::Error(e) => return Err(*e),
                     Value::Number(n) => out.push(*n),
                     Value::Bool(b) => out.push(if *b { 1.0 } else { 0.0 }),
-                    Value::Blank | Value::Text(_) => out.push(0.0),
+                    Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => out.push(0.0),
                     Value::Lambda(_) => return Err(ErrorKind::Value),
                     Value::Array(_)
                     | Value::Spill { .. }
@@ -174,7 +181,7 @@ fn push_numbers_a_from_reference(
             Value::Error(e) => return Err(e),
             Value::Number(n) => out.push(n),
             Value::Bool(b) => out.push(if b { 1.0 } else { 0.0 }),
-            Value::Blank | Value::Text(_) => out.push(0.0),
+            Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => out.push(0.0),
             Value::Lambda(_) => return Err(ErrorKind::Value),
             Value::Array(_)
             | Value::Spill { .. }
@@ -201,7 +208,7 @@ fn push_numbers_a_from_reference_union(
                 Value::Error(e) => return Err(e),
                 Value::Number(n) => out.push(n),
                 Value::Bool(b) => out.push(if b { 1.0 } else { 0.0 }),
-                Value::Blank | Value::Text(_) => out.push(0.0),
+                Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => out.push(0.0),
                 Value::Lambda(_) => return Err(ErrorKind::Value),
                 Value::Array(_)
                 | Value::Spill { .. }
@@ -405,6 +412,7 @@ fn sumsq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     };
                     push_number(n, &mut sum, &mut c, &mut saw_nonfinite, &mut buf, &mut len);
                 }
+                Value::Entity(_) | Value::Record(_) => return Value::Error(ErrorKind::Value),
                 Value::Array(arr) => {
                     for v in arr.iter() {
                         match v {
@@ -422,6 +430,8 @@ fn sumsq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Spill { .. }
@@ -452,6 +462,8 @@ fn sumsq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Spill { .. }
@@ -482,6 +494,8 @@ fn sumsq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
                             | Value::Spill { .. }
@@ -675,6 +689,7 @@ fn arg_to_numeric_sequence(
             Value::Bool(b) => Ok(vec![Some(if b { 1.0 } else { 0.0 })]),
             Value::Blank => Ok(vec![None]),
             Value::Text(s) => Ok(vec![Some(Value::Text(s).coerce_to_number()?)]),
+            Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
             Value::Array(arr) => {
                 let mut out = Vec::with_capacity(arr.values.len());
                 for v in arr.iter() {
@@ -684,6 +699,8 @@ fn arg_to_numeric_sequence(
                         Value::Lambda(_) => return Err(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Spill { .. }
@@ -712,6 +729,8 @@ fn arg_to_numeric_sequence(
                     Value::Lambda(_) => return Err(ErrorKind::Value),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Blank
                     | Value::Array(_)
                     | Value::Spill { .. }
@@ -741,6 +760,8 @@ fn arg_to_numeric_sequence(
                         Value::Lambda(_) => return Err(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Spill { .. }

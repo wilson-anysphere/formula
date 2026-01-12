@@ -5513,6 +5513,7 @@ fn rewrite_defined_name_constants_for_bytecode(
             Value::Number(n) if n.is_finite() => Some(crate::Expr::Number(n.to_string())),
             Value::Number(_) => None,
             Value::Text(s) => Some(crate::Expr::String(s.clone())),
+            Value::Entity(_) | Value::Record(_) => None,
             Value::Bool(b) => Some(crate::Expr::Boolean(*b)),
             Value::Blank => Some(crate::Expr::Missing),
             Value::Error(e) => Some(crate::Expr::Error(e.as_code().to_string())),
@@ -5691,6 +5692,8 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
         Value::Number(n) => bytecode::Value::Number(*n),
         Value::Bool(b) => bytecode::Value::Bool(*b),
         Value::Text(s) => bytecode::Value::Text(Arc::from(s.as_str())),
+        Value::Entity(v) => bytecode::Value::Text(Arc::from(v.display.as_str())),
+        Value::Record(v) => bytecode::Value::Text(Arc::from(v.display.as_str())),
         Value::Blank => bytecode::Value::Empty,
         Value::Error(e) => bytecode::Value::Error(engine_error_to_bytecode(*e)),
         other => match other {

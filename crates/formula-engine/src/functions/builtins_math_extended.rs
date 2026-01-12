@@ -641,6 +641,7 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     Ok(n) => values.push(n),
                     Err(e) => return Value::Error(e),
                 },
+                Value::Entity(_) | Value::Record(_) => return Value::Error(ErrorKind::Value),
                 Value::Reference(_) | Value::ReferenceUnion(_) => {
                     return Value::Error(ErrorKind::Value)
                 }
@@ -652,6 +653,8 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Blank
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_)
@@ -672,6 +675,8 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         // Excel quirk: logicals/text in references are ignored.
                         Value::Bool(_)
                         | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
                         | Value::Blank
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_)
@@ -693,6 +698,8 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Blank
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_)

@@ -105,6 +105,8 @@ impl From<Value> for EncodedValue {
                 EncodedValue::engine_error(format!("non-finite numeric result: {v}"))
             }
             Value::Text(v) => EncodedValue::String { v },
+            Value::Entity(v) => EncodedValue::String { v: v.display },
+            Value::Record(v) => EncodedValue::String { v: v.display },
             Value::Bool(v) => EncodedValue::Bool { v },
             Value::Error(kind) => EncodedValue::Error {
                 v: kind.as_code().to_string(),
@@ -337,6 +339,8 @@ fn main() -> Result<()> {
                 }
             }
             Value::Text(s) => s.clone(),
+            Value::Entity(v) => v.display.clone(),
+            Value::Record(v) => v.display.clone(),
             Value::Bool(b) => {
                 if *b {
                     "TRUE".to_string()

@@ -80,6 +80,8 @@ pub fn text(
             FmtValue::Number(*n)
         }
         Value::Text(s) => FmtValue::Text(s.as_str()),
+        Value::Entity(v) => FmtValue::Text(v.display.as_str()),
+        Value::Record(v) => FmtValue::Text(v.display.as_str()),
         Value::Bool(b) => FmtValue::Bool(*b),
         Value::Blank => FmtValue::Blank,
     };

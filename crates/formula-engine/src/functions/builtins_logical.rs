@@ -1,10 +1,26 @@
-use crate::eval::CompiledExpr;
+use crate::eval::{CompiledExpr, SheetReference};
 use crate::functions::array_lift;
 use crate::functions::{ArgValue, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{ErrorKind, Value};
 
 const VAR_ARGS: usize = 255;
+
+fn is_text_like(value: &Value) -> bool {
+    matches!(value, Value::Text(_) | Value::Entity(_) | Value::Record(_))
+}
+
+fn is_scalar_cell_ref(expr: &CompiledExpr) -> bool {
+    match expr {
+        // Excel treats single-cell references passed to logical aggregations (AND/OR) like scalar
+        // values, which differs from range semantics (e.g. `A1:A1`).
+        //
+        // Avoid changing semantics for 3D references (`Sheet1:Sheet3!A1`), which behave like a
+        // multi-cell reference.
+        CompiledExpr::CellRef(r) => !matches!(r.sheet, SheetReference::SheetRange(_, _)),
+        _ => false,
+    }
+}
 
 inventory::submit! {
     FunctionSpec {
@@ -130,7 +146,13 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut any = false;
 
     for arg in args {
-        match ctx.eval_arg(arg) {
+        let arg_value = if is_scalar_cell_ref(arg) {
+            ArgValue::Scalar(ctx.eval_scalar(arg))
+        } else {
+            ctx.eval_arg(arg)
+        };
+
+        match arg_value {
             ArgValue::Scalar(v) => match v {
                 Value::Error(e) => return Value::Error(e),
                 Value::Number(n) => {
@@ -146,7 +168,9 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     }
                 }
                 Value::Blank => {}
-                Value::Text(_) => return Value::Error(ErrorKind::Value),
+                Value::Text(_) | Value::Entity(_) | Value::Record(_) => {
+                    return Value::Error(ErrorKind::Value)
+                }
                 Value::Reference(_) | Value::ReferenceUnion(_) => {
                     return Value::Error(ErrorKind::Value)
                 }
@@ -168,12 +192,20 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             }
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             // Text and blanks in arrays are ignored (same as references).
-                            Value::Text(_)
-                            | Value::Blank
-                            | Value::Array(_)
-                            | Value::Spill { .. }
-                            | Value::Reference(_)
-                            | Value::ReferenceUnion(_) => {}
+                            other => {
+                                if is_text_like(other)
+                                    || matches!(
+                                        other,
+                                        Value::Blank
+                                            | Value::Array(_)
+                                            | Value::Spill { .. }
+                                            | Value::Reference(_)
+                                            | Value::ReferenceUnion(_)
+                                    )
+                                {
+                                    continue;
+                                }
+                            }
                         }
                     }
                 }
@@ -199,12 +231,20 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         }
                         Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                         // Text and blanks in references are ignored.
-                        Value::Text(_)
-                        | Value::Blank
-                        | Value::Array(_)
-                        | Value::Spill { .. }
-                        | Value::Reference(_)
-                        | Value::ReferenceUnion(_) => {}
+                        other => {
+                            if is_text_like(&other)
+                                || matches!(
+                                    other,
+                                    Value::Blank
+                                        | Value::Array(_)
+                                        | Value::Spill { .. }
+                                        | Value::Reference(_)
+                                        | Value::ReferenceUnion(_)
+                                )
+                            {
+                                continue;
+                            }
+                        }
                     }
                 }
             }
@@ -232,12 +272,20 @@ fn and_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             }
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                             // Text and blanks in references are ignored.
-                            Value::Text(_)
-                            | Value::Blank
-                            | Value::Array(_)
-                            | Value::Spill { .. }
-                            | Value::Reference(_)
-                            | Value::ReferenceUnion(_) => {}
+                            other => {
+                                if is_text_like(&other)
+                                    || matches!(
+                                        other,
+                                        Value::Blank
+                                            | Value::Array(_)
+                                            | Value::Spill { .. }
+                                            | Value::Reference(_)
+                                            | Value::ReferenceUnion(_)
+                                    )
+                                {
+                                    continue;
+                                }
+                            }
                         }
                     }
                 }
@@ -270,7 +318,13 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let mut any = false;
 
     for arg in args {
-        match ctx.eval_arg(arg) {
+        let arg_value = if is_scalar_cell_ref(arg) {
+            ArgValue::Scalar(ctx.eval_scalar(arg))
+        } else {
+            ctx.eval_arg(arg)
+        };
+
+        match arg_value {
             ArgValue::Scalar(v) => match v {
                 Value::Error(e) => return Value::Error(e),
                 Value::Number(n) => {
@@ -286,7 +340,9 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     }
                 }
                 Value::Blank => {}
-                Value::Text(_) => return Value::Error(ErrorKind::Value),
+                Value::Text(_) | Value::Entity(_) | Value::Record(_) => {
+                    return Value::Error(ErrorKind::Value)
+                }
                 Value::Reference(_) | Value::ReferenceUnion(_) => {
                     return Value::Error(ErrorKind::Value)
                 }
@@ -307,12 +363,20 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 }
                             }
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
-                            Value::Text(_)
-                            | Value::Blank
-                            | Value::Array(_)
-                            | Value::Spill { .. }
-                            | Value::Reference(_)
-                            | Value::ReferenceUnion(_) => {}
+                            other => {
+                                if is_text_like(other)
+                                    || matches!(
+                                        other,
+                                        Value::Blank
+                                            | Value::Array(_)
+                                            | Value::Spill { .. }
+                                            | Value::Reference(_)
+                                            | Value::ReferenceUnion(_)
+                                    )
+                                {
+                                    continue;
+                                }
+                            }
                         }
                     }
                 }
@@ -337,12 +401,20 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             }
                         }
                         Value::Lambda(_) => return Value::Error(ErrorKind::Value),
-                        Value::Text(_)
-                        | Value::Blank
-                        | Value::Array(_)
-                        | Value::Spill { .. }
-                        | Value::Reference(_)
-                        | Value::ReferenceUnion(_) => {}
+                        other => {
+                            if is_text_like(&other)
+                                || matches!(
+                                    other,
+                                    Value::Blank
+                                        | Value::Array(_)
+                                        | Value::Spill { .. }
+                                        | Value::Reference(_)
+                                        | Value::ReferenceUnion(_)
+                                )
+                            {
+                                continue;
+                            }
+                        }
                     }
                 }
             }
@@ -369,12 +441,20 @@ fn or_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                                 }
                             }
                             Value::Lambda(_) => return Value::Error(ErrorKind::Value),
-                            Value::Text(_)
-                            | Value::Blank
-                            | Value::Array(_)
-                            | Value::Spill { .. }
-                            | Value::Reference(_)
-                            | Value::ReferenceUnion(_) => {}
+                            other => {
+                                if is_text_like(&other)
+                                    || matches!(
+                                        other,
+                                        Value::Blank
+                                            | Value::Array(_)
+                                            | Value::Spill { .. }
+                                            | Value::Reference(_)
+                                            | Value::ReferenceUnion(_)
+                                    )
+                                {
+                                    continue;
+                                }
+                            }
                         }
                     }
                 }

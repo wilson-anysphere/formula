@@ -131,6 +131,12 @@ impl Criteria {
                 number_locale,
             }),
             Value::Text(s) => parse_criteria_string(s, system, value_locale, now_utc, number_locale, &locale),
+            Value::Entity(v) => {
+                parse_criteria_string(&v.display, system, value_locale, now_utc, number_locale, &locale)
+            }
+            Value::Record(v) => {
+                parse_criteria_string(&v.display, system, value_locale, now_utc, number_locale, &locale)
+            }
             Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
@@ -441,6 +447,8 @@ fn coerce_to_number(value: &Value, locale: NumberLocale) -> Option<f64> {
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Blank => Some(0.0),
         Value::Text(s) => parse_number(s, locale).ok(),
+        Value::Entity(v) => parse_number(&v.display, locale).ok(),
+        Value::Record(v) => parse_number(&v.display, locale).ok(),
         Value::Array(arr) => coerce_to_number(&arr.top_left(), locale),
         Value::Error(_)
         | Value::Reference(_)
@@ -453,7 +461,9 @@ fn coerce_to_number(value: &Value, locale: NumberLocale) -> Option<f64> {
 fn coerce_to_text(value: &Value, value_locale: ValueLocaleConfig) -> Option<String> {
     match value {
         Value::Blank => None,
-        Value::Text(_) | Value::Bool(_) => value.coerce_to_string().ok(),
+        Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Bool(_) => {
+            value.coerce_to_string().ok()
+        }
         Value::Number(n) => {
             let options = FormatOptions {
                 locale: value_locale.separators,

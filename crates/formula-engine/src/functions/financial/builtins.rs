@@ -66,6 +66,7 @@ fn collect_npv_values_from_arg(
                     Err(crate::error::ExcelError::Num) => Err(ErrorKind::Num),
                 }
             }
+            Value::Entity(_) | Value::Record(_) => Ok(vec![0.0]),
             Value::Reference(_) | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
             Value::Array(arr) => {
                 let mut out = Vec::with_capacity(arr.rows.saturating_mul(arr.cols));
@@ -76,6 +77,8 @@ fn collect_npv_values_from_arg(
                         Value::Lambda(_) => return Err(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Spill { .. }
@@ -100,6 +103,8 @@ fn collect_npv_values_from_arg(
                     Value::Lambda(_) => return Err(ErrorKind::Value),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Blank
                     | Value::Array(_)
                     | Value::Spill { .. }
@@ -122,6 +127,8 @@ fn collect_npv_values_from_arg(
                         Value::Lambda(_) => return Err(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Spill { .. }
@@ -146,7 +153,7 @@ fn collect_irr_values_from_arg(
         ArgValue::Scalar(v) => match v {
             Value::Error(e) => Err(e),
             Value::Number(n) => Ok(vec![n]),
-            Value::Bool(_) | Value::Text(_) | Value::Blank => Ok(vec![0.0]),
+            Value::Bool(_) | Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Blank => Ok(vec![0.0]),
             Value::Lambda(_) => Err(ErrorKind::Value),
             Value::Reference(_) | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
             Value::Array(arr) => {
@@ -158,6 +165,8 @@ fn collect_irr_values_from_arg(
                         Value::Lambda(_) => return Err(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Spill { .. }
@@ -181,6 +190,8 @@ fn collect_irr_values_from_arg(
                     Value::Lambda(_) => return Err(ErrorKind::Value),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Blank
                     | Value::Array(_)
                     | Value::Spill { .. }
@@ -203,6 +214,8 @@ fn collect_irr_values_from_arg(
                         Value::Lambda(_) => return Err(ErrorKind::Value),
                         Value::Bool(_)
                         | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
                         | Value::Spill { .. }

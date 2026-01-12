@@ -2610,6 +2610,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                         };
                         acc += n;
                     }
+                    Value::Entity(_) | Value::Record(_) => {
+                        return (Value::Error(ErrorKind::Value), traces)
+                    }
                     Value::Reference(_) | Value::ReferenceUnion(_) => {
                         return (Value::Error(ErrorKind::Value), traces);
                     }
@@ -2620,6 +2623,8 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                 Value::Number(n) => acc += n,
                                 Value::Bool(_)
                                 | Value::Text(_)
+                                | Value::Entity(_)
+                                | Value::Record(_)
                                 | Value::Blank
                                 | Value::Array(_)
                                 | Value::Lambda(_)
@@ -2641,6 +2646,8 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                                 Value::Number(n) => acc += n,
                                 Value::Bool(_)
                                 | Value::Text(_)
+                                | Value::Entity(_)
+                                | Value::Record(_)
                                 | Value::Blank
                                 | Value::Array(_)
                                 | Value::Lambda(_)
@@ -2942,15 +2949,27 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     if let Value::Error(e) = right {
         return Err(*e);
     }
+
+    let left = match left.clone() {
+        Value::Entity(v) => Value::Text(v.display),
+        Value::Record(v) => Value::Text(v.display),
+        other => other,
+    };
+    let right = match right.clone() {
+        Value::Entity(v) => Value::Text(v.display),
+        Value::Record(v) => Value::Text(v.display),
+        other => other,
+    };
+
     if matches!(
-        left,
+        &left,
         Value::Array(_)
             | Value::Lambda(_)
             | Value::Spill { .. }
             | Value::Reference(_)
             | Value::ReferenceUnion(_)
     ) || matches!(
-        right,
+        &right,
         Value::Array(_)
             | Value::Lambda(_)
             | Value::Spill { .. }
@@ -2960,7 +2979,7 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         return Err(ErrorKind::Value);
     }
 
-    let (l, r) = match (left, right) {
+    let (l, r) = match (&left, &right) {
         (Value::Blank, Value::Number(_)) => (Value::Number(0.0), right.clone()),
         (Value::Number(_), Value::Blank) => (left.clone(), Value::Number(0.0)),
         (Value::Blank, Value::Bool(_)) => (Value::Bool(false), right.clone()),
@@ -2970,18 +2989,31 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         _ => (left.clone(), right.clone()),
     };
 
+    fn text_like_str(v: &Value) -> Option<&str> {
+        match v {
+            Value::Text(s) => Some(s),
+            Value::Entity(v) => Some(v.display.as_str()),
+            Value::Record(v) => Some(v.display.as_str()),
+            _ => None,
+        }
+    }
+
     Ok(match (&l, &r) {
         (Value::Number(a), Value::Number(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
-        (Value::Text(a), Value::Text(b)) => {
-            let au = a.to_ascii_uppercase();
-            let bu = b.to_ascii_uppercase();
+        (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
+            let au = text_like_str(a).unwrap().to_ascii_uppercase();
+            let bu = text_like_str(b).unwrap().to_ascii_uppercase();
             au.cmp(&bu)
         }
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
-        (Value::Number(_), Value::Text(_) | Value::Bool(_)) => Ordering::Less,
-        (Value::Text(_), Value::Bool(_)) => Ordering::Less,
-        (Value::Text(_), Value::Number(_)) => Ordering::Greater,
-        (Value::Bool(_), Value::Number(_) | Value::Text(_)) => Ordering::Greater,
+        (Value::Number(_), Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Bool(_)) => {
+            Ordering::Less
+        }
+        (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Bool(_)) => Ordering::Less,
+        (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Number(_)) => Ordering::Greater,
+        (Value::Bool(_), Value::Number(_) | Value::Text(_) | Value::Entity(_) | Value::Record(_)) => {
+            Ordering::Greater
+        }
         (Value::Blank, Value::Blank) => Ordering::Equal,
         (Value::Blank, _) => Ordering::Less,
         (_, Value::Blank) => Ordering::Greater,
@@ -2996,6 +3028,7 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         | (_, Value::Reference(_))
         | (Value::ReferenceUnion(_), _)
         | (_, Value::ReferenceUnion(_)) => Ordering::Equal,
+        _ => Ordering::Equal,
     })
 }
 

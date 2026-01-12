@@ -1739,10 +1739,19 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
         }
     }
 
+    fn text_like_str(v: &Value) -> Option<&str> {
+        match v {
+            Value::Text(s) => Some(s),
+            Value::Entity(v) => Some(v.display.as_str()),
+            Value::Record(v) => Some(v.display.as_str()),
+            _ => None,
+        }
+    }
+
     fn type_rank(v: &Value) -> Option<u8> {
         match v {
             Value::Number(_) => Some(0),
-            Value::Text(_) => Some(1),
+            Value::Text(_) | Value::Entity(_) | Value::Record(_) => Some(1),
             Value::Bool(_) => Some(2),
             Value::Blank => Some(3),
             Value::Error(_) => Some(4),
@@ -1766,12 +1775,12 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
             std::cmp::Ordering::Equal => Some(0),
             std::cmp::Ordering::Greater => Some(1),
         },
-        (Value::Blank, Value::Text(y)) => Some(match cmp_case_insensitive("", y) {
+        (Value::Blank, other) if text_like_str(other).is_some() => Some(match cmp_case_insensitive("", text_like_str(other)?) {
             std::cmp::Ordering::Less => -1,
             std::cmp::Ordering::Equal => 0,
             std::cmp::Ordering::Greater => 1,
         }),
-        (Value::Text(x), Value::Blank) => Some(match cmp_case_insensitive(x, "") {
+        (other, Value::Blank) if text_like_str(other).is_some() => Some(match cmp_case_insensitive(text_like_str(other)?, "") {
             std::cmp::Ordering::Less => -1,
             std::cmp::Ordering::Equal => 0,
             std::cmp::Ordering::Greater => 1,
@@ -1795,7 +1804,9 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
 
             match (a, b) {
                 (Value::Number(x), Value::Number(y)) => Some(ordering_to_i32(x.partial_cmp(y)?)),
-                (Value::Text(x), Value::Text(y)) => Some(ordering_to_i32(cmp_case_insensitive(x, y))),
+                (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
+                    Some(ordering_to_i32(cmp_case_insensitive(text_like_str(a)?, text_like_str(b)?)))
+                }
                 (Value::Bool(x), Value::Bool(y)) => Some(ordering_to_i32(x.cmp(y))),
                 (Value::Blank, Value::Blank) => Some(0),
                 (Value::Error(x), Value::Error(y)) => Some(ordering_to_i32(x.code().cmp(&y.code()))),
