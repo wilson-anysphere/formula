@@ -303,3 +303,37 @@ test("permission storage: getGrantedPermissions for an unknown extension does no
   const stored = JSON.parse(await fs.readFile(storePath, "utf8"));
   assert.deepEqual(stored, { "pub.other": { clipboard: true } });
 });
+
+test("permission storage: revoking the last granted permission removes the extension record", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-perms-revoke-last-"));
+  const storePath = path.join(dir, "permissions.json");
+
+  const pm = new PermissionManager({
+    storagePath: storePath,
+    prompt: async () => true
+  });
+
+  await pm.ensurePermissions(
+    {
+      extensionId: "pub.one",
+      displayName: "One",
+      declaredPermissions: ["clipboard"]
+    },
+    ["clipboard"]
+  );
+
+  await pm.ensurePermissions(
+    {
+      extensionId: "pub.two",
+      displayName: "Two",
+      declaredPermissions: ["cells.write"]
+    },
+    ["cells.write"]
+  );
+
+  await pm.revokePermissions("pub.one", ["clipboard"]);
+  assert.deepEqual(await pm.getGrantedPermissions("pub.one"), {});
+
+  const stored = JSON.parse(await fs.readFile(storePath, "utf8"));
+  assert.deepEqual(stored, { "pub.two": { "cells.write": true } });
+});

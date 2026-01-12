@@ -246,7 +246,11 @@ class PermissionManager {
     }
 
     if (!changed) return;
-    this._data[id] = current;
+    if (Object.keys(current).length === 0) {
+      delete this._data[id];
+    } else {
+      this._data[id] = current;
+    }
     await this._save();
   }
 

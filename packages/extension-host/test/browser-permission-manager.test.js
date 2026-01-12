@@ -337,3 +337,40 @@ test("browser PermissionManager: getGrantedPermissions for unknown extension doe
   const stored = JSON.parse(storage.getItem(storageKey));
   assert.deepEqual(stored, { "pub.other": { clipboard: true } });
 });
+
+test("browser PermissionManager: revoking the last granted permission removes the extension record", async () => {
+  const { PermissionManager } = await importBrowserPermissionManager();
+
+  const storage = createMemoryStorage();
+  const storageKey = "formula.test.permissions.revokeLast";
+
+  const pm = new PermissionManager({
+    storage,
+    storageKey,
+    prompt: async () => true
+  });
+
+  await pm.ensurePermissions(
+    {
+      extensionId: "pub.one",
+      displayName: "One",
+      declaredPermissions: ["clipboard"]
+    },
+    ["clipboard"]
+  );
+
+  await pm.ensurePermissions(
+    {
+      extensionId: "pub.two",
+      displayName: "Two",
+      declaredPermissions: ["cells.write"]
+    },
+    ["cells.write"]
+  );
+
+  await pm.revokePermissions("pub.one", ["clipboard"]);
+  assert.deepEqual(await pm.getGrantedPermissions("pub.one"), {});
+
+  const stored = JSON.parse(storage.getItem(storageKey));
+  assert.deepEqual(stored, { "pub.two": { "cells.write": true } });
+});
