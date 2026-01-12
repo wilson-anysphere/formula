@@ -2244,17 +2244,30 @@ function showDialogAndFocus(dialog: HTMLDialogElement): void {
 }
 
 mountRibbon(ribbonRoot, {
-  onCommand: (commandId) => {
+  onToggle: (commandId, pressed) => {
     switch (commandId) {
       case "home.font.bold":
-        applyToSelection("Bold", (sheetId, ranges) => toggleBold(app.getDocument(), sheetId, ranges));
+        applyToSelection("Bold", (sheetId, ranges) => toggleBold(app.getDocument(), sheetId, ranges, { next: pressed }));
         return;
       case "home.font.italic":
-        applyToSelection("Italic", (sheetId, ranges) => toggleItalic(app.getDocument(), sheetId, ranges));
+        applyToSelection("Italic", (sheetId, ranges) =>
+          toggleItalic(app.getDocument(), sheetId, ranges, { next: pressed }),
+        );
         return;
       case "home.font.underline":
-        applyToSelection("Underline", (sheetId, ranges) => toggleUnderline(app.getDocument(), sheetId, ranges));
+        applyToSelection("Underline", (sheetId, ranges) =>
+          toggleUnderline(app.getDocument(), sheetId, ranges, { next: pressed }),
+        );
         return;
+      case "home.alignment.wrapText":
+        applyToSelection("Wrap", (sheetId, ranges) => toggleWrap(app.getDocument(), sheetId, ranges, { next: pressed }));
+        return;
+      default:
+        return;
+    }
+  },
+  onCommand: (commandId) => {
+    switch (commandId) {
       case "home.font.borders":
         applyToSelection("Borders", (sheetId, ranges) => applyAllBorders(app.getDocument(), sheetId, ranges));
         return;
@@ -2306,9 +2319,6 @@ mountRibbon(ribbonRoot, {
         applyToSelection("Align right", (sheetId, ranges) =>
           setHorizontalAlign(app.getDocument(), sheetId, ranges, "right"),
         );
-        return;
-      case "home.alignment.wrapText":
-        applyToSelection("Wrap", (sheetId, ranges) => toggleWrap(app.getDocument(), sheetId, ranges));
         return;
 
       case "home.number.percent":

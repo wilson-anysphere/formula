@@ -19,22 +19,29 @@ function allCellsMatch(doc, sheetId, rangeOrRanges, predicate) {
   return true;
 }
 
-export function toggleBold(doc, sheetId, range) {
-  const next = !allCellsMatch(doc, sheetId, range, (s) => Boolean(s.font?.bold));
+export function toggleBold(doc, sheetId, range, options = {}) {
+  const next =
+    typeof options.next === "boolean" ? options.next : !allCellsMatch(doc, sheetId, range, (s) => Boolean(s.font?.bold));
   for (const r of normalizeRanges(range)) {
     doc.setRangeFormat(sheetId, r, { font: { bold: next } }, { label: "Bold" });
   }
 }
 
-export function toggleItalic(doc, sheetId, range) {
-  const next = !allCellsMatch(doc, sheetId, range, (s) => Boolean(s.font?.italic));
+export function toggleItalic(doc, sheetId, range, options = {}) {
+  const next =
+    typeof options.next === "boolean"
+      ? options.next
+      : !allCellsMatch(doc, sheetId, range, (s) => Boolean(s.font?.italic));
   for (const r of normalizeRanges(range)) {
     doc.setRangeFormat(sheetId, r, { font: { italic: next } }, { label: "Italic" });
   }
 }
 
-export function toggleUnderline(doc, sheetId, range) {
-  const next = !allCellsMatch(doc, sheetId, range, (s) => Boolean(s.font?.underline));
+export function toggleUnderline(doc, sheetId, range, options = {}) {
+  const next =
+    typeof options.next === "boolean"
+      ? options.next
+      : !allCellsMatch(doc, sheetId, range, (s) => Boolean(s.font?.underline));
   for (const r of normalizeRanges(range)) {
     doc.setRangeFormat(sheetId, r, { font: { underline: next } }, { label: "Underline" });
   }
@@ -89,8 +96,11 @@ export function setHorizontalAlign(doc, sheetId, range, align) {
   }
 }
 
-export function toggleWrap(doc, sheetId, range) {
-  const next = !allCellsMatch(doc, sheetId, range, (s) => Boolean(s.alignment?.wrapText));
+export function toggleWrap(doc, sheetId, range, options = {}) {
+  const next =
+    typeof options.next === "boolean"
+      ? options.next
+      : !allCellsMatch(doc, sheetId, range, (s) => Boolean(s.alignment?.wrapText));
   for (const r of normalizeRanges(range)) {
     doc.setRangeFormat(sheetId, r, { alignment: { wrapText: next } }, { label: "Wrap" });
   }

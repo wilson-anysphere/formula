@@ -8,9 +8,24 @@ export type RangeInputOrRanges = RangeInput | RangeInput[];
 export type HorizontalAlign = "left" | "center" | "right" | "justify" | (string & {});
 export type NumberFormatPreset = "currency" | "percent" | "date";
 
-export function toggleBold(doc: DocumentController, sheetId: string, range: RangeInputOrRanges): void;
-export function toggleItalic(doc: DocumentController, sheetId: string, range: RangeInputOrRanges): void;
-export function toggleUnderline(doc: DocumentController, sheetId: string, range: RangeInputOrRanges): void;
+export function toggleBold(
+  doc: DocumentController,
+  sheetId: string,
+  range: RangeInputOrRanges,
+  options?: { next?: boolean },
+): void;
+export function toggleItalic(
+  doc: DocumentController,
+  sheetId: string,
+  range: RangeInputOrRanges,
+  options?: { next?: boolean },
+): void;
+export function toggleUnderline(
+  doc: DocumentController,
+  sheetId: string,
+  range: RangeInputOrRanges,
+  options?: { next?: boolean },
+): void;
 
 export function applyAllBorders(
   doc: DocumentController,
@@ -26,7 +41,12 @@ export function setHorizontalAlign(
   align: HorizontalAlign,
 ): void;
 
-export function toggleWrap(doc: DocumentController, sheetId: string, range: RangeInputOrRanges): void;
+export function toggleWrap(
+  doc: DocumentController,
+  sheetId: string,
+  range: RangeInputOrRanges,
+  options?: { next?: boolean },
+): void;
 
 export function setFontSize(doc: DocumentController, sheetId: string, range: RangeInputOrRanges, sizePt: number): void;
 export function setFontColor(doc: DocumentController, sheetId: string, range: RangeInputOrRanges, argb: string): void;
@@ -39,4 +59,3 @@ export function applyNumberFormatPreset(
   range: RangeInputOrRanges,
   preset: NumberFormatPreset,
 ): void;
-

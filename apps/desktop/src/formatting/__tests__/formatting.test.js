@@ -91,6 +91,19 @@ test("toggle commands accept multiple ranges and apply consistently", () => {
   assert.equal(Boolean(b1After.font?.bold), false);
 });
 
+test("toggle commands can be forced to an explicit state", () => {
+  const doc = new DocumentController();
+  doc.setRangeValues("Sheet1", "A1", [["x", "y"]]);
+
+  doc.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
+  toggleBold(doc, "Sheet1", ["A1", "B1"], { next: false });
+
+  const a1 = doc.styleTable.get(doc.getCell("Sheet1", "A1").styleId);
+  const b1 = doc.styleTable.get(doc.getCell("Sheet1", "B1").styleId);
+  assert.equal(Boolean(a1.font?.bold), false);
+  assert.equal(Boolean(b1.font?.bold), false);
+});
+
 test("Ctrl/Cmd+1 triggers Format Cells shortcut", () => {
   const target = new FakeEventTarget();
   let count = 0;
