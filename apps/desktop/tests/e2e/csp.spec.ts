@@ -302,7 +302,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     await expect(page.locator("#grid")).toHaveCount(1);
 
     const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
-    const managerModuleUrl = viteFsUrl(path.join(repoRoot, "apps/web/src/marketplace/WebExtensionManager.ts"));
+    const managerModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-marketplace/src/index.ts"));
 
     const result = await page.evaluate(
       async ({ hostModuleUrl, managerModuleUrl }) => {

@@ -1,10 +1,24 @@
 import { defineConfig } from "@playwright/test";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Playwright sets `FORCE_COLOR` for its reporters, which causes some tooling
 // (eg `supports-color`) to warn when `NO_COLOR` is also present. Ensure `NO_COLOR`
 // is unset for the test runner + any spawned webServer processes so e2e output
 // stays warning-free.
 delete process.env.NO_COLOR;
+
+const repoRoot = path.resolve(fileURLToPath(new URL(".", import.meta.url)), "../..");
+
+function stablePortFromString(input: string, { base = 4174, range = 1000 } = {}): number {
+  // Deterministic port selection avoids collisions when multiple agents run Playwright tests
+  // on the same host. `repoRoot` is unique per checkout in our agent environment.
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
+  }
+  return base + (hash % range);
+}
 
 function withEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
   // Playwright sets `FORCE_COLOR` for its reporters, which causes some tooling
@@ -15,8 +29,14 @@ function withEnv(overrides: Record<string, string>): NodeJS.ProcessEnv {
   return env;
 }
 
-const parsedBasePort = Number.parseInt(process.env.FORMULA_E2E_PORT ?? "4174", 10);
-const basePort = Number.isFinite(parsedBasePort) ? parsedBasePort : 4174;
+const defaultBasePort = 4174;
+const basePort = (() => {
+  const raw = process.env.FORMULA_E2E_PORT;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  if (process.env.CI) return defaultBasePort;
+  return stablePortFromString(repoRoot, { base: defaultBasePort, range: 1000 });
+})();
 const cspPort = basePort + 1;
 const desktopPort = basePort + 2;
 
