@@ -2,6 +2,8 @@ use anyhow::{anyhow, Result};
 #[cfg(any(feature = "desktop", test))]
 use anyhow::Context;
 use directories::{BaseDirs, UserDirs};
+#[cfg(any(feature = "desktop", test))]
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 /// Return the canonicalized filesystem roots that the desktop app is allowed to access.
@@ -74,6 +76,74 @@ pub(crate) fn canonicalize_in_allowed_roots_with_error(
     }
 }
 
+/// Resolve a prospective save destination and verify it is contained within `allowed_roots`.
+///
+/// Unlike [`canonicalize_in_allowed_roots_with_error`], this helper supports paths that do not
+/// exist yet by canonicalizing only the parent directory and re-attaching the requested file name.
+///
+/// This is intended for "save as" style operations where the destination file may not exist.
+#[cfg(any(feature = "desktop", test))]
+pub(crate) fn resolve_save_path_in_allowed_roots(
+    path: &Path,
+    allowed_roots: &[PathBuf],
+) -> Result<PathBuf> {
+    let Some(file_name) = path.file_name() else {
+        return Err(anyhow!(
+            "Invalid save path '{}': path must include a file name",
+            path.display()
+        ));
+    };
+    if file_name == OsStr::new(".") || file_name == OsStr::new("..") {
+        return Err(anyhow!(
+            "Invalid save path '{}': file name cannot be '.' or '..'",
+            path.display()
+        ));
+    }
+
+    let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) else {
+        return Err(anyhow!(
+            "Invalid save path '{}': path must include a parent directory",
+            path.display()
+        ));
+    };
+
+    let canonical_parent = match canonicalize_in_allowed_roots_with_error(parent, allowed_roots) {
+        Ok(parent) => parent,
+        Err(CanonicalizeInAllowedRootsError::OutsideScope { path: canonical_parent }) => {
+            let candidate = canonical_parent.join(Path::new(file_name));
+            return Err(anyhow!(
+                "Refusing to save to '{}' because it is outside the allowed filesystem scope",
+                candidate.display()
+            ));
+        }
+        Err(CanonicalizeInAllowedRootsError::Canonicalize { path, source }) => {
+            return Err(anyhow::Error::new(source))
+                .context(format!("canonicalize {}", path.display()));
+        }
+    };
+
+    let candidate = canonical_parent.join(Path::new(file_name));
+
+    // If the file already exists, ensure it doesn't resolve (via symlink) outside the scope.
+    if candidate.exists() {
+        match canonicalize_in_allowed_roots_with_error(&candidate, allowed_roots) {
+            Ok(_) => {}
+            Err(CanonicalizeInAllowedRootsError::OutsideScope { path }) => {
+                return Err(anyhow!(
+                    "Refusing to save to '{}' because it is outside the allowed filesystem scope",
+                    path.display()
+                ));
+            }
+            Err(CanonicalizeInAllowedRootsError::Canonicalize { path, source }) => {
+                return Err(anyhow::Error::new(source))
+                    .context(format!("canonicalize {}", path.display()));
+            }
+        }
+    }
+
+    Ok(candidate)
+}
+
 /// Canonicalize `path` and verify it is contained within `allowed_roots`.
 ///
 /// This is used by IPC commands that proxy filesystem access to the webview. Canonicalization
@@ -143,6 +213,52 @@ mod tests {
 
         let allowed_roots = vec![dunce::canonicalize(&allowed_root).expect("canonicalize root")];
         let err = canonicalize_in_allowed_roots(&symlink_path, &allowed_roots).unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("outside"));
+    }
+
+    #[test]
+    fn desktop_scope_open_validation_allows_home_file_and_rejects_out_of_scope() {
+        let base_dirs = BaseDirs::new().expect("base dirs");
+        let in_scope_tmp = tempfile::tempdir_in(base_dirs.home_dir()).expect("tempdir in home");
+        let in_scope_file = in_scope_tmp.path().join("in-scope.xlsx");
+        fs::write(&in_scope_file, "hello").expect("write in-scope file");
+
+        let out_scope_tmp = tempfile::tempdir().expect("tempdir out-of-scope");
+        let out_scope_file = out_scope_tmp.path().join("out-of-scope.xlsx");
+        fs::write(&out_scope_file, "secret").expect("write out-of-scope file");
+
+        let allowed_roots = desktop_allowed_roots().expect("allowed roots");
+
+        let resolved_in_scope =
+            canonicalize_in_allowed_roots(&in_scope_file, &allowed_roots).expect("in scope");
+        assert!(path_in_allowed_roots(&resolved_in_scope, &allowed_roots));
+
+        let err = canonicalize_in_allowed_roots(&out_scope_file, &allowed_roots).unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("outside"));
+    }
+
+    #[test]
+    fn desktop_scope_save_validation_allows_nonexistent_home_path_and_rejects_out_of_scope() {
+        let base_dirs = BaseDirs::new().expect("base dirs");
+        let in_scope_tmp = tempfile::tempdir_in(base_dirs.home_dir()).expect("tempdir in home");
+        let in_scope_dest = in_scope_tmp.path().join("new-workbook.xlsx");
+        assert!(!in_scope_dest.exists());
+
+        let out_scope_tmp = tempfile::tempdir().expect("tempdir out-of-scope");
+        let out_scope_dest = out_scope_tmp.path().join("new-workbook.xlsx");
+        assert!(!out_scope_dest.exists());
+
+        let allowed_roots = desktop_allowed_roots().expect("allowed roots");
+
+        let resolved_in_scope =
+            resolve_save_path_in_allowed_roots(&in_scope_dest, &allowed_roots).expect("in scope");
+        let expected_in_scope_parent = std::fs::canonicalize(in_scope_tmp.path()).expect("canon");
+        assert_eq!(
+            resolved_in_scope,
+            expected_in_scope_parent.join("new-workbook.xlsx")
+        );
+
+        let err = resolve_save_path_in_allowed_roots(&out_scope_dest, &allowed_roots).unwrap_err();
         assert!(err.to_string().to_lowercase().contains("outside"));
     }
 }

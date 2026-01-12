@@ -390,8 +390,6 @@ pub struct PivotTableSummary {
 #[cfg(feature = "desktop")]
 use crate::file_io::read_workbook;
 #[cfg(feature = "desktop")]
-use crate::path_scope::PathScopePolicy;
-#[cfg(feature = "desktop")]
 use crate::persistence::{
     autosave_db_path_for_new_workbook, autosave_db_path_for_workbook, WorkbookPersistenceLocation,
 };
@@ -487,12 +485,16 @@ pub async fn open_workbook(
     path: String,
     state: State<'_, SharedAppState>,
 ) -> Result<WorkbookInfo, String> {
-    let policy = PathScopePolicy::default_desktop();
-    let validated_path = policy.validate_read_path(std::path::Path::new(&path))?;
-    let path = validated_path.to_string_lossy().to_string();
+    let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
+    let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
+        std::path::Path::new(&path),
+        &allowed_roots,
+    )
+    .map_err(|e| e.to_string())?;
+    let resolved_str = resolved.to_string_lossy().to_string();
 
-    let workbook = read_workbook(validated_path).await.map_err(|e| e.to_string())?;
-    let location = autosave_db_path_for_workbook(&path)
+    let workbook = read_workbook(resolved).await.map_err(|e| e.to_string())?;
+    let location = autosave_db_path_for_workbook(&resolved_str)
         .map(WorkbookPersistenceLocation::OnDisk)
         .unwrap_or(WorkbookPersistenceLocation::InMemory);
 
@@ -1189,12 +1191,15 @@ pub async fn save_workbook(
 
     let save_path_clone = save_path.clone();
     let (validated_save_path, written_bytes) = tauri::async_runtime::spawn_blocking(move || {
-        let policy = PathScopePolicy::default_desktop();
-        let validated_path = policy.validate_write_path(std::path::Path::new(&save_path_clone))?;
-        let validated_save_path = validated_path.to_string_lossy().to_string();
+        let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
+        let resolved_path = crate::fs_scope::resolve_save_path_in_allowed_roots(
+            std::path::Path::new(&save_path_clone),
+            &allowed_roots,
+        )
+        .map_err(|e| e.to_string())?;
+        let validated_save_path = resolved_path.to_string_lossy().to_string();
 
-        let path = validated_path.as_path();
-        let ext = path
+        let ext = resolved_path
             .extension()
             .and_then(|s| s.to_str())
             .unwrap_or_default();
@@ -1202,7 +1207,8 @@ pub async fn save_workbook(
         // XLSB saves must go through the `formula-xlsb` round-trip writer. The storage export
         // path only knows how to generate XLSX.
         if ext.eq_ignore_ascii_case("xlsb") {
-            let bytes = crate::file_io::write_xlsx_blocking(path, &workbook).map_err(|e| e.to_string())?;
+            let bytes = crate::file_io::write_xlsx_blocking(&resolved_path, &workbook)
+                .map_err(|e| e.to_string())?;
             return Ok::<_, String>((validated_save_path, bytes));
         }
 
@@ -1213,10 +1219,15 @@ pub async fn save_workbook(
         // Fall back to the storage->model export path for non-XLSX origins (csv/xls) and
         // for new workbooks without an `origin_xlsx_bytes` baseline.
         let bytes = if workbook.origin_xlsx_bytes.is_some() {
-            crate::file_io::write_xlsx_blocking(path, &workbook).map_err(|e| e.to_string())?
+            crate::file_io::write_xlsx_blocking(&resolved_path, &workbook).map_err(|e| e.to_string())?
         } else {
-            crate::persistence::write_xlsx_from_storage(&storage, workbook_id, &workbook, path)
-                .map_err(|e| e.to_string())?
+            crate::persistence::write_xlsx_from_storage(
+                &storage,
+                workbook_id,
+                &workbook,
+                &resolved_path,
+            )
+            .map_err(|e| e.to_string())?
         };
         Ok::<_, String>((validated_save_path, bytes))
     })
