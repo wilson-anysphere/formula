@@ -656,6 +656,31 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
             return Value::Error(ErrorKind::Value);
         }
 
+        // Field access (`A1.Price`) is currently parsed/serialized for round-trip and rewrite
+        // support, but the engine does not yet have a native rich value (Entity/Record) runtime.
+        //
+        // Match Excel's error semantics by returning `#FIELD!` when attempting to read a field from
+        // a non-record value, while still propagating argument errors.
+        if name.eq_ignore_ascii_case("_FIELDACCESS") {
+            if args.len() != 2 {
+                return Value::Error(ErrorKind::Value);
+            }
+
+            let base = self.deref_eval_value_dynamic(self.eval_value(&args[0]));
+            if let Value::Error(e) = base {
+                return Value::Error(e);
+            }
+
+            let field = self.deref_eval_value_dynamic(self.eval_value(&args[1]));
+            match field {
+                Value::Text(_) => {}
+                Value::Error(e) => return Value::Error(e),
+                _ => return Value::Error(ErrorKind::Value),
+            }
+
+            return Value::Error(ErrorKind::Field);
+        }
+
         if let Some(spec) = crate::functions::lookup_function(name) {
             if args.len() < spec.min_args || args.len() > spec.max_args {
                 return Value::Error(ErrorKind::Value);
