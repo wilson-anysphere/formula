@@ -345,3 +345,140 @@ fn trimmean_rejects_invalid_percent() {
         Value::Error(ErrorKind::Num)
     );
 }
+
+#[test]
+fn binomial_distribution_functions_match_known_values() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=BINOM.DIST(2,5,0.5,FALSE)"), 0.3125);
+    assert_number(&sheet.eval("=BINOM.DIST(2,5,0.5,TRUE)"), 0.5);
+
+    // Range form.
+    assert_number(&sheet.eval("=BINOM.DIST.RANGE(5,0.5,1,3)"), 0.78125);
+    assert_number(&sheet.eval("=BINOM.DIST.RANGE(5,0.5,2)"), 0.3125);
+
+    // Inverse.
+    assert_number(&sheet.eval("=BINOM.INV(10,0.5,0.5)"), 5.0);
+}
+
+#[test]
+fn binomial_legacy_aliases_match_modern_functions() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=BINOMDIST(2,5,0.5,FALSE)"),
+        sheet.eval("=BINOM.DIST(2,5,0.5,FALSE)")
+    );
+    assert_eq!(
+        sheet.eval("=CRITBINOM(10,0.5,0.5)"),
+        sheet.eval("=BINOM.INV(10,0.5,0.5)")
+    );
+}
+
+#[test]
+fn poisson_distribution_matches_known_values() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=POISSON.DIST(2,3,FALSE)"), 0.22404180765538775);
+    assert_number(&sheet.eval("=POISSON.DIST(2,3,TRUE)"), 0.42319008112684353);
+    assert_eq!(
+        sheet.eval("=POISSON(2,3,TRUE)"),
+        sheet.eval("=POISSON.DIST(2,3,TRUE)")
+    );
+}
+
+#[test]
+fn negative_binomial_distribution_matches_known_values() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=NEGBINOM.DIST(3,2,0.5,FALSE)"), 0.125);
+    assert_number(&sheet.eval("=NEGBINOM.DIST(3,2,0.5,TRUE)"), 0.8125);
+    assert_eq!(
+        sheet.eval("=NEGBINOMDIST(3,2,0.5)"),
+        sheet.eval("=NEGBINOM.DIST(3,2,0.5,FALSE)")
+    );
+}
+
+#[test]
+fn hypergeometric_distribution_matches_known_values() {
+    let mut sheet = TestSheet::new();
+    assert_number(
+        &sheet.eval("=HYPGEOM.DIST(2,5,5,10,FALSE)"),
+        0.3968253968253968,
+    );
+    assert_number(&sheet.eval("=HYPGEOM.DIST(2,5,5,10,TRUE)"), 0.5);
+    assert_eq!(
+        sheet.eval("=HYPGEOMDIST(2,5,5,10)"),
+        sheet.eval("=HYPGEOM.DIST(2,5,5,10,FALSE)")
+    );
+}
+
+#[test]
+fn prob_returns_expected_probability_mass() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=PROB({0,1,2},{0.2,0.5,0.3},1)"), 0.5);
+    assert_number(&sheet.eval("=PROB({0,1,2},{0.2,0.5,0.3},0,1)"), 0.7);
+}
+
+#[test]
+fn prob_errors_on_invalid_probability_ranges() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval("=PROB({0,1},{0.1,0.2},0,1)"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        sheet.eval("=PROB({0,1,2},{0.2,0.5,0.3},2,1)"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        sheet.eval("=PROB({0,1},{0.5,0.5,0.0},0,1)"),
+        Value::Error(ErrorKind::NA)
+    );
+}
+
+#[test]
+fn hypothesis_tests_return_sane_p_values_and_error_codes() {
+    let mut sheet = TestSheet::new();
+
+    // Z.TEST: one-tailed, sigma omitted (uses sample stdev).
+    assert_number(&sheet.eval("=Z.TEST({1,2,3,4},2)"), 0.21928901304049997);
+    assert_eq!(
+        sheet.eval("=ZTEST({1,2,3,4},2)"),
+        sheet.eval("=Z.TEST({1,2,3,4},2)")
+    );
+    assert_eq!(sheet.eval("=Z.TEST({1},1)"), Value::Error(ErrorKind::Div0));
+
+    // T.TEST: paired, two-tailed and one-tailed.
+    assert_number(&sheet.eval("=T.TEST({1,2,3},{3,2,1},2,1)"), 1.0);
+    assert_number(&sheet.eval("=T.TEST({1,2,3},{3,2,1},1,1)"), 0.5);
+    assert_eq!(
+        sheet.eval("=TTEST({1,2,3},{3,2,1},2,1)"),
+        sheet.eval("=T.TEST({1,2,3},{3,2,1},2,1)")
+    );
+    assert_eq!(
+        sheet.eval("=T.TEST({1,2,3},{3,2,1},3,1)"),
+        Value::Error(ErrorKind::Num)
+    );
+
+    // F.TEST: identical arrays => ratio 1 with equal dfs => p-value 1.
+    assert_number(&sheet.eval("=F.TEST({1,2,3},{1,2,3})"), 1.0);
+    assert_eq!(
+        sheet.eval("=FTEST({1,2,3},{1,2,3})"),
+        sheet.eval("=F.TEST({1,2,3},{1,2,3})")
+    );
+
+    // CHISQ.TEST: 2x2 contingency table.
+    assert_number(
+        &sheet.eval("=CHISQ.TEST({10,20;30,40},{12,18;28,42})"),
+        0.372998483613487,
+    );
+    assert_eq!(
+        sheet.eval("=CHITEST({10,20;30,40},{12,18;28,42})"),
+        sheet.eval("=CHISQ.TEST({10,20;30,40},{12,18;28,42})")
+    );
+    assert_eq!(
+        sheet.eval("=CHISQ.TEST({1,2},{1,2;3,4})"),
+        Value::Error(ErrorKind::NA)
+    );
+    assert_eq!(
+        sheet.eval("=CHISQ.TEST({1},{0})"),
+        Value::Error(ErrorKind::Num)
+    );
+}

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T17:48:04.196512764Z",
+  "generatedAt": "2026-01-12T18:22:28.927345237Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "1f6555a07245a868e5186a3fd3776f1d98f520ebc9ad3c2f6d8ce1f1d0e667e9",
-    "count": 1796
+    "sha256": "b4cf69b7fe513368e8d52ab0c6d0aa158139645328ef665d60d3de8fdf6864f1",
+    "count": 1816
   },
   "results": [
     {
@@ -9725,6 +9725,206 @@
       "displayText": "0.3413447460549428"
     },
     {
+      "caseId": "binom_dist_ac832b161d53",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.3125
+      },
+      "address": "C1",
+      "displayText": "0.3125"
+    },
+    {
+      "caseId": "binom_dist_range_bb1eb5decb3d",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.7812500000000004
+      },
+      "address": "C1",
+      "displayText": "0.7812500000000004"
+    },
+    {
+      "caseId": "binom_inv_34a30840aaa9",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 5.0
+      },
+      "address": "C1",
+      "displayText": "5"
+    },
+    {
+      "caseId": "binomdist_1592ef0b1d34",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.3125
+      },
+      "address": "C1",
+      "displayText": "0.3125"
+    },
+    {
+      "caseId": "critbinom_3e07249989e6",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 5.0
+      },
+      "address": "C1",
+      "displayText": "5"
+    },
+    {
+      "caseId": "poisson_dist_a02f3491412e",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.22404180765538775
+      },
+      "address": "C1",
+      "displayText": "0.22404180765538775"
+    },
+    {
+      "caseId": "poisson_a79d3f168435",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.4231900811268454
+      },
+      "address": "C1",
+      "displayText": "0.4231900811268454"
+    },
+    {
+      "caseId": "negbinom_dist_11b956fb65b2",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.12500000000000086
+      },
+      "address": "C1",
+      "displayText": "0.12500000000000086"
+    },
+    {
+      "caseId": "negbinomdist_46144bf30a65",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.12500000000000086
+      },
+      "address": "C1",
+      "displayText": "0.12500000000000086"
+    },
+    {
+      "caseId": "hypgeom_dist_2018f3991147",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.3968253968253968
+      },
+      "address": "C1",
+      "displayText": "0.3968253968253968"
+    },
+    {
+      "caseId": "hypgeomdist_f006bf1d1f82",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.3968253968253968
+      },
+      "address": "C1",
+      "displayText": "0.3968253968253968"
+    },
+    {
+      "caseId": "prob_30b8fa14011a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.7
+      },
+      "address": "C1",
+      "displayText": "0.7"
+    },
+    {
+      "caseId": "z_test_d589439dc12a",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.21928901306194504
+      },
+      "address": "C1",
+      "displayText": "0.21928901306194504"
+    },
+    {
+      "caseId": "ztest_bfb7e47c5ea5",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.21928901306194504
+      },
+      "address": "C1",
+      "displayText": "0.21928901306194504"
+    },
+    {
+      "caseId": "t_test_af86bad2fd57",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "ttest_71f2ffd2a9eb",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 1.0
+      },
+      "address": "C1",
+      "displayText": "1"
+    },
+    {
+      "caseId": "f_test_561e4f20e938",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.9999999999999991
+      },
+      "address": "C1",
+      "displayText": "0.9999999999999991"
+    },
+    {
+      "caseId": "ftest_965d48165abd",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.9999999999999991
+      },
+      "address": "C1",
+      "displayText": "0.9999999999999991"
+    },
+    {
+      "caseId": "chisq_test_c0e1b0dc919c",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.37299848361348686
+      },
+      "address": "C1",
+      "displayText": "0.37299848361348686"
+    },
+    {
+      "caseId": "chitest_67402f90cad3",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.37299848361348686
+      },
+      "address": "C1",
+      "displayText": "0.37299848361348686"
+    },
+    {
       "caseId": "frequency_0bb91b1b0dd3",
       "outputCell": "C1",
       "result": {
@@ -16313,6 +16513,126 @@
       "displayText": "0.15667744331501973"
     },
     {
+      "caseId": "oddfprice_invalid_schedule_dom_mismatch_ce323f02a9ef",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfyield_invalid_schedule_dom_mismatch_352719794f9c",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfprice_invalid_schedule_maturity_eom_first_not_ce705dfabb4e",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfyield_invalid_schedule_maturity_eom_first_not_36ba94ae29a0",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfprice_invalid_schedule_maturity_not_eom_first_is_8c4407616753",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfyield_invalid_schedule_maturity_not_eom_first_is_7229368f6f7f",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddlprice_invalid_schedule_misaligned_last_interest_7844a6299f87",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.47630718954248
+      },
+      "address": "C1",
+      "displayText": "100.47630718954248"
+    },
+    {
+      "caseId": "oddlyield_invalid_schedule_misaligned_last_interest_eae16064c1e4",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.07041660821994312
+      },
+      "address": "C1",
+      "displayText": "0.07041660821994312"
+    },
+    {
+      "caseId": "oddlprice_invalid_schedule_last_after_maturity_69b5d9af2de5",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddlyield_invalid_schedule_last_after_maturity_53d29e46e92c",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfprice_invalid_schedule_settlement_after_first_1bc49b18aff1",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfyield_invalid_schedule_settlement_after_first_938531ed93bc",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
       "caseId": "oddfprice_neg_yld_2928961fbdcb",
       "outputCell": "C1",
       "result": {
@@ -18580,126 +18900,6 @@
       },
       "address": "A1",
       "displayText": "31"
-    },
-    {
-      "caseId": "oddfprice_invalid_schedule_dom_mismatch_ce323f02a9ef",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddfyield_invalid_schedule_dom_mismatch_352719794f9c",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddfprice_invalid_schedule_maturity_eom_first_not_ce705dfabb4e",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddfyield_invalid_schedule_maturity_eom_first_not_36ba94ae29a0",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddfprice_invalid_schedule_maturity_not_eom_first_is_8c4407616753",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddfyield_invalid_schedule_maturity_not_eom_first_is_7229368f6f7f",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddlprice_invalid_schedule_misaligned_last_interest_7844a6299f87",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 100.47630718954248
-      },
-      "address": "C1",
-      "displayText": "100.47630718954248"
-    },
-    {
-      "caseId": "oddlyield_invalid_schedule_misaligned_last_interest_eae16064c1e4",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.07041660821994312
-      },
-      "address": "C1",
-      "displayText": "0.07041660821994312"
-    },
-    {
-      "caseId": "oddlprice_invalid_schedule_last_after_maturity_69b5d9af2de5",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddlyield_invalid_schedule_last_after_maturity_53d29e46e92c",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddfprice_invalid_schedule_settlement_after_first_1bc49b18aff1",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
-    },
-    {
-      "caseId": "oddfyield_invalid_schedule_settlement_after_first_938531ed93bc",
-      "outputCell": "C1",
-      "result": {
-        "t": "e",
-        "v": "#NUM!"
-      },
-      "address": "C1",
-      "displayText": "#NUM!"
     }
   ]
 }

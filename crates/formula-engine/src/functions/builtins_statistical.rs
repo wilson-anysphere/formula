@@ -1828,6 +1828,690 @@ fn covariance_p_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 }
 
+// ------------------------------------------------------------------
+// Discrete distributions + hypothesis tests (Excel compatibility)
+// ------------------------------------------------------------------
+
+inventory::submit! {
+    FunctionSpec {
+        name: "BINOM.DIST",
+        min_args: 4,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Number, ValueType::Bool],
+        implementation: binom_dist_fn,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "BINOMDIST",
+        min_args: 4,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Number, ValueType::Bool],
+        implementation: binom_dist_fn,
+    }
+}
+
+fn binom_dist_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let number_s = array_lift::eval_arg(ctx, &args[0]);
+    let trials = array_lift::eval_arg(ctx, &args[1]);
+    let probability_s = array_lift::eval_arg(ctx, &args[2]);
+    let cumulative = array_lift::eval_arg(ctx, &args[3]);
+    array_lift::lift4(number_s, trials, probability_s, cumulative, |number_s, trials, p, cumulative| {
+        let number_s = number_s.coerce_to_number_with_ctx(ctx)?;
+        let trials = trials.coerce_to_number_with_ctx(ctx)?;
+        let p = p.coerce_to_number_with_ctx(ctx)?;
+        let cumulative = cumulative.coerce_to_bool_with_ctx(ctx)?;
+        Ok(Value::Number(crate::functions::statistical::binom_dist(
+            number_s, trials, p, cumulative,
+        )?))
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "BINOM.DIST.RANGE",
+        min_args: 3,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Number, ValueType::Number],
+        implementation: binom_dist_range_fn,
+    }
+}
+
+fn binom_dist_range_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let trials = array_lift::eval_arg(ctx, &args[0]);
+    let probability_s = array_lift::eval_arg(ctx, &args[1]);
+    let number_s = array_lift::eval_arg(ctx, &args[2]);
+
+    if args.len() == 3 {
+        array_lift::lift3(trials, probability_s, number_s, |trials, p, number_s| {
+            let trials = trials.coerce_to_number_with_ctx(ctx)?;
+            let p = p.coerce_to_number_with_ctx(ctx)?;
+            let number_s = number_s.coerce_to_number_with_ctx(ctx)?;
+            Ok(Value::Number(crate::functions::statistical::binom_dist_range(
+                trials,
+                p,
+                number_s,
+                None,
+            )?))
+        })
+    } else {
+        let number_s2 = array_lift::eval_arg(ctx, &args[3]);
+        array_lift::lift4(trials, probability_s, number_s, number_s2, |trials, p, number_s, number_s2| {
+            let trials = trials.coerce_to_number_with_ctx(ctx)?;
+            let p = p.coerce_to_number_with_ctx(ctx)?;
+            let number_s = number_s.coerce_to_number_with_ctx(ctx)?;
+            let number_s2 = number_s2.coerce_to_number_with_ctx(ctx)?;
+            Ok(Value::Number(crate::functions::statistical::binom_dist_range(
+                trials,
+                p,
+                number_s,
+                Some(number_s2),
+            )?))
+        })
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "BINOM.INV",
+        min_args: 3,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Number],
+        implementation: binom_inv_fn,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "CRITBINOM",
+        min_args: 3,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Number],
+        implementation: binom_inv_fn,
+    }
+}
+
+fn binom_inv_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let trials = array_lift::eval_arg(ctx, &args[0]);
+    let probability_s = array_lift::eval_arg(ctx, &args[1]);
+    let alpha = array_lift::eval_arg(ctx, &args[2]);
+    array_lift::lift3(trials, probability_s, alpha, |trials, p, alpha| {
+        let trials = trials.coerce_to_number_with_ctx(ctx)?;
+        let p = p.coerce_to_number_with_ctx(ctx)?;
+        let alpha = alpha.coerce_to_number_with_ctx(ctx)?;
+        Ok(Value::Number(crate::functions::statistical::binom_inv(
+            trials, p, alpha,
+        )?))
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "POISSON.DIST",
+        min_args: 3,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Bool],
+        implementation: poisson_dist_fn,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "POISSON",
+        min_args: 3,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Bool],
+        implementation: poisson_dist_fn,
+    }
+}
+
+fn poisson_dist_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let x = array_lift::eval_arg(ctx, &args[0]);
+    let mean = array_lift::eval_arg(ctx, &args[1]);
+    let cumulative = array_lift::eval_arg(ctx, &args[2]);
+    array_lift::lift3(x, mean, cumulative, |x, mean, cumulative| {
+        let x = x.coerce_to_number_with_ctx(ctx)?;
+        let mean = mean.coerce_to_number_with_ctx(ctx)?;
+        let cumulative = cumulative.coerce_to_bool_with_ctx(ctx)?;
+        Ok(Value::Number(crate::functions::statistical::poisson_dist(
+            x, mean, cumulative,
+        )?))
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "NEGBINOM.DIST",
+        min_args: 4,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Number, ValueType::Bool],
+        implementation: negbinom_dist_fn,
+    }
+}
+
+fn negbinom_dist_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let number_f = array_lift::eval_arg(ctx, &args[0]);
+    let number_s = array_lift::eval_arg(ctx, &args[1]);
+    let probability_s = array_lift::eval_arg(ctx, &args[2]);
+    let cumulative = array_lift::eval_arg(ctx, &args[3]);
+    array_lift::lift4(number_f, number_s, probability_s, cumulative, |number_f, number_s, p, cumulative| {
+        let number_f = number_f.coerce_to_number_with_ctx(ctx)?;
+        let number_s = number_s.coerce_to_number_with_ctx(ctx)?;
+        let p = p.coerce_to_number_with_ctx(ctx)?;
+        let cumulative = cumulative.coerce_to_bool_with_ctx(ctx)?;
+        Ok(Value::Number(crate::functions::statistical::negbinom_dist(
+            number_f,
+            number_s,
+            p,
+            cumulative,
+        )?))
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "NEGBINOMDIST",
+        min_args: 3,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Number],
+        implementation: negbinomdist_fn,
+    }
+}
+
+fn negbinomdist_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let number_f = array_lift::eval_arg(ctx, &args[0]);
+    let number_s = array_lift::eval_arg(ctx, &args[1]);
+    let probability_s = array_lift::eval_arg(ctx, &args[2]);
+    array_lift::lift3(number_f, number_s, probability_s, |number_f, number_s, p| {
+        let number_f = number_f.coerce_to_number_with_ctx(ctx)?;
+        let number_s = number_s.coerce_to_number_with_ctx(ctx)?;
+        let p = p.coerce_to_number_with_ctx(ctx)?;
+        Ok(Value::Number(crate::functions::statistical::negbinom_dist(
+            number_f,
+            number_s,
+            p,
+            false,
+        )?))
+    })
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "HYPGEOM.DIST",
+        min_args: 5,
+        max_args: 5,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[
+            ValueType::Number,
+            ValueType::Number,
+            ValueType::Number,
+            ValueType::Number,
+            ValueType::Bool,
+        ],
+        implementation: hypgeom_dist_fn,
+    }
+}
+
+fn hypgeom_dist_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let sample_s = array_lift::eval_arg(ctx, &args[0]);
+    let number_sample = array_lift::eval_arg(ctx, &args[1]);
+    let population_s = array_lift::eval_arg(ctx, &args[2]);
+    let number_pop = array_lift::eval_arg(ctx, &args[3]);
+    let cumulative = array_lift::eval_arg(ctx, &args[4]);
+    array_lift::lift5(
+        sample_s,
+        number_sample,
+        population_s,
+        number_pop,
+        cumulative,
+        |sample_s, number_sample, population_s, number_pop, cumulative| {
+            let sample_s = sample_s.coerce_to_number_with_ctx(ctx)?;
+            let number_sample = number_sample.coerce_to_number_with_ctx(ctx)?;
+            let population_s = population_s.coerce_to_number_with_ctx(ctx)?;
+            let number_pop = number_pop.coerce_to_number_with_ctx(ctx)?;
+            let cumulative = cumulative.coerce_to_bool_with_ctx(ctx)?;
+            Ok(Value::Number(crate::functions::statistical::hypgeom_dist(
+                sample_s,
+                number_sample,
+                population_s,
+                number_pop,
+                cumulative,
+            )?))
+        },
+    )
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "HYPGEOMDIST",
+        min_args: 4,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number, ValueType::Number, ValueType::Number, ValueType::Number],
+        implementation: hypgeomdist_fn,
+    }
+}
+
+fn hypgeomdist_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let sample_s = array_lift::eval_arg(ctx, &args[0]);
+    let number_sample = array_lift::eval_arg(ctx, &args[1]);
+    let population_s = array_lift::eval_arg(ctx, &args[2]);
+    let number_pop = array_lift::eval_arg(ctx, &args[3]);
+    array_lift::lift4(sample_s, number_sample, population_s, number_pop, |sample_s, number_sample, population_s, number_pop| {
+        let sample_s = sample_s.coerce_to_number_with_ctx(ctx)?;
+        let number_sample = number_sample.coerce_to_number_with_ctx(ctx)?;
+        let population_s = population_s.coerce_to_number_with_ctx(ctx)?;
+        let number_pop = number_pop.coerce_to_number_with_ctx(ctx)?;
+        Ok(Value::Number(crate::functions::statistical::hypgeom_dist(
+            sample_s,
+            number_sample,
+            population_s,
+            number_pop,
+            false,
+        )?))
+    })
+}
+
+#[derive(Debug, Clone)]
+enum Range2D {
+    Scalar(Value),
+    Reference(crate::functions::Reference),
+    Array(Array),
+}
+
+impl Range2D {
+    fn try_from_arg(arg: ArgValue) -> Result<Self, ErrorKind> {
+        match arg {
+            ArgValue::Scalar(Value::Error(e)) => Err(e),
+            ArgValue::Scalar(Value::Reference(r)) => Ok(Self::Reference(r.normalized())),
+            ArgValue::Scalar(Value::Array(arr)) => Ok(Self::Array(arr)),
+            ArgValue::Scalar(v) => Ok(Self::Scalar(v)),
+            ArgValue::Reference(r) => Ok(Self::Reference(r.normalized())),
+            ArgValue::ReferenceUnion(_) => Err(ErrorKind::Value),
+        }
+    }
+
+    fn record_reference(&self, ctx: &dyn FunctionContext) {
+        if let Range2D::Reference(r) = self {
+            ctx.record_reference(r);
+        }
+    }
+
+    fn shape(&self) -> (usize, usize) {
+        match self {
+            Range2D::Scalar(_) => (1, 1),
+            Range2D::Reference(r) => {
+                let rows = (r.end.row - r.start.row + 1) as usize;
+                let cols = (r.end.col - r.start.col + 1) as usize;
+                (rows, cols)
+            }
+            Range2D::Array(arr) => (arr.rows, arr.cols),
+        }
+    }
+
+    fn get(&self, ctx: &dyn FunctionContext, row: usize, col: usize) -> Value {
+        match self {
+            Range2D::Scalar(v) => {
+                if row == 0 && col == 0 {
+                    v.clone()
+                } else {
+                    Value::Blank
+                }
+            }
+            Range2D::Reference(r) => {
+                let addr = crate::eval::CellAddr {
+                    row: r.start.row + row as u32,
+                    col: r.start.col + col as u32,
+                };
+                ctx.get_cell_value(&r.sheet_id, addr)
+            }
+            Range2D::Array(arr) => arr.get(row, col).cloned().unwrap_or(Value::Blank),
+        }
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "PROB",
+        min_args: 3,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: prob_fn,
+    }
+}
+
+fn prob_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let x_range = match Range2D::try_from_arg(ctx.eval_arg(&args[0])) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let prob_range = match Range2D::try_from_arg(ctx.eval_arg(&args[1])) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    x_range.record_reference(ctx);
+    prob_range.record_reference(ctx);
+
+    let (rows_x, cols_x) = x_range.shape();
+    let (rows_p, cols_p) = prob_range.shape();
+    if (rows_x, cols_x) != (rows_p, cols_p) {
+        return Value::Error(ErrorKind::NA);
+    }
+    let len = rows_x.saturating_mul(cols_x);
+    let mut xs = Vec::with_capacity(len);
+    let mut ps = Vec::with_capacity(len);
+    for r in 0..rows_x {
+        for c in 0..cols_x {
+            let x = x_range.get(ctx, r, c).coerce_to_number_with_ctx(ctx);
+            let p = prob_range.get(ctx, r, c).coerce_to_number_with_ctx(ctx);
+            let x = match x {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
+            let p = match p {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
+            xs.push(x);
+            ps.push(p);
+        }
+    }
+
+    let lower = match eval_scalar_arg(ctx, &args[2]).coerce_to_number_with_ctx(ctx) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let upper = if args.len() == 4 {
+        match eval_scalar_arg(ctx, &args[3]).coerce_to_number_with_ctx(ctx) {
+            Ok(v) => Some(v),
+            Err(e) => return Value::Error(e),
+        }
+    } else {
+        None
+    };
+
+    match crate::functions::statistical::prob(&xs, &ps, lower, upper) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "Z.TEST",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: z_test_fn,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "ZTEST",
+        min_args: 2,
+        max_args: 3,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: z_test_fn,
+    }
+}
+
+fn z_test_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let mut values = Vec::new();
+    if let Err(e) = push_numbers_from_arg(ctx, &mut values, ctx.eval_arg(&args[0])) {
+        return Value::Error(e);
+    }
+
+    let x = match eval_scalar_arg(ctx, &args[1]).coerce_to_number_with_ctx(ctx) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let sigma = if args.len() == 3 {
+        match eval_scalar_arg(ctx, &args[2]).coerce_to_number_with_ctx(ctx) {
+            Ok(v) => Some(v),
+            Err(e) => return Value::Error(e),
+        }
+    } else {
+        None
+    };
+
+    match crate::functions::statistical::z_test(&values, x, sigma) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "T.TEST",
+        min_args: 4,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: t_test_fn,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "TTEST",
+        min_args: 4,
+        max_args: 4,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any, ValueType::Number, ValueType::Number],
+        implementation: t_test_fn,
+    }
+}
+
+fn t_test_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let tails = match eval_scalar_arg(ctx, &args[2]).coerce_to_i64_with_ctx(ctx) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let test_type = match eval_scalar_arg(ctx, &args[3]).coerce_to_i64_with_ctx(ctx) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+
+    let (xs, ys) = if test_type == 1 {
+        match collect_numeric_pairs(ctx, &args[0], &args[1]) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        }
+    } else {
+        let left = match arg_to_numeric_sequence(ctx, ctx.eval_arg(&args[0])) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let right = match arg_to_numeric_sequence(ctx, ctx.eval_arg(&args[1])) {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let xs: Vec<f64> = left.into_iter().flatten().collect();
+        let ys: Vec<f64> = right.into_iter().flatten().collect();
+        (xs, ys)
+    };
+
+    match crate::functions::statistical::t_test(&xs, &ys, tails, test_type) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "F.TEST",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any],
+        implementation: f_test_fn,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "FTEST",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any],
+        implementation: f_test_fn,
+    }
+}
+
+fn f_test_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let mut xs = Vec::new();
+    if let Err(e) = push_numbers_from_arg(ctx, &mut xs, ctx.eval_arg(&args[0])) {
+        return Value::Error(e);
+    }
+    let mut ys = Vec::new();
+    if let Err(e) = push_numbers_from_arg(ctx, &mut ys, ctx.eval_arg(&args[1])) {
+        return Value::Error(e);
+    }
+
+    match crate::functions::statistical::f_test(&xs, &ys) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "CHISQ.TEST",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any],
+        implementation: chisq_test_fn,
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "CHITEST",
+        min_args: 2,
+        max_args: 2,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::SupportsArrays,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Any, ValueType::Any],
+        implementation: chisq_test_fn,
+    }
+}
+
+fn chisq_test_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let actual = match Range2D::try_from_arg(ctx.eval_arg(&args[0])) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    let expected = match Range2D::try_from_arg(ctx.eval_arg(&args[1])) {
+        Ok(v) => v,
+        Err(e) => return Value::Error(e),
+    };
+    actual.record_reference(ctx);
+    expected.record_reference(ctx);
+
+    let (rows_a, cols_a) = actual.shape();
+    let (rows_e, cols_e) = expected.shape();
+    if (rows_a, cols_a) != (rows_e, cols_e) {
+        return Value::Error(ErrorKind::NA);
+    }
+    let len = rows_a.saturating_mul(cols_a);
+    let mut actual_vals = Vec::with_capacity(len);
+    let mut expected_vals = Vec::with_capacity(len);
+    for r in 0..rows_a {
+        for c in 0..cols_a {
+            let a = match actual.get(ctx, r, c).coerce_to_number_with_ctx(ctx) {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
+            let e = match expected.get(ctx, r, c).coerce_to_number_with_ctx(ctx) {
+                Ok(v) => v,
+                Err(e) => return Value::Error(e),
+            };
+            actual_vals.push(a);
+            expected_vals.push(e);
+        }
+    }
+
+    match crate::functions::statistical::chisq_test(&actual_vals, &expected_vals, rows_a, cols_a) {
+        Ok(v) => Value::Number(v),
+        Err(e) => Value::Error(e),
+    }
+}
+
 // On wasm targets, `inventory` registrations can be dropped by the linker if the object file
 // contains no otherwise-referenced symbols. Referencing this function from a `#[used]` table in
 // `functions/mod.rs` ensures the module (and its `inventory::submit!` entries) are retained.

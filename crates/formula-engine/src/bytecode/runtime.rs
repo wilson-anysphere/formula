@@ -4453,6 +4453,9 @@ fn format_number_general(n: f64) -> String {
     // locale-aware "General" formatting. Using the same logic here avoids backend divergence from
     // subtle rounding differences (e.g. in `&` / CONCAT) and from locale-specific formatting (e.g.
     // `=CONCAT(1.5)` under `de-DE`, which should yield `1,5`).
+    if !n.is_finite() {
+        return n.to_string();
+    }
     let options = FormatOptions {
         locale: thread_value_locale().separators,
         date_system: match thread_date_system() {

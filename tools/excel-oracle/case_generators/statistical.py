@@ -560,6 +560,57 @@ def generate(
     add_case(cases, prefix="phi", tags=["stat", "PHI"], formula="=PHI(0)")
     add_case(cases, prefix="gauss", tags=["stat", "GAUSS"], formula="=GAUSS(1)")
 
+    # Discrete distributions + probability functions (CDF/PDF/INV + legacy aliases).
+    add_case(cases, prefix="binom_dist", tags=["stat", "BINOM.DIST"], formula="=BINOM.DIST(2,5,0.5,FALSE)")
+    add_case(
+        cases,
+        prefix="binom_dist_range",
+        tags=["stat", "BINOM.DIST.RANGE"],
+        formula="=BINOM.DIST.RANGE(5,0.5,1,3)",
+    )
+    add_case(cases, prefix="binom_inv", tags=["stat", "BINOM.INV"], formula="=BINOM.INV(10,0.5,0.5)")
+    add_case(cases, prefix="binomdist", tags=["stat", "BINOMDIST"], formula="=BINOMDIST(2,5,0.5,FALSE)")
+    add_case(cases, prefix="critbinom", tags=["stat", "CRITBINOM"], formula="=CRITBINOM(10,0.5,0.5)")
+
+    add_case(cases, prefix="poisson_dist", tags=["stat", "POISSON.DIST"], formula="=POISSON.DIST(2,3,FALSE)")
+    add_case(cases, prefix="poisson", tags=["stat", "POISSON"], formula="=POISSON(2,3,TRUE)")
+
+    add_case(
+        cases,
+        prefix="negbinom_dist",
+        tags=["stat", "NEGBINOM.DIST"],
+        formula="=NEGBINOM.DIST(3,2,0.5,FALSE)",
+    )
+    add_case(cases, prefix="negbinomdist", tags=["stat", "NEGBINOMDIST"], formula="=NEGBINOMDIST(3,2,0.5)")
+
+    add_case(
+        cases,
+        prefix="hypgeom_dist",
+        tags=["stat", "HYPGEOM.DIST"],
+        formula="=HYPGEOM.DIST(2,5,5,10,FALSE)",
+    )
+    add_case(cases, prefix="hypgeomdist", tags=["stat", "HYPGEOMDIST"], formula="=HYPGEOMDIST(2,5,5,10)")
+
+    add_case(cases, prefix="prob", tags=["stat", "PROB"], formula="=PROB({0,1,2},{0.2,0.5,0.3},0,1)")
+
+    # Hypothesis tests + legacy aliases.
+    add_case(cases, prefix="z_test", tags=["stat", "Z.TEST"], formula="=Z.TEST({1,2,3,4},2)")
+    add_case(cases, prefix="ztest", tags=["stat", "ZTEST"], formula="=ZTEST({1,2,3,4},2)")
+
+    add_case(cases, prefix="t_test", tags=["stat", "T.TEST"], formula="=T.TEST({1,2,3},{3,2,1},2,1)")
+    add_case(cases, prefix="ttest", tags=["stat", "TTEST"], formula="=TTEST({1,2,3},{3,2,1},2,1)")
+
+    add_case(cases, prefix="f_test", tags=["stat", "F.TEST"], formula="=F.TEST({1,2,3},{1,2,3})")
+    add_case(cases, prefix="ftest", tags=["stat", "FTEST"], formula="=FTEST({1,2,3},{1,2,3})")
+
+    add_case(
+        cases,
+        prefix="chisq_test",
+        tags=["stat", "CHISQ.TEST"],
+        formula="=CHISQ.TEST({10,20;30,40},{12,18;28,42})",
+    )
+    add_case(cases, prefix="chitest", tags=["stat", "CHITEST"], formula="=CHITEST({10,20;30,40},{12,18;28,42})")
+
     add_case(
         cases,
         prefix="frequency",

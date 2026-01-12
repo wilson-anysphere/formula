@@ -20154,6 +20154,206 @@
       "id": "gauss_7376976e7474"
     },
     {
+      "formula": "=BINOM.DIST(2,5,0.5,FALSE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "BINOM.DIST"
+      ],
+      "id": "binom_dist_ac832b161d53"
+    },
+    {
+      "formula": "=BINOM.DIST.RANGE(5,0.5,1,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "BINOM.DIST.RANGE"
+      ],
+      "id": "binom_dist_range_bb1eb5decb3d"
+    },
+    {
+      "formula": "=BINOM.INV(10,0.5,0.5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "BINOM.INV"
+      ],
+      "id": "binom_inv_34a30840aaa9"
+    },
+    {
+      "formula": "=BINOMDIST(2,5,0.5,FALSE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "BINOMDIST"
+      ],
+      "id": "binomdist_1592ef0b1d34"
+    },
+    {
+      "formula": "=CRITBINOM(10,0.5,0.5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "CRITBINOM"
+      ],
+      "id": "critbinom_3e07249989e6"
+    },
+    {
+      "formula": "=POISSON.DIST(2,3,FALSE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "POISSON.DIST"
+      ],
+      "id": "poisson_dist_a02f3491412e"
+    },
+    {
+      "formula": "=POISSON(2,3,TRUE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "POISSON"
+      ],
+      "id": "poisson_a79d3f168435"
+    },
+    {
+      "formula": "=NEGBINOM.DIST(3,2,0.5,FALSE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "NEGBINOM.DIST"
+      ],
+      "id": "negbinom_dist_11b956fb65b2"
+    },
+    {
+      "formula": "=NEGBINOMDIST(3,2,0.5)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "NEGBINOMDIST"
+      ],
+      "id": "negbinomdist_46144bf30a65"
+    },
+    {
+      "formula": "=HYPGEOM.DIST(2,5,5,10,FALSE)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "HYPGEOM.DIST"
+      ],
+      "id": "hypgeom_dist_2018f3991147"
+    },
+    {
+      "formula": "=HYPGEOMDIST(2,5,5,10)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "HYPGEOMDIST"
+      ],
+      "id": "hypgeomdist_f006bf1d1f82"
+    },
+    {
+      "formula": "=PROB({0,1,2},{0.2,0.5,0.3},0,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "PROB"
+      ],
+      "id": "prob_30b8fa14011a"
+    },
+    {
+      "formula": "=Z.TEST({1,2,3,4},2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "Z.TEST"
+      ],
+      "id": "z_test_d589439dc12a"
+    },
+    {
+      "formula": "=ZTEST({1,2,3,4},2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "ZTEST"
+      ],
+      "id": "ztest_bfb7e47c5ea5"
+    },
+    {
+      "formula": "=T.TEST({1,2,3},{3,2,1},2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "T.TEST"
+      ],
+      "id": "t_test_af86bad2fd57"
+    },
+    {
+      "formula": "=TTEST({1,2,3},{3,2,1},2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "TTEST"
+      ],
+      "id": "ttest_71f2ffd2a9eb"
+    },
+    {
+      "formula": "=F.TEST({1,2,3},{1,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "F.TEST"
+      ],
+      "id": "f_test_561e4f20e938"
+    },
+    {
+      "formula": "=FTEST({1,2,3},{1,2,3})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "FTEST"
+      ],
+      "id": "ftest_965d48165abd"
+    },
+    {
+      "formula": "=CHISQ.TEST({10,20;30,40},{12,18;28,42})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "CHISQ.TEST"
+      ],
+      "id": "chisq_test_c0e1b0dc919c"
+    },
+    {
+      "formula": "=CHITEST({10,20;30,40},{12,18;28,42})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "stat",
+        "CHITEST"
+      ],
+      "id": "chitest_67402f90cad3"
+    },
+    {
       "formula": "=FREQUENCY({79,85,78,85,50,81,95,88,97},{70,79,89})",
       "outputCell": "C1",
       "inputs": [],

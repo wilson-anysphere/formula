@@ -9,6 +9,11 @@ mod frequency;
 pub use frequency::frequency;
 pub mod ets;
 pub mod regression;
+mod discrete;
+mod hypothesis;
+
+pub use discrete::*;
+pub use hypothesis::*;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RankMethod {

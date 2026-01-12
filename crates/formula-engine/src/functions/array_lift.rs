@@ -241,3 +241,46 @@ pub(crate) fn lift4(
 
     Value::Array(Array::new(shape.rows, shape.cols, out))
 }
+
+pub(crate) fn lift5(
+    a: Value,
+    b: Value,
+    c: Value,
+    d: Value,
+    e: Value,
+    f: impl Fn(&Value, &Value, &Value, &Value, &Value) -> Result<Value, ErrorKind>,
+) -> Value {
+    let Some(shape) = (match dominant_shape(&[&a, &b, &c, &d, &e]) {
+        Ok(shape) => shape,
+        Err(err) => return Value::Error(err),
+    }) else {
+        return match f(&a, &b, &c, &d, &e) {
+            Ok(v) => v,
+            Err(err) => Value::Error(err),
+        };
+    };
+
+    if !broadcast_compatible(&a, shape)
+        || !broadcast_compatible(&b, shape)
+        || !broadcast_compatible(&c, shape)
+        || !broadcast_compatible(&d, shape)
+        || !broadcast_compatible(&e, shape)
+    {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let mut out = Vec::with_capacity(shape.len());
+    for idx in 0..shape.len() {
+        let av = element_at(&a, shape, idx);
+        let bv = element_at(&b, shape, idx);
+        let cv = element_at(&c, shape, idx);
+        let dv = element_at(&d, shape, idx);
+        let ev = element_at(&e, shape, idx);
+        out.push(match f(av, bv, cv, dv, ev) {
+            Ok(v) => v,
+            Err(err) => Value::Error(err),
+        });
+    }
+
+    Value::Array(Array::new(shape.rows, shape.cols, out))
+}

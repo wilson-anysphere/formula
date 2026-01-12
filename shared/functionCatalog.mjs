@@ -338,6 +338,57 @@ export default {
       ]
     },
     {
+      "name": "BINOM.DIST",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "BINOM.DIST.RANGE",
+      "min_args": 3,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "BINOM.INV",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "BINOMDIST",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
       "name": "BYCOL",
       "min_args": 2,
       "max_args": 2,
@@ -401,6 +452,28 @@ export default {
       "return_type": "any",
       "arg_types": [
         "text",
+        "any"
+      ]
+    },
+    {
+      "name": "CHISQ.TEST",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any"
+      ]
+    },
+    {
+      "name": "CHITEST",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
         "any"
       ]
     },
@@ -744,6 +817,18 @@ export default {
       "arg_types": [
         "any",
         "any"
+      ]
+    },
+    {
+      "name": "CRITBINOM",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
       ]
     },
     {
@@ -1323,6 +1408,17 @@ export default {
       ]
     },
     {
+      "name": "F.TEST",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "FACT",
       "min_args": 1,
       "max_args": 1,
@@ -1525,6 +1621,17 @@ export default {
       ]
     },
     {
+      "name": "FTEST",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any"
+      ]
+    },
+    {
       "name": "FV",
       "min_args": 3,
       "max_args": 5,
@@ -1661,6 +1768,33 @@ export default {
       "arg_types": [
         "any",
         "any"
+      ]
+    },
+    {
+      "name": "HYPGEOM.DIST",
+      "min_args": 5,
+      "max_args": 5,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "HYPGEOMDIST",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "number"
       ]
     },
     {
@@ -2579,6 +2713,31 @@ export default {
       "arg_types": []
     },
     {
+      "name": "NEGBINOM.DIST",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "NEGBINOMDIST",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "NETWORKDAYS",
       "min_args": 2,
       "max_args": 3,
@@ -3012,6 +3171,30 @@ export default {
       ]
     },
     {
+      "name": "POISSON",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
+      "name": "POISSON.DIST",
+      "min_args": 3,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number",
+        "bool"
+      ]
+    },
+    {
       "name": "POWER",
       "min_args": 2,
       "max_args": 2,
@@ -3073,6 +3256,19 @@ export default {
         "any",
         "any",
         "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "PROB",
+      "min_args": 3,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
         "number",
         "number"
       ]
@@ -3888,6 +4084,19 @@ export default {
       ]
     },
     {
+      "name": "T.TEST",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "TAKE",
       "min_args": 1,
       "max_args": 3,
@@ -4176,6 +4385,19 @@ export default {
       "volatility": "non_volatile",
       "return_type": "number",
       "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "TTEST",
+      "min_args": 4,
+      "max_args": 4,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
         "number",
         "number"
       ]
@@ -4511,6 +4733,30 @@ export default {
         "any",
         "any",
         "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "Z.TEST",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "ZTEST",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
         "number",
         "number"
       ]
