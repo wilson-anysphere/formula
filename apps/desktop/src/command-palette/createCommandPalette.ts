@@ -668,8 +668,17 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
           main.appendChild(signature);
         }
 
+        const right = document.createElement("div");
+        right.className = "command-palette__item-right";
+
+        const enterHint = document.createElement("span");
+        enterHint.className = "command-palette__shortcut command-palette__function-hint";
+        enterHint.textContent = "↵";
+        right.appendChild(enterHint);
+
         li.appendChild(icon);
         li.appendChild(main);
+        li.appendChild(right);
 
         li.addEventListener("mousedown", (e) => {
           // Prevent focus leaving the input before we run the command.

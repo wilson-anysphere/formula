@@ -567,6 +567,14 @@
   letter-spacing: 0.02em;
 }
 
+.command-palette__function-hint {
+  display: none;
+}
+
+.command-palette__item[aria-selected="true"] .command-palette__function-hint {
+  display: inline-flex;
+}
+
 .command-palette__highlight {
   font-weight: 700;
 }
