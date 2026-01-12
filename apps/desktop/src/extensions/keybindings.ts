@@ -134,6 +134,10 @@ const keyTokenToCodeFallback: Record<string, KeyboardEvent["code"] | KeyboardEve
   "`": "Backquote",
   "[": "BracketLeft",
   "]": "BracketRight",
+  // Excel-style shortcuts sometimes refer to `Ctrl+Shift+*` but are actually bound to the
+  // physical `Digit8` key on many layouts. Allow falling back to the physical key code so
+  // `ctrl+shift+*` bindings still match when `event.key` is not literally "*".
+  "*": ["Digit8", "NumpadMultiply"],
   // ISO/JIS keyboards may report alternate codes for the physical backslash key.
   "\\": ["Backslash", "IntlBackslash", "IntlYen", "IntlRo"],
   "/": "Slash",
