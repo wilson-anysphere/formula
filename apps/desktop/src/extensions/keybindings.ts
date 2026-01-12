@@ -182,6 +182,11 @@ export function matchesKeybinding(binding: ParsedKeybinding, event: KeyboardEven
     if (event.code === "Digit8") return true;
   }
 
+  // Excel-style number-format shortcuts are spelled with `$`, `%`, and `#` but correspond to the
+  // shifted Digit4/Digit5/Digit3 keys on many layouts. Only apply the `code` fallback when Shift
+  // is explicitly part of the binding to avoid `ctrl+$` accidentally matching `Ctrl+4`, etc.
+  if (!binding.shift && (binding.key === "$" || binding.key === "%" || binding.key === "#")) return false;
+
   const fallback = keyTokenToCodeFallback[binding.key];
   if (!fallback) return false;
 

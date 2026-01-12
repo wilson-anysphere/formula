@@ -155,6 +155,26 @@ describe("keybindings", () => {
     expect(matchesKeybinding(binding!, eventForKey("!", { ctrlKey: true, shiftKey: true, code: "Digit1" }))).toBe(true);
   });
 
+  it.each([
+    { symbol: "$", code: "Digit4", eventKey: "4" },
+    { symbol: "%", code: "Digit5", eventKey: "5" },
+    { symbol: "#", code: "Digit3", eventKey: "3" },
+  ])("matches Excel-style number format shortcut ctrl+shift+$symbol via KeyboardEvent.code fallback", ({ symbol, code, eventKey }) => {
+    const binding = parseKeybinding("cmd", `ctrl+shift+${symbol}`);
+    expect(binding).not.toBeNull();
+    expect(matchesKeybinding(binding!, eventForKey(eventKey, { ctrlKey: true, shiftKey: true, code }))).toBe(true);
+  });
+
+  it.each([
+    { symbol: "$", code: "Digit4", eventKey: "4" },
+    { symbol: "%", code: "Digit5", eventKey: "5" },
+    { symbol: "#", code: "Digit3", eventKey: "3" },
+  ])("does not match unshifted ctrl+$symbol via Digit code fallback (avoid ctrl+digit ambiguity)", ({ symbol, code, eventKey }) => {
+    const binding = parseKeybinding("cmd", `ctrl+${symbol}`);
+    expect(binding).not.toBeNull();
+    expect(matchesKeybinding(binding!, eventForKey(eventKey, { ctrlKey: true, shiftKey: false, code }))).toBe(false);
+  });
+
   it("matches Ctrl+Shift+8 when the key is '*' (Excel Ctrl+Shift+*)", () => {
     const binding = parseKeybinding("cmd", "ctrl+shift+8");
     expect(binding).not.toBeNull();
