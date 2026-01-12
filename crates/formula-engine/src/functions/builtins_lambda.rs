@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::eval::{CompiledExpr, Expr, SheetReference, LAMBDA_OMITTED_PREFIX};
 use crate::functions::{
-    ArgValue, ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType, Volatility,
+    ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType, Volatility,
 };
 use crate::value::{casefold, ErrorKind, Lambda, Value};
 
@@ -46,10 +46,6 @@ fn let_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         let name_key = casefold(name.trim());
 
         let value = ctx.eval_arg(&pair[1]);
-        if let ArgValue::Scalar(Value::Error(e)) = &value {
-            return Value::Error(*e);
-        }
-
         ctx.set_local(&name_key, value);
     }
 

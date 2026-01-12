@@ -11,6 +11,12 @@ fn let_binds_values_left_to_right() {
 }
 
 #[test]
+fn let_can_bind_error_values() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=LET(x,1/0,IFERROR(x,0))"), 0.0);
+}
+
+#[test]
 fn let_rejects_non_identifier_names() {
     let mut sheet = TestSheet::new();
     assert_eq!(sheet.eval("=LET(1,2,3)"), Value::Error(ErrorKind::Value));
@@ -29,6 +35,14 @@ fn lambda_can_be_called_inline() {
 
     assert_number(&sheet.eval("=LAMBDA(x,x+1)(2)"), 3.0);
     assert_number(&sheet.eval("=LAMBDA(x,LAMBDA(y,x+y))(1)(2)"), 3.0);
+}
+
+#[test]
+fn lambda_arguments_can_be_errors() {
+    let mut sheet = TestSheet::new();
+
+    assert_eq!(sheet.eval("=LAMBDA(x,ISERROR(x))(1/0)"), Value::Bool(true));
+    assert_number(&sheet.eval("=LAMBDA(x,IFERROR(x,0))(1/0)"), 0.0);
 }
 
 #[test]

@@ -1406,16 +1406,10 @@ fn reduce_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             None => return Value::Error(ErrorKind::Calc),
         },
     };
-    if let Value::Error(e) = &acc {
-        return Value::Error(*e);
-    }
 
     for cell in iter {
         let args = [acc.clone(), cell.clone()];
         acc = invoke_lambda_value(ctx, &lambda, &call, &args);
-        if let Value::Error(e) = &acc {
-            return Value::Error(*e);
-        }
     }
 
     acc
@@ -1465,9 +1459,6 @@ fn scan_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 Ok(v) => v,
                 Err(e) => return Value::Error(e),
             };
-            if let Value::Error(e) = acc {
-                return Value::Error(e);
-            }
 
             for cell in &array.values {
                 let args = [acc.clone(), cell.clone()];

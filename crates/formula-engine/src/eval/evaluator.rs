@@ -643,9 +643,6 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     }
                 }
             };
-            if let Value::Error(e) = v {
-                return Value::Error(e);
-            }
             evaluated_args.push(v);
         }
 

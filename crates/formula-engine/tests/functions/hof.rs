@@ -95,6 +95,30 @@ fn reduce_without_initial_uses_first_array_element() {
 }
 
 #[test]
+fn reduce_can_recover_from_error_accumulator() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=1/0")
+        .expect("set formula");
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    // When initial_value is omitted, REDUCE seeds the accumulator from the first array element.
+    // If that element is an error, Excel still evaluates the lambda for subsequent elements, so
+    // the lambda can choose to recover.
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "C9",
+            "=REDUCE(A1:A3,LAMBDA(acc,v,IFERROR(acc,0)+v))",
+        )
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C9"), Value::Number(5.0));
+}
+
+#[test]
 fn scan_spills_running_accumulations_over_range() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
