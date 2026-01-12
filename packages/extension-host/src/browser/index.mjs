@@ -1912,10 +1912,16 @@ class BrowserExtensionHost {
         const rawUrl = String(args[0]);
         const init = args[1];
 
-        // When running inside the Tauri desktop shell we keep a strict
-        // `connect-src 'self'` CSP so extensions cannot bypass permission checks
-        // via direct `fetch()` calls. Instead, outbound HTTP(S) requests are
-        // proxied through the Rust backend via a Tauri command.
+        // When running inside the Tauri desktop shell, prefer proxying outbound
+        // HTTP(S) requests through the Rust backend via a Tauri command. This:
+        //
+        // - avoids relying on CORS headers for the `tauri://…` origin
+        // - keeps networking behavior consistent/hardened across WebViews
+        //
+        // Note: extension network access is enforced by Formula's permission
+        // model + worker guardrails (which replace `fetch`/`WebSocket` inside the
+        // extension worker). CSP is defense-in-depth, not the primary enforcement
+        // mechanism here.
         const tauriInvoke = globalThis?.__TAURI__?.core?.invoke ?? globalThis?.__TAURI__?.invoke;
         if (typeof tauriInvoke === "function") {
           const resolved = safeParseUrl(rawUrl);

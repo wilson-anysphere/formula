@@ -1391,9 +1391,12 @@ const marketplace = new MarketplaceClient({ baseUrl: "https://marketplace.exampl
 const manager = new WebExtensionManager({ marketplaceClient: marketplace, host, engineVersion: "1.0.0" });
 ```
 
-**Network strategy (Desktop/Tauri):** in packaged desktop builds, marketplace HTTP requests are made by the Rust backend
-via Tauri IPC (so they are not subject to browser CSP/CORS). In pure web/in-browser dev, `MarketplaceClient` uses plain
-`fetch()` and is subject to normal browser CSP + CORS rules.
+**Network strategy (Desktop/Tauri):** in packaged desktop builds, `MarketplaceClient` prefers making requests via the Rust
+backend (Tauri IPC: `marketplace_search`, `marketplace_get_extension`, `marketplace_download_package`) when running under
+Tauri with an absolute `http(s)` marketplace base URL. This avoids relying on permissive CORS headers for the `tauri://…`
+origin (and avoids WebView CSP/CORS constraints) and lets the desktop CSP remain relatively restrictive (no
+`http:`/`ws:`). In pure web/in-browser dev, `MarketplaceClient` uses plain `fetch()` and is subject to normal browser CSP +
+CORS rules.
 
 ### End-to-end: local marketplace → install in Desktop (dev)
 
