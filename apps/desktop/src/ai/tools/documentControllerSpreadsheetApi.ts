@@ -608,21 +608,6 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
         return out;
       };
 
-      const effectiveFormatCache = new Map<string, CellFormat | undefined>();
-      const getEffectiveFormat = (styleIds: [number, number, number, number]): CellFormat | undefined => {
-        const [sheetStyleId, rowStyleId, colStyleId, cellStyleId] = styleIds;
-        if (sheetStyleId === 0 && rowStyleId === 0 && colStyleId === 0 && cellStyleId === 0) return undefined;
-        const key = `${sheetStyleId},${rowStyleId},${colStyleId},${cellStyleId}`;
-        if (effectiveFormatCache.has(key)) return effectiveFormatCache.get(key);
-
-        const inherited = getInheritedFormat([sheetStyleId, rowStyleId, colStyleId]);
-        const cellFormat = getFormatForStyleId(cellStyleId);
-        const merged: CellFormat = { ...(inherited ?? {}), ...(cellFormat ?? {}) };
-        const out = Object.keys(merged).length > 0 ? merged : undefined;
-        effectiveFormatCache.set(key, out);
-        return out;
-      };
-
       const inputs: any[][] = [];
       for (let r = 0; r < rowCount; r++) {
         const srcRow = cells[r] ?? [];
@@ -646,23 +631,22 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
             : [0, 0, 0, cellStyleId];
 
           const inheritedFormat = hasLayeredFormattingWritePath ? getInheritedFormat([styleIds[0], styleIds[1], styleIds[2]]) : undefined;
-          const effectiveFormat = hasLayeredFormattingWritePath ? getEffectiveFormat(styleIds) : getFormatForStyleId(cellStyleId);
 
           const requestedFormat = cell.format && Object.keys(cell.format).length > 0 ? cell.format : null;
 
-          // Treat per-cell formats as a patch on top of the cell's *effective* formatting, but
-          // only write the minimum set of cell-level overrides required to achieve that result.
-          // This prevents layered defaults (sheet/row/col) from being materialized into per-cell styles.
+          // CellData.format in writeRange is treated like the ai-tools InMemoryWorkbook: it is a
+          // per-cell override for supported keys. We still want to preserve layered defaults
+          // (sheet/row/col) without materializing them into per-cell styles. To do that, drop any
+          // requested keys that are already satisfied by inherited formatting.
           let formatToWrite: CellFormat | null | undefined = null;
           if (!requestedFormat) {
             // No format specified for this cell => clear ai-tools supported keys (preserve other style keys).
             formatToWrite = null;
           } else {
-            const desiredEffective: CellFormat = { ...(effectiveFormat ?? {}), ...requestedFormat };
             const override: CellFormat = {};
             const inherited = inheritedFormat ?? {};
-            for (const key of Object.keys(desiredEffective) as Array<keyof CellFormat>) {
-              const value = desiredEffective[key];
+            for (const key of Object.keys(requestedFormat) as Array<keyof CellFormat>) {
+              const value = requestedFormat[key];
               if (value === undefined) continue;
               if ((inherited as any)[key] === value) continue;
               (override as any)[key] = value;

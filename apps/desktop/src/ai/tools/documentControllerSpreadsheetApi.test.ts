@@ -375,6 +375,22 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(api.getCell({ sheet: "Sheet1", row: 1, col: 2 }).format).toEqual({ bold: true });
   });
 
+  it("does not merge stale supported formatting when writeRange overwrites a cell with a different per-cell format", () => {
+    const controller = new DocumentController();
+    controller.setRangeValues("Sheet1", "A1:A2", [[1], [2]]);
+    controller.setRangeFormat("Sheet1", "A1", { font: { bold: true } }, { label: "Bold A1" });
+    controller.setRangeFormat("Sheet1", "A2", { font: { italic: true } }, { label: "Italic A2" });
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    api.writeRange(
+      { sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 2, endCol: 1 },
+      [[{ value: 1, format: { italic: true } }], [{ value: 2, format: { bold: true } }]]
+    );
+
+    expect(api.getCell({ sheet: "Sheet1", row: 1, col: 1 }).format).toEqual({ italic: true });
+    expect(api.getCell({ sheet: "Sheet1", row: 2, col: 1 }).format).toEqual({ bold: true });
+  });
+
   it("preserves formatting when set_range updates values", async () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", 1);
