@@ -617,98 +617,122 @@ def generate(
     add_case(
         cases,
         prefix="oddfprice_neg_yld",
-        tags=["financial", "odd_coupon", "ODDFPRICE"],
+        tags=["financial", "odd_coupon", "ODDFPRICE", "odd_coupon_validation", "neg_yld"],
         formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-0.01,100,2,0)",
         description="ODDFPRICE with negative yld (confirm whether Excel returns #NUM! or a price)",
     )
     add_case(
         cases,
         prefix="oddlprice_neg_yld",
-        tags=["financial", "odd_coupon", "ODDLPRICE"],
+        tags=["financial", "odd_coupon", "ODDLPRICE", "odd_coupon_validation", "neg_yld"],
         formula="=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-0.01,100,2,0)",
         description="ODDLPRICE with negative yld (confirm whether Excel returns #NUM! or a price)",
     )
     add_case(
         cases,
         prefix="oddfprice_neg_yld_below_minus1",
-        tags=["financial", "odd_coupon", "ODDFPRICE"],
+        tags=["financial", "odd_coupon", "ODDFPRICE", "odd_coupon_validation", "neg_yld", "yld_below_minus1"],
         formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-1.5,100,2,0)",
         description="ODDFPRICE with yld=-1.5 (below -1 but still within the per-period domain yld > -frequency when frequency=2)",
     )
     add_case(
         cases,
         prefix="oddlprice_neg_yld_below_minus1",
-        tags=["financial", "odd_coupon", "ODDLPRICE"],
+        tags=["financial", "odd_coupon", "ODDLPRICE", "odd_coupon_validation", "neg_yld", "yld_below_minus1"],
         formula="=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-1.5,100,2,0)",
         description="ODDLPRICE with yld=-1.5 (below -1 but still within the per-period domain yld > -frequency when frequency=2)",
     )
     add_case(
         cases,
         prefix="oddfprice_yld_eq_neg_frequency",
-        tags=["financial", "odd_coupon", "ODDFPRICE"],
+        tags=[
+            "financial",
+            "odd_coupon",
+            "ODDFPRICE",
+            "odd_coupon_validation",
+            "yld_eq_neg_frequency",
+        ],
         formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-2,100,2,0)",
         description="ODDFPRICE with yld == -frequency (discount base hits 0; confirm Excel returns #DIV/0!)",
     )
     add_case(
         cases,
         prefix="oddlprice_yld_eq_neg_frequency",
-        tags=["financial", "odd_coupon", "ODDLPRICE"],
+        tags=[
+            "financial",
+            "odd_coupon",
+            "ODDLPRICE",
+            "odd_coupon_validation",
+            "yld_eq_neg_frequency",
+        ],
         formula="=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-2,100,2,0)",
         description="ODDLPRICE with yld == -frequency (discount base hits 0; confirm Excel returns #DIV/0!)",
     )
     add_case(
         cases,
         prefix="oddfprice_yld_below_neg_frequency",
-        tags=["financial", "odd_coupon", "ODDFPRICE"],
+        tags=[
+            "financial",
+            "odd_coupon",
+            "ODDFPRICE",
+            "odd_coupon_validation",
+            "yld_lt_neg_frequency",
+        ],
         formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-2.5,100,2,0)",
         description="ODDFPRICE with yld < -frequency (confirm Excel returns #NUM!)",
     )
     add_case(
         cases,
         prefix="oddlprice_yld_below_neg_frequency",
-        tags=["financial", "odd_coupon", "ODDLPRICE"],
+        tags=[
+            "financial",
+            "odd_coupon",
+            "ODDLPRICE",
+            "odd_coupon_validation",
+            "yld_lt_neg_frequency",
+        ],
         formula="=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-2.5,100,2,0)",
         description="ODDLPRICE with yld < -frequency (confirm Excel returns #NUM!)",
     )
     add_case(
         cases,
         prefix="oddfprice_neg_rate",
-        tags=["financial", "odd_coupon", "ODDFPRICE"],
+        tags=["financial", "odd_coupon", "ODDFPRICE", "odd_coupon_validation", "neg_rate"],
         formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),-0.01,0.0625,100,2,0)",
         description="ODDFPRICE with negative coupon rate (confirm whether Excel returns #NUM!)",
     )
     add_case(
         cases,
         prefix="oddlprice_neg_rate",
-        tags=["financial", "odd_coupon", "ODDLPRICE"],
+        tags=["financial", "odd_coupon", "ODDLPRICE", "odd_coupon_validation", "neg_rate"],
         formula="=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),-0.01,0.0625,100,2,0)",
         description="ODDLPRICE with negative coupon rate (confirm whether Excel returns #NUM!)",
     )
     add_case(
         cases,
         prefix="oddfyield_neg_rate",
-        tags=["financial", "odd_coupon", "ODDFYIELD"],
+        tags=["financial", "odd_coupon", "ODDFYIELD", "odd_coupon_validation", "neg_rate"],
         formula="=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),-0.01,98,100,2,0)",
         description="ODDFYIELD with negative coupon rate (confirm whether Excel returns #NUM!)",
     )
     add_case(
         cases,
         prefix="oddlyield_neg_rate",
-        tags=["financial", "odd_coupon", "ODDLYIELD"],
+        tags=["financial", "odd_coupon", "ODDLYIELD", "odd_coupon_validation", "neg_rate"],
         formula="=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),-0.01,98,100,2,0)",
         description="ODDLYIELD with negative coupon rate (confirm whether Excel returns #NUM!)",
     )
     add_case(
         cases,
         prefix="oddfyield_high_price",
-        tags=["financial", "odd_coupon", "ODDFYIELD"],
+        tags=["financial", "odd_coupon", "ODDFYIELD", "odd_coupon_validation", "implied_neg_yld"],
         formula="=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,300,100,2,0)",
         description="ODDFYIELD with a price that implies a negative yield if allowed (confirm whether Excel returns a negative yield or #NUM!)",
     )
     add_case(
         cases,
         prefix="oddlyield_high_price",
-        tags=["financial", "odd_coupon", "ODDLYIELD"],
+        tags=["financial", "odd_coupon", "ODDLYIELD", "odd_coupon_validation", "implied_neg_yld"],
         formula="=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,300,100,2,0)",
         description="ODDLYIELD with a price that implies a negative yield if allowed (confirm whether Excel returns a negative yield or #NUM!)",
     )
