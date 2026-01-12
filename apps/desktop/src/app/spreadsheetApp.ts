@@ -2015,36 +2015,23 @@ export class SpreadsheetApp {
   private createCommentsPanel(): HTMLDivElement {
     const panel = document.createElement("div");
     panel.dataset.testid = "comments-panel";
-    panel.style.position = "absolute";
-    panel.style.top = "0";
-    panel.style.right = "0";
-    panel.style.width = "320px";
-    panel.style.height = "100%";
-    panel.style.display = "none";
-    panel.style.flexDirection = "column";
-    panel.style.background = "var(--dialog-bg)";
-    panel.style.borderInlineStart = "1px solid var(--dialog-border)";
-    panel.style.boxShadow = "-2px 0 10px var(--dialog-border)";
-    panel.style.zIndex = "20";
-    panel.style.padding = "10px";
-    panel.style.boxSizing = "border-box";
+    panel.className = "comments-panel";
 
     panel.addEventListener("pointerdown", (e) => e.stopPropagation());
     panel.addEventListener("dblclick", (e) => e.stopPropagation());
     panel.addEventListener("keydown", (e) => e.stopPropagation());
 
     const header = document.createElement("div");
-    header.style.display = "flex";
-    header.style.alignItems = "center";
-    header.style.justifyContent = "space-between";
-    header.style.marginBottom = "8px";
+    header.className = "comments-panel__header";
 
     const title = document.createElement("div");
     title.textContent = t("comments.title");
-    title.style.fontWeight = "600";
+    title.className = "comments-panel__title";
 
     const closeButton = document.createElement("button");
     closeButton.textContent = "×";
+    closeButton.type = "button";
+    closeButton.className = "comments-panel__close-button";
     closeButton.setAttribute("aria-label", t("comments.closePanel"));
     closeButton.addEventListener("click", () => this.toggleCommentsPanel());
 
@@ -2054,34 +2041,27 @@ export class SpreadsheetApp {
 
     this.commentsPanelCell = document.createElement("div");
     this.commentsPanelCell.dataset.testid = "comments-active-cell";
-    this.commentsPanelCell.style.fontSize = "12px";
-    this.commentsPanelCell.style.color = "var(--text-secondary)";
-    this.commentsPanelCell.style.marginBottom = "10px";
+    this.commentsPanelCell.className = "comments-panel__active-cell";
     panel.appendChild(this.commentsPanelCell);
 
     this.commentsPanelThreads = document.createElement("div");
-    this.commentsPanelThreads.style.flex = "1";
-    this.commentsPanelThreads.style.overflow = "auto";
-    this.commentsPanelThreads.style.display = "flex";
-    this.commentsPanelThreads.style.flexDirection = "column";
-    this.commentsPanelThreads.style.gap = "10px";
+    this.commentsPanelThreads.className = "comments-panel__threads";
     panel.appendChild(this.commentsPanelThreads);
 
     const footer = document.createElement("div");
-    footer.style.display = "flex";
-    footer.style.gap = "8px";
-    footer.style.paddingTop = "10px";
-    footer.style.borderTop = "1px solid var(--border)";
+    footer.className = "comments-panel__footer";
 
     this.newCommentInput = document.createElement("input");
     this.newCommentInput.dataset.testid = "new-comment-input";
     this.newCommentInput.type = "text";
     this.newCommentInput.placeholder = t("comments.new.placeholder");
-    this.newCommentInput.style.flex = "1";
+    this.newCommentInput.className = "comments-panel__new-comment-input";
 
     const submit = document.createElement("button");
     submit.dataset.testid = "submit-comment";
     submit.textContent = t("comments.new.submit");
+    submit.type = "button";
+    submit.className = "comments-panel__submit-button";
     submit.addEventListener("click", () => this.submitNewComment());
 
     footer.appendChild(this.newCommentInput);
@@ -2094,18 +2074,7 @@ export class SpreadsheetApp {
   private createCommentTooltip(): HTMLDivElement {
     const tooltip = document.createElement("div");
     tooltip.dataset.testid = "comment-tooltip";
-    tooltip.style.position = "absolute";
-    tooltip.style.display = "none";
-    tooltip.style.maxWidth = "260px";
-    tooltip.style.padding = "8px 10px";
-    tooltip.style.background = "var(--bg-tertiary)";
-    tooltip.style.color = "var(--text-primary)";
-    tooltip.style.border = "1px solid var(--border)";
-    tooltip.style.fontSize = "12px";
-    tooltip.style.borderRadius = "8px";
-    tooltip.style.pointerEvents = "none";
-    tooltip.style.whiteSpace = "pre-wrap";
-    tooltip.style.zIndex = "30";
+    tooltip.className = "comment-tooltip";
     return tooltip;
   }
 
@@ -2204,8 +2173,7 @@ export class SpreadsheetApp {
     if (threads.length === 0) {
       const empty = document.createElement("div");
       empty.textContent = t("comments.none");
-      empty.style.fontSize = "12px";
-      empty.style.color = "var(--text-secondary)";
+      empty.className = "comments-panel__empty";
       this.commentsPanelThreads.appendChild(empty);
       return;
     }
@@ -2220,29 +2188,20 @@ export class SpreadsheetApp {
     container.dataset.testid = "comment-thread";
     container.dataset.commentId = comment.id;
     container.dataset.resolved = comment.resolved ? "true" : "false";
-    container.style.border = "1px solid var(--border)";
-    container.style.borderRadius = "8px";
-    container.style.padding = "10px";
-    container.style.display = "flex";
-    container.style.flexDirection = "column";
-    container.style.gap = "8px";
-    if (comment.resolved) {
-      container.style.opacity = "0.7";
-    }
+    container.className = "comment-thread";
 
     const header = document.createElement("div");
-    header.style.display = "flex";
-    header.style.alignItems = "center";
-    header.style.justifyContent = "space-between";
+    header.className = "comment-thread__header";
 
     const author = document.createElement("div");
     author.textContent = comment.author.name || t("presence.anonymous");
-    author.style.fontSize = "12px";
-    author.style.fontWeight = "600";
+    author.className = "comment-thread__author";
 
     const resolve = document.createElement("button");
     resolve.dataset.testid = "resolve-comment";
     resolve.textContent = comment.resolved ? t("comments.unresolve") : t("comments.resolve");
+    resolve.type = "button";
+    resolve.className = "comment-thread__resolve-button";
     resolve.addEventListener("click", () => {
       this.commentManager.setResolved({
         commentId: comment.id,
@@ -2256,25 +2215,20 @@ export class SpreadsheetApp {
 
     const body = document.createElement("div");
     body.textContent = comment.content;
-    body.style.fontSize = "13px";
-    body.style.whiteSpace = "pre-wrap";
+    body.className = "comment-thread__body";
     container.appendChild(body);
 
     for (const reply of comment.replies) {
       const replyEl = document.createElement("div");
-      replyEl.style.paddingInlineStart = "10px";
-      replyEl.style.borderInlineStart = "2px solid var(--border)";
+      replyEl.className = "comment-thread__reply";
 
       const replyAuthor = document.createElement("div");
       replyAuthor.textContent = reply.author.name || t("presence.anonymous");
-      replyAuthor.style.fontSize = "12px";
-      replyAuthor.style.fontWeight = "600";
+      replyAuthor.className = "comment-thread__reply-author";
 
       const replyBody = document.createElement("div");
       replyBody.textContent = reply.content;
-      replyBody.style.fontSize = "13px";
-      replyBody.style.whiteSpace = "pre-wrap";
-      replyBody.style.marginTop = "4px";
+      replyBody.className = "comment-thread__reply-body";
 
       replyEl.appendChild(replyAuthor);
       replyEl.appendChild(replyBody);
@@ -2282,18 +2236,19 @@ export class SpreadsheetApp {
     }
 
     const replyRow = document.createElement("div");
-    replyRow.style.display = "flex";
-    replyRow.style.gap = "8px";
+    replyRow.className = "comment-thread__reply-row";
 
     const replyInput = document.createElement("input");
     replyInput.dataset.testid = "reply-input";
     replyInput.type = "text";
     replyInput.placeholder = t("comments.reply.placeholder");
-    replyInput.style.flex = "1";
+    replyInput.className = "comment-thread__reply-input";
 
     const submitReply = document.createElement("button");
     submitReply.dataset.testid = "submit-reply";
     submitReply.textContent = t("comments.reply.send");
+    submitReply.type = "button";
+    submitReply.className = "comment-thread__submit-reply-button";
     submitReply.addEventListener("click", () => {
       const content = replyInput.value.trim();
       if (!content) return;

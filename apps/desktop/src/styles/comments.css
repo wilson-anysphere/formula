@@ -1,0 +1,167 @@
+/*
+  Comments UI (side panel + hover tooltip).
+
+  This file intentionally uses only design tokens from `tokens.css` and does not
+  hardcode colors (enforced by `noHardcodedColors.test.js`).
+*/
+
+.comments-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 320px;
+  height: 100%;
+  display: none;
+  flex-direction: column;
+  padding: 10px;
+  box-sizing: border-box;
+  background: var(--dialog-bg);
+  border-inline-start: 1px solid var(--dialog-border);
+  box-shadow: var(--panel-shadow);
+  z-index: 20;
+}
+
+.comments-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.comments-panel__title {
+  font-weight: 600;
+}
+
+.comments-panel__close-button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.comments-panel__active-cell {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.comments-panel__threads {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.comments-panel__empty {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.comments-panel__footer {
+  display: flex;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.comments-panel__new-comment-input {
+  flex: 1;
+}
+
+.comments-panel__new-comment-input,
+.comment-thread__reply-input {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.comments-panel__new-comment-input:focus,
+.comment-thread__reply-input:focus {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.comments-panel__submit-button,
+.comment-thread__resolve-button,
+.comment-thread__submit-reply-button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.comment-thread {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.comment-thread[data-resolved="true"] {
+  opacity: 0.7;
+}
+
+.comment-thread__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.comment-thread__author,
+.comment-thread__reply-author {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.comment-thread__body,
+.comment-thread__reply-body {
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.comment-thread__reply {
+  padding-inline-start: 10px;
+  border-inline-start: 2px solid var(--border);
+}
+
+.comment-thread__reply-body {
+  margin-top: 4px;
+}
+
+.comment-thread__reply-row {
+  display: flex;
+  gap: 8px;
+}
+
+.comment-thread__reply-input {
+  flex: 1;
+}
+
+.comment-tooltip {
+  position: absolute;
+  display: none;
+  max-width: 260px;
+  padding: 8px 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  border-radius: 8px;
+  pointer-events: none;
+  white-space: pre-wrap;
+  z-index: 30;
+}
+
