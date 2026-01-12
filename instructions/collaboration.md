@@ -29,7 +29,7 @@ Build real-time collaboration that doesn't break at scale. Seamless, conflict-fr
 
 ### Your Documentation
 
-- **Primary:** [`docs/06-collaboration.md`](../docs/06-collaboration.md) — CRDT sync, presence, versioning, conflict resolution
+- **Primary:** [`docs/06-collaboration.md`](../docs/06-collaboration.md) — implementation-backed wiring for session + binder + presence + versioning/branching
 
 ---
 
@@ -40,12 +40,19 @@ Build real-time collaboration that doesn't break at scale. Seamless, conflict-fr
 ```typescript
 interface SpreadsheetDoc {
   doc: Y.Doc;
-  sheets: Y.Array<Y.Map<any>>;       // Sheet list
-  cells: Y.Map<Y.Map<any>>;          // Key: "sheetId:row:col"
+  sheets: Y.Array<Y.Map<any>>;       // Sheet list (each entry has { id, name, view? })
+  cells: Y.Map<Y.Map<any>>;          // Key: `${sheetId}:${row}:${col}` (canonical)
   metadata: Y.Map<any>;              // Workbook metadata
   namedRanges: Y.Map<any>;           // Named range definitions
 }
 ```
+
+See [`docs/06-collaboration.md`](../docs/06-collaboration.md) for:
+
+- desktop binder wiring (`packages/collab/binder/index.js`, `bindYjsToDocumentController`)
+- sheet `view` state storage (`sheets[i].get("view")`)
+- presence rendering (`apps/desktop/src/grid/presence-renderer/`)
+- collaborative versioning (`@formula/collab-versioning`) and branching (`packages/collab/branching/index.js`)
 
 ### Sync Server Features
 

@@ -1,1259 +1,382 @@
-# Real-Time Collaboration
+# Collaboration (Yjs)
 
-## Overview
+This document is the implementation-backed reference for how Formula wires together:
 
-Collaboration must be seamless, conflict-free, and work offline. We use **CRDTs (Conflict-free Replicated Data Types)** via Yjs for the core sync engine, providing better offline support and conflict resolution than traditional Operational Transformation.
+- **Sync + offline persistence** (`@formula/collab-session`)
+- **Desktop workbook binding** (`packages/collab/binder/index.js`)
+- **Presence** (`@formula/collab-presence` + desktop `PresenceRenderer`)
+- **Version history** (`@formula/collab-versioning`)
+- **Branching/merging** (`packages/collab/branching/index.js` + `packages/versioning/branches`)
 
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  CLIENT A                              CLIENT B                              │
-│  ┌────────────┐                       ┌────────────┐                        │
-│  │ Local Doc  │                       │ Local Doc  │                        │
-│  │ (Yjs)      │                       │ (Yjs)      │                        │
-│  └─────┬──────┘                       └─────┬──────┘                        │
-│        │                                    │                               │
-│        │ Updates                            │ Updates                       │
-│        ▼                                    ▼                               │
-│  ┌────────────┐                       ┌────────────┐                        │
-│  │ Awareness  │                       │ Awareness  │                        │
-│  │ Protocol   │                       │ Protocol   │                        │
-│  └─────┬──────┘                       └─────┬──────┘                        │
-│        │                                    │                               │
-│        └──────────────┬─────────────────────┘                               │
-│                       ▼                                                     │
-│              ┌────────────────┐                                             │
-│              │  WebSocket/    │                                             │
-│              │  WebRTC Sync   │                                             │
-│              └────────┬───────┘                                             │
-│                       │                                                     │
-│                       ▼                                                     │
-│              ┌────────────────┐                                             │
-│              │  Sync Server   │                                             │
-│              │  (y-websocket) │                                             │
-│              └────────┬───────┘                                             │
-│                       │                                                     │
-│                       ▼                                                     │
-│              ┌────────────────┐                                             │
-│              │  Persistence   │                                             │
-│              │  (Database)    │                                             │
-│              └────────────────┘                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+If you are editing collaboration code, start here and keep this doc in sync with the implementation.
 
 ---
 
-## CRDT Data Model
+## Key modules (source of truth)
 
-### Yjs Document Structure
+- Session orchestration: [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts) (`createCollabSession`)
+- Workbook roots/schema helpers: [`packages/collab/workbook/src/index.ts`](../packages/collab/workbook/src/index.ts) (`getWorkbookRoots`, `ensureWorkbookSchema`)
+- Cell key helpers: [`packages/collab/session/src/cell-key.js`](../packages/collab/session/src/cell-key.js) (`makeCellKey`, `parseCellKey`, `normalizeCellKey`)
+- Desktop binder: [`packages/collab/binder/index.js`](../packages/collab/binder/index.js) (`bindYjsToDocumentController`)
+- Presence (Awareness wrapper): [`packages/collab/presence/src/presenceManager.js`](../packages/collab/presence/src/presenceManager.js) (`PresenceManager`)
+- Desktop presence renderer: [`apps/desktop/src/grid/presence-renderer/`](../apps/desktop/src/grid/presence-renderer/) (`PresenceRenderer`)
+- Collab version history glue: [`packages/collab/versioning/src/index.ts`](../packages/collab/versioning/src/index.ts) (`createCollabVersioning`)
+- Version store kept *inside the Y.Doc*: [`packages/versioning/src/store/yjsVersionStore.js`](../packages/versioning/src/store/yjsVersionStore.js) (`YjsVersionStore`)
+- Branching glue: [`packages/collab/branching/index.js`](../packages/collab/branching/index.js) (`CollabBranchingWorkflow`)
+- Branch graph store kept *inside the Y.Doc*: [`packages/versioning/branches/src/store/YjsBranchStore.js`](../packages/versioning/branches/src/store/YjsBranchStore.js) (`YjsBranchStore`)
+- BranchService + snapshot adapter: [`packages/versioning/branches/src/`](../packages/versioning/branches/src/) (`BranchService`, `yjsDocToDocumentState`, `applyDocumentStateToYjsDoc`)
 
-```typescript
-import * as Y from "yjs";
-import { ensureWorkbookSchema } from "@formula/collab-workbook";
+---
 
-interface SpreadsheetDoc {
-  // Root Y.Doc
-  doc: Y.Doc;
-  
-  // Sheets array
-  sheets: Y.Array<Y.Map<any>>;
-  
-  // Per-sheet cell data
-  // Key: "sheetId:row:col", Value: cell data.
-  //
-  // Note: for enterprise "protected ranges" that must be truly confidential,
-  // cell contents are stored end-to-end encrypted under the `enc` field (see
-  // "Encrypted Cells" below). When `enc` is present, plaintext `value`/`formula`
-  // fields are omitted so unauthorized collaborators (and the sync server) cannot
-  // read protected content from the shared CRDT.
-  cells: Y.Map<Y.Map<any>>;
-  
-  // Metadata
-  metadata: Y.Map<any>;
-  
-  // Named ranges
-  namedRanges: Y.Map<any>;
-}
+## Yjs workbook schema (roots + conventions)
 
-class CollaborativeDocument {
-  private doc: Y.Doc;
-  
-  constructor(documentId: string) {
-    this.doc = new Y.Doc({ guid: documentId });
-    this.initializeStructure();
-  }
-  
-  private initializeStructure(): void {
-    // Production code should call `ensureWorkbookSchema` so all required roots
-    // exist and at least one default sheet is present.
-    ensureWorkbookSchema(this.doc, { defaultSheetId: "Sheet1", defaultSheetName: "Sheet1" });
+### Root types
 
-    // Get or create top-level structures
-    const sheets = this.doc.getArray("sheets");
-    const cells = this.doc.getMap("cells");
-    const metadata = this.doc.getMap("metadata");
-    const namedRanges = this.doc.getMap("namedRanges");
-     
-    // Initialize default sheet if empty
-    if (sheets.length === 0) {
-      // Note: we default to a stable sheet id ("Sheet1") for backwards compatibility
-      // with existing code that assumes a Sheet1 sheetId.
-      sheets.push([this.createSheet({ id: "Sheet1", name: "Sheet1" })]);
-    }
-  }
-   
-  private createSheet(input: { id: string; name: string }): Y.Map<any> {
-    const sheet = new Y.Map();
-    sheet.set("id", input.id);
-    sheet.set("name", input.name);
-    sheet.set("frozenRows", 0);
-    sheet.set("frozenCols", 0);
-    return sheet;
-  }
-  
-  setCell(sheetId: string, row: number, col: number, value: CellValue, formula?: string): void {
-    this.doc.transact(() => {
-      const cells = this.doc.getMap("cells");
-      const cellKey = `${sheetId}:${row}:${col}`;
-      
-      let cellData = cells.get(cellKey) as Y.Map<any>;
-      if (!cellData) {
-        cellData = new Y.Map();
-        cells.set(cellKey, cellData);
-      }
-      
-      cellData.set("value", value);
-      if (formula) {
-        cellData.set("formula", formula);
-      } else {
-        cellData.delete("formula");
-      }
-      cellData.set("modified", Date.now());
-      cellData.set("modifiedBy", this.userId);
-    });
-  }
-  
-  getCell(sheetId: string, row: number, col: number): CellData | null {
-    const cells = this.doc.getMap("cells");
-    const cellKey = `${sheetId}:${row}:${col}`;
-    const cellData = cells.get(cellKey) as Y.Map<any>;
-    
-    if (!cellData) return null;
-    
-    return {
-      value: cellData.get("value"),
-      formula: cellData.get("formula"),
-      modified: cellData.get("modified"),
-      modifiedBy: cellData.get("modifiedBy")
-    };
-  }
-}
-```
+The collaborative workbook is a single shared `Y.Doc` with these primary roots:
 
-### Encrypted Cells (Protected Ranges)
+- `cells`: `Y.Map<unknown>` keyed by **canonical cell keys**
+- `sheets`: `Y.Array<Y.Map<unknown>>` where each entry is a sheet metadata map
+- `metadata`: `Y.Map<unknown>` (workbook-level metadata)
+- `namedRanges`: `Y.Map<unknown>` (named range definitions)
+- `comments`: optional (see `@formula/collab-comments`; supports legacy schemas)
 
-Yjs updates are broadcast to all connected collaborators and the sync server
-cannot filter cell-level content per-connection. That means **client/UI masking
-alone is not sufficient** for confidential ranges.
+`@formula/collab-workbook` (`getWorkbookRoots`, `ensureWorkbookSchema`) is the canonical place that defines/normalizes these roots.
 
-To provide real confidentiality, Formula supports optional **end-to-end
-encryption** of cell content *before* it enters the Yjs CRDT. Encrypted cell data
-is stored under the per-cell `enc` field:
+### Canonical cell keys
+
+**Always use** the canonical cell key format:
 
 ```ts
-// Stored under `cells.get(cellKey).get("enc")`
-type EncryptedCellPayloadV1 = {
-  v: 1,
-  alg: "AES-256-GCM",
-  keyId: string,
-  ivBase64: string,
-  tagBase64: string,
-  ciphertextBase64: string
+const cellKey = `${sheetId}:${row}:${col}`; // 0-based row/col
+```
+
+Implementation:
+
+- [`packages/collab/session/src/cell-key.js`](../packages/collab/session/src/cell-key.js) (`makeCellKey`)
+
+Compatibility:
+
+- The stack can *read* legacy keys like `${sheetId}:${row},${col}` and `r{row}c{col}` (tests / historical encodings), but new code should only *write* canonical keys.
+
+### Cell value schema (`cells.get(cellKey)`)
+
+Each cell is stored as a `Y.Map` with the following relevant fields:
+
+- `value`: any JSON-serializable scalar/object (only when not a formula)
+- `formula`: string (normalized; when present, `value` is set to `null`)
+- `format`: JSON object for cell formatting (interned into `DocumentController.styleTable` on desktop)
+- `enc`: optional encrypted payload (see below)
+- `modified`: `number` (ms since epoch; best-effort)
+- `modifiedBy`: `string` (best-effort user id)
+
+Formula normalization is consistent across the stack: formula strings are treated as canonical when they start with `"="` and have no leading/trailing whitespace (see binder/session implementations).
+
+### Sheet schema (`sheets` array entries)
+
+Each entry in `doc.getArray("sheets")` is a `Y.Map` with (at least):
+
+```ts
+type SheetViewState = {
+  frozenRows: number;
+  frozenCols: number;
+  colWidths?: Record<string, number>;
+  rowHeights?: Record<string, number>;
+};
+
+type Sheet = {
+  id: string;
+  name: string | null;
+  view?: SheetViewState;
 };
 ```
 
-- Plaintext is JSON: `{ value, formula, format? }` (format is optional).
-- Plaintext `value` and `formula` keys are removed from the Yjs cell map when
-  `enc` is present.
-- AES-GCM Additional Authenticated Data (AAD) binds ciphertext to
-  `{ docId, sheetId, row, col }` to prevent replay across cells/docs.
+The `SheetViewState` shape matches:
 
-Clients that have the appropriate per-range key can decrypt and display the
-plaintext content; clients without the key see a fixed masked placeholder (e.g.
-`"###"`).
-
-The collaboration session APIs take an optional encryption resolver:
-
-```ts
-import { createCollabSession } from "@formula/collab-session";
-
-const session = createCollabSession({
-  connection: { wsUrl, docId },
-  encryption: {
-    keyForCell: ({ sheetId, row, col }) => {
-      if (sheetId === "Sheet1" && row === 0 && col === 0) {
-        return { keyId: "k-range-1", keyBytes: new Uint8Array(32) };
-      }
-      return null; // no key => cell will be masked/decrypt-fail safe
-    }
-  }
-});
-```
-
-### Handling Formulas in CRDT
-
-Formulas require special handling because they're interconnected:
-
-```typescript
-class FormulaCollaboration {
-  private formulaEngine: FormulaEngine;
-  private doc: CollaborativeDocument;
-  
-  onCellChange(sheetId: string, row: number, col: number, newFormula: string): void {
-    // Parse and validate formula locally first
-    const parsed = this.formulaEngine.parse(newFormula);
-    if (parsed.error) {
-      // Don't sync invalid formulas
-      return;
-    }
-    
-    // Update CRDT
-    this.doc.setCell(sheetId, row, col, null, newFormula);
-    
-    // Note: We don't sync calculated values
-    // Each client recalculates independently for consistency
-  }
-  
-  onRemoteChange(changes: CellChange[]): void {
-    for (const change of changes) {
-      // Mark cell dirty in dependency graph
-      this.formulaEngine.markDirty(change.cell);
-    }
-    
-    // Trigger recalculation
-    this.formulaEngine.recalculate();
-  }
-}
-```
+- BranchService `SheetViewState`: [`packages/versioning/branches/src/types.js`](../packages/versioning/branches/src/types.js)
+- Desktop `DocumentController` `SheetViewState`: [`apps/desktop/src/document/documentController.js`](../apps/desktop/src/document/documentController.js)
 
 ---
 
-## Presence Awareness
+## Creating a collaboration session (`@formula/collab-session`)
 
-### Awareness Protocol
+`createCollabSession` is the top-level API for constructing a Yjs doc + sync provider + optional integrations.
 
-```typescript
-import { Awareness } from "y-protocols/awareness";
+Source: [`packages/collab/session/src/index.ts`](../packages/collab/session/src/index.ts)
 
-interface UserPresence {
-  id: string;
-  name: string;
-  color: string;
-  cursor?: CursorPosition;
-  selection?: Selection;
-  activeSheet: string;
-  lastActive: number;
-}
-
-interface CursorPosition {
-  row: number;
-  col: number;
-}
-
-class PresenceManager {
-  private awareness: Awareness;
-  private localUser: UserPresence;
-  
-  constructor(doc: Y.Doc, user: UserInfo) {
-    this.awareness = new Awareness(doc);
-    this.localUser = {
-      id: user.id,
-      name: user.name,
-      color: this.assignColor(user.id),
-      activeSheet: "",
-      lastActive: Date.now()
-    };
-    
-    // Set local state
-    this.awareness.setLocalState(this.localUser);
-    
-    // Listen for remote changes
-    this.awareness.on("change", this.onAwarenessChange.bind(this));
-  }
-  
-  updateCursor(row: number, col: number): void {
-    this.localUser.cursor = { row, col };
-    this.localUser.lastActive = Date.now();
-    this.awareness.setLocalState(this.localUser);
-  }
-  
-  updateSelection(selection: Selection): void {
-    this.localUser.selection = selection;
-    this.localUser.lastActive = Date.now();
-    this.awareness.setLocalState(this.localUser);
-  }
-  
-  getOtherUsers(): UserPresence[] {
-    const states = this.awareness.getStates();
-    const users: UserPresence[] = [];
-    
-    states.forEach((state, clientId) => {
-      if (clientId !== this.awareness.clientID && state) {
-        users.push(state as UserPresence);
-      }
-    });
-    
-    return users;
-  }
-  
-  private assignColor(userId: string): string {
-    // Generate consistent color from user ID
-    const colors = [
-      "#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4",
-      "#FFEAA7", "#DDA0DD", "#98D8C8", "#F7DC6F"
-    ];
-    const hash = userId.split("").reduce((a, b) => {
-      a = ((a << 5) - a) + b.charCodeAt(0);
-      return a & a;
-    }, 0);
-    return colors[Math.abs(hash) % colors.length];
-  }
-  
-  private onAwarenessChange(changes: { added: number[], updated: number[], removed: number[] }): void {
-    // Notify UI to update presence indicators
-    this.emit("presenceChanged", {
-      users: this.getOtherUsers()
-    });
-  }
-}
-```
-
-### Rendering Presence
-
-```typescript
-class PresenceRenderer {
-  render(ctx: CanvasRenderingContext2D, users: UserPresence[], viewport: Viewport): void {
-    for (const user of users) {
-      // Skip users on different sheets
-      if (user.activeSheet !== this.currentSheet) continue;
-      
-      // Render cursor
-      if (user.cursor) {
-        this.renderCursor(ctx, user, viewport);
-      }
-      
-      // Render selection
-      if (user.selection) {
-        this.renderSelection(ctx, user, viewport);
-      }
-    }
-  }
-  
-  private renderCursor(ctx: CanvasRenderingContext2D, user: UserPresence, viewport: Viewport): void {
-    const { row, col } = user.cursor!;
-    const bounds = this.getCellBounds(row, col, viewport);
-    
-    if (!bounds) return;  // Outside viewport
-    
-    // Draw cursor highlight
-    ctx.strokeStyle = user.color;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
-    
-    // Draw name badge
-    ctx.fillStyle = user.color;
-    ctx.fillRect(bounds.x, bounds.y - 20, this.measureText(user.name) + 8, 18);
-    
-    ctx.fillStyle = "#FFFFFF";
-    ctx.font = "12px sans-serif";
-    ctx.fillText(user.name, bounds.x + 4, bounds.y - 6);
-  }
-  
-  private renderSelection(ctx: CanvasRenderingContext2D, user: UserPresence, viewport: Viewport): void {
-    const selection = user.selection!;
-    
-    // Semi-transparent fill
-    ctx.fillStyle = user.color + "20";  // 12.5% opacity
-    
-    for (const range of selection.ranges) {
-      const bounds = this.getRangeBounds(range, viewport);
-      if (bounds) {
-        ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-        
-        // Border
-        ctx.strokeStyle = user.color + "80";  // 50% opacity
-        ctx.lineWidth = 1;
-        ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
-      }
-    }
-  }
-}
-```
-
----
-
-## Sync Protocol
-
-### WebSocket Connection
-
-```typescript
-import { WebsocketProvider } from "y-websocket";
-
-class SyncManager {
-  private provider: WebsocketProvider;
-  private doc: Y.Doc;
-  
-  constructor(doc: Y.Doc, documentId: string, serverUrl: string) {
-    this.doc = doc;
-    this.provider = new WebsocketProvider(serverUrl, documentId, doc, {
-      connect: true,
-      awareness: new Awareness(doc),
-      params: {
-        // Auth token for connection
-        token: this.getAuthToken()
-      }
-    });
-    
-    this.setupEventHandlers();
-  }
-  
-  private setupEventHandlers(): void {
-    this.provider.on("status", (event: { status: string }) => {
-      console.log("Connection status:", event.status);
-      this.emit("connectionStatus", event.status);
-    });
-    
-    this.provider.on("sync", (isSynced: boolean) => {
-      console.log("Sync status:", isSynced);
-      this.emit("syncStatus", isSynced);
-    });
-    
-    // Handle disconnection
-    this.provider.on("connection-close", () => {
-      this.scheduleReconnect();
-    });
-  }
-  
-  private scheduleReconnect(): void {
-    // Exponential backoff
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-    setTimeout(() => {
-      this.provider.connect();
-      this.reconnectAttempts++;
-    }, delay);
-  }
-  
-  disconnect(): void {
-    this.provider.disconnect();
-  }
-}
-```
-
-### Offline Support
-
-In production, Formula treats collaboration as **offline-first** by persisting the local Yjs
-CRDT state across app restarts. When a client reconnects, Yjs automatically merges any offline
-changes with remote updates.
-
-`@formula/collab-session` supports this via a pluggable persistence layer (see
-`@formula/collab-persistence`):
+Typical usage:
 
 ```ts
 import { createCollabSession } from "@formula/collab-session";
 import { IndexedDbCollabPersistence } from "@formula/collab-persistence/indexeddb";
 
 const session = createCollabSession({
-  docId,
-  // Browser: persist CRDT updates to IndexedDB.
-  persistence: new IndexedDbCollabPersistence(),
   connection: { wsUrl, docId, token },
+
+  // Optional offline-first persistence (applied before connecting the provider).
+  persistence: new IndexedDbCollabPersistence(),
+
+  // Optional presence (builds a PresenceManager and exposes it on `session.presence`).
+  presence: {
+    user: { id: userId, name: userName, color: "#4c8bf5" },
+    activeSheet: "Sheet1",
+  },
+
+  // Optional collaborative undo/redo (Y.UndoManager-backed).
+  undo: { captureTimeoutMs: 750 },
+
+  // Optional end-to-end cell encryption.
+  encryption: { keyForCell },
 });
 
-// Ensures local persisted state is applied into the Y.Doc before the sync provider connects.
+// Ensure persisted updates are applied into the doc before syncing.
 await session.whenLocalPersistenceLoaded();
 ```
 
-Node/desktop environments can use `FileCollabPersistence` instead:
+Notes:
+
+- If `persistence` is provided, `connection.docId` (or `options.docId`) must be set; otherwise the session throws.
+- When `presence` is enabled, `session.presence` is a `PresenceManager` instance.
+
+---
+
+## Binding Yjs to the desktop workbook model
+
+**Goal:** keep the desktop workbook state machine (`DocumentController`) in sync with the shared Yjs workbook.
+
+The binder lives at:
+
+- [`packages/collab/binder/index.js`](../packages/collab/binder/index.js) (`bindYjsToDocumentController`)
+
+It synchronizes **cell value/formula/format** between:
+
+- `Y.Doc` → `cells` root (`Y.Map`)
+- Desktop `DocumentController` (see [`apps/desktop/src/document/documentController.js`](../apps/desktop/src/document/documentController.js))
+
+> Note: the binder currently **does not** sync the `sheets` array (sheet creation/order/rename) or per-sheet `view` state. Those are stored in Yjs (see below) and are used by branching/versioning, but desktop live-binding is currently cell-focused.
+
+### End-to-end wiring example
 
 ```ts
-import { FileCollabPersistence } from "@formula/collab-persistence/file";
+import { createCollabSession } from "@formula/collab-session";
+import { IndexedDbCollabPersistence } from "@formula/collab-persistence/indexeddb";
+
+import { DocumentController } from "../apps/desktop/src/document/documentController.js";
+import { bindYjsToDocumentController } from "../packages/collab/binder/index.js";
 
 const session = createCollabSession({
-  docId,
-  persistence: new FileCollabPersistence("/path/to/app-data-dir"),
   connection: { wsUrl, docId, token },
+  persistence: new IndexedDbCollabPersistence(),
+  presence: { user: { id: userId, name: userName, color: "#4c8bf5" }, activeSheet: "Sheet1" },
+  undo: { captureTimeoutMs: 750 },
+  encryption: { keyForCell }, // optional
+});
+
+await session.whenLocalPersistenceLoaded();
+
+const documentController = new DocumentController();
+
+// Role + range restrictions come from your auth layer / server.
+const permissions = { role: "editor", restrictions: [], userId };
+
+const binder = bindYjsToDocumentController({
+  ydoc: session.doc,
+  documentController,
+
+  // Optional: makes DocumentController->Yjs writes go through the collaborative UndoManager.
+  // (Only present when `createCollabSession({ undo: ... })` is enabled.)
+  undoService: session.undo,
+
+  userId,
+  permissions,
+  encryption: session.getEncryptionConfig(),
+});
+
+// Later:
+// binder.destroy();
+// session.destroy();
+```
+
+### Echo suppression (origins) + UndoManager exception
+
+When you bind two reactive systems, you must avoid doing this:
+
+1. Local edit (DocumentController) writes to Yjs
+2. Yjs observer fires (because the doc changed)
+3. Binder applies the same change back into DocumentController (wasted work + can cause feedback loops)
+
+The binder prevents this using **Yjs transaction origins**:
+
+- Local DocumentController→Yjs writes are wrapped in a Yjs transaction with a stable `origin` token (`binderOrigin` or `undoService.origin`).
+- The Yjs→DocumentController observer checks `transaction.origin` and **ignores** transactions that originated from those known local origins.
+
+However, when collaborative undo/redo is enabled, Yjs uses a `Y.UndoManager` instance as an origin for undo/redo application. If we treated the UndoManager itself as “local” for echo suppression, then:
+
+- Undo/redo would mutate Yjs
+- …but the binder would ignore it
+- …and the desktop UI would not update
+
+So the binder intentionally:
+
+- ignores **origin tokens** used for local writes
+- but **does not** ignore the UndoManager instance origin
+
+This is implemented by filtering `undoService.localOrigins` and excluding any value that looks like an UndoManager (see `isUndoManager(...)` in the binder).
+
+---
+
+## Sheet view state storage and syncing
+
+Per-sheet view state (frozen panes + row/col size overrides) is stored on each sheet entry in the `sheets` array:
+
+- `doc.getArray("sheets").get(i).get("view")`
+
+The `view` object uses the same `SheetViewState` shape as BranchService (and desktop `DocumentController`):
+
+```ts
+{
+  frozenRows: 2,
+  frozenCols: 1,
+  colWidths: { "0": 120 },
+  rowHeights: { "1": 40 }
+}
+```
+
+Compatibility note:
+
+- Some historical/experimental docs stored `frozenRows` / `frozenCols` as **top-level** fields directly on the sheet map.
+- BranchService’s Yjs adapter explicitly supports both shapes (see `branchStateFromYjsDoc` in [`packages/versioning/branches/src/yjs/branchStateAdapter.js`](../packages/versioning/branches/src/yjs/branchStateAdapter.js)), but **new writes should use `view`**.
+
+Because `sheets` is part of the shared Y.Doc, any edits to `view` will sync like any other Yjs update (subject to your provider/persistence).
+
+---
+
+## Presence integration (Awareness → desktop renderer)
+
+### PresenceManager
+
+`@formula/collab-session` can construct a `PresenceManager` automatically when `presence: {...}` is provided.
+
+- `session.presence` is a `PresenceManager` (or `null` if not enabled)
+- `PresenceManager` writes/reads the Yjs Awareness state field `"presence"`
+- `PresenceManager.subscribe()` emits **remote** presences on the active sheet (it intentionally ignores local cursor/selection changes to reduce re-render pressure)
+
+Source: [`packages/collab/presence/src/presenceManager.js`](../packages/collab/presence/src/presenceManager.js)
+
+### Desktop rendering (`apps/desktop/src/grid/presence-renderer/`)
+
+The desktop grid has a canvas overlay renderer:
+
+- [`apps/desktop/src/grid/presence-renderer/`](../apps/desktop/src/grid/presence-renderer/)
+
+The renderer expects the same `cursor` + `selections` shapes that `PresenceManager` emits, so you can typically pass the array through directly:
+
+```ts
+import { PresenceRenderer } from "../apps/desktop/src/grid/presence-renderer/index.js";
+
+const renderer = new PresenceRenderer();
+
+// `getCellRect(row, col)` must return the cell’s pixel rect in the overlay canvas coordinate space.
+const unsubscribe = session.presence.subscribe((presences) => {
+  renderer.clear(overlayCtx);
+  renderer.render(overlayCtx, presences, { getCellRect });
 });
 ```
 
-```typescript
-import { IndexeddbPersistence } from "y-indexeddb";
+Also remember to drive the local presence from UI events:
 
-class OfflineManager {
-  private persistence: IndexeddbPersistence;
-  private syncManager: SyncManager;
-  
-  constructor(doc: Y.Doc, documentId: string) {
-    // Persist to IndexedDB
-    this.persistence = new IndexeddbPersistence(documentId, doc);
-    
-    this.persistence.on("synced", () => {
-      console.log("Loaded from IndexedDB");
-    });
-  }
-  
-  async getOfflineChanges(): Promise<Uint8Array> {
-    // Get local state that hasn't been synced
-    return Y.encodeStateAsUpdate(this.doc);
-  }
-  
-  async clearOfflineData(): Promise<void> {
-    await this.persistence.clearData();
-  }
-}
-
-class OfflineIndicator {
-  private isOnline: boolean = navigator.onLine;
-  private pendingChanges: number = 0;
-  
-  constructor(private syncManager: SyncManager) {
-    window.addEventListener("online", () => {
-      this.isOnline = true;
-      this.updateUI();
-    });
-    
-    window.addEventListener("offline", () => {
-      this.isOnline = false;
-      this.updateUI();
-    });
-    
-    syncManager.on("syncStatus", (synced: boolean) => {
-      if (synced) {
-        this.pendingChanges = 0;
-      }
-      this.updateUI();
-    });
-  }
-  
-  incrementPending(): void {
-    this.pendingChanges++;
-    this.updateUI();
-  }
-  
-  private updateUI(): void {
-    if (!this.isOnline) {
-      this.showStatus("Offline - changes saved locally");
-    } else if (this.pendingChanges > 0) {
-      this.showStatus(`Syncing ${this.pendingChanges} changes...`);
-    } else {
-      this.showStatus("All changes saved");
-    }
-  }
-}
-```
+- `session.presence.setActiveSheet(sheetId)`
+- `session.presence.setCursor({ row, col })`
+- `session.presence.setSelections([{ startRow, startCol, endRow, endCol }, ...])`
 
 ---
 
-## Version History
+## Version history (collab mode)
 
-### Change Tracking
+Use `@formula/collab-versioning` to store and restore workbook snapshots in a collaborative session.
 
-```typescript
-interface Version {
-  id: string;
-  timestamp: Date;
-  userId: string;
-  userName: string;
-  description?: string;
-  snapshot: Uint8Array;  // Y.Doc state
-  changes: ChangeEntry[];
-}
+Source: [`packages/collab/versioning/src/index.ts`](../packages/collab/versioning/src/index.ts)
 
-interface ChangeEntry {
-  type: "cell" | "row" | "column" | "sheet" | "format";
-  target: string;
-  before: any;
-  after: any;
-}
+### “Use this in collaborative mode” snippet
 
-class VersionManager {
-  private versions: Version[] = [];
-  private doc: Y.Doc;
-  private autoSaveInterval: number = 5 * 60 * 1000;  // 5 minutes
-  
-  constructor(doc: Y.Doc) {
-    this.doc = doc;
-    this.startAutoSave();
-  }
-  
-  createVersion(description?: string): Version {
-    const snapshot = Y.encodeStateAsUpdate(this.doc);
-    const changes = this.getChangesSinceLastVersion();
-    
-    const version: Version = {
-      id: crypto.randomUUID(),
-      timestamp: new Date(),
-      userId: this.currentUserId,
-      userName: this.currentUserName,
-      description,
-      snapshot,
-      changes
-    };
-    
-    this.versions.push(version);
-    this.persistVersion(version);
-    
-    return version;
-  }
-  
-  async restoreVersion(versionId: string): Promise<void> {
-    const version = this.versions.find(v => v.id === versionId);
-    if (!version) throw new Error("Version not found");
-    
-    // Create new doc from snapshot
-    const restoredDoc = new Y.Doc();
-    Y.applyUpdate(restoredDoc, version.snapshot);
-    
-    // Apply to current doc (this will sync to all clients)
-    this.doc.transact(() => {
-      // Clear current state
-      const cells = this.doc.getMap("cells");
-      cells.forEach((_, key) => cells.delete(key));
-      
-      // Apply restored state
-      const restoredCells = restoredDoc.getMap("cells");
-      restoredCells.forEach((value, key) => {
-        cells.set(key, value);
-      });
-    });
-  }
-  
-  private startAutoSave(): void {
-    setInterval(() => {
-      if (this.hasChangesSinceLastVersion()) {
-        this.createVersion("Auto-save");
-      }
-    }, this.autoSaveInterval);
-  }
-}
-```
+```ts
+import { createCollabVersioning } from "@formula/collab-versioning";
 
-### Named Checkpoints
-
-```typescript
-interface Checkpoint extends Version {
-  name: string;
-  isLocked: boolean;
-  annotations?: string;
-}
-
-class CheckpointManager {
-  async createCheckpoint(name: string, annotations?: string): Promise<Checkpoint> {
-    const version = this.versionManager.createVersion(name);
-    
-    const checkpoint: Checkpoint = {
-      ...version,
-      name,
-      isLocked: false,
-      annotations
-    };
-    
-    await this.saveCheckpoint(checkpoint);
-    return checkpoint;
-  }
-  
-  async lockCheckpoint(checkpointId: string): Promise<void> {
-    const checkpoint = await this.getCheckpoint(checkpointId);
-    checkpoint.isLocked = true;
-    await this.saveCheckpoint(checkpoint);
-  }
-  
-  async listCheckpoints(): Promise<Checkpoint[]> {
-    return this.db.query("checkpoints", {
-      orderBy: "timestamp",
-      order: "desc"
-    });
-  }
-}
-```
-
----
-
-## Collaborative Branching (Scenario Analysis)
-
-Formula supports Git-like **branch + merge workflows** for *collaborative* spreadsheets by storing
-the branch/commit graph **inside the same Yjs document** as workbook data.
-
-Key property: because branching metadata lives in the Yjs CRDT, it automatically:
-
-- syncs to all connected collaborators
-- persists via sync-server
-- can be restored by replaying Yjs updates (just like cell edits)
-
-### Yjs roots for branching metadata
-
-The following Yjs roots are reserved for branching:
-
-- `branching:branches` — `Y.Map<branchName, Y.Map>` (branch metadata + head commit pointer)
-- `branching:commits` — `Y.Map<commitId, Y.Map>` (commit graph; commits store patches and periodic snapshots)
-- `branching:meta.rootCommitId` — string (root commit id)
-- `branching:meta.currentBranchName` — string (the **globally checked-out branch** name)
-
-### Global checkout semantics (first iteration)
-
-Branch checkout and merge are currently **global operations**: checking out a branch applies that
-branch’s snapshot into the *live workbook* (mutating the shared `cells`, `sheets`, `metadata`,
-`namedRanges`, and `comments` roots). All collaborators will observe the checkout/merge result.
-
-Per-user “what-if views” (where each collaborator can independently browse branches without
-mutating the shared workbook) can be built later on top of the same commit graph.
-
-### Implementation modules
-
-- Branch graph storage: `packages/versioning/branches/src/store/YjsBranchStore.js`
-- Workbook snapshot adapter: `packages/versioning/branches/src/yjs/` (`yjsDocToDocumentState`, `applyDocumentStateToYjsDoc`)
-- Collab wrapper: `packages/collab/branching/index.js` (`CollabBranchingWorkflow`)
-
-Permission model:
-
-- **owner/admin**: branch management (create/rename/delete/checkout/merge)
-- **editor**: can still create commits (snapshot current shared workbook state)
-
----
-
-## Conflict Resolution
-
-### Cell-Level Conflicts
-
-CRDTs handle most conflicts automatically via last-writer-wins. For cases where we need smarter resolution:
-
-Note: conflict payloads include `remoteUserId` fields. These are best-effort and
-may be an empty string when the writer does not attach user attribution
-metadata (e.g. legacy/edge clients).
-
-```typescript
-interface ConflictResolution {
-  strategy: "last_write_wins" | "first_write_wins" | "merge" | "prompt_user";
-  mergeFunction?: (a: CellValue, b: CellValue) => CellValue;
-}
-
-class ConflictHandler {
-  // For most cells, last-write-wins is fine
-  defaultResolution: ConflictResolution = { strategy: "last_write_wins" };
-  
-  // For specific cells (e.g., counters, totals), we might want merge
-  specialResolutions: Map<string, ConflictResolution> = new Map();
-  
-  registerMergeCell(cellRef: string, mergeFunction: (a: any, b: any) => any): void {
-    this.specialResolutions.set(cellRef, {
-      strategy: "merge",
-      mergeFunction
-    });
-  }
-  
-  // Example: Counter cell that should sum concurrent increments
-  setupCounterCell(cellRef: string): void {
-    this.registerMergeCell(cellRef, (a: number, b: number) => {
-      // This is a simplified example; real implementation would track deltas
-      return a + b;
-    });
-  }
-}
-```
-
-### Formula Conflicts
-
-When formulas conflict (multiple users edit same cell's formula):
-
-In Formula, conflict detection is **causal** (Yjs-based), not based on wall-clock
-timestamps. This means we can reliably detect true offline/concurrent edits even
-after long disconnect periods.
-
-Implementation notes (see `packages/collab/conflicts/src/formula-conflict-monitor.js`):
-- Sequential overwrites are identified using Yjs map entry `Item.origin` ids.
-- Map deletes do not create new items; to detect delete-vs-overwrite conflicts
-  deterministically, local formula clears are represented as `formula = null`
-  (instead of deleting the key) so overwrites can reference the deletion via
-  `Item.origin`.
-- Value conflicts are optionally supported via `mode: "formula+value"`.
-- In `"formula+value"` mode, value edits clear formulas via `formula = null`
-  (not key deletion) so later formula writes can causally reference the clear.
-  Concurrent value-vs-formula edits (including formula clears) surface as a
-  `"content"` conflict that lets the user choose between the literal value and
-  the formula.
-- `remoteUserId` in conflict payloads is best-effort and may be an empty string
-  when the writer does not update `modifiedBy` (legacy/edge clients).
-
-```typescript
-class FormulaConflictResolver {
-  async handleFormulaConflict(
-    cell: CellRef,
-    localFormula: string,
-    remoteFormula: string,
-    remoteUser: string
-  ): Promise<string> {
-    // If formulas are equivalent, no conflict
-    if (this.formulasEquivalent(localFormula, remoteFormula)) {
-      return remoteFormula;  // Use remote (it's equivalent anyway)
-    }
-    
-    // Check if one is a subset/extension of other
-    if (this.isExtension(localFormula, remoteFormula)) {
-      return remoteFormula;
-    }
-    if (this.isExtension(remoteFormula, localFormula)) {
-      return localFormula;
-    }
-    
-    // True conflict - prompt user
-    const resolution = await this.promptUser({
-      cell,
-      localFormula,
-      remoteFormula,
-      remoteUser,
-      options: [
-        { label: "Keep yours", value: localFormula },
-        { label: `Use ${remoteUser}'s`, value: remoteFormula },
-        { label: "Edit manually", value: "edit" }
-      ]
-    });
-    
-    return resolution;
-  }
-  
-  private formulasEquivalent(a: string, b: string): boolean {
-    // Normalize and compare ASTs
-    const astA = this.parse(a);
-    const astB = this.parse(b);
-    return this.astEqual(astA, astB);
-  }
-}
-```
-
----
-
-## Semantic Diff
-
-### Cell-by-Cell Comparison
-
-```typescript
-interface DiffResult {
-  added: CellChange[];
-  removed: CellChange[];
-  modified: CellChange[];
-  moved: MoveChange[];
-  formatOnly: CellChange[];
-}
-
-interface CellChange {
-  cell: CellRef;
-  oldValue?: CellValue;
-  newValue?: CellValue;
-  oldFormula?: string;
-  newFormula?: string;
-}
-
-interface MoveChange {
-  oldLocation: CellRef;
-  newLocation: CellRef;
-  value: CellValue;
-}
-
-class SemanticDiff {
-  compare(before: SheetData, after: SheetData): DiffResult {
-    const result: DiffResult = {
-      added: [],
-      removed: [],
-      modified: [],
-      moved: [],
-      formatOnly: []
-    };
-    
-    // Find removed and modified cells
-    for (const [cellId, beforeCell] of before.cells) {
-      const afterCell = after.cells.get(cellId);
-      
-      if (!afterCell) {
-        // Check if it moved
-        const movedTo = this.findMovedCell(beforeCell, after);
-        if (movedTo) {
-          result.moved.push({
-            oldLocation: this.parseCellId(cellId),
-            newLocation: movedTo,
-            value: beforeCell.value
-          });
-        } else {
-          result.removed.push({
-            cell: this.parseCellId(cellId),
-            oldValue: beforeCell.value,
-            oldFormula: beforeCell.formula
-          });
-        }
-      } else if (!this.cellsEqual(beforeCell, afterCell)) {
-        if (this.onlyFormatChanged(beforeCell, afterCell)) {
-          result.formatOnly.push({
-            cell: this.parseCellId(cellId),
-            oldValue: beforeCell.value,
-            newValue: afterCell.value
-          });
-        } else {
-          result.modified.push({
-            cell: this.parseCellId(cellId),
-            oldValue: beforeCell.value,
-            newValue: afterCell.value,
-            oldFormula: beforeCell.formula,
-            newFormula: afterCell.formula
-          });
-        }
-      }
-    }
-    
-    // Find added cells
-    for (const [cellId, afterCell] of after.cells) {
-      if (!before.cells.has(cellId)) {
-        // Check if it was a move (already handled)
-        const wasMove = result.moved.some(m => 
-          this.cellRefsEqual(m.newLocation, this.parseCellId(cellId))
-        );
-        
-        if (!wasMove) {
-          result.added.push({
-            cell: this.parseCellId(cellId),
-            newValue: afterCell.value,
-            newFormula: afterCell.formula
-          });
-        }
-      }
-    }
-    
-    return result;
-  }
-  
-  private findMovedCell(cell: Cell, after: SheetData): CellRef | null {
-    // Look for cell with same value and formula in different location
-    for (const [cellId, afterCell] of after.cells) {
-      if (this.cellsEqual(cell, afterCell)) {
-        return this.parseCellId(cellId);
-      }
-    }
-    return null;
-  }
-}
-```
-
-### Diff Visualization
-
-```typescript
-class DiffRenderer {
-  render(diff: DiffResult, ctx: CanvasRenderingContext2D, viewport: Viewport): void {
-    // Added cells - green highlight
-    for (const change of diff.added) {
-      const bounds = this.getCellBounds(change.cell, viewport);
-      if (bounds) {
-        ctx.fillStyle = "rgba(0, 200, 0, 0.2)";
-        ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-        
-        ctx.strokeStyle = "rgba(0, 200, 0, 0.8)";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
-      }
-    }
-    
-    // Removed cells - red highlight
-    for (const change of diff.removed) {
-      const bounds = this.getCellBounds(change.cell, viewport);
-      if (bounds) {
-        ctx.fillStyle = "rgba(200, 0, 0, 0.2)";
-        ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-        
-        // Strikethrough
-        ctx.strokeStyle = "rgba(200, 0, 0, 0.8)";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(bounds.x, bounds.y + bounds.height / 2);
-        ctx.lineTo(bounds.x + bounds.width, bounds.y + bounds.height / 2);
-        ctx.stroke();
-      }
-    }
-    
-    // Modified cells - yellow highlight
-    for (const change of diff.modified) {
-      const bounds = this.getCellBounds(change.cell, viewport);
-      if (bounds) {
-        ctx.fillStyle = "rgba(255, 200, 0, 0.2)";
-        ctx.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-        
-        ctx.strokeStyle = "rgba(255, 200, 0, 0.8)";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
-      }
-    }
-  }
-}
-```
-
----
-
-## Comments and Annotations
-
-### Cell-Level Comments
-
-**Canonical schema:** `comments` is a `Y.Map` keyed by comment id (`Y.Map<string, Y.Map>`).
-
-> Compatibility note: older documents stored `comments` as a `Y.Array<Y.Map>` (one entry per
-> comment). Because Yjs root types are schema-defined by name, calling `doc.getMap("comments")`
-> on an Array-backed root can make the legacy array content inaccessible. When loading unknown
-> docs, detect the root kind first (or run a migration) before choosing a constructor
-> (e.g. `getCommentsRoot` / `migrateCommentsArrayToMap` in `@formula/collab-comments`; the
-> migration renames the legacy array root to `comments_legacy*` and creates the canonical map
-> under `comments`).
->
-> Undo note: if you're using `@formula/collab-session` with collaborative undo enabled
-> (`@formula/collab-undo`), ensure comment mutations run inside
-> `session.transactLocal(...)` (or use `createCommentManagerForSession(session)`), otherwise
-> they won't be captured by the UndoManager's tracked origins.
-
-```typescript
-import type { CommentAuthor } from "@formula/collab-comments";
-import { CommentManager, migrateCommentsArrayToMap } from "@formula/collab-comments";
-
-// Optional: normalize legacy `comments` array roots to the canonical Map schema.
-// Call this immediately after loading/applying a snapshot, before any code calls
-// `doc.getMap("comments")` directly.
-migrateCommentsArrayToMap(doc);
-
-const author: CommentAuthor = { id: "u1", name: "Alice" };
-
-const mgr = new CommentManager(doc);
-
-const commentId = mgr.addComment({
-  cellRef: "A1",
-  kind: "threaded",
-  content: "Hello",
-  author,
+const versioning = createCollabVersioning({
+  session,
+  user: { userId, userName },
+  // store: defaults to YjsVersionStore (history inside the shared Y.Doc)
 });
 
-mgr.addReply({
-  commentId,
-  content: "First reply",
-  author,
-});
+await versioning.createSnapshot({ description: "Auto" });
+await versioning.createCheckpoint({ name: "Q3 Approved", annotations: "Signed off" });
 
-mgr.setResolved({ commentId, resolved: true });
-
-const commentsForA1 = mgr.listForCell("A1");
+const versions = await versioning.listVersions();
+await versioning.restoreVersion(versions[0].id);
 ```
+
+### How history is stored (YjsVersionStore)
+
+By default, `createCollabVersioning` uses `YjsVersionStore`, which stores all versions **inside the same shared Y.Doc** under these roots:
+
+- `versions` (records)
+- `versionsMeta` (ordering + metadata)
+
+Important detail: when the store is `YjsVersionStore`, `CollabVersioning` excludes `versions` and `versionsMeta` from snapshots/restores to avoid:
+
+- recursive snapshots (history containing itself)
+- restores rolling back version history
+
+See the `excludeRoots` logic in [`packages/collab/versioning/src/index.ts`](../packages/collab/versioning/src/index.ts).
 
 ---
 
-## Permissions
+## Branching + merging (collab mode)
 
-### Access Control Levels
+Formula supports Git-like **branch + merge** workflows for collaborative spreadsheets by storing the branch/commit graph **inside the shared Y.Doc**.
 
-```typescript
-type PermissionLevel = "owner" | "editor" | "commenter" | "viewer";
+### Required Yjs roots (default `rootName = "branching"`)
 
-interface DocumentPermission {
-  documentId: string;
-  userId: string;
-  email: string;
-  level: PermissionLevel;
-  grantedBy: string;
-  grantedAt: Date;
-  expiresAt?: Date;
-}
+The Yjs-backed branch store reserves:
 
-interface RangePermission {
-  rangeId: string;
-  range: Range;
-  permissions: CellPermission[];
-}
+- `branching:branches` (`Y.Map<branchName, Y.Map>`)
+- `branching:commits` (`Y.Map<commitId, Y.Map>`)
+- `branching:meta` (`Y.Map`, including `rootCommitId` and `currentBranchName`)
 
-interface CellPermission {
-  userId: string;
-  canView: boolean;
-  canEdit: boolean;
-}
+Source: [`packages/versioning/branches/src/store/YjsBranchStore.js`](../packages/versioning/branches/src/store/YjsBranchStore.js)
 
-class PermissionManager {
-  canEdit(userId: string, cellRef: CellRef): boolean {
-    // Check document-level permission
-    const docPerm = this.getDocumentPermission(userId);
-    if (docPerm.level === "viewer" || docPerm.level === "commenter") {
-      return false;
-    }
-    
-    // Check cell-level restrictions
-    const cellPerm = this.getCellPermission(userId, cellRef);
-    if (cellPerm && !cellPerm.canEdit) {
-      return false;
-    }
-    
-    // Check if cell is locked
-    const cell = this.getCell(cellRef);
-    if (cell?.protection?.locked && this.sheetProtected) {
-      return false;
-    }
-    
-    return true;
-  }
-  
-  async grantAccess(email: string, level: PermissionLevel): Promise<void> {
-    const permission: DocumentPermission = {
-      documentId: this.documentId,
-      userId: await this.resolveUserId(email),
-      email,
-      level,
-      grantedBy: this.currentUserId,
-      grantedAt: new Date()
-    };
-    
-    await this.savePermission(permission);
-    await this.sendInvitationEmail(email, level);
-  }
-  
-  async restrictRange(range: Range, allowedUsers: string[]): Promise<void> {
-    const rangePermission: RangePermission = {
-      rangeId: crypto.randomUUID(),
-      range,
-      permissions: allowedUsers.map(userId => ({
-        userId,
-        canView: true,
-        canEdit: true
-      }))
-    };
-    
-    await this.saveRangePermission(rangePermission);
-  }
-}
+### “Use this in collaborative mode” snippet (CollabBranchingWorkflow)
+
+```ts
+import { CollabBranchingWorkflow } from "../packages/collab/branching/index.js";
+import { BranchService, YjsBranchStore } from "../packages/versioning/branches/src/index.js";
+
+const store = new YjsBranchStore({ ydoc: session.doc }); // writes under branching:*
+const branchService = new BranchService({ docId, store });
+
+// Collab wrapper applies checkout/merge results back into the *live* Y.Doc.
+const workflow = new CollabBranchingWorkflow({ session, branchService });
+
+// Initialize (creates main branch if needed).
+await branchService.init({ userId, role: "owner" }, /* initialState */ { sheets: {} });
+
+await workflow.createBranch({ userId, role: "owner" }, { name: "scenario-a" });
+await workflow.checkoutBranch({ userId, role: "owner" }, { name: "scenario-a" });
+
+// Snapshot current shared workbook into a commit.
+await workflow.commitCurrentState({ userId, role: "owner" }, "Try new model");
 ```
+
+### Global checkout semantics (current design)
+
+Branch checkout and merge currently mutate the **shared workbook roots** (`cells`, `sheets`, `metadata`, `namedRanges`, `comments`) of the live document. That means:
+
+- all collaborators observe the checkout/merge result
+- branching acts like a shared “scenario mode”, not a per-user view
+
+This is enforced by `CollabBranchingWorkflow` calling `applyDocumentStateToYjsDoc(session.doc, ...)` after checkout/merge.
 
 ---
 
-## Performance Considerations
+## Related docs
 
-### Optimizing Sync
-
-```typescript
-class SyncOptimizer {
-  private batchInterval = 50;  // ms
-  private pendingUpdates: Y.Transaction[] = [];
-  private batchTimeout: number | null = null;
-  
-  queueUpdate(transaction: Y.Transaction): void {
-    this.pendingUpdates.push(transaction);
-    
-    if (!this.batchTimeout) {
-      this.batchTimeout = setTimeout(() => {
-        this.flushUpdates();
-      }, this.batchInterval);
-    }
-  }
-  
-  private flushUpdates(): void {
-    if (this.pendingUpdates.length === 0) return;
-    
-    // Combine all updates into single sync message
-    const updates = this.pendingUpdates;
-    this.pendingUpdates = [];
-    this.batchTimeout = null;
-    
-    // Send combined update
-    this.sendUpdate(Y.mergeUpdates(updates.map(t => t.update)));
-  }
-}
-```
-
-### Reducing Awareness Overhead
-
-```typescript
-class ThrottledAwareness {
-  private lastCursorUpdate = 0;
-  private cursorThrottle = 100;  // ms
-  
-  updateCursor(row: number, col: number): void {
-    const now = Date.now();
-    if (now - this.lastCursorUpdate < this.cursorThrottle) {
-      return;  // Throttle
-    }
-    
-    this.lastCursorUpdate = now;
-    this.awareness.setLocalState({
-      ...this.awareness.getLocalState(),
-      cursor: { row, col }
-    });
-  }
-}
-```
-
----
-
-## Testing Strategy
-
-### Collaboration Tests
-
-```typescript
-describe("Real-time Collaboration", () => {
-  it("syncs cell changes between clients", async () => {
-    const doc1 = createCollaborativeDoc("test-doc");
-    const doc2 = createCollaborativeDoc("test-doc");
-    
-    await connectBothClients(doc1, doc2);
-    
-    // Client 1 makes change
-    doc1.setCell("sheet1", 0, 0, "Hello");
-    
-    // Wait for sync
-    await waitForSync(doc2);
-    
-    // Client 2 should see change
-    expect(doc2.getCell("sheet1", 0, 0)?.value).toBe("Hello");
-  });
-  
-  it("handles concurrent edits to different cells", async () => {
-    const doc1 = createCollaborativeDoc("test-doc");
-    const doc2 = createCollaborativeDoc("test-doc");
-    
-    await connectBothClients(doc1, doc2);
-    
-    // Concurrent edits
-    doc1.setCell("sheet1", 0, 0, "A1 from client 1");
-    doc2.setCell("sheet1", 0, 1, "B1 from client 2");
-    
-    // Wait for sync
-    await waitForSync(doc1);
-    await waitForSync(doc2);
-    
-    // Both changes should be present in both docs
-    expect(doc1.getCell("sheet1", 0, 0)?.value).toBe("A1 from client 1");
-    expect(doc1.getCell("sheet1", 0, 1)?.value).toBe("B1 from client 2");
-    expect(doc2.getCell("sheet1", 0, 0)?.value).toBe("A1 from client 1");
-    expect(doc2.getCell("sheet1", 0, 1)?.value).toBe("B1 from client 2");
-  });
-  
-  it("handles offline changes and syncs on reconnect", async () => {
-    const doc1 = createCollaborativeDoc("test-doc");
-    const doc2 = createCollaborativeDoc("test-doc");
-    
-    await connectBothClients(doc1, doc2);
-    
-    // Disconnect client 2
-    doc2.disconnect();
-    
-    // Both make changes offline
-    doc1.setCell("sheet1", 0, 0, "Online change");
-    doc2.setCell("sheet1", 1, 0, "Offline change");
-    
-    // Reconnect
-    await doc2.reconnect();
-    await waitForSync(doc1);
-    await waitForSync(doc2);
-    
-    // Both changes should be present
-    expect(doc1.getCell("sheet1", 0, 0)?.value).toBe("Online change");
-    expect(doc1.getCell("sheet1", 1, 0)?.value).toBe("Offline change");
-  });
-});
-```
+- Workstream overview: [`instructions/collaboration.md`](../instructions/collaboration.md)
