@@ -721,7 +721,8 @@ Further reading:
 
 ### In-cell images (cellImages.xml)
 
-Some producer tooling (and possibly some Excel builds) can store “images in cell” (pictures that behave like cell content rather than floating drawing objects) in a dedicated workbook-level OPC part:
+Some workbooks (including real Excel workbooks in this repo) can store “images in cell” (pictures that
+behave like cell content rather than floating drawing objects) in a dedicated workbook-level OPC part:
 
 - Part: `xl/cellImages.xml` (casing varies; `xl/cellimages.xml` is also seen in the wild)
 - Relationships: `xl/_rels/cellImages.xml.rels` (casing varies in lockstep with the XML part name)
