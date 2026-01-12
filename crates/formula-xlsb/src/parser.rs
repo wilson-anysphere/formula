@@ -10,10 +10,7 @@ use crate::workbook_context::{
 use formula_model::rich_text::{RichText, RichTextRunStyle};
 use thiserror::Error;
 
-use crate::rgce::{
-    decode_formula_rgce, decode_formula_rgce_with_base, decode_formula_rgce_with_context,
-    decode_formula_rgce_with_context_and_base, DecodeWarning,
-};
+use crate::rgce::DecodeWarning;
 use crate::strings::{
     read_xl_wide_string, read_xl_wide_string_impl, read_xl_wide_string_with_flags, FlagsWidth,
     ParsedXlsbString,
@@ -615,69 +612,16 @@ pub(crate) fn parse_workbook<R: Read>(
                 continue;
             };
 
-            let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb(
+            // Some contexts (notably defined-name formulas) can contain relative reference ptgs
+            // (`PtgRefN` / `PtgAreaN`) which require a base cell to decode. We don't have a real
+            // origin cell for workbook-scoped names, so use `A1` as a best-effort base.
+            let base = crate::rgce::CellCoord::new(0, 0);
+            let decoded = crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
                 &formula.rgce,
                 &formula.extra,
                 &ctx,
+                base,
             );
-            let decoded = if decoded.text.is_some() {
-                decoded
-            } else {
-                let decoded = decode_formula_rgce_with_context(&formula.rgce, &ctx);
-                if decoded.text.is_some() {
-                    decoded
-                } else {
-                    let decoded =
-                        crate::rgce::decode_formula_rgce_with_rgcb(&formula.rgce, &formula.extra);
-                    if decoded.text.is_some() {
-                        decoded
-                    } else {
-                        let decoded = decode_formula_rgce(&formula.rgce);
-                        if decoded.text.is_some() {
-                            decoded
-                        } else {
-                            // Some contexts (notably defined-name formulas) can contain relative
-                            // reference ptgs (`PtgRefN` / `PtgAreaN`) which require a base cell to
-                            // decode. We don't have a real origin cell for workbook-scoped names, so
-                            // use `A1` as a best-effort base to surface something in the UI and allow
-                            // downstream consumers to attempt evaluation.
-                            let base = crate::rgce::CellCoord::new(0, 0);
-                            let decoded =
-                                crate::rgce::decode_formula_rgce_with_context_and_rgcb_and_base(
-                                    &formula.rgce,
-                                    &formula.extra,
-                                    &ctx,
-                                    base,
-                                );
-                            let decoded = if decoded.text.is_some() {
-                                decoded
-                            } else {
-                                let decoded = decode_formula_rgce_with_context_and_base(
-                                    &formula.rgce,
-                                    &ctx,
-                                    base,
-                                );
-                                if decoded.text.is_some() {
-                                    decoded
-                                } else {
-                                    let decoded =
-                                        crate::rgce::decode_formula_rgce_with_rgcb_and_base(
-                                            &formula.rgce,
-                                            &formula.extra,
-                                            base,
-                                        );
-                                    if decoded.text.is_some() {
-                                        decoded
-                                    } else {
-                                        decode_formula_rgce_with_base(&formula.rgce, base)
-                                    }
-                                }
-                            };
-                            decoded
-                        }
-                    }
-                }
-            };
 
             formula.text = decoded.text;
             formula.warnings = decoded.warnings;
