@@ -578,4 +578,36 @@ describe("SpreadsheetApp selection summary (status bar)", () => {
     app.destroy();
     root.remove();
   });
+
+  it("invalidates selection summary cache when referenced sheet content changes", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    clearSeededCells(app);
+    const doc = app.getDocument();
+
+    // Create a second sheet and a cross-sheet reference so the computed value of A1 on Sheet1
+    // depends on Sheet2. This is evaluated via the in-process evaluator (multi-sheet mode).
+    doc.setCellValue("Sheet2", "A1", 10);
+    doc.setCellFormula("Sheet1", "A1", "=Sheet2!A1");
+    app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 } }); // A1
+
+    const before = app.getSelectionSummary();
+    expect(before.sum).toBe(10);
+
+    // Update the referenced sheet without changing Sheet1's content. The cached summary must
+    // invalidate because formula results can depend on other sheets.
+    doc.setCellValue("Sheet2", "A1", 20);
+
+    const after = app.getSelectionSummary();
+    expect(after.sum).toBe(20);
+
+    app.destroy();
+    root.remove();
+  });
 });

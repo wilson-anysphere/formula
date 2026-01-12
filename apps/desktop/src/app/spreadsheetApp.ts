@@ -769,7 +769,7 @@ export class SpreadsheetApp {
   private selectionSummaryCache:
     | {
         sheetId: string;
-        sheetContentVersion: number;
+        workbookContentVersion: number;
         computedValuesVersion: number;
         rangesKey: number[];
         summary: SpreadsheetSelectionSummary;
@@ -3253,13 +3253,13 @@ export class SpreadsheetApp {
    */
   getSelectionSummary(): SpreadsheetSelectionSummary {
     const sheetId = this.sheetId;
-    const sheetContentVersion = this.document.getSheetContentVersion(sheetId);
+    const workbookContentVersion = this.document.contentVersion;
 
     const cached = this.selectionSummaryCache;
     if (
       cached &&
       cached.sheetId === sheetId &&
-      cached.sheetContentVersion === sheetContentVersion &&
+      cached.workbookContentVersion === workbookContentVersion &&
       cached.computedValuesVersion === this.computedValuesVersion &&
       cached.rangesKey.length === this.selection.ranges.length * 4
     ) {
@@ -3328,7 +3328,7 @@ export class SpreadsheetApp {
       };
       this.selectionSummaryCache = {
         sheetId,
-        sheetContentVersion,
+        workbookContentVersion,
         computedValuesVersion: this.computedValuesVersion,
         rangesKey,
         summary,
@@ -3346,7 +3346,7 @@ export class SpreadsheetApp {
       };
       this.selectionSummaryCache = {
         sheetId,
-        sheetContentVersion,
+        workbookContentVersion,
         computedValuesVersion: this.computedValuesVersion,
         rangesKey,
         summary,
@@ -3466,7 +3466,7 @@ export class SpreadsheetApp {
 
     this.selectionSummaryCache = {
       sheetId,
-      sheetContentVersion,
+      workbookContentVersion,
       computedValuesVersion: this.computedValuesVersion,
       rangesKey,
       summary,
