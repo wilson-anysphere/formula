@@ -7,6 +7,8 @@ Perfect XLSX compatibility is the foundation of user trust. Users must be confid
 ## Related docs
 
 - [20-xlsx-rich-data.md](./20-xlsx-rich-data.md) — Excel `richData` / rich values (including “image in cell”)
+- [20-images-in-cells.md](./20-images-in-cells.md) — Excel “Images in Cell” (`IMAGE()` / “Place in Cell”) packaging + schema notes
+- [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) — RichData (`richValue*`) tables used by images-in-cells
 
 ---
 
@@ -26,6 +28,7 @@ workbook.xlsx (ZIP archive)
 │   ├── workbook.xml             # Workbook structure, sheet refs
 │   ├── styles.xml               # All cell formatting
 │   ├── sharedStrings.xml        # Deduplicated text strings
+│   ├── cellImages.xml           # Excel “image in cell” definitions (in-cell pictures; name/casing varies in the wild)
 │   ├── calcChain.xml            # Calculation order hints
 │   ├── metadata.xml             # Cell/value metadata (Excel "Rich Data")
 │   ├── richData/                # Excel 365+ rich values (data types, in-cell images)
@@ -59,7 +62,9 @@ workbook.xlsx (ZIP archive)
 │   ├── customXml/               # Power Query definitions (base64)
 │   └── vbaProject.bin           # VBA macros (binary)
 └── xl/_rels/
-    └── workbook.xml.rels        # Workbook relationships
+    ├── workbook.xml.rels        # Workbook relationships
+    ├── cellImages.xml.rels      # Relationships for in-cell images (to xl/media/*; name/casing varies in the wild)
+    └── metadata.xml.rels        # Relationships from metadata.xml to xl/richData/*
 ```
 
 See also:
