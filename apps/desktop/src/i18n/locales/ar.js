@@ -72,5 +72,6 @@ export const ar = {
   "commandDescription.view.togglePanel.branchManager": "إظهار/إخفاء لوحة مدير الفروع",
   "commandDescription.comments.togglePanel": "تبديل اللوحة الجانبية للتعليقات",
   "commandDescription.comments.addComment": "فتح لوحة التعليقات وتركيز حقل إدخال تعليق جديد",
-  "commandDescription.edit.selectCurrentRegion": "تحديد المنطقة الحالية حول الخلية النشطة (Excel: Ctrl+Shift+*)"
+  "commandDescription.edit.selectCurrentRegion":
+    "تحديد المنطقة الحالية حول الخلية النشطة (Excel: Ctrl+Shift+* / Ctrl+Shift+8؛ Ctrl+* في لوحة الأرقام)"
 };

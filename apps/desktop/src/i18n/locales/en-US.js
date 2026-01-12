@@ -259,7 +259,8 @@ export const enUS = {
   "commandDescription.edit.clearContents": "Clear cell contents in the current selection",
   "commandDescription.edit.fillDown": "Fill the selection down (Excel: Ctrl+D)",
   "commandDescription.edit.fillRight": "Fill the selection right (Excel: Ctrl+R)",
-  "commandDescription.edit.selectCurrentRegion": "Select the current region around the active cell (Excel: Ctrl+Shift+*)",
+  "commandDescription.edit.selectCurrentRegion":
+    "Select the current region around the active cell (Excel: Ctrl+Shift+* / Ctrl+Shift+8; Ctrl+* on numpad)",
   "commandDescription.edit.insertDate": "Insert the current date into the selection (Excel: Ctrl+;)",
   "commandDescription.edit.insertTime": "Insert the current time into the selection (Excel: Ctrl+Shift+;)",
   "commandDescription.edit.autoSum": "Insert a SUM formula based on adjacent numeric cells (Excel: Alt+=)",

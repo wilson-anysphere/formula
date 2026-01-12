@@ -72,5 +72,6 @@ export const deDE = {
   "commandDescription.view.togglePanel.branchManager": "Das Branch-Manager-Panel ein-/ausblenden",
   "commandDescription.comments.togglePanel": "Die Kommentare-Seitenleiste ein-/ausblenden",
   "commandDescription.comments.addComment": "Das Kommentarpanel öffnen und das Eingabefeld für neue Kommentare fokussieren",
-  "commandDescription.edit.selectCurrentRegion": "Den aktuellen Bereich um die aktive Zelle auswählen (Excel: Strg+Umschalt+*)"
+  "commandDescription.edit.selectCurrentRegion":
+    "Den aktuellen Bereich um die aktive Zelle auswählen (Excel: Strg+Umschalt+* / Strg+Umschalt+8; Strg+* auf dem Nummernblock)"
 };
