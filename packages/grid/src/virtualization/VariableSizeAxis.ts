@@ -38,6 +38,48 @@ export class VariableSizeAxis {
     return this.overrides.get(index) ?? this.defaultSize;
   }
 
+  /**
+   * Replace the entire set of size overrides.
+   *
+   * This is intended for bulk updates (e.g. applying persisted row/col sizes) where calling
+   * {@link setSize} repeatedly can devolve into O(n^2) behavior due to prefix-sum updates.
+   *
+   * The provided map may include entries equal to `defaultSize`; those are treated as "no override"
+   * and are ignored.
+   */
+  setOverrides(overrides: ReadonlyMap<number, number>): void {
+    const entries: Array<[number, number]> = [];
+    for (const [index, size] of overrides) {
+      if (!Number.isSafeInteger(index) || index < 0) {
+        throw new Error(`index must be a non-negative safe integer, got ${index}`);
+      }
+      if (!Number.isFinite(size) || size <= 0) {
+        throw new Error(`size must be a positive finite number, got ${size}`);
+      }
+      if (size === this.defaultSize) continue;
+      entries.push([index, size]);
+    }
+
+    entries.sort((a, b) => a[0] - b[0]);
+
+    const nextOverrides = new Map<number, number>();
+    const nextIndices = new Array<number>(entries.length);
+    const nextPrefix = new Array<number>(entries.length);
+
+    let running = 0;
+    for (let i = 0; i < entries.length; i++) {
+      const [index, size] = entries[i]!;
+      nextOverrides.set(index, size);
+      nextIndices[i] = index;
+      running += size - this.defaultSize;
+      nextPrefix[i] = running;
+    }
+
+    this.overrides = nextOverrides;
+    this.overrideIndices = nextIndices;
+    this.prefixDiffs = nextPrefix;
+  }
+
   setSize(index: number, size: number): void {
     if (!Number.isSafeInteger(index) || index < 0) {
       throw new Error(`index must be a non-negative safe integer, got ${index}`);
@@ -181,4 +223,3 @@ export class VariableSizeAxis {
     return this.prefixDiffs[pos - 1];
   }
 }
-

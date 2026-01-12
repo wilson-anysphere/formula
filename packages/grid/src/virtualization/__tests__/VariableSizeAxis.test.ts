@@ -20,6 +20,31 @@ describe("VariableSizeAxis", () => {
     expect(axis.getSize(1)).toBe(20);
   });
 
+  it("can replace overrides in bulk", () => {
+    const axis = new VariableSizeAxis(10);
+    axis.setOverrides(
+      new Map([
+        [1, 20],
+        [3, 5]
+      ])
+    );
+
+    expect(axis.getSize(1)).toBe(20);
+    expect(axis.getSize(2)).toBe(10);
+    expect(axis.getSize(3)).toBe(5);
+
+    expect(axis.positionOf(0)).toBe(0);
+    expect(axis.positionOf(1)).toBe(10);
+    expect(axis.positionOf(2)).toBe(30);
+    expect(axis.positionOf(3)).toBe(40);
+    expect(axis.totalSize(4)).toBe(45);
+
+    // Replacing with an empty map should clear overrides.
+    axis.setOverrides(new Map());
+    expect(axis.getSize(1)).toBe(10);
+    expect(axis.totalSize(4)).toBe(40);
+  });
+
   it("finds indices at positions (binary search)", () => {
     const axis = new VariableSizeAxis(10);
     axis.setSize(1, 20);
@@ -38,4 +63,3 @@ describe("VariableSizeAxis", () => {
     expect(range).toEqual({ start: 0, end: 3, offset: 0 });
   });
 });
-

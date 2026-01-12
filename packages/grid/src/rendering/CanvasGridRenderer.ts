@@ -1130,9 +1130,7 @@ export class CanvasGridRenderer {
     const zoom = this.zoom;
 
     // When we're replacing the full set of overrides (the common case for sheet-view sync),
-    // it is much faster to rebuild the VirtualScrollManager from scratch. This avoids
-    // `VariableSizeAxis.setSize()` doing O(n) prefix sum updates for *each* updated index
-    // when many overrides change at once (worst-case O(n^2)).
+    // rebuilding VariableSizeAxis overrides in bulk avoids worst-case O(n^2) prefix sum updates.
     if (resetUnspecified && (rows || cols)) {
       const epsilon = 1e-6;
 
@@ -1151,7 +1149,8 @@ export class CanvasGridRenderer {
         if (!sizes) return null;
 
         const variableAxis = axis === "rows" ? this.scroll.rows : this.scroll.cols;
-        const assertIndex = axis === "rows" ? (idx: number) => this.assertRowIndex(idx) : (idx: number) => this.assertColIndex(idx);
+        const assertIndex =
+          axis === "rows" ? (idx: number) => this.assertRowIndex(idx) : (idx: number) => this.assertColIndex(idx);
         const defaultSize = variableAxis.defaultSize;
 
         // Normalize into base-unit overrides (zoom=1), excluding defaults.
@@ -1172,64 +1171,29 @@ export class CanvasGridRenderer {
 
       const rowChanged = nextRowsBase ? !mapsEqual(this.rowHeightOverridesBase, nextRowsBase) : false;
       const colChanged = nextColsBase ? !mapsEqual(this.colWidthOverridesBase, nextColsBase) : false;
-      if (!rowChanged && !colChanged) {
-        return;
-      }
+      if (!rowChanged && !colChanged) return;
 
-      const prevScroll = this.scroll.getScroll();
-      const prevViewport = this.scroll.getViewportState();
-      const { rowCount, colCount } = this.scroll.getCounts();
-
-      const nextScroll = new VirtualScrollManager({
-        rowCount,
-        colCount,
-        defaultRowHeight: this.baseDefaultRowHeight * zoom,
-        defaultColWidth: this.baseDefaultColWidth * zoom
-      });
-      nextScroll.setViewportSize(prevViewport.width, prevViewport.height);
-      nextScroll.setFrozen(prevViewport.frozenRows, prevViewport.frozenCols);
-
-      const applySorted = (axis: "rows" | "cols") => {
-        const base = axis === "rows" ? nextRowsBase : nextColsBase;
-        if (!base) {
-          // Preserve existing overrides for axes that aren't being replaced.
-          const existing = axis === "rows" ? this.rowHeightOverridesBase : this.colWidthOverridesBase;
-          const entries = Array.from(existing.entries()).sort((a, b) => a[0] - b[0]);
-          for (const [idx, baseSize] of entries) {
-            if (axis === "rows") nextScroll.rows.setSize(idx, baseSize * zoom);
-            else nextScroll.cols.setSize(idx, baseSize * zoom);
-          }
-          return;
-        }
-
-        const entries = Array.from(base.entries()).sort((a, b) => a[0] - b[0]);
-        for (const [idx, baseSize] of entries) {
-          if (axis === "rows") nextScroll.rows.setSize(idx, baseSize * zoom);
-          else nextScroll.cols.setSize(idx, baseSize * zoom);
-        }
-      };
-
-      applySorted("cols");
-      applySorted("rows");
-
-      if (nextRowsBase) {
+      if (nextRowsBase && rowChanged) {
         this.rowHeightOverridesBase.clear();
+        const cssOverrides = new Map<number, number>();
         for (const [idx, baseSize] of nextRowsBase) {
           this.rowHeightOverridesBase.set(idx, baseSize);
+          cssOverrides.set(idx, baseSize * zoom);
         }
-      }
-      if (nextColsBase) {
-        this.colWidthOverridesBase.clear();
-        for (const [idx, baseSize] of nextColsBase) {
-          this.colWidthOverridesBase.set(idx, baseSize);
-        }
+        this.scroll.rows.setOverrides(cssOverrides);
       }
 
-      this.scroll = nextScroll;
-      this.scroll.setScroll(prevScroll.x, prevScroll.y);
-      const aligned = this.alignScrollToDevicePixels(this.scroll.getScroll());
-      this.scroll.setScroll(aligned.x, aligned.y);
-      this.markAllDirty();
+      if (nextColsBase && colChanged) {
+        this.colWidthOverridesBase.clear();
+        const cssOverrides = new Map<number, number>();
+        for (const [idx, baseSize] of nextColsBase) {
+          this.colWidthOverridesBase.set(idx, baseSize);
+          cssOverrides.set(idx, baseSize * zoom);
+        }
+        this.scroll.cols.setOverrides(cssOverrides);
+      }
+
+      this.onAxisSizeChanged();
       return;
     }
 
