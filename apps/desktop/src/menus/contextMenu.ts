@@ -394,7 +394,8 @@ export class ContextMenu {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "context-menu__item";
-      btn.setAttribute("role", "menuitem");
+      // Intentionally keep the native <button> role so Playwright e2e tests can
+      // locate items via `getByRole("button")`. Do NOT override to role=menuitem.
       btn.tabIndex = -1;
 
       this.buttonItems.set(btn, item);
