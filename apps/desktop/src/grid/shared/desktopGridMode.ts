@@ -34,6 +34,5 @@ export function resolveDesktopGridMode(search: string = typeof window !== "undef
     if (normalized === "legacy" || normalized === "0" || normalized === "false") return "legacy";
   }
 
-  return "legacy";
+  return "shared";
 }
-

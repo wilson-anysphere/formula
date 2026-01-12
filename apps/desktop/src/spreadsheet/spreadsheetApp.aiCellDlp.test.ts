@@ -19,6 +19,8 @@ import { LocalClassificationStore } from "../../../../packages/security/dlp/src/
 import { CLASSIFICATION_SCOPE } from "../../../../packages/security/dlp/src/selectors.js";
 import { CLASSIFICATION_LEVEL } from "../../../../packages/security/dlp/src/classification.js";
 
+let priorGridMode: string | undefined;
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -67,11 +69,15 @@ function createMockCanvasContext(): CanvasRenderingContext2D {
 
 describe("SpreadsheetApp AI cell functions (DLP wiring)", () => {
   afterEach(() => {
+    if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
+    else process.env.DESKTOP_GRID_MODE = priorGridMode;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
   beforeEach(() => {
+    priorGridMode = process.env.DESKTOP_GRID_MODE;
+    process.env.DESKTOP_GRID_MODE = "legacy";
     document.body.innerHTML = "";
 
     const storage = createInMemoryLocalStorage();

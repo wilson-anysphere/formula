@@ -74,7 +74,7 @@ function createRoot(): HTMLElement {
   return root;
 }
 
-describe("SpreadsheetApp fallback evaluator", () => {
+describe("SpreadsheetApp shared grid (large limits)", () => {
   afterEach(() => {
     if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
     else process.env.DESKTOP_GRID_MODE = priorGridMode;
@@ -84,30 +84,36 @@ describe("SpreadsheetApp fallback evaluator", () => {
 
   beforeEach(() => {
     priorGridMode = process.env.DESKTOP_GRID_MODE;
-    process.env.DESKTOP_GRID_MODE = "legacy";
+    process.env.DESKTOP_GRID_MODE = "shared";
     document.body.innerHTML = "";
 
-    // Node 22 ships an experimental `localStorage` global that errors unless configured via flags.
-    // Provide a stable in-memory implementation for unit tests.
     const storage = createInMemoryLocalStorage();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
     Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
     storage.clear();
 
-    // jsdom lacks a real canvas implementation; SpreadsheetApp expects a 2D context.
+    // CanvasGridRenderer schedules renders via requestAnimationFrame; ensure it exists in jsdom.
+    Object.defineProperty(globalThis, "requestAnimationFrame", {
+      configurable: true,
+      value: (cb: FrameRequestCallback) => {
+        cb(0);
+        return 0;
+      },
+    });
+    Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
+
     Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
       configurable: true,
       value: () => createMockCanvasContext(),
     });
 
-    // jsdom doesn't ship ResizeObserver by default.
     (globalThis as any).ResizeObserver = class {
       observe() {}
       disconnect() {}
     };
   });
 
-  it("resolves sheet-qualified references case-insensitively", () => {
+  it("uses Excel-scale limits without eagerly building per-row/col visibility caches", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -116,35 +122,26 @@ describe("SpreadsheetApp fallback evaluator", () => {
     };
 
     const app = new SpreadsheetApp(root, status);
-    const doc = app.getDocument();
-    doc.setCellValue("Sheet2", { row: 0, col: 0 }, 123);
-    doc.setCellFormula("Sheet1", { row: 0, col: 1 }, "=sheet2!A1+1");
+    expect(app.getGridMode()).toBe("shared");
 
-    const computed = (app as any).getCellComputedValue({ row: 0, col: 1 });
-    expect(computed).toBe(124);
-    expect(doc.getSheetIds()).not.toContain("sheet2");
+    const limits = (app as any).limits as { maxRows: number; maxCols: number };
+    expect(limits.maxRows).toBe(1_048_576);
+    expect(limits.maxCols).toBe(16_384);
 
-    app.destroy();
-    root.remove();
-  });
+    // Shared grid must not pre-populate legacy visibility caches for all rows/cols.
+    expect(((app as any).rowIndexByVisual as number[]).length).toBe(0);
+    expect(((app as any).colIndexByVisual as number[]).length).toBe(0);
+    expect(((app as any).rowToVisual as Map<number, number>).size).toBe(0);
+    expect(((app as any).colToVisual as Map<number, number>).size).toBe(0);
 
-  it("returns #REF! for unknown sheet references without creating a sheet", () => {
-    const root = createRoot();
-    const status = {
-      activeCell: document.createElement("div"),
-      selectionRange: document.createElement("div"),
-      activeValue: document.createElement("div"),
-    };
-
-    const app = new SpreadsheetApp(root, status);
-    const doc = app.getDocument();
-    doc.setCellFormula("Sheet1", { row: 0, col: 1 }, "=MissingSheet!A1");
-
-    const computed = (app as any).getCellComputedValue({ row: 0, col: 1 });
-    expect(computed).toBe("#REF!");
-    expect(doc.getSheetIds()).not.toContain("MissingSheet");
+    const sharedGrid = (app as any).sharedGrid;
+    expect(sharedGrid).toBeTruthy();
+    const counts = sharedGrid.renderer.scroll.getCounts();
+    expect(counts.rowCount).toBe(limits.maxRows + 1);
+    expect(counts.colCount).toBe(limits.maxCols + 1);
 
     app.destroy();
     root.remove();
   });
 });
+

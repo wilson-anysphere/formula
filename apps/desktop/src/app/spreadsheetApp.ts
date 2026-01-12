@@ -550,7 +550,17 @@ export class SpreadsheetApp {
     } = {}
   ) {
     this.gridMode = resolveDesktopGridMode();
-    this.limits = opts.limits ?? { ...DEFAULT_GRID_LIMITS, maxRows: 10_000, maxCols: 200 };
+    this.limits =
+      opts.limits ??
+      (this.gridMode === "shared"
+        ? { ...DEFAULT_GRID_LIMITS }
+        : {
+            // Legacy renderer relies on eagerly-built row/col visibility caches; keep its
+            // default caps small to avoid O(N) work and large Map allocations.
+            ...DEFAULT_GRID_LIMITS,
+            maxRows: 10_000,
+            maxCols: 200
+          });
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
     this.currentUser = { id: "local", name: t("chat.role.user") };
 
@@ -1043,8 +1053,13 @@ export class SpreadsheetApp {
        });
      }
 
-    // Precompute row/col visibility + mappings before any initial render work.
-    this.rebuildAxisVisibilityCache();
+    if (this.gridMode === "legacy") {
+      // Precompute row/col visibility + mappings before any initial render work.
+      //
+      // NOTE: This work is intentionally *skipped* in shared-grid mode so the app
+      // can support Excel-scale sheets without O(maxRows/maxCols) upfront work.
+      this.rebuildAxisVisibilityCache();
+    }
 
     // Seed a demo chart using the chart store helpers so it matches the logic
     // used by AI chart creation.
@@ -2401,6 +2416,34 @@ export class SpreadsheetApp {
   }
 
   getLastSelectionDrawn(): unknown {
+    if (this.sharedGrid) {
+      // Shared-grid mode renders selection via CanvasGridRenderer, not the legacy SelectionRenderer.
+      // Preserve the existing "selection debug" API for e2e tests by returning an equivalent
+      // bounding-rect representation in viewport coordinates.
+      const ranges = this.selection.ranges
+        .map((range) => {
+          const start = this.getCellRect({ row: range.startRow, col: range.startCol });
+          const end = this.getCellRect({ row: range.endRow, col: range.endCol });
+          if (!start || !end) return null;
+          const x = Math.min(start.x, end.x);
+          const y = Math.min(start.y, end.y);
+          const width = Math.max(start.x + start.width, end.x + end.width) - x;
+          const height = Math.max(start.y + start.height, end.y + end.height) - y;
+          if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+          return {
+            range: { ...range },
+            rect: { x, y, width, height },
+            edges: { top: true, right: true, bottom: true, left: true }
+          };
+        })
+        .filter((r): r is NonNullable<typeof r> => r !== null);
+
+      return {
+        ranges,
+        activeCellRect: this.getCellRect(this.selection.active),
+      };
+    }
+
     return this.selectionRenderer.getLastDebug();
   }
 
@@ -4441,7 +4484,9 @@ export class SpreadsheetApp {
   }
 
   private onOutlineUpdated(): void {
-    this.rebuildAxisVisibilityCache();
+    if (this.gridMode === "legacy") {
+      this.rebuildAxisVisibilityCache();
+    }
     this.ensureActiveCellVisible();
     this.scrollCellIntoView(this.selection.active);
     if (this.sharedGrid) this.syncSharedGridSelectionFromState();
@@ -5478,30 +5523,49 @@ export class SpreadsheetApp {
       e.preventDefault();
       this.ensureActiveCellVisible();
       const dir = e.key === "PageDown" ? 1 : -1;
-      const visualRow = this.rowToVisual.get(this.selection.active.row);
-      const visualCol = this.colToVisual.get(this.selection.active.col);
-      if (visualRow === undefined || visualCol === undefined) return;
-
-      if (e.altKey) {
-        const pageCols = Math.max(1, Math.floor(this.viewportWidth() / this.cellWidth));
-        const nextColVisual = Math.min(
-          Math.max(0, visualCol + dir * pageCols),
-          Math.max(0, this.colIndexByVisual.length - 1)
-        );
-        const col = this.colIndexByVisual[nextColVisual] ?? 0;
-        this.selection = e.shiftKey
-          ? extendSelectionToCell(this.selection, { row: this.selection.active.row, col }, this.limits)
-          : setActiveCell(this.selection, { row: this.selection.active.row, col }, this.limits);
+      if (this.sharedGrid) {
+        // Shared grid does not build legacy row/col visibility maps. Use direct index
+        // math against the document coordinate space (rows/cols are not hidden in
+        // shared mode yet).
+        if (e.altKey) {
+          const pageCols = Math.max(1, Math.floor(this.viewportWidth() / this.cellWidth));
+          const col = Math.max(0, Math.min(this.limits.maxCols - 1, this.selection.active.col + dir * pageCols));
+          this.selection = e.shiftKey
+            ? extendSelectionToCell(this.selection, { row: this.selection.active.row, col }, this.limits)
+            : setActiveCell(this.selection, { row: this.selection.active.row, col }, this.limits);
+        } else {
+          const pageRows = Math.max(1, Math.floor(this.viewportHeight() / this.cellHeight));
+          const row = Math.max(0, Math.min(this.limits.maxRows - 1, this.selection.active.row + dir * pageRows));
+          this.selection = e.shiftKey
+            ? extendSelectionToCell(this.selection, { row, col: this.selection.active.col }, this.limits)
+            : setActiveCell(this.selection, { row, col: this.selection.active.col }, this.limits);
+        }
       } else {
-        const pageRows = Math.max(1, Math.floor(this.viewportHeight() / this.cellHeight));
-        const nextRowVisual = Math.min(
-          Math.max(0, visualRow + dir * pageRows),
-          Math.max(0, this.rowIndexByVisual.length - 1)
-        );
-        const row = this.rowIndexByVisual[nextRowVisual] ?? 0;
-        this.selection = e.shiftKey
-          ? extendSelectionToCell(this.selection, { row, col: this.selection.active.col }, this.limits)
-          : setActiveCell(this.selection, { row, col: this.selection.active.col }, this.limits);
+        const visualRow = this.rowToVisual.get(this.selection.active.row);
+        const visualCol = this.colToVisual.get(this.selection.active.col);
+        if (visualRow === undefined || visualCol === undefined) return;
+
+        if (e.altKey) {
+          const pageCols = Math.max(1, Math.floor(this.viewportWidth() / this.cellWidth));
+          const nextColVisual = Math.min(
+            Math.max(0, visualCol + dir * pageCols),
+            Math.max(0, this.colIndexByVisual.length - 1)
+          );
+          const col = this.colIndexByVisual[nextColVisual] ?? 0;
+          this.selection = e.shiftKey
+            ? extendSelectionToCell(this.selection, { row: this.selection.active.row, col }, this.limits)
+            : setActiveCell(this.selection, { row: this.selection.active.row, col }, this.limits);
+        } else {
+          const pageRows = Math.max(1, Math.floor(this.viewportHeight() / this.cellHeight));
+          const nextRowVisual = Math.min(
+            Math.max(0, visualRow + dir * pageRows),
+            Math.max(0, this.rowIndexByVisual.length - 1)
+          );
+          const row = this.rowIndexByVisual[nextRowVisual] ?? 0;
+          this.selection = e.shiftKey
+            ? extendSelectionToCell(this.selection, { row, col: this.selection.active.col }, this.limits)
+            : setActiveCell(this.selection, { row, col: this.selection.active.col }, this.limits);
+        }
       }
 
       this.ensureActiveCellVisible();
@@ -5521,8 +5585,11 @@ export class SpreadsheetApp {
       e.preventDefault();
       this.ensureActiveCellVisible();
       const row = this.selection.active.row;
-      const col =
-        e.key === "Home"
+      const col = this.sharedGrid
+        ? e.key === "Home"
+          ? 0
+          : Math.max(0, this.limits.maxCols - 1)
+        : e.key === "Home"
           ? (this.colIndexByVisual[0] ?? 0)
           : (this.colIndexByVisual[this.colIndexByVisual.length - 1] ?? 0);
       this.selection = e.shiftKey
