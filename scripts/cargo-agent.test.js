@@ -157,3 +157,23 @@ test(
     );
   },
 );
+
+test(
+  'cargo_agent clamps default RUST_TEST_THREADS based on chosen test jobs',
+  { skip: !hasBash || !hasCargo },
+  () => {
+    const { stderr } = runBash(
+      'unset FORMULA_CARGO_JOBS FORMULA_CARGO_TEST_JOBS FORMULA_RUST_TEST_THREADS RUST_TEST_THREADS && bash scripts/cargo_agent.sh test -h',
+    );
+    const match = stderr.match(/test_threads=([0-9]+)/);
+    assert.ok(match, stderr);
+    const threads = Number(match[1]);
+    // With no explicit configuration, cargo_agent defaults `cargo test` jobs to 1. The wrapper
+    // should therefore clamp the default test thread pool to <= 4 (jobs * 4).
+    assert.ok(stderr.includes('jobs=1'), stderr);
+    assert.ok(
+      threads <= 4,
+      `expected test_threads <= 4 when jobs=1, got ${threads}\nstderr:\n${stderr}`,
+    );
+  },
+);

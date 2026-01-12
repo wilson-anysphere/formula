@@ -339,15 +339,6 @@ if [[ -n "${explicit_jobs}" ]]; then
   fi
 fi
 
-# For test runs, cap RUST_TEST_THREADS to avoid spawning hundreds of threads
-if [[ "${subcommand}" == "test" && -z "${RUST_TEST_THREADS:-}" ]]; then
-  rust_test_threads="${FORMULA_RUST_TEST_THREADS:-}"
-  if [[ -z "${rust_test_threads}" ]]; then
-    rust_test_threads=$(( nproc_val < 16 ? nproc_val : 16 ))
-  fi
-  export RUST_TEST_THREADS="${rust_test_threads}"
-fi
-
 # Further reduce concurrency for test runs when callers haven't explicitly opted into
 # higher parallelism. This avoids sporadic rustc panics like:
 # "failed to spawn helper thread: Resource temporarily unavailable" (EAGAIN)
@@ -369,6 +360,28 @@ if [[ "${subcommand}" == "test" ]]; then
   if [[ -z "${MAKEFLAGS:-}" || "${MAKEFLAGS}" =~ ^-j[0-9]+$ ]]; then
     export MAKEFLAGS="-j${jobs}"
   fi
+fi
+
+# For test runs, cap RUST_TEST_THREADS to avoid spawning hundreds of threads.
+#
+# We set this *after* potentially reducing `jobs` for `cargo test` so the default thread count
+# matches the chosen parallelism level. This reduces the chance of EAGAIN ("Resource temporarily
+# unavailable") failures on multi-agent hosts when multiple test binaries run concurrently.
+if [[ "${subcommand}" == "test" && -z "${RUST_TEST_THREADS:-}" ]]; then
+  rust_test_threads="${FORMULA_RUST_TEST_THREADS:-}"
+  if [[ -z "${rust_test_threads}" ]]; then
+    rust_test_threads=$(( nproc_val < 16 ? nproc_val : 16 ))
+
+    # Clamp based on the chosen cargo `-j` level (default: 4 * jobs).
+    max_by_jobs=$(( jobs * 4 ))
+    if [[ "${max_by_jobs}" -lt 1 ]]; then
+      max_by_jobs=1
+    fi
+    if [[ "${rust_test_threads}" -gt "${max_by_jobs}" ]]; then
+      rust_test_threads="${max_by_jobs}"
+    fi
+  fi
+  export RUST_TEST_THREADS="${rust_test_threads}"
 fi
 
 # Make: default to matching the chosen Cargo parallelism.
