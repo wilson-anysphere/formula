@@ -839,6 +839,13 @@ fn main() {
         // the running instance receives an "open documents" event. Route it through the
         // same open-file pipeline.
         tauri::RunEvent::Opened { urls, .. } => {
+            for url in &urls {
+                let url = url.as_str().trim().trim_matches('"');
+                if url.starts_with("formula://") {
+                    let _ = app_handle.emit("oauth-redirect", url.to_string());
+                }
+            }
+
             let argv: Vec<String> = urls.iter().map(|url| url.to_string()).collect();
             let paths = extract_open_file_paths(&argv, None);
             handle_open_file_request(app_handle, paths);
