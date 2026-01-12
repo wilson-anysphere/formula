@@ -133,7 +133,7 @@ export interface WorkbookContextBuildStats {
     /**
      * `block` refers to the per-range sampled block cache in `WorkbookContextBuilder`.
      */
-    block: { hits: number; misses: number; entries: number };
+    block: { hits: number; misses: number; entries: number; entriesByKind: Record<WorkbookContextBlockKind, number> };
   };
   rag: {
     enabled: boolean;
@@ -428,7 +428,7 @@ export class WorkbookContextBuilder {
           readBlockCellCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
           cache: {
             schema: { hits: 0, misses: 0, entries: 0 },
-            block: { hits: 0, misses: 0, entries: 0 },
+            block: { hits: 0, misses: 0, entries: 0, entriesByKind: { selection: 0, sheet_sample: 0, retrieved: 0 } },
           },
           rag: { enabled: false, retrievedCount: 0, retrievedBlockCount: 0 },
           timingsMs: {
@@ -652,6 +652,11 @@ export class WorkbookContextBuilder {
       stats.blockCellCountByKind = blockCellCountByKind;
       stats.cache.schema.entries = this.sheetSummaryCache.size;
       stats.cache.block.entries = this.blockCache.size;
+      const cacheEntriesByKind: Record<WorkbookContextBlockKind, number> = { selection: 0, sheet_sample: 0, retrieved: 0 };
+      for (const entry of this.blockCache.values()) {
+        cacheEntriesByKind[entry.block.kind] += 1;
+      }
+      stats.cache.block.entriesByKind = cacheEntriesByKind;
       stats.promptContextChars = promptContext.length;
       stats.promptContextTokens = usedPromptContextTokens;
       stats.rag.retrievedBlockCount = blocks.filter((b) => b.kind === "retrieved").length;
