@@ -875,7 +875,10 @@ fn main() {
       emit("coi-check-result", {
         cross_origin_isolated: crossOriginIsolated,
         shared_array_buffer: sharedArrayBuffer,
-      }).catch(() => {});
+      }).catch(() => {
+        if (Date.now() > deadline) return;
+        setTimeout(tick, 50);
+      });
       return;
     }
     if (Date.now() > deadline) return;

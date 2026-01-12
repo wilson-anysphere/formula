@@ -437,6 +437,7 @@ The command list is large; below are the “core” ones most contributors will 
 - **Lifecycle**
   - `quit_app` (hard-exits the process; used by the tray/menu quit flow)
   - `restart_app` (Tauri-managed restart/exit; intended for updater install flows so Tauri/plugins can shut down cleanly)
+  - `--cross-origin-isolation-check` (special CLI mode; exits with 0/1 based on `crossOriginIsolated` + `SharedArrayBuffer`)
 
 Note: `quit_app` intentionally hard-exits (`std::process::exit(0)`) to avoid re-entering the hide-to-tray close handler.
 For update-driven restarts prefer `restart_app` (graceful).
@@ -488,7 +489,7 @@ Related frontend → backend events used as acknowledgements:
 - `close-handled` (token)
 - `open-file-ready` (signals that the frontend’s `open-file` listener is installed; causes the Rust host to flush queued open requests)
 - `updater-ui-ready` (signals the updater UI listeners are installed; triggers the startup update check)
-- `coi-check-result` (used by the packaged cross-origin isolation smoke check mode)
+- `coi-check-result` (used by the packaged cross-origin isolation smoke check mode, e.g. `pnpm -C apps/desktop check:coi`)
 
 ---
 
