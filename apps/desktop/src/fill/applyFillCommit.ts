@@ -1,4 +1,4 @@
-import { computeFillEdits, type CellRange, type FillMode, type FillSourceCell } from "@formula/fill-engine";
+import { computeFillEdits, type CellRange, type FillMode, type FillSourceCell } from "../../../../packages/fill-engine/src/index.ts";
 
 import type { DocumentController } from "../document/documentController.js";
 

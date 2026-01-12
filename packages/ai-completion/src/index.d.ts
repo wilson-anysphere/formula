@@ -31,7 +31,7 @@ export class TabCompletionEngine {
   constructor(options?: {
     functionRegistry?: FunctionRegistry;
     parsePartialFormula?: typeof parsePartialFormula;
-    localModel?: { complete: (prompt: string, options?: unknown) => Promise<string> } | null;
+    localModel?: { complete: (prompt: string, options?: CompletionOptions) => Promise<string> } | null;
     schemaProvider?: SchemaProvider | null;
     cache?: LRUCache<Suggestion[]>;
     cacheSize?: number;
@@ -110,7 +110,7 @@ export class LocalModelManager {
       health: () => Promise<boolean>;
       hasModel: (name: string) => Promise<boolean>;
       pullModel: (name: string) => Promise<void>;
-      generate: (params: unknown) => Promise<unknown>;
+      generate: (params: { model: string; prompt: string; options?: Record<string, unknown>; stream?: boolean }) => Promise<unknown>;
     };
     requiredModels?: string[];
     defaultModel?: string;
