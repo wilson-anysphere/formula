@@ -92,9 +92,10 @@ function readPngBase64(source) {
           ? source.image_png_base64
           : undefined;
 
-  if (typeof raw !== "string") return undefined;
-  const normalized = normalizeBase64String(raw);
-  return normalized ? normalized : undefined;
+  // Return the raw wire format string here. Callers are responsible for applying
+  // size checks before stripping `data:` prefixes / trimming to avoid allocating
+  // huge intermediate strings for oversized payloads.
+  return typeof raw === "string" ? raw : undefined;
 }
 
 /**
@@ -260,7 +261,7 @@ function mergeClipboardContent(target, source) {
     } else if (!image && typeof target.pngBase64 !== "string" && typeof pngBase64 === "string") {
       // Only preserve base64 when we couldn't decode it into bytes.
       if (estimateBase64Bytes(pngBase64) <= MAX_IMAGE_BYTES) {
-        target.pngBase64 = pngBase64;
+        target.pngBase64 = normalizeBase64String(pngBase64);
       }
     }
   }
@@ -341,7 +342,7 @@ function createTauriClipboardProvider() {
                 native.imagePng = imagePng;
               } else if (estimateBase64Bytes(pngBase64) <= MAX_IMAGE_BYTES) {
                 // Preserve base64 only when decoding fails (legacy/internal).
-                native.pngBase64 = pngBase64;
+                native.pngBase64 = normalizeBase64String(pngBase64);
               }
             }
 
