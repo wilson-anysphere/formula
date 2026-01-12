@@ -294,9 +294,25 @@ export class EngineWorker {
    * Note: this RPC is independent of workbook state and intentionally does NOT
    * flush pending `setCell` batches.
    */
-  async lexFormula(formula: string, options?: FormulaParseOptions, rpcOptions?: RpcOptions): Promise<FormulaToken[]> {
+  async lexFormula(formula: string, options?: FormulaParseOptions, rpcOptions?: RpcOptions): Promise<FormulaToken[]>;
+  async lexFormula(formula: string, rpcOptions?: RpcOptions): Promise<FormulaToken[]>;
+  async lexFormula(
+    formula: string,
+    optionsOrRpcOptions?: FormulaParseOptions | RpcOptions,
+    rpcOptions?: RpcOptions
+  ): Promise<FormulaToken[]> {
+    const isFormulaParseOptions = (value: unknown): value is FormulaParseOptions =>
+      isPlainObject(value) && !("signal" in value) && !("timeoutMs" in value);
+    const isRpcOptions = (value: unknown): value is RpcOptions =>
+      Boolean(value && typeof value === "object" && ("signal" in value || "timeoutMs" in value));
+
+    const options = isRpcOptions(optionsOrRpcOptions) && !isFormulaParseOptions(optionsOrRpcOptions)
+      ? undefined
+      : (optionsOrRpcOptions as FormulaParseOptions | undefined);
+    const finalRpcOptions = isRpcOptions(optionsOrRpcOptions) ? optionsOrRpcOptions : rpcOptions;
+
     const normalizedOptions = normalizeFormulaParseOptions(options);
-    return (await this.invoke("lexFormula", { formula, options: normalizedOptions }, rpcOptions)) as FormulaToken[];
+    return (await this.invoke("lexFormula", { formula, options: normalizedOptions }, finalRpcOptions)) as FormulaToken[];
   }
 
   /**

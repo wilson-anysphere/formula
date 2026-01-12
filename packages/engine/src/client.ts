@@ -116,6 +116,12 @@ export interface EngineClient {
    * This call is independent of any loaded workbook.
    */
   lexFormula(formula: string, options?: FormulaParseOptions, rpcOptions?: RpcOptions): Promise<FormulaToken[]>;
+  /**
+   * Tokenize a formula string for editor tooling (syntax highlighting, etc).
+   *
+   * Convenience overload for `lexFormula(formula, undefined, rpcOptions)`.
+   */
+  lexFormula(formula: string, rpcOptions?: RpcOptions): Promise<FormulaToken[]>;
 
   /**
    * Best-effort lexer for editor syntax highlighting (never throws).
@@ -252,8 +258,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
     applyOperation: async (op, rpcOptions) => await withEngine((connected) => connected.applyOperation(op, rpcOptions)),
     rewriteFormulasForCopyDelta: async (requests, rpcOptions) =>
       await withEngine((connected) => connected.rewriteFormulasForCopyDelta(requests, rpcOptions)),
-    lexFormula: async (formula, options, rpcOptions) =>
-      await withEngine((connected) => connected.lexFormula(formula, options, rpcOptions)),
+    lexFormula: async (formula: string, optionsOrRpcOptions?: FormulaParseOptions | RpcOptions, rpcOptions?: RpcOptions) =>
+      await withEngine((connected) => (connected.lexFormula as any)(formula, optionsOrRpcOptions, rpcOptions)),
     lexFormulaPartial: async (formula, options, rpcOptions) =>
       await withEngine((connected) => connected.lexFormulaPartial(formula, options, rpcOptions)),
     parseFormulaPartial: async (
