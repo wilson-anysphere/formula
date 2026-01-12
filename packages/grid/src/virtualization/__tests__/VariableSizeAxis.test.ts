@@ -45,6 +45,27 @@ describe("VariableSizeAxis", () => {
     expect(axis.totalSize(4)).toBe(40);
   });
 
+  it("updates existing overrides without breaking position math", () => {
+    const axis = new VariableSizeAxis(10);
+    axis.setOverrides(
+      new Map([
+        [1, 20],
+        [3, 5]
+      ])
+    );
+
+    // Update an existing override (index 1) and ensure downstream positions adjust.
+    axis.setSize(1, 25);
+    expect(axis.getSize(1)).toBe(25);
+    expect(axis.positionOf(2)).toBe(35); // row0=0:10 + row1=25 => row2 starts at 35
+    expect(axis.totalSize(4)).toBe(50); // 10 + 25 + 10 + 5
+
+    // Clearing an override by setting it back to the default should restore defaults.
+    axis.setSize(1, 10);
+    expect(axis.getSize(1)).toBe(10);
+    expect(axis.totalSize(4)).toBe(35); // back to 10 + 10 + 10 + 5
+  });
+
   it("finds indices at positions (binary search)", () => {
     const axis = new VariableSizeAxis(10);
     axis.setSize(1, 20);
