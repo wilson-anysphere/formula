@@ -756,10 +756,16 @@ test.describe("desktop updater UI wiring (tauri)", () => {
       (window as any).__tauriEmittedEvents = emitted;
       (window as any).__tauriNotifications = notifications;
       (window as any).__tauriInvokes = invokes;
+      (window as any).__tauriShowCalls = 0;
+      (window as any).__tauriFocusCalls = 0;
 
       const windowHandle = {
-        show: async () => {},
-        setFocus: async () => {},
+        show: async () => {
+          (window as any).__tauriShowCalls += 1;
+        },
+        setFocus: async () => {
+          (window as any).__tauriFocusCalls += 1;
+        },
       };
 
       (window as any).__TAURI__ = {
@@ -806,6 +812,12 @@ test.describe("desktop updater UI wiring (tauri)", () => {
       Boolean((window as any).__tauriEmittedEvents?.some((entry: any) => entry?.event === "updater-ui-ready")),
     );
 
+    const baseline = await page.evaluate(() => ({
+      toastCount: document.querySelectorAll('#toast-root [data-testid="toast"]').length,
+      showCalls: (window as any).__tauriShowCalls ?? 0,
+      focusCalls: (window as any).__tauriFocusCalls ?? 0,
+    }));
+
     await waitForTauriListeners(page, "update-available");
     await dispatchTauriEvent(page, "update-available", {
       source: "startup",
@@ -842,5 +854,51 @@ test.describe("desktop updater UI wiring (tauri)", () => {
       expect(String(invoke?.args?.title ?? "")).toContain("Update available");
       expect(String(invoke?.args?.body ?? "")).toContain("9.9.9");
     }
+
+    // Startup update events should not force-show or focus the main window and should not create
+    // in-app toasts.
+    const afterUpdateAvailable = await page.evaluate(() => ({
+      toastCount: document.querySelectorAll('#toast-root [data-testid="toast"]').length,
+      showCalls: (window as any).__tauriShowCalls ?? 0,
+      focusCalls: (window as any).__tauriFocusCalls ?? 0,
+      notificationsCount: (window as any).__tauriNotifications?.length ?? 0,
+      invokeNotificationCount: Array.isArray((window as any).__tauriInvokes)
+        ? (window as any).__tauriInvokes.filter((entry: any) => entry?.cmd === "show_system_notification").length
+        : 0,
+    }));
+    expect(afterUpdateAvailable.toastCount).toBe(baseline.toastCount);
+    expect(afterUpdateAvailable.showCalls).toBe(baseline.showCalls);
+    expect(afterUpdateAvailable.focusCalls).toBe(baseline.focusCalls);
+
+    // Startup completion events should also remain silent unless a manual follow-up is pending.
+    await waitForTauriListeners(page, "update-not-available");
+    await dispatchTauriEvent(page, "update-not-available", { source: "startup" });
+    await flushMicrotasks(page);
+
+    const afterNotAvailable = await page.evaluate(() => ({
+      toastCount: document.querySelectorAll('#toast-root [data-testid="toast"]').length,
+      notificationsCount: (window as any).__tauriNotifications?.length ?? 0,
+      invokeNotificationCount: Array.isArray((window as any).__tauriInvokes)
+        ? (window as any).__tauriInvokes.filter((entry: any) => entry?.cmd === "show_system_notification").length
+        : 0,
+    }));
+    expect(afterNotAvailable.toastCount).toBe(baseline.toastCount);
+    // No additional system notifications for "up to date".
+    expect(afterNotAvailable.notificationsCount).toBe(afterUpdateAvailable.notificationsCount);
+    expect(afterNotAvailable.invokeNotificationCount).toBe(afterUpdateAvailable.invokeNotificationCount);
+
+    await waitForTauriListeners(page, "update-check-error");
+    await dispatchTauriEvent(page, "update-check-error", { source: "startup", error: "network down" });
+    await flushMicrotasks(page);
+    const afterStartupError = await page.evaluate(() => ({
+      toastCount: document.querySelectorAll('#toast-root [data-testid="toast"]').length,
+      notificationsCount: (window as any).__tauriNotifications?.length ?? 0,
+      invokeNotificationCount: Array.isArray((window as any).__tauriInvokes)
+        ? (window as any).__tauriInvokes.filter((entry: any) => entry?.cmd === "show_system_notification").length
+        : 0,
+    }));
+    expect(afterStartupError.toastCount).toBe(baseline.toastCount);
+    expect(afterStartupError.notificationsCount).toBe(afterUpdateAvailable.notificationsCount);
+    expect(afterStartupError.invokeNotificationCount).toBe(afterUpdateAvailable.invokeNotificationCount);
   });
 });
