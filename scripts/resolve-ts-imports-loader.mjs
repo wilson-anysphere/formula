@@ -15,6 +15,11 @@
  * This loader keeps runtime semantics identical when a real `.js` file exists, but
  * falls back to the matching `.ts`/`.tsx` source when it doesn't.
  *
+ * Additionally, some TS sources in this repo still use extensionless relative
+ * imports (e.g. `import "./foo"`). Node ESM does not support extensionless path
+ * resolution, so when the specifier is missing (and the file exists as
+ * `foo.ts`/`foo.tsx`) we also provide a `.ts`/`.tsx` fallback.
+ *
  * Notes
  * -----
  * - We rely on Node's `--experimental-strip-types` to execute the `.ts`/`.tsx` files.
@@ -39,6 +44,15 @@ function splitSpecifier(specifier) {
 }
 
 /**
+ * @param {string} pathLike
+ */
+function hasExtension(pathLike) {
+  const lastSlash = Math.max(pathLike.lastIndexOf("/"), pathLike.lastIndexOf("\\"));
+  const lastDot = pathLike.lastIndexOf(".");
+  return lastDot > lastSlash;
+}
+
+/**
  * @param {string} specifier
  * @param {any} context
  * @param {(specifier: string, context: any, nextResolve: any) => Promise<any>} defaultResolve
@@ -59,7 +73,8 @@ export async function resolve(specifier, context, defaultResolve) {
 
   const isJs = base.endsWith(".js");
   const isJsx = base.endsWith(".jsx");
-  if (!isJs && !isJsx) {
+  const isExtensionless = !hasExtension(base);
+  if (!isJs && !isJsx && !isExtensionless) {
     return defaultResolve(specifier, context, defaultResolve);
   }
 
@@ -69,18 +84,30 @@ export async function resolve(specifier, context, defaultResolve) {
     const code = /** @type {any} */ (err)?.code;
     if (code !== "ERR_MODULE_NOT_FOUND") throw err;
 
-    const baseNoExt = isJs ? base.slice(0, -3) : base.slice(0, -4);
-    const candidates = isJs ? [".ts", ".tsx"] : [".tsx", ".ts"];
-    for (const ext of candidates) {
-      try {
-        return await defaultResolve(`${baseNoExt}${ext}${suffix}`, context, defaultResolve);
-      } catch (candidateErr) {
-        const candidateCode = /** @type {any} */ (candidateErr)?.code;
-        if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
+    if (isJs || isJsx) {
+      const baseNoExt = isJs ? base.slice(0, -3) : base.slice(0, -4);
+      const candidates = isJs ? [".ts", ".tsx"] : [".tsx", ".ts"];
+      for (const ext of candidates) {
+        try {
+          return await defaultResolve(`${baseNoExt}${ext}${suffix}`, context, defaultResolve);
+        } catch (candidateErr) {
+          const candidateCode = /** @type {any} */ (candidateErr)?.code;
+          if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
+        }
+      }
+    }
+
+    if (isExtensionless) {
+      for (const ext of [".ts", ".tsx", ".js"]) {
+        try {
+          return await defaultResolve(`${base}${ext}${suffix}`, context, defaultResolve);
+        } catch (candidateErr) {
+          const candidateCode = /** @type {any} */ (candidateErr)?.code;
+          if (candidateCode !== "ERR_MODULE_NOT_FOUND") throw candidateErr;
+        }
       }
     }
 
     throw err;
   }
 }
-
