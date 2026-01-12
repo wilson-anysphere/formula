@@ -150,7 +150,15 @@ jobs:
             libssl-dev \
             patchelf
       - name: Check desktop shell builds with full desktop feature set
-        run: cargo check -p desktop --features desktop
+        run: |
+          # The desktop shell crate was historically named `desktop`. It is now
+          # `formula-desktop-tauri` (with the Rust library crate kept as `desktop`
+          # so internal `use desktop::...` imports still work).
+          if cargo metadata --no-deps --format-version=1 | grep -q '"name":"formula-desktop-tauri"'; then
+            cargo check -p formula-desktop-tauri --features desktop
+          else
+            cargo check -p desktop --features desktop
+          fi
 
   node-tests:
     name: Node tests

@@ -9,6 +9,9 @@ const __dirname = path.dirname(__filename);
 const desktopDir = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(desktopDir, "../..");
 
+const DESKTOP_TAURI_PACKAGE = "formula-desktop-tauri";
+const DESKTOP_BINARY_NAME = "formula-desktop";
+
 function run(
   cmd,
   args,
@@ -34,52 +37,19 @@ function run(
 }
 
 function desktopBinaryPath() {
-  const exe = process.platform === "win32" ? "formula-desktop.exe" : "formula-desktop";
+  const exe = process.platform === "win32" ? `${DESKTOP_BINARY_NAME}.exe` : DESKTOP_BINARY_NAME;
   return path.join(repoRoot, "target", "release", exe);
 }
 
-function desktopCargoPackageName() {
-  // The desktop Tauri crate historically used the package name `desktop`. It was renamed to
-  // `formula-desktop-tauri` to avoid an overly-generic workspace package name.
-  //
-  // We read the package name from Cargo.toml so this script works across the rename and in forks.
-  const cargoTomlPath = path.join(desktopDir, "src-tauri", "Cargo.toml");
-  let cargoToml;
-  try {
-    cargoToml = fs.readFileSync(cargoTomlPath, "utf8");
-  } catch {
-    return "formula-desktop-tauri";
-  }
-
-  const lines = cargoToml.split(/\r?\n/);
-  let inPackage = false;
-  for (const line of lines) {
-    if (/^\s*\[package\]\s*$/.test(line)) {
-      inPackage = true;
-      continue;
-    }
-    if (inPackage && /^\s*\[/.test(line)) {
-      inPackage = false;
-    }
-    if (!inPackage) continue;
-
-    const m = line.match(/^\s*name\s*=\s*"([^"]+)"\s*$/);
-    if (m) return m[1];
-  }
-
-  return "formula-desktop-tauri";
-}
-
 async function cargoBuildDesktopBinary() {
-  const pkg = desktopCargoPackageName();
   const cargoArgs = [
     "build",
     "-p",
-    pkg,
+    DESKTOP_TAURI_PACKAGE,
     "--features",
     "desktop",
     "--bin",
-    "formula-desktop",
+    DESKTOP_BINARY_NAME,
     "--release",
   ];
 
@@ -130,7 +100,11 @@ async function main() {
     runArgs = [binary, ...args];
   }
 
-  const runCode = await run(runCmd, runArgs);
+  const runCode = await run(runCmd, runArgs, {
+    // Running the produced `.exe` directly is more reliable than going through a shell
+    // (avoids quoting issues when the repo path contains spaces).
+    shell: process.platform === "win32" ? false : undefined,
+  });
   if (runCode !== 0) {
     console.error(
       `[coi-check] FAILED: packaged Tauri build is not cross-origin isolated (exit code ${runCode}).`,
