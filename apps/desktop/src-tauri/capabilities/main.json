@@ -83,5 +83,5 @@
     "updater:allow-check",
     "updater:allow-download",
     "updater:allow-install"
-  ]
+    ]
 }

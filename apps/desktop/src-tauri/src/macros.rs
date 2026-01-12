@@ -91,7 +91,6 @@ pub enum MacroHostError {
 pub struct MacroHost {
     vba_project_hash: Option<u64>,
     project: Option<formula_vba::VBAProject>,
-    program: Option<formula_vba_runtime::VbaProgram>,
     procedure_module: HashMap<String, String>,
     runtime_context: MacroRuntimeContext,
     #[cfg(test)]
@@ -112,7 +111,6 @@ impl MacroHost {
     pub fn invalidate(&mut self) {
         self.vba_project_hash = None;
         self.project = None;
-        self.program = None;
         self.procedure_module.clear();
         self.runtime_context = MacroRuntimeContext::default();
         #[cfg(test)]
@@ -141,7 +139,6 @@ impl MacroHost {
         if hash != self.vba_project_hash {
             self.vba_project_hash = hash;
             self.project = None;
-            self.program = None;
             self.procedure_module.clear();
             self.runtime_context = MacroRuntimeContext::default();
             #[cfg(test)]
@@ -163,40 +160,8 @@ impl MacroHost {
 
         let project = formula_vba::VBAProject::parse(vba_bin)
             .map_err(|e| MacroHostError::ProjectParse(e.to_string()))?;
+        self.procedure_module = build_procedure_module_map(&project);
         self.project = Some(project);
-        Ok(())
-    }
-
-    fn ensure_program_loaded(&mut self, workbook: &Workbook) -> Result<(), MacroHostError> {
-        self.ensure_project_loaded(workbook)?;
-        if workbook.vba_project_bin.is_none() {
-            return Ok(());
-        }
-        if self.program.is_some() {
-            return Ok(());
-        }
-
-        let project = self
-            .project
-            .as_ref()
-            .ok_or_else(|| MacroHostError::Runtime("missing VBA project".to_string()))?;
-
-        let combined = project
-            .modules
-            .iter()
-            .map(|m| m.code.as_str())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        let program = formula_vba_runtime::parse_program(&combined)
-            .map_err(|e| MacroHostError::ProgramParse(e.to_string()))?;
-
-        self.procedure_module = build_procedure_module_map(project);
-        self.program = Some(program);
-        #[cfg(test)]
-        {
-            self.program_compile_count = self.program_compile_count.saturating_add(1);
-        }
-
         Ok(())
     }
 
@@ -212,13 +177,36 @@ impl MacroHost {
         &mut self,
         workbook: &Workbook,
     ) -> Result<Option<formula_vba_runtime::VbaProgram>, MacroHostError> {
-        self.ensure_program_loaded(workbook)?;
-        Ok(self.program.clone())
+        self.ensure_project_loaded(workbook)?;
+        if workbook.vba_project_bin.is_none() {
+            return Ok(None);
+        }
+
+        let project = self
+            .project
+            .as_ref()
+            .ok_or_else(|| MacroHostError::Runtime("missing VBA project".to_string()))?;
+
+        let combined = project
+            .modules
+            .iter()
+            .map(|m| m.code.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        let program = formula_vba_runtime::parse_program(&combined)
+            .map_err(|e| MacroHostError::ProgramParse(e.to_string()))?;
+
+        #[cfg(test)]
+        {
+            self.program_compile_count = self.program_compile_count.saturating_add(1);
+        }
+
+        Ok(Some(program))
     }
 
     pub fn list_macros(&mut self, workbook: &Workbook) -> Result<Vec<MacroInfo>, MacroHostError> {
-        self.ensure_program_loaded(workbook)?;
-        let Some(program) = self.program.as_ref() else {
+        let Some(program) = self.program(workbook)? else {
             return Ok(Vec::new());
         };
         let module_map = &self.procedure_module;

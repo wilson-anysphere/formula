@@ -15,6 +15,8 @@ use desktop::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMac
 use desktop::macros::MacroExecutionOptions;
 use desktop::open_file;
 use desktop::open_file_ipc::OpenFileState;
+#[cfg(target_os = "macos")]
+use desktop::opened_urls;
 use desktop::state::{AppState, CellUpdateData, SharedAppState};
 use desktop::tray_status::{self, TrayStatusState};
 use desktop::updater;
@@ -1326,10 +1328,11 @@ fn main() {
         // same open-file pipeline.
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Opened { urls, .. } => {
-            let argv: Vec<String> = urls.iter().map(|url| url.to_string()).collect();
-            let oauth_urls = extract_oauth_redirect_urls(&argv);
-            handle_oauth_redirect_request(app_handle, oauth_urls);
-            let paths = extract_open_file_paths(&argv, None);
+            let classified = opened_urls::classify_opened_urls(&urls);
+            handle_oauth_redirect_request(_app_handle, classified.oauth_redirects);
+
+            // File association / open-with handling.
+            let paths = extract_open_file_paths(&classified.file_open_candidates, None);
             handle_open_file_request(_app_handle, paths);
         }
         _ => {}

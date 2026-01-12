@@ -99,6 +99,7 @@
     },
     "macOS": {
       "entitlements": "entitlements.plist",
+      "infoPlist": "Info.plist",
       "minimumSystemVersion": "10.15",
       "signingIdentity": "Developer ID Application"
     },
