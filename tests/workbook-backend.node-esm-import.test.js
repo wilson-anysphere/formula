@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 // Include an explicit `.ts` import specifier so the repo's node:test runner can
@@ -18,6 +19,12 @@ import {
 } from "../packages/workbook-backend/src/sheetNameValidation.js";
 
 test("workbook-backend is importable under Node ESM when executing TS sources (strip-types)", async () => {
+  // Guardrail: repo-level typecheck can run with TS configs that do *not* enable
+  // `allowImportingTsExtensions`. `.ts` specifiers in source imports/exports would
+  // then fail the build, so keep the public entrypoint free of `.ts` specifiers.
+  const indexSrc = readFileSync(new URL("../packages/workbook-backend/src/index.ts", import.meta.url), "utf8");
+  assert.ok(!/from\s+\"\.\/[^\"\n]+\.ts\"/.test(indexSrc), "packages/workbook-backend/src/index.ts must not use .ts specifiers");
+
   const mod = await import("@formula/workbook-backend");
 
   assert.equal(typeof mod.getSheetNameValidationErrorMessage, "function");
