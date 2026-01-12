@@ -11,6 +11,28 @@ export type ShortcutSearchMatch<T extends ShortcutSearchCommandLike = ShortcutSe
   shortcut: string;
 };
 
+const SHORTCUT_SYMBOL_TOKENS: Record<string, string> = {
+  // Modifiers.
+  "⌘": "cmd",
+  "⇧": "shift",
+  "⌥": "alt",
+  "⌃": "ctrl",
+
+  // Common keys.
+  "⎋": "escape",
+  "↩": "enter",
+  "↵": "enter",
+  "⌫": "backspace",
+  "⌦": "delete",
+  "⇥": "tab",
+
+  // Arrows.
+  "↑": "up",
+  "↓": "down",
+  "←": "left",
+  "→": "right",
+};
+
 function normalizeQuery(query: string): string {
   return String(query ?? "")
     .trim()
@@ -21,6 +43,47 @@ function normalizeQuery(query: string): string {
 function normalizeCategory(category: string | null): string {
   const value = String(category ?? "").trim();
   return value ? value : "Other";
+}
+
+function extractShortcutTokens(text: string): string[] {
+  const tokens: string[] = [];
+  let buffer = "";
+
+  const flush = () => {
+    if (!buffer) return;
+    tokens.push(buffer.toLowerCase());
+    buffer = "";
+  };
+
+  for (const ch of String(text ?? "")) {
+    const mapped = SHORTCUT_SYMBOL_TOKENS[ch];
+    if (mapped) {
+      flush();
+      tokens.push(mapped);
+      continue;
+    }
+
+    if (/[a-z0-9]/i.test(ch)) {
+      buffer += ch;
+      continue;
+    }
+
+    flush();
+  }
+
+  flush();
+  return tokens;
+}
+
+function matchesShortcutTokenQuery(shortcutDisplay: string, query: string): boolean {
+  const qTokens = extractShortcutTokens(query);
+  if (qTokens.length === 0) return false;
+
+  const shortcutTokens = new Set(extractShortcutTokens(shortcutDisplay));
+  for (const token of qTokens) {
+    if (!shortcutTokens.has(token)) return false;
+  }
+  return true;
 }
 
 function getPrimaryShortcut(value: string | readonly string[] | undefined): string | null {
@@ -50,7 +113,7 @@ export function searchShortcutCommands<T extends ShortcutSearchCommandLike>(para
 
     if (q) {
       const haystack = `${cmd.title} ${cmd.commandId} ${shortcut}`.toLowerCase();
-      if (!haystack.includes(q)) continue;
+      if (!haystack.includes(q) && !matchesShortcutTokenQuery(shortcut, q)) continue;
     }
 
     matches.push({ ...cmd, shortcut });

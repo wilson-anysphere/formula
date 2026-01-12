@@ -37,5 +37,13 @@ describe("command-palette shortcut search", () => {
     expect(searchShortcutCommands({ commands, keybindingIndex, query: "sample.sum" }).map((c) => c.commandId)).toEqual(["sample.sum"]);
     expect(searchShortcutCommands({ commands, keybindingIndex, query: "shift+y" }).map((c) => c.commandId)).toEqual(["sample.sum"]);
   });
-});
 
+  test("matches ascii modifier queries against mac symbol shortcuts (cmd+shift+p vs ⇧⌘P)", () => {
+    const commands = [{ commandId: "workbench.showCommandPalette", title: "Show Command Palette", category: "Navigation", source: { kind: "builtin" as const } }];
+    const keybindingIndex = new Map<string, readonly string[]>([["workbench.showCommandPalette", ["⇧⌘P"]]]);
+
+    expect(searchShortcutCommands({ commands, keybindingIndex, query: "cmd+shift+p" }).map((c) => c.commandId)).toEqual([
+      "workbench.showCommandPalette",
+    ]);
+  });
+});
