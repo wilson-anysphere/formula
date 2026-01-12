@@ -3403,19 +3403,15 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     if matches!(
         &left,
         Value::Array(_)
-            | Value::Record(_)
             | Value::Lambda(_)
             | Value::Spill { .. }
-            | Value::Entity(_)
             | Value::Reference(_)
             | Value::ReferenceUnion(_)
     ) || matches!(
         &right,
         Value::Array(_)
-            | Value::Record(_)
             | Value::Lambda(_)
             | Value::Spill { .. }
-            | Value::Entity(_)
             | Value::Reference(_)
             | Value::ReferenceUnion(_)
     ) {
@@ -3432,89 +3428,17 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         (l, r) => (l, r),
     };
 
-    fn text_like_str(v: &Value) -> Option<&str> {
-        match v {
-            Value::Text(s) => Some(s),
-            _ => None,
-        }
-    }
-
     Ok(match (&l, &r) {
         (Value::Number(a), Value::Number(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
-        (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
-            crate::value::cmp_case_insensitive(text_like_str(a).unwrap(), text_like_str(b).unwrap())
-        }
-        (Value::Text(a), Value::Entity(b)) => {
-            let au = a.to_ascii_uppercase();
-            let bu = b.display.to_ascii_uppercase();
-            au.cmp(&bu)
-        }
-        (Value::Text(a), Value::Record(b)) => {
-            let au = a.to_ascii_uppercase();
-            let bu = b.display.to_ascii_uppercase();
-            au.cmp(&bu)
-        }
-        (Value::Entity(a), Value::Text(b)) => {
-            let au = a.display.to_ascii_uppercase();
-            let bu = b.to_ascii_uppercase();
-            au.cmp(&bu)
-        }
-        (Value::Record(a), Value::Text(b)) => {
-            let au = a.display.to_ascii_uppercase();
-            let bu = b.to_ascii_uppercase();
-            au.cmp(&bu)
-        }
-        (Value::Entity(a), Value::Entity(b)) => {
-            let au = a.display.to_ascii_uppercase();
-            let bu = b.display.to_ascii_uppercase();
-            au.cmp(&bu)
-        }
-        (Value::Record(a), Value::Record(b)) => {
-            let au = a.display.to_ascii_uppercase();
-            let bu = b.display.to_ascii_uppercase();
-            au.cmp(&bu)
-        }
-        (Value::Entity(a), Value::Record(b)) => {
-            let au = a.display.to_ascii_uppercase();
-            let bu = b.display.to_ascii_uppercase();
-            au.cmp(&bu)
-        }
-        (Value::Record(a), Value::Entity(b)) => {
-            let au = a.display.to_ascii_uppercase();
-            let bu = b.display.to_ascii_uppercase();
-            au.cmp(&bu)
-        }
+        (Value::Text(a), Value::Text(b)) => crate::value::cmp_case_insensitive(a, b),
         (Value::Bool(a), Value::Bool(b)) => a.cmp(b),
-        (
-            Value::Number(_),
-            Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Bool(_),
-        ) => Ordering::Less,
-        (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Bool(_)) => Ordering::Less,
-        (Value::Text(_) | Value::Entity(_) | Value::Record(_), Value::Number(_)) => {
-            Ordering::Greater
-        }
-        (
-            Value::Bool(_),
-            Value::Number(_) | Value::Text(_) | Value::Entity(_) | Value::Record(_),
-        ) => Ordering::Greater,
+        (Value::Number(_), Value::Text(_) | Value::Bool(_)) => Ordering::Less,
+        (Value::Text(_), Value::Bool(_)) => Ordering::Less,
+        (Value::Text(_), Value::Number(_)) => Ordering::Greater,
+        (Value::Bool(_), Value::Number(_) | Value::Text(_)) => Ordering::Greater,
         (Value::Blank, Value::Blank) => Ordering::Equal,
         (Value::Blank, _) => Ordering::Less,
         (_, Value::Blank) => Ordering::Greater,
-        (Value::Error(_), _) | (_, Value::Error(_)) => Ordering::Equal,
-        (Value::Entity(_), _)
-        | (_, Value::Entity(_))
-        | (Value::Record(_), _)
-        | (_, Value::Record(_)) => Ordering::Equal,
-        (Value::Array(_), _)
-        | (_, Value::Array(_))
-        | (Value::Lambda(_), _)
-        | (_, Value::Lambda(_))
-        | (Value::Spill { .. }, _)
-        | (_, Value::Spill { .. })
-        | (Value::Reference(_), _)
-        | (_, Value::Reference(_))
-        | (Value::ReferenceUnion(_), _)
-        | (_, Value::ReferenceUnion(_)) => Ordering::Equal,
         _ => Ordering::Equal,
     })
 }
