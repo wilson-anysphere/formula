@@ -71,6 +71,23 @@ test("diffDocumentSnapshots detects formatOnly edits from sheet-default formatti
   assert.equal(diff.removed.length, 0);
 });
 
+test("diffDocumentSnapshots detects formatOnly edits from row-default formatting", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  const beforeSnapshot = doc.encodeState();
+
+  // Full-width row format should update the row-default layer (not materialize each cell).
+  doc.setRangeFormat("Sheet1", "A1:XFD1", { font: { italic: true } });
+  const afterSnapshot = doc.encodeState();
+
+  const diff = diffDocumentSnapshots({ beforeSnapshot, afterSnapshot, sheetId: "Sheet1" });
+  assert.equal(diff.formatOnly.length, 1);
+  assert.deepEqual(diff.formatOnly[0].cell, { row: 0, col: 0 });
+  assert.equal(diff.modified.length, 0);
+  assert.equal(diff.added.length, 0);
+  assert.equal(diff.removed.length, 0);
+});
+
 test("exportSheetForSemanticDiff exports effective formats from column defaults", () => {
   const doc = new DocumentController();
   doc.setCellValue("Sheet1", "A1", 1);
@@ -87,6 +104,15 @@ test("exportSheetForSemanticDiff exports effective formats from sheet defaults",
 
   const exported = doc.exportSheetForSemanticDiff("Sheet1");
   assert.deepEqual(exported.cells.get(cellKey(0, 0))?.format, { font: { bold: true } });
+});
+
+test("exportSheetForSemanticDiff exports effective formats from row defaults", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.setRangeFormat("Sheet1", "A1:XFD1", { font: { italic: true } });
+
+  const exported = doc.exportSheetForSemanticDiff("Sheet1");
+  assert.deepEqual(exported.cells.get(cellKey(0, 0))?.format, { font: { italic: true } });
 });
 
 test("diffDocumentVersionAgainstCurrent uses exportSheetForSemanticDiff (and includes layered formats)", async () => {
