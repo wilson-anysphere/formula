@@ -46,7 +46,7 @@ fn cell_contents_returns_formula_text_or_value() {
 }
 
 #[test]
-fn info_recalc_and_unknown_keys() {
+fn info_recalc_defaults_to_manual_and_unknown_keys() {
     let mut sheet = TestSheet::new();
 
     assert_eq!(
