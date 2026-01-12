@@ -40,10 +40,6 @@ pub(crate) struct BiffRecordIter<'a> {
 }
 
 impl<'a> BiffRecordIter<'a> {
-    pub(crate) fn new(stream: &'a [u8]) -> Self {
-        Self { stream, offset: 0 }
-    }
-
     pub(crate) fn from_offset(stream: &'a [u8], offset: usize) -> Result<Self, String> {
         if offset > stream.len() {
             return Err(format!(
@@ -224,10 +220,8 @@ pub(crate) struct LogicalBiffRecordIter<'a> {
 
 impl<'a> LogicalBiffRecordIter<'a> {
     pub(crate) fn new(workbook_stream: &'a [u8], allows_continuation: fn(u16) -> bool) -> Self {
-        Self {
-            iter: BiffRecordIter::new(workbook_stream).peekable(),
-            allows_continuation,
-        }
+        Self::from_offset(workbook_stream, 0, allows_continuation)
+            .expect("offset 0 should always be in bounds for BIFF streams")
     }
 
     pub(crate) fn from_offset(

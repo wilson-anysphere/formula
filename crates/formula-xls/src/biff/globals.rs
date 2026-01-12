@@ -54,11 +54,14 @@ pub(crate) fn parse_biff_bound_sheets(
                     record.data[2],
                     record.data[3],
                 ]) as usize;
-                let Ok((name, _)) =
+                let Ok((mut name, _)) =
                     strings::parse_biff_short_string(&record.data[6..], biff, codepage)
                 else {
                     continue;
                 };
+                // Some `.xls` files store sheet names with embedded NUL bytes; strip them to match
+                // Excel's display behavior and keep downstream sheet-name matching predictable.
+                name = name.replace('\0', "");
                 out.push(BoundSheetInfo {
                     name,
                     offset: sheet_offset,
