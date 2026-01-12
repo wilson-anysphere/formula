@@ -4601,6 +4601,44 @@ fn bytecode_backend_xlookup_accepts_array_if_not_found() {
 }
 
 #[test]
+fn bytecode_backend_xlookup_applies_implicit_intersection_for_if_not_found_ranges() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 30.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "C2", "=XLOOKUP(99,{1;2;3},{10;20;30},B1:B3)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C5", "=XLOOKUP(99,{1;2;3},{10;20;30},B1:B3)")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 2);
+    assert_eq!(
+        stats.compiled, 2,
+        "expected XLOOKUP to compile with range if_not_found args"
+    );
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+
+    // In C2, the vertical range intersects on row 2 => B2.
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(20.0));
+    // Row 5 does not intersect B1:B3 => #VALUE!.
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C5"),
+        Value::Error(ErrorKind::Value)
+    );
+
+    for cell in ["C2", "C5"] {
+        assert_engine_matches_ast(&engine, "=XLOOKUP(99,{1;2;3},{10;20;30},B1:B3)", cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_xlookup_xmatch_accept_let_single_cell_reference_locals() {
     let mut engine = Engine::new();
 

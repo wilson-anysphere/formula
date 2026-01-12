@@ -8243,10 +8243,18 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Spill);
     }
 
-    let if_not_found = match args.get(3) {
+    let if_not_found_arg = match args.get(3) {
         None | Some(Value::Missing) => None,
         Some(v) => Some(v),
     };
+    // `if_not_found` is scalar when provided as a reference/range (Excel applies implicit
+    // intersection), but may also be an array literal/expression (which can spill). Preserve array
+    // values, but eagerly intersect references to match the AST evaluator's `eval_scalar_arg`
+    // behavior.
+    let if_not_found_intersected = if_not_found_arg.and_then(|v| match v {
+        Value::Range(_) | Value::MultiRange(_) => Some(apply_implicit_intersection(v.clone(), grid, base)),
+        _ => None,
+    });
 
     let match_mode = match parse_xmatch_match_mode(args.get(4)) {
         Ok(m) => m,
@@ -8377,7 +8385,11 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     let match_pos = match match_pos {
         Ok(p) => p,
         Err(EngineErrorKind::NA) => {
-            return if_not_found.cloned().unwrap_or(Value::Error(ErrorKind::NA));
+            return match (if_not_found_arg, if_not_found_intersected) {
+                (None, _) => Value::Error(ErrorKind::NA),
+                (Some(_), Some(v)) => v,
+                (Some(v), None) => v.clone(),
+            };
         }
         Err(e) => return Value::Error(ErrorKind::from(e)),
     };
