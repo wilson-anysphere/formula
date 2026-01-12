@@ -102,10 +102,14 @@ fn validate_sqlite_db_path(path: &str) -> Result<PathBuf> {
 fn sqlite_connect_options_from_path(path: &str) -> Result<sqlx::sqlite::SqliteConnectOptions> {
     let trimmed = path.trim();
     if trimmed.eq_ignore_ascii_case(":memory:") || trimmed.eq_ignore_ascii_case("memory") {
-        return Ok(sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")?);
+        let mut opts = sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")?;
+        opts = opts.busy_timeout(sql_query_timeout_duration());
+        return Ok(opts);
     }
     let canonical = validate_sqlite_db_path(path)?;
-    Ok(sqlx::sqlite::SqliteConnectOptions::new().filename(canonical))
+    let mut opts = sqlx::sqlite::SqliteConnectOptions::new().filename(canonical);
+    opts = opts.busy_timeout(sql_query_timeout_duration());
+    Ok(opts)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -898,6 +902,7 @@ pub async fn sql_query(
             let in_memory = descriptor.in_memory.unwrap_or(false);
             let mut opts = if in_memory {
                 sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")?
+                    .busy_timeout(sql_query_timeout_duration())
             } else {
                 let path = descriptor
                     .path
@@ -980,6 +985,7 @@ pub async fn sql_query(
                 let in_memory = path.trim().eq_ignore_ascii_case(":memory:") || path.trim().eq_ignore_ascii_case("memory");
                 let mut opts = if in_memory {
                     sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")?
+                        .busy_timeout(sql_query_timeout_duration())
                 } else {
                     sqlite_connect_options_from_path(&path)?
                 };
@@ -1058,6 +1064,7 @@ pub async fn sql_get_schema(
                 let in_memory = descriptor.in_memory.unwrap_or(false);
                 let mut opts = if in_memory {
                     sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")?
+                        .busy_timeout(sql_query_timeout_duration())
                 } else {
                     let path = descriptor
                         .path
@@ -1140,6 +1147,7 @@ pub async fn sql_get_schema(
                         path.trim().eq_ignore_ascii_case(":memory:") || path.trim().eq_ignore_ascii_case("memory");
                     let mut opts = if in_memory {
                         sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")?
+                            .busy_timeout(sql_query_timeout_duration())
                     } else {
                         sqlite_connect_options_from_path(&path)?
                     };
