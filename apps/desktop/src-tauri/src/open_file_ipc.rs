@@ -92,18 +92,18 @@ mod tests {
             "desktop main.rs must listen for OPEN_FILE_READY_EVENT"
         );
         assert!(
-            main_rs.contains("queue_or_emit("),
+            main_rs.contains(".queue_or_emit("),
             "desktop main.rs must queue open-file requests via OpenFileState::queue_or_emit"
         );
         assert!(
-            main_rs.contains("mark_ready_and_drain("),
+            main_rs.contains(".mark_ready_and_drain("),
             "desktop main.rs must flush pending open-file requests via OpenFileState::mark_ready_and_drain"
         );
 
         // Extra guardrail: the backend should only flip readiness in response to the frontend
         // readiness signal. If `mark_ready_and_drain` starts getting called elsewhere (e.g. during
         // startup), cold-start file-open events can be emitted before the JS listener exists.
-        let ready_calls = main_rs.matches("mark_ready_and_drain(").count();
+        let ready_calls = main_rs.matches(".mark_ready_and_drain(").count();
         assert_eq!(
             ready_calls, 1,
             "expected exactly one mark_ready_and_drain call in desktop main.rs, found {ready_calls}"
