@@ -2082,26 +2082,6 @@ export const defaultRibbonSchema: RibbonSchema = {
           ],
         },
         {
-          id: "view.workbookViews",
-          label: "Workbook Views",
-          buttons: [
-            { id: "view.workbookViews.normal", label: "Normal", ariaLabel: "Normal View", icon: "▦", kind: "toggle", defaultPressed: true, size: "large" },
-            { id: "view.workbookViews.pageBreakPreview", label: "Page Break Preview", ariaLabel: "Page Break Preview", icon: "⤶", kind: "toggle", size: "large" },
-            { id: "view.workbookViews.pageLayout", label: "Page Layout", ariaLabel: "Page Layout View", icon: "📄", kind: "toggle", size: "large" },
-            {
-              id: "view.workbookViews.customViews",
-              label: "Custom Views",
-              ariaLabel: "Custom Views",
-              icon: "👁",
-              kind: "dropdown",
-              menuItems: [
-                { id: "view.workbookViews.customViews", label: "Custom Views…", ariaLabel: "Custom Views", icon: "👁" },
-                { id: "view.workbookViews.customViews.manage", label: "Manage Views…", ariaLabel: "Manage Views", icon: "⚙️" },
-              ],
-            },
-          ],
-        },
-        {
           id: "view.show",
           label: "Show",
           buttons: [
@@ -2153,6 +2133,26 @@ export const defaultRibbonSchema: RibbonSchema = {
             },
             { id: "view.zoom.zoom100", label: "100%", ariaLabel: "Zoom to 100%", icon: "100%" },
             { id: "view.zoom.zoomToSelection", label: "Zoom to Selection", ariaLabel: "Zoom to Selection", icon: "🎯" },
+          ],
+        },
+        {
+          id: "view.workbookViews",
+          label: "Workbook Views",
+          buttons: [
+            { id: "view.workbookViews.normal", label: "Normal", ariaLabel: "Normal View", icon: "▦", kind: "toggle", defaultPressed: true, size: "large" },
+            { id: "view.workbookViews.pageBreakPreview", label: "Page Break Preview", ariaLabel: "Page Break Preview", icon: "⤶", kind: "toggle", size: "large" },
+            { id: "view.workbookViews.pageLayout", label: "Page Layout", ariaLabel: "Page Layout View", icon: "📄", kind: "toggle", size: "large" },
+            {
+              id: "view.workbookViews.customViews",
+              label: "Custom Views",
+              ariaLabel: "Custom Views",
+              icon: "👁",
+              kind: "dropdown",
+              menuItems: [
+                { id: "view.workbookViews.customViews", label: "Custom Views…", ariaLabel: "Custom Views", icon: "👁" },
+                { id: "view.workbookViews.customViews.manage", label: "Manage Views…", ariaLabel: "Manage Views", icon: "⚙️" },
+              ],
+            },
           ],
         },
         {
