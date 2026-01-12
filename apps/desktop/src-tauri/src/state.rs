@@ -996,6 +996,14 @@ impl AppState {
             (current, visible_count)
         };
 
+        // The desktop UI only exposes "visible" / "hidden". Preserve `veryHidden` when present in
+        // imported workbooks, but do not allow the webview to set it.
+        if matches!(visibility, SheetVisibility::VeryHidden) {
+            return Err(AppStateError::WhatIf(
+                "setting veryHidden sheet visibility is not supported".to_string(),
+            ));
+        }
+
         // Excel invariant: cannot hide the last visible sheet.
         if matches!(current, SheetVisibility::Visible)
             && !matches!(visibility, SheetVisibility::Visible)
@@ -1032,10 +1040,18 @@ impl AppState {
 
         {
             let workbook = self.get_workbook_mut()?;
-            let sheet = workbook
-                .sheet_mut(sheet_id)
-                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
-            sheet.visibility = visibility;
+            {
+                let sheet = workbook
+                    .sheet_mut(sheet_id)
+                    .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+                sheet.visibility = visibility;
+            }
+
+            // Sheet visibility is workbook.xml metadata. The patch-based save path only patches
+            // worksheet cell XML, so drop origin bytes to force regeneration from storage on the
+            // next save/export.
+            workbook.origin_xlsx_bytes = None;
+            workbook.origin_xlsb_path = None;
         }
 
         self.dirty = true;
@@ -1089,10 +1105,18 @@ impl AppState {
 
         {
             let workbook = self.get_workbook_mut()?;
-            let sheet = workbook
-                .sheet_mut(sheet_id)
-                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
-            sheet.tab_color = tab_color;
+            {
+                let sheet = workbook
+                    .sheet_mut(sheet_id)
+                    .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+                sheet.tab_color = tab_color;
+            }
+
+            // Tab color lives in worksheet metadata (`sheetPr/tabColor`). The patch-based save path
+            // only patches worksheet cell XML, so drop origin bytes to force regeneration from
+            // storage on the next save/export.
+            workbook.origin_xlsx_bytes = None;
+            workbook.origin_xlsb_path = None;
         }
 
         self.dirty = true;
