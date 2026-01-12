@@ -415,9 +415,12 @@ export class DocumentCellProvider implements CellProvider {
         const rowStyleDeltas = Array.isArray(payload?.rowStyleDeltas) ? payload.rowStyleDeltas : [];
         const colStyleDeltas = Array.isArray(payload?.colStyleDeltas) ? payload.colStyleDeltas : [];
         const sheetStyleDeltas = Array.isArray(payload?.sheetStyleDeltas) ? payload.sheetStyleDeltas : [];
+        // DocumentController emits layered format updates as `formatDeltas`.
+        const formatDeltas = Array.isArray(payload?.formatDeltas) ? payload.formatDeltas : [];
 
         const recalc = payload?.recalc === true;
-        const hasFormatLayerDeltas = rowStyleDeltas.length > 0 || colStyleDeltas.length > 0 || sheetStyleDeltas.length > 0;
+        const hasFormatLayerDeltas =
+          rowStyleDeltas.length > 0 || colStyleDeltas.length > 0 || sheetStyleDeltas.length > 0 || formatDeltas.length > 0;
 
         // No cell deltas + no formatting deltas: preserve the sheet-view optimization.
         if (deltas.length === 0 && !hasFormatLayerDeltas) {
@@ -439,7 +442,8 @@ export class DocumentCellProvider implements CellProvider {
             // If the delta doesn't specify a sheet, conservatively assume it impacts the visible sheet.
             if (id == null) return true;
             return String(id) === sheetId;
-          })
+          }) ||
+          formatDeltas.some((delta: any) => delta && String(delta.sheetId ?? "") === sheetId && delta.layer === "sheet")
         ) {
           this.invalidateAll();
           return;
@@ -554,7 +558,10 @@ export class DocumentCellProvider implements CellProvider {
           });
         }
 
-        const rowSpan = collectAxisSpan(rowStyleDeltas, "row");
+        const rowSpan = collectAxisSpan(
+          [...rowStyleDeltas, ...formatDeltas.filter((d: any) => d && d.layer === "row")],
+          "row"
+        );
         if (rowSpan === "unknown") {
           this.invalidateAll();
           return;
@@ -568,7 +575,10 @@ export class DocumentCellProvider implements CellProvider {
           });
         }
 
-        const colSpan = collectAxisSpan(colStyleDeltas, "col");
+        const colSpan = collectAxisSpan(
+          [...colStyleDeltas, ...formatDeltas.filter((d: any) => d && d.layer === "col")],
+          "col"
+        );
         if (colSpan === "unknown") {
           this.invalidateAll();
           return;
