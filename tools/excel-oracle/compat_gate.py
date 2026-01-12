@@ -347,6 +347,31 @@ def main() -> int:
         env["CARGO_HOME"] = str(repo_root / "target" / "cargo-home")
     Path(env["CARGO_HOME"]).mkdir(parents=True, exist_ok=True)
 
+    # Concurrency defaults: keep Rust builds stable on high-core-count multi-agent hosts.
+    #
+    # Prefer explicit overrides, but default to a conservative job count when unset.
+    jobs_raw = env.get("FORMULA_CARGO_JOBS") or env.get("CARGO_BUILD_JOBS") or "4"
+    try:
+        jobs_int = int(jobs_raw)
+    except ValueError:
+        jobs_int = 4
+    if jobs_int < 1:
+        jobs_int = 4
+    jobs = str(jobs_int)
+
+    env["CARGO_BUILD_JOBS"] = jobs
+    env.setdefault("MAKEFLAGS", f"-j{jobs}")
+    env.setdefault("CARGO_PROFILE_DEV_CODEGEN_UNITS", jobs)
+    env.setdefault("CARGO_PROFILE_TEST_CODEGEN_UNITS", jobs)
+    env.setdefault("CARGO_PROFILE_RELEASE_CODEGEN_UNITS", jobs)
+    env.setdefault("CARGO_PROFILE_BENCH_CODEGEN_UNITS", jobs)
+    env.setdefault("RAYON_NUM_THREADS", env.get("FORMULA_RAYON_NUM_THREADS") or jobs)
+
+    # Some environments configure Cargo to use `sccache` via a global config file. Prefer
+    # compiling locally for determinism/reliability unless the user explicitly opted in.
+    env.setdefault("RUSTC_WRAPPER", "")
+    env.setdefault("RUSTC_WORKSPACE_WRAPPER", "")
+
     engine_cmd = _build_engine_cmd(
         cases_path=cases_path,
         actual_path=actual_path,

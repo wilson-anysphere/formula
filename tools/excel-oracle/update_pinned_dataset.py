@@ -78,6 +78,57 @@ def _write_json(path: Path, payload: Any) -> None:
         f.write("\n")
 
 
+def _tool_env(repo_root: Path) -> dict[str, str]:
+    """
+    Build a conservative environment for running Cargo tools.
+
+    In agent/CI environments we often want to avoid:
+    - global Cargo home lock contention across concurrent processes
+    - user/global Cargo config (which can set `build.rustc-wrapper = "sccache"` and be flaky)
+    - extreme default parallelism on high-core-count hosts
+    """
+
+    env = dict(os.environ)
+
+    default_global_cargo_home = Path.home() / ".cargo"
+    cargo_home = env.get("CARGO_HOME")
+    cargo_home_path = Path(cargo_home).expanduser() if cargo_home else None
+
+    if not cargo_home or (
+        not env.get("CI")
+        and not env.get("FORMULA_ALLOW_GLOBAL_CARGO_HOME")
+        and cargo_home_path == default_global_cargo_home
+    ):
+        env["CARGO_HOME"] = str(repo_root / "target" / "cargo-home")
+
+    Path(env["CARGO_HOME"]).mkdir(parents=True, exist_ok=True)
+
+    # Some environments configure Cargo to use `sccache` via a global config file. Prefer
+    # compiling locally for determinism/reliability unless the user explicitly opted in.
+    env.setdefault("RUSTC_WRAPPER", "")
+    env.setdefault("RUSTC_WORKSPACE_WRAPPER", "")
+
+    # Concurrency defaults: keep Rust builds stable on high-core-count multi-agent hosts.
+    jobs_raw = env.get("FORMULA_CARGO_JOBS") or env.get("CARGO_BUILD_JOBS") or "4"
+    try:
+        jobs_int = int(jobs_raw)
+    except ValueError:
+        jobs_int = 4
+    if jobs_int < 1:
+        jobs_int = 4
+    jobs = str(jobs_int)
+
+    env["CARGO_BUILD_JOBS"] = jobs
+    env.setdefault("MAKEFLAGS", f"-j{jobs}")
+    env.setdefault("CARGO_PROFILE_DEV_CODEGEN_UNITS", jobs)
+    env.setdefault("CARGO_PROFILE_TEST_CODEGEN_UNITS", jobs)
+    env.setdefault("CARGO_PROFILE_RELEASE_CODEGEN_UNITS", jobs)
+    env.setdefault("CARGO_PROFILE_BENCH_CODEGEN_UNITS", jobs)
+    env.setdefault("RAYON_NUM_THREADS", env.get("FORMULA_RAYON_NUM_THREADS") or jobs)
+
+    return env
+
+
 def _stable_case_path_string(*, repo_root: Path, cases_path: Path) -> str:
     try:
         rel = cases_path.resolve().relative_to(repo_root.resolve())
@@ -103,10 +154,11 @@ def _run_formula_excel_oracle(
     engine_bin: Path | None,
     cases_path: Path,
     out_path: Path,
+    env: dict[str, str] | None,
 ) -> None:
     if engine_bin is not None:
         cmd = [str(engine_bin), "--cases", str(cases_path), "--out", str(out_path)]
-        subprocess.run(cmd, cwd=str(repo_root), check=True)
+        subprocess.run(cmd, cwd=str(repo_root), env=env, check=True)
         return
 
     cmd = [
@@ -122,7 +174,7 @@ def _run_formula_excel_oracle(
         "--out",
         str(out_path),
     ]
-    subprocess.run(cmd, cwd=str(repo_root), check=True)
+    subprocess.run(cmd, cwd=str(repo_root), env=env, check=True)
 
 
 def update_pinned_dataset(
@@ -132,6 +184,7 @@ def update_pinned_dataset(
     merge_results_paths: list[Path],
     engine_bin: Path | None,
     run_engine_for_missing: bool,
+    env: dict[str, str] | None,
     force_engine: bool = False,
     overwrite_existing: bool = False,
 ) -> tuple[int, int]:
@@ -247,7 +300,11 @@ def update_pinned_dataset(
             tmp_results = tmp_dir / "missing-results.json"
             _write_json(tmp_cases, temp_corpus)
             _run_formula_excel_oracle(
-                repo_root=repo_root, engine_bin=engine_bin, cases_path=tmp_cases, out_path=tmp_results
+                repo_root=repo_root,
+                engine_bin=engine_bin,
+                cases_path=tmp_cases,
+                out_path=tmp_results,
+                env=env,
             )
             payload = _load_json(tmp_results)
             for r in _iter_result_entries(payload):
@@ -333,6 +390,7 @@ def main() -> int:
     args = p.parse_args()
 
     repo_root = Path(__file__).resolve().parents[2]
+    env = _tool_env(repo_root)
     cases_path = (repo_root / args.cases).resolve() if not os.path.isabs(args.cases) else Path(args.cases)
     pinned_path = (repo_root / args.pinned).resolve() if not os.path.isabs(args.pinned) else Path(args.pinned)
 
@@ -352,6 +410,7 @@ def main() -> int:
         merge_results_paths=merge_results_paths,
         engine_bin=engine_bin,
         run_engine_for_missing=not args.no_engine,
+        env=env,
         force_engine=args.force_engine,
         overwrite_existing=args.overwrite_existing,
     )
