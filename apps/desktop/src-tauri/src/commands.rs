@@ -3583,10 +3583,10 @@ pub async fn write_clipboard(
     image_png_base64: Option<String>,
 ) -> Result<(), String> {
     let payload = crate::clipboard::ClipboardWritePayload {
-        text,
+        text: Some(text),
         html,
         rtf,
-        image_png_base64,
+        png_base64: image_png_base64,
     };
     tauri::async_runtime::spawn_blocking(move || crate::clipboard::write(&payload).map_err(|e| e.to_string()))
         .await

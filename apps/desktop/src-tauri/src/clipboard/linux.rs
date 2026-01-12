@@ -83,13 +83,13 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         let text = clipboard.wait_for_text().map(|s| s.to_string());
         let html = wait_for_utf8_targets(&clipboard, &["text/html", "text/html;charset=utf-8"]);
         let rtf = wait_for_utf8_targets(&clipboard, &["text/rtf", "application/rtf"]);
-        let image_png_base64 = wait_for_bytes_base64(&clipboard, "image/png");
+        let png_base64 = wait_for_bytes_base64(&clipboard, "image/png");
 
         Ok(ClipboardContent {
             text,
             html,
             rtf,
-            image_png_base64,
+            png_base64,
         })
     })
 }
@@ -99,7 +99,7 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
     let html = payload.html.clone();
     let rtf = payload.rtf.clone();
     let png_bytes = payload
-        .image_png_base64
+        .png_base64
         .as_deref()
         .filter(|s| !s.is_empty())
         .map(|s| {
@@ -122,13 +122,15 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         let flags = gtk::TargetFlags::OTHER_APP;
         let mut targets: Vec<gtk::TargetEntry> = Vec::new();
 
-        // Provide common plaintext targets so other apps can pick their preferred flavor.
-        // (GTK's own `set_text` would also do this, but we need to set multiple targets at once.)
-        targets.push(gtk::TargetEntry::new("text/plain", flags, INFO_TEXT));
-        targets.push(gtk::TargetEntry::new("text/plain;charset=utf-8", flags, INFO_TEXT));
-        targets.push(gtk::TargetEntry::new("UTF8_STRING", flags, INFO_TEXT));
-        targets.push(gtk::TargetEntry::new("STRING", flags, INFO_TEXT));
-        targets.push(gtk::TargetEntry::new("TEXT", flags, INFO_TEXT));
+        if text.is_some() {
+            // Provide common plaintext targets so other apps can pick their preferred flavor.
+            // (GTK's own `set_text` would also do this, but we need to set multiple targets at once.)
+            targets.push(gtk::TargetEntry::new("text/plain", flags, INFO_TEXT));
+            targets.push(gtk::TargetEntry::new("text/plain;charset=utf-8", flags, INFO_TEXT));
+            targets.push(gtk::TargetEntry::new("UTF8_STRING", flags, INFO_TEXT));
+            targets.push(gtk::TargetEntry::new("STRING", flags, INFO_TEXT));
+            targets.push(gtk::TargetEntry::new("TEXT", flags, INFO_TEXT));
+        }
 
         if html.is_some() {
             targets.push(gtk::TargetEntry::new("text/html", flags, INFO_HTML));
@@ -149,7 +151,9 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         let success = clipboard.set_with_data(&targets, move |_clipboard, selection_data, info| {
             match info {
                 INFO_TEXT => {
-                    selection_data.set(&selection_data.target(), 8, text.as_bytes());
+                    if let Some(ref text) = text {
+                        selection_data.set(&selection_data.target(), 8, text.as_bytes());
+                    }
                 }
                 INFO_HTML => {
                     if let Some(ref html) = html {

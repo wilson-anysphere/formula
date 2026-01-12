@@ -8,6 +8,7 @@ mod asset_protocol;
 mod menu;
 mod tray;
 
+use desktop::clipboard;
 use desktop::commands;
 use desktop::macro_trust::{compute_macro_fingerprint, MacroTrustStore, SharedMacroTrustStore};
 use desktop::macros::MacroExecutionOptions;
@@ -428,6 +429,8 @@ fn main() {
         .manage(TrayStatusState::default())
         .manage(startup_metrics)
         .invoke_handler(tauri::generate_handler![
+            clipboard::clipboard_read,
+            clipboard::clipboard_write,
             commands::open_workbook,
             commands::new_workbook,
             commands::add_sheet,
