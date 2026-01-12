@@ -55,6 +55,11 @@ SMOKE_INCLUDE_TAGS = [
     "SORT",
     "UNIQUE",
     "ISERROR",
+    # Small, high-signal slice of statistical regression functions.
+    "LINEST",
+    "LOGEST",
+    "TREND",
+    "GROWTH",
     # Thai deterministic localization functions (BAHTTEXT/THAI*/ROUNDBAHT*).
     "thai",
     # Exercise small-but-important date validation boundary conditions (e.g. odd-coupon bonds where
