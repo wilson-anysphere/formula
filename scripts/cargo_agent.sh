@@ -206,6 +206,23 @@ if [[ "${subcommand}" == "test" && -z "${RUST_TEST_THREADS:-}" ]]; then
   export RUST_TEST_THREADS="${rust_test_threads}"
 fi
 
+# Limit rustc's internal codegen parallelism on multi-agent hosts.
+#
+# Even with `cargo -j` and Rayon's thread pool capped, rustc/LLVM may still spawn helper threads
+# and/or one worker thread per codegen unit. Under high system load this can fail with
+# "Resource temporarily unavailable" (EAGAIN) and crash compilation.
+#
+# Default to a single codegen unit for tests to reduce thread usage. Callers can override via the
+# standard Cargo env vars (`CARGO_PROFILE_{dev,test}_CODEGEN_UNITS`).
+if [[ "${subcommand}" == "test" ]]; then
+  if [[ -z "${CARGO_PROFILE_DEV_CODEGEN_UNITS:-}" ]]; then
+    export CARGO_PROFILE_DEV_CODEGEN_UNITS="1"
+  fi
+  if [[ -z "${CARGO_PROFILE_TEST_CODEGEN_UNITS:-}" ]]; then
+    export CARGO_PROFILE_TEST_CODEGEN_UNITS="1"
+  fi
+fi
+
 # Only some Cargo subcommands accept `-j/--jobs`. `cargo fmt`, `cargo clean`, etc
 # reject it, and we want `cargo_agent.sh` to be usable for *any* cargo invocation.
 case "${subcommand}" in

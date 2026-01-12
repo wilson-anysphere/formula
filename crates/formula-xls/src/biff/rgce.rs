@@ -842,10 +842,17 @@ pub(crate) fn decode_biff8_rgce_with_base(
 }
 
 fn unsupported(ptg: u8, warnings: Vec<String>) -> DecodeRgceResult {
+    let mut warnings = warnings;
+    // The BIFF8 rgce decoder is best-effort: for tokens we can't decode, we still want a formula
+    // string that is parseable by downstream consumers. Emit a stable, known Excel error literal
+    // (`#UNKNOWN!`) and include the ptg id in warnings for debugging/telemetry.
+    let msg = format!("unsupported rgce token 0x{ptg:02X}");
+    if !warnings.iter().any(|w| w == &msg) {
+        warnings.push(msg);
+    }
     DecodeRgceResult {
-        // Use a parseable error literal (no parentheses) so downstream formula parsing can still
-        // succeed when we hit an unsupported ptg.
-        text: format!("#UNSUPPORTED_PTG_0x{ptg:02X}!"),
+        // Use a parseable error literal so downstream formula parsing can still succeed.
+        text: "#UNKNOWN!".to_string(),
         warnings,
     }
 }
@@ -1972,10 +1979,10 @@ mod tests {
 
         let rgce = [0x00];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
-        assert_eq!(decoded.text, "#UNSUPPORTED_PTG_0x00!");
+        assert_eq!(decoded.text, "#UNKNOWN!");
         assert!(
-            !decoded.warnings.is_empty(),
-            "expected warning for unsupported ptg, warnings={:?}",
+            decoded.warnings.iter().any(|w| w.contains("0x00")),
+            "expected warning to include original ptg id, warnings={:?}",
             decoded.warnings
         );
         assert_parseable(&decoded.text);

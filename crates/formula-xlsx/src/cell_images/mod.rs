@@ -4,8 +4,8 @@
 //! appear to rely on a workbook-level `xl/cellimages*.xml` part containing
 //! DrawingML `<pic>` payloads that reference media via relationships.
 mod part_info;
-
 pub use part_info::{CellImageEmbed, CellImagesPartInfo};
+
 use std::collections::{BTreeMap, HashMap};
 
 use formula_model::drawings::{ImageData, ImageId};
@@ -41,6 +41,7 @@ pub(crate) fn load_cell_images_from_parts(
         let _ = parse_cell_images_part(path, parts, workbook);
     }
 }
+
 /// Parsed workbook-level cell images parts.
 #[derive(Debug, Clone, Default)]
 pub struct CellImages {
