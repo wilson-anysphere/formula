@@ -4,14 +4,12 @@ import { createLLMClient } from "./createLLMClient.js";
 import { CursorLLMClient } from "./cursor.js";
 
 describe("createLLMClient", () => {
-  it("creates a Cursor client by default", () => {
+  it("creates a Cursor backend client", () => {
     const client = createLLMClient();
     expect(client).toBeInstanceOf(CursorLLMClient);
   });
 
-  it("throws when passed a legacy provider config", () => {
-    expect(() => createLLMClient({ provider: "openai", apiKey: "test" } as any)).toThrowError(
-      /Provider selection is no longer supported; all AI uses Cursor backend\./,
-    );
+  it("rejects legacy configuration arguments", () => {
+    expect(() => (createLLMClient as any)({})).toThrow(/no longer accepts/);
   });
 });
