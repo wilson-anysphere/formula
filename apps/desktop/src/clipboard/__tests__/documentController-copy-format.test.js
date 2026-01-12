@@ -40,6 +40,18 @@ test("copyRangeToClipboardPayload formats m/d/yyyy date serials (UI date preset)
   assert.match(payload.html, /data-number-format="m\/d\/yyyy"/);
 });
 
+test("copyRangeToClipboardPayload formats hh:mm:ss time serials (Time preset)", () => {
+  const doc = new DocumentController();
+
+  const serial = (3 * 3600 + 4 * 60 + 5) / 86_400;
+  doc.setRangeValues("Sheet1", "A1", [[{ value: serial, format: { numberFormat: "hh:mm:ss" } }]]);
+
+  const payload = copyRangeToClipboardPayload(doc, "Sheet1", "A1");
+  assert.equal(payload.text, "03:04:05");
+  assert.ok(payload.html);
+  assert.match(payload.html, /data-number-format="hh:mm:ss"/);
+});
+
 test("copyRangeToClipboardPayload serializes rich text values as plain text", () => {
   const doc = new DocumentController();
 

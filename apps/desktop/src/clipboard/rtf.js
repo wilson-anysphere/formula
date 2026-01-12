@@ -58,6 +58,26 @@ function isLikelyDateNumberFormat(fmt) {
   return lower.includes("yyyy-mm-dd") || lower.includes("m/d/yyyy");
 }
 
+function isLikelyTimeNumberFormat(fmt) {
+  if (typeof fmt !== "string") return false;
+  const compact = fmt.toLowerCase().replace(/\s+/g, "");
+  return /^h{1,2}:m{1,2}(:s{1,2})?$/.test(compact);
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function formatExcelTime(serial, fmt) {
+  const date = excelSerialToDate(serial);
+  const hh = date.getUTCHours();
+  const mm = date.getUTCMinutes();
+  const ss = date.getUTCSeconds();
+  const compact = String(fmt).toLowerCase().replace(/\s+/g, "");
+  const hasSeconds = compact.includes(":s");
+  return hasSeconds ? `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}` : `${pad2(hh)}:${pad2(mm)}`;
+}
+
 function clampByte(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return 0;
@@ -338,6 +358,10 @@ function cellValueToRtf(cell) {
     const date = excelSerialToDate(value);
     const lower = numberFormat.toLowerCase();
     return lower.includes("h") ? date.toISOString() : date.toISOString().slice(0, 10);
+  }
+
+  if (typeof value === "number" && isLikelyTimeNumberFormat(numberFormat)) {
+    return formatExcelTime(value, numberFormat);
   }
 
   return String(value);

@@ -39,6 +39,15 @@ export function parseScalar(rawInput) {
     if (Number.isFinite(num)) return { value: num, type: "number" };
   }
 
+  const timeOnly = parseTimeOnlyToExcelSerial(trimmed);
+  if (timeOnly) {
+    return {
+      value: timeOnly.serial,
+      type: "datetime",
+      numberFormat: timeOnly.numberFormat,
+    };
+  }
+
   if (isIsoLikeDateString(trimmed)) {
     const parsed = parseIsoLikeToUtcDate(trimmed);
     if (parsed) {
@@ -101,6 +110,22 @@ export function isIsoLikeDateString(rawInput) {
   }
 
   return false;
+}
+
+function parseTimeOnlyToExcelSerial(input) {
+  // Time-only values are locale-agnostic and safe to infer (unlike `1/2/2024` dates).
+  // Accept `H:MM` / `HH:MM` / `H:MM:SS` / `HH:MM:SS` (24-hour).
+  const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(input);
+  if (!match) return null;
+  const hh = Number(match[1]);
+  const mm = Number(match[2]);
+  const ss = match[3] != null ? Number(match[3]) : 0;
+  if (!Number.isInteger(hh) || hh < 0 || hh > 23) return null;
+  if (!Number.isInteger(mm) || mm < 0 || mm > 59) return null;
+  if (!Number.isInteger(ss) || ss < 0 || ss > 59) return null;
+
+  const serial = (hh * 3600 + mm * 60 + ss) / 86_400;
+  return { serial, numberFormat: match[3] != null ? "hh:mm:ss" : "hh:mm" };
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;

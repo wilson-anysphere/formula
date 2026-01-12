@@ -43,6 +43,18 @@ test("CSV import infers column types and preserves header strings", () => {
   assert.equal(grid[1][3].format.numberFormat, "yyyy-mm-dd");
 });
 
+test("CSV import parses time-only values into Excel serials with hh:mm:ss number formats", () => {
+  const csv = "time\n03:04:05\n";
+  const { grid } = importCsvToCellGrid(csv, { delimiter: "," });
+
+  assert.equal(grid[0][0].value, "time");
+
+  const expectedSerial = (3 * 3600 + 4 * 60 + 5) / 86_400;
+  assert.equal(typeof grid[1][0].value, "number");
+  assert.ok(Math.abs(grid[1][0].value - expectedSerial) < 1e-10);
+  assert.equal(grid[1][0].format.numberFormat, "hh:mm:ss");
+});
+
 test("CSV import treats leading whitespace before '=' as a formula indicator", () => {
   const csv = "col\n  =SUM(A1:A2)\n=\n";
   const { grid } = importCsvToCellGrid(csv, { delimiter: "," });
@@ -126,6 +138,23 @@ test("CSV export treats m/d/yyyy numberFormat as date-like and serializes to an 
 
   const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A1");
   assert.equal(csv, "2024-01-31");
+});
+
+test("CSV export serializes time-only numberFormats (hh:mm:ss) as HH:MM:SS", () => {
+  const doc = new DocumentController();
+  const serial = (3 * 3600 + 4 * 60 + 5) / 86_400;
+
+  doc.setCellValue("Sheet1", "A1", serial);
+  doc.setRangeFormat("Sheet1", "A1", { numberFormat: "hh:mm:ss" });
+
+  const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A1");
+  assert.equal(csv, "03:04:05");
+
+  // Round trip through CSV import should preserve the typed serial + number format.
+  const { grid } = importCsvToCellGrid(csv, { delimiter: "," });
+  assert.equal(typeof grid[0][0].value, "number");
+  assert.ok(Math.abs(grid[0][0].value - serial) < 1e-10);
+  assert.equal(grid[0][0].format.numberFormat, "hh:mm:ss");
 });
 
 test("CSV export respects layered column formats (styleId may be 0)", () => {
