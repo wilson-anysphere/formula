@@ -236,6 +236,29 @@ fn csv_import_autodetects_decimal_comma_locale_for_semicolon_csv() {
 }
 
 #[test]
+fn csv_import_autodetects_tab_delimiter_for_decimal_comma_values() {
+    // Without a header row, delimiter sniffing can be ambiguous: decimal commas can make the input
+    // look comma-delimited. Ensure we still pick the real delimiter (tab) when the sample suggests
+    // a decimal-comma locale.
+    let tsv = "1,23\t4,56\n7,89\t0,12\n";
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(tsv.as_bytes()),
+        CsvOptions {
+            has_header: false,
+            ..CsvOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.23));
+    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::Number(4.56));
+    assert_eq!(sheet.value(CellRef::new(1, 0)), CellValue::Number(7.89));
+    assert_eq!(sheet.value(CellRef::new(1, 1)), CellValue::Number(0.12));
+}
+
+#[test]
 fn csv_import_date_order_preference_changes_ambiguous_dates() {
     let csv = "d\n01/02/1970\n";
 

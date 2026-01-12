@@ -810,9 +810,9 @@ fn select_sniffed_csv_delimiter(hists: &[HashMap<usize, usize>], decimal_separat
     // count (mode field count), matching Excel-like behavior.
     //
     // Tie-break:
-    // - In locales where `,` is the decimal separator, `;` is commonly used as the CSV delimiter.
-    //   If `;` and `,` are equally consistent, prefer `;` to avoid mistaking decimal commas for
-    //   field separators.
+    // - In locales where `,` is the decimal separator, `,` commonly appears inside numeric values.
+    //   If `,` is equally consistent as another delimiter, prefer the non-comma delimiter to avoid
+    //   splitting decimal values into separate fields (Excel-like behavior; commonly `;`).
     // - Otherwise, tie-break deterministically in `CSV_SNIFF_DELIMITERS` order: `,` > `;` > tab > `|`.
 
     #[derive(Clone, Copy, Debug, Default)]
@@ -844,18 +844,34 @@ fn select_sniffed_csv_delimiter(hists: &[HashMap<usize, usize>], decimal_separat
     }
 
     if decimal_separator == ',' {
-        let mut comma = None;
-        let mut semicolon = None;
-        for (idx, delim) in CSV_SNIFF_DELIMITERS.iter().enumerate() {
-            match *delim {
-                b',' => comma = Some(idx),
-                b';' => semicolon = Some(idx),
-                _ => {}
-            }
-        }
-        if let (Some(comma_idx), Some(semi_idx)) = (comma, semicolon) {
-            if stats[comma_idx].mode_count == max_mode_count && stats[semi_idx].mode_count == max_mode_count {
-                return b';';
+        // In decimal-comma locales, `,` commonly appears inside numeric values. When comma-delimited
+        // parsing is equally consistent as another delimiter, bias away from `,` so we don't split
+        // decimal values into separate fields.
+        if let Some(comma_idx) = CSV_SNIFF_DELIMITERS.iter().position(|d| *d == b',') {
+            if stats[comma_idx].mode_count == max_mode_count {
+                let mut best_non_comma: Option<usize> = None;
+                for (idx, stat) in stats.iter().enumerate() {
+                    if idx == comma_idx {
+                        continue;
+                    }
+                    if stat.mode_count != max_mode_count {
+                        continue;
+                    }
+                    match best_non_comma {
+                        None => best_non_comma = Some(idx),
+                        Some(best) => {
+                            if stat.mode_fields > stats[best].mode_fields {
+                                best_non_comma = Some(idx);
+                            } else if stat.mode_fields == stats[best].mode_fields && idx < best {
+                                best_non_comma = Some(idx);
+                            }
+                        }
+                    }
+                }
+
+                if let Some(idx) = best_non_comma {
+                    return CSV_SNIFF_DELIMITERS[idx];
+                }
             }
         }
     }
