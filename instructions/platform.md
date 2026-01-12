@@ -81,8 +81,9 @@ Key config fields you'll touch most often:
 - `plugins.*`: plugin configuration (e.g. updater)
 
 > Note on permissions: Tauri v1 used a `tauri.allowlist` section. **Tauri v2 uses capabilities**
-> to grant access to core APIs and plugins. Once we wire capabilities into this repo, the
-> definitions should live under `apps/desktop/src-tauri/capabilities/` (Tauri's default location).
+> to grant access to core APIs and plugins. Capabilities are defined under
+> `apps/desktop/src-tauri/capabilities/` (e.g. `main.json`) and referenced from
+> `apps/desktop/src-tauri/tauri.conf.json` via `app.windows[].capabilities`.
 
 ### Auto-Update
 

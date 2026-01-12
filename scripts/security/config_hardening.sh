@@ -45,29 +45,88 @@ def jget(obj, *keys, default=None):
         cur = cur[k]
     return cur
 
-allow_all = jget(data, "tauri", "allowlist", "all", default=False)
-shell_open = jget(data, "tauri", "allowlist", "shell", "open", default=False)
+# Tauri v2 config uses `app.*` keys (and window-scoped capabilities) instead of the old v1
+# `tauri.allowlist` / `tauri.security.*` sections.
+#
+# Keep best-effort support for v1 so this script remains reusable if other repos still have v1 configs.
+allow_all = jget(data, "tauri", "allowlist", "all", default=None)
+shell_open = jget(data, "tauri", "allowlist", "shell", "open", default=None)
 
-csp = jget(data, "tauri", "security", "csp", default=None)
-danger_disable_csp_mod = jget(data, "tauri", "security", "dangerousDisableAssetCspModification", default=False)
+csp = jget(data, "app", "security", "csp", default=None)
+csp_key = "app.security.csp"
+danger_disable_csp_mod = jget(data, "app", "security", "dangerousDisableAssetCspModification", default=None)
+danger_key = "app.security.dangerousDisableAssetCspModification"
+
+if csp is None:
+    csp = jget(data, "tauri", "security", "csp", default=None)
+    csp_key = "tauri.security.csp"
+
+if danger_disable_csp_mod is None:
+    danger_disable_csp_mod = jget(data, "tauri", "security", "dangerousDisableAssetCspModification", default=False)
+    danger_key = "tauri.security.dangerousDisableAssetCspModification"
 
 problems = []
+
+# Legacy v1 allowlist checks (if present).
 if allow_all is True:
     problems.append("tauri.allowlist.all must not be true")
 if shell_open is True:
     problems.append("tauri.allowlist.shell.open must not be true (avoid arbitrary URL/file opening)")
+
+# CSP checks (v2: app.security.csp; v1: tauri.security.csp).
 if danger_disable_csp_mod is True:
-    problems.append("tauri.security.dangerousDisableAssetCspModification must not be true")
+    problems.append(f"{danger_key} must not be true")
 
 if not isinstance(csp, str) or not csp.strip():
-    problems.append("tauri.security.csp must be a non-empty string")
+    problems.append(f"{csp_key} must be a non-empty string")
 else:
     # Fail on trivially permissive CSP patterns.
     normalized = " ".join(csp.split()).lower()
     if "default-src *" in normalized or "default-src *;" in normalized:
-        problems.append("tauri.security.csp must not use `default-src *`")
+        problems.append(f"{csp_key} must not use `default-src *`")
     if "default-src" in normalized and "'self'" not in normalized:
-        problems.append("tauri.security.csp should include `default-src 'self'` (or equivalent restriction)")
+        problems.append(f"{csp_key} should include `default-src 'self'` (or equivalent restriction)")
+
+# Capabilities checks (Tauri v2).
+capabilities = set()
+windows = jget(data, "app", "windows", default=[])
+if isinstance(windows, list):
+    for w in windows:
+        if isinstance(w, dict) and isinstance(w.get("capabilities"), list):
+            for cap in w["capabilities"]:
+                if isinstance(cap, str) and cap.strip():
+                    capabilities.add(cap.strip())
+
+if capabilities:
+    cap_dir = path.parent / "capabilities"
+    if not cap_dir.is_dir():
+        problems.append(f"Missing capabilities directory: {cap_dir} (referenced by app.windows[].capabilities)")
+    else:
+        cap_files = list(cap_dir.glob("*.json"))
+        parsed_caps = {}
+        for cap_file in cap_files:
+            try:
+                parsed = json.loads(cap_file.read_text(encoding="utf-8"))
+            except Exception as e:
+                problems.append(f"Invalid JSON in capability file {cap_file}: {e}")
+                continue
+            identifier = parsed.get("identifier")
+            if isinstance(identifier, str) and identifier.strip():
+                parsed_caps[identifier.strip()] = (cap_file, parsed)
+
+        for cap in sorted(capabilities):
+            if cap not in parsed_caps:
+                problems.append(f"Capability '{cap}' is referenced but no matching JSON file was found under {cap_dir}/*.json")
+                continue
+            cap_file, cap_data = parsed_caps[cap]
+            perms = cap_data.get("permissions")
+            if not isinstance(perms, list) or not perms:
+                problems.append(f"{cap_file}: permissions must be a non-empty array")
+                continue
+            # Best-effort guardrail: avoid obviously over-broad permissions.
+            for p in perms:
+                if isinstance(p, str) and "allow-all" in p:
+                    problems.append(f"{cap_file}: permission '{p}' looks overly broad (avoid *:allow-all)")
 
 if problems:
     print("    ❌ FAIL")
@@ -115,4 +174,3 @@ else
 fi
 
 exit "$fail"
-

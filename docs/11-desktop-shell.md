@@ -321,11 +321,11 @@ This repo’s desktop shell currently relies primarily on:
 - explicit Rust `#[tauri::command]` functions in `apps/desktop/src-tauri/src/commands.rs` for privileged operations
 - a small set of runtime JS APIs (`__TAURI__.event`, `__TAURI__.window`, `__TAURI__.dialog`)
 
-Capabilities hardening work should live alongside the Tauri app, typically under:
+Capabilities live alongside the Tauri app under:
 
-- `apps/desktop/src-tauri/capabilities/` (planned location; add JSON capability files here as we adopt/lock down more APIs)
+- `apps/desktop/src-tauri/capabilities/` (see `main.json`)
 
-When capabilities are implemented/expanded, add a short pointer here to the dedicated capabilities/security doc.
+The `tauri.conf.json` window config references capabilities via `app.windows[].capabilities`.
 
 ---
 
