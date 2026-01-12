@@ -2118,9 +2118,17 @@ export class CanvasGridRenderer {
     };
 
     const rects = this.rangeToViewportRects(overflowExpanded, viewport);
+    // Borders are rendered using strokes centered on cell edges; to ensure incremental renders
+    // correctly clear + redraw borders (including thick/double borders that extend beyond the
+    // updated cell rect), pad the dirty region slightly.
+    //
+    // We intentionally keep this as a small constant derived from zoom rather than scanning for
+    // the exact maximum border width, which would be expensive for large update ranges.
+    const borderDirtyPaddingPx = Math.max(1, Math.ceil(2 * this.zoom));
     for (const rect of rects) {
-      this.dirty.background.markDirty(rect);
-      this.dirty.content.markDirty(rect);
+      const padded = borderDirtyPaddingPx > 0 ? padRect(rect, borderDirtyPaddingPx) : rect;
+      this.dirty.background.markDirty(padded);
+      this.dirty.content.markDirty(padded);
     }
     this.requestRender();
   }

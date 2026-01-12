@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CellProvider, CellRange } from "../../model/CellProvider";
+import type { CellProvider, CellProviderUpdate, CellRange } from "../../model/CellProvider";
 import { CanvasGridRenderer } from "../CanvasGridRenderer";
 
 type Segment = { x1: number; y1: number; x2: number; y2: number };
 type StrokeRecord = { strokeStyle: unknown; lineWidth: number; lineDash: number[]; segments: Segment[] };
+type RectCall = { x: number; y: number; width: number; height: number };
 
-function createRecording2dContext(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D; strokes: StrokeRecord[] } {
+function createRecording2dContext(canvas: HTMLCanvasElement): {
+  ctx: CanvasRenderingContext2D;
+  strokes: StrokeRecord[];
+  rectCalls: RectCall[];
+} {
   const noop = () => {};
 
   let fillStyle: unknown = "#000";
@@ -17,6 +22,7 @@ function createRecording2dContext(canvas: HTMLCanvasElement): { ctx: CanvasRende
   let cursor: { x: number; y: number } | null = null;
   let segments: Segment[] = [];
   const strokes: StrokeRecord[] = [];
+  const rectCalls: RectCall[] = [];
 
   const ctx = {
     canvas,
@@ -51,7 +57,9 @@ function createRecording2dContext(canvas: HTMLCanvasElement): { ctx: CanvasRende
       cursor = null;
       segments = [];
     },
-    rect: noop,
+    rect: (x: number, y: number, width: number, height: number) => {
+      rectCalls.push({ x, y, width, height });
+    },
     clip: noop,
     fill: noop,
     stroke: () => {
@@ -84,7 +92,7 @@ function createRecording2dContext(canvas: HTMLCanvasElement): { ctx: CanvasRende
       }) as TextMetrics
   } as unknown as CanvasRenderingContext2D;
 
-  return { ctx, strokes };
+  return { ctx, strokes, rectCalls };
 }
 
 function normalizeSegment(seg: Segment): Segment {
@@ -872,5 +880,72 @@ describe("CanvasGridRenderer side border rendering (Excel-like)", () => {
     expect(hasNormalizedSegment(purpleStroke!.segments, { x1: 21.5, y1: 10, x2: 21.5, y2: 20 })).toBe(true);
 
     expect(gridStrokes.some((stroke) => stroke.strokeStyle === "#0000ff")).toBe(false);
+  });
+
+  it("pads provider-update dirty regions so bottom borders spanning into the next row are not clipped", () => {
+    let listener: ((update: CellProviderUpdate) => void) | null = null;
+    let enabled = false;
+
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row === 0 && col === 0) {
+          return enabled
+            ? { row, col, value: null, style: { borders: { bottom: { width: 3, style: "double", color: "#ff00ff" } } } }
+            : { row, col, value: null };
+        }
+        if (row === 1 && col === 0) return { row, col, value: null };
+        return null;
+      },
+      subscribe: (cb) => {
+        listener = cb;
+        return () => {
+          listener = null;
+        };
+      }
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const { ctx: gridCtx, strokes: gridStrokes, rectCalls } = createRecording2dContext(gridCanvas);
+    const contentCtx = createRecording2dContext(contentCanvas).ctx;
+    const selectionCtx = createRecording2dContext(selectionCanvas).ctx;
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, gridCtx],
+      [contentCanvas, contentCtx],
+      [selectionCanvas, selectionCtx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      return contexts.get(this) ?? createRecording2dContext(this).ctx;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({
+      provider,
+      rowCount: 2,
+      colCount: 1,
+      defaultRowHeight: 10,
+      defaultColWidth: 10
+    });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(100, 100, 1);
+
+    // Clear initial render calls.
+    rectCalls.length = 0;
+    gridStrokes.length = 0;
+
+    enabled = true;
+    listener?.({ type: "cells", range: { startRow: 0, endRow: 1, startCol: 0, endCol: 1 } });
+
+    // The dirty-region clip rect should be padded beyond the 10px row height so the second double-border
+    // stroke at y=11.5 is not clipped.
+    expect(rectCalls[0]).toMatchObject({ x: 0, y: 0, width: 12, height: 12 });
+
+    const purpleStroke = gridStrokes.find((stroke) => stroke.strokeStyle === "#ff00ff" && stroke.lineWidth === 1);
+    expect(purpleStroke).toBeTruthy();
+    expect(hasNormalizedSegment(purpleStroke!.segments, { x1: 0, y1: 9.5, x2: 10, y2: 9.5 })).toBe(true);
+    expect(hasNormalizedSegment(purpleStroke!.segments, { x1: 0, y1: 11.5, x2: 10, y2: 11.5 })).toBe(true);
   });
 });
