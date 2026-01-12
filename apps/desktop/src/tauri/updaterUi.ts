@@ -817,6 +817,7 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
       break;
     }
     case "update-available": {
+      const manualFollowUp = manualUpdateCheckFollowUp;
       setManualUpdateCheckFollowUp(false);
       const version =
         typeof payload?.version === "string" && payload.version.trim() !== ""
@@ -835,7 +836,12 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
 
       // Suppress repeat startup prompts for the same version if the user recently
       // clicked "Later" (persisted across launches). Manual checks always surface the update.
-      if (source === "startup" && shouldSuppressStartupUpdatePrompt(version)) {
+      //
+      // Note: a manual check can occur while a background startup check is in-flight. In that
+      // case the backend emits `update-check-already-running` (source: manual) and then later
+      // delivers the update result from the startup check (source: startup). Treat that as a
+      // manual request (no suppression).
+      if (source === "startup" && !manualFollowUp && shouldSuppressStartupUpdatePrompt(version)) {
         break;
       }
 

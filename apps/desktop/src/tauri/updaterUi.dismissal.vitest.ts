@@ -85,5 +85,16 @@ describe("tauri/updaterUi dismissal persistence", () => {
     await handleUpdaterEvent("update-available", { source: "manual", version: "1.2.3", body: "Notes" });
     expect(document.querySelector('[data-testid="updater-dialog"]')).toBeTruthy();
   });
-});
 
+  it("does not suppress when a manual check is waiting on an in-flight startup check", async () => {
+    const { handleUpdaterEvent } = await loadUpdaterUi();
+
+    localStorage.setItem(DISMISSED_VERSION_KEY, "1.2.3");
+    localStorage.setItem(DISMISSED_AT_KEY, String(Date.now()));
+
+    await handleUpdaterEvent("update-check-already-running", { source: "manual" });
+    await handleUpdaterEvent("update-available", { source: "startup", version: "1.2.3", body: "Notes" });
+
+    expect(document.querySelector('[data-testid="updater-dialog"]')).toBeTruthy();
+  });
+});
