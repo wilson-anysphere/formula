@@ -5974,7 +5974,7 @@ if (
       if (e.defaultPrevented) return;
       // Fail-closed: only allow opening the grid context menu when we can
       // confidently say focus is not inside a text input.
-      if (contextKeys.get("focus.inTextInput") !== false) return;
+      if (contextKeys.get(KeyboardContextKeyIds.focusInTextInput) !== false) return;
 
       const shouldOpen = (e.shiftKey && e.key === "F10") || e.key === "ContextMenu" || e.code === "ContextMenu";
       if (!shouldOpen) return;
