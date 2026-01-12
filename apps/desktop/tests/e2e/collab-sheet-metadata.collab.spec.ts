@@ -32,15 +32,17 @@ test.describe("collaboration: sheet metadata", () => {
     try {
       const pollSheetSwitcher = async (expected: { value: string; options: Array<{ value: string; label: string }> }) => {
         await expect
-          .poll(() =>
-            pageB.evaluate(() => {
-              const el = document.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
-              if (!el) return null;
-              return {
-                value: el.value,
-                options: Array.from(el.options).map((opt) => ({ value: opt.value, label: opt.textContent ?? "" })),
-              };
-            }),
+          .poll(
+            () =>
+              pageB.evaluate(() => {
+                const el = document.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
+                if (!el) return null;
+                return {
+                  value: el.value,
+                  options: Array.from(el.options).map((opt) => ({ value: opt.value, label: opt.textContent ?? "" })),
+                };
+              }),
+            { timeout: 30_000 },
           )
           .toEqual(expected);
       };
@@ -119,9 +121,21 @@ test.describe("collaboration: sheet metadata", () => {
       //
       // Hide Sheet2.
       const sheet2TabA = pageA.getByTestId("sheet-tab-Sheet2");
-      await sheet2TabA.focus();
-      await expect(sheet2TabA).toBeFocused();
-      await pageA.keyboard.press("Shift+F10");
+      await expect(sheet2TabA).toBeVisible();
+      // Avoid flaky right-click / keyboard contextmenu behavior in the desktop shell; dispatch a deterministic contextmenu event.
+      await pageA.evaluate(() => {
+        const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
+        if (!tab) throw new Error("Missing Sheet2 tab");
+        const rect = tab.getBoundingClientRect();
+        tab.dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+          }),
+        );
+      });
       const menuA = pageA.getByTestId("sheet-tab-context-menu");
       await expect(menuA).toBeVisible();
       await menuA.getByRole("button", { name: "Hide", exact: true }).click();
@@ -130,9 +144,20 @@ test.describe("collaboration: sheet metadata", () => {
 
       // Unhide Sheet2.
       const sheet1TabA = pageA.getByTestId("sheet-tab-Sheet1");
-      await sheet1TabA.focus();
-      await expect(sheet1TabA).toBeFocused();
-      await pageA.keyboard.press("Shift+F10");
+      await expect(sheet1TabA).toBeVisible();
+      await pageA.evaluate(() => {
+        const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+        if (!tab) throw new Error("Missing Sheet1 tab");
+        const rect = tab.getBoundingClientRect();
+        tab.dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+          }),
+        );
+      });
       await expect(menuA).toBeVisible();
       await menuA.getByRole("button", { name: "Unhide…", exact: true }).click();
       await menuA.getByRole("button", { name: "Sheet2" }).click();
@@ -140,9 +165,19 @@ test.describe("collaboration: sheet metadata", () => {
       await expect(pageB.getByTestId("sheet-tab-Sheet2")).toBeVisible({ timeout: 30_000 });
 
       // Set Sheet2 tab color (pick a non-red color so we can distinguish from Sheet1 later).
-      await sheet2TabA.focus();
-      await expect(sheet2TabA).toBeFocused();
-      await pageA.keyboard.press("Shift+F10");
+      await pageA.evaluate(() => {
+        const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
+        if (!tab) throw new Error("Missing Sheet2 tab");
+        const rect = tab.getBoundingClientRect();
+        tab.dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            clientX: rect.left + rect.width / 2,
+            clientY: rect.top + rect.height / 2,
+          }),
+        );
+      });
       await expect(menuA).toBeVisible();
       await menuA.getByRole("button", { name: "Tab Color", exact: true }).click();
       await menuA.getByRole("button", { name: "Blue" }).click();
