@@ -98,6 +98,54 @@ describe("createCommandPalette Go to suggestion", () => {
     palette.dispose();
   });
 
+  it("prefers Go to over function results when query matches a named range", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const workbook: GoToWorkbookLookup = {
+      getTable: () => null,
+      getName: (name: string) => {
+        if (name === "SUM") {
+          return { sheetName: "Sheet1", range: { startRow: 2, endRow: 2, startCol: 1, endCol: 1 } };
+        }
+        return null;
+      },
+    };
+    const onGoTo = vi.fn();
+    const onSelectFunction = vi.fn();
+
+    const palette = createCommandPalette({
+      commandRegistry,
+      contextKeys: {} as any,
+      keybindingIndex: new Map(),
+      ensureExtensionsLoaded: async () => {},
+      onCloseFocus: () => {},
+      inputDebounceMs: 0,
+      goTo: { workbook, getCurrentSheetName: () => "Sheet1", onGoTo },
+      onSelectFunction,
+    });
+
+    palette.open();
+
+    const input = document.querySelector<HTMLInputElement>('[data-testid="command-palette-input"]');
+    expect(input).toBeTruthy();
+
+    input!.value = "SUM";
+    input!.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const items = Array.from(document.querySelectorAll('[data-testid="command-palette-list"] .command-palette__item'));
+    expect(items.length).toBeGreaterThanOrEqual(2);
+    expect(items[0]?.textContent).toContain("Go to SUM");
+    // Function results should still be present, but ranked below the Go to suggestion.
+    expect(items[1]?.textContent).toContain("SUM");
+
+    input!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(onGoTo).toHaveBeenCalledTimes(1);
+    expect(onSelectFunction).not.toHaveBeenCalled();
+
+    palette.dispose();
+  });
+
   it("formats sheet-qualified refs using the explicit sheet name (not the current sheet)", async () => {
     const commandRegistry = new CommandRegistry();
     commandRegistry.registerBuiltinCommand("test.someCommand", "Some Command", () => {}, { category: "Test" });
