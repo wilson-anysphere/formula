@@ -41,4 +41,33 @@ describe("LayoutController persistence", () => {
     // persistNow should not emit an additional change event.
     expect(changeCount).toBe(2);
   });
+
+  test("switching workspaces persists pending ephemeral updates before reloading", () => {
+    const storage = new MemoryStorage();
+    const keyPrefix = "test.layout";
+    const workspaceManager = new LayoutWorkspaceManager({ storage, keyPrefix });
+    const workbookId = "workbook-2";
+    const controller = new LayoutController({ workbookId, workspaceManager });
+
+    const key = `${keyPrefix}.workbook.${encodeURIComponent(workbookId)}.v1`;
+
+    // Seed initial persisted state.
+    controller.setSplitPaneScroll("secondary", { scrollX: 0, scrollY: 0 });
+    const persistedBefore = storage.getItem(key);
+    expect(persistedBefore).not.toBeNull();
+
+    // Apply an ephemeral update (in-memory only).
+    controller.setSplitPaneScroll("secondary", { scrollX: 5, scrollY: 6 }, { persist: false });
+    expect(storage.getItem(key)).toBe(persistedBefore);
+
+    // Switching workspaces reloads the layout; ensure we don't lose the in-memory change.
+    controller.setWorkspace("analysis");
+
+    const after = storage.getItem(key);
+    expect(after).not.toBeNull();
+    expect(after).not.toBe(persistedBefore);
+    const parsed = JSON.parse(after!);
+    expect(parsed.splitView.panes.secondary.scrollX).toBe(5);
+    expect(parsed.splitView.panes.secondary.scrollY).toBe(6);
+  });
 });
