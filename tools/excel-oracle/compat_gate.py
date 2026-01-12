@@ -333,6 +333,23 @@ def main() -> int:
         lines.append(f"* Mismatches: {summary.get('mismatches')}")
         lines.append(f"* Mismatch rate: {summary.get('mismatchRate')}")
         lines.append(f"* Max mismatch rate: {summary.get('maxMismatchRate')}")
+        include_tags_summary = summary.get("includeTags")
+        if isinstance(include_tags_summary, list) and include_tags_summary:
+            lines.append(f"* Include tags: {', '.join(str(t) for t in include_tags_summary)}")
+        else:
+            lines.append("* Include tags: <all>")
+
+        exclude_tags_summary = summary.get("excludeTags")
+        if isinstance(exclude_tags_summary, list) and exclude_tags_summary:
+            lines.append(f"* Exclude tags: {', '.join(str(t) for t in exclude_tags_summary)}")
+        else:
+            lines.append("* Exclude tags: <none>")
+
+        max_cases_summary = summary.get("maxCases")
+        if isinstance(max_cases_summary, int) and max_cases_summary > 0:
+            lines.append(f"* Max cases: {max_cases_summary}")
+        else:
+            lines.append("* Max cases: all")
         lines.append("")
 
         tag_summary = summary.get("tagSummary")
