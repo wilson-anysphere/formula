@@ -82,7 +82,7 @@ Latency:       Latency:       Latency:     Latency:    Latency:
 
 ### Mode 3: Chat Panel (<5s)
 
-- Toggle AI sidebar (Cmd+I on macOS / Ctrl+Shift+A on Windows/Linux)
+- Toggle AI sidebar (Cmd+Shift+A on macOS / Ctrl+Shift+A on Windows/Linux)
 - Ask questions about data
 - Request analysis, explain formulas
 

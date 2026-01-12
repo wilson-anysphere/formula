@@ -71,14 +71,14 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
   {
     command: "view.togglePanel.aiChat",
     key: "ctrl+shift+a",
-    mac: "cmd+i",
+    mac: "cmd+shift+a",
     when: null,
   },
   {
     // Some keyboards (and remote desktop setups) can emit both ctrlKey+metaKey for
     // Cmd-based shortcuts. Add an explicit binding so the AI chat toggle remains reachable.
     command: "view.togglePanel.aiChat",
-    key: "ctrl+cmd+i",
+    key: "ctrl+cmd+shift+a",
     when: null,
   },
   {
@@ -217,9 +217,7 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
   {
     command: "format.toggleItalic",
     key: "ctrl+i",
-    // IMPORTANT: Cmd+I is reserved for toggling the AI sidebar (see instructions/ui.md).
-    // Italic formatting remains Ctrl+I to preserve the AI toggle on macOS.
-    mac: "ctrl+i",
+    mac: "cmd+i",
     when: null,
   },
   {

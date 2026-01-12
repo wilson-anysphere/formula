@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop, waitForDesktopReady } from "./helpers";
 
 test.describe("keybindings: AI Chat toggle", () => {
-  test("Ctrl+Shift+A (Win/Linux) / Cmd+I (macOS) toggles AI Chat without triggering Select All", async ({ page }) => {
+  test("Ctrl+Shift+A (Win/Linux) / Cmd+Shift+A (macOS) toggles AI Chat without triggering Select All", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
     await page.reload({ waitUntil: "domcontentloaded" });
@@ -29,8 +29,8 @@ test.describe("keybindings: AI Chat toggle", () => {
 
     const shortcut =
       process.platform === "darwin"
-        ? // macOS: Cmd+I toggles AI chat.
-          { metaKey: true, shiftKey: false, key: "I", code: "KeyI" }
+        ? // macOS: Cmd+Shift+A toggles AI chat.
+          { metaKey: true, shiftKey: true, key: "A", code: "KeyA" }
         : // Windows/Linux: Ctrl+Shift+A toggles AI chat.
           { ctrlKey: true, shiftKey: true, key: "A", code: "KeyA" };
 
