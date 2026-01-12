@@ -1048,6 +1048,13 @@ export function __resetUpdaterUiStateForTests(): void {
   progressTotal = null;
   progressPercent = null;
 
+  updateReadyToastShownForVersion = null;
+  try {
+    document.querySelectorAll?.('[data-testid="update-ready-toast"]').forEach((el) => el.remove());
+  } catch {
+    // ignore
+  }
+
   manualUpdateCheckFollowUp = false;
   if (manualUpdateCheckFollowUpTimeout) {
     clearTimeout(manualUpdateCheckFollowUpTimeout);

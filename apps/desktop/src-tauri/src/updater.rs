@@ -79,7 +79,9 @@ pub fn spawn_update_check(app: &AppHandle, source: UpdateCheckSource) {
 
                     // Start a best-effort background download so the user can apply the update
                     // immediately once they approve a restart.
-                    spawn_update_download(&handle, source, update);
+                    if matches!(source, UpdateCheckSource::Startup) {
+                        spawn_update_download(&handle, source, update);
+                    }
                 }
                 Ok(None) => {
                     let _ = handle
