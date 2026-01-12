@@ -818,7 +818,8 @@ extension accessed:
 - Any spreadsheet values received via `events.onSelectionChanged` and `events.onCellChanged` will also “taint” the
   corresponding ranges/cells (best-effort).
 - Before allowing `clipboard.writeText`, the host evaluates DLP policy over the current selection *and* any tainted ranges.
-- If any tainted range is classified above the allowed threshold (e.g. `Restricted`), the clipboard write throws.
+- If the selection or any tainted range is classified above the allowed threshold (e.g. `Restricted`), the clipboard
+  write throws.
 
 Writing arbitrary text to the clipboard **without reading any spreadsheet cells** does not taint any ranges (so it
 will not be blocked *due to taint*), but it may still be blocked if the *current selection* is classified above the
