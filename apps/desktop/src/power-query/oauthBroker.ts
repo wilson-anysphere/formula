@@ -117,7 +117,7 @@ export class DesktopOAuthBroker implements OAuthBroker {
     // Used to gate buffering of early redirects. We only expect redirects very
     // shortly after opening an auth URL (PKCE flow), so avoid holding onto deep
     // links indefinitely if they're delivered at unrelated times.
-    this.lastAuthUrlOpenedAtMs = Date.now();
+    this.lastAuthUrlOpenedAtMs = parsed.searchParams.has("redirect_uri") ? Date.now() : null;
 
     if (!this.openAuthUrlHandler) {
       await shellOpen(url);
@@ -127,6 +127,11 @@ export class DesktopOAuthBroker implements OAuthBroker {
   }
 
   waitForRedirect(redirectUri: string): Promise<string> {
+    // Once a redirect wait is registered, there's no longer a race window between
+    // openAuthUrl(...) and waitForRedirect(...), so we can disable early-redirect
+    // buffering for this flow.
+    this.lastAuthUrlOpenedAtMs = null;
+
     // If we observed a redirect before the caller registered the wait, resolve immediately.
     const observed = this.shiftObservedRedirect(redirectUri);
     if (observed) return Promise.resolve(observed);
