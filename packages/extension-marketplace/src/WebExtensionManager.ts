@@ -221,21 +221,21 @@ function deleteAllPackagesForExtension(packagesStore: IDBObjectStore, extensionI
   const id = String(extensionId);
   if (!id) return Promise.resolve();
   return new Promise((resolve, reject) => {
-    let index: IDBIndex;
-    try {
-      index = packagesStore.index("byId");
-    } catch {
-      // Older DB schema without the index; best-effort fallback is handled by callers.
-      resolve();
-      return;
-    }
-
+    // Prefer using the `byId` index when available; fall back to scanning the full store
+    // for older DB schemas.
     let req: IDBRequest<IDBCursorWithValue | null>;
+    let shouldDelete: ((value: unknown) => boolean) | null = null;
+
     try {
+      const index = packagesStore.index("byId");
       req = index.openCursor(id);
-    } catch (error) {
-      reject(error);
-      return;
+    } catch {
+      shouldDelete = (value: unknown) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return String((value as any).id ?? "") === id;
+      };
+      req = packagesStore.openCursor();
     }
 
     req.onerror = () => reject(req.error ?? new Error("Failed to iterate extension packages"));
@@ -245,10 +245,12 @@ function deleteAllPackagesForExtension(packagesStore: IDBObjectStore, extensionI
         resolve();
         return;
       }
-      try {
-        cursor.delete();
-      } catch {
-        // ignore
+      if (!shouldDelete || shouldDelete(cursor.value)) {
+        try {
+          cursor.delete();
+        } catch {
+          // ignore
+        }
       }
       cursor.continue();
     };
@@ -927,9 +929,6 @@ export class WebExtensionManager {
   }
 
   async uninstall(id: string): Promise<void> {
-    const existing = await this.getInstalled(id);
-    if (!existing) return;
-
     await this.unload(id).catch(() => {});
     try {
       const host = this.host;
@@ -943,23 +942,22 @@ export class WebExtensionManager {
       // ignore (host/storage might be unavailable)
     }
 
-    const db = await openDb();
     try {
-      const tx = db.transaction([STORE_INSTALLED, STORE_PACKAGES], "readwrite");
-      tx.objectStore(STORE_INSTALLED).delete(String(id));
-      const packagesStore = tx.objectStore(STORE_PACKAGES);
-      // Best-effort: uninstall should remove *all* stored package records for this extension id,
-      // not only the currently-installed version. This avoids leaving behind orphaned IndexedDB
-      // blobs if the install/update flow previously crashed mid-write.
+      const db = await openDb();
       try {
-        await deleteAllPackagesForExtension(packagesStore, String(id));
-      } catch {
-        // ignore and fall back to deleting the expected version key
+        const tx = db.transaction([STORE_INSTALLED, STORE_PACKAGES], "readwrite");
+        tx.objectStore(STORE_INSTALLED).delete(String(id));
+        const packagesStore = tx.objectStore(STORE_PACKAGES);
+        // Best-effort: uninstall should remove *all* stored package records for this extension id,
+        // not only the currently-installed version. This avoids leaving behind orphaned IndexedDB
+        // blobs if the install/update flow previously crashed mid-write.
+        await deleteAllPackagesForExtension(packagesStore, String(id)).catch(() => {});
+        await txDone(tx);
+      } finally {
+        db.close();
       }
-      packagesStore.delete(`${id}@${existing.version}`);
-      await txDone(tx);
-    } finally {
-      db.close();
+    } catch {
+      // ignore IndexedDB failures (private mode, disabled storage, etc.)
     }
 
     // Best-effort cleanup of persisted state owned by the uninstalled extension so a reinstall
