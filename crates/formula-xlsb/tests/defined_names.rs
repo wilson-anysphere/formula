@@ -74,6 +74,35 @@ fn defined_names_do_not_require_preserve_parsed_parts() {
 }
 
 #[test]
+fn defined_names_respect_decode_formulas_open_option() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures_metadata/defined-names.xlsb"
+    );
+    let opts = OpenOptions {
+        decode_formulas: false,
+        ..OpenOptions::default()
+    };
+    let wb = XlsbWorkbook::open_with_options(path, opts).expect("open xlsb");
+
+    let names = wb.defined_names();
+    let zed = names.iter().find(|n| n.name == "ZedName").expect("ZedName");
+    let formula = zed.formula.as_ref().expect("ZedName formula payload");
+    assert!(
+        !formula.rgce.is_empty(),
+        "expected defined name formula rgce bytes to be preserved"
+    );
+    assert_eq!(
+        formula.text, None,
+        "expected defined name formula text decoding to be skipped"
+    );
+    assert!(
+        formula.warnings.is_empty(),
+        "expected defined name formula warnings to be empty when decoding is skipped"
+    );
+}
+
+#[test]
 fn rgce_codec_resolves_defined_name_tokens_via_workbook_context() {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
