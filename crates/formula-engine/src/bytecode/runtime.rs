@@ -5509,4 +5509,96 @@ mod tests {
             Ok((range.rows() as usize).saturating_sub(2))
         );
     }
+
+    #[test]
+    fn countif_uses_sparse_iteration_for_sheet_ranges() {
+        use std::collections::HashMap;
+
+        struct PanicGrid {
+            bounds: (i32, i32),
+            cells_by_sheet: HashMap<usize, Vec<(CellCoord, Value)>>,
+        }
+
+        impl Grid for PanicGrid {
+            fn get_value(&self, _coord: CellCoord) -> Value {
+                panic!("unexpected get_value call (expected sparse iteration)");
+            }
+
+            fn get_value_on_sheet(&self, _sheet: usize, _coord: CellCoord) -> Value {
+                panic!("unexpected get_value_on_sheet call (expected sparse iteration)");
+            }
+
+            fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+                None
+            }
+
+            fn column_slice_on_sheet(
+                &self,
+                _sheet: usize,
+                _col: i32,
+                _row_start: i32,
+                _row_end: i32,
+            ) -> Option<&[f64]> {
+                None
+            }
+
+            fn iter_cells_on_sheet(
+                &self,
+                sheet: usize,
+            ) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
+                Some(Box::new(self.cells_by_sheet.get(&sheet)?.iter().cloned()))
+            }
+
+            fn bounds(&self) -> (i32, i32) {
+                self.bounds
+            }
+
+            fn bounds_on_sheet(&self, _sheet: usize) -> (i32, i32) {
+                self.bounds
+            }
+        }
+
+        let row_end = BYTECODE_SPARSE_RANGE_ROW_THRESHOLD; // rows() == threshold + 1
+        let range = ResolvedRange {
+            row_start: 0,
+            row_end,
+            col_start: 0,
+            col_end: 0,
+        };
+
+        let seen_in_range = 7usize;
+        let explicit_zero_matches = 3usize;
+        let total_cells = (range.rows() as usize) * (range.cols() as usize);
+
+        let grid = PanicGrid {
+            bounds: (row_end + 1, 2),
+            cells_by_sheet: HashMap::from([(
+                0,
+                vec![
+                    (CellCoord { row: 0, col: 0 }, Value::Empty),
+                    (CellCoord { row: 1, col: 0 }, Value::Number(0.0)),
+                    (CellCoord { row: 2, col: 0 }, Value::Number(2.0)),
+                    (CellCoord { row: 3, col: 0 }, Value::Bool(true)),
+                    (CellCoord { row: 4, col: 0 }, Value::Text(Arc::from("0"))),
+                    (CellCoord { row: 5, col: 0 }, Value::Text(Arc::from("x"))),
+                    (CellCoord { row: 6, col: 0 }, Value::Error(ErrorKind::Div0)),
+                    // Outside the range (different col).
+                    (CellCoord { row: 1, col: 1 }, Value::Number(0.0)),
+                ],
+            )]),
+        };
+
+        let criteria_zero = NumericCriteria::new(CmpOp::Eq, 0.0);
+        let expected_zero = explicit_zero_matches + total_cells.saturating_sub(seen_in_range);
+        assert_eq!(
+            count_if_range_on_sheet(&grid, 0, range, criteria_zero),
+            Ok(expected_zero)
+        );
+
+        let criteria_gt = NumericCriteria::new(CmpOp::Gt, 0.0);
+        assert_eq!(
+            count_if_range_on_sheet(&grid, 0, range, criteria_gt),
+            Ok(2)
+        );
+    }
 }
