@@ -2111,50 +2111,54 @@ if (
     "keydown",
     (e) => {
       if (e.defaultPrevented) return;
+      if (e.repeat) return;
+      if (app.isEditing()) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
 
       const primary = e.ctrlKey || e.metaKey;
       if (!primary || e.altKey) return;
 
-      const key = e.key;
+      const key = e.key ?? "";
+      const keyLower = key.toLowerCase();
 
       // Font style toggles.
-      if (!e.shiftKey && (key === "b" || key === "B")) {
+      if (!e.shiftKey && keyLower === "b") {
         e.preventDefault();
         executeCommand("format.toggleBold");
         return;
       }
-      if (!e.shiftKey && (key === "i" || key === "I")) {
+      if (!e.shiftKey && keyLower === "i") {
         e.preventDefault();
         executeCommand("format.toggleItalic");
         return;
       }
-      if (!e.shiftKey && (key === "u" || key === "U")) {
+      if (!e.shiftKey && keyLower === "u") {
         e.preventDefault();
         executeCommand("format.toggleUnderline");
         return;
       }
 
       // Number formats.
-      if (!e.shiftKey && key === "1") {
+      if (!e.shiftKey && (key === "1" || e.code === "Digit1")) {
         e.preventDefault();
         executeCommand("format.openFormatCells");
         return;
       }
-      if (e.shiftKey && key === "$") {
-        e.preventDefault();
-        executeCommand("format.numberFormat.currency");
-        return;
-      }
-      if (e.shiftKey && key === "%") {
-        e.preventDefault();
-        executeCommand("format.numberFormat.percent");
-        return;
-      }
-      if (e.shiftKey && key === "#") {
-        e.preventDefault();
-        executeCommand("format.numberFormat.date");
+      if (e.shiftKey) {
+        const preset =
+          key === "$" || e.code === "Digit4"
+            ? "currency"
+            : key === "%" || e.code === "Digit5"
+              ? "percent"
+              : key === "#" || e.code === "Digit3"
+                ? "date"
+                : null;
+
+        if (preset) {
+          e.preventDefault();
+          executeCommand(`format.numberFormat.${preset}`);
+        }
       }
     },
     true,
@@ -3468,12 +3472,12 @@ if (
 
   openCommandPalette = commandPalette.open;
 
-  // Cmd+I toggles the AI sidebar (chat panel).
+  // Cmd+Shift+I toggles the AI sidebar (chat panel).
   // Keep this as a global shortcut so it works even when focus isn't on the grid.
   window.addEventListener("keydown", (e) => {
     if (e.defaultPrevented) return;
     if (e.repeat) return;
-    if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if (!e.metaKey || e.ctrlKey || e.altKey || !e.shiftKey) return;
     if (e.key !== "I" && e.key !== "i") return;
 
     const target = (e.target instanceof HTMLElement ? e.target : null) ?? (document.activeElement as HTMLElement | null);
