@@ -4,6 +4,8 @@ export type {
   CellRange,
   MergedCellRange,
   CellData,
+  CellRichText,
+  CellRichTextRun,
   CellStyle,
   CellBorderLineStyle,
   CellBorderSpec,
