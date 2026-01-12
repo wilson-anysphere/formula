@@ -4168,6 +4168,12 @@ if (
       const shouldOpen = (e.shiftKey && e.key === "F10") || e.key === "ContextMenu" || e.code === "ContextMenu";
       if (!shouldOpen) return;
 
+      // If *any* context menu is already open, let it manage focus/keyboard handling.
+      // This avoids opening the grid context menu while another menu (e.g. sheet tabs)
+      // is active.
+      const openContextMenu = document.querySelector<HTMLElement>(".context-menu-overlay:not([hidden])");
+      if (openContextMenu) return;
+
       // When focus is on a sheet tab, Shift+F10 / ContextMenu should behave like Excel and
       // open the sheet-tab context menu instead of the active-cell context menu.
       // (The tab strip is responsible for handling these keys.)
