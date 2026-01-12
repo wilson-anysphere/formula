@@ -50,7 +50,7 @@ the primary boundaries are the WebView’s own process sandbox + the extension w
 The desktop implements a small, VS Code-inspired subset of `when` syntax for menus/keybindings:
 
 - Operators: `&&`, `||`, `!`, parentheses
-- Identifiers (context keys): `cellHasValue`, `selectionType`, `activeCellA1`, …
+- Identifiers (context keys): `sheetName`, `cellHasValue`, `selectionType`, `activeCellA1`, …
 - Equality: `==` / `!=` against string/number/boolean literals
 
 Built-in keys (desktop UI):
@@ -112,6 +112,7 @@ Extensions can contribute menu items via `contributes.menus` in the manifest (an
 Supported menu locations (desktop UI):
 
 - `cell/context` — the grid (cell) context menu (`contributes.menus["cell/context"]`).
+  - Extension-contributed items are appended after the built-in clipboard/edit items, separated by a divider.
 
 Reserved menu locations (not yet wired in the desktop UI, but reserved for future parity):
 
@@ -137,6 +138,11 @@ Separators:
 - The context menu renderer automatically inserts a separator when the **group name changes** between adjacent items
   after sorting (VS Code-style).
 - Items with `group: null` / omitted are treated as the empty group name (`""`).
+
+Label formatting:
+
+- Menu item labels come from the contributed command’s `title` and optional `category`.
+  If a command specifies a `category`, the label is rendered as `"Category: Title"`.
 
 Example (manifest snippet using `selectionType` + `activeCellA1`):
 
