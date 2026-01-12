@@ -2,6 +2,7 @@ use super::*;
 
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use roxmltree::Document;
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use zip::write::{FileOptions, ZipWriter};
@@ -602,5 +603,38 @@ fn patch_workbook_rels_for_sheet_edits_handles_prefixed_relationships() {
     assert!(
         ids.contains(&"rId4"),
         "expected added sheet relationship to be inserted"
+    );
+}
+
+#[test]
+fn patch_workbook_xml_infers_relationships_prefix_from_sheets_namespace() {
+    let mut workbook = formula_model::Workbook::new();
+    workbook.add_sheet("Sheet1".to_string()).unwrap();
+    let doc = crate::XlsxDocument::new(workbook);
+
+    let workbook_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="{spreadsheetml}">
+  <x:sheets xmlns:rel="{rels}">
+    <x:sheet name="Sheet1" sheetId="1" rel:id="rId1"/>
+  </x:sheets>
+</x:workbook>"#,
+        spreadsheetml = SPREADSHEETML_NS,
+        rels = crate::xml::OFFICE_RELATIONSHIPS_NS
+    );
+
+    let patched = patch_workbook_xml(&doc, workbook_xml.as_bytes(), &doc.meta.sheets)
+        .expect("patch workbook xml");
+    let patched = std::str::from_utf8(&patched).expect("patched xml is utf8");
+
+    Document::parse(patched).expect("patched workbook.xml must parse as XML");
+
+    assert!(
+        patched.contains("rel:id="),
+        "expected patched workbook.xml to use rel:id; got:\n{patched}"
+    );
+    assert!(
+        !patched.contains(" r:id="),
+        "must not introduce undeclared r:id attributes; got:\n{patched}"
     );
 }

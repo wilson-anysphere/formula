@@ -115,6 +115,22 @@ fn prefixed_tag(prefix: Option<&str>, local: &str) -> String {
     }
 }
 
+fn office_relationships_prefix_from_xmlns(
+    e: &quick_xml::events::BytesStart<'_>,
+) -> Result<Option<String>, WriteError> {
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        let key = attr.key.as_ref();
+        let Some(prefix) = key.strip_prefix(b"xmlns:") else {
+            continue;
+        };
+        if attr.value.as_ref() == crate::xml::OFFICE_RELATIONSHIPS_NS.as_bytes() {
+            return Ok(Some(String::from_utf8_lossy(prefix).into_owned()));
+        }
+    }
+    Ok(None)
+}
+
 fn worksheet_has_default_spreadsheetml_ns(
     e: &quick_xml::events::BytesStart<'_>,
 ) -> Result<bool, WriteError> {
@@ -1928,7 +1944,10 @@ fn patch_workbook_xml(
                 skipping_sheets = true;
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 let sheet_tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "sheet");
-                let rel_id_attr = prefixed_tag(office_rels_prefix.as_deref().or(Some("r")), "id");
+                if office_rels_prefix.is_none() {
+                    office_rels_prefix = office_relationships_prefix_from_xmlns(&e)?;
+                }
+                let rel_id_attr = prefixed_tag(office_rels_prefix.as_deref(), "id");
 
                 writer.get_mut().extend_from_slice(b"<");
                 writer.get_mut().extend_from_slice(tag.as_bytes());
@@ -1984,7 +2003,10 @@ fn patch_workbook_xml(
                 // Replace `<sheets/>` with a full section.
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 let sheet_tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "sheet");
-                let rel_id_attr = prefixed_tag(office_rels_prefix.as_deref().or(Some("r")), "id");
+                if office_rels_prefix.is_none() {
+                    office_rels_prefix = office_relationships_prefix_from_xmlns(&e)?;
+                }
+                let rel_id_attr = prefixed_tag(office_rels_prefix.as_deref(), "id");
 
                 writer.get_mut().extend_from_slice(b"<");
                 writer.get_mut().extend_from_slice(tag.as_bytes());
