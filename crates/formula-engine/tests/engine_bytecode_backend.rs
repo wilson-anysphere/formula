@@ -360,6 +360,60 @@ fn bytecode_backend_compiles_and_evaluates_now() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_let_simple() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, 1, x+1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=LET(x, 1, x+1)", "A1");
+    assert_eq!(engine.bytecode_program_count(), 1);
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_let_multiple_bindings_and_case_insensitive_names() {
+    let mut engine = Engine::new();
+
+    // Use different cases for the binding name and its references to assert case-insensitive lookup.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(X, 1, y, x+1, y+X)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=LET(X, 1, y, x+1, y+X)", "A1");
+    assert_eq!(engine.bytecode_program_count(), 1);
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_let_with_cell_refs_in_bindings() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", 10.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=LET(x, A1, x+1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=LET(x, A1, x+1)", "B1");
+    assert_eq!(engine.bytecode_program_count(), 1);
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_let_shadowing() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, 1, LET(x, 2, x+1)+x)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=LET(x, 1, LET(x, 2, x+1)+x)", "A1");
+    assert_eq!(engine.bytecode_program_count(), 1);
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_sum_and_countif() {
     let mut engine = Engine::new();
 
