@@ -181,28 +181,33 @@ class DocumentSheetAdapter {
     const endCol = Math.min(used.endCol, range.endCol);
     if (startRow > endRow || startCol > endCol) return;
 
-    const sheet = this.document.model?.sheets?.get(this.sheetId);
-    const entries = sheet?.cells ? Array.from(sheet.cells.entries()) : [];
-
     const results = [];
-    for (const [key, cell] of entries) {
-      if (!cell) continue;
-      if (cell.value == null && cell.formula == null) continue;
-      const parsed = parseCellKey(key);
-      if (!parsed) continue;
-      if (
-        parsed.row < startRow ||
-        parsed.row > endRow ||
-        parsed.col < startCol ||
-        parsed.col > endCol
-      ) {
-        continue;
-      }
+    if (typeof this.document.forEachCellInSheet === "function") {
+      // Use the DocumentController's cell iterator to avoid re-parsing sparse map keys.
+      this.document.forEachCellInSheet(this.sheetId, ({ row, col, cell }) => {
+        if (!cell) return;
+        if (cell.value == null && cell.formula == null) return;
+        if (row < startRow || row > endRow || col < startCol || col > endCol) return;
+        const formula = normalizeFormula(cell.formula);
+        const value = cell.value ?? null;
+        const display = value != null ? String(value) : formula ?? "";
+        results.push({ row, col, cell: { value, formula, display } });
+      });
+    } else {
+      // Fallback path for older document implementations.
+      const sheet = this.document.model?.sheets?.get(this.sheetId);
+      for (const [key, cell] of sheet?.cells?.entries?.() ?? []) {
+        if (!cell) continue;
+        if (cell.value == null && cell.formula == null) continue;
+        const parsed = parseCellKey(key);
+        if (!parsed) continue;
+        if (parsed.row < startRow || parsed.row > endRow || parsed.col < startCol || parsed.col > endCol) continue;
 
-      const formula = normalizeFormula(cell.formula);
-      const value = cell.value ?? null;
-      const display = value != null ? String(value) : formula ?? "";
-      results.push({ row: parsed.row, col: parsed.col, cell: { value, formula, display } });
+        const formula = normalizeFormula(cell.formula);
+        const value = cell.value ?? null;
+        const display = value != null ? String(value) : formula ?? "";
+        results.push({ row: parsed.row, col: parsed.col, cell: { value, formula, display } });
+      }
     }
 
     results.sort((a, b) => {
