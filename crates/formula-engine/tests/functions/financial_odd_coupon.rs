@@ -2,6 +2,7 @@ use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::error::ExcelError;
 use formula_engine::functions::date_time;
 use formula_engine::functions::financial::{oddfprice, oddfyield, oddlprice, oddlyield};
+use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::{ErrorKind, Value};
 
 use super::financial_bonds_invariants::eval_number_or_skip;
@@ -4273,6 +4274,95 @@ fn odd_coupon_bond_functions_accept_time_text_that_truncates_to_valid_frequency_
     let time_basis_oddlyield_value = eval_number_or_skip(&mut sheet, time_basis_oddlyield)
         .expect("ODDLYIELD should accept time-like text for basis that truncates to 1");
     assert_close(time_basis_oddlyield_value, baseline_oddlyield_basis_1_value, 1e-9);
+}
+
+#[test]
+fn odd_coupon_bond_functions_respect_value_locale_for_numeric_text_in_frequency_and_basis() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+
+    // In locales where the decimal separator is a comma, numeric text such as "2,9" should be
+    // parsed as 2.9 (VALUE-style), then truncated to an integer and validated.
+
+    // frequency="2,9" -> 2.9 -> trunc->2
+    let baseline_oddfprice =
+        "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0)";
+    let baseline_oddfprice_value = match eval_number_or_skip(&mut sheet, baseline_oddfprice) {
+        Some(v) => v,
+        None => return,
+    };
+    let oddf_text_freq = r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,"2,9",0)"#;
+    let oddf_text_freq_value = eval_number_or_skip(&mut sheet, oddf_text_freq)
+        .expect("ODDFPRICE should parse frequency=\"2,9\" under de-DE locale and truncate");
+    assert_close(oddf_text_freq_value, baseline_oddfprice_value, 1e-9);
+
+    let baseline_oddlprice =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)";
+    let baseline_oddlprice_value = eval_number_or_skip(&mut sheet, baseline_oddlprice)
+        .expect("ODDLPRICE baseline should evaluate");
+    let oddl_text_freq =
+        r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,"2,9",0)"#;
+    let oddl_text_freq_value = eval_number_or_skip(&mut sheet, oddl_text_freq)
+        .expect("ODDLPRICE should parse frequency=\"2,9\" under de-DE locale and truncate");
+    assert_close(oddl_text_freq_value, baseline_oddlprice_value, 1e-9);
+
+    // Yield functions should behave the same way.
+    let baseline_oddfyield = "=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,0))";
+    let baseline_oddfyield_value = eval_number_or_skip(&mut sheet, baseline_oddfyield)
+        .expect("ODDFYIELD baseline should evaluate");
+    let oddf_text_freq = r#"=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,"2,9",0))"#;
+    let oddf_text_freq_value = eval_number_or_skip(&mut sheet, oddf_text_freq)
+        .expect("ODDFYIELD should parse frequency=\"2,9\" under de-DE locale and truncate");
+    assert_close(oddf_text_freq_value, baseline_oddfyield_value, 1e-9);
+
+    let baseline_oddlyield = "=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,2,0))";
+    let baseline_oddlyield_value = eval_number_or_skip(&mut sheet, baseline_oddlyield)
+        .expect("ODDLYIELD baseline should evaluate");
+    let oddl_text_freq = r#"=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,"2,9",0))"#;
+    let oddl_text_freq_value = eval_number_or_skip(&mut sheet, oddl_text_freq)
+        .expect("ODDLYIELD should parse frequency=\"2,9\" under de-DE locale and truncate");
+    assert_close(oddl_text_freq_value, baseline_oddlyield_value, 1e-9);
+
+    // basis="1,9" -> 1.9 -> trunc->1
+    let baseline_basis_1 = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1)";
+    let baseline_basis_1_value = eval_number_or_skip(&mut sheet, baseline_basis_1)
+        .expect("ODDFPRICE baseline basis=1 should evaluate");
+    let oddf_text_basis =
+        r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,"1,9")"#;
+    let oddf_text_basis_value = eval_number_or_skip(&mut sheet, oddf_text_basis)
+        .expect("ODDFPRICE should parse basis=\"1,9\" under de-DE locale and truncate");
+    assert_close(oddf_text_basis_value, baseline_basis_1_value, 1e-9);
+
+    let baseline_oddfyield_basis_1 = "=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,1))";
+    let baseline_oddfyield_basis_1_value = eval_number_or_skip(&mut sheet, baseline_oddfyield_basis_1)
+        .expect("ODDFYIELD baseline basis=1 should evaluate");
+    let oddf_text_basis = r#"=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,1),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,"1,9"))"#;
+    let oddf_text_basis_value = eval_number_or_skip(&mut sheet, oddf_text_basis)
+        .expect("ODDFYIELD should parse basis=\"1,9\" under de-DE locale and truncate");
+    assert_close(oddf_text_basis_value, baseline_oddfyield_basis_1_value, 1e-9);
+}
+
+#[test]
+fn odd_coupon_bond_functions_return_num_for_frequency_and_basis_out_of_i32_range() {
+    let mut sheet = TestSheet::new();
+
+    // Extremely large finite values should truncate to a value outside the i32 range used by the
+    // engine and return #NUM! (not #VALUE!).
+    match sheet.eval(
+        "=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1E20,0)",
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
+    match sheet.eval(
+        "=ODDFPRICE(DATE(2020,3,1),DATE(2023,7,1),DATE(2020,1,1),DATE(2020,7,1),0.06,0.05,100,1,-1E20)",
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
 }
 
 #[test]
