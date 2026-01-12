@@ -876,6 +876,7 @@ export class ToolExecutor {
 
   private applyFormatting(params: any): ToolResultDataByName["apply_formatting"] {
     const range = this.parseRange(params.range, this.options.default_sheet);
+    this.assertRangeWithinMaxToolCells("apply_formatting", range);
     const formatted = this.spreadsheet.applyFormatting(range, params.format);
     return { range: this.formatRangeForUser(range), formatted_cells: formatted };
   }

@@ -67,6 +67,25 @@ describe("ToolExecutor range size limits", () => {
     expect(api.readCalls).toBe(0);
   });
 
+  it("blocks apply_formatting before applying formatting to an unbounded number of cells", async () => {
+    const api = new CountingSpreadsheet();
+    const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
+
+    const result = await executor.execute({
+      name: "apply_formatting",
+      parameters: {
+        // 26 * 8000 = 208k cells (exceeds the default max_tool_range_cells of 200k).
+        range: "Sheet1!A1:Z8000",
+        format: { bold: true },
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.tool).toBe("apply_formatting");
+    expect(result.error?.code).toBe("permission_denied");
+    expect(result.error?.message).toContain("max_tool_range_cells");
+  });
+
   it("blocks apply_formula_column before writing an unbounded number of cells", async () => {
     const api = new CountingSpreadsheet();
     const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
