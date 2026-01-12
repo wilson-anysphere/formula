@@ -97,28 +97,32 @@ test("diffDocumentWorkbookSnapshots reports workbook-level metadata changes (JSO
 
 test("diffDocumentWorkbookSnapshots reports formatOnly edits when default formats change (layered formats)", () => {
   const beforeSnapshot = encodeSnapshot({
-    schemaVersion: 2,
+    schemaVersion: 1,
     sheets: [
       {
         id: "sheet1",
         name: "Sheet1",
         // A1 exists (non-empty) but has no per-cell format override.
-        cells: [{ row: 0, col: 0, value: "x" }],
-        // Column A default formatting.
-        colFormats: { "0": { font: { bold: true } } },
+        cells: [{ row: 0, col: 0, value: "x", formula: null, format: null }],
+        defaultFormat: null,
+        rowFormats: [],
+        // Column A default formatting (matches DocumentController.encodeState output shape).
+        colFormats: [{ col: 0, format: { font: { bold: true } } }],
       },
     ],
   });
 
   const afterSnapshot = encodeSnapshot({
-    schemaVersion: 2,
+    schemaVersion: 1,
     sheets: [
       {
         id: "sheet1",
         name: "Sheet1",
-        cells: [{ row: 0, col: 0, value: "x" }],
+        cells: [{ row: 0, col: 0, value: "x", formula: null, format: null }],
+        defaultFormat: null,
+        rowFormats: [],
         // Same cell content, but the column default format changed.
-        colFormats: { "0": { font: { italic: true } } },
+        colFormats: [{ col: 0, format: { font: { italic: true } } }],
       },
     ],
   });
