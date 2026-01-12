@@ -270,13 +270,16 @@ export async function openExtensionsPanel(page: Page): Promise<void> {
 export async function openSheetTabContextMenu(page: Page, sheetId: string): Promise<Locator> {
   await page.evaluate((id) => {
     // Avoid interpolating the sheet id into a CSS selector (ids can contain characters
-    // that require escaping). Instead, query all sheet tabs and then match by attribute.
-    const expected = `sheet-tab-${id}`;
+    // that require escaping). Instead, query all sheet tab buttons and match by attribute.
+    //
+    // Prefer `data-sheet-id` over `data-testid`: `data-testid^="sheet-tab-"` would also
+    // match the context menu overlay (`data-testid="sheet-tab-context-menu"`), which could
+    // collide if a sheet id ever equals `"context-menu"`.
     const tab =
-      Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="sheet-tab-"]')).find(
-        (el) => el.getAttribute("data-testid") === expected,
+      Array.from(document.querySelectorAll<HTMLButtonElement>('button[role="tab"][data-sheet-id]')).find(
+        (el) => el.dataset.sheetId === id,
       ) ?? null;
-    if (!tab) throw new Error(`Missing sheet-tab-${id}`);
+    if (!tab) throw new Error(`Missing sheet tab button for sheet id: ${id}`);
     const rect = tab.getBoundingClientRect();
     tab.dispatchEvent(
       new MouseEvent("contextmenu", {
