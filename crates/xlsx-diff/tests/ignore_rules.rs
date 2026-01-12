@@ -325,6 +325,106 @@ fn ignore_glob_suppresses_calcchain_diffs() {
 }
 
 #[test]
+fn ignore_glob_suppresses_calcchain_related_plumbing_diffs() {
+    let expected_zip = zip_bytes(&[
+        (
+            "[Content_Types].xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/calcChain.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"/>
+</Types>"#,
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>
+</Relationships>"#,
+        ),
+        ("xl/calcChain.xml", br#"<calcChain/>"#),
+    ]);
+    let actual_zip = zip_bytes(&[
+        (
+            "[Content_Types].xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+</Types>"#,
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>"#,
+        ),
+    ]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let options = DiffOptions {
+        ignore_parts: Default::default(),
+        ignore_globs: vec!["xl/calcChain.*".to_string()],
+    };
+
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert!(report.is_empty(), "expected no diffs, got {:#?}", report.differences);
+}
+
+#[test]
+fn ignore_glob_suppresses_docprops_plumbing_diffs() {
+    let expected_zip = zip_bytes(&[
+        (
+            "[Content_Types].xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+</Types>"#,
+        ),
+        (
+            "_rels/.rels",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>"#,
+        ),
+        (
+            "docProps/app.xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"/>"#,
+        ),
+    ]);
+    let actual_zip = zip_bytes(&[
+        (
+            "[Content_Types].xml",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+</Types>"#,
+        ),
+        (
+            "_rels/.rels",
+            br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>"#,
+        ),
+    ]);
+
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let options = DiffOptions {
+        ignore_parts: Default::default(),
+        ignore_globs: vec!["docProps/*".to_string()],
+    };
+
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert!(report.is_empty(), "expected no diffs, got {:#?}", report.differences);
+}
+
+#[test]
 fn cli_exit_code_honors_fail_on_with_only_warning_diffs() {
     let expected_zip = zip_bytes(&[
         (

@@ -250,7 +250,20 @@ pub fn diff_archives_with_options(
                     } else {
                         BTreeSet::new()
                     };
+                    let ignored_rel_ids = if part.ends_with(".rels") {
+                        let mut ids =
+                            ignored_relationship_ids(part, expected_bytes, &ignore).unwrap_or_default();
+                        ids.extend(
+                            ignored_relationship_ids(part, actual_bytes, &ignore).unwrap_or_default(),
+                        );
+                        ids
+                    } else {
+                        BTreeSet::new()
+                    };
                     for diff in diff_xml(&expected_xml, &actual_xml, base) {
+                        if should_ignore_xml_diff(part, &diff.path, &ignored_rel_ids, &ignore) {
+                            continue;
+                        }
                         let severity = adjust_xml_diff_severity(
                             part,
                             diff.severity,
@@ -412,6 +425,108 @@ impl<'a> IgnoreMatcher<'a> {
     fn matches(&self, part: &str) -> bool {
         self.exact.contains(part) || self.globs.is_match(part)
     }
+}
+
+fn should_ignore_xml_diff(
+    part: &str,
+    path: &str,
+    ignored_rel_ids: &BTreeSet<String>,
+    ignore: &IgnoreMatcher<'_>,
+) -> bool {
+    if part == "[Content_Types].xml" {
+        if let Some(part_name) = content_type_override_part_name_from_path(path) {
+            let normalized = normalize_opc_part_name(part_name);
+            if ignore.matches(&normalized) {
+                return true;
+            }
+        }
+    }
+
+    if part.ends_with(".rels") {
+        if let Some(id) = relationship_id_from_path(path) {
+            if ignored_rel_ids.contains(id) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn content_type_override_part_name_from_path(path: &str) -> Option<&str> {
+    let needle = "Override[@PartName=\"";
+    let start = path.find(needle)? + needle.len();
+    let rest = &path[start..];
+    let end = rest.find('"')?;
+    Some(&rest[..end])
+}
+
+fn normalize_opc_part_name(part_name: &str) -> String {
+    normalize_opc_path(part_name.trim_start_matches('/'))
+}
+
+fn normalize_opc_path(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    let mut out: Vec<&str> = Vec::new();
+    for segment in normalized.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                out.pop();
+            }
+            _ => out.push(segment),
+        }
+    }
+    out.join("/")
+}
+
+fn ignored_relationship_ids(
+    rels_part: &str,
+    bytes: &[u8],
+    ignore: &IgnoreMatcher<'_>,
+) -> Result<BTreeSet<String>> {
+    let text =
+        std::str::from_utf8(bytes).with_context(|| format!("part {rels_part} is not valid UTF-8"))?;
+    let doc = Document::parse(text).with_context(|| format!("parse xml for {rels_part}"))?;
+
+    let mut ids = BTreeSet::new();
+    for node in doc
+        .descendants()
+        .filter(|node| node.is_element() && node.tag_name().name() == "Relationship")
+    {
+        let Some(id) = node.attribute("Id") else {
+            continue;
+        };
+        let target = node.attribute("Target").unwrap_or_default();
+        let resolved = resolve_relationship_target(rels_part, target);
+        if ignore.matches(&resolved) {
+            ids.insert(id.to_string());
+        }
+    }
+
+    Ok(ids)
+}
+
+fn resolve_relationship_target(rels_part: &str, target: &str) -> String {
+    let target = target.replace('\\', "/");
+    if let Some(rest) = target.strip_prefix('/') {
+        return normalize_opc_path(rest);
+    }
+
+    let base_dir = rels_base_dir(rels_part);
+    normalize_opc_path(&format!("{base_dir}{target}"))
+}
+
+fn rels_base_dir(rels_part: &str) -> String {
+    if rels_part.starts_with("_rels/") {
+        return String::new();
+    }
+
+    if let Some(pos) = rels_part.rfind("/_rels/") {
+        return rels_part[..pos + 1].to_string();
+    }
+
+    String::new()
 }
 
 fn adjust_xml_diff_severity(
