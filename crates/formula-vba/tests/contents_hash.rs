@@ -275,6 +275,56 @@ fn content_normalized_data_reference_records_registered_and_project() {
 }
 
 #[test]
+fn content_normalized_data_decodes_utf16le_module_stream_name_without_bom() {
+    // Some producers store module stream-name strings in UTF-16LE form even when the project
+    // codepage is an 8-bit encoding. Ensure the `ContentNormalizedData` builder uses the same
+    // UTF-16LE heuristic as the main `DirStream` parser so module streams can still be located.
+    let module_name = "Module1";
+    let module_name_utf16le: Vec<u8> = module_name
+        .encode_utf16()
+        .flat_map(|u| u.to_le_bytes())
+        .collect();
+
+    let module_code = b"Option Explicit\r\n";
+    let module_container = compress_container(module_code);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        // PROJECTCODEPAGE (Windows-1252)
+        push_record(&mut out, 0x0003, &1252u16.to_le_bytes());
+
+        // Module record group: MODULENAME is ASCII, MODULESTREAMNAME is UTF-16LE.
+        push_record(&mut out, 0x0019, module_name.as_bytes());
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(&module_name_utf16le);
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole
+            .create_stream(&format!("VBA/{module_name}"))
+            .expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+    assert_eq!(normalized, module_code);
+}
+
+#[test]
 fn content_normalized_data_includes_projectname_and_projectconstants_bytes_in_dir_order() {
     let module_code = b"Option Explicit\r\n";
 
