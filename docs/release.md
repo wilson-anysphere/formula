@@ -174,8 +174,8 @@ These dependencies are declared in `apps/desktop/src-tauri/tauri.conf.json` unde
 
 ### Validating the `.deb`
 
-After `tauri build` (or after CI produces an artifact), verify the dependency list and shared
-library resolution.
+After building via `(cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri build)` (or after CI produces an artifact),
+verify the dependency list and shared library resolution.
 
 From `apps/desktop/src-tauri`:
 
