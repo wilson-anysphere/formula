@@ -74,6 +74,33 @@ describe("clampUsedRange", () => {
 });
 
 describe("resolveWorkbookLoadLimits", () => {
+  it("uses env vars when query params are not provided", () => {
+    const limits = resolveWorkbookLoadLimits({
+      env: { DESKTOP_LOAD_MAX_ROWS: "123", DESKTOP_LOAD_MAX_COLS: "456" },
+    });
+
+    expect(limits).toEqual({ maxRows: 123, maxCols: 456 });
+  });
+
+  it("prefers query params over env vars", () => {
+    const limits = resolveWorkbookLoadLimits({
+      queryString: "?maxRows=111&maxCols=222",
+      env: { DESKTOP_LOAD_MAX_ROWS: "123", DESKTOP_LOAD_MAX_COLS: "456" },
+    });
+
+    expect(limits).toEqual({ maxRows: 111, maxCols: 222 });
+  });
+
+  it("falls back per-field when some config values are invalid", () => {
+    const limits = resolveWorkbookLoadLimits({
+      queryString: "?maxRows=5000&maxCols=bad",
+      env: { DESKTOP_LOAD_MAX_COLS: "300" },
+    });
+
+    // maxRows comes from query; maxCols falls back to env since query is invalid.
+    expect(limits).toEqual({ maxRows: 5000, maxCols: 300 });
+  });
+
   it("falls back to defaults when config values are invalid", () => {
     const limits = resolveWorkbookLoadLimits({
       queryString: "?maxRows=not-a-number&maxCols=-5",
@@ -83,4 +110,3 @@ describe("resolveWorkbookLoadLimits", () => {
     expect(limits).toEqual({ maxRows: DEFAULT_DESKTOP_LOAD_MAX_ROWS, maxCols: DEFAULT_DESKTOP_LOAD_MAX_COLS });
   });
 });
-

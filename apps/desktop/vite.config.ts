@@ -61,6 +61,10 @@ function resolveJsToTs() {
 export default defineConfig({
   root: ".",
   cacheDir,
+  // Expose desktop-specific tuning flags to the client bundle. Prefer URL query
+  // params for ad-hoc overrides, but allow env-based configuration for packaged
+  // builds where query params are harder to inject.
+  envPrefix: ["VITE_", "DESKTOP_LOAD_"],
   plugins: [resolveJsToTs()],
   resolve: {
     alias: {
