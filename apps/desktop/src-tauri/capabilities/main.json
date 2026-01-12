@@ -10,6 +10,7 @@
       "identifier": "core:allow-invoke",
       "allow": [
         { "command": "add_sheet" },
+        { "command": "add_sheet_with_id" },
         { "command": "check_for_updates" },
         { "command": "clipboard_read" },
         { "command": "clipboard_write" },
@@ -41,9 +42,9 @@
         { "command": "move_sheet" },
         { "command": "network_fetch" },
         { "command": "new_workbook" },
-        { "command": "oauth_loopback_listen" },
         { "command": "open_external_url" },
         { "command": "open_workbook" },
+        { "command": "oauth_loopback_listen" },
         { "command": "power_query_cache_key_get_or_create" },
         { "command": "power_query_credential_delete" },
         { "command": "power_query_credential_get" },

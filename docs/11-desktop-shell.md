@@ -148,19 +148,13 @@ Tauri v2 replaces Tauri v1’s “allowlist” with **capabilities**, defined as
 
 - `apps/desktop/src-tauri/capabilities/` (main capability: `capabilities/main.json`)
 
-Capabilities are scoped per window in **two** places (defense-in-depth):
+Capabilities are scoped per window via the capability file itself. In this repo the main window is labeled `main`
+(`app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`), and `apps/desktop/src-tauri/capabilities/main.json`
+scopes itself to that window via `"windows": ["main"]`.
 
-- `apps/desktop/src-tauri/tauri.conf.json` opts a window into capability identifiers via `app.windows[].capabilities`
-- Each capability file under `apps/desktop/src-tauri/capabilities/` further scopes itself to window labels via
-  `"windows": [...]`
-
-In this repo the main window is labeled `main` (`app.windows[].label` in `tauri.conf.json`). It opts into the `main`
-capability via `"capabilities": ["main"]`, and `capabilities/main.json` scopes itself to that same window label via
-`"windows": ["main"]`.
-
-> Note: keep `tauri.conf.json`’s `app.windows[].capabilities` mapping and the capability file’s `"windows": [...]` scoping
-> in sync so adding a new window never implicitly grants it the main capability (guardrailed by
-> `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
+> Note: some toolchains also support window-level opt-in via `app.windows[].capabilities` in `tauri.conf.json`. When
+> present, keep it in sync with the capability file’s `"windows": [...]` scoping so adding a new window never implicitly
+> grants it the main capability (guardrailed by `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
 
 Example excerpt:
 
@@ -196,6 +190,9 @@ When adding a new Rust `#[tauri::command]` invoked from the frontend, also updat
 
 - `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke`)
 - `apps/desktop/src-tauri/permissions/allow-invoke.json`
+
+This is guardrailed by `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`, which ensures the allowlists
+match actual frontend `invoke("...")` usage.
 
 See “Tauri v2 Capabilities & Permissions” below for the concrete `main.json` contents.
 

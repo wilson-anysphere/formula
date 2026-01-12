@@ -103,23 +103,28 @@ describe("tauri.conf.json security guardrails", () => {
       `connect-src must not allow wildcard/plaintext HTTP networking; found: ${forbiddenConnectSrcTokens.join(", ")}`,
     ).toEqual([]);
 
-    // Capabilities are scoped per-window via `app.windows[].capabilities` in `tauri.conf.json`, and then further scoped
-    // inside each capability file (e.g. `src-tauri/capabilities/main.json`) via `"windows": [...]`.
+    // Capabilities are always scoped in the capability file via `"windows": [...]` (window labels).
     //
-    // Keep these two layers in sync so adding a new window never implicitly grants it the main capability.
+    // Some toolchains also support window-level opt-in via `app.windows[].capabilities` in `tauri.conf.json`. When present,
+    // ensure it does not accidentally grant the main capability to new windows.
     const windows = Array.isArray(config?.app?.windows) ? (config.app.windows as Array<Record<string, unknown>>) : [];
     const mainWindow = windows.find((w) => String((w as any)?.label ?? "") === "main") as any;
     expect(mainWindow).toBeTruthy();
-    expect(Array.isArray(mainWindow?.capabilities)).toBe(true);
-    expect(mainWindow.capabilities).toContain("main");
 
-    for (const window of windows) {
-      const label = String((window as any)?.label ?? "");
-      const capabilities = (window as any)?.capabilities as unknown;
-      if (label === "main") continue;
-      if (capabilities == null) continue;
-      expect(Array.isArray(capabilities)).toBe(true);
-      expect(capabilities).not.toContain("main");
+    const mainCaps = (mainWindow as any)?.capabilities as unknown;
+    if (mainCaps != null) {
+      expect(Array.isArray(mainCaps)).toBe(true);
+      expect(mainCaps).toContain("main");
+
+      for (const window of windows) {
+        const label = String((window as any)?.label ?? "");
+        const caps = (window as any)?.capabilities as unknown;
+        if (caps == null) continue;
+        expect(Array.isArray(caps)).toBe(true);
+        if (label !== "main") expect(caps).not.toContain("main");
+      }
+    } else {
+      for (const window of windows) expect((window as any)?.capabilities).toBeUndefined();
     }
 
     const capUrl = new URL("../../../src-tauri/capabilities/main.json", import.meta.url);
