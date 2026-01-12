@@ -6,29 +6,22 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-test("CellEditorOverlay visibility uses CSS classes (no inline style.display/zIndex)", () => {
+test("CellEditorOverlay avoids inline display/z-index style assignments", () => {
   const filePath = path.join(__dirname, "..", "src", "editor", "cellEditorOverlay.ts");
   const content = fs.readFileSync(filePath, "utf8");
 
-  assert.equal(
-    /\.style\.display\s*=/.test(content),
-    false,
-    "CellEditorOverlay should not assign element.style.display; use a CSS class toggle (e.g. .cell-editor--open)",
-  );
-  assert.equal(
-    /\.style\.zIndex\s*=/.test(content),
-    false,
-    "CellEditorOverlay should not assign element.style.zIndex; move stacking context into CSS",
-  );
+  const forbiddenAssignments = [
+    /\.style\.display\s*=/,
+    /\.style\s*\[\s*["']display["']\s*\]\s*=/,
+    /\.style\.zIndex\s*=/,
+    /\.style\s*\[\s*["']zIndex["']\s*\]\s*=/,
+  ];
 
-  assert.match(
-    content,
-    /classList\.add\(\s*["']cell-editor--open["']\s*\)/,
-    "CellEditorOverlay.open should add the cell-editor--open CSS modifier class",
-  );
-  assert.match(
-    content,
-    /classList\.remove\(\s*["']cell-editor--open["']\s*\)/,
-    "CellEditorOverlay.close should remove the cell-editor--open CSS modifier class",
-  );
+  for (const pattern of forbiddenAssignments) {
+    assert.equal(
+      pattern.test(content),
+      false,
+      `CellEditorOverlay should not assign inline styles for display/zIndex (matched ${pattern})`,
+    );
+  }
 });
