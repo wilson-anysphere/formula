@@ -128,6 +128,92 @@ test.describe("collaboration", () => {
 
       await expect(panelB.getByTestId("comment-thread").first()).toContainText(commentText);
 
+      // --- 2.5) Multi-sheet comment isolation ---------------------------------
+      //
+      // Historically, desktop comments were keyed by A1 only, which caused collisions
+      // across sheets (Sheet1!A1 vs Sheet2!A1). Ensure sheet-qualified comment refs
+      // keep threads independent in real collab sessions.
+      await pageA.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const session = app?.getCollabSession?.() ?? null;
+        if (!session) throw new Error("Missing collab session");
+
+        session.transactLocal(() => {
+          const existingIds = new Set(
+            (session.sheets?.toArray?.() ?? [])
+              .map((entry: any) => String(entry?.get?.("id") ?? entry?.id ?? "").trim())
+              .filter(Boolean),
+          );
+          if (existingIds.has("Sheet2")) return;
+
+          const firstSheet: any = session.sheets.get(0);
+          const MapCtor = firstSheet?.constructor ?? session.cells?.constructor ?? null;
+          if (typeof MapCtor !== "function") throw new Error("Missing Y.Map constructor");
+          const sheet = new MapCtor();
+          sheet.set("id", "Sheet2");
+          sheet.set("name", "Sheet2");
+          sheet.set("visibility", "visible");
+          session.sheets.insert(1, [sheet]);
+        });
+      });
+
+      await Promise.all([
+        expect(pageA.getByTestId("sheet-tab-Sheet2")).toBeVisible({ timeout: 30_000 }),
+        expect(pageB.getByTestId("sheet-tab-Sheet2")).toBeVisible({ timeout: 30_000 }),
+      ]);
+
+      await Promise.all([
+        pageA.getByTestId("sheet-tab-Sheet2").click(),
+        pageB.getByTestId("sheet-tab-Sheet2").click(),
+      ]);
+
+      await Promise.all([
+        expect.poll(() => pageA.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2"),
+        expect.poll(() => pageB.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2"),
+      ]);
+
+      await pageA.locator("#grid").focus();
+      await expect(pageA.getByTestId("active-cell")).toHaveText("A1");
+      await pageB.locator("#grid").focus();
+      await expect(pageB.getByTestId("active-cell")).toHaveText("A1");
+
+      const commentTextSheet2 = `comment-sheet2-${Date.now()}`;
+      await panelA.getByTestId("new-comment-input").fill(commentTextSheet2);
+      await panelA.getByTestId("submit-comment").click();
+      await expect(panelA.getByTestId("comment-thread").first()).toContainText(commentTextSheet2);
+
+      // Wait for Sheet2 comment to sync to the other client.
+      await pageB.waitForFunction(
+        (text) => {
+          const threads = Array.from(document.querySelectorAll('[data-testid="comment-thread"]'));
+          return threads.some((el) => el.textContent?.includes(text));
+        },
+        commentTextSheet2,
+        { timeout: 60_000 },
+      );
+
+      // Switch back to Sheet1 and ensure the Sheet2 A1 comment doesn't collide.
+      await pageB.getByTestId("sheet-tab-Sheet1").click();
+      await expect.poll(() => pageB.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+      await expect(panelB).toContainText(commentText);
+      await expect(panelB).not.toContainText(commentTextSheet2);
+
+      await pageB.getByTestId("sheet-tab-Sheet2").click();
+      await expect.poll(() => pageB.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
+      await expect(panelB).toContainText(commentTextSheet2);
+      await expect(panelB).not.toContainText(commentText);
+
+      // Restore both clients to Sheet1 so the presence assertions below remain stable.
+      await Promise.all([
+        pageA.getByTestId("sheet-tab-Sheet1").click(),
+        pageB.getByTestId("sheet-tab-Sheet1").click(),
+      ]);
+
+      await Promise.all([
+        expect.poll(() => pageA.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1"),
+        expect.poll(() => pageB.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1"),
+      ]);
+
       // --- 3) Presence -----------------------------------------------------
 
       // Move selection on page A to ensure we publish a presence cursor update.
