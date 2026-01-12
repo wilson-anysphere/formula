@@ -2666,6 +2666,25 @@ fn odd_first_coupon_bond_functions_round_trip_long_stub() {
     let first_coupon = serial(2020, 3, 1, system);
 
     for basis in [0, 1] {
+        // Ensure this is actually a *long* first coupon period for this basis.
+        // (DFC/E > 1 and DSC/E > 1).
+        let dfc = days_between(issue, first_coupon, basis, system);
+        let dsc = days_between(settlement, first_coupon, basis, system);
+        let months_per_period = 12 / 2;
+        let coupon_dates = oddf_coupon_schedule(first_coupon, maturity, 2, system);
+        let eom = is_end_of_month(maturity, system);
+        let n = coupon_dates.len() as i32;
+        let prev_coupon = coupon_date_with_eom(maturity, -(n * months_per_period), eom, system);
+        let e = coupon_period_e(prev_coupon, first_coupon, basis, 2, system);
+        assert!(
+            dfc / e > 1.0,
+            "expected long first coupon (DFC/E > 1), got DFC={dfc} E={e}"
+        );
+        assert!(
+            dsc / e > 1.0,
+            "expected settlement to be more than one coupon period before first coupon (DSC/E > 1), got DSC={dsc} E={e}"
+        );
+
         // Independent price model: compute what Excel's published ODDF* formula should produce
         // for this schedule (long first coupon amount scaled by DFC/E).
         let expected_price = oddf_price_excel_model(
@@ -3775,6 +3794,23 @@ fn odd_last_coupon_bond_functions_round_trip_long_stub() {
     let last_interest = serial(2020, 10, 15, system);
 
     for basis in [0, 1] {
+        // Ensure this is actually a *long* last coupon period for this basis.
+        // (DLM/E > 1 and DSM/E > 1).
+        let dlm = days_between(last_interest, maturity, basis, system);
+        let dsm = days_between(settlement, maturity, basis, system);
+        let months_per_period = 12 / 2;
+        let eom = is_end_of_month(last_interest, system);
+        let prev_coupon = coupon_date_with_eom(last_interest, -months_per_period, eom, system);
+        let e = coupon_period_e(prev_coupon, last_interest, basis, 2, system);
+        assert!(
+            dlm / e > 1.0,
+            "expected long last coupon (DLM/E > 1), got DLM={dlm} E={e}"
+        );
+        assert!(
+            dsm / e > 1.0,
+            "expected settlement to be more than one coupon period before maturity (DSM/E > 1), got DSM={dsm} E={e}"
+        );
+
         let expected_price = oddl_price_excel_model(
             settlement,
             maturity,
