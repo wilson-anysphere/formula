@@ -38,7 +38,7 @@ export interface DesktopRagServiceOptions {
 
   /**
    * Embedding configuration. Desktop workbook RAG uses `HashEmbedder`
-   * (deterministic hash embeddings) by default (offline; no user API keys or local embedders).
+   * (deterministic hash embeddings) by default (offline; no user API keys or local model setup).
    */
   embedder?: DesktopRagEmbedderConfig;
 
@@ -142,7 +142,7 @@ function resolveEmbedder(
  * - Uses sqlite-backed vector store persisted in LocalStorage.
  * - Tracks DocumentController mutations and only re-indexes when content changes.
  * - Keeps buildWorkbookContextFromSpreadsheetApi cheap (no workbook scan when index is up to date).
- * - Uses deterministic hash embeddings by design (offline; no user API keys or local embedders).
+ * - Uses deterministic hash embeddings by design (offline; no user API keys or local model setup).
  */
 export function createDesktopRagService(options: DesktopRagServiceOptions): DesktopRagService {
   const ragFactory = options.createRag ?? createDesktopRag;
