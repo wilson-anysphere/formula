@@ -33,6 +33,7 @@ export class CellConflictMonitor {
    * @param {Y.Map<any>} [opts.cells]
    * @param {object} [opts.origin] Origin token used for local transactions.
    * @param {Set<any>} [opts.localOrigins] Origins treated as local (for ignoring).
+   * @param {Set<any>} [opts.ignoredOrigins] Transaction origins to ignore entirely.
    * @param {(conflict: CellConflict) => void} opts.onConflict
    */
   constructor(opts) {
@@ -42,6 +43,7 @@ export class CellConflictMonitor {
 
     this.origin = opts.origin ?? { type: "local" };
     this.localOrigins = opts.localOrigins ?? new Set([this.origin]);
+    this.ignoredOrigins = opts.ignoredOrigins ?? new Set();
 
     this.onConflict = opts.onConflict;
 
@@ -116,6 +118,7 @@ export class CellConflictMonitor {
    * @param {Y.Transaction} transaction
    */
   _onDeepEvent(events, transaction) {
+    if (this.ignoredOrigins?.has(transaction.origin)) return;
     for (const event of events) {
       if (!event?.changes?.keys) continue;
       const path = event.path ?? [];

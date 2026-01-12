@@ -78,6 +78,11 @@ export class FormulaConflictMonitor {
     cells?: Y.Map<any>;
     origin?: object;
     localOrigins?: Set<any>;
+    /**
+     * Transaction origins that should be ignored entirely (no conflicts emitted,
+     * no local-edit tracking updates).
+     */
+    ignoredOrigins?: Set<any>;
     onConflict: (conflict: FormulaConflict) => void;
     getCellValue?: (ref: { sheetId: string; row: number; col: number }) => any;
     /**
@@ -146,6 +151,11 @@ export class CellConflictMonitor {
     cells?: Y.Map<any>;
     origin?: object;
     localOrigins?: Set<any>;
+    /**
+     * Transaction origins that should be ignored entirely (no conflicts emitted,
+     * no local-edit tracking updates).
+     */
+    ignoredOrigins?: Set<any>;
     onConflict: (conflict: CellConflict) => void;
   });
 

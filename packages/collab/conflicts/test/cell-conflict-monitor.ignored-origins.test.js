@@ -1,0 +1,84 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import * as Y from "yjs";
+
+import { CellConflictMonitor } from "../src/cell-conflict-monitor.js";
+
+/**
+ * @param {{ localClientId: number, remoteClientId: number }} ids
+ */
+function runScenario(ids) {
+  const { localClientId, remoteClientId } = ids;
+
+  const cellKey = "Sheet1:0:0";
+
+  // Seed a baseline document using a third client id so local/remote edits both start at clock=0.
+  const baseDoc = new Y.Doc();
+  baseDoc.clientID = 1000;
+  const baseCells = baseDoc.getMap("cells");
+  const baseCell = new Y.Map();
+  baseCells.set(cellKey, baseCell);
+  baseCell.set("value", null);
+  baseCell.set("formula", null);
+
+  const baseUpdate = Y.encodeStateAsUpdate(baseDoc);
+  const baseStateVector = Y.encodeStateVector(baseDoc);
+
+  const localDoc = new Y.Doc();
+  localDoc.clientID = localClientId;
+  Y.applyUpdate(localDoc, baseUpdate);
+
+  const cells = localDoc.getMap("cells");
+
+  /** @type {any[]} */
+  const conflicts = [];
+  const localOrigin = { type: "local" };
+  const monitor = new CellConflictMonitor({
+    doc: localDoc,
+    cells,
+    localUserId: "user-a",
+    origin: localOrigin,
+    localOrigins: new Set([localOrigin]),
+    ignoredOrigins: new Set(["versioning-restore"]),
+    onConflict: (conflict) => conflicts.push(conflict),
+  });
+
+  monitor.setLocalValue(cellKey, 1);
+
+  const remoteDoc = new Y.Doc();
+  remoteDoc.clientID = remoteClientId;
+  Y.applyUpdate(remoteDoc, baseUpdate);
+
+  const remoteCells = remoteDoc.getMap("cells");
+  const remoteCell = /** @type {any} */ (remoteCells.get(cellKey));
+
+  remoteDoc.transact(() => {
+    remoteCell.set("value", 2);
+    // Intentionally do not touch `modifiedBy` to simulate snapshot/restore operations.
+  });
+
+  const overwriteUpdate = Y.encodeStateAsUpdate(remoteDoc, baseStateVector);
+
+  // Apply the overwrite as a "time travel" operation.
+  Y.applyUpdate(localDoc, overwriteUpdate, "versioning-restore");
+
+  const finalCell = /** @type {any} */ (cells.get(cellKey));
+  const finalValue = finalCell?.get?.("value") ?? null;
+
+  monitor.dispose();
+
+  return { conflicts, finalValue };
+}
+
+test("CellConflictMonitor ignores version restore origins", () => {
+  const attemptA = runScenario({ localClientId: 1, remoteClientId: 2 });
+  const attemptB = attemptA.finalValue === 2 ? null : runScenario({ localClientId: 2, remoteClientId: 1 });
+  const result = attemptB ?? attemptA;
+
+  // Ensure the overwrite applied so the test isn't vacuously passing.
+  assert.equal(result.finalValue, 2);
+
+  // The restore transaction should be ignored entirely (no conflict emission).
+  assert.equal(result.conflicts.length, 0);
+});
+

@@ -929,6 +929,11 @@ export class CollabSession {
       if (undo.localOrigins) this.localOrigins = undo.localOrigins;
     }
 
+    // Certain transactions are intentional, bulk "time travel" operations (e.g.
+    // version restores) and should not participate in conflict detection or
+    // local-edit tracking inside conflict monitors.
+    const ignoredConflictOrigins = new Set<any>(["versioning-restore", "branching-apply"]);
+
     if (options.formulaConflicts) {
       this.formulaConflictMonitor = new FormulaConflictMonitor({
         doc: this.doc,
@@ -936,6 +941,7 @@ export class CollabSession {
         localUserId: options.formulaConflicts.localUserId,
         origin: this.origin,
         localOrigins: this.localOrigins,
+        ignoredOrigins: ignoredConflictOrigins,
         onConflict: options.formulaConflicts.onConflict,
         concurrencyWindowMs: options.formulaConflicts.concurrencyWindowMs,
         mode: options.formulaConflicts.mode,
@@ -962,6 +968,7 @@ export class CollabSession {
         localUserId: options.cellValueConflicts.localUserId,
         origin: this.origin,
         localOrigins: this.localOrigins,
+        ignoredOrigins: ignoredConflictOrigins,
         onConflict: options.cellValueConflicts.onConflict,
       });
     }

@@ -84,11 +84,12 @@ export class FormulaConflictMonitor {
    * @param {Y.Map<any>} [opts.cells]
    * @param {object} [opts.origin] Origin token used for local transactions.
    * @param {Set<any>} [opts.localOrigins] Origins treated as local (for ignoring).
-    * @param {(conflict: FormulaConflict) => void} opts.onConflict
-    * @param {(ref: { sheetId: string, row: number, col: number }) => any} [opts.getCellValue]
-    * @param {number} [opts.concurrencyWindowMs] Deprecated/ignored. Former wall-clock heuristic.
-    * @deprecated
-    * @param {"formula" | "formula+value"} [opts.mode]
+   * @param {Set<any>} [opts.ignoredOrigins] Transaction origins to ignore entirely.
+   * @param {(conflict: FormulaConflict) => void} opts.onConflict
+   * @param {(ref: { sheetId: string, row: number, col: number }) => any} [opts.getCellValue]
+   * @param {number} [opts.concurrencyWindowMs] Deprecated/ignored. Former wall-clock heuristic.
+   * @deprecated
+   * @param {"formula" | "formula+value"} [opts.mode]
     * @param {boolean} [opts.includeValueConflicts] Backwards-compatible alias for `mode: "formula+value"`.
     */
   constructor(opts) {
@@ -98,6 +99,7 @@ export class FormulaConflictMonitor {
 
     this.origin = opts.origin ?? { type: "local" };
     this.localOrigins = opts.localOrigins ?? new Set([this.origin]);
+    this.ignoredOrigins = opts.ignoredOrigins ?? new Set();
 
     this.onConflict = opts.onConflict;
     this.getCellValue = opts.getCellValue ?? null;
@@ -281,6 +283,7 @@ export class FormulaConflictMonitor {
    * @param {Y.Transaction} transaction
    */
   _onDeepEvent(events, transaction) {
+    if (this.ignoredOrigins?.has(transaction.origin)) return;
     const isLocalTransaction = this.localOrigins.has(transaction.origin);
     for (const event of events) {
       // We only care about map key changes on the cell-level Y.Map.
