@@ -869,6 +869,7 @@ fn write_updated_cell<W: Write>(
 
     let mut preserved_attrs: Vec<(String, String)> = Vec::new();
     let mut original_has_vm = false;
+    let mut original_has_cm = false;
     if let Some(start) = original_start {
         for attr in start.attributes() {
             let attr = attr?;
@@ -877,6 +878,8 @@ fn write_updated_cell<W: Write>(
                 _ => {
                     if attr.key.as_ref() == b"vm" {
                         original_has_vm = true;
+                    } else if attr.key.as_ref() == b"cm" {
+                        original_has_cm = true;
                     }
                     let key = std::str::from_utf8(attr.key.as_ref())
                         .unwrap_or("")
@@ -890,21 +893,8 @@ fn write_updated_cell<W: Write>(
 
     let a1 = cell_ref.to_a1();
     let meta = super::lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
-    let meta_vm = meta
-        .and_then(|m| m.vm.as_deref())
-        .map(|vm| vm.to_string());
-    let meta_cm = meta
-        .and_then(|m| m.cm.as_deref())
-        .map(|cm| cm.to_string());
-    // If the file already had `vm`/`cm` attributes, they were captured in `preserved_attrs`.
-    // Avoid emitting duplicate attributes, and prefer meta-provided values so callers can
-    // intentionally update the metadata indices.
-    if meta_vm.is_some() {
-        preserved_attrs.retain(|(k, _)| k != "vm");
-    }
-    if meta_cm.is_some() {
-        preserved_attrs.retain(|(k, _)| k != "cm");
-    }
+    let meta_vm = meta.and_then(|m| m.vm.clone());
+    let meta_cm = meta.and_then(|m| m.cm.clone());
     let value_kind = super::effective_value_kind(meta, cell);
     let meta_sheet_id = cell_meta_sheet_ids
         .get(&sheet_meta.worksheet_id)
@@ -984,13 +974,15 @@ fn write_updated_cell<W: Write>(
     // `vm` to avoid leaving a dangling value-metadata reference.
     let patch_is_rich_value_placeholder = matches!(cell.value, CellValue::Error(ErrorValue::Value));
     let drop_vm = original_has_vm && !patch_is_rich_value_placeholder;
-    if let Some(vm) = &meta_vm {
-        if !drop_vm {
-            c_start.push_attribute(("vm", vm.as_str()));
+    if !original_has_vm {
+        if let Some(vm) = meta_vm.as_deref() {
+            c_start.push_attribute(("vm", vm));
         }
     }
-    if let Some(cm) = &meta_cm {
-        c_start.push_attribute(("cm", cm.as_str()));
+    if !original_has_cm {
+        if let Some(cm) = meta_cm.as_deref() {
+            c_start.push_attribute(("cm", cm));
+        }
     }
     for (k, v) in &preserved_attrs {
         if k == "vm" && drop_vm {
