@@ -189,9 +189,11 @@ fn set_unicode_text(text: &str) -> Result<(), ClipboardError> {
 }
 
 pub fn read() -> Result<ClipboardContent, ClipboardError> {
-    let format_html = register_format("HTML Format")?;
-    let format_rtf = register_format("Rich Text Format")?;
-    let format_png = register_format("PNG")?;
+    // Rich clipboard formats are best-effort: if registration fails (rare), still return whatever
+    // formats we can read (e.g. plain text).
+    let format_html = register_format("HTML Format").ok();
+    let format_rtf = register_format("Rich Text Format").ok();
+    let format_png = register_format("PNG").ok();
     // Some producers use a MIME-like name for PNG. Treat this as best-effort fallback.
     let format_image_png = register_format("image/png").ok();
     // MIME-like aliases used by some cross-platform apps.
@@ -203,9 +205,8 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
     // Best-effort reads: don't fail the entire operation if a single format can't be decoded.
     let text = try_get_unicode_text().ok().flatten();
 
-    let mut html = try_get_clipboard_bytes(format_html, MAX_RICH_TEXT_BYTES)
-        .ok()
-        .flatten()
+    let mut html = format_html
+        .and_then(|format| try_get_clipboard_bytes(format, MAX_RICH_TEXT_BYTES).ok().flatten())
         .map(|bytes| extract_cf_html_fragment_best_effort(&bytes))
         .filter(|s| !s.is_empty());
     if html.is_none() {
@@ -218,9 +219,8 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         }
     }
 
-    let mut rtf = try_get_clipboard_bytes(format_rtf, MAX_RICH_TEXT_BYTES)
-        .ok()
-        .flatten()
+    let mut rtf = format_rtf
+        .and_then(|format| try_get_clipboard_bytes(format, MAX_RICH_TEXT_BYTES).ok().flatten())
         .map(|bytes| {
             String::from_utf8_lossy(&bytes)
                 .trim_end_matches('\0')
@@ -243,23 +243,27 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
 
     const MAX_DIB_BYTES: usize = 4 * MAX_IMAGE_BYTES; // allow larger uncompressed DIBs before converting to PNG
 
-    let mut png_base64 = if let Some(png_bytes) =
-        try_get_clipboard_bytes(format_png, MAX_IMAGE_BYTES).ok().flatten()
-    {
-        Some(STANDARD.encode(png_bytes))
-    } else if let Some(format) = format_image_png {
-        try_get_clipboard_bytes(format, MAX_IMAGE_BYTES)
+    let mut png_base64 = format_png
+        .and_then(|format| try_get_clipboard_bytes(format, MAX_IMAGE_BYTES).ok().flatten())
+        .map(|png_bytes| STANDARD.encode(png_bytes));
+
+    if png_base64.is_none() {
+        if let Some(format) = format_image_png {
+            png_base64 = try_get_clipboard_bytes(format, MAX_IMAGE_BYTES)
+                .ok()
+                .flatten()
+                .map(|bytes| STANDARD.encode(bytes));
+        }
+    }
+
+    if png_base64.is_none() {
+        png_base64 = try_get_clipboard_bytes(CF_DIBV5, MAX_DIB_BYTES)
             .ok()
             .flatten()
-            .map(|bytes| STANDARD.encode(bytes))
-    } else if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIBV5, MAX_DIB_BYTES).ok().flatten() {
-        dibv5_to_png(&dib_bytes)
-            .ok()
+            .and_then(|dib_bytes| dibv5_to_png(&dib_bytes).ok())
             .filter(|png| png.len() <= MAX_IMAGE_BYTES)
-            .map(|png| STANDARD.encode(png))
-    } else {
-        None
-    };
+            .map(|png| STANDARD.encode(png));
+    }
 
     if png_base64.is_none() {
         if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIB, MAX_DIB_BYTES).ok().flatten() {
