@@ -25,7 +25,7 @@ test.describe("ribbon zoom", () => {
     await expect(zoom200).toBeVisible();
     await zoom200.click();
 
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getZoom())).toBe(2);
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getZoom())).toBe(2);
     await expect(zoomControl).toHaveValue("200");
 
     // Menu item "Custom…" should route to the existing QuickPick zoom flow.
@@ -38,7 +38,7 @@ test.describe("ribbon zoom", () => {
     await expect(quickPick).toBeVisible();
     await quickPick.getByRole("button", { name: "125%" }).click();
 
-    await page.waitForFunction(() => Math.abs((window as any).__formulaApp?.getZoom?.() - 1.25) < 0.01);
+    await page.waitForFunction(() => Math.abs((window.__formulaApp as any)?.getZoom?.() - 1.25) < 0.01);
     await expect(zoomControl).toHaveValue("125");
   });
 });

@@ -12,7 +12,7 @@ test.describe("file shortcuts", () => {
     });
 
     // Ensure the grid has focus for key events.
-    await page.evaluate(() => (window as any).__formulaApp.focus());
+    await page.evaluate(() => (window.__formulaApp as any).focus());
 
     // Dispatch a synthetic keydown event instead of relying on the browser shell's
     // handling of Ctrl/Cmd+S, which can be intercepted as a "Save page" shortcut.

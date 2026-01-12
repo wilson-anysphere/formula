@@ -8,7 +8,7 @@ test.describe("sheet switcher focus", () => {
 
     // Ensure A1 is active before switching sheets so F2 editing is deterministic.
     await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       app.activateCell({ row: 0, col: 0 });
       app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
     });
@@ -18,7 +18,7 @@ test.describe("sheet switcher focus", () => {
     const switcher = page.getByTestId("sheet-switcher");
     await switcher.selectOption("Sheet2", { force: true });
 
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getCurrentSheetId())).toBe("Sheet2");
 
     // Sheet activation should behave like navigation and leave the grid ready for keyboard input.
     await expect
@@ -29,4 +29,3 @@ test.describe("sheet switcher focus", () => {
     await expect(page.locator("textarea.cell-editor")).toBeVisible();
   });
 });
-

@@ -11,12 +11,12 @@ test.describe("keybindings: AI Chat toggle", () => {
 
     // Select B2 first so we can assert the shortcut doesn't fall through to Ctrl/Cmd+A (Select All).
     await page.waitForFunction(() => {
-      const app = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       const rect = app?.getCellRectA1?.("B2");
       return rect && rect.width > 0 && rect.height > 0;
     });
 
-    const b2 = (await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("B2"))) as {
+    const b2 = (await page.evaluate(() => (window.__formulaApp as any).getCellRectA1("B2"))) as {
       x: number;
       y: number;
       width: number;

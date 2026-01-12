@@ -22,7 +22,7 @@ test.describe("shared grid zoom persistence", () => {
     await zoomControl.selectOption("75");
 
     await page.waitForFunction(() => {
-      const zoom = (window as any).__formulaApp?.getZoom?.();
+      const zoom = (window.__formulaApp as any)?.getZoom?.();
       return typeof zoom === "number" && Math.abs(zoom - 0.75) < 0.01;
     });
 
@@ -31,7 +31,7 @@ test.describe("shared grid zoom persistence", () => {
 
     await expect(zoomControl).toHaveValue("75");
 
-    const zoomAfter = await page.evaluate(() => (window as any).__formulaApp.getZoom());
+    const zoomAfter = await page.evaluate(() => (window.__formulaApp as any).getZoom());
     expect(zoomAfter).toBeCloseTo(0.75, 2);
   });
 });
