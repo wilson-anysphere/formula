@@ -83,9 +83,8 @@ pub fn decompress_container(input: &[u8]) -> Result<Vec<u8>, CompressionError> {
 
         let compressed = (header & 0x8000) != 0;
         let chunk_size = (header & 0x0FFF) as usize + 3; // includes header
-        let chunk_data_size = chunk_size
-            .checked_sub(2)
-            .expect("chunk_size >=2 by construction");
+        // `chunk_size` includes the 2-byte header and is always >= 3.
+        let chunk_data_size = chunk_size - 2;
 
         if offset + chunk_data_size > rest.len() {
             return Err(CompressionError::TruncatedChunkData);

@@ -410,10 +410,12 @@ pub fn parse_vba_digital_signature(
             .cmp(&signature_path_rank(b))
             .then(a.cmp(b))
     });
-    let chosen = candidates.into_iter().next().expect("candidates non-empty");
+    let Some(chosen) = candidates.into_iter().next() else {
+        return Ok(None);
+    };
     let stream_kind =
         signature_path_stream_kind(&chosen).unwrap_or(VbaSignatureStreamKind::Unknown);
-    let signature = ole.read_stream_opt(&chosen)?.unwrap_or_else(|| Vec::new());
+    let signature = ole.read_stream_opt(&chosen)?.unwrap_or_default();
 
     let signer_subject = extract_first_certificate_subject(&signature);
 
@@ -971,11 +973,11 @@ fn signature_path_rank(path: &str) -> u8 {
 }
 
 fn bytes_to_lower_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        use std::fmt::Write;
-        // Safe to unwrap: writing to a String cannot fail.
-        write!(&mut out, "{:02x}", b).expect("writing to string is infallible");
+    for &b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0F) as usize] as char);
     }
     out
 }
