@@ -175,6 +175,17 @@ mod tests {
         }
 
         // 2) Try some OS-specific global temp locations.
+        #[cfg(unix)]
+        {
+            // Some environments set `TMPDIR` under `$HOME`, which would fall inside the default
+            // allowed roots. Fall back to well-known global temp directories.
+            for base in [Path::new("/tmp"), Path::new("/var/tmp")] {
+                if let Some(tmp) = tempdir_if_outside(Some(base), allowed_roots) {
+                    return tmp;
+                }
+            }
+        }
+
         #[cfg(windows)]
         {
             // `%WINDIR%\\Temp` (commonly writable for normal users).
