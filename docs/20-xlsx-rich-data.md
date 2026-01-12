@@ -507,13 +507,18 @@ Even before full rich-data editing is implemented, round-trip compatibility need
 ## Known gaps / uncertainties (remaining)
 
 1. **More `<rv>` payload variants**
-   - This repo confirms two concrete encodings:
-      - `richValue.xml` variant: `<rv t="image"><v kind="rel">0</v></rv>` (0 = relationship-slot index) with
-        `richValueRel.xml` root `<richValueRel xmlns="…/2017/richdata2">`.
-      - `rdRichValue*` variant: `rdrichvalue.xml` `<rv><v>…</v><v>…</v></rv>` interpreted via
-        `rdrichvaluestructure.xml`, with the relationship slot index in the key
-        `_rvRel:LocalImageIdentifier`, and `richValueRel.xml` root
-        `<richValueRels xmlns="…/2022/richvaluerel">`.
+   - This repo confirms multiple concrete encodings:
+      - Minimal `richValue.xml` variant (synthetic fixture `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`):
+        - rich value payload: `<rv s="0" t="image"><v kind="rel">0</v></rv>`
+        - `richValueRel.xml` root: `<richValueRel xmlns="…/2017/richdata2">`
+      - Modern `richValue.xml` variant (real Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx`):
+        - rich value payload: `<values><rv type="0"><v kind="rel">0</v></rv></values>`
+        - `richValueRel.xml` root: `<rvRel xmlns="…/2017/richdata"><rels>…</rels></rvRel>`
+      - `rdRichValue*` variant (real Excel fixture `fixtures/xlsx/basic/image-in-cell.xlsx`):
+        - rich value payload: `rdrichvalue.xml` `<rv><v>…</v><v>…</v></rv>` interpreted via
+          `rdrichvaluestructure.xml` key order
+        - relationship slot index is the `<v>` for the key `_rvRel:LocalImageIdentifier`
+        - `richValueRel.xml` root: `<richValueRels xmlns="…/2022/richvaluerel">`
    - Other Excel builds may emit additional fields/structures; preserve unknown subtrees.
 2. **Multi-part `richValue*.xml` behavior**
    - When does Excel split into `richValue1.xml`, `richValue2.xml`, etc.?
