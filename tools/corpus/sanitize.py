@@ -1192,7 +1192,33 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
 
     input_buf = io.BytesIO(data)
     with zipfile.ZipFile(input_buf, "r") as zin:
-        names = [info.filename for info in zin.infolist() if not info.is_dir()]
+        def _normalize_zip_entry_name(name: str) -> str:
+            # ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but some
+            # producers emit them. Be tolerant by normalizing entry names for all downstream
+            # bookkeeping and rewrites.
+            return name.replace("\\", "/").lstrip("/")
+
+        # Normalize ZIP entry names (trim leading `/`, normalize `\\`) but keep a mapping to the
+        # original archive entry name for reads. This avoids failures when workbooks store core
+        # parts like `/xl/workbook.xml` instead of `xl/workbook.xml`.
+        #
+        # If the archive contains duplicate entries that collapse to the same normalized part name
+        # (e.g. both `xl/workbook.xml` and `/xl/workbook.xml`), prefer the canonical non-slashed
+        # entry name when present.
+        names: list[str] = []
+        original_by_name: dict[str, str] = {}
+        for info in zin.infolist():
+            if info.is_dir():
+                continue
+            raw = info.filename
+            name = _normalize_zip_entry_name(raw)
+            if name not in original_by_name:
+                names.append(name)
+                original_by_name[name] = raw
+            else:
+                prev = original_by_name[name]
+                if prev.startswith("/") and not raw.startswith("/"):
+                    original_by_name[name] = raw
 
         removed_parts: set[str] = set()
         if options.remove_external_links:
@@ -1233,7 +1259,10 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
         sheet_rename_map: dict[str, str] = {}
         if options.rename_sheets:
             try:
-                wb_root = ET.fromstring(zin.read("xl/workbook.xml"))
+                wb_part = original_by_name.get("xl/workbook.xml")
+                if wb_part is None:
+                    raise KeyError("missing xl/workbook.xml")
+                wb_root = ET.fromstring(zin.read(wb_part))
                 sheets = None
                 for child in wb_root:
                     if child.tag.split("}")[-1] == "sheets":
@@ -1260,7 +1289,7 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
             idx = 1
             for part in table_parts:
                 try:
-                    t_root = ET.fromstring(zin.read(part))
+                    t_root = ET.fromstring(zin.read(original_by_name[part]))
                 except Exception:
                     continue
                 if t_root.tag.split("}")[-1] != "table":
@@ -1313,7 +1342,7 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                 if name in removed_parts:
                     continue
 
-                raw = zin.read(name)
+                raw = zin.read(original_by_name[name])
                 new = raw
 
                 try:
@@ -1370,7 +1399,7 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
                                 )
                                 if rels_name in names and rels_name not in removed_parts:
                                     try:
-                                        rels_root = ET.fromstring(zin.read(rels_name))
+                                        rels_root = ET.fromstring(zin.read(original_by_name[rels_name]))
                                         table_rids: dict[str, str] = {}
                                         for rel in list(rels_root):
                                             if rel.tag != qn(NS_REL, "Relationship"):

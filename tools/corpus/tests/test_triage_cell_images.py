@@ -9,6 +9,20 @@ from tools.corpus.triage import triage_workbook
 from tools.corpus.util import WorkbookInput
 
 
+def _rewrite_zip_with_leading_slash_entry_names(data: bytes) -> bytes:
+    zin_buf = io.BytesIO(data)
+    zout_buf = io.BytesIO()
+    with zipfile.ZipFile(zin_buf, "r") as zin:
+        with zipfile.ZipFile(zout_buf, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+            for info in zin.infolist():
+                if info.is_dir():
+                    continue
+                name = info.filename
+                new_name = name if name.startswith("/") else f"/{name}"
+                zout.writestr(new_name, zin.read(name))
+    return zout_buf.getvalue()
+
+
 def _make_xlsx_with_cell_images() -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
@@ -456,6 +470,35 @@ class TriageCellImagesTests(unittest.TestCase):
                 "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
             ],
         )
+
+    def test_triage_tolerates_leading_slash_zip_entry_names(self) -> None:
+        import tools.corpus.triage as triage_mod
+
+        original_run_rust_triage = triage_mod._run_rust_triage
+        try:
+            triage_mod._run_rust_triage = lambda *args, **kwargs: {  # type: ignore[assignment]
+                "steps": {},
+                "result": {"open_ok": True, "round_trip_ok": True},
+            }
+
+            wb = WorkbookInput(
+                display_name="book.xlsx",
+                data=_rewrite_zip_with_leading_slash_entry_names(_make_xlsx_with_cell_images()),
+            )
+            report = triage_workbook(
+                wb,
+                rust_exe=Path("noop"),
+                diff_ignore=set(),
+                diff_limit=0,
+                recalc=False,
+                render_smoke=False,
+            )
+        finally:
+            triage_mod._run_rust_triage = original_run_rust_triage  # type: ignore[assignment]
+
+        self.assertTrue(report["features"]["has_cell_images"])
+        self.assertIn("cell_images", report)
+        self.assertEqual(report["cell_images"]["part_name"], "/xl/cellimages.xml")
 
     def test_triage_prefers_cellimages_xml_when_present(self) -> None:
         import tools.corpus.triage as triage_mod

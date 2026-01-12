@@ -930,6 +930,19 @@ def _make_minimal_xlsx_with_macrosheet_inline_str() -> bytes:
         )
     return buf.getvalue()
 
+def _rewrite_zip_with_leading_slash_entry_names(data: bytes) -> bytes:
+    zin_buf = io.BytesIO(data)
+    zout_buf = io.BytesIO()
+    with zipfile.ZipFile(zin_buf, "r") as zin:
+        with zipfile.ZipFile(zout_buf, "w", compression=zipfile.ZIP_DEFLATED) as zout:
+            for info in zin.infolist():
+                if info.is_dir():
+                    continue
+                name = info.filename
+                new_name = name if name.startswith("/") else f"/{name}"
+                zout.writestr(new_name, zin.read(name))
+    return zout_buf.getvalue()
+
 
 class SanitizeTests(unittest.TestCase):
     def test_sanitize_removes_common_secret_bearing_parts(self) -> None:
@@ -948,6 +961,22 @@ class SanitizeTests(unittest.TestCase):
             ct = z.read("[Content_Types].xml").decode("utf-8")
             self.assertNotIn("/xl/connections.xml", ct)
             self.assertNotIn("/customXml/item1.xml", ct)
+
+    def test_sanitize_tolerates_leading_slash_zip_entry_names(self) -> None:
+        original = _make_minimal_xlsx_with_secrets()
+        rewritten = _rewrite_zip_with_leading_slash_entry_names(original)
+        sanitized, summary = sanitize_xlsx_bytes(rewritten, options=SanitizeOptions())
+
+        self.assertIn("xl/connections.xml", summary.removed_parts)
+        self.assertIn("customXml/item1.xml", summary.removed_parts)
+
+        with zipfile.ZipFile(io.BytesIO(sanitized), "r") as z:
+            names = set(z.namelist())
+            # Sanitizer writes normalized part names (no leading '/').
+            self.assertIn("xl/workbook.xml", names)
+            self.assertNotIn("/xl/workbook.xml", names)
+            self.assertNotIn("xl/connections.xml", names)
+            self.assertNotIn("customXml/item1.xml", names)
 
     def test_sanitize_scrubs_external_relationship_targets(self) -> None:
         original = _make_minimal_xlsx_with_secrets()

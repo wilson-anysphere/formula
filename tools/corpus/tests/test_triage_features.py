@@ -11,6 +11,13 @@ class TriageFeatureScanTests(unittest.TestCase):
         self.assertIn("has_cell_images", features)
         self.assertTrue(features["has_cell_images"])
 
+    def test_scan_features_detects_cell_images_with_leading_slash(self) -> None:
+        # Some malformed XLSX archives store entry names like `/xl/cellImages.xml`. Feature scanning
+        # should be tolerant and still detect the part.
+        features = _scan_features(["/xl/cellImages.xml"])
+        self.assertIn("has_cell_images", features)
+        self.assertTrue(features["has_cell_images"])
+
     def test_scan_features_detects_cell_images_case_insensitively(self) -> None:
         features = _scan_features(["XL/CellImages1.XML"])
         self.assertIn("has_cell_images", features)

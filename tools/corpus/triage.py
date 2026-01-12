@@ -65,9 +65,17 @@ def _step_skipped(reason: str) -> StepResult:
     return StepResult(status="skipped", details={"reason": reason})
 
 
+def _normalize_zip_entry_name(name: str) -> str:
+    # ZIP entry names in valid XLSX/XLSM packages should not start with `/`, but some producers do.
+    # Normalize for comparisons while preserving the original entry name for `ZipFile.read`.
+    return name.replace("\\", "/").lstrip("/")
+
+
 def _scan_features(zip_names: list[str]) -> dict[str, Any]:
     import posixpath
     import re
+
+    normalized_names = [_normalize_zip_entry_name(n) for n in zip_names]
 
     prefixes = {
         "charts": "xl/charts/",
@@ -84,26 +92,29 @@ def _scan_features(zip_names: list[str]) -> dict[str, Any]:
 
     features: dict[str, Any] = {}
     for key, prefix in prefixes.items():
-        features[f"has_{key}"] = any(n.startswith(prefix) for n in zip_names)
+        features[f"has_{key}"] = any(n.startswith(prefix) for n in normalized_names)
 
-    features["has_vba"] = "xl/vbaProject.bin" in zip_names
-    features["has_connections"] = "xl/connections.xml" in zip_names
-    features["has_shared_strings"] = "xl/sharedStrings.xml" in zip_names
+    normalized_casefold = {n.casefold() for n in normalized_names}
+    features["has_vba"] = "xl/vbaproject.bin" in normalized_casefold
+    features["has_connections"] = "xl/connections.xml" in normalized_casefold
+    features["has_shared_strings"] = "xl/sharedstrings.xml" in normalized_casefold
     # Excel's "Images in Cell" feature (aka `cellImages`).
     cellimages_part_re = re.compile(r"(?i)^cellimages\d*\.xml$")
     features["has_cell_images"] = any(
-        (normalized := n.replace("\\", "/")).casefold().startswith("xl/")
+        _normalize_zip_entry_name(n).casefold().startswith("xl/")
         and cellimages_part_re.match(posixpath.basename(normalized))
-        for n in zip_names
+        for (n, normalized) in zip(zip_names, normalized_names)
     )
-    features["sheet_xml_count"] = len([n for n in zip_names if n.startswith("xl/worksheets/sheet")])
+    features["sheet_xml_count"] = len(
+        [n for n in normalized_names if n.startswith("xl/worksheets/sheet")]
+    )
     return features
 
 
 def _find_zip_entry_case_insensitive(zip_names: list[str], wanted: str) -> str | None:
-    wanted_lower = wanted.lower()
+    wanted_lower = _normalize_zip_entry_name(wanted).casefold()
     for n in zip_names:
-        if n.lower() == wanted_lower:
+        if _normalize_zip_entry_name(n).casefold() == wanted_lower:
             return n
     return None
 
@@ -120,10 +131,10 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
     import re
 
     cellimages_part_re = re.compile(r"(?i)^cellimages(\d*)\.xml$")
-    zip_names_casefold_set = {n.replace("\\", "/").casefold() for n in zip_names}
+    zip_names_casefold_set = {_normalize_zip_entry_name(n).casefold() for n in zip_names}
 
     def _is_cellimages_part(n: str) -> bool:
-        normalized = n.replace("\\", "/")
+        normalized = _normalize_zip_entry_name(n)
         if not normalized.casefold().startswith("xl/"):
             return False
         return bool(cellimages_part_re.match(posixpath.basename(normalized)))
@@ -134,7 +145,7 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
 
     part_name: str | None = None
     for n in candidates:
-        if n.casefold() == "xl/cellimages.xml":
+        if _normalize_zip_entry_name(n).casefold() == "xl/cellimages.xml":
             part_name = n
             break
 
@@ -142,7 +153,7 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
         # Prefer the smallest numeric suffix (treat empty suffix as 0), with a stable tie-breaker.
         scored: list[tuple[int, int, int, str, str]] = []
         for n in candidates:
-            normalized = n.replace("\\", "/")
+            normalized = _normalize_zip_entry_name(n)
             m = cellimages_part_re.match(posixpath.basename(normalized))
             if not m:
                 continue
@@ -165,12 +176,13 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
             from xml.etree import ElementTree as ET
 
             ct_root = ET.fromstring(z.read(content_types_name))
+            part_name_normalized = _normalize_zip_entry_name(part_name)
             for el in ct_root.iter():
                 if el.tag.split("}")[-1] != "Override":
                     continue
                 part = el.attrib.get("PartName") or ""
                 normalized_part = part.lstrip("/").replace("\\", "/")
-                if normalized_part.casefold() == part_name.casefold():
+                if normalized_part.casefold() == part_name_normalized.casefold():
                     content_type = el.attrib.get("ContentType")
                     break
         except Exception:
@@ -203,7 +215,8 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
                 resolved = _resolve_workbook_target(target)
                 if not resolved:
                     continue
-                if resolved.casefold() == part_name.casefold():
+                part_name_normalized = _normalize_zip_entry_name(part_name)
+                if resolved.casefold() == part_name_normalized.casefold():
                     workbook_rel_type = el.attrib.get("Type")
                     break
                 # Be tolerant of producers that use an incorrect base path but a correct basename.
@@ -212,7 +225,7 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
                 if (
                     resolved.casefold() not in zip_names_casefold_set
                     and posixpath.basename(resolved).casefold()
-                    == posixpath.basename(part_name).casefold()
+                    == posixpath.basename(part_name_normalized).casefold()
                 ):
                     workbook_rel_type = el.attrib.get("Type")
                     break
@@ -258,8 +271,9 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
         embed_rids_count = None
 
     rels_types: list[str] = []
-    part_dir = posixpath.dirname(part_name.replace("\\", "/"))
-    part_base = posixpath.basename(part_name.replace("\\", "/"))
+    part_name_normalized = _normalize_zip_entry_name(part_name)
+    part_dir = posixpath.dirname(part_name_normalized)
+    part_base = posixpath.basename(part_name_normalized)
     cellimages_rels_path = posixpath.join(part_dir, "_rels", f"{part_base}.rels")
     cellimages_rels_name = _find_zip_entry_case_insensitive(zip_names, cellimages_rels_path)
     if cellimages_rels_name:
@@ -299,7 +313,8 @@ def _extract_function_counts(z: zipfile.ZipFile) -> Counter[str]:
 
     counts: Counter[str] = Counter()
     for name in z.namelist():
-        if not (name.startswith("xl/worksheets/") and name.endswith(".xml")):
+        normalized = _normalize_zip_entry_name(name)
+        if not (normalized.startswith("xl/worksheets/") and normalized.endswith(".xml")):
             continue
         root = z.read(name)
 
