@@ -97,6 +97,13 @@ test("sync-server rejects connections when introspection marks token inactive", 
     role: "editor",
     sessionId: "00000000-0000-0000-0000-000000000002"
   });
+  const forbiddenActiveToken = signJwt({
+    sub: "u-forbidden-active",
+    docId: docName,
+    orgId: "o1",
+    role: "editor",
+    sessionId: "s-forbidden-active"
+  });
   const apiKeyRevokedToken = signJwt({
     sub: "u-api-key-revoked",
     docId: docName,
@@ -159,6 +166,11 @@ test("sync-server rejects connections when introspection marks token inactive", 
         body = { reason: "invalid_claims", error: "forbidden" };
       } else if (parsed.token === mfaRequiredToken) {
         body = { active: false, reason: "mfa_required" };
+      } else if (parsed.token === forbiddenActiveToken) {
+        // Even if the body claims `{ active: true }`, a 403 response must be treated
+        // as an inactive token.
+        statusCode = 403;
+        body = { active: true, userId: "u-forbidden-active", orgId: "o1", role: "editor", error: "forbidden" };
       } else if (parsed.token === apiKeyRevokedToken) {
         body = { active: false, reason: "api_key_revoked" };
       } else if (parsed.token === notMemberToken) {
@@ -221,6 +233,11 @@ test("sync-server rejects connections when introspection marks token inactive", 
   );
 
   await expectWebSocketUpgradeStatus(
+    `${syncServer.wsUrl}/${docName}?token=${encodeURIComponent(forbiddenActiveToken)}`,
+    403
+  );
+
+  await expectWebSocketUpgradeStatus(
     `${syncServer.wsUrl}/${docName}?token=${encodeURIComponent(apiKeyRevokedToken)}`,
     401
   );
@@ -235,9 +252,10 @@ test("sync-server rejects connections when introspection marks token inactive", 
     403
   );
 
-  assert.ok(calls.length >= 3);
+  assert.ok(calls.length >= 6);
   assert.ok(calls.some((c) => c.token === revokedToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === invalidClaimsToken && c.docId === docName));
+  assert.ok(calls.some((c) => c.token === forbiddenActiveToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === apiKeyRevokedToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === mfaRequiredToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === notMemberToken && c.docId === docName));

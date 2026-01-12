@@ -145,7 +145,8 @@ export function createSyncTokenIntrospectionClient(config: {
 
       if (res.status === 401 || res.status === 403) {
         // Token is inactive/invalid (or the introspection endpoint rejected our request).
-        const fallbackReason =
+        // Never treat a 401/403 response as an active token, even if the body is malformed or claims otherwise.
+        const reason =
           json && typeof json === "object"
             ? typeof (json as any).reason === "string" && (json as any).reason.length > 0
               ? ((json as any).reason as string)
@@ -154,12 +155,7 @@ export function createSyncTokenIntrospectionClient(config: {
                 : "forbidden"
             : "forbidden";
 
-        if (!json) return { active: false, reason: fallbackReason };
-        try {
-          return parseIntrospectionResult(json);
-        } catch {
-          return { active: false, reason: fallbackReason };
-        }
+        return { active: false, reason };
       }
 
       if (!res.ok) {
