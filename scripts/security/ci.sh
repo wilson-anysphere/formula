@@ -39,12 +39,30 @@ esac
 # Some environments configure Cargo globally with `build.rustc-wrapper` (often `sccache`).
 # When the wrapper is unavailable/misconfigured, builds can fail even for `cargo metadata`.
 # Default to disabling any configured wrapper unless the user explicitly overrides it in the env.
-export RUSTC_WRAPPER="${RUSTC_WRAPPER:-}"
-export RUSTC_WORKSPACE_WRAPPER="${RUSTC_WORKSPACE_WRAPPER:-}"
-# Cargo can also read wrapper config via `CARGO_BUILD_RUSTC_WRAPPER` env vars; set them explicitly
-# so a global config doesn't unexpectedly re-enable a flaky wrapper when `RUSTC_WRAPPER` is unset.
-export CARGO_BUILD_RUSTC_WRAPPER="${CARGO_BUILD_RUSTC_WRAPPER:-${RUSTC_WRAPPER}}"
-export CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER="${CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER:-${RUSTC_WORKSPACE_WRAPPER}}"
+#
+# Cargo respects both `RUSTC_WRAPPER` and the config/env-var equivalent `CARGO_BUILD_RUSTC_WRAPPER`.
+# Unify them with nullish precedence (treating empty strings as explicit overrides) so wrapper
+# config cannot leak in unexpectedly.
+rustc_wrapper=""
+if [ -n "${RUSTC_WRAPPER+x}" ]; then
+  rustc_wrapper="${RUSTC_WRAPPER}"
+elif [ -n "${CARGO_BUILD_RUSTC_WRAPPER+x}" ]; then
+  rustc_wrapper="${CARGO_BUILD_RUSTC_WRAPPER}"
+fi
+
+rustc_workspace_wrapper=""
+if [ -n "${RUSTC_WORKSPACE_WRAPPER+x}" ]; then
+  rustc_workspace_wrapper="${RUSTC_WORKSPACE_WRAPPER}"
+elif [ -n "${CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER+x}" ]; then
+  rustc_workspace_wrapper="${CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER}"
+fi
+
+export RUSTC_WRAPPER="${rustc_wrapper}"
+export RUSTC_WORKSPACE_WRAPPER="${rustc_workspace_wrapper}"
+export CARGO_BUILD_RUSTC_WRAPPER="${rustc_wrapper}"
+export CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER="${rustc_workspace_wrapper}"
+unset rustc_wrapper
+unset rustc_workspace_wrapper
 
 REPORT_DIR="${REPORT_DIR:-security-report}"
 ALLOWLIST_CARGO="security/allowlist/cargo-audit.txt"
