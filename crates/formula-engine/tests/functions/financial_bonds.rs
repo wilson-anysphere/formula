@@ -150,6 +150,12 @@ fn negative_yield_below_minus_one_is_allowed_when_frequency_gt_one() {
         yield_rate(settlement, maturity, rate, expected, redemption, frequency, basis, system).unwrap();
     assert_close(solved, yld, 1e-10);
 
+    // With a single cashflow one semiannual period away, Macaulay duration is 0.5 years.
+    let dur = duration(settlement, maturity, rate, yld, frequency, basis, system).unwrap();
+    assert_close(dur, 1.0 / freq, 1e-12);
+    let mdur = mduration(settlement, maturity, rate, yld, frequency, basis, system).unwrap();
+    assert_close(mdur, dur / (1.0 + yld / freq), 1e-12);
+
     // Boundary behavior: 1 + yld/frequency == 0 -> #DIV/0!.
     assert_eq!(
         price(
