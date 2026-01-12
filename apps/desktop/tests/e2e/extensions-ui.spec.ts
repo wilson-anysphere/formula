@@ -136,6 +136,10 @@ test.describe("Extensions UI integration", () => {
     expect(sandboxAttr ?? "").not.toContain("allow-same-origin");
     await expect(iframeLocator, "webview should not send referrers").toHaveAttribute("referrerpolicy", "no-referrer");
     await expect(iframeLocator, "webview should load from a blob: URL").toHaveAttribute("src", /^blob:/);
+    await expect(iframeLocator, "webview should explicitly disable clipboard features").toHaveAttribute(
+      "allow",
+      /clipboard-read 'none'; clipboard-write 'none'/,
+    );
 
     const frame = page.frameLocator('iframe[data-testid="extension-webview-sampleHello.panel"]');
     await expect(frame.locator("h1")).toHaveText("Sample Hello Panel");
