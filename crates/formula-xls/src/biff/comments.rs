@@ -573,6 +573,7 @@ fn parse_txo_text_biff8(
     }
 
     let mut out = String::new();
+    let mut ansi_bytes: Vec<u8> = Vec::new();
     let mut remaining = cch_text;
     let mut remaining_bytes = text_continue_bytes;
     for frag in continues {
@@ -597,9 +598,16 @@ fn parse_txo_text_biff8(
         let take_bytes = take_chars * bytes_per_char;
         let slice = &bytes[..take_bytes];
         if is_unicode {
+            // Flush any buffered ANSI bytes so multi-byte sequences can span CONTINUE fragments.
+            if !ansi_bytes.is_empty() {
+                out.push_str(&strings::decode_ansi(codepage, &ansi_bytes));
+                ansi_bytes.clear();
+            }
             out.push_str(&decode_utf16le(slice));
         } else {
-            out.push_str(&strings::decode_ansi(codepage, slice));
+            // Accumulate and decode once to preserve stateful multibyte encodings (e.g. Shift-JIS)
+            // when a character boundary is split across CONTINUE records.
+            ansi_bytes.extend_from_slice(slice);
         }
         remaining -= take_chars;
     }
@@ -613,6 +621,9 @@ fn parse_txo_text_biff8(
                 cch_text.saturating_sub(remaining)
             ),
         );
+    }
+    if !ansi_bytes.is_empty() {
+        out.push_str(&strings::decode_ansi(codepage, &ansi_bytes));
     }
     trim_trailing_nuls(&mut out);
     strip_embedded_nuls(&mut out);
@@ -751,6 +762,7 @@ fn fallback_decode_continue_fragments(
     );
 
     let mut out = String::new();
+    let mut ansi_bytes: Vec<u8> = Vec::new();
     let mut remaining_chars = TXO_MAX_TEXT_CHARS;
     for frag in continues {
         if remaining_chars == 0 {
@@ -779,11 +791,18 @@ fn fallback_decode_continue_fragments(
         let take_bytes = take_chars * bytes_per_char;
         let slice = &bytes[..take_bytes];
         if is_unicode {
+            if !ansi_bytes.is_empty() {
+                out.push_str(&strings::decode_ansi(codepage, &ansi_bytes));
+                ansi_bytes.clear();
+            }
             out.push_str(&decode_utf16le(slice));
         } else {
-            out.push_str(&strings::decode_ansi(codepage, slice));
+            ansi_bytes.extend_from_slice(slice);
         }
         remaining_chars -= take_chars;
+    }
+    if !ansi_bytes.is_empty() {
+        out.push_str(&strings::decode_ansi(codepage, &ansi_bytes));
     }
 
     trim_trailing_nuls(&mut out);
@@ -1592,6 +1611,33 @@ mod tests {
             warnings.is_empty(),
             "unexpected warnings: {warnings:?}"
         );
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].author, "Alice");
+        assert_eq!(notes[0].text, "\u{3042}");
+    }
+
+    #[test]
+    fn parses_biff8_txo_text_with_multibyte_codepage_split_across_continue_records() {
+        // Some `.xls` files appear to store BIFF8 TXO comment text as 8-bit codepage bytes even
+        // when using a multibyte codepage like Shift-JIS (932). Ensure we decode across CONTINUE
+        // boundaries without corrupting multibyte sequences.
+        let sjis = [0x82u8, 0xA0u8]; // 'あ'
+        let cch_text = sjis.len() as u16;
+
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text(cch_text),
+            continue_text_compressed_bytes(&sjis[..1]),
+            continue_text_compressed_bytes(&sjis[1..]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 932).expect("parse");
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].author, "Alice");
         assert_eq!(notes[0].text, "\u{3042}");
