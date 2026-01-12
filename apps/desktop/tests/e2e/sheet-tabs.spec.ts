@@ -496,6 +496,9 @@ test.describe("sheet tabs", () => {
     await input.press("Enter");
     await expect(page.locator('[data-testid="toast"]').filter({ hasText: /invalid character/i })).toBeVisible();
 
+    // Sheet name remains unchanged.
+    await expect(sheet1Tab.locator(".sheet-tab__name")).toHaveText("Sheet1");
+
     // Invalid rename should not wedge sheet navigation; switching via the status-bar sheet switcher should still work.
     const switcher = page.getByTestId("sheet-switcher");
     await switcher.selectOption("Sheet2", { force: true });
