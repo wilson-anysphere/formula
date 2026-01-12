@@ -4250,6 +4250,74 @@ mod tests {
     }
 
     #[test]
+    fn apply_operation_move_range_remaps_rich_inputs_and_rewrites_field_access_formulas() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let mut properties = BTreeMap::new();
+        properties.insert("Price".to_string(), CellValue::Number(12.5));
+        let entity = CellValue::Entity(formula_model::EntityValue {
+            entity_type: "stock".to_string(),
+            entity_id: "AAPL".to_string(),
+            display_value: "Apple Inc.".to_string(),
+            properties,
+        });
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity.clone())
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "C1", json!("=A1.Price"))
+            .unwrap();
+
+        wb.recalculate_internal(None).unwrap();
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "C1"),
+            EngineValue::Number(12.5)
+        );
+
+        wb.apply_operation_internal(EditOpDto::MoveRange {
+            sheet: DEFAULT_SHEET.to_string(),
+            src: "A1".to_string(),
+            dst_top_left: "B2".to_string(),
+        })
+        .unwrap();
+
+        // Rich input should move along with the cell.
+        assert_eq!(
+            wb.sheets_rich
+                .get(DEFAULT_SHEET)
+                .and_then(|cells| cells.get("B2")),
+            Some(&entity)
+        );
+        assert!(
+            wb.sheets_rich
+                .get(DEFAULT_SHEET)
+                .and_then(|cells| cells.get("A1"))
+                .is_none()
+        );
+
+        // Rich values remain absent from the scalar workbook schema.
+        let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
+        assert!(sheet_cells.get("B2").is_none());
+
+        // Formulas outside the moved range should follow the moved rich value.
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "C1"),
+            Some("=B2.Price")
+        );
+        assert_eq!(sheet_cells.get("C1"), Some(&json!("=B2.Price")));
+
+        // Rich getter should round-trip the value at the new address.
+        let rich_b2 = wb.get_cell_rich_data(DEFAULT_SHEET, "B2").unwrap();
+        assert_eq!(rich_b2.input, entity);
+        assert_eq!(rich_b2.value, rich_b2.input);
+
+        wb.recalculate_internal(None).unwrap();
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "C1"),
+            EngineValue::Number(12.5)
+        );
+    }
+
+    #[test]
     fn apply_operation_copy_range_adjusts_relative_references() {
         let mut wb = WorkbookState::new_with_default_sheet();
         wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1")).unwrap();
@@ -4286,6 +4354,56 @@ mod tests {
             }),
             "expected formula rewrite for copied formula cell"
         );
+    }
+
+    #[test]
+    fn apply_operation_copy_range_copies_rich_inputs_and_overwrites_destination() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let src_entity = CellValue::Entity(formula_model::EntityValue::new("Source"));
+        let dst_entity = CellValue::Entity(formula_model::EntityValue::new("Destination"));
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", src_entity.clone())
+            .unwrap();
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "B1", dst_entity)
+            .unwrap();
+
+        wb.apply_operation_internal(EditOpDto::CopyRange {
+            sheet: DEFAULT_SHEET.to_string(),
+            src: "A1".to_string(),
+            dst_top_left: "B1".to_string(),
+        })
+        .unwrap();
+
+        let rich_cells = wb.sheets_rich.get(DEFAULT_SHEET).unwrap();
+        assert_eq!(rich_cells.get("A1"), Some(&src_entity));
+        assert_eq!(
+            rich_cells.get("B1"),
+            Some(&src_entity),
+            "destination rich input should be overwritten by the copy"
+        );
+    }
+
+    #[test]
+    fn apply_operation_insert_rows_remaps_rich_inputs() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let entity = CellValue::Entity(formula_model::EntityValue::new("Acme"));
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity.clone())
+            .unwrap();
+
+        wb.apply_operation_internal(EditOpDto::InsertRows {
+            sheet: DEFAULT_SHEET.to_string(),
+            row: 0,
+            count: 1,
+        })
+        .unwrap();
+
+        let rich_cells = wb.sheets_rich.get(DEFAULT_SHEET).unwrap();
+        assert!(
+            rich_cells.get("A1").is_none(),
+            "rich input should shift down with inserted rows"
+        );
+        assert_eq!(rich_cells.get("A2"), Some(&entity));
     }
 
     #[test]
