@@ -239,9 +239,14 @@ fn dump_workbook_relationships(pkg: &XlsxPackage) {
     for rel in relationships {
         let target_lower = rel.target.to_ascii_lowercase();
         let type_lower = rel.type_uri.to_ascii_lowercase();
+        // Excel's RichData-related relationship types use several different prefixes
+        // (`metadata`, `richValue*`, `rdRichValue*`, etc). Filter with a best-effort
+        // substring match that catches the common cases.
         if target_lower.contains("metadata")
+            || target_lower.contains("richdata")
             || type_lower.contains("metadata")
             || type_lower.contains("richdata")
+            || type_lower.contains("richvalue")
         {
             matched += 1;
             if let Some(mode) = rel.target_mode.as_deref() {
