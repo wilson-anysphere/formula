@@ -49,8 +49,8 @@ fn find_cell_record(sheet_bin: &[u8], target_row: u32, target_col: u32) -> Optio
         cursor.read_exact(&mut payload).ok()?;
 
         match id {
-            0x0191 => in_sheet_data = true,  // BrtSheetData
-            0x0192 => in_sheet_data = false, // BrtSheetDataEnd
+            0x0091 => in_sheet_data = true,  // BrtSheetData
+            0x0092 => in_sheet_data = false, // BrtSheetDataEnd
             0x0000 if in_sheet_data => {
                 if payload.len() >= 4 {
                     current_row = u32::from_le_bytes(payload[0..4].try_into().unwrap());
@@ -100,7 +100,7 @@ fn read_shared_strings_stats(shared_strings_bin: &[u8]) -> SharedStringsStats {
             .expect("read record payload");
 
         match id {
-            0x019F if payload.len() >= 8 => {
+            0x009F if payload.len() >= 8 => {
                 // BrtSST: [totalCount][uniqueCount]
                 total_count = Some(u32::from_le_bytes(payload[0..4].try_into().unwrap()));
                 unique_count = Some(u32::from_le_bytes(payload[4..8].try_into().unwrap()));
@@ -120,7 +120,7 @@ fn read_shared_strings_stats(shared_strings_bin: &[u8]) -> SharedStringsStats {
                     strings.push(String::from_utf16_lossy(&units));
                 }
             }
-            0x01A0 => break, // BrtSSTEnd
+            0x00A0 => break, // BrtSSTEnd
             _ => {}
         }
     }
@@ -182,7 +182,7 @@ fn with_corrupt_sst_unique_count(input: &[u8], bad_unique_count: u32) -> Vec<u8>
             let len = biff12_varint::read_record_len(&mut cursor)
                 .expect("read record len")
                 .expect("record len");
-            assert_eq!(id, 0x019F, "expected BrtSST header record");
+            assert_eq!(id, 0x009F, "expected BrtSST header record");
             assert!(
                 len >= 8,
                 "expected BrtSST payload to contain [totalCount][uniqueCount]"
