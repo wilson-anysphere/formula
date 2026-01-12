@@ -304,6 +304,9 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
     // Interop: also provide a DIBV5 representation.
     if let Some(bytes) = dib_bytes.as_deref() {
         set_clipboard_bytes(CF_DIBV5, bytes)?;
+        // Additional interop: provide the older CF_DIB flavor too. Many consumers accept a
+        // BITMAPV5HEADER payload even when requesting CF_DIB.
+        let _ = set_clipboard_bytes(CF_DIB, bytes);
     }
 
     Ok(())
