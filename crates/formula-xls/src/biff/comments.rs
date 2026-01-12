@@ -6,8 +6,8 @@
 //! - `TXO` (+ `CONTINUE` records): stores the comment text payload
 //!
 //! This parser is intentionally best-effort and lossy:
-//! - Only plain text + author are decoded; rich text formatting and comment box
-//!   geometry/visibility are ignored.
+//! - Only plain text + author (when available) are decoded; rich text formatting
+//!   and comment box geometry/visibility are ignored.
 //! - Malformed/incomplete record sequences may yield partial output and warnings.
 //! - Modern threaded comments are an OOXML feature and are not supported in `.xls`.
 //! - Missing TXO payloads (text) are treated as a warning and the note may be
