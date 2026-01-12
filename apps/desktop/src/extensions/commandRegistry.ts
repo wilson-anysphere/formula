@@ -25,13 +25,18 @@ export class CommandRegistry {
     }
   }
 
-  registerBuiltinCommand(commandId: string, title: string, run: (...args: any[]) => any): void {
+  registerBuiltinCommand(
+    commandId: string,
+    title: string,
+    run: (...args: any[]) => any,
+    options?: { category?: string | null; icon?: string | null },
+  ): void {
     const id = String(commandId);
     this.commands.set(id, {
       commandId: id,
       title,
-      category: null,
-      icon: null,
+      category: options?.category ?? null,
+      icon: options?.icon ?? null,
       source: { kind: "builtin" },
       run: async (...args) => run(...args),
     });

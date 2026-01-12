@@ -83,7 +83,7 @@ import {
 import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js";
 import { evaluateWhenClause } from "./extensions/whenClause.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
-import { CommandPaletteController } from "./command-palette/commandPaletteController.js";
+import { createCommandPalette } from "./command-palette/index.js";
 import type { Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
 import { getPasteSpecialMenuItems } from "./clipboard/pasteSpecial.js";
@@ -1136,7 +1136,7 @@ if (
 
   // Keybindings (foundation): execute contributed commands.
   const parsedKeybindings: Array<ReturnType<typeof parseKeybinding>> = [];
-  let commandKeybindingDisplayIndex = new Map<string, string[]>();
+  const commandKeybindingDisplayIndex = new Map<string, string[]>();
   let lastLoadedExtensionIds = new Set<string>();
 
   const syncContributedCommands = () => {
@@ -1221,11 +1221,14 @@ if (
 
   const updateKeybindings = () => {
     parsedKeybindings.length = 0;
-    commandKeybindingDisplayIndex = new Map<string, string[]>();
+    commandKeybindingDisplayIndex.clear();
     if (!extensionHostManager.ready) return;
     const platform = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "mac" : "other";
     const contributed = extensionHostManager.getContributedKeybindings() as ContributedKeybinding[];
-    commandKeybindingDisplayIndex = buildCommandKeybindingDisplayIndex({ platform, contributed });
+    const nextKeybindingsIndex = buildCommandKeybindingDisplayIndex({ platform, contributed });
+    for (const [commandId, bindings] of nextKeybindingsIndex.entries()) {
+      commandKeybindingDisplayIndex.set(commandId, bindings);
+    }
     for (const kb of contributed) {
       const binding = platformKeybinding(kb, platform);
       const parsed = parseKeybinding(kb.command, binding, kb.when ?? null);
@@ -1269,6 +1272,10 @@ if (
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
         return;
       }
+
+      // Reserve Ctrl/Cmd+Shift+P for the command palette.
+      const primary = e.ctrlKey || e.metaKey;
+      if (primary && e.shiftKey && (e.key === "P" || e.key === "p")) return;
 
       for (const binding of parsedKeybindings) {
         if (!binding) continue;
@@ -2344,95 +2351,126 @@ if (
     else layoutController.closePanel(PanelIds.VBA_MIGRATE);
   });
 
-  // --- Command palette ----------------------------------------------------------
+  // --- Command palette -----------------------------------------------------------
 
-  // Register the built-in commands immediately so the palette is useful even while
-  // the extension host is still loading.
-  commandRegistry.registerBuiltinCommand("insertPivotTable", t("commandPalette.command.insertPivotTable"), () => {
-    layoutController.openPanel(PanelIds.PIVOT_BUILDER);
-    // If the panel is already open, we still want to refresh its source range from
-    // the latest selection.
-    window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
-  });
-  commandRegistry.registerBuiltinCommand("tracePrecedents", "Trace precedents", () => {
-    app.clearAuditing();
-    app.toggleAuditingPrecedents();
-    app.focus();
-  });
-  commandRegistry.registerBuiltinCommand("traceDependents", "Trace dependents", () => {
-    app.clearAuditing();
-    app.toggleAuditingDependents();
-    app.focus();
-  });
-  commandRegistry.registerBuiltinCommand("traceBoth", "Trace precedents + dependents", () => {
-    app.clearAuditing();
-    app.toggleAuditingPrecedents();
-    app.toggleAuditingDependents();
-    app.focus();
-  });
-  commandRegistry.registerBuiltinCommand("clearAuditing", "Clear auditing", () => {
-    app.clearAuditing();
-    app.focus();
-  });
-  commandRegistry.registerBuiltinCommand("toggleTransitiveAuditing", "Toggle transitive auditing", () => {
-    app.toggleAuditingTransitive();
-    app.focus();
-  });
-  commandRegistry.registerBuiltinCommand("freezePanes", "Freeze Panes", () => {
-    app.freezePanes();
-    app.focus();
-  });
-  commandRegistry.registerBuiltinCommand("freezeTopRow", "Freeze Top Row", () => {
-    app.freezeTopRow();
-    app.focus();
-  });
-  commandRegistry.registerBuiltinCommand("freezeFirstColumn", "Freeze First Column", () => {
-    app.freezeFirstColumn();
-    app.focus();
-  });
-  commandRegistry.registerBuiltinCommand("unfreezePanes", "Unfreeze Panes", () => {
-    app.unfreezePanes();
-    app.focus();
-  });
-
-  if (import.meta.env.DEV) {
-    commandRegistry.registerBuiltinCommand("debugShowSystemNotification", "Debug: Show system notification", () => {
-      void notify({ title: "Formula", body: "This is a test system notification." });
-    });
-  }
-
-  const paletteController = new CommandPaletteController({
-    commandRegistry,
-    ensureExtensionsLoaded,
-    extensionHostManager,
-    syncContributedCommands,
-    placeholder: t("commandPalette.placeholder"),
-    onClose: () => {
-      // Best-effort: return focus to the grid.
+  commandRegistry.registerBuiltinCommand(
+    "insertPivotTable",
+    t("commandPalette.command.insertPivotTable"),
+    () => {
+      layoutController.openPanel(PanelIds.PIVOT_BUILDER);
+      // If the panel is already open, we still want to refresh its source range from
+      // the latest selection.
+      window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
+    },
+    { category: "Insert" },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "tracePrecedents",
+    "Trace precedents",
+    () => {
+      app.clearAuditing();
+      app.toggleAuditingPrecedents();
       app.focus();
     },
-    onCommandError: (err) => {
-      showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+    { category: "Auditing" },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "traceDependents",
+    "Trace dependents",
+    () => {
+      app.clearAuditing();
+      app.toggleAuditingDependents();
+      app.focus();
     },
+    { category: "Auditing" },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "traceBoth",
+    "Trace precedents + dependents",
+    () => {
+      app.clearAuditing();
+      app.toggleAuditingPrecedents();
+      app.toggleAuditingDependents();
+      app.focus();
+    },
+    { category: "Auditing" },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "clearAuditing",
+    "Clear auditing",
+    () => {
+      app.clearAuditing();
+      app.focus();
+    },
+    { category: "Auditing" },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "toggleTransitiveAuditing",
+    "Toggle transitive auditing",
+    () => {
+      app.toggleAuditingTransitive();
+      app.focus();
+    },
+    { category: "Auditing" },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "freezePanes",
+    "Freeze Panes",
+    () => {
+      app.freezePanes();
+      app.focus();
+    },
+    { category: "View" },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "freezeTopRow",
+    "Freeze Top Row",
+    () => {
+      app.freezeTopRow();
+      app.focus();
+    },
+    { category: "View" },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "freezeFirstColumn",
+    "Freeze First Column",
+    () => {
+      app.freezeFirstColumn();
+      app.focus();
+    },
+    { category: "View" },
+  );
+  commandRegistry.registerBuiltinCommand(
+    "unfreezePanes",
+    "Unfreeze Panes",
+    () => {
+      app.unfreezePanes();
+      app.focus();
+    },
+    { category: "View" },
+  );
+
+  if (import.meta.env.DEV) {
+    commandRegistry.registerBuiltinCommand(
+      "debugShowSystemNotification",
+      "Debug: Show system notification",
+      () => {
+        void notify({ title: "Formula", body: "This is a test system notification." });
+      },
+      { category: "Debug" },
+    );
+  }
+
+  const commandPalette = createCommandPalette({
+    commandRegistry,
+    contextKeys,
+    keybindingIndex: commandKeybindingDisplayIndex,
+    ensureExtensionsLoaded,
+    onCloseFocus: () => app.focus(),
+    placeholder: t("commandPalette.placeholder"),
   });
 
-  openCommandPalette = () => paletteController.open();
-
-  window.addEventListener("keydown", (e) => {
-    if (e.defaultPrevented) return;
-    const primary = e.ctrlKey || e.metaKey;
-    if (!primary || !e.shiftKey) return;
-    if (e.key !== "P" && e.key !== "p") return;
-
-    const target = e.target as HTMLElement | null;
-    if (target) {
-      const tag = target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
-    }
-
-    e.preventDefault();
-    paletteController.open();
-  });
+  openCommandPalette = commandPalette.open;
 
   // Cmd+I toggles the AI sidebar (chat panel).
   // Keep this as a global shortcut so it works even when focus isn't on the grid.

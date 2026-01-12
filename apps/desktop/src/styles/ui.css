@@ -444,6 +444,17 @@
   margin: 10px 0 0;
   padding: 0;
   list-style: none;
+  max-height: 340px;
+  overflow: auto;
+}
+
+.command-palette__group {
+  margin: 10px 0 6px;
+  padding: 0 10px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
 }
 
 .command-palette__footer {
@@ -459,9 +470,43 @@
 }
 
 .command-palette__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 8px 10px;
   border-radius: 10px;
   color: var(--text-primary);
+  cursor: default;
+}
+
+.command-palette__item-main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-palette__shortcut {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.command-palette__highlight {
+  font-weight: 700;
+}
+
+.command-palette__empty {
+  padding: 10px;
+  color: var(--text-secondary);
 }
 
 .command-palette__item[aria-selected="true"] {
