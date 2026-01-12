@@ -227,6 +227,46 @@ fn parse_formula_partial_honors_locale_id_option() {
 }
 
 #[wasm_bindgen_test]
+fn parse_formula_partial_honors_reference_style_option() {
+    #[derive(Debug, serde::Deserialize)]
+    struct PartialParseWithAst {
+        ast: formula_engine::Ast,
+        error: Option<PartialParseError>,
+    }
+
+    let opts = Object::new();
+    Reflect::set(
+        &opts,
+        &JsValue::from_str("referenceStyle"),
+        &JsValue::from_str("R1C1"),
+    )
+    .unwrap();
+
+    let parsed_js = parse_formula_partial("=R1C1".to_string(), None, Some(opts.into())).unwrap();
+    let parsed: PartialParseWithAst = serde_wasm_bindgen::from_value(parsed_js).unwrap();
+    assert!(parsed.error.is_none(), "expected successful parse, got {parsed:?}");
+    assert!(
+        matches!(parsed.ast.expr, formula_engine::Expr::CellRef(_)),
+        "expected R1C1 parse to yield CellRef AST node, got {:?}",
+        parsed.ast.expr
+    );
+
+    // Default reference style is A1, so `R1C1` should be treated as an identifier/name rather than
+    // an R1C1 cell reference.
+    let default_js = parse_formula_partial("=R1C1".to_string(), None, None).unwrap();
+    let default_parsed: PartialParseWithAst = serde_wasm_bindgen::from_value(default_js).unwrap();
+    assert!(
+        default_parsed.error.is_none(),
+        "expected successful parse, got {default_parsed:?}"
+    );
+    assert!(
+        matches!(default_parsed.ast.expr, formula_engine::Expr::NameRef(_)),
+        "expected default A1 parse to yield NameRef, got {:?}",
+        default_parsed.ast.expr
+    );
+}
+
+#[wasm_bindgen_test]
 fn recalculate_reports_changed_cells() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_f64(1.0), None)
