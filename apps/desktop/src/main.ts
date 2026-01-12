@@ -4836,15 +4836,12 @@ mountRibbon(ribbonRoot, {
         app.focus();
         return;
       case "view.zoom.zoomToSelection":
-        showToast("Zoom to Selection not implemented yet");
-        return;
-      case "view.zoom.zoom":
-        void openCustomZoomQuickPick();
-        return;
-      case "view.zoom.zoomToSelection":
         app.zoomToSelection();
         syncZoomControl();
         app.focus();
+        return;
+      case "view.zoom.zoom":
+        void openCustomZoomQuickPick();
         return;
       default:
         showToast(`Ribbon: ${commandId}`);
