@@ -65,7 +65,7 @@ function supportsDesktopOAuthRedirectCapture(redirectUri: string): boolean {
   try {
     // Currently we only support custom-scheme deep links (e.g. `formula://oauth/callback`).
     // Loopback redirect capture can be added later.
-    return new URL(redirectUri).protocol === "formula:";
+    return new URL(redirectUri).protocol.toLowerCase() === "formula:";
   } catch {
     return false;
   }
