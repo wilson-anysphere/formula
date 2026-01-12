@@ -184,7 +184,7 @@ def update_pinned_dataset(
     merge_results_paths: list[Path],
     engine_bin: Path | None,
     run_engine_for_missing: bool,
-    env: dict[str, str] | None,
+    env: dict[str, str] | None = None,
     force_engine: bool = False,
     overwrite_existing: bool = False,
 ) -> tuple[int, int]:
