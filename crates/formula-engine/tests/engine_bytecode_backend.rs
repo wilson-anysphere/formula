@@ -1975,6 +1975,46 @@ fn bytecode_backend_matches_ast_for_reference_functions() {
     }
 }
 
+#[test]
+fn bytecode_backend_xor_reference_semantics_match_ast() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=XOR(A1)")
+        .unwrap();
+    // Scalar text values coerce like NOT(); reference text values are ignored.
+    engine
+        .set_cell_formula("Sheet1", "B2", "=XOR(\"TRUE\")")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=XOR(\"TRUE\")", "B2");
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Bool(true));
+
+    let cases: &[(Option<Value>, Value)] = &[
+        (None, Value::Bool(false)),
+        (Some(Value::Text("TRUE".to_string())), Value::Bool(false)),
+        (Some(Value::Text("hello".to_string())), Value::Bool(false)),
+        (Some(Value::Number(0.0)), Value::Bool(false)),
+        (Some(Value::Number(2.0)), Value::Bool(true)),
+        (Some(Value::Bool(false)), Value::Bool(false)),
+        (Some(Value::Bool(true)), Value::Bool(true)),
+        (Some(Value::Error(ErrorKind::Div0)), Value::Error(ErrorKind::Div0)),
+    ];
+
+    for (a1, expected) in cases {
+        match a1 {
+            None => engine.clear_cell("Sheet1", "A1").unwrap(),
+            Some(v) => engine.set_cell_value("Sheet1", "A1", v.clone()).unwrap(),
+        };
+
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), *expected);
+        assert_engine_matches_ast(&engine, "=XOR(A1)", "B1");
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 32, .. ProptestConfig::default() })]
     #[test]

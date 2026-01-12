@@ -337,9 +337,11 @@ fn eval_ast_inner(
             let mut evaluated: SmallVec<[Value; 8]> = SmallVec::with_capacity(args.len());
             for (arg_idx, arg) in args.iter().enumerate() {
                 let treat_cell_as_range = match func {
-                    // AND/OR treat direct cell references as references (like aggregates), so text
-                    // and blank values in referenced cells are ignored.
-                    Function::And | Function::Or => true,
+                    // AND/OR treat direct cell references as scalars (Excel semantics).
+                    Function::And | Function::Or => false,
+                    // XOR uses reference semantics for direct cell references (matching the
+                    // evaluator).
+                    Function::Xor => true,
                     // See `Compiler::compile_func_arg` for the rationale.
                     Function::Sum
                     | Function::Average
@@ -777,6 +779,7 @@ pub fn call_function(
         Function::Ifs => fn_ifs(args),
         Function::And => fn_and(args, grid, base),
         Function::Or => fn_or(args, grid, base),
+        Function::Xor => fn_xor(args, grid, base),
         Function::IfError => fn_iferror(args),
         Function::IfNa => fn_ifna(args),
         Function::IsError => fn_iserror(args),
@@ -1170,6 +1173,27 @@ fn fn_or(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     }
 }
 
+fn fn_xor(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+    let mut acc = false;
+
+    for arg in args {
+        let err = match arg {
+            Value::Range(r) => xor_range(grid, r.resolve(base), &mut acc),
+            Value::MultiRange(r) => xor_multi_range(grid, r, base, &mut acc),
+            Value::Array(a) => xor_array(a, &mut acc),
+            other => xor_scalar(other, &mut acc),
+        };
+        if let Some(e) = err {
+            return Value::Error(e);
+        }
+    }
+
+    Value::Bool(acc)
+}
+
 fn and_scalar(v: &Value, all_true: &mut bool, any: &mut bool) -> Option<ErrorKind> {
     match v {
         Value::Error(e) => Some(*e),
@@ -1189,6 +1213,31 @@ fn and_scalar(v: &Value, all_true: &mut bool, any: &mut bool) -> Option<ErrorKin
         }
         Value::Empty => None,
         Value::Text(_) => Some(ErrorKind::Value),
+        // Ranges/arrays are handled by the caller.
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Some(ErrorKind::Spill),
+    }
+}
+
+fn xor_scalar(v: &Value, acc: &mut bool) -> Option<ErrorKind> {
+    match v {
+        Value::Error(e) => Some(*e),
+        Value::Number(n) => {
+            *acc ^= *n != 0.0;
+            None
+        }
+        Value::Bool(b) => {
+            *acc ^= *b;
+            None
+        }
+        Value::Empty => None,
+        // Scalar text arguments coerce like NOT().
+        Value::Text(s) => match coerce_to_bool(Value::Text(s.clone())) {
+            Ok(b) => {
+                *acc ^= b;
+                None
+            }
+            Err(e) => Some(e),
+        },
         // Ranges/arrays are handled by the caller.
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Some(ErrorKind::Spill),
     }
@@ -1240,6 +1289,16 @@ fn or_array(a: &ArrayValue, any_true: &mut bool, any: &mut bool) -> Option<Error
         if *n != 0.0 {
             *any_true = true;
         }
+    }
+    None
+}
+
+fn xor_array(a: &ArrayValue, acc: &mut bool) -> Option<ErrorKind> {
+    for n in &a.values {
+        if n.is_nan() {
+            continue;
+        }
+        *acc ^= *n != 0.0;
     }
     None
 }
@@ -1696,6 +1755,63 @@ fn format_r1c1_address(row_num: i64, col_num: i64, row_abs: bool, col_abs: bool)
     }
     out
 }
+fn xor_range(grid: &dyn Grid, range: ResolvedRange, acc: &mut bool) -> Option<ErrorKind> {
+    for row in range.row_start..=range.row_end {
+        for col in range.col_start..=range.col_end {
+            match grid.get_value(CellCoord { row, col }) {
+                Value::Error(e) => return Some(e),
+                Value::Number(n) => *acc ^= n != 0.0,
+                Value::Bool(b) => *acc ^= b,
+                // Text/blanks in references are ignored.
+                Value::Text(_)
+                | Value::Empty
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
+            }
+        }
+    }
+    None
+}
+
+fn xor_multi_range(
+    grid: &dyn Grid,
+    range: &super::value::MultiRangeRef,
+    base: CellCoord,
+    acc: &mut bool,
+) -> Option<ErrorKind> {
+    for area in range.areas.iter() {
+        if let Some(e) = xor_range_on_sheet(grid, area.sheet, area.range.resolve(base), acc) {
+            return Some(e);
+        }
+    }
+    None
+}
+
+fn xor_range_on_sheet(
+    grid: &dyn Grid,
+    sheet: usize,
+    range: ResolvedRange,
+    acc: &mut bool,
+) -> Option<ErrorKind> {
+    for row in range.row_start..=range.row_end {
+        for col in range.col_start..=range.col_end {
+            match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
+                Value::Error(e) => return Some(e),
+                Value::Number(n) => *acc ^= n != 0.0,
+                Value::Bool(b) => *acc ^= b,
+                // Text/blanks in references are ignored.
+                Value::Text(_)
+                | Value::Empty
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_) => {}
+            }
+        }
+    }
+    None
+}
+
 fn format_number_general(n: f64) -> String {
     // Match the engine's number-to-text coercion semantics used by the AST evaluator.
     //

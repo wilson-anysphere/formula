@@ -6571,7 +6571,7 @@ fn bytecode_expr_is_eligible_inner(
                     bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
                 })
             }
-            bytecode::ast::Function::And | bytecode::ast::Function::Or => {
+            bytecode::ast::Function::And | bytecode::ast::Function::Or | bytecode::ast::Function::Xor => {
                 if args.is_empty() {
                     return false;
                 }

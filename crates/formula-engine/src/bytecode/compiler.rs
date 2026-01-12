@@ -426,6 +426,9 @@ impl<'a> CompileCtx<'a> {
             // treated as a scalar, so text-like values in the referenced cell behave like scalar
             // text arguments (i.e. typically #VALUE! rather than being ignored).
             Function::And | Function::Or => false,
+            // XOR uses reference semantics for direct cell references (like ranges), matching the
+            // engine evaluator.
+            Function::Xor => true,
             Function::Sum
             | Function::Average
             | Function::Min
