@@ -33,8 +33,8 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
   },
   {
     command: "clipboard.pasteSpecial",
-    key: "ctrl+alt+v",
-    mac: "cmd+option+v",
+    key: "ctrl+shift+v",
+    mac: "cmd+shift+v",
     when: null,
   },
   {

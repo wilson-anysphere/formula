@@ -15,13 +15,16 @@ function isLikelyDateNumberFormat(fmt) {
  * @returns {string}
  */
 function cellValueToPlainText(cell) {
-  const formula = cell.formula;
-  if (typeof formula === "string" && formula.trim() !== "") {
-    return formula;
-  }
-
   const value = cell.value;
-  if (value == null) return "";
+  if (value == null) {
+    const formula = cell.formula;
+    if (typeof formula === "string" && formula.trim() !== "") {
+      // When we don't have a cached/display value, fall back to copying the formula text
+      // (keeps the payload useful for spreadsheet-to-spreadsheet pastes).
+      return formula;
+    }
+    return "";
+  }
 
   // DocumentController stores rich text as `{ text, runs }`. Clipboard payloads should
   // round-trip as plain text (like Excel/Sheets) rather than `[object Object]`.

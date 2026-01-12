@@ -8,6 +8,11 @@ export const deDE = {
   "prompt.unsavedChanges": "Sie haben ungespeicherte Änderungen.",
   "prompt.unsavedChangesDiscardConfirm": "Sie haben ungespeicherte Änderungen. Verwerfen?",
   "commandPalette.command.checkForUpdates": "Nach Updates suchen",
+  "clipboard.pasteSpecial.title": "Inhalte einfügen…",
+  "clipboard.pasteSpecial.paste": "Einfügen",
+  "clipboard.pasteSpecial.pasteValues": "Werte einfügen",
+  "clipboard.pasteSpecial.pasteFormulas": "Formeln einfügen",
+  "clipboard.pasteSpecial.pasteFormats": "Formate einfügen",
   "versionHistory.checkpoint": "Kontrollpunkt",
   "versionHistory.autoSave": "Auto-Speichern",
   "versionHistory.restore": "Wiederhergestellt"

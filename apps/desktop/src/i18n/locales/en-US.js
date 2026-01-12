@@ -128,6 +128,7 @@ export const enUS = {
   "filterDropdown.clear": "Clear",
   "filterDropdown.apply": "Apply",
   "table.filter.ariaLabel": "Filter {column}",
+  "clipboard.pasteSpecial.title": "Paste Special…",
   "clipboard.pasteSpecial.paste": "Paste",
   "clipboard.pasteSpecial.pasteValues": "Paste Values",
   "clipboard.pasteSpecial.pasteFormulas": "Paste Formulas",

@@ -4,6 +4,8 @@ import type { LayoutController } from "../layout/layoutController.js";
 import { getPanelPlacement } from "../layout/layoutState.js";
 import { PanelIds } from "../panels/panelRegistry.js";
 import { t } from "../i18n/index.js";
+import { showQuickPick } from "../extensions/ui.js";
+import { getPasteSpecialMenuItems } from "../clipboard/pasteSpecial.js";
 
 export function registerBuiltinCommands(params: {
   commandRegistry: CommandRegistry;
@@ -395,9 +397,66 @@ export function registerBuiltinCommands(params: {
   );
 
   commandRegistry.registerBuiltinCommand(
+    "clipboard.pasteSpecial.all",
+    t("clipboard.pasteSpecial.paste"),
+    () => app.pasteFromClipboard(),
+    {
+      category: "Editing",
+      icon: null,
+      description: "Paste everything (same as Paste)",
+      keywords: ["paste", "clipboard", "all"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "clipboard.pasteSpecial.values",
+    t("clipboard.pasteSpecial.pasteValues"),
+    () => app.clipboardPasteSpecial("values"),
+    {
+      category: "Editing",
+      icon: null,
+      description: "Paste values only",
+      keywords: ["paste", "clipboard", "values"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "clipboard.pasteSpecial.formulas",
+    t("clipboard.pasteSpecial.pasteFormulas"),
+    () => app.clipboardPasteSpecial("formulas"),
+    {
+      category: "Editing",
+      icon: null,
+      description: "Paste formulas only",
+      keywords: ["paste", "clipboard", "formulas"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "clipboard.pasteSpecial.formats",
+    t("clipboard.pasteSpecial.pasteFormats"),
+    () => app.clipboardPasteSpecial("formats"),
+    {
+      category: "Editing",
+      icon: null,
+      description: "Paste formats only",
+      keywords: ["paste", "clipboard", "formats"],
+    },
+  );
+
+  const pasteSpecialTitle = t("clipboard.pasteSpecial.title");
+  commandRegistry.registerBuiltinCommand(
     "clipboard.pasteSpecial",
-    "Paste Special…",
-    (mode?: unknown) => app.clipboardPasteSpecial((mode as any) ?? "all"),
+    pasteSpecialTitle,
+    async () => {
+      const items = getPasteSpecialMenuItems();
+      const picked = await showQuickPick(
+        items.map((item) => ({ label: item.label, value: item.mode })),
+        { placeHolder: pasteSpecialTitle },
+      );
+      if (!picked) return;
+      await commandRegistry.executeCommand(`clipboard.pasteSpecial.${picked === "all" ? "all" : picked}`);
+    },
     {
       category: "Editing",
       icon: null,

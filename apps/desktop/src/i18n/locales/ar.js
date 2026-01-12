@@ -8,6 +8,11 @@ export const ar = {
   "prompt.unsavedChanges": "لديك تغييرات غير محفوظة.",
   "prompt.unsavedChangesDiscardConfirm": "لديك تغييرات غير محفوظة. هل تريد تجاهلها؟",
   "commandPalette.command.checkForUpdates": "التحقق من التحديثات",
+  "clipboard.pasteSpecial.title": "لصق خاص…",
+  "clipboard.pasteSpecial.paste": "لصق",
+  "clipboard.pasteSpecial.pasteValues": "لصق القيم",
+  "clipboard.pasteSpecial.pasteFormulas": "لصق الصيغ",
+  "clipboard.pasteSpecial.pasteFormats": "لصق التنسيقات",
   "versionHistory.checkpoint": "نقطة حفظ",
   "versionHistory.autoSave": "حفظ تلقائي",
   "versionHistory.restore": "تمت الاستعادة"

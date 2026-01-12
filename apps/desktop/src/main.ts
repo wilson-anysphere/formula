@@ -96,7 +96,6 @@ import { createCommandPalette } from "./command-palette/index.js";
 import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
 import type { Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
-import { getPasteSpecialMenuItems } from "./clipboard/pasteSpecial.js";
 import { WorkbookSheetStore, generateDefaultSheetName } from "./sheets/workbookSheetStore";
 import {
   applyAllBorders,
@@ -2420,6 +2419,8 @@ if (
       // Reserve Ctrl/Cmd+Shift+P for the command palette.
       const primary = e.ctrlKey || e.metaKey;
       if (primary && e.shiftKey && (e.key === "P" || e.key === "p")) return;
+      // Reserve Ctrl/Cmd+Shift+V for Paste Special.
+      if (primary && e.shiftKey && (e.key === "V" || e.key === "v")) return;
 
       for (const binding of aiChatToggleKeybindings) {
         if (!matchesKeybinding(binding, e)) continue;
@@ -2513,16 +2514,12 @@ if (
       },
       { type: "separator" },
       {
-        type: "submenu",
-        label: "Paste Special",
+        type: "item",
+        label: t("clipboard.pasteSpecial.title"),
         shortcut:
           getPrimaryCommandKeybindingDisplay("clipboard.pasteSpecial", commandKeybindingDisplayIndex) ??
-          (isMac ? "⌘⌥V" : "Ctrl+Alt+V"),
-        items: getPasteSpecialMenuItems().map((item) => ({
-          type: "item",
-          label: item.label,
-          onSelect: () => executeBuiltinCommand("clipboard.pasteSpecial", item.mode),
-        })),
+          (isMac ? "⇧⌘V" : "Ctrl+Shift+V"),
+        onSelect: () => executeBuiltinCommand("clipboard.pasteSpecial"),
       },
       { type: "separator" },
       {
@@ -3588,6 +3585,24 @@ if (
   });
 
   openCommandPalette = commandPalette.open;
+
+  // Paste Special… (Ctrl/Cmd+Shift+V)
+  window.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented) return;
+    if (e.repeat) return;
+    const primary = e.ctrlKey || e.metaKey;
+    if (!primary || !e.shiftKey || e.altKey) return;
+    if (e.key !== "V" && e.key !== "v") return;
+
+    const target = (e.target instanceof HTMLElement ? e.target : null) ?? (document.activeElement as HTMLElement | null);
+    if (target) {
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+    }
+
+    e.preventDefault();
+    executeBuiltinCommand("clipboard.pasteSpecial");
+  });
 
   // Cmd+Shift+I toggles the AI sidebar (chat panel).
   // Keep this as a global shortcut so it works even when focus isn't on the grid.
