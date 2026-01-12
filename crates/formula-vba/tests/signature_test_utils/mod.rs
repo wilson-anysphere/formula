@@ -99,6 +99,13 @@ pub fn build_vba_project_bin_with_signature_streams(streams: &[(&str, &[u8])]) -
     let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
 
     for (path, bytes) in streams {
+        // The `cfb` crate requires storages to exist before creating nested streams. Some signature
+        // producers store signatures under a storage (e.g. `\x05DigitalSignatureExt/sig`), so make
+        // this helper resilient to nested OLE paths.
+        if let Some((parent, _)) = path.rsplit_once('/') {
+            ole.create_storage_all(parent)
+                .expect("create parent storage path");
+        }
         let mut stream = ole.create_stream(path).expect("create signature stream");
         stream.write_all(bytes).expect("write signature bytes");
     }
