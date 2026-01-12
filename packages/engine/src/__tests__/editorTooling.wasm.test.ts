@@ -293,4 +293,23 @@ describeWasm("EngineWorker editor tooling RPCs (wasm)", () => {
       engine.terminate();
     }
   });
+
+  it("surfaces unknown localeId errors from the WASM parser helpers", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      await expect(engine.lexFormula("=1+2", { localeId: "xx-XX" })).rejects.toThrow(/unknown localeId: xx-XX/);
+      await expect(engine.parseFormulaPartial("=1+2", undefined, { localeId: "xx-XX" })).rejects.toThrow(
+        /unknown localeId: xx-XX/
+      );
+    } finally {
+      engine.terminate();
+    }
+  });
 });
