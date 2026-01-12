@@ -146,6 +146,11 @@ const SCANNED_BASENAMES_WITHOUT_EXTENSION = new Set([
   ".editorconfig",
 ]);
 
+// Some config files embed their "extension" into the basename (notably `.env`,
+// `.env.local`, `.env.production`, etc). Scan them by prefix so they can't be
+// used to stash provider keys in a committed env file.
+const SCANNED_BASENAME_PREFIXES = [".env"];
+
 /**
  * @typedef {{ file: string, ruleId: string, message: string, line?: number, column?: number }} Violation
  */
@@ -214,11 +219,12 @@ function relativeToRoot(filePath, rootDir) {
 function shouldScanFile(filePath) {
   const ext = path.extname(filePath);
   const extLower = ext ? ext.toLowerCase() : "";
+  const baseLower = path.basename(filePath).toLowerCase();
+  if (SCANNED_BASENAME_PREFIXES.some((prefix) => baseLower.startsWith(prefix))) return true;
   if (extLower && !SCANNED_FILE_EXTENSIONS.has(extLower)) return false;
   // Files without extensions (rare) are ignored by default to reduce false
   // positives on license/readme-style blobs that can live inside packages.
   if (!extLower) {
-    const baseLower = path.basename(filePath).toLowerCase();
     return SCANNED_BASENAMES_WITHOUT_EXTENSION.has(baseLower);
   }
   return true;

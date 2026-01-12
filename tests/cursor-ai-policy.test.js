@@ -74,6 +74,19 @@ test("cursor AI policy guard fails when forbidden provider strings are present i
   }
 });
 
+test("cursor AI policy guard scans .env* files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-env-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, ".env.local", "OPENAI_API_KEY=test\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard scans Dockerfiles for provider strings", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-dockerfile-fail-"));
   try {
