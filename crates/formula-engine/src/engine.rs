@@ -2920,10 +2920,10 @@ impl Engine {
         // are also treated as volatile by the dependency graph, but classify them under the
         // lowering error so coverage reports can prioritize external-reference support separately
         // from volatile worksheet functions.
-        if canonical_expr_depends_on_external_workbook_refs(expr, key.sheet, &self.workbook) {
-            return Err(BytecodeCompileReason::LowerError(
-                bytecode::LowerError::ExternalReference,
-            ));
+        if let Some(lower_error) =
+            canonical_expr_depends_on_lowering_prefix_error(expr, key.sheet, &self.workbook)
+        {
+            return Err(BytecodeCompileReason::LowerError(lower_error));
         }
         if !thread_safe {
             return Err(BytecodeCompileReason::NotThreadSafe);
@@ -4915,40 +4915,169 @@ fn canonical_expr_contains_let_or_lambda(expr: &crate::Expr) -> bool {
     }
 }
 
-fn canonical_expr_depends_on_external_workbook_refs(
+#[derive(Clone, Copy, Default)]
+struct PrefixLowerErrorFlags {
+    external_reference: bool,
+    unknown_sheet: bool,
+    cross_sheet_reference: bool,
+}
+
+fn canonical_expr_depends_on_lowering_prefix_error(
     expr: &crate::Expr,
     current_sheet: SheetId,
     workbook: &Workbook,
-) -> bool {
-    if canonical_expr_contains_external_workbook_refs(expr) {
-        return true;
+) -> Option<bytecode::LowerError> {
+    let mut flags = PrefixLowerErrorFlags::default();
+    flags.external_reference |= canonical_expr_contains_external_workbook_refs(expr);
+    canonical_expr_collect_sheet_prefix_errors(expr, current_sheet, workbook, &mut flags);
+
+    if flags.external_reference {
+        return Some(bytecode::LowerError::ExternalReference);
     }
 
     // Avoid chasing defined names when LET/LAMBDA might introduce lexical bindings that shadow
-    // workbook/sheet defined names. Direct external workbook refs are still detected above.
+    // workbook/sheet defined names. Direct reference prefixes are still detected above.
     if canonical_expr_contains_let_or_lambda(expr) {
-        return false;
+        if flags.unknown_sheet {
+            return Some(bytecode::LowerError::UnknownSheet);
+        }
+        if flags.cross_sheet_reference {
+            return Some(bytecode::LowerError::CrossSheetReference);
+        }
+        return None;
     }
 
     let mut visiting: HashSet<(SheetId, String)> = HashSet::new();
-    canonical_expr_depends_on_external_workbook_refs_inner(expr, current_sheet, workbook, &mut visiting)
+    canonical_expr_collect_defined_name_prefix_errors(
+        expr,
+        current_sheet,
+        workbook,
+        &mut visiting,
+        &mut flags,
+    );
+
+    if flags.external_reference {
+        Some(bytecode::LowerError::ExternalReference)
+    } else if flags.unknown_sheet {
+        Some(bytecode::LowerError::UnknownSheet)
+    } else if flags.cross_sheet_reference {
+        Some(bytecode::LowerError::CrossSheetReference)
+    } else {
+        None
+    }
 }
 
-fn canonical_expr_depends_on_external_workbook_refs_inner(
+fn canonical_expr_collect_sheet_prefix_errors(
+    expr: &crate::Expr,
+    current_sheet: SheetId,
+    workbook: &Workbook,
+    flags: &mut PrefixLowerErrorFlags,
+) {
+    match expr {
+        crate::Expr::CellRef(r) => {
+            update_sheet_prefix_flags(&r.workbook, r.sheet.as_ref(), current_sheet, workbook, flags);
+        }
+        crate::Expr::ColRef(r) => {
+            update_sheet_prefix_flags(&r.workbook, r.sheet.as_ref(), current_sheet, workbook, flags);
+        }
+        crate::Expr::RowRef(r) => {
+            update_sheet_prefix_flags(&r.workbook, r.sheet.as_ref(), current_sheet, workbook, flags);
+        }
+        crate::Expr::FieldAccess(access) => {
+            canonical_expr_collect_sheet_prefix_errors(access.base.as_ref(), current_sheet, workbook, flags);
+        }
+        crate::Expr::FunctionCall(call) => {
+            for arg in &call.args {
+                canonical_expr_collect_sheet_prefix_errors(arg, current_sheet, workbook, flags);
+            }
+        }
+        crate::Expr::Call(call) => {
+            canonical_expr_collect_sheet_prefix_errors(call.callee.as_ref(), current_sheet, workbook, flags);
+            for arg in &call.args {
+                canonical_expr_collect_sheet_prefix_errors(arg, current_sheet, workbook, flags);
+            }
+        }
+        crate::Expr::Unary(u) => {
+            canonical_expr_collect_sheet_prefix_errors(&u.expr, current_sheet, workbook, flags);
+        }
+        crate::Expr::Postfix(p) => {
+            canonical_expr_collect_sheet_prefix_errors(&p.expr, current_sheet, workbook, flags);
+        }
+        crate::Expr::Binary(b) => {
+            canonical_expr_collect_sheet_prefix_errors(&b.left, current_sheet, workbook, flags);
+            canonical_expr_collect_sheet_prefix_errors(&b.right, current_sheet, workbook, flags);
+        }
+        crate::Expr::Array(arr) => {
+            for el in arr.rows.iter().flatten() {
+                canonical_expr_collect_sheet_prefix_errors(el, current_sheet, workbook, flags);
+            }
+        }
+        crate::Expr::NameRef(_)
+        | crate::Expr::StructuredRef(_)
+        | crate::Expr::Number(_)
+        | crate::Expr::String(_)
+        | crate::Expr::Boolean(_)
+        | crate::Expr::Error(_)
+        | crate::Expr::Missing => {}
+    }
+}
+
+fn update_sheet_prefix_flags(
+    workbook_prefix: &Option<String>,
+    sheet: Option<&crate::SheetRef>,
+    current_sheet: SheetId,
+    workbook: &Workbook,
+    flags: &mut PrefixLowerErrorFlags,
+) {
+    if workbook_prefix.is_some() {
+        flags.external_reference = true;
+        return;
+    }
+
+    let Some(sheet) = sheet else {
+        return;
+    };
+
+    match sheet {
+        crate::SheetRef::Sheet(name) => match workbook.sheet_id(name) {
+            None => {
+                flags.unknown_sheet = true;
+            }
+            Some(sheet_id) => {
+                if sheet_id != current_sheet {
+                    flags.cross_sheet_reference = true;
+                }
+            }
+        },
+        crate::SheetRef::SheetRange { start, end } => {
+            if workbook.sheet_id(start).is_none() || workbook.sheet_id(end).is_none() {
+                flags.unknown_sheet = true;
+            }
+        }
+    }
+}
+
+fn canonical_expr_collect_defined_name_prefix_errors(
     expr: &crate::Expr,
     current_sheet: SheetId,
     workbook: &Workbook,
     visiting: &mut HashSet<(SheetId, String)>,
-) -> bool {
+    flags: &mut PrefixLowerErrorFlags,
+) {
+    if flags.external_reference {
+        return;
+    }
+
     match expr {
         crate::Expr::NameRef(nref) => {
             if nref.workbook.is_some() {
-                return true;
+                flags.external_reference = true;
+                return;
             }
 
             let name_key = normalize_defined_name(&nref.name);
             if name_key.is_empty() {
-                return false;
+                return;
             }
 
             let sheet_id = match nref.sheet.as_ref() {
@@ -4958,106 +5087,143 @@ fn canonical_expr_depends_on_external_workbook_refs_inner(
                     .and_then(|name| workbook.sheet_id(name)),
             };
             let Some(sheet_id) = sheet_id else {
-                return false;
+                return;
             };
 
-            defined_name_depends_on_external_workbook_refs(sheet_id, &name_key, workbook, visiting)
+            canonical_expr_collect_defined_name_prefix_errors_for_name(
+                sheet_id, &name_key, workbook, visiting, flags,
+            );
         }
-        crate::Expr::FieldAccess(access) => canonical_expr_depends_on_external_workbook_refs_inner(
-            access.base.as_ref(),
-            current_sheet,
-            workbook,
-            visiting,
-        ),
-        crate::Expr::FunctionCall(call) => call.args.iter().any(|arg| {
-            canonical_expr_depends_on_external_workbook_refs_inner(
-                arg,
+        crate::Expr::FieldAccess(access) => {
+            canonical_expr_collect_defined_name_prefix_errors(
+                access.base.as_ref(),
                 current_sheet,
                 workbook,
                 visiting,
-            )
-        }),
-        crate::Expr::Call(call) => {
-            canonical_expr_depends_on_external_workbook_refs_inner(
-                call.callee.as_ref(),
-                current_sheet,
-                workbook,
-                visiting,
-            ) || call.args.iter().any(|arg| {
-                canonical_expr_depends_on_external_workbook_refs_inner(
+                flags,
+            );
+        }
+        crate::Expr::FunctionCall(call) => {
+            for arg in &call.args {
+                canonical_expr_collect_defined_name_prefix_errors(
                     arg,
                     current_sheet,
                     workbook,
                     visiting,
-                )
-            })
+                    flags,
+                );
+            }
         }
-        crate::Expr::Unary(u) => canonical_expr_depends_on_external_workbook_refs_inner(
-            &u.expr,
-            current_sheet,
-            workbook,
-            visiting,
-        ),
-        crate::Expr::Postfix(p) => canonical_expr_depends_on_external_workbook_refs_inner(
-            &p.expr,
-            current_sheet,
-            workbook,
-            visiting,
-        ),
+        crate::Expr::Call(call) => {
+            canonical_expr_collect_defined_name_prefix_errors(
+                call.callee.as_ref(),
+                current_sheet,
+                workbook,
+                visiting,
+                flags,
+            );
+            for arg in &call.args {
+                canonical_expr_collect_defined_name_prefix_errors(
+                    arg,
+                    current_sheet,
+                    workbook,
+                    visiting,
+                    flags,
+                );
+            }
+        }
+        crate::Expr::Unary(u) => {
+            canonical_expr_collect_defined_name_prefix_errors(
+                &u.expr,
+                current_sheet,
+                workbook,
+                visiting,
+                flags,
+            );
+        }
+        crate::Expr::Postfix(p) => {
+            canonical_expr_collect_defined_name_prefix_errors(
+                &p.expr,
+                current_sheet,
+                workbook,
+                visiting,
+                flags,
+            );
+        }
         crate::Expr::Binary(b) => {
-            canonical_expr_depends_on_external_workbook_refs_inner(
+            canonical_expr_collect_defined_name_prefix_errors(
                 &b.left,
                 current_sheet,
                 workbook,
                 visiting,
-            ) || canonical_expr_depends_on_external_workbook_refs_inner(
+                flags,
+            );
+            canonical_expr_collect_defined_name_prefix_errors(
                 &b.right,
                 current_sheet,
                 workbook,
                 visiting,
-            )
+                flags,
+            );
         }
-        crate::Expr::Array(arr) => arr.rows.iter().flatten().any(|el| {
-            canonical_expr_depends_on_external_workbook_refs_inner(
-                el,
-                current_sheet,
-                workbook,
-                visiting,
-            )
-        }),
-        _ => false,
+        crate::Expr::Array(arr) => {
+            for el in arr.rows.iter().flatten() {
+                canonical_expr_collect_defined_name_prefix_errors(
+                    el,
+                    current_sheet,
+                    workbook,
+                    visiting,
+                    flags,
+                );
+            }
+        }
+        crate::Expr::CellRef(_)
+        | crate::Expr::ColRef(_)
+        | crate::Expr::RowRef(_)
+        | crate::Expr::StructuredRef(_)
+        | crate::Expr::Number(_)
+        | crate::Expr::String(_)
+        | crate::Expr::Boolean(_)
+        | crate::Expr::Error(_)
+        | crate::Expr::Missing => {}
     }
 }
 
-fn defined_name_depends_on_external_workbook_refs(
+fn canonical_expr_collect_defined_name_prefix_errors_for_name(
     sheet_id: SheetId,
     name_key: &str,
     workbook: &Workbook,
     visiting: &mut HashSet<(SheetId, String)>,
-) -> bool {
+    flags: &mut PrefixLowerErrorFlags,
+) {
+    if flags.external_reference {
+        return;
+    }
+
     let visit_key = (sheet_id, name_key.to_string());
     if !visiting.insert(visit_key.clone()) {
-        return false;
+        return;
     }
 
     let Some(def) = resolve_defined_name(workbook, sheet_id, name_key) else {
         visiting.remove(&visit_key);
-        return false;
+        return;
     };
 
-    let mut result = false;
     match &def.definition {
         NameDefinition::Constant(_) => {}
         NameDefinition::Reference(formula) | NameDefinition::Formula(formula) => {
             if let Ok(ast) = crate::parse_formula(formula, crate::ParseOptions::default()) {
-                if canonical_expr_contains_external_workbook_refs(&ast.expr) {
-                    result = true;
-                } else if !canonical_expr_contains_let_or_lambda(&ast.expr) {
-                    result = canonical_expr_depends_on_external_workbook_refs_inner(
+                flags.external_reference |= canonical_expr_contains_external_workbook_refs(&ast.expr);
+                canonical_expr_collect_sheet_prefix_errors(&ast.expr, sheet_id, workbook, flags);
+
+                if !flags.external_reference && !canonical_expr_contains_let_or_lambda(&ast.expr) {
+                    canonical_expr_collect_defined_name_prefix_errors(
                         &ast.expr,
                         sheet_id,
                         workbook,
                         visiting,
+                        flags,
                     );
                 }
             }
@@ -5065,7 +5231,6 @@ fn defined_name_depends_on_external_workbook_refs(
     }
 
     visiting.remove(&visit_key);
-    result
 }
 
 fn rewrite_structured_refs_for_bytecode(

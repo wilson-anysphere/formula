@@ -2780,6 +2780,65 @@ fn bytecode_compile_diagnostics_reports_external_reference_through_defined_name_
 }
 
 #[test]
+fn bytecode_compile_diagnostics_reports_unknown_sheet_through_defined_name_formula() {
+    let mut engine = Engine::new();
+
+    engine
+        .define_name(
+            "UNK",
+            NameScope::Workbook,
+            NameDefinition::Formula("=MissingSheet!A1+1".to_string()),
+        )
+        .unwrap();
+
+    engine.set_cell_formula("Sheet1", "A1", "=UNK").unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 0);
+    assert_eq!(stats.fallback, 1);
+    assert_eq!(
+        stats
+            .fallback_reasons
+            .get(&BytecodeCompileReason::LowerError(bytecode::LowerError::UnknownSheet))
+            .copied()
+            .unwrap_or(0),
+        1
+    );
+}
+
+#[test]
+fn bytecode_compile_diagnostics_reports_cross_sheet_reference_through_defined_name_formula() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet2", "A1", 42.0).unwrap();
+
+    engine
+        .define_name(
+            "CROSS",
+            NameScope::Workbook,
+            NameDefinition::Formula("=Sheet2!A1+1".to_string()),
+        )
+        .unwrap();
+
+    engine.set_cell_formula("Sheet1", "A1", "=CROSS").unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 0);
+    assert_eq!(stats.fallback, 1);
+    assert_eq!(
+        stats
+            .fallback_reasons
+            .get(&BytecodeCompileReason::LowerError(
+                bytecode::LowerError::CrossSheetReference,
+            ))
+            .copied()
+            .unwrap_or(0),
+        1
+    );
+}
+
+#[test]
 fn bytecode_compile_diagnostics_reports_not_thread_safe_reason() {
     let mut engine = Engine::new();
 
