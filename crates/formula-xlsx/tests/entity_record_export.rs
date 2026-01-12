@@ -12,9 +12,16 @@ fn export_degrades_entity_and_record_values_to_plain_strings() {
         CellRef::new(0, 0),
         CellValue::Entity(EntityValue::new("Entity Display")),
     );
+    // Record values degrade to their Display implementation when exporting.
+    // `formula_model::RecordValue` uses `display_field` (when present) before falling back to
+    // `display_value`, so keep the test aligned with that behavior.
     sheet.set_value(
         CellRef::new(1, 0),
-        CellValue::Record(RecordValue::new("Record Display")),
+        CellValue::Record(
+            RecordValue::new("Record Fallback")
+                .with_field("Name", "Record Display")
+                .with_display_field("Name"),
+        ),
     );
 
     let mut cursor = Cursor::new(Vec::new());
@@ -33,4 +40,3 @@ fn export_degrades_entity_and_record_values_to_plain_strings() {
         CellValue::String("Record Display".to_string())
     );
 }
-
