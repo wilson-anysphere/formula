@@ -301,23 +301,44 @@ export function ExtensionsPanel({
                                 const installedVersion = String(item.version ?? "");
                                 const reason = String(item.incompatibleReason ?? "");
                                 const isEngineMismatch = reason.toLowerCase().includes("engine mismatch");
-                                const updated = await webExtensionManager.update(item.id);
-                                const updatedVersion = String(updated?.version ?? "");
+                                try {
+                                  const updated = await webExtensionManager.update(item.id);
+                                  const updatedVersion = String(updated?.version ?? "");
 
-                                const didUpdate = updatedVersion.length > 0 && updatedVersion !== installedVersion;
-                                if (!didUpdate) {
-                                  // If the extension is quarantined due to a corrupted/invalid stored
-                                  // manifest (not an engine mismatch), reinstalling the current version
-                                  // can repair it even when no update is available.
-                                  if (!isEngineMismatch) {
-                                    await webExtensionManager.repair(item.id);
-                                  } else {
-                                    shouldAttemptLoad = false;
-                                    try {
-                                      showToast("No compatible update", "warning");
-                                    } catch {
-                                      // ignore missing toast root
+                                  const didUpdate = updatedVersion.length > 0 && updatedVersion !== installedVersion;
+                                  if (!didUpdate) {
+                                    // If the extension is quarantined due to a corrupted/invalid stored
+                                    // manifest (not an engine mismatch), reinstalling the current version
+                                    // can repair it even when no update is available.
+                                    if (!isEngineMismatch) {
+                                      await webExtensionManager.repair(item.id);
+                                    } else {
+                                      shouldAttemptLoad = false;
+                                      try {
+                                        showToast("No compatible update", "warning");
+                                      } catch {
+                                        // ignore missing toast root
+                                      }
                                     }
+                                  }
+                                } catch (error) {
+                                  const msg = String((error as any)?.message ?? error);
+                                  if (msg.toLowerCase().includes("engine mismatch")) {
+                                    if (!isEngineMismatch) {
+                                      // The latest version is incompatible with this engine, but the
+                                      // stored incompatible quarantine may be caused by a corrupted
+                                      // manifest. Reinstall the current version as a recovery path.
+                                      await webExtensionManager.repair(item.id);
+                                    } else {
+                                      shouldAttemptLoad = false;
+                                      try {
+                                        showToast("No compatible update", "warning");
+                                      } catch {
+                                        // ignore missing toast root
+                                      }
+                                    }
+                                  } else {
+                                    throw error;
                                   }
                                 }
                               } else {

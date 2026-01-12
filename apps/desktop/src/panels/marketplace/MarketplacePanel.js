@@ -370,7 +370,41 @@ async function renderSearchResults({
                 try {
                   let record;
                   if (shouldTryUpdate && typeof extensionManager.update === "function") {
-                    record = await extensionManager.update(item.id);
+                    try {
+                      record = await extensionManager.update(item.id);
+                    } catch (error) {
+                      const msg = String(error?.message ?? error);
+                      if (/engine mismatch/i.test(msg)) {
+                        // If the extension is incompatible due to an engine mismatch, there is no
+                        // recovery path without a compatible update (or changing engine version).
+                        if (isEngineMismatch) {
+                          actions.textContent = "No compatible update";
+                          tryShowToast("No compatible update", "warning");
+                          tryNotifyExtensionsChanged();
+                          await renderSearchResults({
+                            container,
+                            marketplaceClient,
+                            extensionManager,
+                            extensionHostManager,
+                            query,
+                            transientStatusById,
+                          });
+                          return;
+                        }
+
+                        // If the extension is marked incompatible for a reason other than engine
+                        // mismatch (eg: corrupted stored manifest), but the latest version cannot
+                        // be installed due to an engine mismatch, fall back to reinstalling the
+                        // currently-installed version so users still have a recovery path.
+                        if (typeof extensionManager.repair === "function") {
+                          record = await extensionManager.repair(item.id);
+                        } else {
+                          throw error;
+                        }
+                      } else {
+                        throw error;
+                      }
+                    }
                     // If the update is a no-op (already on the latest version), fall back to a
                     // repair/reinstall so users still have a recovery path when an incompatible
                     // quarantine is caused by corrupted manifest metadata rather than an engine
