@@ -67,3 +67,33 @@ test("CellStructuralConflictMonitor preserves foreign cell maps even when constr
   monitor.dispose();
   doc.destroy();
 });
+
+test("CellStructuralConflictMonitor initializes when cellStructuralOps root was created by a different Yjs instance (CJS getMap)", () => {
+  const Ycjs = requireYjsCjs();
+
+  const doc = new Y.Doc();
+  const cells = doc.getMap("cells");
+
+  // Simulate another Yjs module instance eagerly instantiating the op log root.
+  Ycjs.Doc.prototype.getMap.call(doc, "cellStructuralOps");
+
+  assert.throws(() => doc.getMap("cellStructuralOps"), /different constructor/);
+
+  const origin = { type: "local" };
+  const monitor = new CellStructuralConflictMonitor({
+    doc,
+    cells,
+    localUserId: "user-a",
+    origin,
+    localOrigins: new Set([origin]),
+    onConflict: () => {},
+  });
+
+  // Root should be normalized back to this module's Yjs constructors so other code
+  // can safely call `doc.getMap("cellStructuralOps")`.
+  assert.ok(doc.share.get("cellStructuralOps") instanceof Y.Map);
+  assert.ok(doc.getMap("cellStructuralOps") instanceof Y.Map);
+
+  monitor.dispose();
+  doc.destroy();
+});
