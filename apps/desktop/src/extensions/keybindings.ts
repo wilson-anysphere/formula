@@ -134,10 +134,12 @@ const keyTokenToCodeFallback: Record<string, KeyboardEvent["code"] | KeyboardEve
   "`": "Backquote",
   "[": "BracketLeft",
   "]": "BracketRight",
-  // Excel-style shortcuts sometimes refer to `Ctrl+Shift+*` but are actually bound to the
-  // physical `Digit8` key on many layouts. Allow falling back to the physical key code so
-  // `ctrl+shift+*` bindings still match when `event.key` is not literally "*".
-  "*": ["Digit8", "NumpadMultiply"],
+  // Dedicated "*" keys can appear on the numpad (`KeyboardEvent.code === "NumpadMultiply"`).
+  //
+  // Note: some Excel-style shortcuts refer to `Ctrl+Shift+*` but are actually bound to the
+  // physical `Digit8` key on many layouts. We handle that conditionally in `matchesKeybinding`
+  // when Shift is required, so `ctrl+*` does *not* accidentally match `Ctrl+8`.
+  "*": "NumpadMultiply",
   // ISO/JIS keyboards may report alternate codes for the physical backslash key.
   "\\": ["Backslash", "IntlBackslash", "IntlYen", "IntlRo"],
   "/": "Slash",
@@ -166,6 +168,12 @@ export function matchesKeybinding(binding: ParsedKeybinding, event: KeyboardEven
   if (binding.meta !== event.metaKey) return false;
 
   if (normalizeEventKey(event) === binding.key) return true;
+
+  // Special-case: Excel-style `Ctrl+Shift+*` is frequently entered as `Ctrl+Shift+8`
+  // on many layouts. When Shift is required, allow falling back to the physical Digit8 key.
+  if (binding.key === "*" && binding.shift) {
+    if (event.code === "Digit8") return true;
+  }
 
   const fallback = keyTokenToCodeFallback[binding.key];
   if (!fallback) return false;

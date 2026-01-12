@@ -176,6 +176,12 @@ describe("keybindings", () => {
     expect(matchesKeybinding(binding!, eventForKey("8", { ctrlKey: true, shiftKey: true, code: "Digit8" }))).toBe(true);
   });
 
+  it("does not match ctrl+* when the physical key is Digit8 without Shift (avoid ctrl+8 ambiguity)", () => {
+    const binding = parseKeybinding("cmd", "ctrl+*");
+    expect(binding).not.toBeNull();
+    expect(matchesKeybinding(binding!, eventForKey("8", { ctrlKey: true, shiftKey: false, code: "Digit8" }))).toBe(false);
+  });
+
   it("matches digit keys via KeyboardEvent.code fallback when event.key differs by layout (ctrl+1)", () => {
     const binding = parseKeybinding("cmd", "ctrl+1");
     expect(binding).not.toBeNull();
