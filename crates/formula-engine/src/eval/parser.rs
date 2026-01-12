@@ -12,7 +12,9 @@ use thiserror::Error;
 
 /// Excel limits (0-indexed).
 ///
-/// These match the bounds enforced by [`crate::eval::parse_a1`].
+/// These are used by this lightweight `eval::Parser` lowering pass to expand whole-row/whole-column
+/// references into explicit rectangular ranges. The main `Engine` compiler uses per-sheet worksheet
+/// dimensions instead of these fixed Excel bounds.
 const MAX_ROW_IDX: u32 = EXCEL_MAX_ROWS - 1;
 const MAX_COL_IDX: u32 = EXCEL_MAX_COLS - 1;
 
