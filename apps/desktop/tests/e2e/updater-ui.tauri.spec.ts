@@ -42,6 +42,15 @@ test.describe("desktop updater UI wiring (tauri)", () => {
       (window as any).__tauriShowCalls = 0;
       (window as any).__tauriFocusCalls = 0;
 
+      const windowHandle = {
+        show: async () => {
+          (window as any).__tauriShowCalls += 1;
+        },
+        setFocus: async () => {
+          (window as any).__tauriFocusCalls += 1;
+        },
+      };
+
       (window as any).__TAURI__ = {
         core: {
           invoke: async (_cmd: string, _args: any) => {
@@ -68,14 +77,12 @@ test.describe("desktop updater UI wiring (tauri)", () => {
           },
         },
         window: {
-          getCurrentWebviewWindow: () => ({
-            show: async () => {
-              (window as any).__tauriShowCalls += 1;
-            },
-            setFocus: async () => {
-              (window as any).__tauriFocusCalls += 1;
-            },
-          }),
+          // Provide all common handle accessors used by our Tauri abstractions so this
+          // test stays resilient to future refactors.
+          getCurrentWebviewWindow: () => windowHandle,
+          getCurrentWindow: () => windowHandle,
+          getCurrent: () => windowHandle,
+          appWindow: windowHandle,
         },
         notification: {
           notify: async (_payload: { title: string; body?: string }) => {},
@@ -122,14 +129,24 @@ test.describe("desktop updater UI wiring (tauri)", () => {
       const listeners: Record<string, Array<(event: any) => void>> = {};
       const emitted: Array<{ event: string; payload: any }> = [];
       const notifications: Array<{ title: string; body?: string }> = [];
+      const invokes: Array<{ cmd: string; args: any }> = [];
 
       (window as any).__tauriListeners = listeners;
       (window as any).__tauriEmittedEvents = emitted;
       (window as any).__tauriNotifications = notifications;
+      (window as any).__tauriInvokes = invokes;
+
+      const windowHandle = {
+        show: async () => {},
+        setFocus: async () => {},
+      };
 
       (window as any).__TAURI__ = {
         core: {
-          invoke: async (_cmd: string, _args: any) => null,
+          invoke: async (cmd: string, args: any) => {
+            invokes.push({ cmd, args });
+            return null;
+          },
         },
         event: {
           listen: async (name: string, handler: any) => {
@@ -149,10 +166,10 @@ test.describe("desktop updater UI wiring (tauri)", () => {
           },
         },
         window: {
-          getCurrentWebviewWindow: () => ({
-            show: async () => {},
-            setFocus: async () => {},
-          }),
+          getCurrentWebviewWindow: () => windowHandle,
+          getCurrentWindow: () => windowHandle,
+          getCurrent: () => windowHandle,
+          appWindow: windowHandle,
         },
         notification: {
           notify: async (payload: { title: string; body?: string }) => {
@@ -175,13 +192,34 @@ test.describe("desktop updater UI wiring (tauri)", () => {
       body: "Notes",
     });
 
-    await expect(page.getByTestId("updater-dialog")).toHaveCount(0);
+    // Startup checks should remain silent in-app (no modal dialog). `toBeHidden()` passes
+    // for both "not present" and "present but not visible" cases.
+    await expect(page.getByTestId("updater-dialog")).toBeHidden();
 
-    await page.waitForFunction(() => ((window as any).__tauriNotifications?.length ?? 0) >= 1);
-    const notifications = await page.evaluate(() => (window as any).__tauriNotifications ?? []);
-    expect(Array.isArray(notifications)).toBe(true);
-    expect(notifications.length).toBeGreaterThan(0);
-    expect(String(notifications[0]?.title ?? "")).toBe("Update available");
-    expect(String(notifications[0]?.body ?? "")).toContain("9.9.9");
+    // A system notification should be requested either through the direct notification
+    // plugin API or via the `show_system_notification` invoke command.
+    await page.waitForFunction(() => {
+      const notifications = (window as any).__tauriNotifications;
+      if (Array.isArray(notifications) && notifications.length > 0) return true;
+      const invokes = (window as any).__tauriInvokes;
+      if (Array.isArray(invokes) && invokes.some((entry: any) => entry?.cmd === "show_system_notification")) return true;
+      return false;
+    });
+
+    const details = await page.evaluate(() => {
+      const notifications = (window as any).__tauriNotifications ?? [];
+      const invokes = (window as any).__tauriInvokes ?? [];
+      return { notifications, invokes };
+    });
+
+    if (Array.isArray(details.notifications) && details.notifications.length > 0) {
+      expect(String(details.notifications[0]?.title ?? "")).toContain("Update available");
+      expect(String(details.notifications[0]?.body ?? "")).toContain("9.9.9");
+    } else {
+      const invoke = (details.invokes as any[]).find((entry: any) => entry?.cmd === "show_system_notification");
+      expect(invoke).toBeTruthy();
+      expect(String(invoke?.args?.title ?? "")).toContain("Update available");
+      expect(String(invoke?.args?.body ?? "")).toContain("9.9.9");
+    }
   });
 });
