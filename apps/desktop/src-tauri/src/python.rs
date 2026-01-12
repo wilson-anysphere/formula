@@ -2,6 +2,7 @@ use crate::commands::{
     CellUpdate, PythonError, PythonFilesystemPermission, PythonNetworkPermission,
     PythonPermissions, PythonRunContext, PythonRunResult, PythonSelection,
 };
+use crate::resource_limits::{MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
 use crate::state::{AppState, AppStateError, CellUpdateData};
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
@@ -235,6 +236,50 @@ impl<'a> PythonRpcHost<'a> {
         Ok(())
     }
 
+    fn enforce_range_limits(range: &RangeRef) -> Result<(usize, usize), String> {
+        if range.start_row > range.end_row || range.start_col > range.end_col {
+            return Err(AppStateError::InvalidRange {
+                start_row: range.start_row,
+                start_col: range.start_col,
+                end_row: range.end_row,
+                end_col: range.end_col,
+            }
+            .to_string());
+        }
+
+        let row_count = range
+            .end_row
+            .checked_sub(range.start_row)
+            .and_then(|d| d.checked_add(1))
+            .unwrap_or(usize::MAX);
+        let col_count = range
+            .end_col
+            .checked_sub(range.start_col)
+            .and_then(|d| d.checked_add(1))
+            .unwrap_or(usize::MAX);
+
+        if row_count > MAX_RANGE_DIM || col_count > MAX_RANGE_DIM {
+            return Err(AppStateError::RangeDimensionTooLarge {
+                rows: row_count,
+                cols: col_count,
+                limit: MAX_RANGE_DIM,
+            }
+            .to_string());
+        }
+
+        let cell_count = (row_count as u128) * (col_count as u128);
+        if cell_count > MAX_RANGE_CELLS_PER_CALL as u128 {
+            return Err(AppStateError::RangeTooLarge {
+                rows: row_count,
+                cols: col_count,
+                limit: MAX_RANGE_CELLS_PER_CALL,
+            }
+            .to_string());
+        }
+
+        Ok((row_count, col_count))
+    }
+
     fn handle_rpc(&mut self, method: &str, params: Option<JsonValue>) -> Result<JsonValue, String> {
         let params = params.unwrap_or(JsonValue::Null);
         match method {
@@ -315,14 +360,15 @@ impl<'a> PythonRpcHost<'a> {
             }
             "get_range_values" => {
                 let range = Self::parse_range(&params)?;
+                let (row_count, col_count) = Self::enforce_range_limits(&range)?;
                 let workbook = self.state.get_workbook().map_err(|e| e.to_string())?;
                 let sheet = workbook.sheet(&range.sheet_id).ok_or_else(|| {
                     AppStateError::UnknownSheet(range.sheet_id.clone()).to_string()
                 })?;
 
-                let mut out: Vec<Vec<JsonValue>> = Vec::new();
+                let mut out: Vec<Vec<JsonValue>> = Vec::with_capacity(row_count);
                 for row in range.start_row..=range.end_row {
-                    let mut row_vals = Vec::new();
+                    let mut row_vals = Vec::with_capacity(col_count);
                     for col in range.start_col..=range.end_col {
                         let cell = sheet.get_cell(row, col);
                         row_vals.push(cell.computed_value.as_json().unwrap_or(JsonValue::Null));
@@ -334,8 +380,7 @@ impl<'a> PythonRpcHost<'a> {
             "set_range_values" => {
                 let range = Self::parse_range(&params)?;
                 let values = params.get("values").unwrap_or(&JsonValue::Null);
-                let row_count = range.end_row.saturating_sub(range.start_row) + 1;
-                let col_count = range.end_col.saturating_sub(range.start_col) + 1;
+                let (row_count, col_count) = Self::enforce_range_limits(&range)?;
 
                 let normalized: Vec<Vec<(Option<JsonValue>, Option<String>)>> = match values {
                     JsonValue::Array(rows)
@@ -441,18 +486,14 @@ impl<'a> PythonRpcHost<'a> {
             }
             "clear_range" => {
                 let range = Self::parse_range(&params)?;
-                let row_count = range.end_row.saturating_sub(range.start_row) + 1;
-                let col_count = range.end_col.saturating_sub(range.start_col) + 1;
-                let edits = vec![vec![(None, None); col_count]; row_count];
                 let updates = self
                     .state
-                    .set_range(
+                    .clear_range(
                         &range.sheet_id,
                         range.start_row,
                         range.start_col,
                         range.end_row,
                         range.end_col,
-                        edits,
                     )
                     .map_err(|e| e.to_string())?;
                 self.extend_updates(updates);

@@ -483,6 +483,32 @@ impl AppState {
             });
         }
 
+        let row_count = end_row
+            .checked_sub(start_row)
+            .and_then(|d| d.checked_add(1))
+            .unwrap_or(usize::MAX);
+        let col_count = end_col
+            .checked_sub(start_col)
+            .and_then(|d| d.checked_add(1))
+            .unwrap_or(usize::MAX);
+
+        if row_count > MAX_RANGE_DIM || col_count > MAX_RANGE_DIM {
+            return Err(AppStateError::RangeDimensionTooLarge {
+                rows: row_count,
+                cols: col_count,
+                limit: MAX_RANGE_DIM,
+            });
+        }
+
+        let cell_count = (row_count as u128) * (col_count as u128);
+        if cell_count > MAX_RANGE_CELLS_PER_CALL as u128 {
+            return Err(AppStateError::RangeTooLarge {
+                rows: row_count,
+                cols: col_count,
+                limit: MAX_RANGE_CELLS_PER_CALL,
+            });
+        }
+
         let workbook = self.get_workbook_mut()?;
         let sheet = workbook
             .sheet_mut(sheet_id)
@@ -1307,6 +1333,143 @@ impl AppState {
         self.dirty = true;
         self.redo_stack.clear();
         self.undo_stack.push(UndoEntry { before, after });
+        Ok(updates)
+    }
+
+    pub fn clear_range(
+        &mut self,
+        sheet_id: &str,
+        start_row: usize,
+        start_col: usize,
+        end_row: usize,
+        end_col: usize,
+    ) -> Result<Vec<CellUpdateData>, AppStateError> {
+        if start_row > end_row || start_col > end_col {
+            return Err(AppStateError::InvalidRange {
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+            });
+        }
+
+        let row_count = end_row
+            .checked_sub(start_row)
+            .and_then(|d| d.checked_add(1))
+            .unwrap_or(usize::MAX);
+        let col_count = end_col
+            .checked_sub(start_col)
+            .and_then(|d| d.checked_add(1))
+            .unwrap_or(usize::MAX);
+
+        if row_count > MAX_RANGE_DIM || col_count > MAX_RANGE_DIM {
+            return Err(AppStateError::RangeDimensionTooLarge {
+                rows: row_count,
+                cols: col_count,
+                limit: MAX_RANGE_DIM,
+            });
+        }
+
+        let cell_count = (row_count as u128) * (col_count as u128);
+        if cell_count > MAX_RANGE_CELLS_PER_CALL as u128 {
+            return Err(AppStateError::RangeTooLarge {
+                rows: row_count,
+                cols: col_count,
+                limit: MAX_RANGE_CELLS_PER_CALL,
+            });
+        }
+
+        let coords_to_clear = {
+            let workbook = self.get_workbook()?;
+            let sheet = workbook
+                .sheet(sheet_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
+
+            sheet
+                .cells_iter()
+                .filter_map(|((row, col), cell)| {
+                    if row < start_row
+                        || row > end_row
+                        || col < start_col
+                        || col > end_col
+                        || (cell.input_value.is_none() && cell.formula.is_none())
+                    {
+                        None
+                    } else {
+                        Some((row, col))
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+
+        if coords_to_clear.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut before = Vec::new();
+        let mut after = Vec::new();
+        let mut changed = Vec::new();
+
+        for (row, col) in coords_to_clear {
+            let snapshot_before = self.snapshot_cell(sheet_id, row, col)?;
+            let snapshot_after = CellInputSnapshot {
+                sheet_id: sheet_id.to_string(),
+                row,
+                col,
+                value: None,
+                formula: None,
+            };
+
+            if snapshot_before != snapshot_after {
+                before.push(snapshot_before);
+                after.push(snapshot_after);
+                changed.push((row, col));
+            }
+        }
+
+        if changed.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        if let Some(workbook) = self.workbook.as_mut() {
+            if workbook.origin_xlsx_bytes.is_some() || workbook.origin_xlsb_path.is_some() {
+                for snap in &before {
+                    workbook
+                        .cell_input_baseline
+                        .entry((snap.sheet_id.clone(), snap.row, snap.col))
+                        .or_insert_with(|| (snap.value.clone(), snap.formula.clone()));
+                }
+            }
+        }
+
+        self.apply_snapshots(&after)?;
+        let direct_changes = changed
+            .iter()
+            .map(|(row, col)| (sheet_id.to_string(), *row, *col))
+            .collect::<Vec<_>>();
+        let mut updates = self.recalculate_with_pivots(direct_changes)?;
+
+        for (row, col) in changed {
+            if !updates
+                .iter()
+                .any(|u| u.sheet_id == sheet_id && u.row == row && u.col == col)
+            {
+                let cell_data = self.get_cell(sheet_id, row, col)?;
+                updates.push(CellUpdateData {
+                    sheet_id: sheet_id.to_string(),
+                    row,
+                    col,
+                    value: cell_data.value,
+                    formula: cell_data.formula,
+                    display_value: cell_data.display_value,
+                });
+            }
+        }
+
+        self.dirty = true;
+        self.redo_stack.clear();
+        self.undo_stack.push(UndoEntry { before, after });
+
         Ok(updates)
     }
 
@@ -3534,6 +3697,59 @@ mod tests {
         assert_eq!(a1.value, CellScalar::Number(1.0));
         let b2 = state.get_cell(&sheet_id, 1, 1).expect("get B2");
         assert_eq!(b2.value, CellScalar::Number(4.0));
+    }
+
+    #[test]
+    fn set_range_number_format_rejects_oversized_ranges() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let end_row = MAX_RANGE_DIM - 1;
+        let end_col = MAX_RANGE_DIM - 1;
+        let err = state
+            .set_range_number_format(&sheet_id, 0, 0, end_row, end_col, Some("0.00".to_string()))
+            .expect_err("expected oversized set_range_number_format to fail");
+        assert!(matches!(
+            err,
+            AppStateError::RangeTooLarge {
+                rows: MAX_RANGE_DIM,
+                cols: MAX_RANGE_DIM,
+                limit: MAX_RANGE_CELLS_PER_CALL
+            }
+        ));
+    }
+
+    #[test]
+    fn clear_range_clears_values_but_preserves_number_format() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let mut cell = Cell::from_literal(Some(CellScalar::Number(1.25)));
+        cell.number_format = Some("0.00".to_string());
+        workbook
+            .sheet_mut(&sheet_id)
+            .unwrap()
+            .set_cell(0, 0, cell);
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        state
+            .clear_range(&sheet_id, 0, 0, 0, 0)
+            .expect("clear range");
+
+        let a1 = state.get_cell(&sheet_id, 0, 0).expect("get A1");
+        assert_eq!(a1.value, CellScalar::Empty);
+
+        let workbook = state.get_workbook().expect("workbook");
+        let sheet = workbook.sheet(&sheet_id).expect("sheet");
+        let a1_cell = sheet.get_cell(0, 0);
+        assert_eq!(a1_cell.number_format.as_deref(), Some("0.00"));
     }
 
     #[test]
