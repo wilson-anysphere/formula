@@ -11186,6 +11186,16 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_switch_does_not_eval_case_results_when_case_value_is_error_even_when_volatile() {
+        let v =
+            assert_bytecode_eq_ast("=IFERROR(SWITCH(2, 1/0, RAND(), RAND(), RAND()) + RAND(), RAND())");
+        match v {
+            Value::Number(n) => assert!((0.0..1.0).contains(&n), "got {n}"),
+            other => panic!("expected number, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn bytecode_compiler_allows_huge_ranges_for_implicit_intersection() {
         let mut engine = Engine::new();
 
