@@ -25,6 +25,16 @@ pub(super) fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Optio
     }
 }
 
+fn coupon_date_from_maturity(maturity: &str, months_per_period: i32, periods_back: i32) -> String {
+    debug_assert!(months_per_period > 0);
+    debug_assert!(periods_back >= 0);
+    let mut expr = maturity.to_string();
+    for _ in 0..periods_back {
+        expr = format!("EDATE({expr},-{months_per_period})");
+    }
+    expr
+}
+
 #[test]
 fn coup_invariants_when_settlement_is_coupon_date() {
     let mut sheet = TestSheet::new();
@@ -51,8 +61,8 @@ fn coup_invariants_when_settlement_is_coupon_date() {
         for &frequency in &frequencies {
             let months_per_period = 12 / frequency;
             for k in 1..=6 {
-                let months_back = k * months_per_period;
-                let settlement = format!("EDATE({maturity},-{months_back})");
+                let settlement =
+                    coupon_date_from_maturity(maturity, months_per_period, k);
 
                 for &basis in &bases {
                     let daybs = eval_number(
@@ -121,8 +131,7 @@ fn coup_days_additivity_for_30_360_bases() {
 
             // Ensure there's room to step back and still have a valid next coupon date.
             for k in 1..=6 {
-                let months_back = k * months_per_period;
-                let pcd = format!("EDATE({maturity},-{months_back})");
+                let pcd = coupon_date_from_maturity(maturity, months_per_period, k);
 
                 for &delta in &deltas {
                     let settlement = format!("({pcd}+{delta})");
@@ -180,18 +189,10 @@ fn coup_schedule_roundtrips_when_settlement_is_coupon_date() {
         for &frequency in &frequencies {
             let months_per_period = 12 / frequency;
             for k in 1..=6 {
-                let months_back = k * months_per_period;
-                let settlement = format!("EDATE({maturity},-{months_back})");
-                // When settlement is a coupon date constructed from the maturity anchor, the next
-                // coupon date should be the corresponding (k-1)-period offset from maturity.
-                //
-                // This avoids relying on `EDATE(settlement, +m)`, which is not always equivalent
-                // to `EDATE(maturity, -(k-1)*m)` due to end-of-month clamping.
-                let expected_ncd = if k == 1 {
-                    maturity.to_string()
-                } else {
-                    format!("EDATE({maturity},-{})", (k - 1) * months_per_period)
-                };
+                let settlement =
+                    coupon_date_from_maturity(maturity, months_per_period, k);
+                let expected_ncd =
+                    coupon_date_from_maturity(maturity, months_per_period, k - 1);
 
                 for &basis in &bases {
                     let pcd = eval_number(
@@ -251,8 +252,8 @@ fn price_yield_roundtrip_consistency() {
         for &frequency in &frequencies {
             let months_per_period = 12 / frequency;
             for k in 1..=5 {
-                let months_back = k * months_per_period;
-                let settlement = format!("EDATE({maturity},-{months_back})");
+                let settlement =
+                    coupon_date_from_maturity(maturity, months_per_period, k);
 
                 for &basis in &bases {
                     for &rate in &rates {
@@ -278,17 +279,12 @@ fn price_yield_roundtrip_consistency() {
 fn price_matches_pv_when_settlement_is_coupon_date() {
     let mut sheet = TestSheet::new();
 
-    // Skip if PRICE (or the COUP schedule helper used to derive N) isn't registered yet.
+    // Skip if PRICE isn't registered yet.
     if eval_number_or_skip(
         &mut sheet,
         "=PRICE(DATE(2020,7,1),DATE(2021,1,1),0.05,0.04,100,2,0)",
     )
     .is_none()
-        || eval_number_or_skip(
-            &mut sheet,
-            "=COUPNUM(DATE(2020,7,1),DATE(2021,1,1),2,0)",
-        )
-        .is_none()
     {
         return;
     }
@@ -313,8 +309,8 @@ fn price_matches_pv_when_settlement_is_coupon_date() {
         for &frequency in &frequencies {
             let months_per_period = 12 / frequency;
             for k in 1..=5 {
-                let months_back = k * months_per_period;
-                let settlement = format!("EDATE({maturity},-{months_back})");
+                let settlement =
+                    coupon_date_from_maturity(maturity, months_per_period, k);
 
                 for &basis in &bases {
                     for &rate in &rates {
@@ -330,7 +326,7 @@ fn price_matches_pv_when_settlement_is_coupon_date() {
                                 let pv = eval_number(
                                     &mut sheet,
                                     &format!(
-                                        "=LET(n,COUPNUM({settlement},{maturity},{frequency},{basis}),c,({rate})*({redemption})/{frequency},k,({yld})/{frequency},PV(k,n,-c,-{redemption}))"
+                                        "=LET(n,{k},c,100*({rate})/{frequency},r,({yld})/{frequency},PV(r,n,-c,-{redemption}))"
                                     ),
                                 );
 
@@ -348,27 +344,12 @@ fn price_matches_pv_when_settlement_is_coupon_date() {
 fn duration_n1_equals_time_to_maturity() {
     let mut sheet = TestSheet::new();
 
-    // Skip if DURATION or the COUP helpers it relies on aren't registered yet.
+    // Skip if DURATION isn't registered yet.
     if eval_number_or_skip(
         &mut sheet,
         "=DURATION(DATE(2020,7,2),DATE(2021,1,1),0.05,0.04,2,0)",
     )
     .is_none()
-        || eval_number_or_skip(
-            &mut sheet,
-            "=COUPNUM(DATE(2020,7,2),DATE(2021,1,1),2,0)",
-        )
-        .is_none()
-        || eval_number_or_skip(
-            &mut sheet,
-            "=COUPDAYSNC(DATE(2020,7,2),DATE(2021,1,1),2,0)",
-        )
-        .is_none()
-        || eval_number_or_skip(
-            &mut sheet,
-            "=COUPDAYS(DATE(2020,7,2),DATE(2021,1,1),2,0)",
-        )
-        .is_none()
     {
         return;
     }
@@ -389,30 +370,23 @@ fn duration_n1_equals_time_to_maturity() {
             let months_per_period = 12 / frequency;
 
             for &delta in &deltas {
-                let settlement =
-                    format!("(EDATE({maturity},-{months_per_period})+{delta})");
+                let pcd = format!("EDATE({maturity},-{months_per_period})");
+                let settlement = format!("({pcd}+{delta})");
 
                 for &basis in &bases {
-                    let n = eval_number(
+                    // For N=1, NCD == maturity and PCD == EDATE(maturity, -months_per_period) (since
+                    // we picked settlement in the final coupon period).
+                    //
+                    // Compute expected DURATION using the same day-count definitions as the bond
+                    // schedule:
+                    // - basis 0/4 use DAYS360
+                    // - basis 1/2/3 use actual serial-day differences
+                    let expected = eval_number(
                         &mut sheet,
-                        &format!("=COUPNUM({settlement},{maturity},{frequency},{basis})"),
+                        &format!(
+                            "=LET(pcd,{pcd},dsc,IF({basis}=0,DAYS360({settlement},{maturity},FALSE),IF({basis}=4,DAYS360({settlement},{maturity},TRUE),{maturity}-{settlement})),e,IF({basis}=0,DAYS360(pcd,{maturity},FALSE),IF({basis}=4,DAYS360(pcd,{maturity},TRUE),{maturity}-pcd)),(dsc/e)/{frequency})"
+                        ),
                     );
-                    if (n - 1.0).abs() > 1e-12 {
-                        // If the schedule construction doesn't land in the last coupon period for
-                        // this basis/date combination, skip rather than asserting an incorrect
-                        // identity.
-                        continue;
-                    }
-
-                    let dsc = eval_number(
-                        &mut sheet,
-                        &format!("=COUPDAYSNC({settlement},{maturity},{frequency},{basis})"),
-                    );
-                    let e = eval_number(
-                        &mut sheet,
-                        &format!("=COUPDAYS({settlement},{maturity},{frequency},{basis})"),
-                    );
-                    let expected = (dsc / e) / (frequency as f64);
 
                     for &coupon in &coupons {
                         for &yld in &yields {
@@ -460,8 +434,8 @@ fn mduration_matches_duration_identity() {
         for &frequency in &frequencies {
             let months_per_period = 12 / frequency;
             for k in 1..=6 {
-                let months_back = k * months_per_period;
-                let settlement = format!("EDATE({maturity},-{months_back})");
+                let settlement =
+                    coupon_date_from_maturity(maturity, months_per_period, k);
 
                 for &basis in &bases {
                     for &coupon in &coupons {
