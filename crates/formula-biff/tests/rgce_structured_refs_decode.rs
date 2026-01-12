@@ -267,6 +267,24 @@ fn decodes_structured_ref_unknown_flags_are_ignored() {
 }
 
 #[test]
+fn decodes_structured_ref_multiple_item_flags_prefers_headers() {
+    // Excel's flags are not strictly mutually exclusive; ensure we stay best-effort by choosing a
+    // stable priority order (Headers > Totals > All > Data), matching formula-xlsb's decoder.
+    let rgce = ptg_list(1, 0x0002 | 0x0004, 2, 2, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[[#Headers],[Column2]]");
+    assert_eq!(normalize(&text), normalize("Table1[[#Headers],[Column2]]"));
+}
+
+#[test]
+fn decodes_structured_ref_multiple_item_flags_prefers_totals_over_data() {
+    let rgce = ptg_list(1, 0x0008 | 0x0004, 2, 2, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[[#Totals],[Column2]]");
+    assert_eq!(normalize(&text), normalize("Table1[[#Totals],[Column2]]"));
+}
+
+#[test]
 fn decodes_structured_ref_extend_a_is_supported() {
     // PtgExtendA (0x58) uses the same payload as ref/value class variants.
     let rgce = ptg_list(1, 0x0000, 2, 2, 0x58);
