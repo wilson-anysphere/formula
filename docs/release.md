@@ -20,6 +20,17 @@ node scripts/check-desktop-version.mjs vX.Y.Z
 node scripts/check-updater-config.mjs
 ```
 
+## Updater restart semantics (important)
+
+When an update is downloaded/installed, the desktop app should restart/exit using Tauri's supported
+APIs so the updater plugin can complete any pending work during shutdown.
+
+- Use the backend command **`restart_app`** for updater-driven restarts (it calls
+  `AppHandle::restart()` and falls back to `AppHandle::exit(0)`).
+- Do **not** use **`quit_app`** for updates. `quit_app` intentionally uses `std::process::exit(0)`
+  to avoid re-entering the `CloseRequested` hide-to-tray flow, but hard exits can bypass normal
+  shutdown hooks.
+
 ## 1) Versioning + tagging
 
 1. Update the desktop app version in `apps/desktop/src-tauri/tauri.conf.json` (`version`).

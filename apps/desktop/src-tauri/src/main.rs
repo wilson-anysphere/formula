@@ -484,6 +484,7 @@ fn main() {
             commands::run_python_script,
             commands::check_for_updates,
             commands::quit_app,
+            commands::restart_app,
             commands::fire_workbook_open,
             commands::fire_workbook_before_close,
             commands::fire_worksheet_change,

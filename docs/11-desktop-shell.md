@@ -363,8 +363,11 @@ The command list is large; below are the “core” ones most contributors will 
   - VBA event hooks: `fire_workbook_open`, `fire_workbook_before_close`, `fire_worksheet_change`, `fire_selection_change`
 - **Lifecycle**
   - `quit_app` (hard-exits the process; used by the tray quit flow)
+  - `restart_app` (Tauri-managed restart/exit; intended for updater install flows so shutdown hooks can run)
   - `exit_process` (hard-exits with a given code; used by `pnpm -C apps/desktop check:coi`)
   - `report_cross_origin_isolation` (logs `crossOriginIsolated` + `SharedArrayBuffer` status for the COOP/COEP smoke check)
+
+Note: updater-driven installs should use `restart_app`, not `quit_app`. `quit_app` intentionally hard-exits (`std::process::exit(0)`) to avoid re-entering the hide-to-tray close handler, but hard exits can bypass normal shutdown hooks.
 - **Tray integration**
   - `set_tray_status` (update tray icon + tooltip for simple statuses: `idle`, `syncing`, `error`)
 

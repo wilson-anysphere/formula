@@ -3558,6 +3558,21 @@ pub fn quit_app() {
     std::process::exit(0);
 }
 
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub fn restart_app(app: tauri::AppHandle) {
+    // For update flows we need a graceful shutdown so Tauri and its plugins (notably
+    // `tauri-plugin-updater`) can complete any pending work before the process exits.
+    //
+    // On desktop targets Tauri provides `AppHandle::restart()`. On unsupported targets we fall
+    // back to a best-effort graceful exit.
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    app.restart();
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    app.exit(0);
+}
+
 // Clipboard bridge commands.
 //
 // The frontend prefers the browser Clipboard API when available (so we can copy/paste rich HTML
@@ -3897,5 +3912,13 @@ export default async function main(ctx) {
             "",
             "expected Sheet1!A1 to remain empty"
         );
+    }
+
+    #[cfg(feature = "desktop")]
+    #[test]
+    fn restart_app_command_signature_compiles() {
+        // We can't exercise a real restart in tests, but we can assert that the command
+        // compiles with Tauri's supported restart API.
+        let _ = restart_app as fn(tauri::AppHandle);
     }
 }
