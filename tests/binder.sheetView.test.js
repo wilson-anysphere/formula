@@ -162,6 +162,51 @@ test("binder: applies view state when sheet id is set after view", async () => {
   }
 });
 
+test("binder: observes deep view mutations when view is stored as nested Y.Maps", async () => {
+  const ydoc = new Y.Doc();
+  const sheets = ydoc.getArray("sheets");
+
+  const view = new Y.Map();
+  view.set("frozenRows", 0);
+  view.set("frozenCols", 0);
+  const colWidths = new Y.Map();
+  colWidths.set("0", 111);
+  view.set("colWidths", colWidths);
+
+  ydoc.transact(() => {
+    const entry = new Y.Map();
+    entry.set("id", "Sheet1");
+    entry.set("name", "Sheet1");
+    entry.set("view", view);
+    sheets.push([entry]);
+  });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({ ydoc, documentController, defaultSheetId: "Sheet1" });
+
+  try {
+    await waitForCondition(() => documentController.getSheetView("Sheet1").colWidths?.["0"] === 111);
+
+    const remoteOrigin = { type: "remote-test" };
+    ydoc.transact(
+      () => {
+        colWidths.set("1", 222);
+      },
+      remoteOrigin,
+    );
+
+    await waitForCondition(() => documentController.getSheetView("Sheet1").colWidths?.["1"] === 222);
+    assert.deepEqual(documentController.getSheetView("Sheet1"), {
+      frozenRows: 0,
+      frozenCols: 0,
+      colWidths: { "0": 111, "1": 222 },
+    });
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
+
 test("binder: Yjs→DocumentController syncs sheet view state (initial hydration + remote changes)", async () => {
   const ydoc = new Y.Doc();
   const sheets = ydoc.getArray("sheets");

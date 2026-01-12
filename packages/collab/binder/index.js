@@ -893,18 +893,36 @@ export function bindYjsToDocumentController(options) {
     let needsFullScan = false;
 
     for (const event of events) {
+      const path = event?.path;
+      const touchesView = Array.isArray(path) && path.includes("view");
       const changes = event?.changes?.keys;
-      const hasPotentialViewChange =
+      const hasPotentialViewChange = Boolean(
         changes &&
-        (changes.has("view") ||
-          changes.has("id") ||
-          changes.has("frozenRows") ||
-          changes.has("frozenCols") ||
-          changes.has("colWidths") ||
-          changes.has("rowHeights"));
+          (touchesView ||
+            changes.has("view") ||
+            changes.has("id") ||
+            changes.has("frozenRows") ||
+            changes.has("frozenCols") ||
+            changes.has("colWidths") ||
+            changes.has("rowHeights")),
+      );
 
-      // Array-level changes (insert/delete/move) don't expose `changes.keys`.
+      // Array-level changes (insert/delete/move) don't expose `changes.keys`. This can
+      // happen for the root `sheets` array, or for nested arrays under `sheet.view`.
+      //
+      // If the path indicates which sheet index was touched (e.g. nested view arrays),
+      // we can avoid scanning the entire sheet list.
       if (!changes) {
+        if (touchesView && Array.isArray(path) && typeof path[0] === "number") {
+          const entry = sheets.get(path[0]);
+          const id = coerceString(entry?.get?.("id") ?? entry?.id);
+          if (id) {
+            changed.add(id);
+            continue;
+          }
+        }
+
+        // Root array changes: conservatively rescan sheet ids.
         needsFullScan = true;
         continue;
       }
@@ -919,7 +937,6 @@ export function bindYjsToDocumentController(options) {
       }
 
       // Otherwise fall back to resolving the sheet index from the deep path.
-      const path = event?.path;
       if (Array.isArray(path) && typeof path[0] === "number") {
         const entry = sheets.get(path[0]);
         const id = coerceString(entry?.get?.("id") ?? entry?.id);
