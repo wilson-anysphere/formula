@@ -980,13 +980,22 @@ fn write_updated_cell<W: Write>(
     //
     // If the value itself hasn't changed (e.g. style-only edits), preserve `vm`.
     //
-    // If the caller explicitly provides `vm` metadata we always emit it. Otherwise, preserve a
-    // pre-existing `vm` attribute only if the cell's cached value hasn't changed (e.g. style-only
-    // edits) or the cell still contains the `#VALUE!` placeholder used by many rich-data cells.
+    // If the cell already has a `vm` attribute we treat the on-disk value as the baseline.
+    //
+    // - If the caller overrides `CellMeta.vm` (different from the file), emit the override.
+    // - Otherwise, preserve the original `vm` only when the cached value is unchanged
+    //   (e.g. style-only edits) or the cell still contains the `#VALUE!` placeholder used by
+    //   many rich-value cells.
     let preserve_vm = !value_changed || matches!(cell.value, CellValue::Error(ErrorValue::Value));
-    let drop_vm = original_has_vm && (meta_vm.is_some() || !preserve_vm);
-    if let Some(vm) = meta_vm.as_deref() {
-        c_start.push_attribute(("vm", vm));
+    let original_vm = preserved_attrs
+        .iter()
+        .find_map(|(k, v)| (k == "vm").then_some(v.as_str()));
+    let vm_override = meta_vm.as_deref().is_some_and(|vm| Some(vm) != original_vm);
+    let drop_vm = original_has_vm && (vm_override || !preserve_vm);
+    if vm_override {
+        if let Some(vm) = meta_vm.as_deref() {
+            c_start.push_attribute(("vm", vm));
+        }
     }
     if !original_has_cm {
         if let Some(cm) = meta_cm.as_deref() {

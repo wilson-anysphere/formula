@@ -3675,6 +3675,19 @@ fn append_cell_xml(
             }
         }
     }
+
+    // Emit SpreadsheetML cell metadata indices (`c/@vm` and `c/@cm`) when present.
+    //
+    // These are captured in `XlsxDocument` during read and may also be injected by callers
+    // who need low-level round-trip control (e.g. rich values / images-in-cell flows).
+    if let Some(meta) = meta {
+        if let Some(vm) = meta.vm.as_deref() {
+            out.push_str(&format!(r#" vm="{}""#, escape_attr(vm)));
+        }
+        if let Some(cm) = meta.cm.as_deref() {
+            out.push_str(&format!(r#" cm="{}""#, escape_attr(cm)));
+        }
+    }
     out.push('>');
 
     let model_formula = cell.formula.as_deref();
