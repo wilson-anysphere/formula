@@ -1025,6 +1025,50 @@ Important notes:
   structure ("binding" the signature to the VBA project streams). This can be added later to match
   Excel's behavior more closely.
 
+#### VBA digital signatures: stream location, payload variants, and digest binding
+
+Excel stores VBA macro signatures **inside** `xl/vbaProject.bin` (an OLE compound document), in one
+of the control-character-prefixed streams:
+
+- `\x05DigitalSignature`
+- `\x05DigitalSignatureEx`
+- `\x05DigitalSignatureExt`
+
+Edge case: some producers store a **storage** named `\x05DigitalSignature*` containing a nested
+stream (e.g. `\x05DigitalSignature/sig`). When searching for signatures, match on any path
+component, not just root-level streams.
+
+Common signature stream payload shapes we must handle:
+
+1. **Raw PKCS#7/CMS DER** (`ContentInfo`, usually begins with ASN.1 `SEQUENCE (0x30)`).
+2. **MS-OFFCRYPTO `DigSigInfoSerialized` wrapper/prefix**, which contains (or precedes) the
+   DER-encoded PKCS#7/CMS payload.
+3. **Detached `content || pkcs7`**, where the stream is `signed_content_bytes` followed by a
+   detached PKCS#7 signature over those bytes.
+
+How to obtain the signed digest for MS-OVBA “project digest” binding:
+
+- Parse the PKCS#7/CMS `ContentInfo`. The `contentType` is typically `signedData`
+  (`1.2.840.113549.1.7.2`).
+- From `SignedData.encapContentInfo`, read the `eContent` bytes (if embedded). For Authenticode-like
+  signatures, `eContentType` is typically `SpcIndirectDataContent` (`1.3.6.1.4.1.311.2.1.4`).
+  - In the detached `content || pkcs7` variant, the detached `content` prefix plays the same role
+    as `eContent`.
+- Decode the `SpcIndirectDataContent` structure and extract its `messageDigest: DigestInfo`:
+  - digest algorithm (hash OID)
+  - digest bytes
+
+Binding plan (future work; see MS-OVBA):
+
+1. Compute the MS-OVBA “VBA project digest” over the project streams (excluding the signature
+   streams), using the hash algorithm indicated by the extracted `DigestInfo`.
+2. Compare the computed digest to the `DigestInfo` digest bytes.
+3. Only treat `trusted_signed_only` as satisfied if:
+   - the PKCS#7/CMS signature verifies, **and**
+   - the digest comparison matches (signature is bound to the project contents).
+
+For more detail, see [`vba-digital-signatures.md`](./vba-digital-signatures.md).
+
 ### Script Sandboxing
 
 ```typescript
