@@ -79,6 +79,7 @@ export class DesktopOAuthBroker implements OAuthBroker {
   private openAuthUrlHandler: ((url: string) => Promise<void> | void) | null = null;
   private deviceCodePromptHandler: ((code: string, verificationUri: string) => Promise<void> | void) | null = null;
   private pendingRedirects = new Map<string, Deferred<string>>();
+  private pendingRedirectStates = new Map<string, string>();
   private observedRedirects: Array<{ url: string; observedAtMs: number }> = [];
   private lastAuthUrlOpenedAtMs: number | null = null;
   private lastAuthRedirectUri: string | null = null;
@@ -153,6 +154,15 @@ export class DesktopOAuthBroker implements OAuthBroker {
   }
 
   waitForRedirect(redirectUri: string): Promise<string> {
+    // If the most recently opened auth URL included a state value (PKCE), remember it so we
+    // can ignore later oauth-redirect events that don't match the expected state.
+    //
+    // Note: this is best-effort and does not replace the OAuth2Manager's state check; it
+    // merely prevents spurious deep links from prematurely resolving the redirect wait.
+    if (this.lastAuthRedirectUri === redirectUri && typeof this.lastAuthState === "string" && this.lastAuthState) {
+      this.pendingRedirectStates.set(redirectUri, this.lastAuthState);
+    }
+
     // Once a redirect wait is registered, there's no longer a race window between
     // openAuthUrl(...) and waitForRedirect(...), so we can disable early-redirect
     // buffering for this flow.
@@ -182,6 +192,7 @@ export class DesktopOAuthBroker implements OAuthBroker {
     const pending = this.pendingRedirects.get(redirectUri);
     if (!pending) return;
     this.pendingRedirects.delete(redirectUri);
+    this.pendingRedirectStates.delete(redirectUri);
     pending.resolve(redirectUrl);
   }
 
@@ -198,6 +209,19 @@ export class DesktopOAuthBroker implements OAuthBroker {
     // Try to resolve an existing pending redirect first.
     const expectedRedirectUri = this.findPendingRedirectUri(redirectUrl);
     if (expectedRedirectUri) {
+      const expectedState = this.pendingRedirectStates.get(expectedRedirectUri) ?? null;
+      if (typeof expectedState === "string" && expectedState) {
+        try {
+          const parsedRedirect = new URL(redirectUrl);
+          const returnedState = parsedRedirect.searchParams.get("state");
+          if (returnedState && returnedState !== expectedState) {
+            // Ignore redirects for the correct endpoint but the wrong CSRF state.
+            return false;
+          }
+        } catch {
+          return false;
+        }
+      }
       this.resolveRedirect(expectedRedirectUri, redirectUrl);
       return true;
     }
@@ -271,6 +295,7 @@ export class DesktopOAuthBroker implements OAuthBroker {
     const pending = this.pendingRedirects.get(redirectUri);
     if (!pending) return;
     this.pendingRedirects.delete(redirectUri);
+    this.pendingRedirectStates.delete(redirectUri);
     pending.reject(reason);
   }
 }
