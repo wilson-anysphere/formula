@@ -146,6 +146,24 @@ fn days360_matches_excel_examples() {
 }
 
 #[test]
+fn days360_month_end_rollover_applies_outside_february() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // US/NASD-only behavior: if end_date is month-end and the (adjusted) start day is < 30,
+    // end_date rolls forward to the 1st of the next month. This can differ from the European
+    // method even in months that are not February.
+    let start = ymd_to_serial(ExcelDate::new(2019, 4, 29), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2019, 4, 30), system).unwrap(); // month-end (30-day month)
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 2);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 1);
+
+    let start = ymd_to_serial(ExcelDate::new(2019, 4, 29), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2019, 5, 31), system).unwrap(); // month-end (31-day month)
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 32);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 31);
+}
+
+#[test]
 fn days360_accounts_for_lotus_bug_feb_1900() {
     let system = ExcelDateSystem::EXCEL_1900;
     let jan31 = ymd_to_serial(ExcelDate::new(1900, 1, 31), system).unwrap();

@@ -304,6 +304,29 @@ fn days360_matches_excel_examples() {
 }
 
 #[test]
+fn days360_month_end_rollover_applies_outside_february() {
+    let mut sheet = TestSheet::new();
+
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2019,4,29),DATE(2019,4,30))"),
+        2.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2019,4,29),DATE(2019,4,30),TRUE)"),
+        1.0,
+    );
+
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2019,4,29),DATE(2019,5,31))"),
+        32.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2019,4,29),DATE(2019,5,31),TRUE)"),
+        31.0,
+    );
+}
+
+#[test]
 fn days360_accounts_for_lotus_bug_feb_1900() {
     let mut sheet = TestSheet::new();
     sheet.set_date_system(ExcelDateSystem::Excel1900 { lotus_compat: true });
