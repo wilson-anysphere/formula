@@ -74,10 +74,11 @@ pub fn extract_rich_cell_images(
     // The workbook parsing stack can error for malformed workbook.xml; bubble that up.
     let worksheet_parts = pkg.worksheet_parts()?;
 
-    let Some(metadata_bytes) = pkg.part("xl/metadata.xml") else {
+    let metadata_part = resolve_workbook_metadata_part_name(pkg)?;
+    let Some(metadata_bytes) = pkg.part(&metadata_part) else {
         return Ok(HashMap::new());
     };
-    let vm_to_rich_value = parse_vm_to_rich_value_index_map(metadata_bytes)?;
+    let vm_to_rich_value = parse_vm_to_rich_value_index_map(metadata_bytes, &metadata_part)?;
     if vm_to_rich_value.is_empty() {
         return Ok(HashMap::new());
     }
@@ -151,6 +152,36 @@ pub fn extract_rich_cell_images(
     Ok(out)
 }
 
+fn resolve_workbook_metadata_part_name(pkg: &XlsxPackage) -> Result<String, RichDataError> {
+    const DEFAULT: &str = "xl/metadata.xml";
+    const REL_TYPE_SHEET_METADATA: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata";
+    const REL_TYPE_METADATA: &str =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata";
+
+    let Some(rels_bytes) = pkg.part("xl/_rels/workbook.xml.rels") else {
+        return Ok(DEFAULT.to_string());
+    };
+
+    let rels = crate::openxml::parse_relationships(rels_bytes)?;
+    for rel in rels {
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|m| m.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
+
+        let type_uri = rel.type_uri.trim();
+        if type_uri == REL_TYPE_SHEET_METADATA || type_uri == REL_TYPE_METADATA {
+            return Ok(path::resolve_target("xl/workbook.xml", &rel.target));
+        }
+    }
+
+    Ok(DEFAULT.to_string())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum RichValuePartFamily {
     RichValue,
@@ -216,11 +247,14 @@ fn cmp_rich_value_parts_by_numeric_suffix(a: &str, b: &str) -> Ordering {
         .then_with(|| a.cmp(b))
 }
 
-fn parse_vm_to_rich_value_index_map(bytes: &[u8]) -> Result<HashMap<u32, u32>, RichDataError> {
+fn parse_vm_to_rich_value_index_map(
+    bytes: &[u8],
+    part_name: &str,
+) -> Result<HashMap<u32, u32>, RichDataError> {
     // Prefer the structured metadata parser (which understands metadataTypes/futureMetadata),
     // but fall back to a looser `<xlrd:rvb i="..."/>` scan for forward/backward compatibility.
     let primary = metadata::parse_value_metadata_vm_to_rich_value_index_map(bytes)
-        .map_err(|e| map_xml_dom_error("xl/metadata.xml", e))?;
+        .map_err(|e| map_xml_dom_error(part_name, e))?;
     if !primary.is_empty() {
         // Excel's `vm` appears in the wild as both 0-based and 1-based. To be tolerant, insert
         // both the original key and its 0-based equivalent.
@@ -236,16 +270,19 @@ fn parse_vm_to_rich_value_index_map(bytes: &[u8]) -> Result<HashMap<u32, u32>, R
 
     // Fallback parser: find all `<rvb i="...">` in document order and treat `<rc v="...">` as an
     // index into that list. This matches some simplified metadata.xml payloads.
-    parse_metadata_vm_mapping_fallback(bytes)
+    parse_metadata_vm_mapping_fallback(bytes, part_name)
 }
 
-fn parse_metadata_vm_mapping_fallback(bytes: &[u8]) -> Result<HashMap<u32, u32>, RichDataError> {
+fn parse_metadata_vm_mapping_fallback(
+    bytes: &[u8],
+    part_name: &str,
+) -> Result<HashMap<u32, u32>, RichDataError> {
     let xml = std::str::from_utf8(bytes).map_err(|source| RichDataError::XmlNonUtf8 {
-        part: "xl/metadata.xml".to_string(),
+        part: part_name.to_string(),
         source,
     })?;
     let doc = roxmltree::Document::parse(xml).map_err(|source| RichDataError::XmlParse {
-        part: "xl/metadata.xml".to_string(),
+        part: part_name.to_string(),
         source,
     })?;
 
