@@ -120,9 +120,12 @@ describe("SpreadsheetApp comments sheet qualification", () => {
       const app = new SpreadsheetApp(root, status, { collabMode: true });
       expect(app.getGridMode()).toBe("shared");
 
-      // Ensure Sheet2 exists so switching behaves like the real UI.
+      // Ensure a second sheet exists with a stable internal id that differs from the user-facing
+      // display name (mirrors real workbooks where ids are stable, e.g. `sheet_<uuid>`).
       const doc = app.getDocument();
-      doc.setCellValue("Sheet2", { row: 0, col: 0 }, "Seed2");
+      doc.setCellValue("Sheet1", { row: 0, col: 0 }, "Seed1");
+      doc.addSheet({ sheetId: "sheet_2", name: "My Sheet" });
+      doc.setCellValue("sheet_2", { row: 0, col: 0 }, "Seed2");
 
       // Open the comments panel and add a comment on Sheet1!A1.
       app.activateCell({ sheetId: "Sheet1", row: 0, col: 0 });
@@ -145,29 +148,30 @@ describe("SpreadsheetApp comments sheet qualification", () => {
 
       const manager = (app as any).commentManager as { listForCell: (ref: string) => Array<{ content: string }> };
       expect(manager.listForCell("Sheet1!A1").map((c) => c.content)).toEqual(["Comment on Sheet1"]);
-      expect(manager.listForCell("Sheet2!A1").map((c) => c.content)).toEqual([]);
+      expect(manager.listForCell("sheet_2!A1").map((c) => c.content)).toEqual([]);
 
       expect(cellLabel.textContent).toContain("Sheet1!A1");
 
-      // Switch to Sheet2 - panel should update to Sheet2!A1 and show no comments yet.
-      app.activateSheet("Sheet2");
-      expect(cellLabel.textContent).toContain("Sheet2!A1");
+      // Switch to sheet_2 - panel should update to 'My Sheet'!A1 (display name) and show no comments yet.
+      app.activateSheet("sheet_2");
+      expect(cellLabel.textContent).toContain("'My Sheet'!A1");
+      expect(cellLabel.textContent).not.toContain("sheet_2!A1");
       expect(panel.textContent).not.toContain("Comment on Sheet1");
       expect(panel.querySelectorAll('[data-testid="comment-thread"]').length).toBe(0);
 
-      // Add a comment on Sheet2!A1.
-      input.value = "Comment on Sheet2";
+      // Add a comment on sheet_2!A1.
+      input.value = "Comment on My Sheet";
       submit.click();
 
-      expect(manager.listForCell("Sheet2!A1").map((c) => c.content)).toEqual(["Comment on Sheet2"]);
-      expect(panel.textContent).toContain("Comment on Sheet2");
+      expect(manager.listForCell("sheet_2!A1").map((c) => c.content)).toEqual(["Comment on My Sheet"]);
+      expect(panel.textContent).toContain("Comment on My Sheet");
       expect(panel.textContent).not.toContain("Comment on Sheet1");
 
       // Switching back should restore the Sheet1 thread, without collisions.
       app.activateSheet("Sheet1");
       expect(cellLabel.textContent).toContain("Sheet1!A1");
       expect(panel.textContent).toContain("Comment on Sheet1");
-      expect(panel.textContent).not.toContain("Comment on Sheet2");
+      expect(panel.textContent).not.toContain("Comment on My Sheet");
 
       app.destroy();
       root.remove();

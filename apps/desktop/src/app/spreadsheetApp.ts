@@ -132,6 +132,13 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
   return typeof (value as { then?: unknown } | null)?.then === "function";
 }
 
+function formatSheetNameForA1(sheetName: string): string {
+  const name = String(sheetName ?? "").trim();
+  if (!name) return "";
+  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
+  return `'${name.replace(/'/g, "''")}'`;
+}
+
 function isInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value);
 }
@@ -4132,6 +4139,17 @@ export class SpreadsheetApp {
     return this.commentCellRefFromA1(sheetId, cellToA1(cell));
   }
 
+  private commentCellLabelFromA1(sheetId: string, a1: string): string {
+    if (!this.collabMode) return a1;
+    const sheetName = this.resolveSheetDisplayNameById(sheetId);
+    const prefix = formatSheetNameForA1(sheetName || sheetId);
+    return prefix ? `${prefix}!${a1}` : a1;
+  }
+
+  private commentCellLabel(cell: CellCoord, sheetId: string = this.sheetId): string {
+    return this.commentCellLabelFromA1(sheetId, cellToA1(cell));
+  }
+
   private ensureCommentsUndoScope(root?: ReturnType<typeof getCommentsRoot> | null, opts: { allowCreateBeforeSync?: boolean } = {}): void {
     if (this.commentsUndoScopeAdded) return;
     const undoService = this.collabUndoService;
@@ -4309,7 +4327,8 @@ export class SpreadsheetApp {
     if (!this.commentsPanelVisible) return;
 
     const cellRef = this.commentCellRef(this.selection.active);
-    this.commentsPanelCell.textContent = tWithVars("comments.cellLabel", { cellRef });
+    const cellLabel = this.commentCellLabel(this.selection.active);
+    this.commentsPanelCell.textContent = tWithVars("comments.cellLabel", { cellRef: cellLabel });
 
     const threads = this.commentThreadsByCellRef.get(cellRef) ?? [];
     this.commentsPanelThreads.replaceChildren();
@@ -8800,7 +8819,11 @@ export class SpreadsheetApp {
   }
 
   private resolveSheetDisplayNameById(sheetId: string): string {
-    return this.sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
+    const resolved = this.sheetNameResolver?.getSheetNameById(sheetId) ?? null;
+    if (resolved) return resolved;
+    const metaName = (this.document as any)?.getSheetMeta?.(sheetId)?.name;
+    if (typeof metaName === "string" && metaName.trim() !== "") return metaName;
+    return sheetId;
   }
 
   private clearComputedValuesByCoord(): void {
