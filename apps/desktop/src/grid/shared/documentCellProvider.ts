@@ -16,22 +16,48 @@ function isPlainObject(value: unknown): value is Record<string, any> {
 }
 
 /**
- * Convert `#AARRGGBB` strings into `rgba(r,g,b,a)` strings usable by canvas.
- * Returns `undefined` when the input is invalid.
+ * Normalize a hex color to a CSS color string.
+ *
+ * This intentionally matches the clipboard’s permissive behavior:
+ * - accepts `#RRGGBB` / `RRGGBB`
+ * - accepts Excel/OOXML ARGB `#AARRGGBB` / `AARRGGBB` (converts to `#RRGGBB` or `rgba(...)`)
  */
-function argbToCanvasCss(argb: unknown): string | undefined {
-  if (typeof argb !== "string") return undefined;
-  const match = /^#([0-9a-fA-F]{8})$/.exec(argb.trim());
-  if (!match) return undefined;
+function normalizeHexToCssColor(hex: string): string | null {
+  const normalized = hex.trim().replace(/^#/, "");
+  if (!/^[0-9a-fA-F]+$/.test(normalized)) return null;
 
-  const a = Number.parseInt(match[1].slice(0, 2), 16);
-  const r = Number.parseInt(match[1].slice(2, 4), 16);
-  const g = Number.parseInt(match[1].slice(4, 6), 16);
-  const b = Number.parseInt(match[1].slice(6, 8), 16);
-  if (![a, r, g, b].every((n) => Number.isFinite(n))) return undefined;
+  // #RRGGBB
+  if (normalized.length === 6) return `#${normalized}`;
 
-  const alpha = Math.min(1, Math.max(0, Math.round((a / 255) * 1000) / 1000));
-  return `rgba(${r},${g},${b},${alpha})`;
+  // Excel/OOXML commonly stores colors as ARGB (AARRGGBB).
+  if (normalized.length === 8) {
+    const a = Number.parseInt(normalized.slice(0, 2), 16);
+    const r = Number.parseInt(normalized.slice(2, 4), 16);
+    const g = Number.parseInt(normalized.slice(4, 6), 16);
+    const b = Number.parseInt(normalized.slice(6, 8), 16);
+    if (![a, r, g, b].every((n) => Number.isFinite(n))) return null;
+
+    if (a >= 255) {
+      return `#${normalized.slice(2)}`;
+    }
+
+    const alpha = Math.max(0, Math.min(1, a / 255));
+    const rounded = Math.round(alpha * 1000) / 1000;
+    return `rgba(${r},${g},${b},${rounded})`;
+  }
+
+  return null;
+}
+
+function normalizeCssColor(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  // Accept plain CSS colors as-is.
+  if (!/^[0-9a-fA-F#]+$/.test(trimmed)) return trimmed;
+
+  return normalizeHexToCssColor(trimmed) ?? trimmed;
 }
 
 function isRichTextValue(value: unknown): value is RichTextValue {
@@ -125,20 +151,66 @@ export class DocumentCellProvider implements CellProvider {
     const out: any = {};
 
     const fill = isPlainObject(docStyle.fill) ? docStyle.fill : null;
-    const fillColor = argbToCanvasCss(fill?.fgColor ?? fill?.background);
+    const fillColor = normalizeCssColor(
+      fill?.fgColor ??
+        fill?.background ??
+        fill?.bgColor ??
+        (docStyle as any).backgroundColor ??
+        (docStyle as any).background_color ??
+        (docStyle as any).fillColor ??
+        (docStyle as any).fill_color
+    );
     if (fillColor) out.fill = fillColor;
 
     const font = isPlainObject(docStyle.font) ? docStyle.font : null;
-    if (font?.bold === true) out.fontWeight = "700";
-    if (font?.italic === true) out.fontStyle = "italic";
-    if (font?.underline === true) out.underline = true;
-    if (font?.strike === true) out.strike = true;
+    const bold =
+      typeof font?.bold === "boolean"
+        ? font.bold
+        : typeof (docStyle as any).bold === "boolean"
+          ? (docStyle as any).bold
+          : undefined;
+    if (bold === true) out.fontWeight = "700";
+
+    const italic =
+      typeof font?.italic === "boolean"
+        ? font.italic
+        : typeof (docStyle as any).italic === "boolean"
+          ? (docStyle as any).italic
+          : undefined;
+    if (italic === true) out.fontStyle = "italic";
+
+    const underlineRaw =
+      typeof font?.underline === "boolean" || typeof font?.underline === "string"
+        ? font.underline
+        : typeof (docStyle as any).underline === "boolean" || typeof (docStyle as any).underline === "string"
+          ? (docStyle as any).underline
+          : undefined;
+    if (underlineRaw === true) out.underline = true;
+    if (typeof underlineRaw === "string" && underlineRaw !== "none") out.underline = true;
+
+    const strike =
+      typeof font?.strike === "boolean"
+        ? font.strike
+        : typeof (docStyle as any).strike === "boolean"
+          ? (docStyle as any).strike
+          : undefined;
+    if (strike === true) out.strike = true;
+
     if (typeof font?.name === "string" && font.name.trim() !== "") out.fontFamily = font.name;
     if (typeof font?.size === "number" && Number.isFinite(font.size)) {
       out.fontSize = (font.size * 96) / 72;
     }
-    const fontColor = argbToCanvasCss(font?.color);
+    const fontColor = normalizeCssColor(
+      font?.color ??
+        (docStyle as any).textColor ??
+        (docStyle as any).text_color ??
+        (docStyle as any).fontColor ??
+        (docStyle as any).font_color
+    );
     if (fontColor) out.color = fontColor;
+
+    const rawNumberFormat = (docStyle as any).numberFormat ?? (docStyle as any).number_format;
+    if (typeof rawNumberFormat === "string" && rawNumberFormat.trim() !== "") out.numberFormat = rawNumberFormat;
 
     const alignment = isPlainObject(docStyle.alignment) ? docStyle.alignment : null;
     const horizontal = alignment?.horizontal;
@@ -197,7 +269,7 @@ export class DocumentCellProvider implements CellProvider {
         if (!isPlainObject(edge)) return undefined;
         const mapped = mapExcelBorderStyle(edge.style);
         if (!mapped) return undefined;
-        const color = argbToCanvasCss(edge.color) ?? defaultBorderColor;
+        const color = normalizeCssColor(edge.color) ?? defaultBorderColor;
         return { width: mapped.width, style: mapped.style, color };
       };
 
