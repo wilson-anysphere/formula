@@ -1256,6 +1256,9 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 // the MS-OVBA v3 pseudocode.
                 out.extend_from_slice(&(len as u32).to_le_bytes());
                 out.extend_from_slice(data);
+                // `REFERENCEORIGINAL` embeds an immediate `REFERENCECONTROL` record; MS-OVBA v3
+                // does not incorporate that embedded control in the transcript.
+                skip_referenceoriginal_embedded_control(&dir_decompressed, &mut offset)?;
             }
 
             // ---- ProjectModules / ProjectCookie / dir Terminator ----
@@ -1372,6 +1375,56 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
     }
 
     Ok(out)
+}
+
+fn skip_referenceoriginal_embedded_control(
+    dir_decompressed: &[u8],
+    offset: &mut usize,
+) -> Result<(), ParseError> {
+    // Embedded `REFERENCECONTROL` immediately follows the `REFERENCEORIGINAL` libid bytes.
+    // If the next record isn't 0x002F, this isn't a spec-compliant embedded control (or we're at
+    // end-of-buffer).
+    if peek_next_record_id(dir_decompressed, *offset) != Some(0x002F) {
+        return Ok(());
+    }
+
+    // Skip the embedded REFERENCECONTROL (0x002F) twiddled part.
+    skip_dir_record(dir_decompressed, offset)?;
+
+    // Optional NameRecordExtended (0x0016) + NameUnicode (0x003E).
+    if peek_next_record_id(dir_decompressed, *offset) == Some(0x0016) {
+        skip_dir_record(dir_decompressed, offset)?;
+        if peek_next_record_id(dir_decompressed, *offset) == Some(0x003E) {
+            skip_dir_record(dir_decompressed, offset)?;
+        }
+    }
+
+    // Extended control tail (Reserved3=0x0030 marker + size + payload).
+    if peek_next_record_id(dir_decompressed, *offset) == Some(0x0030) {
+        skip_dir_record(dir_decompressed, offset)?;
+    }
+
+    Ok(())
+}
+
+fn skip_dir_record(dir_decompressed: &[u8], offset: &mut usize) -> Result<(), ParseError> {
+    if *offset + 6 > dir_decompressed.len() {
+        return Err(DirParseError::Truncated.into());
+    }
+
+    let id = u16::from_le_bytes([dir_decompressed[*offset], dir_decompressed[*offset + 1]]);
+    let len = u32::from_le_bytes([
+        dir_decompressed[*offset + 2],
+        dir_decompressed[*offset + 3],
+        dir_decompressed[*offset + 4],
+        dir_decompressed[*offset + 5],
+    ]) as usize;
+    *offset += 6;
+    if *offset + len > dir_decompressed.len() {
+        return Err(DirParseError::BadRecordLength { id, len }.into());
+    }
+    *offset += len;
+    Ok(())
 }
 
 fn append_v3_module(
