@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InMemoryAwarenessHub, PresenceManager } from "../../collab/presence/index.js";
+import { DocumentController } from "../../document/documentController.js";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 function createInMemoryLocalStorage(): Storage {
@@ -193,6 +194,40 @@ describe("SpreadsheetApp collab presence", () => {
     expect(presence.localPresence.activeSheet).toBe("Sheet2");
     expect(presence.localPresence.cursor).toEqual({ row: 1, col: 1 });
     expect(presence.localPresence.selections).toEqual([{ startRow: 1, startCol: 1, endRow: 2, endCol: 3 }]);
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("syncs presence when restoreDocumentState changes the active sheet", async () => {
+    const hub = new InMemoryAwarenessHub();
+    const awareness = hub.createAwareness(1);
+    const presence = new PresenceManager(awareness, {
+      user: { id: "u1", name: "User 1", color: "#ff0000" },
+      activeSheet: "Sheet1",
+      throttleMs: 0,
+    });
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    (app as any).collabSession = { presence };
+
+    const snapshotDoc = new DocumentController();
+    snapshotDoc.setCellValue("Sheet2", { row: 0, col: 0 }, "X");
+    const snapshot = snapshotDoc.encodeState();
+
+    await app.restoreDocumentState(snapshot);
+
+    expect((app as any).sheetId).toBe("Sheet2");
+    expect(presence.localPresence.activeSheet).toBe("Sheet2");
+    expect(presence.localPresence.cursor).toEqual({ row: 0, col: 0 });
+    expect(presence.localPresence.selections).toEqual([{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }]);
 
     app.destroy();
     root.remove();
