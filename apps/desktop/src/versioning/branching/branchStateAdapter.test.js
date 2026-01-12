@@ -22,6 +22,8 @@ import {
 function attachSheetMetadataShim(doc) {
   /** @type {Map<string, any>} */
   const metaById = new Map();
+  /** @type {string[] | null} */
+  let lastSheetOrder = null;
 
   // Read path used by the adapter.
   doc.getSheetMeta = (sheetId) => metaById.get(sheetId) ?? null;
@@ -43,6 +45,7 @@ function attachSheetMetadataShim(doc) {
     // Capture names/order from the snapshot passed by the adapter.
     const parsed = JSON.parse(decode(snapshot));
     const sheets = Array.isArray(parsed?.sheets) ? parsed.sheets : [];
+    lastSheetOrder = Array.isArray(parsed?.sheetOrder) ? parsed.sheetOrder.map((id) => String(id)) : null;
     metaById.clear();
     for (const sheet of sheets) {
       const id = sheet?.id;
@@ -60,7 +63,7 @@ function attachSheetMetadataShim(doc) {
     originalApplyState(snapshot);
   };
 
-  return { metaById };
+  return { metaById, getLastSheetOrder: () => lastSheetOrder };
 }
 
 test("documentControllerToBranchState/applyBranchStateToDocumentController: preserves sheet order", () => {
@@ -75,7 +78,9 @@ test("documentControllerToBranchState/applyBranchStateToDocumentController: pres
   assert.deepEqual(state.sheets.order, ["SheetB", "SheetA", "SheetC"]);
 
   const restored = new DocumentController();
+  const { getLastSheetOrder } = attachSheetMetadataShim(restored);
   applyBranchStateToDocumentController(restored, state);
+  assert.deepEqual(getLastSheetOrder(), ["SheetB", "SheetA", "SheetC"]);
   assert.deepEqual(restored.getSheetIds(), ["SheetB", "SheetA", "SheetC"]);
 
   const roundTrip = documentControllerToBranchState(restored);

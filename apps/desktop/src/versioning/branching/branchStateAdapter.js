@@ -435,7 +435,10 @@ export function applyBranchStateToDocumentController(doc, state) {
     return outSheet;
   });
 
-  const snapshot = { schemaVersion: 1, sheets };
+  // Match DocumentController's snapshot shape: include an explicit `sheetOrder`
+  // array so ordering survives even if consumers manipulate/sort the `sheets`
+  // list.
+  const snapshot = { schemaVersion: 1, sheetOrder: sheetIds, sheets };
 
   const encoded =
     typeof TextEncoder !== "undefined"
