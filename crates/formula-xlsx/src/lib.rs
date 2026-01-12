@@ -573,7 +573,9 @@ impl XlsxDocument {
     ///   `xl/metadata.xml` part.
     /// - `Ok(Some(index))` if the cell's `vm` can be resolved to an `xl/richData/richValue.xml`
     ///   record index.
-    /// - `Err(_)` only if `xl/metadata.xml` exists but is not valid UTF-8 or valid XML.
+    ///
+    /// Note: this is currently best-effort and will not return an error (the `Result` is for API
+    /// consistency / future extensibility).
     pub fn rich_value_index_for_cell(
         &self,
         sheet_id: WorksheetId,
@@ -656,7 +658,13 @@ impl XlsxDocument {
                 return Ok(None);
             }
 
-            let target_part = crate::path::resolve_target(&rich_value_rel_part, &rel.target);
+            // Relationship targets may include URI fragments (`../media/image.png#foo`); those are
+            // not part names.
+            let target = rel.target.split_once('#').map(|(t, _)| t).unwrap_or(&rel.target);
+            if target.is_empty() {
+                return Ok(None);
+            }
+            let target_part = crate::path::resolve_target(&rich_value_rel_part, target);
             if !self.parts.contains_key(&target_part) {
                 return Ok(None);
             }

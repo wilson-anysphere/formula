@@ -62,7 +62,7 @@ fn build_rich_cell_image_fixture() -> Vec<u8> {
 
     let rich_value_rel_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png#fragment"/>
 </Relationships>
 "#;
 
@@ -115,4 +115,3 @@ fn resolves_image_target_for_rich_value_cell() -> Result<(), Box<dyn std::error:
 
     Ok(())
 }
-
