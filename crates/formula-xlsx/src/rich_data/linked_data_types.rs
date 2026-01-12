@@ -78,8 +78,16 @@ pub fn extract_linked_data_types(
         let cells = super::parse_worksheet_vm_cells(sheet_bytes)?;
 
         // Keep the metadata mapping in its canonical 1-based form and infer whether this worksheet
-        // uses 0-based `vm` indices by checking for any `vm="0"` cells.
-        let vm_offset: u32 = if cells.iter().any(|(_, vm)| *vm == 0) { 1 } else { 0 };
+        // uses 0-based `vm` indices by checking for any `vm="0"` cells. Some workbooks use a
+        // fallback metadata mapping that is already 0-based; in that case avoid shifting.
+        let vm_offset: u32 = if !vm_to_rich_value.is_empty()
+            && !vm_to_rich_value.contains_key(&0)
+            && cells.iter().any(|(_, vm)| *vm == 0)
+        {
+            1
+        } else {
+            0
+        };
 
         for (cell, vm) in cells {
             let vm = vm.saturating_add(vm_offset);
