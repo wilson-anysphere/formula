@@ -320,6 +320,64 @@ describe("SpreadsheetApp selection summary (status bar)", () => {
     root.remove();
   });
 
+  it("uses coordinate scanning for small selections on dense sheets (and dedupes overlap) without calling getCell", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    clearSeededCells(app);
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+
+    // Populate a bunch of cells outside the selection to make the sheet "dense" so the
+    // implementation prefers scanning selection coordinates rather than iterating every stored cell.
+    for (let row = 0; row < 25; row += 1) {
+      doc.setCellValue(sheetId, { row, col: 10 }, row);
+    }
+
+    doc.setCellValue(sheetId, "A1", 1);
+    doc.setCellValue(sheetId, "B2", 2);
+    doc.setCellValue(sheetId, "C3", 3);
+
+    // A1:B2 overlaps B2:C3 at B2. Even in coordinate-scan mode, B2 should not be double-counted.
+    (app as any).selection = buildSelection(
+      {
+        ranges: [
+          { startRow: 0, endRow: 1, startCol: 0, endCol: 1 }, // A1:B2
+          { startRow: 1, endRow: 2, startCol: 1, endCol: 2 }, // B2:C3
+        ],
+        active: { row: 0, col: 0 },
+        anchor: { row: 0, col: 0 },
+        activeRangeIndex: 0,
+      },
+      (app as any).limits,
+    );
+
+    const getCellSpy = vi.spyOn(doc, "getCell");
+    const sparseSpy = vi.spyOn(doc as any, "forEachCellInSheet");
+
+    const summary = app.getSelectionSummary();
+    expect(summary).toEqual({
+      sum: 6,
+      average: 2,
+      count: 3,
+      numericCount: 3,
+      countNonEmpty: 3,
+    });
+
+    // Coordinate scanning should read from the sheet model map directly (no `getCell` clones),
+    // and should not fall back to the sparse iterator for this small selection.
+    expect(getCellSpy).not.toHaveBeenCalled();
+    expect(sparseSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
   it("includes computed values for formula cells", () => {
     const root = createRoot();
     const status = {
