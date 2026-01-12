@@ -18,6 +18,7 @@ mod financial_depreciation_ext;
 mod financial_bonds_invariants;
 mod financial_odd_coupon;
 mod financial_french_depreciation;
+mod financial_discount_securities;
 mod financial_time_value;
 mod hof;
 mod harness;
