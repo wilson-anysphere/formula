@@ -320,9 +320,45 @@ export class DocumentCellProvider implements CellProvider {
     // to the exact type shape.
     const out: any = {};
 
-    const fill = isPlainObject(docStyle.fill) ? docStyle.fill : null;
-    const fillColor = normalizeCssColor(
-      fill?.fgColor ??
+    // Fill colors appear in several legacy and modern shapes:
+    // - Modern UI: `{ fill: { pattern: "solid", fgColor: ... } }`
+    // - formula-model/XLSX import: `{ fill: { fg_color: ... } }`
+    // - legacy/clipboard-ish snapshots: `{ backgroundColor: ... }`
+    //
+    // When the UI clears fill by setting `fill: null`, treat it as authoritative and do not
+    // fall back to legacy `backgroundColor` keys.
+    const fillRaw = hasOwn(docStyle, "fill") ? (docStyle as any).fill : undefined;
+    const fill = isPlainObject(fillRaw) ? fillRaw : null;
+    let fillColorInput: unknown = undefined;
+    let fillOverride = false;
+
+    if (hasOwn(docStyle, "fill")) {
+      if (fillRaw == null) {
+        fillOverride = true;
+        fillColorInput = null;
+      } else if (fill) {
+        if (hasOwn(fill, "fgColor")) {
+          fillOverride = true;
+          fillColorInput = (fill as any).fgColor;
+        } else if (hasOwn(fill, "fg_color")) {
+          fillOverride = true;
+          fillColorInput = (fill as any).fg_color;
+        } else if (hasOwn(fill, "background")) {
+          fillOverride = true;
+          fillColorInput = (fill as any).background;
+        } else if (hasOwn(fill, "bgColor")) {
+          fillOverride = true;
+          fillColorInput = (fill as any).bgColor;
+        } else if (hasOwn(fill, "bg_color")) {
+          fillOverride = true;
+          fillColorInput = (fill as any).bg_color;
+        }
+      }
+    }
+
+    if (!fillOverride) {
+      fillColorInput =
+        fill?.fgColor ??
         fill?.fg_color ??
         fill?.background ??
         fill?.bgColor ??
@@ -330,8 +366,10 @@ export class DocumentCellProvider implements CellProvider {
         (docStyle as any).backgroundColor ??
         (docStyle as any).background_color ??
         (docStyle as any).fillColor ??
-        (docStyle as any).fill_color
-    );
+        (docStyle as any).fill_color;
+    }
+
+    const fillColor = normalizeCssColor(fillColorInput);
     if (fillColor) out.fill = fillColor;
 
     const font = isPlainObject(docStyle.font) ? docStyle.font : null;

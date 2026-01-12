@@ -136,6 +136,35 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect((cell as any).style?.color).toBe("#ff0000"); // Excel indexed color 2
   });
 
+  it("allows modern fill:null patches to clear legacy flat backgroundColor fills", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", "No fill");
+    // Legacy/clipboard-ish payloads store background colors as flat keys.
+    doc.setRangeFormat(sheetId, "A1", { backgroundColor: "#FFFFFF00", font: { bold: true } });
+    // Modern UI "No fill" writes `fill: null`.
+    doc.setRangeFormat(sheetId, "A1", { fill: null });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell).not.toBeNull();
+    // Bold is preserved...
+    expect((cell as any).style?.fontWeight).toBe("700");
+    // ...but fill should be cleared.
+    expect((cell as any).style?.fill).toBeUndefined();
+  });
+
   it("prefers camelCase overrides when both snake_case + camelCase fields exist (imported style then user edits)", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";
