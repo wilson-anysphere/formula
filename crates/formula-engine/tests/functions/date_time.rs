@@ -77,6 +77,20 @@ fn days360_matches_excel_examples() {
     assert_eq!(date_time::days360(start, end, false, system).unwrap(), 30);
     assert_eq!(date_time::days360(start, end, true, system).unwrap(), 31);
 
+    // In leap years, Feb 28 is *not* month-end, so US/NASD month-end rollover does not apply to
+    // the start date.
+    let start = ymd_to_serial(ExcelDate::new(2020, 2, 28), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 3, 31), system).unwrap();
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 33);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 32);
+
+    // US/NASD-only behavior: end-of-month can roll forward to the 1st of next month when the
+    // start day is < 30.
+    let start = ymd_to_serial(ExcelDate::new(2020, 2, 28), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 3);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 1);
+
     let start = ymd_to_serial(ExcelDate::new(2020, 1, 31), system).unwrap();
     let end = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
     assert_eq!(date_time::days360(start, end, false, system).unwrap(), 30);
@@ -160,6 +174,16 @@ fn yearfrac_respects_basis_conventions() {
     let aa2 = date_time::yearfrac(a, a2, 1, system).unwrap();
     assert!((aa2 - 2.0).abs() < 1e-12);
     assert!((aa2 + date_time::yearfrac(a2, a, 1, system).unwrap()).abs() < 1e-12);
+
+    let a3 = ymd_to_serial(ExcelDate::new(2023, 2, 28), system).unwrap();
+    let aa3 = date_time::yearfrac(a, a3, 1, system).unwrap();
+    assert!((aa3 - 3.0).abs() < 1e-12);
+    assert!((aa3 + date_time::yearfrac(a3, a, 1, system).unwrap()).abs() < 1e-12);
+
+    let a4 = ymd_to_serial(ExcelDate::new(2024, 2, 29), system).unwrap();
+    let aa4 = date_time::yearfrac(a, a4, 1, system).unwrap();
+    assert!((aa4 - 4.0).abs() < 1e-12);
+    assert!((aa4 + date_time::yearfrac(a4, a, 1, system).unwrap()).abs() < 1e-12);
 
     assert_eq!(date_time::yearfrac(start, end, 9, system).unwrap_err(), ExcelError::Num);
 }
