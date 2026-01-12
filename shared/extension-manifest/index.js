@@ -270,13 +270,8 @@ function validateActivationEvents(activationEvents, contributes) {
 
     if (ev.startsWith("onView:")) {
       const id = ev.slice("onView:".length);
-      // Panels/views can be provided by the extension itself *or* by the host (built-in views) /
-      // other extensions. Unlike commands/customFunctions/dataConnectors (which must be declared
-      // by the extension), we allow `onView:*` to reference any view id.
-      //
-      // The runtime is responsible for deciding when to emit `viewActivated` for a given view id.
-      if (id.trim().length === 0) {
-        throw new ManifestError(`activationEvents references empty view/panel id`);
+      if (!knownPanels.has(id)) {
+        throw new ManifestError(`activationEvents references unknown view/panel: ${id}`);
       }
       continue;
     }
