@@ -5532,6 +5532,11 @@ mountRibbon(ribbonRoot, {
         }
         return;
 
+      case "view.macros.recordMacro":
+      case "view.macros.recordMacro.stop":
+        openRibbonPanel(PanelIds.MACROS);
+        return;
+
       case "developer.code.macros":
       case "developer.code.macros.run":
       case "developer.code.macros.edit":
@@ -5539,6 +5544,13 @@ mountRibbon(ribbonRoot, {
         if (commandId.endsWith(".edit")) {
           openRibbonPanel(PanelIds.SCRIPT_EDITOR);
         }
+        return;
+
+      case "developer.code.recordMacro":
+      case "developer.code.recordMacro.stop":
+      case "developer.code.macroSecurity":
+      case "developer.code.macroSecurity.trustCenter":
+        openRibbonPanel(PanelIds.MACROS);
         return;
 
       case "developer.code.visualBasic":
