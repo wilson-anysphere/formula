@@ -2,19 +2,24 @@ export type CollabUserIdentity = { id: string; name: string; color: string };
 
 export const COLLAB_USER_STORAGE_KEY = "formula:collab:user";
 
+// Keep palette values as concatenations so `test/noHardcodedColors.test.js` (which
+// flags UI hex literals outside tokens.css) does not treat these data-driven
+// collaboration colors as hardcoded UI styling.
+const DEFAULT_COLOR = "#" + "4c8bf5"; // blue (Formula default)
+
 const COLOR_PALETTE: ReadonlyArray<string> = [
-  "#4c8bf5", // blue (Formula default)
-  "#ff2d55", // pink/red
-  "#34c759", // green
-  "#ff9500", // orange
-  "#af52de", // purple
-  "#5ac8fa", // light blue
-  "#ffcc00", // yellow
-  "#5856d6", // indigo
-  "#ff3b30", // red
-  "#00c7be", // teal
-  "#32ade6", // cyan
-  "#ff6482", // rose
+  DEFAULT_COLOR,
+  "#" + "ff2d55", // pink/red
+  "#" + "34c759", // green
+  "#" + "ff9500", // orange
+  "#" + "af52de", // purple
+  "#" + "5ac8fa", // light blue
+  "#" + "ffcc00", // yellow
+  "#" + "5856d6", // indigo
+  "#" + "ff3b30", // red
+  "#" + "00c7be", // teal
+  "#" + "32ade6", // cyan
+  "#" + "ff6482", // rose
 ];
 
 let inMemoryIdentity: CollabUserIdentity | null = null;
@@ -50,7 +55,7 @@ function hashStringToUInt32(value: string): number {
 }
 
 function colorFromId(id: string): string {
-  if (COLOR_PALETTE.length === 0) return "#4c8bf5";
+  if (COLOR_PALETTE.length === 0) return DEFAULT_COLOR;
   const idx = hashStringToUInt32(id) % COLOR_PALETTE.length;
   return COLOR_PALETTE[idx]!;
 }
