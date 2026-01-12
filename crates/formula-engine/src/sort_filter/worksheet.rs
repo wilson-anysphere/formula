@@ -268,14 +268,21 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                 .get("displayValue")
                 .or_else(|| value.get("display_value"))
                 .or_else(|| value.get("display"))
-                .and_then(|v| v.as_str())?
-                .to_string();
-            Some(CellValue::Text(display_value))
+                .and_then(|v| v.as_str())?;
+            Some(CellValue::Text(display_value.to_string()))
         }
         "record" => {
             let record = serialized.get("value")?;
 
             // Current `formula-model` record values are a simple display string.
+            if let Some(display) = record.as_str() {
+                if !display.is_empty() {
+                    return Some(CellValue::Text(display.to_string()));
+                }
+                return Some(CellValue::Blank);
+            }
+
+            // Prefer a precomputed display string when present.
             if let Some(display) = record
                 .get("displayValue")
                 .or_else(|| record.get("display_value"))
