@@ -178,7 +178,7 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
             if !parsed.rules.is_empty() {
                 ws.conditional_formatting_rules = parsed.rules;
                 let dxfs = conditional_formatting_dxfs
-                    .get_or_insert_with(|| parse_conditional_formatting_dxfs(styles_bytes.as_deref()));
+                    .get_or_insert_with(|| styles_part.conditional_formatting_dxfs());
                 ws.conditional_formatting_dxfs = dxfs.clone();
             }
         }
@@ -438,9 +438,8 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
             .unwrap_or_default();
         if !parsed_cf.rules.is_empty() {
             ws.conditional_formatting_rules = parsed_cf.rules;
-            let dxfs = conditional_formatting_dxfs.get_or_insert_with(|| {
-                parse_conditional_formatting_dxfs(parts.get(&styles_part_name).map(|b| b.as_slice()))
-            });
+            let dxfs = conditional_formatting_dxfs
+                .get_or_insert_with(|| styles_part.conditional_formatting_dxfs());
             ws.conditional_formatting_dxfs = dxfs.clone();
         }
 
@@ -1418,16 +1417,6 @@ fn parse_table_part_ids(xml: &[u8]) -> Result<Vec<String>, ReadError> {
     }
 
     Ok(out)
-}
-
-fn parse_conditional_formatting_dxfs(
-    styles_bytes: Option<&[u8]>,
-) -> Vec<formula_model::CfStyleOverride> {
-    styles_bytes
-        .and_then(|bytes| std::str::from_utf8(bytes).ok())
-        .and_then(|xml| crate::styles::Styles::parse(xml).ok())
-        .map(|s| s.dxfs)
-        .unwrap_or_default()
 }
 
 fn parse_inline_is_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<String, ReadError> {

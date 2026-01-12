@@ -11,8 +11,8 @@
 use std::collections::HashMap;
 
 use formula_model::{
-    Alignment, Border, BorderEdge, BorderStyle, Color, Fill, FillPattern, Font,
-    HorizontalAlignment, Protection, Style, StyleTable, VerticalAlignment,
+    parse_argb_hex_color, Alignment, Border, BorderEdge, BorderStyle, CfStyleOverride, Color, Fill,
+    FillPattern, Font, HorizontalAlignment, Protection, Style, StyleTable, VerticalAlignment,
 };
 
 use crate::xml::{QName, XmlDomError, XmlElement, XmlNode};
@@ -214,6 +214,20 @@ impl StylesPart {
         self.root.to_xml_string().into_bytes()
     }
 
+    /// Parse differential formats (`<dxfs>`) for conditional formatting rules.
+    ///
+    /// This is a lightweight parser over the already-parsed `styles.xml` DOM held by this
+    /// [`StylesPart`]. It avoids re-parsing `styles.xml` when importing conditional formatting.
+    pub fn conditional_formatting_dxfs(&self) -> Vec<CfStyleOverride> {
+        let Some(dxfs) = self.root.child("dxfs") else {
+            return Vec::new();
+        };
+
+        dxfs.children_by_local("dxf")
+            .map(parse_conditional_formatting_dxf)
+            .collect()
+    }
+
     /// Ensure every `style_id` in `style_ids` has a corresponding `xf` index.
     ///
     /// The returned map can be used to set worksheet `c/@s` attributes.
@@ -335,6 +349,36 @@ impl StylesPart {
         num_fmts.set_attr("count", (count + 1).to_string());
         id
     }
+}
+
+fn parse_conditional_formatting_dxf(dxf: &XmlElement) -> CfStyleOverride {
+    let mut out = CfStyleOverride::default();
+
+    if let Some(font) = dxf.child("font") {
+        if font.children_by_local("b").next().is_some() {
+            out.bold = Some(true);
+        }
+        if font.children_by_local("i").next().is_some() {
+            out.italic = Some(true);
+        }
+        if let Some(color) = font.child("color") {
+            if let Some(rgb) = color.attr("rgb") {
+                out.font_color = parse_argb_hex_color(rgb);
+            }
+        }
+    }
+
+    if let Some(fill) = dxf.child("fill") {
+        if let Some(pattern_fill) = fill.child("patternFill") {
+            if let Some(fg) = pattern_fill.child("fgColor") {
+                if let Some(rgb) = fg.attr("rgb") {
+                    out.fill = parse_argb_hex_color(rgb);
+                }
+            }
+        }
+    }
+
+    out
 }
 
 fn parse_num_fmts(root: &XmlElement) -> HashMap<u16, String> {
