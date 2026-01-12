@@ -1201,6 +1201,20 @@ In Formula Desktop, the effective base URL comes from `getMarketplaceBaseUrl()`
 - override via `VITE_FORMULA_MARKETPLACE_BASE_URL`
 - default: `"/api"` in dev/e2e, `https://marketplace.formula.app/api` in production builds
 
+Quick override (DevTools):
+
+```js
+localStorage.setItem("formula:marketplace:baseUrl", "https://marketplace.formula.app/api");
+location.reload();
+```
+
+To reset back to the default behavior:
+
+```js
+localStorage.removeItem("formula:marketplace:baseUrl");
+location.reload();
+```
+
 If you’re wiring up a custom host, you can pass a fully-qualified HTTPS base URL directly:
 
 ```ts

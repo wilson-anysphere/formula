@@ -140,6 +140,16 @@ localStorage.removeItem("formula.extensionHost.permissions");
   - **Application → Local Storage →** `formula.extensionHost.*` (permissions + extension storage)
   - **Sources → Workers** to debug the extension worker runtime (`extension-worker.mjs`)
 
+### Marketplace base URL (Desktop)
+
+The marketplace base URL is chosen by `getMarketplaceBaseUrl()` (`apps/desktop/src/panels/marketplace/getMarketplaceBaseUrl.ts`).
+In dev, you can override it via `localStorage["formula:marketplace:baseUrl"]` and reload.
+
+```js
+localStorage.setItem("formula:marketplace:baseUrl", "https://marketplace.formula.app/api");
+location.reload();
+```
+
 ### Legacy Node-only installer/runtime (deprecated)
 
 The repo still contains Node-only marketplace/host modules used by Node integration tests and earlier experiments:
