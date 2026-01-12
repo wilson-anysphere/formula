@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 type DesktopReadyOptions = {
   /**
@@ -258,4 +258,33 @@ export async function openExtensionsPanel(page: Page): Promise<void> {
     const text = panel.textContent ?? "";
     return !text.includes("Loading extensions");
   }, undefined, { timeout: 30_000 });
+}
+
+/**
+ * Open the sheet tab context menu for a given sheet id.
+ *
+ * We dispatch a deterministic `contextmenu` event instead of relying on Playwright's
+ * right-click helpers, which can be flaky in the desktop shell (and in some WebView
+ * environments where native context menu handling differs).
+ */
+export async function openSheetTabContextMenu(page: Page, sheetId: string): Promise<Locator> {
+  await page.evaluate((id) => {
+    const tab = document.querySelector(`[data-testid="sheet-tab-${id}"]`) as HTMLElement | null;
+    if (!tab) throw new Error(`Missing sheet-tab-${id}`);
+    const rect = tab.getBoundingClientRect();
+    tab.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        // Explicitly mark this as a right-click.
+        button: 2,
+        clientX: rect.left + 10,
+        clientY: rect.top + 10,
+      }),
+    );
+  }, sheetId);
+
+  const menu = page.getByTestId("sheet-tab-context-menu");
+  await menu.waitFor({ state: "visible", timeout: 10_000 });
+  return menu;
 }

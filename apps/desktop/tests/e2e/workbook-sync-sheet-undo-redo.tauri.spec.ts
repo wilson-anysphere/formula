@@ -1,26 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { gotoDesktop } from "./helpers";
-
-async function openSheetTabContextMenu(page: Page, sheetId: string) {
-  // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
-  await page.evaluate((id) => {
-    const tab = document.querySelector(`[data-testid="sheet-tab-${id}"]`) as HTMLElement | null;
-    if (!tab) throw new Error(`Missing sheet-tab-${id}`);
-    const rect = tab.getBoundingClientRect();
-    tab.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        cancelable: true,
-        clientX: rect.left + 10,
-        clientY: rect.top + 10,
-      }),
-    );
-  }, sheetId);
-  const menu = page.getByTestId("sheet-tab-context-menu");
-  await expect(menu).toBeVisible();
-  return menu;
-}
+import { gotoDesktop, openSheetTabContextMenu } from "./helpers";
 
 function installTauriStubForTests() {
   const listeners: Record<string, any> = {};
