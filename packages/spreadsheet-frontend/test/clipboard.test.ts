@@ -18,6 +18,11 @@ describe("clipboard helpers", () => {
     ]);
   });
 
+  it("caps TSV parsing when maxCells is exceeded", () => {
+    const tsv = ["a", "b", "c", "d", "e", "f"].join("\t");
+    expect(parseTsvToGrid(tsv, { maxCells: 5 })).toBe(null);
+  });
+
   it("serializes a grid to an HTML table fragment", () => {
     const html = serializeGridToHtmlTable([
       ["1", "2"],
@@ -49,4 +54,3 @@ describe("clipboard helpers", () => {
     expect(parseHtmlTableToGrid(html)).toEqual(original);
   });
 });
-
