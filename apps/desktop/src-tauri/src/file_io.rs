@@ -1473,42 +1473,6 @@ fn workbook_override_matches_content_type(content_types_xml: &str, desired: &str
     content_types_xml[start..=end].contains(desired)
 }
 
-fn patch_workbook_override_content_type(
-    content_types_xml: &str,
-    desired: &str,
-) -> Option<String> {
-    let idx = content_types_xml.find("/xl/workbook.xml")?;
-    let start = content_types_xml[..idx].rfind('<')?;
-    let end = idx + content_types_xml[idx..].find('>')?;
-    let element = &content_types_xml[start..=end];
-    if element.contains(desired) {
-        return None;
-    }
-
-    let (attr_key, quote) = if element.contains("ContentType=\"") {
-        ("ContentType=\"", '"')
-    } else if element.contains("ContentType='") {
-        ("ContentType='", '\'')
-    } else {
-        return None;
-    };
-
-    let key_pos_in_element = element.find(attr_key)?;
-    let attr_start_in_element = key_pos_in_element + attr_key.len();
-    let attr_end_in_element = element[attr_start_in_element..]
-        .find(quote)
-        .map(|off| attr_start_in_element + off)?;
-
-    let attr_start = start + attr_start_in_element;
-    let attr_end = start + attr_end_in_element;
-
-    let mut out = String::with_capacity(content_types_xml.len() + desired.len());
-    out.push_str(&content_types_xml[..attr_start]);
-    out.push_str(desired);
-    out.push_str(&content_types_xml[attr_end..]);
-    Some(out)
-}
-
 pub(crate) fn patch_workbook_main_content_type_in_package(
     bytes: &[u8],
     desired: &str,
@@ -1521,16 +1485,20 @@ pub(crate) fn patch_workbook_main_content_type_in_package(
     .flatten() else {
         return Ok(None);
     };
-    let content_types_xml = std::str::from_utf8(&content_types_bytes)
-        .context("parse [Content_Types].xml as utf8")?;
-    let Some(patched_xml) = patch_workbook_override_content_type(content_types_xml, desired) else {
+
+    let Some(patched_xml) = formula_xlsx::rewrite_content_types_workbook_content_type(
+        &content_types_bytes,
+        desired,
+    )
+    .context("rewrite workbook content type in [Content_Types].xml")?
+    else {
         return Ok(None);
     };
 
     let mut part_overrides: HashMap<String, PartOverride> = HashMap::new();
     part_overrides.insert(
         "[Content_Types].xml".to_string(),
-        PartOverride::Replace(patched_xml.into_bytes()),
+        PartOverride::Replace(patched_xml),
     );
 
     let mut cursor = Cursor::new(Vec::new());
