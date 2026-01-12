@@ -476,6 +476,8 @@ Some workbooks use `vm="0"` for the first entry (0-based). Example from
 Current Formula behavior:
 
 * `vm` is treated as **ambiguous** (0-based or 1-based), because both appear in the wild.
+  - Example: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` uses `vm="0"` for the first record.
+  - Example: `fixtures/xlsx/basic/image-in-cell.xlsx` uses `vm="1"` / `vm="2"`.
   Implementations should attempt to resolve both (e.g. try `vm` and `vm-1`), and preserve the original
   values when round-tripping.
 * Missing `vm` means “no value metadata”.
@@ -767,11 +769,6 @@ The richValue relationships are Microsoft-specific. Observed in this repo:
 * `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel` → `xl/richData/richValueRel.xml`
   * Observed in `fixtures/xlsx/basic/image-in-cell.xlsx`
 
-Likely (not observed in fixtures here, but expected for richer payloads):
-
-* `http://schemas.microsoft.com/office/2017/06/relationships/richValueTypes` → `xl/richData/richValueTypes.xml`
-* `http://schemas.microsoft.com/office/2017/06/relationships/richValueStructure` → `xl/richData/richValueStructure.xml`
-
 Some workbooks may instead relate the richData parts from `xl/metadata.xml` via `xl/_rels/metadata.xml.rels`.
 For parsing and round-trip safety, treat both relationship layouts as valid.
 
@@ -825,18 +822,24 @@ These values are copied from fixtures/tests in this repo and are safe to treat a
 </Relationships>
 ```
 
-`xl/_rels/metadata.xml.rels` (optional; metadata → richData tables):
+`xl/_rels/metadata.xml.rels` (optional; metadata → richData tables; observed in
+`fixtures/xlsx/rich-data/richdata-minimal.xlsx`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rIdRichValue"
-                Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue"
-                Target="richData/richValue.xml"/>
+  <Relationship Id="rIdRichValueTypes"
+                Type="http://schemas.microsoft.com/office/2017/relationships/richValueTypes"
+                Target="richData/richValueTypes.xml"/>
+  <Relationship Id="rIdRichValueStructure"
+                Type="http://schemas.microsoft.com/office/2017/relationships/richValueStructure"
+                Target="richData/richValueStructure.xml"/>
   <Relationship Id="rIdRichValueRel"
-                Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel"
+                Type="http://schemas.microsoft.com/office/2017/relationships/richValueRel"
                 Target="richData/richValueRel.xml"/>
-  <!-- richValueTypes/richValueStructure relationships may also appear (unverified) -->
+  <Relationship Id="rIdRichValue"
+                Type="http://schemas.microsoft.com/office/2017/relationships/richValue"
+                Target="richData/richValue.xml"/>
 </Relationships>
 ```
 

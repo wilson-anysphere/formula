@@ -288,6 +288,11 @@ Excel wires the rich-data parts via OPC relationships. Relationship type URIs us
 - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes`
 - (variant seen in some producers/fixtures) `http://schemas.microsoft.com/office/2017/06/relationships/richValue`
 - (variant seen in some producers/fixtures) `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel`
+- (variant, when richData parts are related from `xl/metadata.xml` via `xl/_rels/metadata.xml.rels`)
+  - `http://schemas.microsoft.com/office/2017/relationships/richValue`
+  - `http://schemas.microsoft.com/office/2017/relationships/richValueRel`
+  - `http://schemas.microsoft.com/office/2017/relationships/richValueTypes`
+  - `http://schemas.microsoft.com/office/2017/relationships/richValueStructure`
 - (inside `xl/richData/_rels/richValueRel.xml.rels`) `http://schemas.openxmlformats.org/officeDocument/2006/relationships/image`
 
 Representative `xl/_rels/workbook.xml.rels` snippet:
@@ -340,11 +345,17 @@ Some packages instead attach the richData parts to `xl/metadata.xml` via `xl/_re
 <!-- xl/_rels/metadata.xml.rels -->
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1"
-                Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue"
-                Target="richData/richValue.xml"/>
+                Type="http://schemas.microsoft.com/office/2017/relationships/richValueTypes"
+                Target="richData/richValueTypes.xml"/>
   <Relationship Id="rId2"
-                Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel"
+                Type="http://schemas.microsoft.com/office/2017/relationships/richValueStructure"
+                Target="richData/richValueStructure.xml"/>
+  <Relationship Id="rId3"
+                Type="http://schemas.microsoft.com/office/2017/relationships/richValueRel"
                 Target="richData/richValueRel.xml"/>
+  <Relationship Id="rId4"
+                Type="http://schemas.microsoft.com/office/2017/relationships/richValue"
+                Target="richData/richValue.xml"/>
 </Relationships>
 ```
 

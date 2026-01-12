@@ -539,7 +539,7 @@ And observed that **no override** may be present (default `application/xml`), in
 Note: some workbooks omit the override entirely and rely on the package default
 `<Default Extension="xml" ContentType="application/xml"/>` (e.g. `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`).
 
-### `xl/richData/*` content types (observed + TODO)
+### `xl/richData/*` content types (observed + variants)
 
 Content types for `xl/richData/*` vary across Excel/producers and across the two naming schemes
 (`richValue*.xml` vs `rdRichValue*`).
@@ -554,8 +554,8 @@ Observed in `fixtures/xlsx/basic/image-in-cell.xlsx` (explicit overrides present
 - `/xl/richData/rdrichvaluestructure.xml`: `application/vnd.ms-excel.rdrichvaluestructure+xml`
 - `/xl/richData/rdRichValueTypes.xml`: `application/vnd.ms-excel.rdrichvaluetypes+xml`
 
-Likely patterns seen in the ecosystem for the *unprefixed* `richValue.xml` / `richValueTypes.xml` /
-`richValueStructure.xml` parts:
+Observed in `fixtures/xlsx/rich-data/richdata-minimal.xlsx` (Excel-generated; explicit overrides present for
+the unprefixed `richValue*` naming scheme):
 
 - `application/vnd.ms-excel.richvalue+xml` (for `/xl/richData/richValue.xml`)
 - `application/vnd.ms-excel.richvaluerel+xml` (for `/xl/richData/richValueRel.xml`)
@@ -575,19 +575,27 @@ Likely patterns seen in the ecosystem for the *unprefixed* `richValue.xml` / `ri
   <Override PartName="/xl/metadata.xml"
             ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
 
-  <!-- Unprefixed “richValue*” naming (observed in synthetic fixtures/tests; not yet observed in a real Excel fixture that emits explicit overrides). -->
-  <Override PartName="/xl/richData/richValue.xml" ContentType="application/vnd.ms-excel.richvalue+xml"/>
-  <Override PartName="/xl/richData/richValueRel.xml" ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
-
-  <!-- Likely patterns for the optional schema tables (not yet observed in a real Excel fixture that emits explicit overrides). -->
+  <!-- Unprefixed “richValue*” naming (observed in `fixtures/xlsx/rich-data/richdata-minimal.xlsx`; overrides may be absent in other workbooks). -->
   <Override PartName="/xl/richData/richValueTypes.xml" ContentType="application/vnd.ms-excel.richvaluetypes+xml"/>
   <Override PartName="/xl/richData/richValueStructure.xml" ContentType="application/vnd.ms-excel.richvaluestructure+xml"/>
+  <Override PartName="/xl/richData/richValue.xml" ContentType="application/vnd.ms-excel.richvalue+xml"/>
+  <Override PartName="/xl/richData/richValueRel.xml" ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
 </Types>
 ```
 
-**TODO (fixture-driven):** add an Excel-generated workbook that uses the *unprefixed* `richValue*.xml` naming
-scheme and emits explicit overrides for those parts, then update this section with the exact `ContentType="..."`
-strings for `richValue*` and the optional `richValueTypes.xml` / `richValueStructure.xml` tables.
+TODO (fixture-driven): add additional Excel-generated workbooks covering:
+
+- `=IMAGE(...)` results
+- “Place in Cell” images across Excel versions
+
+and update this section if Excel emits additional `xl/richData/*` part names or content types beyond those
+already observed in:
+
+- `fixtures/xlsx/rich-data/richdata-minimal.xlsx`
+- `fixtures/xlsx/basic/image-in-cell.xlsx`
+
+and exercised by tests like
+`crates/formula-xlsx/tests/richdata_preservation.rs`.
 
 ## Relationship type URIs (what we know vs TODO)
 
@@ -613,6 +621,16 @@ Partially known (fixture-driven details still recommended):
       - `Target="richData/richValue.xml"`
     - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel"`
       - `Target="richData/richValueRel.xml"`
+- Metadata → richData parts (when linked indirectly via `xl/_rels/metadata.xml.rels`):
+  - Observed in `fixtures/xlsx/rich-data/richdata-minimal.xlsx`:
+    - `Type="http://schemas.microsoft.com/office/2017/relationships/richValueTypes"`
+      - `Target="richData/richValueTypes.xml"`
+    - `Type="http://schemas.microsoft.com/office/2017/relationships/richValueStructure"`
+      - `Target="richData/richValueStructure.xml"`
+    - `Type="http://schemas.microsoft.com/office/2017/relationships/richValueRel"`
+      - `Target="richData/richValueRel.xml"`
+    - `Type="http://schemas.microsoft.com/office/2017/relationships/richValue"`
+      - `Target="richData/richValue.xml"`
 - Workbook → `xl/cellImages.xml` relationship:
   - Lives in `xl/_rels/workbook.xml.rels`.
   - Excel uses a Microsoft-extension relationship `Type` URI that has been observed to vary.
@@ -630,6 +648,10 @@ Partially known (fixture-driven details still recommended):
   - Workbook → richData relationships (Type URIs are Microsoft-specific and versioned). Observed in this repo:
     - `http://schemas.microsoft.com/office/2017/06/relationships/richValue` (fixture: `image-in-cell-richdata.xlsx`)
     - `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` (fixture: `image-in-cell-richdata.xlsx`)
+    - `http://schemas.microsoft.com/office/2017/relationships/richValue` (fixture: `rich-data/richdata-minimal.xlsx` via `xl/_rels/metadata.xml.rels`)
+    - `http://schemas.microsoft.com/office/2017/relationships/richValueRel` (fixture: `rich-data/richdata-minimal.xlsx` via `xl/_rels/metadata.xml.rels`)
+    - `http://schemas.microsoft.com/office/2017/relationships/richValueTypes` (fixture: `rich-data/richdata-minimal.xlsx` via `xl/_rels/metadata.xml.rels`)
+    - `http://schemas.microsoft.com/office/2017/relationships/richValueStructure` (fixture: `rich-data/richdata-minimal.xlsx` via `xl/_rels/metadata.xml.rels`)
     - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` (fixture: `image-in-cell.xlsx`; also test: `embedded_images_place_in_cell_roundtrip.rs`)
     - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure` (fixture: `image-in-cell.xlsx`)
     - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes` (fixture: `image-in-cell.xlsx`)
@@ -640,14 +662,13 @@ TODO (confirm via real Excel fixture, then harden parsers/writers):
 
 - Relationship type(s) connecting `xl/workbook.xml` (or other workbook-level parts) to:
   - `xl/cellImages.xml`
-  - richData parts when linked indirectly via `xl/_rels/metadata.xml.rels` (instead of directly from `workbook.xml.rels`)
 
 Until confirmed, Formula must preserve any such relationships byte-for-byte rather than regenerating.
 
 ## TODO: verify with real Excel sample
 
-This doc is partially derived from **synthetic fixtures** in this repository plus best-effort reverse
-engineering.
+This doc is partially derived from **in-repo fixtures** (some synthetic, some Excel-generated) plus
+best-effort reverse engineering.
 
 Current status:
 
@@ -719,6 +740,9 @@ does not “orphan” images or break Excel’s internal references.
 - **Round-trip preservation of richData-backed in-cell image parts**
   - Test: `crates/formula-xlsx/tests/rich_data_roundtrip.rs`
   - Fixture: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
+- **Preservation of richData parts when related from `xl/metadata.xml` (via `xl/_rels/metadata.xml.rels`)**
+  - Test: `crates/formula-xlsx/tests/richdata_preservation.rs`
+  - Fixture: `fixtures/xlsx/rich-data/richdata-minimal.xlsx`
 - **Preservation of RichData “Place in Cell” parts (`xl/metadata.xml` + `xl/richData/*` + `xl/media/*`) on edits**
   - Test: `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
 - **Best-effort extraction of richData-backed in-cell images (cell → bytes)**

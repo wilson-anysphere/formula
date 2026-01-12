@@ -60,6 +60,29 @@ The package also needs the usual bookkeeping:
 - `[Content_Types].xml` may include overrides for `metadata.xml` and the `xl/richData/*` parts (some files rely on the default `application/xml`).
 - The workbook part (`xl/workbook.xml` + `xl/_rels/workbook.xml.rels`) typically contains a relationship to `xl/metadata.xml` and often relates directly to the rich value parts.
 
+Observed (in this repo) relationship type URIs:
+
+- Workbook → metadata:
+  - `http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata`
+  - `http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata`
+- Workbook → rich value store (Microsoft-specific, versioned):
+  - `http://schemas.microsoft.com/office/2017/06/relationships/richValue`
+  - `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel`
+  - (variant, when the richData parts are related from `xl/metadata.xml` via `xl/_rels/metadata.xml.rels`)
+    - `http://schemas.microsoft.com/office/2017/relationships/richValue`
+    - `http://schemas.microsoft.com/office/2017/relationships/richValueRel`
+    - `http://schemas.microsoft.com/office/2017/relationships/richValueTypes`
+    - `http://schemas.microsoft.com/office/2017/relationships/richValueStructure`
+  - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` (rdRichValue naming)
+  - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure` (rdRichValue naming)
+  - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes` (rdRichValue naming)
+  - `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel`
+
+For details and fixture references, see:
+
+- [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md) (general richValue* / rdRichValue* notes)
+- [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md) (concrete “Place in Cell” mapping chain)
+
 This doc focuses on the **parts listed above** because they form the minimal chain to go from a cell → image bytes.
 
 ---
