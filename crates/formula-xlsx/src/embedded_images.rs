@@ -919,21 +919,29 @@ fn parse_rich_value_rel_ids(xml: &[u8]) -> Result<Vec<String>, XlsxError> {
         match reader.read_event_into(&mut buf)? {
             Event::Eof => break,
             Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"rel" => {
-                let mut rid: Option<String> = None;
+                let mut rid_prefixed: Option<String> = None;
+                let mut rid_unprefixed: Option<String> = None;
                 for attr in e.attributes() {
                     let attr = attr?;
-                    if openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"id") {
+                    let key = attr.key.as_ref();
+                    if openxml::local_name(key).eq_ignore_ascii_case(b"id") {
                         let value = attr.unescape_value()?.into_owned();
                         let trimmed = value.trim();
-                        if !trimmed.is_empty() {
-                            rid = Some(trimmed.to_string());
+                        if trimmed.is_empty() {
+                            continue;
                         }
-                        break;
+
+                        // Prefer namespaced `r:id`, but be tolerant of unqualified `id`.
+                        if key.iter().any(|b| *b == b':') {
+                            rid_prefixed = Some(trimmed.to_string());
+                        } else {
+                            rid_unprefixed = Some(trimmed.to_string());
+                        }
                     }
                 }
                 // Preserve missing `r:id` entries as placeholders to avoid shifting relationship
                 // indices (Excel treats the `<rel>` list as a dense table).
-                out.push(rid.unwrap_or_default());
+                out.push(rid_prefixed.or(rid_unprefixed).unwrap_or_default());
             }
             _ => {}
         }

@@ -161,6 +161,13 @@ const RICH_VALUE_REL_XML_WITH_ID_WHITESPACE: &str = r#"<?xml version="1.0" encod
 </richValueRel>
 "#;
 
+const RICH_VALUE_REL_XML_WITH_BOTH_ID_FORMS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValueRel xmlns="http://schemas.microsoft.com/office/2022/10/spreadsheetml/richvaluerelationships"
+              xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rel id="wrong" r:id="rId1"/>
+</richValueRel>
+"#;
+
 const RICH_VALUE_REL_XML_WITH_CUSTOM_REL_ID: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <richValueRel xmlns="http://schemas.microsoft.com/office/2022/10/spreadsheetml/richvaluerelationships"
               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -362,6 +369,17 @@ fn extracts_when_rich_value_rel_rid_has_whitespace() {
         METADATA_XML,
         1,
         RICH_VALUE_REL_XML_WITH_ID_WHITESPACE,
+        RICH_VALUE_REL_RELS_XML,
+    );
+}
+
+#[test]
+fn extracts_when_rich_value_rel_has_both_prefixed_and_unprefixed_id_attributes() {
+    // Some producers may include both `id` and `r:id`. Prefer the namespaced `r:id` value.
+    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema_with_rels(
+        METADATA_XML,
+        1,
+        RICH_VALUE_REL_XML_WITH_BOTH_ID_FORMS,
         RICH_VALUE_REL_RELS_XML,
     );
 }
