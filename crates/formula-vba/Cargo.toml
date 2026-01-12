@@ -21,7 +21,9 @@ openssl = { version = "0.10", features = ["vendored"] }
 openssl = { version = "0.10", features = ["vendored"] }
 
 [target.'cfg(all(not(target_arch = "wasm32"), not(any(windows, target_os = "macos"))))'.dependencies]
-openssl = "0.10"
+# Linux CI environments may not have OpenSSL development headers installed. Use a vendored
+# OpenSSL build to keep `formula-vba` building out-of-the-box across platforms.
+openssl = { version = "0.10", features = ["vendored"] }
 
 [dev-dependencies]
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
