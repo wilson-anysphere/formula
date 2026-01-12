@@ -2,9 +2,8 @@
 
 use std::io::{Cursor, Write};
 
-use formula_vba::{compress_container, content_normalized_data, VbaSignatureBinding, VbaSignatureVerification};
+use formula_vba::{compute_vba_project_digest, DigestAlg, VbaSignatureBinding, VbaSignatureVerification};
 use formula_xlsx::XlsxPackage;
-use openssl::hash::{hash, MessageDigest};
 
 const TEST_KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
 MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQC8kN1a0raWt6a7
@@ -75,12 +74,6 @@ fn make_pkcs7_signed_message(data: &[u8]) -> Vec<u8> {
     )
     .expect("pkcs7 sign");
     pkcs7.to_der().expect("pkcs7 DER")
-}
-
-fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
-    out.extend_from_slice(&id.to_le_bytes());
-    out.extend_from_slice(&(data.len() as u32).to_le_bytes());
-    out.extend_from_slice(data);
 }
 
 fn der_len(len: usize) -> Vec<u8> {
@@ -159,8 +152,9 @@ fn make_spc_indirect_data_content_sha256(digest: &[u8]) -> Vec<u8> {
 }
 
 fn build_minimal_vba_project_bin(module1: &[u8]) -> Vec<u8> {
-    // `content_normalized_data` expects a parsable/decompressible `VBA/dir` stream and module
-    // streams containing MS-OVBA compressed containers.
+    // This fixture intentionally omits `VBA/dir` so MS-OVBA `ContentNormalizedData` cannot be
+    // computed and signature binding verification falls back to the deterministic
+    // `compute_vba_project_digest` transcript.
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
 
@@ -173,45 +167,8 @@ fn build_minimal_vba_project_bin(module1: &[u8]) -> Vec<u8> {
     ole.create_storage("VBA").expect("VBA storage");
 
     {
-        // Minimal `dir` stream (decompressed form) with a single module.
-        let dir_decompressed = {
-            let mut out = Vec::new();
-            // PROJECTNAME
-            push_record(&mut out, 0x0004, b"VBAProject");
-            // MODULENAME
-            push_record(&mut out, 0x0019, b"Module1");
-            // MODULESTREAMNAME + reserved u16
-            let mut stream_name = Vec::new();
-            stream_name.extend_from_slice(b"Module1");
-            stream_name.extend_from_slice(&0u16.to_le_bytes());
-            push_record(&mut out, 0x001A, &stream_name);
-            // MODULETYPE (standard)
-            push_record(&mut out, 0x0021, &0u16.to_le_bytes());
-            // MODULETEXTOFFSET
-            push_record(&mut out, 0x0031, &0u32.to_le_bytes());
-            out
-        };
-
-        let dir_container = compress_container(&dir_decompressed);
-
-        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
-        s.write_all(&dir_container).expect("write dir");
-    }
-
-    {
-        // Used by Office and present in most real projects; not required by our binding logic
-        // directly, but makes the fixture a closer match to real files.
-        let mut s = ole
-            .create_stream("VBA/_VBA_PROJECT")
-            .expect("_VBA_PROJECT stream");
-        s.write_all(b"dummy").expect("write _VBA_PROJECT");
-    }
-
-    {
-        // VBA module source is stored using the MS-OVBA compression scheme.
-        let module_container = compress_container(module1);
         let mut s = ole.create_stream("VBA/Module1").expect("module stream");
-        s.write_all(&module_container).expect("write module");
+        s.write_all(module1).expect("write module");
     }
 
     ole.into_inner().into_inner()
@@ -402,9 +359,10 @@ fn verify_falls_back_to_vba_project_bin_when_signature_part_is_garbage() {
 #[test]
 fn verify_signature_part_binding_matches_vba_project_bin() {
     let vba_project_bin = build_minimal_vba_project_bin(b"Sub Hello()\r\nEnd Sub\r\n");
-    let normalized = content_normalized_data(&vba_project_bin).expect("content normalized data");
-    let digest = hash(MessageDigest::md5(), &normalized).expect("md5(content_normalized_data)");
-    let spc = make_spc_indirect_data_content_sha256(digest.as_ref());
+    let digest = compute_vba_project_digest(&vba_project_bin, DigestAlg::Md5)
+        .expect("compute project digest");
+    assert_eq!(digest.len(), 16, "VBA project digest must be 16-byte MD5");
+    let spc = make_spc_indirect_data_content_sha256(&digest);
 
     let pkcs7 = make_pkcs7_signed_message(&spc);
     let signature_part = build_vba_signature_ole(&pkcs7);
@@ -424,9 +382,10 @@ fn verify_signature_part_binding_matches_vba_project_bin() {
 #[test]
 fn verify_signature_part_binding_matches_vba_project_bin_when_digsig_blob_wrapped() {
     let vba_project_bin = build_minimal_vba_project_bin(b"Sub Hello()\r\nEnd Sub\r\n");
-    let normalized = content_normalized_data(&vba_project_bin).expect("content normalized data");
-    let digest = hash(MessageDigest::md5(), &normalized).expect("md5(content_normalized_data)");
-    let spc = make_spc_indirect_data_content_sha256(digest.as_ref());
+    let digest = compute_vba_project_digest(&vba_project_bin, DigestAlg::Md5)
+        .expect("compute project digest");
+    assert_eq!(digest.len(), 16, "VBA project digest must be 16-byte MD5");
+    let spc = make_spc_indirect_data_content_sha256(&digest);
 
     let pkcs7 = make_pkcs7_signed_message(&spc);
     let wrapped = build_oshared_digsig_blob(&pkcs7);
@@ -447,9 +406,10 @@ fn verify_signature_part_binding_matches_vba_project_bin_when_digsig_blob_wrappe
 #[test]
 fn verify_signature_part_binding_detects_tampered_vba_project_bin() {
     let vba_project_bin = build_minimal_vba_project_bin(b"Sub Hello()\r\nEnd Sub\r\n");
-    let normalized = content_normalized_data(&vba_project_bin).expect("content normalized data");
-    let digest = hash(MessageDigest::md5(), &normalized).expect("md5(content_normalized_data)");
-    let spc = make_spc_indirect_data_content_sha256(digest.as_ref());
+    let digest = compute_vba_project_digest(&vba_project_bin, DigestAlg::Md5)
+        .expect("compute project digest");
+    assert_eq!(digest.len(), 16, "VBA project digest must be 16-byte MD5");
+    let spc = make_spc_indirect_data_content_sha256(&digest);
 
     let pkcs7 = make_pkcs7_signed_message(&spc);
     let signature_part = build_vba_signature_ole(&pkcs7);
