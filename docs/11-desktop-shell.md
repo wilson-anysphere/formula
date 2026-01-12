@@ -29,6 +29,15 @@ The desktop configuration lives in `apps/desktop/src-tauri/tauri.conf.json` (Tau
 
 Key sections you’ll most commonly touch:
 
+### App identity (name/id/version)
+
+Top-level keys in `tauri.conf.json` define the packaged app identity:
+
+- `productName`: human-readable app name
+- `identifier`: reverse-DNS bundle identifier (`app.formula.desktop`)
+- `version`: desktop app version used by the updater / release tooling (see `docs/release.md`)
+- `mainBinaryName`: the Rust binary name Tauri expects to launch (matches `[[bin]].name` in `apps/desktop/src-tauri/Cargo.toml`)
+
 ### `build.*` (frontend dev/build + Cargo feature flags)
 
 - `build.beforeDevCommand`: `pnpm dev` (runs Vite)
