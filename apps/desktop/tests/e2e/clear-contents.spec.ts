@@ -86,4 +86,35 @@ test.describe("Clear Contents context menu", () => {
     const value = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
     expect(value).toBe("");
   });
+
+  test("disables Clear Contents when the selection is empty", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+
+    // Ensure A1 is empty.
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      doc.setCellValue(sheetId, { row: 0, col: 0 }, null);
+    });
+    await waitForIdle(page);
+
+    const grid = page.locator("#grid");
+    const a1Rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"));
+    await grid.click({ position: { x: a1Rect.x + a1Rect.width / 2, y: a1Rect.y + a1Rect.height / 2 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await grid.click({
+      button: "right",
+      position: { x: a1Rect.x + a1Rect.width / 2, y: a1Rect.y + a1Rect.height / 2 },
+    });
+    const menu = page.getByTestId("context-menu");
+    await expect(menu).toBeVisible();
+
+    const item = menu.getByRole("button", { name: "Clear Contents" });
+    await expect(item).toBeDisabled();
+  });
 });
