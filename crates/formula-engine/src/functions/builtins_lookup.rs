@@ -92,7 +92,7 @@ fn vlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     None => return Value::Error(ErrorKind::NA),
                 }
             } else {
-                match exact_match_in_first_col_array(&lookup_value, &table) {
+                match exact_match_in_first_col_array(ctx, &lookup_value, &table) {
                     Some(r) => r,
                     None => return Value::Error(ErrorKind::NA),
                 }
@@ -187,7 +187,7 @@ fn hlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     None => return Value::Error(ErrorKind::NA),
                 }
             } else {
-                match exact_match_in_first_row_array(&lookup_value, &table) {
+                match exact_match_in_first_row_array(ctx, &lookup_value, &table) {
                     Some(c) => c,
                     None => return Value::Error(ErrorKind::NA),
                 }
@@ -443,7 +443,7 @@ fn match_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 return Value::Error(ErrorKind::NA);
             }
             match match_type {
-                0 => exact_match_values(&lookup, &arr.values),
+                0 => exact_match_values(ctx, &lookup, &arr.values),
                 1 => approximate_match_values(&lookup, &arr.values, true),
                 -1 => approximate_match_values(&lookup, &arr.values, false),
                 _ => return Value::Error(ErrorKind::NA),
@@ -514,7 +514,7 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             let sheet_id = &r.sheet_id;
             let start = r.start;
 
-            let pos = lookup::xmatch_with_modes_accessor(
+            let pos = lookup::xmatch_with_modes_accessor_with_locale(
                 &lookup_value,
                 len,
                 |idx| match shape {
@@ -535,6 +535,8 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 },
                 match_mode,
                 search_mode,
+                ctx.value_locale(),
+                ctx.date_system(),
             );
 
             match pos {
@@ -546,7 +548,14 @@ fn xmatch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             if arr.rows != 1 && arr.cols != 1 {
                 return Value::Error(ErrorKind::Value);
             }
-            match lookup::xmatch_with_modes(&lookup_value, &arr.values, match_mode, search_mode) {
+            match lookup::xmatch_with_modes_with_locale(
+                &lookup_value,
+                &arr.values,
+                match_mode,
+                search_mode,
+                ctx.value_locale(),
+                ctx.date_system(),
+            ) {
                 Ok(pos) => Value::Number(pos as f64),
                 Err(e) => Value::Error(e),
             }
@@ -650,7 +659,14 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         ) -> Result<i32, ErrorKind> {
             match self {
                 XlookupLookupArray::Values { values, .. } => {
-                    lookup::xmatch_with_modes(lookup_value, values, match_mode, search_mode)
+                    lookup::xmatch_with_modes_with_locale(
+                        lookup_value,
+                        values,
+                        match_mode,
+                        search_mode,
+                        ctx.value_locale(),
+                        ctx.date_system(),
+                    )
                 }
                 XlookupLookupArray::Reference {
                     shape,
@@ -659,7 +675,7 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 } => {
                     let sheet_id = &reference.sheet_id;
                     let start = reference.start;
-                    lookup::xmatch_with_modes_accessor(
+                    lookup::xmatch_with_modes_accessor_with_locale(
                         lookup_value,
                         *len,
                         |idx| match shape {
@@ -680,6 +696,8 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         },
                         match_mode,
                         search_mode,
+                        ctx.value_locale(),
+                        ctx.date_system(),
                     )
                 }
             }
@@ -1194,7 +1212,7 @@ fn getpivotdata_find_row(
         let mut row_matches = true;
         for (col, item) in criteria {
             let cell = ctx.get_cell_value(sheet_id, crate::eval::CellAddr { row, col: *col });
-            if !pivot_item_matches(&cell, item)? {
+            if !pivot_item_matches(ctx, &cell, item)? {
                 row_matches = false;
                 break;
             }
@@ -1219,16 +1237,16 @@ fn value_text_eq(v: &Value, s: &str) -> bool {
     }
 }
 
-fn pivot_item_matches(cell: &Value, item: &Value) -> Result<bool, ErrorKind> {
+fn pivot_item_matches(ctx: &dyn FunctionContext, cell: &Value, item: &Value) -> Result<bool, ErrorKind> {
     match (cell, item) {
         (Value::Error(e), _) => Err(*e),
         (_, Value::Error(e)) => Err(*e),
         (Value::Text(cell_text), _) => {
-            let item_text = item.coerce_to_string()?;
+            let item_text = item.coerce_to_string_with_ctx(ctx)?;
             Ok(cell_text.eq_ignore_ascii_case(&item_text))
         }
         (Value::Blank, _) => {
-            let item_text = item.coerce_to_string()?;
+            let item_text = item.coerce_to_string_with_ctx(ctx)?;
             Ok(item_text.is_empty())
         }
         _ => Ok(excel_eq(cell, item)),
@@ -1301,13 +1319,13 @@ fn wildcard_pattern_for_lookup(lookup: &Value) -> Option<WildcardPattern> {
     Some(WildcardPattern::new(pattern))
 }
 
-fn exact_match_values(lookup: &Value, values: &[Value]) -> Option<usize> {
+fn exact_match_values(ctx: &dyn FunctionContext, lookup: &Value, values: &[Value]) -> Option<usize> {
     if let Some(pattern) = wildcard_pattern_for_lookup(lookup) {
         for (idx, candidate) in values.iter().enumerate() {
             let text = match candidate {
                 Value::Error(_) => continue,
                 Value::Text(s) => Cow::Borrowed(s.as_str()),
-                other => match other.coerce_to_string() {
+                other => match other.coerce_to_string_with_ctx(ctx) {
                     Ok(s) => Cow::Owned(s),
                     Err(_) => continue,
                 },
@@ -1367,7 +1385,7 @@ fn exact_match_in_first_col(
             let text = match &key {
                 Value::Error(_) => continue,
                 Value::Text(s) => Cow::Borrowed(s.as_str()),
-                other => match other.coerce_to_string() {
+                other => match other.coerce_to_string_with_ctx(ctx) {
                     Ok(s) => Cow::Owned(s),
                     Err(_) => continue,
                 },
@@ -1382,7 +1400,11 @@ fn exact_match_in_first_col(
     None
 }
 
-fn exact_match_in_first_col_array(lookup: &Value, table: &Array) -> Option<u32> {
+fn exact_match_in_first_col_array(
+    ctx: &dyn FunctionContext,
+    lookup: &Value,
+    table: &Array,
+) -> Option<u32> {
     let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
     for row in 0..table.rows {
         let key = table.get(row, 0).unwrap_or(&Value::Blank);
@@ -1390,7 +1412,7 @@ fn exact_match_in_first_col_array(lookup: &Value, table: &Array) -> Option<u32> 
             let text = match key {
                 Value::Error(_) => continue,
                 Value::Text(s) => Cow::Borrowed(s.as_str()),
-                other => match other.coerce_to_string() {
+                other => match other.coerce_to_string_with_ctx(ctx) {
                     Ok(s) => Cow::Owned(s),
                     Err(_) => continue,
                 },
@@ -1422,7 +1444,7 @@ fn exact_match_in_first_row(
             let text = match &key {
                 Value::Error(_) => continue,
                 Value::Text(s) => Cow::Borrowed(s.as_str()),
-                other => match other.coerce_to_string() {
+                other => match other.coerce_to_string_with_ctx(ctx) {
                     Ok(s) => Cow::Owned(s),
                     Err(_) => continue,
                 },
@@ -1437,7 +1459,11 @@ fn exact_match_in_first_row(
     None
 }
 
-fn exact_match_in_first_row_array(lookup: &Value, table: &Array) -> Option<u32> {
+fn exact_match_in_first_row_array(
+    ctx: &dyn FunctionContext,
+    lookup: &Value,
+    table: &Array,
+) -> Option<u32> {
     let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
     for col in 0..table.cols {
         let key = table.get(0, col).unwrap_or(&Value::Blank);
@@ -1445,7 +1471,7 @@ fn exact_match_in_first_row_array(lookup: &Value, table: &Array) -> Option<u32> 
             let text = match key {
                 Value::Error(_) => continue,
                 Value::Text(s) => Cow::Borrowed(s.as_str()),
-                other => match other.coerce_to_string() {
+                other => match other.coerce_to_string_with_ctx(ctx) {
                     Ok(s) => Cow::Owned(s),
                     Err(_) => continue,
                 },
@@ -1572,7 +1598,7 @@ fn exact_match_1d(
             let text = match &v {
                 Value::Error(_) => continue,
                 Value::Text(s) => Cow::Borrowed(s.as_str()),
-                other => match other.coerce_to_string() {
+                other => match other.coerce_to_string_with_ctx(ctx) {
                     Ok(s) => Cow::Owned(s),
                     Err(_) => continue,
                 },

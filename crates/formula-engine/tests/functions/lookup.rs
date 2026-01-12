@@ -1,4 +1,5 @@
 use formula_engine::functions::lookup;
+use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::Engine;
 use formula_engine::{ErrorKind, Value};
 
@@ -198,6 +199,27 @@ fn xmatch_wildcards_coerce_non_text_candidates_to_text() {
     sheet.set("A3", 30.0);
 
     assert_eq!(sheet.eval("=XMATCH(\"2*\", A1:A3, 2)"), Value::Number(2.0));
+}
+
+#[test]
+fn lookup_wildcard_numeric_text_coercion_respects_value_locale() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+    sheet.set("A1", 1.5);
+    sheet.set("A2", 2.0);
+
+    // MATCH (exact match_type=0) applies wildcard matching when the lookup value contains
+    // wildcards, and coerces non-text candidates to text first.
+    assert_eq!(
+        sheet.eval("=MATCH(\"*,5\", A1:A2, 0)"),
+        Value::Number(1.0)
+    );
+
+    // XMATCH wildcard mode should also coerce non-text candidates using the workbook value locale.
+    assert_eq!(
+        sheet.eval("=XMATCH(\"1,5\", A1:A2, 2)"),
+        Value::Number(1.0)
+    );
 }
 
 #[test]

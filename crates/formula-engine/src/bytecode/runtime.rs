@@ -2881,10 +2881,9 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
 }
 
 fn coerce_to_string_for_lookup(v: &Value) -> Result<String, ErrorKind> {
-    let engine_value = bytecode_value_to_engine(v.clone());
-    engine_value
-        .coerce_to_string()
-        .map_err(ErrorKind::from)
+    // Use the bytecode runtime's locale-aware coercion (shared with CONCAT/& fixes) so wildcard
+    // matching behaves consistently across backends.
+    coerce_to_string(v.clone())
 }
 
 fn exact_match_in_first_col(grid: &dyn Grid, lookup: &Value, table: ResolvedRange) -> Option<i32> {

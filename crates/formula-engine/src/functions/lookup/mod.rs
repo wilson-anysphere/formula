@@ -4,8 +4,43 @@ use crate::date::ExcelDateSystem;
 use crate::functions::wildcard::WildcardPattern;
 use crate::locale::ValueLocaleConfig;
 use chrono::Utc;
+use formula_format::{DateSystem, FormatOptions, Locale, Value as FmtValue};
 use std::borrow::Cow;
 use std::cmp::Ordering;
+
+fn format_options_for_value_locale(value_locale: ValueLocaleConfig, system: ExcelDateSystem) -> FormatOptions {
+    FormatOptions {
+        locale: value_locale.separators,
+        date_system: match system {
+            // `formula-format` always uses the Lotus 1-2-3 leap-year bug behavior for the 1900
+            // date system (Excel compatibility).
+            ExcelDateSystem::Excel1900 { .. } => DateSystem::Excel1900,
+            ExcelDateSystem::Excel1904 => DateSystem::Excel1904,
+        },
+    }
+}
+
+fn default_format_options() -> FormatOptions {
+    FormatOptions {
+        locale: Locale::en_us(),
+        date_system: DateSystem::Excel1900,
+    }
+}
+
+fn coerce_to_string_with_format_options(value: &Value, options: &FormatOptions) -> Result<String, ErrorKind> {
+    match value {
+        Value::Text(s) => Ok(s.clone()),
+        Value::Number(n) => Ok(formula_format::format_value(FmtValue::Number(*n), None, options).text),
+        Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
+        Value::Blank => Ok(String::new()),
+        Value::Error(e) => Err(*e),
+        Value::Reference(_)
+        | Value::ReferenceUnion(_)
+        | Value::Array(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. } => Err(ErrorKind::Value),
+    }
+}
 
 fn text_eq_case_insensitive(a: &str, b: &str) -> bool {
     if a.is_ascii() && b.is_ascii() {
@@ -225,12 +260,39 @@ pub fn xmatch_with_modes(
     match_mode: MatchMode,
     search_mode: SearchMode,
 ) -> Result<i32, ErrorKind> {
+    let options = default_format_options();
+    xmatch_with_modes_impl(lookup_value, lookup_array, match_mode, search_mode, &options)
+}
+
+pub(crate) fn xmatch_with_modes_with_locale(
+    lookup_value: &Value,
+    lookup_array: &[Value],
+    match_mode: MatchMode,
+    search_mode: SearchMode,
+    value_locale: ValueLocaleConfig,
+    date_system: ExcelDateSystem,
+) -> Result<i32, ErrorKind> {
+    let options = format_options_for_value_locale(value_locale, date_system);
+    xmatch_with_modes_impl(lookup_value, lookup_array, match_mode, search_mode, &options)
+}
+
+fn xmatch_with_modes_impl(
+    lookup_value: &Value,
+    lookup_array: &[Value],
+    match_mode: MatchMode,
+    search_mode: SearchMode,
+    format_options: &FormatOptions,
+) -> Result<i32, ErrorKind> {
     if matches!(lookup_value, Value::Lambda(_)) {
         return Err(ErrorKind::Value);
     }
     let pos = match search_mode {
-        SearchMode::FirstToLast => xmatch_linear(lookup_value, lookup_array, match_mode, false)?,
-        SearchMode::LastToFirst => xmatch_linear(lookup_value, lookup_array, match_mode, true)?,
+        SearchMode::FirstToLast => {
+            xmatch_linear(lookup_value, lookup_array, match_mode, false, format_options)?
+        }
+        SearchMode::LastToFirst => {
+            xmatch_linear(lookup_value, lookup_array, match_mode, true, format_options)?
+        }
         SearchMode::BinaryAscending => xmatch_binary(lookup_value, lookup_array, match_mode, false)?,
         SearchMode::BinaryDescending => xmatch_binary(lookup_value, lookup_array, match_mode, true)?,
     };
@@ -250,14 +312,60 @@ pub fn xmatch_with_modes_accessor(
     match_mode: MatchMode,
     search_mode: SearchMode,
 ) -> Result<i32, ErrorKind> {
+    let options = default_format_options();
+    xmatch_with_modes_accessor_impl(lookup_value, len, &mut value_at, match_mode, search_mode, &options)
+}
+
+pub(crate) fn xmatch_with_modes_accessor_with_locale(
+    lookup_value: &Value,
+    len: usize,
+    mut value_at: impl FnMut(usize) -> Value,
+    match_mode: MatchMode,
+    search_mode: SearchMode,
+    value_locale: ValueLocaleConfig,
+    date_system: ExcelDateSystem,
+) -> Result<i32, ErrorKind> {
+    let options = format_options_for_value_locale(value_locale, date_system);
+    xmatch_with_modes_accessor_impl(
+        lookup_value,
+        len,
+        &mut value_at,
+        match_mode,
+        search_mode,
+        &options,
+    )
+}
+
+fn xmatch_with_modes_accessor_impl(
+    lookup_value: &Value,
+    len: usize,
+    value_at: &mut impl FnMut(usize) -> Value,
+    match_mode: MatchMode,
+    search_mode: SearchMode,
+    format_options: &FormatOptions,
+) -> Result<i32, ErrorKind> {
     if matches!(lookup_value, Value::Lambda(_)) {
         return Err(ErrorKind::Value);
     }
     let pos = match search_mode {
-        SearchMode::FirstToLast => xmatch_linear_accessor(lookup_value, len, &mut value_at, match_mode, false)?,
-        SearchMode::LastToFirst => xmatch_linear_accessor(lookup_value, len, &mut value_at, match_mode, true)?,
-        SearchMode::BinaryAscending => xmatch_binary_accessor(lookup_value, len, &mut value_at, match_mode, false)?,
-        SearchMode::BinaryDescending => xmatch_binary_accessor(lookup_value, len, &mut value_at, match_mode, true)?,
+        SearchMode::FirstToLast => xmatch_linear_accessor(
+            lookup_value,
+            len,
+            value_at,
+            match_mode,
+            false,
+            format_options,
+        )?,
+        SearchMode::LastToFirst => xmatch_linear_accessor(
+            lookup_value,
+            len,
+            value_at,
+            match_mode,
+            true,
+            format_options,
+        )?,
+        SearchMode::BinaryAscending => xmatch_binary_accessor(lookup_value, len, value_at, match_mode, false)?,
+        SearchMode::BinaryDescending => xmatch_binary_accessor(lookup_value, len, value_at, match_mode, true)?,
     };
 
     let pos = pos.checked_add(1).unwrap_or(usize::MAX);
@@ -269,6 +377,7 @@ fn xmatch_linear(
     lookup_array: &[Value],
     match_mode: MatchMode,
     reverse: bool,
+    format_options: &FormatOptions,
 ) -> Result<usize, ErrorKind> {
     let iter: Box<dyn Iterator<Item = (usize, &Value)>> = if reverse {
         Box::new(lookup_array.iter().enumerate().rev())
@@ -287,7 +396,7 @@ fn xmatch_linear(
         }
         MatchMode::Wildcard => {
             // Excel applies wildcard matching to text patterns.
-            let pattern = match lookup_value.coerce_to_string() {
+            let pattern = match coerce_to_string_with_format_options(lookup_value, format_options) {
                 Ok(s) => s,
                 Err(e) => return Err(e),
             };
@@ -296,7 +405,7 @@ fn xmatch_linear(
                 let text = match candidate {
                     Value::Error(_) => continue,
                     Value::Text(s) => Cow::Borrowed(s.as_str()),
-                    other => match other.coerce_to_string() {
+                    other => match coerce_to_string_with_format_options(other, format_options) {
                         Ok(s) => Cow::Owned(s),
                         Err(_) => continue,
                     },
@@ -364,6 +473,7 @@ fn xmatch_linear_accessor(
     value_at: &mut impl FnMut(usize) -> Value,
     match_mode: MatchMode,
     reverse: bool,
+    format_options: &FormatOptions,
 ) -> Result<usize, ErrorKind> {
     let iter: Box<dyn Iterator<Item = usize>> = if reverse {
         Box::new((0..len).rev())
@@ -382,7 +492,7 @@ fn xmatch_linear_accessor(
             Err(ErrorKind::NA)
         }
         MatchMode::Wildcard => {
-            let pattern = match lookup_value.coerce_to_string() {
+            let pattern = match coerce_to_string_with_format_options(lookup_value, format_options) {
                 Ok(s) => s,
                 Err(e) => return Err(e),
             };
@@ -392,7 +502,7 @@ fn xmatch_linear_accessor(
                 let text = match &candidate {
                     Value::Error(_) => continue,
                     Value::Text(s) => Cow::Borrowed(s.as_str()),
-                    other => match other.coerce_to_string() {
+                    other => match coerce_to_string_with_format_options(other, format_options) {
                         Ok(s) => Cow::Owned(s),
                         Err(_) => continue,
                     },
