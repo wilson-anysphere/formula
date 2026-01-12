@@ -1951,7 +1951,7 @@ fn format_structured_ref(
             StructuredColumns::Range { start, end } => {
                 let start = escape_structured_ref_bracket_content(start);
                 let end = escape_structured_ref_bracket_content(end);
-                return format!("[[#This Row],[{start}]:[{end}]]");
+                return format!("[@[{start}]:[{end}]]");
             }
         }
     }

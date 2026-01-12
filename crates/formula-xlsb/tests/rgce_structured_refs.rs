@@ -53,6 +53,16 @@ fn decodes_structured_ref_this_row() {
 }
 
 #[test]
+fn decodes_structured_ref_this_row_range() {
+    // Flags are best-effort; the decoder treats 0x0010 as "#This Row".
+    let ctx = ctx_table1();
+    let rgce = ptg_list(1, 0x0010, 2, 4, 0x18); // [@[Qty]:[Total]]
+    let text = decode_rgce_with_context(&rgce, &ctx).expect("decode");
+    assert_eq!(text, "[@[Qty]:[Total]]");
+    assert_parses_and_roundtrips(&text);
+}
+
+#[test]
 fn decodes_structured_ref_headers_column() {
     // Flags are best-effort; the decoder treats 0x0002 as "#Headers".
     let ctx = ctx_table1();
