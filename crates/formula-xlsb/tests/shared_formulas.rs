@@ -594,6 +594,129 @@ fn materializes_shared_formulas_with_ptgref3d() {
 }
 
 #[test]
+fn materializes_shared_formulas_with_ptgarea3d() {
+    // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
+    const WORKSHEET_BEGIN: u32 = 0x0081;
+    const WORKSHEET_END: u32 = 0x0082;
+    const SHEETDATA_BEGIN: u32 = 0x0091;
+    const SHEETDATA_END: u32 = 0x0092;
+    const DIMENSION: u32 = 0x0094;
+
+    const ROW: u32 = 0x0000;
+    const FMLA_NUM: u32 = 0x0009;
+    const SHR_FMLA: u32 = 0x0010;
+
+    // Provide workbook context so `PtgArea3d` can decode to a sheet name.
+    let mut ctx = WorkbookContext::default();
+    ctx.add_extern_sheet("Sheet2", "Sheet2", 0);
+
+    let mut sheet = Vec::new();
+    push_record(&mut sheet, WORKSHEET_BEGIN, &[]);
+
+    // BrtWsDim: r1, r2, c1, c2 (all u32). Cover B1:B2.
+    let mut dim = Vec::new();
+    dim.extend_from_slice(&0u32.to_le_bytes());
+    dim.extend_from_slice(&1u32.to_le_bytes());
+    dim.extend_from_slice(&1u32.to_le_bytes());
+    dim.extend_from_slice(&1u32.to_le_bytes());
+    push_record(&mut sheet, DIMENSION, &dim);
+
+    push_record(&mut sheet, SHEETDATA_BEGIN, &[]);
+
+    // Row 0
+    push_record(&mut sheet, ROW, &0u32.to_le_bytes());
+
+    // Shared formula over B1:B2:
+    //   B1: SUM(Sheet2!A1:A2)
+    //   B2: SUM(Sheet2!A2:A3)
+    let mut shr_fmla = Vec::new();
+    // Range: r1=0, r2=1, c1=1, c2=1.
+    shr_fmla.extend_from_slice(&0u32.to_le_bytes());
+    shr_fmla.extend_from_slice(&1u32.to_le_bytes());
+    shr_fmla.extend_from_slice(&1u32.to_le_bytes());
+    shr_fmla.extend_from_slice(&1u32.to_le_bytes());
+
+    // Base rgce: PtgArea3d(Sheet2!A1:A2, relative endpoints) + SUM(argc=1)
+    let base_rgce: Vec<u8> = {
+        let mut v = Vec::new();
+        v.push(0x3B); // PtgArea3d
+        v.extend_from_slice(&0u16.to_le_bytes()); // ixti (Sheet2)
+        v.extend_from_slice(&0u32.to_le_bytes()); // r1 (A1)
+        v.extend_from_slice(&1u32.to_le_bytes()); // r2 (A2)
+        v.extend_from_slice(&0xC000u16.to_le_bytes()); // c1=A, row+col relative
+        v.extend_from_slice(&0xC000u16.to_le_bytes()); // c2=A, row+col relative
+        v.push(0x22); // PtgFuncVar
+        v.push(1); // argc=1
+        v.extend_from_slice(&0x0004u16.to_le_bytes()); // SUM
+        v
+    };
+    shr_fmla.extend_from_slice(&(base_rgce.len() as u32).to_le_bytes());
+    shr_fmla.extend_from_slice(&base_rgce);
+    push_record(&mut sheet, SHR_FMLA, &shr_fmla);
+
+    // B1 full formula (same as base rgce).
+    let mut b1 = Vec::new();
+    b1.extend_from_slice(&1u32.to_le_bytes()); // col B
+    b1.extend_from_slice(&0u32.to_le_bytes()); // style
+    b1.extend_from_slice(&0.0f64.to_le_bytes()); // cached value
+    b1.extend_from_slice(&0u16.to_le_bytes()); // flags
+    b1.extend_from_slice(&(base_rgce.len() as u32).to_le_bytes());
+    b1.extend_from_slice(&base_rgce);
+    push_record(&mut sheet, FMLA_NUM, &b1);
+
+    // Row 1
+    push_record(&mut sheet, ROW, &1u32.to_le_bytes());
+
+    // B2 uses PtgExp to reference base cell B1 (row=0,col=1).
+    let ptgexp: [u8; 5] = [0x01, 0x00, 0x00, 0x01, 0x00];
+    let mut b2 = Vec::new();
+    b2.extend_from_slice(&1u32.to_le_bytes()); // col B
+    b2.extend_from_slice(&0u32.to_le_bytes()); // style
+    b2.extend_from_slice(&0.0f64.to_le_bytes()); // cached value
+    b2.extend_from_slice(&0u16.to_le_bytes()); // flags
+    b2.extend_from_slice(&(ptgexp.len() as u32).to_le_bytes());
+    b2.extend_from_slice(&ptgexp);
+    push_record(&mut sheet, FMLA_NUM, &b2);
+
+    push_record(&mut sheet, SHEETDATA_END, &[]);
+    push_record(&mut sheet, WORKSHEET_END, &[]);
+
+    let parsed =
+        parse_sheet_bin_with_context(&mut Cursor::new(sheet), &[], &ctx).expect("parse sheet");
+    let mut cells: HashMap<(u32, u32), _> =
+        parsed.cells.iter().map(|c| ((c.row, c.col), c)).collect();
+
+    let b1 = cells.remove(&(0, 1)).expect("B1 present");
+    assert_eq!(
+        b1.formula.as_ref().and_then(|f| f.text.as_deref()),
+        Some("SUM(Sheet2!A1:A2)")
+    );
+
+    let b2 = cells.remove(&(1, 1)).expect("B2 present");
+    assert_eq!(
+        b2.formula.as_ref().and_then(|f| f.text.as_deref()),
+        Some("SUM(Sheet2!A2:A3)")
+    );
+
+    // Ensure we stored a materialized rgce with adjusted area rows.
+    let b2_rgce = &b2.formula.as_ref().unwrap().rgce;
+    assert_eq!(
+        b2_rgce,
+        &vec![
+            0x3B, // PtgArea3d
+            0x00, 0x00, // ixti (Sheet2)
+            0x01, 0x00, 0x00, 0x00, // r1=1 (A2)
+            0x02, 0x00, 0x00, 0x00, // r2=2 (A3)
+            0x00, 0xC0, // c1=A, relative
+            0x00, 0xC0, // c2=A, relative
+            0x22, // PtgFuncVar
+            0x01, // argc
+            0x04, 0x00, // SUM
+        ]
+    );
+}
+
+#[test]
 fn materializes_shared_formulas_with_ptgarray_rgcb() {
     // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
     const WORKSHEET_BEGIN: u32 = 0x0081;
