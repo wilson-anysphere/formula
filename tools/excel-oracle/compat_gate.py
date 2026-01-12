@@ -52,6 +52,9 @@ SMOKE_INCLUDE_TAGS = [
     "SORT",
     "UNIQUE",
     "ISERROR",
+    # Exercise small-but-important date validation boundary conditions (e.g. odd-coupon bonds where
+    # settlement == coupon date) without pulling in the full financial corpus.
+    "boundary",
     # Explicitly include value coercion cases so CI exercises the conversion rules
     # (text -> number/date/time) we implement and diff against Excel later.
     "coercion",
