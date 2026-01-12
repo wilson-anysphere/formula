@@ -70,7 +70,7 @@ The formula engine is the computational heart of the spreadsheet. It must parse,
 | NUMBER | `123`, `3.14`, `1E10`, `.5` | Scientific notation, leading decimal |
 | STRING | `"Hello"`, `""` | Double-quote escaped by doubling |
 | BOOLEAN | `TRUE`, `FALSE` | Case insensitive |
-| ERROR | `#VALUE!`, `#REF!`, `#N/A` | All 7 Excel error types |
+| ERROR | `#VALUE!`, `#REF!`, `#N/A` | All Excel error types (classic + dynamic array/data errors like `#SPILL!`, `#CALC!`, `#GETTING_DATA`, `#FIELD!`, etc.) |
 | CELL_REF | `A1`, `$A$1`, `A$1`, `$A1` | Absolute/relative markers |
 | RANGE_REF | `A1:B10`, `A:A`, `1:1` | Full column/row references |
 | SHEET_REF | `Sheet1!A1`, `Sheet1:Sheet3!A1`, `'Sheet Name'!A1`, `'Sheet 1:Sheet 3'!A1` | Includes 3D sheet spans; quoted for special chars |
