@@ -1080,15 +1080,6 @@ export function bindYjsToDocumentController(options) {
       for (const item of prepared) {
         const { canonicalKey, targets, value, formula, styleId, format, encryptedPayload, formatKey } = item;
 
-        if (value == null && formula == null && styleId === 0 && !encryptedPayload) {
-          for (const rawKey of targets) {
-            cells.delete(rawKey);
-            untrackRawKey(canonicalKey, rawKey);
-          }
-          cache.delete(canonicalKey);
-          continue;
-        }
-
         for (const rawKey of targets) {
           let cellData = cells.get(rawKey);
           let cell = getYMapCell(cellData);
@@ -1107,7 +1098,13 @@ export function bindYjsToDocumentController(options) {
               cell.set("formula", formula);
               cell.set("value", null);
             } else {
-              cell.delete("formula");
+              // Preserve explicit formula clear markers (`formula=null`) so other
+              // CRDT observers (e.g. conflict monitors) can reason about
+              // delete-vs-overwrite causality via Yjs Item origin ids.
+              //
+              // This is also a safe superset for value writes: writing a literal
+              // value always clears any prior formula via an explicit marker.
+              cell.set("formula", null);
               cell.set("value", value);
             }
           }
