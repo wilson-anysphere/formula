@@ -68,3 +68,76 @@ test("setSheetTabColor accepts ARGB string and emits a meta delta", () => {
   assert.deepEqual(doc.getSheetMeta("Sheet1")?.tabColor, { rgb: "FF00FF00" });
 });
 
+test("hideSheet/unhideSheet emit sheetMetaDeltas", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.setCellValue("Sheet2", "A1", 2);
+
+  /** @type {any} */
+  let lastChange = null;
+  doc.on("change", (payload) => {
+    lastChange = payload;
+  });
+
+  doc.hideSheet("Sheet2");
+  assert.equal(lastChange?.recalc, false);
+  assert.ok(Array.isArray(lastChange?.sheetMetaDeltas));
+  assert.deepEqual(lastChange.sheetMetaDeltas[0], {
+    sheetId: "Sheet2",
+    before: { name: "Sheet2", visibility: "visible" },
+    after: { name: "Sheet2", visibility: "hidden" },
+  });
+
+  doc.unhideSheet("Sheet2");
+  assert.equal(lastChange?.recalc, false);
+  assert.deepEqual(lastChange.sheetMetaDeltas[0], {
+    sheetId: "Sheet2",
+    before: { name: "Sheet2", visibility: "hidden" },
+    after: { name: "Sheet2", visibility: "visible" },
+  });
+});
+
+test("addSheet emits sheetMetaDeltas + sheetOrderDelta", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+
+  /** @type {any} */
+  let lastChange = null;
+  doc.on("change", (payload) => {
+    lastChange = payload;
+  });
+
+  doc.addSheet({ sheetId: "Sheet2", name: "Second" });
+
+  assert.equal(lastChange?.recalc, true);
+  assert.deepEqual(lastChange?.sheetOrderDelta, { before: ["Sheet1"], after: ["Sheet1", "Sheet2"] });
+  assert.ok(Array.isArray(lastChange?.sheetMetaDeltas));
+  assert.deepEqual(lastChange.sheetMetaDeltas[0], {
+    sheetId: "Sheet2",
+    before: null,
+    after: { name: "Second", visibility: "visible" },
+  });
+});
+
+test("deleteSheet emits sheetMetaDeltas + sheetOrderDelta", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.setCellValue("Sheet2", "A1", 2);
+
+  /** @type {any} */
+  let lastChange = null;
+  doc.on("change", (payload) => {
+    lastChange = payload;
+  });
+
+  doc.deleteSheet("Sheet2");
+
+  assert.equal(lastChange?.recalc, true);
+  assert.ok(Array.isArray(lastChange?.sheetMetaDeltas));
+  assert.deepEqual(lastChange.sheetMetaDeltas[0], {
+    sheetId: "Sheet2",
+    before: { name: "Sheet2", visibility: "visible" },
+    after: null,
+  });
+  assert.deepEqual(lastChange?.sheetOrderDelta, { before: ["Sheet1", "Sheet2"], after: ["Sheet1"] });
+});
