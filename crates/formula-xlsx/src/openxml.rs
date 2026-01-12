@@ -202,7 +202,7 @@ mod tests {
         let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com" TargetMode="External"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png#frag"/>
 </Relationships>"#;
 
         let pkg = build_package(&[
@@ -221,6 +221,18 @@ mod tests {
                 .expect("resolve internal")
                 .as_deref(),
             Some("xl/media/image1.png")
+        );
+    }
+
+    #[test]
+    fn resolve_target_strips_uri_fragments() {
+        assert_eq!(
+            resolve_target("xl/metadata.xml", "richData/rd1.xml#frag"),
+            "xl/richData/rd1.xml"
+        );
+        assert_eq!(
+            resolve_target("xl/_rels/workbook.xml.rels", "/xl/media/image1.png#frag"),
+            "xl/media/image1.png"
         );
     }
 }
