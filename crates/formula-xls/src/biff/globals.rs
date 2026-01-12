@@ -24,6 +24,9 @@ const RECORD_FORMAT_BIFF8: u16 = 0x041E;
 const RECORD_FORMAT2_BIFF5: u16 = 0x001E;
 const RECORD_XF: u16 = 0x00E0;
 
+// XF type/protection flags: bit 2 is fStyle in BIFF5/8.
+const XF_FLAG_STYLE: u16 = 0x0004;
+
 fn strip_embedded_nuls(s: &mut String) {
     if s.contains('\0') {
         s.retain(|c| c != '\0');
@@ -279,7 +282,7 @@ fn parse_biff_xf_record(data: &[u8]) -> Result<BiffXf, String> {
     // Optional: in BIFF5/8 this is part of the "type/protection" flags field and bit 2 is `fStyle`.
     let kind = data.get(4..6).map(|bytes| {
         let flags = u16::from_le_bytes([bytes[0], bytes[1]]);
-        if (flags & 0x0004) != 0 {
+        if (flags & XF_FLAG_STYLE) != 0 {
             BiffXfKind::Style
         } else {
             BiffXfKind::Cell

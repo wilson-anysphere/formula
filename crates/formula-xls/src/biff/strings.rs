@@ -437,11 +437,11 @@ mod tests {
         // First fragment contains the header and the first UTF-16LE code unit.
         let mut frag1 = Vec::new();
         frag1.extend_from_slice(&(s.len() as u16).to_le_bytes());
-        frag1.push(0x01); // flags (unicode)
+        frag1.push(STR_FLAG_HIGH_BYTE); // flags (unicode)
         frag1.extend_from_slice(&[b'A', 0x00]);
 
         // Continuation fragment begins with option flags byte (fHighByte), then remaining UTF-16LE bytes.
-        let frag2 = [0x01, b'B', 0x00];
+        let frag2 = [STR_FLAG_HIGH_BYTE, b'B', 0x00];
 
         let fragments: [&[u8]; 2] = [&frag1, &frag2];
         let out = parse_biff8_unicode_string_continued(&fragments, 0, 1252).expect("parse");
@@ -453,10 +453,10 @@ mod tests {
         // cch=1, unicode.
         let mut frag1 = Vec::new();
         frag1.extend_from_slice(&1u16.to_le_bytes());
-        frag1.push(0x01); // flags (unicode)
+        frag1.push(STR_FLAG_HIGH_BYTE); // flags (unicode)
         frag1.push(b'A'); // only 1 byte of the 2-byte code unit
 
-        let frag2 = [0x01, 0x00]; // cont_flags + remaining byte
+        let frag2 = [STR_FLAG_HIGH_BYTE, 0x00]; // cont_flags + remaining byte
 
         let fragments: [&[u8]; 2] = [&frag1, &frag2];
         let err = parse_biff8_unicode_string_continued(&fragments, 0, 1252).unwrap_err();
@@ -476,7 +476,7 @@ mod tests {
     #[test]
     fn parses_biff8_short_string_unicode() {
         // "Hi" as UTF-16LE.
-        let input = [2u8, 0x01, b'H', 0x00, b'i', 0x00];
+        let input = [2u8, STR_FLAG_HIGH_BYTE, b'H', 0x00, b'i', 0x00];
         let (s, consumed) = parse_biff8_short_string(&input, 1252).expect("parse");
         assert_eq!(consumed, input.len());
         assert_eq!(s, "Hi");
@@ -486,7 +486,7 @@ mod tests {
     fn parses_biff8_short_string_with_richtext_and_ext() {
         let mut input = Vec::new();
         // cch=3, flags=richtext+ext (compressed)
-        input.extend_from_slice(&[3u8, 0x0C]);
+        input.extend_from_slice(&[3u8, STR_FLAG_RICH_TEXT | STR_FLAG_EXT]);
         input.extend_from_slice(&1u16.to_le_bytes()); // cRun
         input.extend_from_slice(&2u32.to_le_bytes()); // cbExtRst
         input.extend_from_slice(b"abc"); // char data
@@ -513,7 +513,7 @@ mod tests {
     fn parses_biff8_unicode_string_unicode() {
         let mut input = Vec::new();
         input.extend_from_slice(&2u16.to_le_bytes());
-        input.push(0x01); // flags (unicode)
+        input.push(STR_FLAG_HIGH_BYTE); // flags (unicode)
         input.extend_from_slice(&[b'H', 0x00, b'i', 0x00]);
         let (s, consumed) = parse_biff8_unicode_string(&input, 1252).expect("parse");
         assert_eq!(consumed, input.len());

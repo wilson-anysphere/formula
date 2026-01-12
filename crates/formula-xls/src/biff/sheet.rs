@@ -25,6 +25,12 @@ const RECORD_LABELSST: u16 = 0x00FD;
 const RECORD_MULRK: u16 = 0x00BD;
 const RECORD_MULBLANK: u16 = 0x00BE;
 
+const ROW_HEIGHT_TWIPS_MASK: u16 = 0x7FFF;
+const ROW_HEIGHT_DEFAULT_FLAG: u16 = 0x8000;
+const ROW_OPTION_HIDDEN: u32 = 0x0000_0020;
+
+const COLINFO_OPTION_HIDDEN: u16 = 0x0001;
+
 #[derive(Debug, Default)]
 pub(crate) struct SheetRowColProperties {
     pub(crate) rows: BTreeMap<u32, RowProperties>,
@@ -47,10 +53,10 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 }
                 let row = u16::from_le_bytes([data[0], data[1]]) as u32;
                 let height_options = u16::from_le_bytes([data[6], data[7]]);
-                let height_twips = height_options & 0x7FFF;
-                let default_height = (height_options & 0x8000) != 0;
+                let height_twips = height_options & ROW_HEIGHT_TWIPS_MASK;
+                let default_height = (height_options & ROW_HEIGHT_DEFAULT_FLAG) != 0;
                 let options = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
-                let hidden = (options & 0x0000_0020) != 0;
+                let hidden = (options & ROW_OPTION_HIDDEN) != 0;
 
                 let height =
                     (!default_height && height_twips > 0).then_some(height_twips as f32 / 20.0);
@@ -75,7 +81,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 let last_col = u16::from_le_bytes([data[2], data[3]]) as u32;
                 let width_raw = u16::from_le_bytes([data[4], data[5]]);
                 let options = u16::from_le_bytes([data[8], data[9]]);
-                let hidden = (options & 0x0001) != 0;
+                let hidden = (options & COLINFO_OPTION_HIDDEN) != 0;
 
                 let width = (width_raw > 0).then_some(width_raw as f32 / 256.0);
 
