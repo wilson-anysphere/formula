@@ -34,6 +34,7 @@ fixtures/xlsx/
   - `comments.xlsx` - legacy comments parts.
   - `grouped-rows.xlsx` - outline/grouped rows metadata.
   - `image.xlsx` - embedded image (`xl/media/image1.png`) + drawing relationship.
+  - `activex-control.xlsx` - minimal ActiveX/form control parts (`xl/ctrlProps/*` + `xl/activeX/*`) with a worksheet `<controls>` fragment.
   - `print-settings.xlsx` - page setup + print titles/areas.
 - `formulas/`:
   - `formulas.xlsx` - simple formula + cached result.
