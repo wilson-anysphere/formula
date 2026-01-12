@@ -51,11 +51,15 @@ export const ar = {
   "command.view.togglePanel.dataQueries": "تبديل البيانات/الاستعلامات",
   "command.view.togglePanel.scriptEditor": "تبديل محرر النصوص البرمجية",
   "command.view.togglePanel.python": "تبديل بايثون",
+  "command.view.togglePanel.versionHistory": "تبديل سجل الإصدارات",
+  "command.view.togglePanel.branchManager": "تبديل مدير الفروع",
   "commandDescription.view.togglePanel.aiChat": "إظهار/إخفاء لوحة دردشة الذكاء الاصطناعي",
   "commandDescription.view.togglePanel.aiAudit": "إظهار/إخفاء لوحة تدقيق الذكاء الاصطناعي",
   "commandDescription.view.togglePanel.extensions": "إظهار/إخفاء لوحة الإضافات",
   "commandDescription.view.togglePanel.macros": "إظهار/إخفاء لوحة وحدات الماكرو",
   "commandDescription.view.togglePanel.dataQueries": "إظهار/إخفاء لوحة البيانات/الاستعلامات",
   "commandDescription.view.togglePanel.scriptEditor": "إظهار/إخفاء لوحة محرر النصوص البرمجية",
-  "commandDescription.view.togglePanel.python": "إظهار/إخفاء لوحة بايثون"
+  "commandDescription.view.togglePanel.python": "إظهار/إخفاء لوحة بايثون",
+  "commandDescription.view.togglePanel.versionHistory": "إظهار/إخفاء لوحة سجل الإصدارات",
+  "commandDescription.view.togglePanel.branchManager": "إظهار/إخفاء لوحة مدير الفروع"
 };

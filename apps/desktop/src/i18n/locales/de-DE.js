@@ -51,11 +51,15 @@ export const deDE = {
   "command.view.togglePanel.dataQueries": "Daten/Abfragen umschalten",
   "command.view.togglePanel.scriptEditor": "Script-Editor umschalten",
   "command.view.togglePanel.python": "Python umschalten",
+  "command.view.togglePanel.versionHistory": "Versionsverlauf umschalten",
+  "command.view.togglePanel.branchManager": "Branch-Manager umschalten",
   "commandDescription.view.togglePanel.aiChat": "Das KI-Chat-Panel ein-/ausblenden",
   "commandDescription.view.togglePanel.aiAudit": "Das KI-Audit-Panel ein-/ausblenden",
   "commandDescription.view.togglePanel.extensions": "Das Erweiterungen-Panel ein-/ausblenden",
   "commandDescription.view.togglePanel.macros": "Das Makros-Panel ein-/ausblenden",
   "commandDescription.view.togglePanel.dataQueries": "Das Daten-/Abfragen-Panel ein-/ausblenden",
   "commandDescription.view.togglePanel.scriptEditor": "Das Script-Editor-Panel ein-/ausblenden",
-  "commandDescription.view.togglePanel.python": "Das Python-Panel ein-/ausblenden"
+  "commandDescription.view.togglePanel.python": "Das Python-Panel ein-/ausblenden",
+  "commandDescription.view.togglePanel.versionHistory": "Das Versionsverlaufs-Panel ein-/ausblenden",
+  "commandDescription.view.togglePanel.branchManager": "Das Branch-Manager-Panel ein-/ausblenden"
 };
