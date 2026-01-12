@@ -1690,10 +1690,14 @@ fn bytecode_backend_matches_ast_for_common_logical_error_functions() {
     engine
         .set_cell_formula("Sheet1", "B8", "=ISNA(NA())")
         .unwrap();
+    engine
+        // ISNA must not propagate non-#N/A errors.
+        .set_cell_formula("Sheet1", "B10", "=ISNA(1/0)")
+        .unwrap();
 
     assert_eq!(
         engine.bytecode_program_count(),
-        9,
+        10,
         "expected all formulas to compile to bytecode"
     );
 
@@ -1709,6 +1713,7 @@ fn bytecode_backend_matches_ast_for_common_logical_error_functions() {
         ("=NA()", "B6"),
         ("=ISERROR(1/0)", "B7"),
         ("=ISNA(NA())", "B8"),
+        ("=ISNA(1/0)", "B10"),
     ] {
         assert_engine_matches_ast(&engine, formula, cell);
     }
@@ -1738,10 +1743,14 @@ fn bytecode_backend_matches_ast_for_logical_error_functions_with_error_literals(
     engine
         .set_cell_formula("Sheet1", "A7", "=IF(#N/A, 1, 2)")
         .unwrap();
+    engine
+        // ISNA must not propagate non-#N/A error literals.
+        .set_cell_formula("Sheet1", "A8", "=ISNA(#DIV/0!)")
+        .unwrap();
 
     assert_eq!(
         engine.bytecode_program_count(),
-        7,
+        8,
         "expected all formulas to compile to bytecode"
     );
 
@@ -1755,6 +1764,7 @@ fn bytecode_backend_matches_ast_for_logical_error_functions_with_error_literals(
         ("=IFNA(#N/A, 7)", "A5"),
         ("=IFNA(#DIV/0!, 7)", "A6"),
         ("=IF(#N/A, 1, 2)", "A7"),
+        ("=ISNA(#DIV/0!)", "A8"),
     ] {
         assert_engine_matches_ast(&engine, formula, cell);
     }

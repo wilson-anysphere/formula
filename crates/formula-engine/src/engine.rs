@@ -6660,7 +6660,8 @@ fn bytecode_expr_is_eligible_inner(
                 })
             }
             bytecode::ast::Function::And | bytecode::ast::Function::Or | bytecode::ast::Function::Xor => {
-                if args.is_empty() {
+                // Excel limits AND/OR/XOR to 255 arguments.
+                if args.is_empty() || args.len() > 255 {
                     return false;
                 }
                 args.iter()
