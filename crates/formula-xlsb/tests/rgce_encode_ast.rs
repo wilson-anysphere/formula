@@ -115,7 +115,7 @@ fn ast_encoder_roundtrips_sheet_range_ref() {
     assert!(encoded.rgcb.is_empty());
 
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
-    assert_eq!(decoded, "SUM(Sheet1:Sheet3!A1)");
+    assert_eq!(decoded, "SUM('Sheet1:Sheet3'!A1)");
 }
 
 #[test]
@@ -203,4 +203,53 @@ fn ast_encoder_encodes_workbook_defined_name_function_call_via_ptgname() {
 
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
     assert_eq!(decoded, "MyLambda(1,2)");
+}
+
+#[test]
+fn ast_encoder_encodes_sheet_scoped_defined_name_function_call_via_call_expr() {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_sheet_name("Sheet2", "MyLocalLambda", 2);
+
+    let encoded =
+        encode_rgce_with_context_ast("=Sheet2!MyLocalLambda(1,2)", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    // args..., PtgName(func), PtgFuncVar(argc+1, 0x00FF)
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x1E, 0x01, 0x00, // 1
+            0x1E, 0x02, 0x00, // 2
+            0x23, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, // PtgName(nameId=2)
+            0x22, 0x03, 0xFF, 0x00, // PtgFuncVar(argc=3, iftab=0x00FF)
+        ]
+    );
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "Sheet2!MyLocalLambda(1,2)");
+}
+
+#[test]
+fn ast_encoder_encodes_cell_lambda_call() {
+    let ctx = WorkbookContext::default();
+
+    let encoded =
+        encode_rgce_with_context_ast("=A1(1)", &ctx, CellCoord::new(0, 0)).expect("encode");
+    assert!(encoded.rgcb.is_empty());
+
+    // arg..., PtgRef(callee), PtgFuncVar(argc+1, 0x00FF)
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x1E, 0x01, 0x00, // 1
+            0x24, // PtgRef
+            0x00, 0x00, 0x00, 0x00, // row=0
+            0x00, 0xC0, // col=A with row/col relative flags
+            0x22, 0x02, 0xFF, 0x00, // PtgFuncVar(argc=2, iftab=0x00FF)
+        ]
+    );
+
+    let decoded = decode_rgce(&encoded.rgce).expect("decode");
+    assert_eq!(decoded, "A1(1)");
 }

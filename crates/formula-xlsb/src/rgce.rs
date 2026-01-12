@@ -29,7 +29,11 @@ pub enum DecodeError {
     /// A ptg referenced a constant we don't know how to display.
     InvalidConstant { offset: usize, ptg: u8, value: u8 },
     /// Decoding exceeded the maximum output size derived from the input length.
-    OutputTooLarge { offset: usize, ptg: u8, max_len: usize },
+    OutputTooLarge {
+        offset: usize,
+        ptg: u8,
+        max_len: usize,
+    },
     /// After decoding, the expression stack didn't contain exactly one item.
     StackNotSingular {
         offset: usize,
@@ -591,12 +595,18 @@ fn decode_rgce_impl(
             // Binary operators.
             0x03..=0x11 => {
                 let Some(op) = op_str(ptg) else {
-                    return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
+                    return Err(DecodeError::UnknownPtg {
+                        offset: ptg_offset,
+                        ptg,
+                    });
                 };
                 let prec = binary_precedence(ptg).expect("precedence for binary ops");
 
                 if stack.len() < 2 {
-                    return Err(DecodeError::StackUnderflow { offset: ptg_offset, ptg });
+                    return Err(DecodeError::StackUnderflow {
+                        offset: ptg_offset,
+                        ptg,
+                    });
                 }
                 let right = stack.pop().expect("len checked");
                 let left = stack.pop().expect("len checked");
@@ -627,9 +637,10 @@ fn decode_rgce_impl(
             // Unary +/-.
             0x12 | 0x13 => {
                 let op = if ptg == 0x12 { "+" } else { "-" };
-                let expr = stack
-                    .pop()
-                    .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
+                let expr = stack.pop().ok_or(DecodeError::StackUnderflow {
+                    offset: ptg_offset,
+                    ptg,
+                })?;
                 let prec = 70;
                 let inner = if expr.precedence < prec && !expr.is_missing {
                     format!("({})", expr.text)
@@ -645,9 +656,10 @@ fn decode_rgce_impl(
             }
             // Percent postfix.
             0x14 => {
-                let expr = stack
-                    .pop()
-                    .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
+                let expr = stack.pop().ok_or(DecodeError::StackUnderflow {
+                    offset: ptg_offset,
+                    ptg,
+                })?;
                 let prec = 60;
                 let inner = if expr.precedence < prec && !expr.is_missing {
                     format!("({})", expr.text)
@@ -663,9 +675,10 @@ fn decode_rgce_impl(
             }
             // Spill range postfix (`#`).
             PTG_SPILL => {
-                let expr = stack
-                    .pop()
-                    .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
+                let expr = stack.pop().ok_or(DecodeError::StackUnderflow {
+                    offset: ptg_offset,
+                    ptg,
+                })?;
                 let prec = 60;
                 let inner = if expr.precedence < prec && !expr.is_missing {
                     format!("({})", expr.text)
@@ -681,9 +694,10 @@ fn decode_rgce_impl(
             }
             // Explicit parentheses.
             0x15 => {
-                let expr = stack
-                    .pop()
-                    .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
+                let expr = stack.pop().ok_or(DecodeError::StackUnderflow {
+                    offset: ptg_offset,
+                    ptg,
+                })?;
                 stack.push(ExprFragment {
                     text: format!("({})", expr.text),
                     precedence: 100,
@@ -756,9 +770,10 @@ fn decode_rgce_impl(
                 const T_ATTR_SEMI: u8 = 0x80;
 
                 if grbit & T_ATTR_SUM != 0 {
-                    let a = stack
-                        .pop()
-                        .ok_or(DecodeError::StackUnderflow { offset: ptg_offset, ptg })?;
+                    let a = stack.pop().ok_or(DecodeError::StackUnderflow {
+                        offset: ptg_offset,
+                        ptg,
+                    })?;
                     stack.push(format_function_call("SUM", vec![a]));
                 } else if grbit & T_ATTR_CHOOSE != 0 {
                     // `tAttrChoose` is followed by a jump table of `u16` offsets used for
@@ -910,12 +925,8 @@ fn decode_rgce_impl(
 
                 let row_first0 =
                     u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
-                let row_last0 = u32::from_le_bytes([
-                    rgce[i + 4],
-                    rgce[i + 5],
-                    rgce[i + 6],
-                    rgce[i + 7],
-                ]);
+                let row_last0 =
+                    u32::from_le_bytes([rgce[i + 4], rgce[i + 5], rgce[i + 6], rgce[i + 7]]);
                 let col_first = u16::from_le_bytes([rgce[i + 8], rgce[i + 9]]);
                 let col_last = u16::from_le_bytes([rgce[i + 10], rgce[i + 11]]);
                 i += 12;
@@ -1009,7 +1020,10 @@ fn decode_rgce_impl(
                     });
                 }
                 let Some(base) = base else {
-                    return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
+                    return Err(DecodeError::UnknownPtg {
+                        offset: ptg_offset,
+                        ptg,
+                    });
                 };
 
                 let row_off =
@@ -1042,17 +1056,16 @@ fn decode_rgce_impl(
                     });
                 }
                 let Some(base) = base else {
-                    return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
+                    return Err(DecodeError::UnknownPtg {
+                        offset: ptg_offset,
+                        ptg,
+                    });
                 };
 
                 let row_first_off =
                     i32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]) as i64;
-                let row_last_off = i32::from_le_bytes([
-                    rgce[i + 4],
-                    rgce[i + 5],
-                    rgce[i + 6],
-                    rgce[i + 7],
-                ]) as i64;
+                let row_last_off =
+                    i32::from_le_bytes([rgce[i + 4], rgce[i + 5], rgce[i + 6], rgce[i + 7]]) as i64;
                 let col_first_off = i16::from_le_bytes([rgce[i + 8], rgce[i + 9]]) as i64;
                 let col_last_off = i16::from_le_bytes([rgce[i + 10], rgce[i + 11]]) as i64;
                 i += 12;
@@ -1117,7 +1130,10 @@ fn decode_rgce_impl(
                 }
 
                 let Some(ctx) = ctx else {
-                    return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
+                    return Err(DecodeError::UnknownPtg {
+                        offset: ptg_offset,
+                        ptg,
+                    });
                 };
 
                 let ixti = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
@@ -1129,12 +1145,8 @@ fn decode_rgce_impl(
                     .extern_sheet_target(ixti)
                     .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
                 let prefix = match workbook {
-                    None => {
-                        format_sheet_prefix(first, last)
-                    }
-                    Some(book) => {
-                        format_external_sheet_prefix(book, first, last)
-                    }
+                    None => format_sheet_prefix(first, last),
+                    Some(book) => format_external_sheet_prefix(book, first, last),
                 };
                 let cell = format_cell_ref_from_field(row0, col_field);
                 stack.push(ExprFragment::new(format!("{prefix}{cell}")));
@@ -1151,7 +1163,10 @@ fn decode_rgce_impl(
                 }
 
                 let Some(ctx) = ctx else {
-                    return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
+                    return Err(DecodeError::UnknownPtg {
+                        offset: ptg_offset,
+                        ptg,
+                    });
                 };
 
                 let ixti = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
@@ -1167,12 +1182,8 @@ fn decode_rgce_impl(
                     .extern_sheet_target(ixti)
                     .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
                 let prefix = match workbook {
-                    None => {
-                        format_sheet_prefix(first, last)
-                    }
-                    Some(book) => {
-                        format_external_sheet_prefix(book, first, last)
-                    }
+                    None => format_sheet_prefix(first, last),
+                    Some(book) => format_external_sheet_prefix(book, first, last),
                 };
 
                 let a = format_cell_ref_from_field(row_first0, col_first);
@@ -1240,17 +1251,22 @@ fn decode_rgce_impl(
                 }
 
                 let Some(ctx) = ctx else {
-                    return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
+                    return Err(DecodeError::UnknownPtg {
+                        offset: ptg_offset,
+                        ptg,
+                    });
                 };
 
-                let name_id =
-                    u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
+                let name_id = u32::from_le_bytes([rgce[i], rgce[i + 1], rgce[i + 2], rgce[i + 3]]);
                 i += 4;
                 i += 2; // reserved
 
                 let def = ctx
                     .name_definition(name_id)
-                    .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
+                    .ok_or(DecodeError::UnknownPtg {
+                        offset: ptg_offset,
+                        ptg,
+                    })?;
 
                 let is_value_class = (ptg & 0x60) == 0x40;
 
@@ -1292,7 +1308,10 @@ fn decode_rgce_impl(
                 }
 
                 let Some(ctx) = ctx else {
-                    return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
+                    return Err(DecodeError::UnknownPtg {
+                        offset: ptg_offset,
+                        ptg,
+                    });
                 };
 
                 let ixti = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
@@ -1301,7 +1320,10 @@ fn decode_rgce_impl(
 
                 let txt = ctx
                     .format_namex(ixti, name_index)
-                    .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
+                    .ok_or(DecodeError::UnknownPtg {
+                        offset: ptg_offset,
+                        ptg,
+                    })?;
                 stack.push(ExprFragment::new(txt));
             }
             // PtgFunc: [iftab: u16] (argument count is implicit and fixed for the function).
@@ -1318,15 +1340,24 @@ fn decode_rgce_impl(
                 let iftab = u16::from_le_bytes([rgce[i], rgce[i + 1]]);
                 i += 2;
 
-                let spec = formula_biff::function_spec_from_id(iftab)
-                    .ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
+                let spec =
+                    formula_biff::function_spec_from_id(iftab).ok_or(DecodeError::UnknownPtg {
+                        offset: ptg_offset,
+                        ptg,
+                    })?;
                 if spec.min_args != spec.max_args {
-                    return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg });
+                    return Err(DecodeError::UnknownPtg {
+                        offset: ptg_offset,
+                        ptg,
+                    });
                 }
 
                 let argc = spec.min_args as usize;
                 if stack.len() < argc {
-                    return Err(DecodeError::StackUnderflow { offset: ptg_offset, ptg });
+                    return Err(DecodeError::StackUnderflow {
+                        offset: ptg_offset,
+                        ptg,
+                    });
                 }
 
                 let mut args = Vec::with_capacity(argc);
@@ -1352,14 +1383,20 @@ fn decode_rgce_impl(
                 i += 3;
 
                 if stack.len() < argc {
-                    return Err(DecodeError::StackUnderflow { offset: ptg_offset, ptg });
+                    return Err(DecodeError::StackUnderflow {
+                        offset: ptg_offset,
+                        ptg,
+                    });
                 }
 
                 // Excel uses a sentinel function id for user-defined functions: the top-of-stack
                 // item is the function name (typically from `PtgNameX`), followed by args.
                 if iftab == 0x00FF {
                     if argc == 0 {
-                        return Err(DecodeError::StackUnderflow { offset: ptg_offset, ptg });
+                        return Err(DecodeError::StackUnderflow {
+                            offset: ptg_offset,
+                            ptg,
+                        });
                     }
 
                     let func_name = stack.pop().expect("len checked").text;
@@ -1370,8 +1407,10 @@ fn decode_rgce_impl(
                     args.reverse();
                     stack.push(format_function_call(&func_name, args));
                 } else {
-                    let name =
-                        function_name(iftab).ok_or(DecodeError::UnknownPtg { offset: ptg_offset, ptg })?;
+                    let name = function_name(iftab).ok_or(DecodeError::UnknownPtg {
+                        offset: ptg_offset,
+                        ptg,
+                    })?;
 
                     let mut args = Vec::with_capacity(argc);
                     for _ in 0..argc {
@@ -1381,13 +1420,15 @@ fn decode_rgce_impl(
                     stack.push(format_function_call(name, args));
                 }
             }
-            _ => return Err(DecodeError::UnknownPtg { offset: ptg_offset, ptg }),
+            _ => {
+                return Err(DecodeError::UnknownPtg {
+                    offset: ptg_offset,
+                    ptg,
+                })
+            }
         }
 
-        if stack
-            .last()
-            .is_some_and(|s| s.text.len() > max_len)
-        {
+        if stack.last().is_some_and(|s| s.text.len() > max_len) {
             return Err(DecodeError::OutputTooLarge {
                 offset: ptg_offset,
                 ptg,
@@ -1655,8 +1696,8 @@ mod encode_ast {
     use super::{
         error_code_from_literal, ptg_with_class, ArrayConst, ArrayElem, CellCoord, EncodeError,
         EncodedRgce, PtgClass, WorkbookContext, COL_INDEX_MASK, COL_RELATIVE_MASK, PTG_AREA,
-        PTG_AREA3D, PTG_FUNCVAR, PTG_NAME, PTG_NAMEX, PTG_REF, PTG_REF3D, PTG_SPILL, PTG_UPLUS,
-        PTG_UMINUS, ROW_RELATIVE_MASK,
+        PTG_AREA3D, PTG_FUNCVAR, PTG_NAME, PTG_NAMEX, PTG_REF, PTG_REF3D, PTG_SPILL, PTG_UMINUS,
+        PTG_UPLUS, ROW_RELATIVE_MASK,
     };
 
     use formula_engine as fe;
@@ -1709,7 +1750,10 @@ mod encode_ast {
         base: CellCoord,
     ) -> Result<EncodedRgce, EncodeError> {
         let ast = fe::parse_formula(formula, fe::ParseOptions::default()).map_err(|e| {
-            EncodeError::Parse(format!("{} (span {}..{})", e.message, e.span.start, e.span.end))
+            EncodeError::Parse(format!(
+                "{} (span {}..{})",
+                e.message, e.span.start, e.span.end
+            ))
         })?;
 
         let mut rgce = Vec::new();
@@ -1777,12 +1821,46 @@ mod encode_ast {
                         emit_expr(arg, ctx, base, rgce, rgcb)?;
                     }
                 }
-                emit_function_call(&call.name, call.args.len(), ctx, rgce)?;
+                match emit_function_call(&call.name, call.args.len(), ctx, rgce) {
+                    Ok(()) => {}
+                    Err(EncodeError::UnknownFunction { .. }) => {
+                        // `formula-engine` parses some callable-reference patterns like `A1(1)`
+                        // as a `FunctionCall` with the name `A1`. In Excel this syntax is used to
+                        // call a cell containing a `LAMBDA`.
+                        //
+                        // If we can't resolve the identifier as a built-in function, extern name,
+                        // or defined name, treat it as a cell reference and encode using the
+                        // UDF sentinel (iftab=255) with a `PtgRef` callee.
+                        if let Some(callee) = cell_ref_info_from_function_name(&call.name)? {
+                            emit_cell_ref_info(&callee, ctx, rgce, PtgClass::Ref)?;
+                            emit_call_udf_sentinel(call.args.len(), rgce)?;
+                        } else {
+                            return Err(EncodeError::UnknownFunction {
+                                name: call.name.name_upper.clone(),
+                            });
+                        }
+                    }
+                    Err(e) => return Err(e),
+                }
             }
-            fe::Expr::Call(_) => {
-                return Err(EncodeError::Unsupported(
-                    "call expressions (e.g. LAMBDA invocation)",
-                ))
+            fe::Expr::Call(call) => {
+                // Encode "callable expression" invocations such as:
+                // - `Sheet1!MyLambda(1,2)` (sheet-scoped defined name call)
+                // - `A1(3)` (cell containing a LAMBDA)
+                // - `LAMBDA(x,x+1)(3)` (inline lambda invocation)
+                //
+                // BIFF uses the UDF sentinel (iftab=255) with the "function name" stored as the
+                // top-of-stack item (callee expression) immediately before `PtgFuncVar`.
+                for arg in &call.args {
+                    if matches!(arg, fe::Expr::Missing) {
+                        rgce.push(PTG_MISS_ARG);
+                    } else {
+                        emit_expr(arg, ctx, base, rgce, rgcb)?;
+                    }
+                }
+
+                emit_expr(&call.callee, ctx, base, rgce, rgcb)?;
+                emit_call_udf_sentinel(call.args.len(), rgce)?;
             }
             fe::Expr::Unary(u) => match u.op {
                 fe::UnaryOp::ImplicitIntersection => {
@@ -1830,7 +1908,9 @@ mod encode_ast {
             },
             fe::Expr::ColRef(_) => return Err(EncodeError::Unsupported("column references")),
             fe::Expr::RowRef(_) => return Err(EncodeError::Unsupported("row references")),
-            fe::Expr::StructuredRef(_) => return Err(EncodeError::Unsupported("structured references")),
+            fe::Expr::StructuredRef(_) => {
+                return Err(EncodeError::Unsupported("structured references"))
+            }
         }
 
         Ok(())
@@ -1922,7 +2002,10 @@ mod encode_ast {
         }
     }
 
-    fn cell_ref_info_from_cell_ref(r: &fe::CellRef, base: CellCoord) -> Result<CellRefInfo, EncodeError> {
+    fn cell_ref_info_from_cell_ref(
+        r: &fe::CellRef,
+        base: CellCoord,
+    ) -> Result<CellRefInfo, EncodeError> {
         let (row, abs_row) = coord_to_a1_index(&r.row, base.row)?;
         let (col, abs_col) = coord_to_a1_index(&r.col, base.col)?;
         let sheet = sheet_spec_from_ref_prefix(&r.workbook, &r.sheet);
@@ -1992,7 +2075,9 @@ mod encode_ast {
             SheetSpec::Current => {
                 rgce.push(ptg_with_class(PTG_REF, class));
                 rgce.extend_from_slice(&r.row.to_le_bytes());
-                rgce.extend_from_slice(&encode_col_field(r.col, r.abs_row, r.abs_col).to_le_bytes());
+                rgce.extend_from_slice(
+                    &encode_col_field(r.col, r.abs_row, r.abs_col).to_le_bytes(),
+                );
             }
             SheetSpec::Single(sheet) => {
                 let ixti = ctx
@@ -2001,7 +2086,9 @@ mod encode_ast {
                 rgce.push(ptg_with_class(PTG_REF3D, class));
                 rgce.extend_from_slice(&ixti.to_le_bytes());
                 rgce.extend_from_slice(&r.row.to_le_bytes());
-                rgce.extend_from_slice(&encode_col_field(r.col, r.abs_row, r.abs_col).to_le_bytes());
+                rgce.extend_from_slice(
+                    &encode_col_field(r.col, r.abs_row, r.abs_col).to_le_bytes(),
+                );
             }
             SheetSpec::Range(first, last) => {
                 let ixti = ctx
@@ -2010,7 +2097,9 @@ mod encode_ast {
                 rgce.push(ptg_with_class(PTG_REF3D, class));
                 rgce.extend_from_slice(&ixti.to_le_bytes());
                 rgce.extend_from_slice(&r.row.to_le_bytes());
-                rgce.extend_from_slice(&encode_col_field(r.col, r.abs_row, r.abs_col).to_le_bytes());
+                rgce.extend_from_slice(
+                    &encode_col_field(r.col, r.abs_row, r.abs_col).to_le_bytes(),
+                );
             }
         }
         Ok(())
@@ -2120,9 +2209,8 @@ mod encode_ast {
         let upper = name.name_upper.as_str();
 
         if let Some(iftab) = formula_biff::function_name_to_id(upper).filter(|id| *id != 0x00FF) {
-            let spec = formula_biff::function_spec_from_id(iftab).ok_or_else(|| {
-                EncodeError::Parse(format!("unknown function id: {iftab}"))
-            })?;
+            let spec = formula_biff::function_spec_from_id(iftab)
+                .ok_or_else(|| EncodeError::Parse(format!("unknown function id: {iftab}")))?;
 
             if argc < spec.min_args as usize || argc > spec.max_args as usize {
                 return Err(EncodeError::Parse(format!(
@@ -2193,6 +2281,81 @@ mod encode_ast {
         })
     }
 
+    fn emit_call_udf_sentinel(arg_count: usize, rgce: &mut Vec<u8>) -> Result<(), EncodeError> {
+        let argc_total = arg_count
+            .checked_add(1)
+            .ok_or_else(|| EncodeError::Parse("too many function arguments".to_string()))?;
+        let argc_total_u8: u8 = argc_total
+            .try_into()
+            .map_err(|_| EncodeError::Parse("too many function arguments".to_string()))?;
+
+        rgce.push(PTG_FUNCVAR);
+        rgce.push(argc_total_u8);
+        rgce.extend_from_slice(&0x00FFu16.to_le_bytes());
+        Ok(())
+    }
+
+    fn cell_ref_info_from_function_name(
+        name: &fe::FunctionName,
+    ) -> Result<Option<CellRefInfo>, EncodeError> {
+        let s = name.name_upper.as_str();
+
+        let mut chars = s.chars().peekable();
+        let mut col_letters = String::new();
+        while let Some(&ch) = chars.peek() {
+            if ch.is_ascii_alphabetic() {
+                col_letters.push(ch);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        if col_letters.is_empty() {
+            return Ok(None);
+        }
+
+        let mut row_digits = String::new();
+        while let Some(&ch) = chars.peek() {
+            if ch.is_ascii_digit() {
+                row_digits.push(ch);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        if row_digits.is_empty() {
+            return Ok(None);
+        }
+        if chars.next().is_some() {
+            // Trailing characters => not a plain A1 reference.
+            return Ok(None);
+        }
+
+        let col = match super::col_from_a1(&col_letters) {
+            Some(v) => v,
+            None => return Ok(None),
+        };
+        let row1: u32 = match row_digits.parse() {
+            Ok(v) if v != 0 => v,
+            _ => return Ok(None),
+        };
+        let row = row1 - 1;
+
+        // Keep bounds aligned with BIFF12's allowed grid size.
+        const MAX_ROW: u32 = 1_048_575;
+        if row > MAX_ROW || col > COL_INDEX_MASK as u32 {
+            return Ok(None);
+        }
+
+        Ok(Some(CellRefInfo {
+            sheet: SheetSpec::Current,
+            row,
+            col,
+            abs_row: false,
+            abs_col: false,
+        }))
+    }
+
     fn coord_to_a1_index(coord: &fe::Coord, base_axis: u32) -> Result<(u32, bool), EncodeError> {
         match coord {
             fe::Coord::A1 { index, abs } => Ok((*index, *abs)),
@@ -2221,11 +2384,15 @@ mod encode_ast {
 
     fn array_literal_to_const(arr: &fe::ArrayLiteral) -> Result<ArrayConst, EncodeError> {
         if arr.rows.is_empty() {
-            return Err(EncodeError::Parse("array literal cannot be empty".to_string()));
+            return Err(EncodeError::Parse(
+                "array literal cannot be empty".to_string(),
+            ));
         }
         let cols = arr.rows[0].len();
         if cols == 0 {
-            return Err(EncodeError::Parse("array literal cannot be empty".to_string()));
+            return Err(EncodeError::Parse(
+                "array literal cannot be empty".to_string(),
+            ));
         }
         if arr.rows.iter().any(|r| r.len() != cols) {
             return Err(EncodeError::Parse(
@@ -2309,10 +2476,7 @@ pub fn encode_rgce_with_context(
     let mut rgce = Vec::new();
     let mut rgcb = Vec::new();
     emit_expr(&expr, ctx, &mut rgce, &mut rgcb)?;
-    Ok(EncodedRgce {
-        rgce,
-        rgcb,
-    })
+    Ok(EncodedRgce { rgce, rgcb })
 }
 
 const PTG_ADD: u8 = 0x03;
@@ -2360,10 +2524,20 @@ enum Expr {
     Ref(Ref),
     Name(NameRef),
     Array(ArrayConst),
-    Func { name: String, args: Vec<Expr> },
+    Func {
+        name: String,
+        args: Vec<Expr>,
+    },
     SpillRange(Box<Expr>),
-    Unary { op: UnaryOp, expr: Box<Expr> },
-    Binary { op: BinaryOp, left: Box<Expr>, right: Box<Expr> },
+    Unary {
+        op: UnaryOp,
+        expr: Box<Expr>,
+    },
+    Binary {
+        op: BinaryOp,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2496,7 +2670,11 @@ fn emit_number(n: f64, out: &mut Vec<u8>) {
     }
 }
 
-fn emit_array(array: &ArrayConst, rgce: &mut Vec<u8>, rgcb: &mut Vec<u8>) -> Result<(), EncodeError> {
+fn emit_array(
+    array: &ArrayConst,
+    rgce: &mut Vec<u8>,
+    rgcb: &mut Vec<u8>,
+) -> Result<(), EncodeError> {
     rgce.push(ptg_with_class(PTG_ARRAY, PtgClass::Array));
     rgce.extend_from_slice(&[0u8; 7]); // reserved
     encode_array_constant(array, rgcb)
@@ -2506,7 +2684,9 @@ fn encode_array_constant(array: &ArrayConst, rgcb: &mut Vec<u8>) -> Result<(), E
     let rows = array.rows.len();
     let cols = array.rows.first().map(|r| r.len()).unwrap_or(0);
     if rows == 0 || cols == 0 {
-        return Err(EncodeError::Parse("array constant cannot be empty".to_string()));
+        return Err(EncodeError::Parse(
+            "array constant cannot be empty".to_string(),
+        ));
     }
     if array.rows.iter().any(|r| r.len() != cols) {
         return Err(EncodeError::Parse(
@@ -2533,10 +2713,9 @@ fn encode_array_constant(array: &ArrayConst, rgcb: &mut Vec<u8>) -> Result<(), E
                 ArrayElem::Str(s) => {
                     rgcb.push(0x02);
                     let units: Vec<u16> = s.encode_utf16().collect();
-                    let len: u16 = units
-                        .len()
-                        .try_into()
-                        .map_err(|_| EncodeError::Parse("array string literal is too long".to_string()))?;
+                    let len: u16 = units.len().try_into().map_err(|_| {
+                        EncodeError::Parse("array string literal is too long".to_string())
+                    })?;
                     rgcb.extend_from_slice(&len.to_le_bytes());
                     for u in units {
                         rgcb.extend_from_slice(&u.to_le_bytes());
@@ -2571,7 +2750,9 @@ fn emit_func(
     // avoid treating `iftab=0x00FF` as a built-in here.
     if let Some(iftab) = formula_biff::function_name_to_id(&upper).filter(|id| *id != 0x00FF) {
         if argc > u8::MAX as usize {
-            return Err(EncodeError::Parse("too many function arguments".to_string()));
+            return Err(EncodeError::Parse(
+                "too many function arguments".to_string(),
+            ));
         }
         out.push(PTG_FUNCVAR);
         out.push(argc as u8);
@@ -2585,7 +2766,9 @@ fn emit_func(
             .checked_add(1)
             .ok_or_else(|| EncodeError::Parse("too many function arguments".to_string()))?;
         if argc_total > u8::MAX as usize {
-            return Err(EncodeError::Parse("too many function arguments".to_string()));
+            return Err(EncodeError::Parse(
+                "too many function arguments".to_string(),
+            ));
         }
 
         out.push(PTG_NAMEX);
@@ -2619,7 +2802,12 @@ fn emit_name(
     Ok(())
 }
 
-fn emit_ref(r: &Ref, ctx: &WorkbookContext, out: &mut Vec<u8>, class: PtgClass) -> Result<(), EncodeError> {
+fn emit_ref(
+    r: &Ref,
+    ctx: &WorkbookContext,
+    out: &mut Vec<u8>,
+    class: PtgClass,
+) -> Result<(), EncodeError> {
     match (&r.sheet, &r.kind) {
         (None, RefKind::Cell(cell)) => {
             out.push(ptg_with_class(PTG_REF, class));
@@ -2937,7 +3125,7 @@ impl<'a> FormulaParser<'a> {
     fn parse_error_literal(&mut self) -> Result<u8, String> {
         let start = self.pos;
         while let Some(ch) = self.peek_char() {
-            if matches!(ch, ',' | ';' | '}' ) || ch.is_whitespace() {
+            if matches!(ch, ',' | ';' | '}') || ch.is_whitespace() {
                 break;
             }
             self.next_char();
@@ -2980,7 +3168,10 @@ impl<'a> FormulaParser<'a> {
             self.next_char();
             Ok(Expr::Func { name: ident, args })
         } else {
-            Ok(Expr::Name(NameRef { sheet: None, name: ident }))
+            Ok(Expr::Name(NameRef {
+                sheet: None,
+                name: ident,
+            }))
         }
     }
 
@@ -3032,7 +3223,10 @@ impl<'a> FormulaParser<'a> {
             SheetSpec::Range(_, _) => None,
         };
 
-        Ok(Some(Expr::Name(NameRef { sheet: sheet_name, name })))
+        Ok(Some(Expr::Name(NameRef {
+            sheet: sheet_name,
+            name,
+        })))
     }
 
     fn try_parse_ref(&mut self, sheet: Option<SheetSpec>) -> Result<Option<Ref>, String> {
@@ -3047,9 +3241,15 @@ impl<'a> FormulaParser<'a> {
             let b = self
                 .parse_cell_ref()?
                 .ok_or_else(|| "expected cell reference after ':'".to_string())?;
-            return Ok(Some(Ref { sheet, kind: RefKind::Area(a, b) }));
+            return Ok(Some(Ref {
+                sheet,
+                kind: RefKind::Area(a, b),
+            }));
         }
-        Ok(Some(Ref { sheet, kind: RefKind::Cell(a) }))
+        Ok(Some(Ref {
+            sheet,
+            kind: RefKind::Cell(a),
+        }))
     }
 
     fn parse_number(&mut self) -> Result<Expr, String> {
@@ -3062,7 +3262,9 @@ impl<'a> FormulaParser<'a> {
             }
         }
         let s = &self.input[start..self.pos];
-        let n: f64 = s.parse().map_err(|_| format!("invalid number literal: {s}"))?;
+        let n: f64 = s
+            .parse()
+            .map_err(|_| format!("invalid number literal: {s}"))?;
         Ok(Expr::Number(n))
     }
 
@@ -3101,7 +3303,8 @@ impl<'a> FormulaParser<'a> {
             return Ok(None);
         }
 
-        let col = col_label_to_index(col_label).ok_or_else(|| "invalid column label".to_string())?;
+        let col =
+            col_label_to_index(col_label).ok_or_else(|| "invalid column label".to_string())?;
         let row1: u32 = row_str.parse().map_err(|_| "invalid row".to_string())?;
         if row1 == 0 {
             self.pos = start;
@@ -3114,7 +3317,12 @@ impl<'a> FormulaParser<'a> {
             return Ok(None);
         }
 
-        Ok(Some(CellRef { row, col, abs_row, abs_col }))
+        Ok(Some(CellRef {
+            row,
+            col,
+            abs_row,
+            abs_col,
+        }))
     }
 
     fn parse_sheet_name(&mut self) -> Result<Option<String>, String> {
