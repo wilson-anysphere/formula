@@ -9,6 +9,7 @@ import { createCollabVersioning, type CollabVersioning, type VersionRecord } fro
 import { createAIAuditPanel } from "./ai-audit/index.js";
 import { mountPythonPanel } from "./python/index.js";
 import { VbaMigratePanel } from "./vba-migrate/index.js";
+import { createMarketplacePanel } from "./marketplace/index.js";
 import { ExtensionPanelBody } from "../extensions/ExtensionPanelBody.js";
 import { ExtensionsPanel } from "../extensions/ExtensionsPanel.js";
 import type { ExtensionPanelBridge } from "../extensions/extensionPanelBridge.js";
@@ -21,6 +22,9 @@ import { buildVersionHistoryItems } from "./version-history/index.js";
 import { BranchManagerPanel, type Actor as BranchActor } from "./branch-manager/BranchManagerPanel.js";
 import { MergeBranchPanel } from "./branch-manager/MergeBranchPanel.js";
 import { BranchService, YjsBranchStore, applyDocumentStateToYjsDoc, yjsDocToDocumentState } from "../../../../packages/versioning/branches/src/index.js";
+import { getMarketplaceBaseUrl } from "../marketplace/getMarketplaceBaseUrl.js";
+import { MarketplaceClient } from "../../../web/src/marketplace/MarketplaceClient.js";
+import { WebExtensionManager } from "../../../web/src/marketplace/WebExtensionManager.js";
 
 function formatVersionTimestamp(timestampMs: number): string {
   try {
@@ -323,6 +327,68 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
   const reactPanels = new Map<string, ReactPanelInstance>();
   const domPanels = new Map<string, DomPanelInstance>();
 
+  // Marketplace wiring (lazy so desktop builds without a marketplace service don't
+  // eagerly touch IndexedDB / crypto).
+  let marketplaceClient: MarketplaceClient | null = null;
+  let marketplaceExtensionManager: WebExtensionManager | null = null;
+  let marketplaceExtensionHostManager:
+    | {
+        syncInstalledExtensions: () => Promise<void>;
+        reloadExtension: (id: string) => Promise<void>;
+        unloadExtension: (id: string) => Promise<void>;
+      }
+    | null = null;
+
+  function getMarketplaceServices() {
+    if (!marketplaceClient) {
+      marketplaceClient = new MarketplaceClient({ baseUrl: getMarketplaceBaseUrl() });
+    }
+
+    if (!marketplaceExtensionManager) {
+      marketplaceExtensionManager = new WebExtensionManager({
+        marketplaceClient,
+        host: (options.extensionHostManager?.host as any) ?? null,
+      });
+    }
+
+    if (!marketplaceExtensionHostManager) {
+      marketplaceExtensionHostManager = {
+        syncInstalledExtensions: async () => {
+          const manager = marketplaceExtensionManager!;
+          const installed = await manager.listInstalled();
+          for (const item of installed) {
+            // Best-effort: ignore failures to load individual extensions so the UI
+            // can keep going.
+            try {
+              if (manager.isLoaded(item.id)) continue;
+              // eslint-disable-next-line no-await-in-loop
+              await manager.loadInstalled(item.id);
+            } catch {
+              // ignore
+            }
+          }
+        },
+        reloadExtension: async (id: string) => {
+          const manager = marketplaceExtensionManager!;
+          if (manager.isLoaded(id)) {
+            await manager.unload(id);
+          }
+          await manager.loadInstalled(id);
+        },
+        unloadExtension: async (id: string) => {
+          const manager = marketplaceExtensionManager!;
+          await manager.unload(id);
+        },
+      };
+    }
+
+    return {
+      marketplaceClient,
+      extensionManager: marketplaceExtensionManager,
+      extensionHostManager: marketplaceExtensionHostManager,
+    };
+  }
+
   function renderReactPanel(panelId: string, body: HTMLDivElement, element: React.ReactElement) {
     let instance = reactPanels.get(panelId);
     if (!instance) {
@@ -436,6 +502,21 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
         body,
         <DataQueriesPanelContainer getDocumentController={options.getDocumentController} workbookId={options.workbookId} />,
       );
+      return;
+    }
+
+    if (panelId === PanelIds.MARKETPLACE) {
+      makeBodyFillAvailableHeight(body);
+      renderDomPanel(panelId, body, (container) => {
+        const services = getMarketplaceServices();
+        const panel = createMarketplacePanel({
+          container,
+          marketplaceClient: services.marketplaceClient,
+          extensionManager: services.extensionManager,
+          extensionHostManager: services.extensionHostManager,
+        });
+        return { container, dispose: panel.dispose };
+      });
       return;
     }
 

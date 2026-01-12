@@ -67,6 +67,18 @@ export default defineConfig({
       "@formula/extension-api": extensionApiEntry
     }
   },
+  build: {
+    // Desktop (Tauri/WebView) targets modern runtimes. Use a modern output target so
+    // optional dependencies (e.g. apache-arrow) can rely on top-level await without
+    // breaking production builds.
+    target: "es2022",
+    commonjsOptions: {
+      // `shared/` is CommonJS, but the desktop runtime imports ESM shims that depend on
+      // `shared/extension-package/core/v2-core.js`. Ensure Rollup runs the CommonJS
+      // transform on that file during production builds.
+      include: [/node_modules/, /shared[\\/]+extension-package[\\/]+core[\\/]+/],
+    },
+  },
   server: {
     port: 4174,
     strictPort: true,
