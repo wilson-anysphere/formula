@@ -583,10 +583,14 @@ fn dump_vm_cell_mappings(
 
     rows.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
+    let rv_to_rel_values: BTreeMap<u32, Vec<u32>> = find_part_case_insensitive(pkg, "xl/richData/richValue.xml")
+        .and_then(|(_name, bytes)| extract_rich_value_record_rel_values(&bytes).ok())
+        .unwrap_or_default();
+
     println!();
     println!("vm cell mappings (sheet, cell, vm -> rv -> target):");
     let max = 50usize;
-    for (idx, (sheet, cell, vm, rv, target)) in rows.into_iter().enumerate() {
+    for (idx, (sheet, cell, vm, rv, target)) in rows.iter().enumerate() {
         if idx >= max {
             println!("  ... (more omitted)");
             break;
@@ -594,6 +598,31 @@ fn dump_vm_cell_mappings(
         println!(
             "  {sheet}!{cell} vm={vm} -> rv={} -> {}",
             rv.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
+            target.clone().unwrap_or_else(|| "-".to_string())
+        );
+    }
+
+    // Machine-friendly output for quick copy/paste/grepping.
+    //
+    // Format:
+    //   sheet<TAB>cell<TAB>vm<TAB>rv<TAB>rel<TAB>target
+    println!();
+    println!("vm cell mappings (tsv):");
+    println!("sheet\tcell\tvm\trv\trel\ttarget");
+    for (idx, (sheet, cell, vm, rv, target)) in rows.into_iter().enumerate() {
+        if idx >= max {
+            println!("... (more omitted)");
+            break;
+        }
+
+        let rel = rv
+            .and_then(|rv| rv_to_rel_values.get(&rv))
+            .and_then(|rels| rels.first().copied());
+
+        println!(
+            "{sheet}\t{cell}\t{vm}\t{}\t{}\t{}",
+            rv.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
+            rel.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
             target.unwrap_or_else(|| "-".to_string())
         );
     }
@@ -745,6 +774,53 @@ fn extract_rich_value_record_rids(bytes: &[u8]) -> Result<BTreeMap<u32, Vec<Stri
 
         if !rids.is_empty() {
             out.insert(idx as u32, rids);
+        }
+    }
+
+    Ok(out)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn extract_rich_value_record_rel_values(
+    bytes: &[u8],
+) -> Result<BTreeMap<u32, Vec<u32>>, Box<dyn Error>> {
+    let xml = std::str::from_utf8(bytes)?;
+    let doc = roxmltree::Document::parse(xml)?;
+
+    let rv_nodes: Vec<roxmltree::Node<'_, '_>> = doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "rv")
+        .collect();
+    if rv_nodes.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let mut out: BTreeMap<u32, Vec<u32>> = BTreeMap::new();
+    for (idx, rv_node) in rv_nodes.into_iter().enumerate() {
+        let mut rels: Vec<u32> = Vec::new();
+        for node in rv_node.descendants() {
+            if !node.is_element() {
+                continue;
+            }
+            if node.tag_name().name() != "v" {
+                continue;
+            }
+            let kind = node.attribute("kind").unwrap_or_default();
+            if !kind.eq_ignore_ascii_case("rel") {
+                continue;
+            }
+            let Some(text) = node.text() else {
+                continue;
+            };
+            if let Ok(value) = text.trim().parse::<u32>() {
+                rels.push(value);
+            }
+        }
+
+        rels.sort();
+        rels.dedup();
+        if !rels.is_empty() {
+            out.insert(idx as u32, rels);
         }
     }
 
@@ -932,4 +1008,3 @@ fn local_name(name: &[u8]) -> &[u8] {
         None => name,
     }
 }
-
