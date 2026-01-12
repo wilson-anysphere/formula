@@ -164,6 +164,22 @@ fn extracts_signed_digest_from_spc_indirect_data_content_v2_sigdata_as_octet_wra
     assert_eq!(got.digest, source_hash);
 }
 
+#[test]
+fn v2_parser_rejects_plain_16_byte_octet_string_instead_of_sigdata() {
+    // Regression test: our V2 parser used to have an overly-permissive fallback that would accept
+    // *any* 16-byte OCTET STRING as the VBA project hash. This is unsafe for binding verification.
+    //
+    // Ensure we only accept properly shaped SigDataV1Serialized structures.
+    let plain_16 = (0u8..16).collect::<Vec<_>>();
+    let spc_v2 = build_spc_indirect_data_content_v2_with_sigdata_element(der_octet_string(&plain_16));
+    let pkcs7 = make_pkcs7_signed_message(&spc_v2);
+
+    assert!(
+        extract_vba_signature_signed_digest(&pkcs7).is_err(),
+        "expected digest extraction to fail for non-SigData payload"
+    );
+}
+
 fn build_minimal_vba_project_bin(module1: &[u8], signature_blob: Option<&[u8]>) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
