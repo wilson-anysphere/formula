@@ -7706,7 +7706,9 @@ export class SpreadsheetApp {
     // The WASM engine currently cannot resolve sheet-qualified references (e.g. `Sheet2!A1`),
     // so when multiple sheets exist we fall back to the in-process evaluator for *all* formulas
     // to keep dependent values consistent.
-    const useEngineCache = this.document.getSheetIds().length <= 1;
+    // Hot path: avoid allocating a fresh `string[]` on every render-time lookup.
+    const sheetCount = (this.document as any)?.model?.sheets?.size;
+    const useEngineCache = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
     if (useEngineCache) {
       // Hot path: shared-grid rendering calls this for *every* formula cell in view.
       // Avoid allocating A1/key strings on cache hits by using a numeric `{row,col}` cache.

@@ -111,6 +111,7 @@ describe("SpreadsheetApp computed-value cache", () => {
     };
 
     const app = new SpreadsheetApp(root, status);
+    const doc = app.getDocument() as any;
     const sheetId = app.getCurrentSheetId();
 
     const row = 0;
@@ -118,6 +119,7 @@ describe("SpreadsheetApp computed-value cache", () => {
     const key = row * 16_384 + col;
 
     const spy = vi.spyOn(selectionA1, "cellToA1");
+    const sheetIdsSpy = vi.spyOn(doc, "getSheetIds");
 
     // Seed the numeric computed-value cache directly.
     const byCoord = new Map<number, any>();
@@ -125,12 +127,14 @@ describe("SpreadsheetApp computed-value cache", () => {
     (app as any).computedValuesByCoord.set(sheetId, byCoord);
 
     spy.mockClear();
+    sheetIdsSpy.mockClear();
 
     for (let i = 0; i < 10_000; i += 1) {
       expect((app as any).getCellComputedValue({ row, col })).toBe(123);
     }
 
     expect(spy).not.toHaveBeenCalled();
+    expect(sheetIdsSpy).not.toHaveBeenCalled();
 
     // Sanity check: when the numeric cache entry is missing, we should fall back and
     // build an A1 address.
@@ -143,4 +147,3 @@ describe("SpreadsheetApp computed-value cache", () => {
     root.remove();
   });
 });
-
