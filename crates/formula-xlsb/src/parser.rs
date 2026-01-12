@@ -665,6 +665,14 @@ mod tests {
             classify_supbook_name("Book.xltm"),
             SupBookKind::ExternalWorkbook
         );
+        assert_eq!(
+            classify_supbook_name("Book.xlt"),
+            SupBookKind::ExternalWorkbook
+        );
+        assert_eq!(
+            classify_supbook_name("Book.xla"),
+            SupBookKind::ExternalWorkbook
+        );
     }
 
     #[test]
@@ -2594,6 +2602,8 @@ fn classify_supbook_name(raw_name: &str) -> SupBookKind {
     let name = raw_name.to_ascii_lowercase();
     if name.contains(['/', '\\'])
         || name.ends_with(".xls")
+        || name.ends_with(".xlt")
+        || name.ends_with(".xla")
         || name.ends_with(".xlsx")
         || name.ends_with(".xlsm")
         || name.ends_with(".xltx")
@@ -2616,6 +2626,8 @@ fn supbook_is_plausible(supbook: &SupBook) -> bool {
     let name = supbook.raw_name.to_ascii_lowercase();
     name.contains(['/', '\\'])
         || name.ends_with(".xls")
+        || name.ends_with(".xlt")
+        || name.ends_with(".xla")
         || name.ends_with(".xlsx")
         || name.ends_with(".xlsm")
         || name.ends_with(".xltx")
