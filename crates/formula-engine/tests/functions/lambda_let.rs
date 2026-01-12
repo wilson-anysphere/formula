@@ -17,6 +17,22 @@ fn let_can_bind_error_values() {
 }
 
 #[test]
+fn let_range_result_spills_values_and_compiles_to_bytecode_backend() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 10.0);
+    sheet.set("A2", 20.0);
+    sheet.set_formula("B1", "=LET(r,A1:A2,r)");
+
+    // Ensure LET can return range results (which then spill at the top level) without forcing an
+    // AST fallback.
+    assert_eq!(sheet.bytecode_program_count(), 1);
+
+    sheet.recalculate();
+    assert_eq!(sheet.get("B1"), Value::Number(10.0));
+    assert_eq!(sheet.get("B2"), Value::Number(20.0));
+}
+
+#[test]
 fn let_rejects_non_identifier_names() {
     let mut sheet = TestSheet::new();
     assert_eq!(sheet.eval("=LET(1,2,3)"), Value::Error(ErrorKind::Value));

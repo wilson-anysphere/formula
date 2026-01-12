@@ -686,6 +686,37 @@ fn vlookup_and_hlookup_compile_to_bytecode_backend_for_simple_range_tables() {
 }
 
 #[test]
+fn lookup_functions_compile_to_bytecode_backend_with_let_bound_ranges() {
+    let mut sheet = TestSheet::new();
+
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 2.0);
+    sheet.set("A3", 3.0);
+    sheet.set("B1", "a");
+    sheet.set("B2", "b");
+    sheet.set("B3", "c");
+
+    sheet.set("D1", 1.0);
+    sheet.set("E1", 2.0);
+    sheet.set("F1", 3.0);
+    sheet.set("D2", "a");
+    sheet.set("E2", "b");
+    sheet.set("F2", "c");
+
+    sheet.set_formula("C1", "=LET(t, A1:B3, VLOOKUP(2, t, 2, FALSE))");
+    sheet.set_formula("C2", "=LET(t, D1:F2, HLOOKUP(2, t, 2, FALSE))");
+    sheet.set_formula("C3", "=LET(a, A1:A3, MATCH(2, a, 0))");
+
+    assert_eq!(sheet.bytecode_program_count(), 3);
+
+    sheet.recalculate();
+
+    assert_eq!(sheet.get("C1"), Value::Text("b".to_string()));
+    assert_eq!(sheet.get("C2"), Value::Text("b".to_string()));
+    assert_eq!(sheet.get("C3"), Value::Number(2.0));
+}
+
+#[test]
 fn match_and_vlookup_approximate_treat_blanks_like_zero_or_empty_string() {
     let mut sheet = TestSheet::new();
 

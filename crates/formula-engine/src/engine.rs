@@ -7409,10 +7409,14 @@ fn bytecode_expr_is_eligible_inner(
                     return false;
                 }
 
-                let table_ok = matches!(
-                    args[1],
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
-                );
+                let table_ok = match &args[1] {
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
+                    bytecode::Expr::NameRef(name) => matches!(
+                        local_binding_kind(lexical_scopes, name),
+                        Some(BytecodeLocalBindingKind::Range)
+                    ),
+                    _ => false,
+                };
                 let lookup_ok = bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes);
                 let index_ok = bytecode_expr_is_eligible_inner(&args[2], false, false, lexical_scopes);
                 let range_lookup_ok = if args.len() == 4 {
@@ -7428,10 +7432,14 @@ fn bytecode_expr_is_eligible_inner(
                     return false;
                 }
 
-                let array_ok = matches!(
-                    args[1],
-                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
-                );
+                let array_ok = match &args[1] {
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
+                    bytecode::Expr::NameRef(name) => matches!(
+                        local_binding_kind(lexical_scopes, name),
+                        Some(BytecodeLocalBindingKind::Range)
+                    ),
+                    _ => false,
+                };
                 let lookup_ok = bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes);
                 let match_type_ok = if args.len() == 3 {
                     bytecode_expr_is_eligible_inner(&args[2], false, false, lexical_scopes)
