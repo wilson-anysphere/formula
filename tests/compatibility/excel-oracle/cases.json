@@ -34032,6 +34032,90 @@
         "error"
       ],
       "id": "err_name_98478a4250b7"
+    },
+    {
+      "formula": "=DAY(COUPNCD(DATE(2021,3,1),DATE(2021,8,31),2,0))",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPNCD",
+        "eom"
+      ],
+      "description": "COUPNCD end-of-month schedule restores month-end after February",
+      "id": "financial_coupncd_eom_4e3d20e2b4f0"
+    },
+    {
+      "formula": "=DAY(COUPPCD(DATE(2020,12,1),DATE(2021,8,31),2,0))",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPPCD",
+        "eom"
+      ],
+      "description": "COUPPCD end-of-month schedule restores month-end across February",
+      "id": "financial_couppcd_eom_4e851b0d9f01"
+    },
+    {
+      "formula": "=COUPNUM(DATE(2020,12,1),DATE(2021,8,31),2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPNUM",
+        "eom"
+      ],
+      "description": "COUPNUM counts remaining coupons on an end-of-month schedule",
+      "id": "financial_coupnum_eom_9c7c7cb1f2e8"
+    },
+    {
+      "formula": "=COUPDAYBS(DATE(2021,3,1),DATE(2021,8,31),2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYBS",
+        "eom"
+      ],
+      "description": "COUPDAYBS day-count in the current coupon period (EOM schedule)",
+      "id": "financial_coupdaybs_eom_0b8c03c2f3b5"
+    },
+    {
+      "formula": "=COUPDAYSNC(DATE(2021,3,1),DATE(2021,8,31),2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYSNC",
+        "eom"
+      ],
+      "description": "COUPDAYSNC days from settlement to next coupon date (EOM schedule)",
+      "id": "financial_coupdaysnc_eom_2b4ef86c77f3"
+    },
+    {
+      "formula": "=COUPDAYS(DATE(2021,3,1),DATE(2021,8,31),2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYS",
+        "eom"
+      ],
+      "description": "COUPDAYS days in coupon period (EOM schedule)",
+      "id": "financial_coupdays_eom_6b0e7dbb1dbe"
+    },
+    {
+      "formula": "=DAY(COUPPCD(DATE(2030,9,1),DATE(2031,2,28),2,0))",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPPCD",
+        "eom"
+      ],
+      "description": "COUPPCD EOM schedule restores month-end when maturity is Feb month-end (28th -> 31st)",
+      "id": "financial_couppcd_eom_maturity_feb_5a1134bb4f72"
     }
   ]
 }

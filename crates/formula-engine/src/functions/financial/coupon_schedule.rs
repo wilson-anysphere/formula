@@ -24,6 +24,24 @@ pub(crate) fn validate_serial(serial: i32, system: ExcelDateSystem) -> ExcelResu
     Ok(())
 }
 
+fn is_eom(date_serial: i32, system: ExcelDateSystem) -> ExcelResult<bool> {
+    Ok(date_time::eomonth(date_serial, 0, system)? == date_serial)
+}
+
+fn shift_coupon_months_eom(
+    anchor: i32,
+    months: i32,
+    eom: bool,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
+    let shifted = date_time::edate(anchor, months, system)?;
+    if eom {
+        date_time::eomonth(shifted, 0, system)
+    } else {
+        Ok(shifted)
+    }
+}
+
 fn coupon_period_months(frequency: i32) -> ExcelResult<i32> {
     match frequency {
         1 => Ok(12),
@@ -36,7 +54,12 @@ fn coupon_period_months(frequency: i32) -> ExcelResult<i32> {
 /// Previous coupon date (PCD), next coupon date (NCD), and number of coupons remaining (COUPNUM).
 ///
 /// Schedule is anchored at `maturity` and stepped backwards by `12/frequency` months using
-/// `EDATE` semantics.
+/// `EDATE` semantics, with Excel's end-of-month pinning rule:
+///
+/// If `maturity` is the last day of its month, Excel treats the schedule as end-of-month (EOM)
+/// and pins all coupon dates to month-end. This matters when `maturity` is month-end but not the
+/// 31st (e.g. Feb 28), because repeated `EDATE` offsets preserve the 28th/30th rather than
+/// restoring later month-ends (Aug 31, Nov 30, ...).
 pub(crate) fn coupon_pcd_ncd_num(
     settlement: i32,
     maturity: i32,
@@ -44,6 +67,7 @@ pub(crate) fn coupon_pcd_ncd_num(
     system: ExcelDateSystem,
 ) -> ExcelResult<(i32, i32, i32)> {
     let months = coupon_period_months(frequency)?;
+    let eom = is_eom(maturity, system)?;
     // IMPORTANT: Coupon schedules are anchored to `maturity` (not stepped iteratively).
     //
     // `EDATE` month-stepping is not invertible due to end-of-month clamping; if we step
@@ -54,14 +78,14 @@ pub(crate) fn coupon_pcd_ncd_num(
     for n in 1..=MAX_COUPON_STEPS {
         let n_i32 = n as i32;
         let months_back = n_i32.checked_mul(months).ok_or(ExcelError::Num)?;
-        let pcd = date_time::edate(maturity, -months_back, system)?;
+        let pcd = shift_coupon_months_eom(maturity, -months_back, eom, system)?;
 
         let ncd = if n == 1 {
             maturity
         } else {
             let prev_n = n_i32.checked_sub(1).ok_or(ExcelError::Num)?;
             let prev_months_back = prev_n.checked_mul(months).ok_or(ExcelError::Num)?;
-            date_time::edate(maturity, -prev_months_back, system)?
+            shift_coupon_months_eom(maturity, -prev_months_back, eom, system)?
         };
 
         if pcd <= settlement && settlement < ncd {
@@ -91,7 +115,8 @@ pub(crate) fn days_between(
 }
 
 /// Coupon-period length `E` (days) following Excel-compatible conventions:
-/// - basis 0/2/4: 360/frequency (constant)
+/// - basis 0/2: 360/frequency (constant)
+/// - basis 4: European 30/360 day count between coupon dates (variable)
 /// - basis 3: 365/frequency (constant)
 /// - basis 1: actual days between PCD and NCD (variable)
 pub(crate) fn coupon_period_e(
@@ -99,7 +124,7 @@ pub(crate) fn coupon_period_e(
     ncd: i32,
     frequency: i32,
     basis: i32,
-    _system: ExcelDateSystem,
+    system: ExcelDateSystem,
 ) -> ExcelResult<f64> {
     let freq = f64::from(frequency);
     if !freq.is_finite() || freq <= 0.0 {
@@ -108,7 +133,8 @@ pub(crate) fn coupon_period_e(
 
     let e = match basis {
         1 => (i64::from(ncd) - i64::from(pcd)) as f64,
-        0 | 2 | 4 => 360.0 / freq,
+        0 | 2 => 360.0 / freq,
+        4 => days_between(pcd, ncd, 4, system)? as f64,
         3 => 365.0 / freq,
         _ => return Err(ExcelError::Num),
     };
@@ -205,7 +231,9 @@ pub fn coupdaysnc(
     let (pcd, ncd, _n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
     // Excel's COUPDAYSNC is not always the same day-count convention as `days_between`.
     // For 30/360 bases, Excel treats the coupon period length `E` as a fixed 360/fraction,
-    // and computes DSC as the remaining portion of that modeled coupon period.
+    // and computes DSC as the remaining portion of that modeled coupon period. For European
+    // 30/360 (basis 4), Excel's modeled period length is the 30/360 day count between coupon
+    // dates, which can differ from 360/frequency around month ends.
     let dsc = match basis {
         0 | 4 => {
             let e = coupon_period_e(pcd, ncd, frequency, basis, system)?;

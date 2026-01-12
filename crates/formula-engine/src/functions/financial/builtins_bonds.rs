@@ -647,4 +647,3 @@ fn mduration_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         ctx.date_system(),
     ))
 }
-

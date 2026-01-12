@@ -33,6 +33,9 @@ fn coupon_date_from_maturity(maturity: &str, months_per_period: i32, periods_bac
     // month-end dates due to end-of-month clamping (e.g. Dec 31 -> Jun 30 -> Dec 30). The COUP*
     // functions (and bond schedule math) compute coupon dates as `EDATE(maturity, -k*m)`, so tests
     // should too.
+    //
+    // Excel also has an end-of-month (EOM) rule: if `maturity` is the last day of its month,
+    // the coupon schedule is pinned to month-end (including leap-year February).
     debug_assert!(months_per_period > 0);
     debug_assert!(periods_back >= 0);
     let months_back = months_per_period
@@ -41,7 +44,9 @@ fn coupon_date_from_maturity(maturity: &str, months_per_period: i32, periods_bac
     if months_back == 0 {
         maturity.to_string()
     } else {
-        format!("EDATE({maturity},-{months_back})")
+        format!(
+            "IF({maturity}=EOMONTH({maturity},0),EOMONTH(EDATE({maturity},-{months_back}),0),EDATE({maturity},-{months_back}))"
+        )
     }
 }
 
@@ -71,8 +76,7 @@ fn coup_invariants_when_settlement_is_coupon_date() {
         for &frequency in &frequencies {
             let months_per_period = 12 / frequency;
             for k in 1..=6 {
-                let settlement =
-                    coupon_date_from_maturity(maturity, months_per_period, k);
+                let settlement = coupon_date_from_maturity(maturity, months_per_period, k);
 
                 for &basis in &bases {
                     let daybs = eval_number(
@@ -199,10 +203,8 @@ fn coup_schedule_roundtrips_when_settlement_is_coupon_date() {
         for &frequency in &frequencies {
             let months_per_period = 12 / frequency;
             for k in 1..=6 {
-                let settlement =
-                    coupon_date_from_maturity(maturity, months_per_period, k);
-                let expected_ncd =
-                    coupon_date_from_maturity(maturity, months_per_period, k - 1);
+                let settlement = coupon_date_from_maturity(maturity, months_per_period, k);
+                let expected_ncd = coupon_date_from_maturity(maturity, months_per_period, k - 1);
 
                 for &basis in &bases {
                     let pcd = eval_number(
@@ -262,8 +264,7 @@ fn price_yield_roundtrip_consistency() {
         for &frequency in &frequencies {
             let months_per_period = 12 / frequency;
             for k in 1..=5 {
-                let settlement =
-                    coupon_date_from_maturity(maturity, months_per_period, k);
+                let settlement = coupon_date_from_maturity(maturity, months_per_period, k);
 
                 for &basis in &bases {
                     for &rate in &rates {
@@ -319,8 +320,7 @@ fn price_matches_pv_when_settlement_is_coupon_date() {
         for &frequency in &frequencies {
             let months_per_period = 12 / frequency;
             for k in 1..=5 {
-                let settlement =
-                    coupon_date_from_maturity(maturity, months_per_period, k);
+                let settlement = coupon_date_from_maturity(maturity, months_per_period, k);
 
                 for &basis in &bases {
                     for &rate in &rates {
@@ -336,11 +336,17 @@ fn price_matches_pv_when_settlement_is_coupon_date() {
                                 let pv = eval_number(
                                     &mut sheet,
                                     &format!(
-                                        "=LET(n,{k},c,({redemption})*({rate})/{frequency},r,({yld})/{frequency},PV(r,n,-c,-{redemption}))"
+                                        "=LET(n,{k},c,({rate})*({redemption})/{frequency},r,({yld})/{frequency},PV(r,n,-c,-{redemption}))"
                                     ),
                                 );
 
-                                assert_close(price, pv, 1e-7);
+                                if (price - pv).abs() > 1e-7 {
+                                    let settlement_serial =
+                                        eval_number(&mut sheet, &format!("={settlement}"));
+                                    panic!(
+                                        "PRICE/PV mismatch: maturity={maturity} settlement={settlement} (serial={settlement_serial}) frequency={frequency} basis={basis} rate={rate} yld={yld} redemption={redemption}: expected {pv}, got {price}"
+                                    );
+                                }
                             }
                         }
                     }
@@ -380,7 +386,7 @@ fn duration_n1_equals_time_to_maturity() {
             let months_per_period = 12 / frequency;
 
             for &delta in &deltas {
-                let pcd = format!("EDATE({maturity},-{months_per_period})");
+                let pcd = coupon_date_from_maturity(maturity, months_per_period, 1);
                 let settlement = format!("({pcd}+{delta})");
 
                 for &basis in &bases {
@@ -389,8 +395,10 @@ fn duration_n1_equals_time_to_maturity() {
                     //
                     // Compute expected DURATION using the same day-count definitions as the bond
                     // schedule (`coupon_schedule` in `bonds.rs`):
-                    // - basis 0/4: `E` is modeled as 360/frequency and `DSC = E - A` (with `A`
-                    //   computed via DAYS360)
+                    // - basis 0: `E` is modeled as 360/frequency and `DSC = E - A` (with `A`
+                    //   computed via US/NASD DAYS360)
+                    // - basis 4: `E` is the European 30/360 day count between coupon dates, and
+                    //   `DSC = E - A` (with `A` computed via European DAYS360)
                     // - basis 2: `E = 360/frequency`, `DSC` is an actual day count
                     // - basis 3: `E = 365/frequency`, `DSC` is an actual day count
                     // - basis 1: `E` is the actual length of the coupon period, and `DSC` is an
@@ -398,7 +406,7 @@ fn duration_n1_equals_time_to_maturity() {
                     let expected = eval_number(
                         &mut sheet,
                         &format!(
-                            "=LET(pcd,{pcd},a,IF({basis}=0,DAYS360(pcd,{settlement},FALSE),IF({basis}=4,DAYS360(pcd,{settlement},TRUE),{settlement}-pcd)),e,IF(OR({basis}=0,{basis}=2,{basis}=4),360/{frequency},IF({basis}=3,365/{frequency},{maturity}-pcd)),dsc,IF(OR({basis}=0,{basis}=4),e-a,{maturity}-{settlement}),(dsc/e)/{frequency})"
+                            "=LET(pcd,{pcd},a,IF({basis}=0,DAYS360(pcd,{settlement},FALSE),IF({basis}=4,DAYS360(pcd,{settlement},TRUE),{settlement}-pcd)),e,IF(OR({basis}=0,{basis}=2),360/{frequency},IF({basis}=4,DAYS360(pcd,{maturity},TRUE),IF({basis}=3,365/{frequency},{maturity}-pcd))),dsc,IF(OR({basis}=0,{basis}=4),e-a,{maturity}-{settlement}),(dsc/e)/{frequency})"
                         ),
                     );
 

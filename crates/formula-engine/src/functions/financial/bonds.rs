@@ -18,7 +18,6 @@ struct CouponSchedule {
     /// Number of coupon payments remaining (COUPNUM).
     n: i32,
 }
-
 fn coupon_schedule(
     settlement: i32,
     maturity: i32,
