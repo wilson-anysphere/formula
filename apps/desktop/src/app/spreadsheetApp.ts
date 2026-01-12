@@ -1767,6 +1767,29 @@ export class SpreadsheetApp {
   }
 
   /**
+   * Return the active cell's bounding box in viewport coordinates.
+   *
+   * This is useful for anchoring floating UI (e.g. context menus) to the active cell
+   * without changing selection.
+   */
+  getActiveCellRect(): { x: number; y: number; width: number; height: number } | null {
+    if (!this.sharedGrid) {
+      this.ensureViewportMappingCurrent();
+    }
+
+    const rect = this.getCellRect(this.selection.active);
+    if (!rect) return null;
+
+    const rootRect = (this.sharedGrid ? this.selectionCanvas : this.root).getBoundingClientRect();
+    return {
+      x: rootRect.left + rect.x,
+      y: rootRect.top + rect.y,
+      width: rect.width,
+      height: rect.height,
+    };
+  }
+
+  /**
    * Hit-test the grid and return the document cell (0-based row/col) under the
    * provided client (viewport) coordinates.
    *

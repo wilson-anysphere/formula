@@ -1112,29 +1112,7 @@ if (
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
   const primaryShortcut = (key: string) => (isMac ? `⌘${key}` : `Ctrl+${key}`);
 
-  gridRoot.addEventListener("contextmenu", (e) => {
-    // Always prevent the native context menu; we render our own.
-    e.preventDefault();
-
-    const picked = app.pickCellAtClientPoint(e.clientX, e.clientY);
-    if (picked) {
-      // Excel-like behavior: if the user right-clicks outside the current selection,
-      // move the active cell to the clicked coordinate. If they right-click within
-      // the selection, keep it intact (important for when-clause context keys like
-      // `hasSelection`).
-      const ranges = app.getSelectionRanges();
-      const inSelection = ranges.some((range) => {
-        const startRow = Math.min(range.startRow, range.endRow);
-        const endRow = Math.max(range.startRow, range.endRow);
-        const startCol = Math.min(range.startCol, range.endCol);
-        const endCol = Math.max(range.startCol, range.endCol);
-        return picked.row >= startRow && picked.row <= endRow && picked.col >= startCol && picked.col <= endCol;
-      });
-      if (!inSelection) {
-        app.activateCell({ row: picked.row, col: picked.col });
-      }
-    }
-
+  const buildGridContextMenuItems = (): ContextMenuItem[] => {
     const menuItems: ContextMenuItem[] = [
       {
         type: "item",
@@ -1197,8 +1175,70 @@ if (
       }
     }
 
-    contextMenu.open({ x: e.clientX, y: e.clientY, items: menuItems });
+    return menuItems;
+  };
+
+  gridRoot.addEventListener("contextmenu", (e) => {
+    // Always prevent the native context menu; we render our own.
+    e.preventDefault();
+
+    const picked = app.pickCellAtClientPoint(e.clientX, e.clientY);
+    if (picked) {
+      // Excel-like behavior: if the user right-clicks outside the current selection,
+      // move the active cell to the clicked coordinate. If they right-click within
+      // the selection, keep it intact (important for when-clause context keys like
+      // `hasSelection`).
+      const ranges = app.getSelectionRanges();
+      const inSelection = ranges.some((range) => {
+        const startRow = Math.min(range.startRow, range.endRow);
+        const endRow = Math.max(range.startRow, range.endRow);
+        const startCol = Math.min(range.startCol, range.endCol);
+        const endCol = Math.max(range.startCol, range.endCol);
+        return picked.row >= startRow && picked.row <= endRow && picked.col >= startCol && picked.col <= endCol;
+      });
+      if (!inSelection) {
+        app.activateCell({ row: picked.row, col: picked.col });
+      }
+    }
+
+    contextMenu.open({ x: e.clientX, y: e.clientY, items: buildGridContextMenuItems() });
   });
+
+  const isEditableTarget = (target: EventTarget | null): boolean => {
+    const el = target as HTMLElement | null;
+    if (!el) return false;
+    return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
+  };
+
+  const openGridContextMenuAtActiveCell = () => {
+    const rect = app.getActiveCellRect();
+    if (rect) {
+      contextMenu.open({ x: rect.x, y: rect.y + rect.height, items: buildGridContextMenuItems() });
+      return;
+    }
+
+    const gridRect = gridRoot.getBoundingClientRect();
+    contextMenu.open({
+      x: gridRect.left + gridRect.width / 2,
+      y: gridRect.top + gridRect.height / 2,
+      items: buildGridContextMenuItems(),
+    });
+  };
+
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.defaultPrevented) return;
+      if (isEditableTarget(e.target)) return;
+
+      const shouldOpen = (e.shiftKey && e.key === "F10") || e.key === "ContextMenu" || e.code === "ContextMenu";
+      if (!shouldOpen) return;
+
+      e.preventDefault();
+      openGridContextMenuAtActiveCell();
+    },
+    true,
+  );
 
   let macrosBackend: unknown | null = null;
   const getMacrosBackend = () => {
