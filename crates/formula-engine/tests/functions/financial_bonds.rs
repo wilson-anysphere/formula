@@ -128,6 +128,58 @@ fn price_supports_zero_yield() {
 }
 
 #[test]
+fn negative_yield_below_minus_one_is_allowed_when_frequency_gt_one() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    // Settlement is exactly on a coupon date, with one period remaining (n=1, A=0, d=1).
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+
+    let rate = 0.10;
+    let yld = -1.5;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 0;
+
+    let freq = frequency as f64;
+    let coupon_payment = redemption * rate / freq;
+    let expected = (coupon_payment + redemption) / (1.0 + yld / freq);
+    let actual = price(settlement, maturity, rate, yld, redemption, frequency, basis, system).unwrap();
+    assert_close(actual, expected, 1e-12);
+
+    let solved =
+        yield_rate(settlement, maturity, rate, expected, redemption, frequency, basis, system).unwrap();
+    assert_close(solved, yld, 1e-10);
+
+    // Boundary behavior: 1 + yld/frequency == 0 -> #DIV/0!.
+    assert_eq!(
+        price(
+            settlement,
+            maturity,
+            rate,
+            -(frequency as f64),
+            redemption,
+            frequency,
+            basis,
+            system
+        ),
+        Err(formula_engine::ExcelError::Div0)
+    );
+    assert_eq!(
+        price(
+            settlement,
+            maturity,
+            rate,
+            -(frequency as f64) - 0.1,
+            redemption,
+            frequency,
+            basis,
+            system
+        ),
+        Err(formula_engine::ExcelError::Num)
+    );
+}
+
+#[test]
 fn price_scales_coupon_payment_by_redemption() {
     // With settlement on a coupon date and yld=0, PRICE reduces to redemption + coupon_payment
     // (clean == dirty, since accrued interest A=0). Excel defines coupon_payment as

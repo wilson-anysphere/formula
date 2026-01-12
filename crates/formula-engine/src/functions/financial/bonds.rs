@@ -299,9 +299,6 @@ fn dirty_price_and_deriv_sum(
     if frequency <= 0.0 || n <= 0 {
         return None;
     }
-    if yld <= -1.0 {
-        return None;
-    }
 
     let per_yield = yld / frequency;
     if per_yield <= -1.0 {
@@ -370,14 +367,20 @@ pub fn price(
     if rate < 0.0 {
         return Err(ExcelError::Num);
     }
-    if yld <= -1.0 {
-        return Err(ExcelError::Num);
-    }
     if redemption <= 0.0 {
         return Err(ExcelError::Num);
     }
 
     let freq = frequency as f64;
+    // Yield must satisfy 1 + yld/frequency > 0, matching Excel's bond discount base.
+    // This allows negative yields down to `-frequency` (annualized), inclusive of large magnitudes
+    // when frequency > 1.
+    if yld == -freq {
+        return Err(ExcelError::Div0);
+    }
+    if yld < -freq {
+        return Err(ExcelError::Num);
+    }
     // Excel models coupon payments as a fraction of the redemption/face value.
     // This matches the conventions used by the odd-coupon bond functions (ODDF*/ODDL*).
     let coupon_payment = redemption * rate / freq;
@@ -429,15 +432,23 @@ pub fn yield_rate(
 
     let freq = frequency as f64;
     let coupon_payment = redemption * rate / freq;
+    if !coupon_payment.is_finite() {
+        return Err(ExcelError::Num);
+    }
 
     let schedule = coupon_schedule(settlement, maturity, frequency, basis, system)?;
 
     let f = |y: f64| {
-        let (dirty, _deriv_sum, _g) =
-            dirty_price_and_deriv_sum(coupon_payment, redemption, y, freq, schedule.d, schedule.n)?;
-        let clean = dirty - coupon_payment * schedule.a_over_e;
-        let fx = clean - pr;
-        (fx.is_finite()).then_some(fx)
+        // Near the `-frequency` boundary, the dirty price can overflow (approaching +∞). Excel
+        // still brackets a solution in that region; treat overflow as a large positive residual.
+        match dirty_price_and_deriv_sum(coupon_payment, redemption, y, freq, schedule.d, schedule.n) {
+            Some((dirty, _deriv_sum, _g)) => {
+                let clean = dirty - coupon_payment * schedule.a_over_e;
+                let fx = clean - pr;
+                (fx.is_finite()).then_some(fx)
+            }
+            None => Some(f64::MAX),
+        }
     };
 
     let df = |y: f64| {
@@ -449,7 +460,7 @@ pub fn yield_rate(
 
     // Excel does not expose an explicit guess for YIELD; it defaults to ~0.1.
     let guess = if rate > 0.0 { rate } else { 0.1 };
-    let lower_bound = -0.999999999; // yld must be > -1.0
+    let lower_bound = -freq + 1e-8; // yld must be > -frequency
     let upper_bound = 1.0e10;
 
     solve_root_newton_bisection(guess, lower_bound, upper_bound, MAX_ITER_YIELD, f, df)
@@ -480,11 +491,14 @@ pub fn duration(
     if coupon < 0.0 {
         return Err(ExcelError::Num);
     }
-    if yld <= -1.0 {
-        return Err(ExcelError::Num);
-    }
 
     let freq = frequency as f64;
+    if yld == -freq {
+        return Err(ExcelError::Div0);
+    }
+    if yld < -freq {
+        return Err(ExcelError::Num);
+    }
     let coupon_payment = 100.0 * coupon / freq;
     let redemption = 100.0;
 
