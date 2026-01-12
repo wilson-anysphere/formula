@@ -253,7 +253,8 @@ test.describe("updater UI wiring", () => {
     await gotoDesktop(page);
 
     await fireTauriEvent(page, "update-available", { source: "manual", version: "9.9.9", body: "Notes" });
-    await expect(page.getByTestId("updater-dialog")).toBeVisible();
+    const dialog = page.getByTestId("updater-dialog");
+    await expect(dialog).toBeVisible();
 
     await fireTauriEvent(page, "update-download-started", { source: "startup", version: "9.9.9" });
     await expect(page.getByTestId("updater-progress-wrap")).toBeVisible();
@@ -264,5 +265,19 @@ test.describe("updater UI wiring", () => {
     await fireTauriEvent(page, "update-downloaded", { source: "startup", version: "9.9.9" });
     await expect(page.getByTestId("updater-restart")).toBeVisible();
     await expect(page.getByTestId("update-ready-toast")).toHaveCount(0);
+
+    await page.evaluate(() => {
+      (window as any).__tauriInvokeCalls = [];
+    });
+
+    await page.getByTestId("updater-restart").click();
+    await expect(dialog).toBeHidden();
+
+    await page.waitForFunction(() => {
+      const calls = (window as any).__tauriInvokeCalls;
+      if (!Array.isArray(calls)) return false;
+      const cmds = calls.map((call) => call?.cmd);
+      return cmds.includes("install_downloaded_update") && (cmds.includes("restart_app") || cmds.includes("quit_app"));
+    });
   });
 });
