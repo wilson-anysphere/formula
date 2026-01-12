@@ -329,6 +329,7 @@ test.describe("grid keyboard navigation + in-place editing", () => {
     await page.getByTestId("formula-highlight").click();
     const input = page.getByTestId("formula-input");
     await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
     await expect(input).toHaveValue("Hello");
 
     // Create a text edit inside the formula bar.
