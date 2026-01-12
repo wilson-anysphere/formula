@@ -566,8 +566,11 @@ export function getCellGridFromRange(doc, sheetId, range) {
       typeof doc.getColStyleId === "function");
   const hasInternalLayeredStyleMaps = Boolean(doc?.model?.sheets?.get && typeof doc.model.sheets.get === "function");
 
-  // Initialize cachedSheetViewHasStyleLayers (at most one call).
-  getSheetViewForStyleLayers();
+  // Only consult `getSheetView()` when there isn't another obvious way to derive
+  // the style-id tuple (some controllers may surface row/col style ids on the view).
+  if (!hasStyleIdTupleHelper && !hasPerLayerStyleIdMethods && !hasInternalLayeredStyleMaps) {
+    getSheetViewForStyleLayers();
+  }
   const canDeriveStyleIdTuple = Boolean(
     hasStyleIdTupleHelper || hasPerLayerStyleIdMethods || hasInternalLayeredStyleMaps || cachedSheetViewHasStyleLayers
   );
