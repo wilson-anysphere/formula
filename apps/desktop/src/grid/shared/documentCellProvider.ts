@@ -73,7 +73,10 @@ export class DocumentCellProvider implements CellProvider {
   private lastSheetId: string | null = null;
   private lastSheetCache: LruCache<number, CellData | null> | null = null;
   private readonly styleCache = new Map<number, CellStyle | undefined>();
-  private readonly resolvedStyleCache = new WeakMap<object, CellStyle | undefined>();
+  // Cache resolved layered formats by contributing style ids (sheet/row/col/cell). This avoids
+  // re-merging OOXML-ish style objects for every cell when large regions share the same
+  // formatting layers (e.g. column formatting).
+  private readonly resolvedFormatCache = new LruCache<string, { style: CellStyle | undefined; numberFormat: string | null }>(10_000);
   private readonly listeners = new Set<(update: CellProviderUpdate) => void>();
   private unsubscribeDoc: (() => void) | null = null;
 
@@ -109,12 +112,42 @@ export class DocumentCellProvider implements CellProvider {
     return style;
   }
 
-  private resolveResolvedStyle(docStyle: unknown): CellStyle | undefined {
-    if (!isPlainObject(docStyle)) return undefined;
-    if (this.resolvedStyleCache.has(docStyle)) return this.resolvedStyleCache.get(docStyle);
-    const style = this.convertDocStyleToGridStyle(docStyle);
-    this.resolvedStyleCache.set(docStyle, style);
-    return style;
+  private resolveResolvedFormat(sheetId: string, coord: { row: number; col: number }, cellStyleId: number): {
+    style: CellStyle | undefined;
+    numberFormat: string | null;
+  } {
+    const controller: any = this.options.document as any;
+
+    const getNumberFormat = (docStyle: any): string | null => {
+      const raw = docStyle?.numberFormat ?? docStyle?.number_format;
+      return typeof raw === "string" && raw.trim() !== "" ? raw : null;
+    };
+
+    if (typeof controller.getCellFormat === "function") {
+      if (typeof controller.getCellFormatStyleIds === "function") {
+        const ids = controller.getCellFormatStyleIds(sheetId, coord);
+        const key = Array.isArray(ids) ? ids.join(",") : String(ids);
+        const cached = this.resolvedFormatCache.get(key);
+        if (cached !== undefined) return cached;
+
+        const resolvedDocStyle: unknown = controller.getCellFormat(sheetId, coord);
+        const docStyle: DocStyle = isPlainObject(resolvedDocStyle) ? (resolvedDocStyle as DocStyle) : {};
+        const style = this.convertDocStyleToGridStyle(docStyle);
+        const numberFormat = getNumberFormat(docStyle);
+        const out = { style, numberFormat };
+        this.resolvedFormatCache.set(key, out);
+        return out;
+      }
+
+      // Fallback: older controllers may not expose style-id tuples.
+      const resolvedDocStyle: unknown = controller.getCellFormat(sheetId, coord);
+      const docStyle: DocStyle = isPlainObject(resolvedDocStyle) ? (resolvedDocStyle as DocStyle) : {};
+      return { style: this.convertDocStyleToGridStyle(docStyle), numberFormat: getNumberFormat(docStyle) };
+    }
+
+    // Legacy fallback: per-cell styleId only.
+    const docStyle: DocStyle = this.options.document?.styleTable?.get?.(cellStyleId) ?? {};
+    return { style: this.resolveStyle(cellStyleId), numberFormat: getNumberFormat(docStyle) };
   }
 
   private convertDocStyleToGridStyle(docStyle: unknown): CellStyle | undefined {
@@ -423,28 +456,15 @@ export class DocumentCellProvider implements CellProvider {
     }
 
     const styleId = typeof state.styleId === "number" ? state.styleId : 0;
-    const controller: any = this.options.document as any;
-    const resolvedDocStyle: unknown =
-      typeof controller.getCellFormat === "function"
-        ? controller.getCellFormat(sheetId, { row: docRow, col: docCol })
-        : this.options.document?.styleTable?.get?.(styleId) ?? {};
-    const docStyle: DocStyle = isPlainObject(resolvedDocStyle) ? (resolvedDocStyle as DocStyle) : {};
-    const styleAny = docStyle as any;
-    const numberFormat =
-      typeof styleAny?.numberFormat === "string"
-        ? (styleAny.numberFormat as string)
-        : typeof styleAny?.number_format === "string"
-          ? (styleAny.number_format as string)
-          : null;
-
-    let style = typeof controller.getCellFormat === "function" ? this.resolveResolvedStyle(docStyle) : this.resolveStyle(styleId);
+    const { style, numberFormat } = this.resolveResolvedFormat(sheetId, { row: docRow, col: docCol }, styleId);
+    let resolvedStyle = style;
 
     if (typeof value === "number" && numberFormat !== null) {
       value = formatValueWithNumberFormat(value, numberFormat);
       // Preserve spreadsheet-like default alignment for numeric values even though we
       // render them as formatted strings (CanvasGridRenderer defaults to left-aligning strings).
-      if (style?.textAlign === undefined) {
-        style = { ...(style ?? {}), textAlign: "end" };
+      if (resolvedStyle?.textAlign === undefined) {
+        resolvedStyle = { ...(resolvedStyle ?? {}), textAlign: "end" };
       }
     }
 
@@ -455,11 +475,11 @@ export class DocumentCellProvider implements CellProvider {
     // and keep CellData objects lean for fast scrolling.
     const cell: CellData = richText
       ? meta
-        ? { row, col, value, richText, style, comment: { resolved: meta.resolved } }
-        : { row, col, value, richText, style }
+        ? { row, col, value, richText, style: resolvedStyle, comment: { resolved: meta.resolved } }
+        : { row, col, value, richText, style: resolvedStyle }
       : meta
-        ? { row, col, value, style, comment: { resolved: meta.resolved } }
-        : { row, col, value, style };
+        ? { row, col, value, style: resolvedStyle, comment: { resolved: meta.resolved } }
+        : { row, col, value, style: resolvedStyle };
     cache.set(key, cell);
     return cell;
   }
