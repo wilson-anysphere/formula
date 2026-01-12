@@ -2657,8 +2657,29 @@ fn odd_first_coupon_bond_functions_round_trip_long_stub() {
     // ODDFPRICE/ODDFYIELD are internally consistent.)
     let yield_target = 0.0625;
     let rate = 0.0785;
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    let settlement = serial(2019, 6, 1, system);
+    let maturity = serial(2022, 3, 1, system);
+    let issue = serial(2019, 1, 1, system);
+    let first_coupon = serial(2020, 3, 1, system);
 
     for basis in [0, 1] {
+        // Independent price model: compute what Excel's published ODDF* formula should produce
+        // for this schedule (long first coupon amount scaled by DFC/E).
+        let expected_price = oddf_price_excel_model(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            yield_target,
+            100.0,
+            2,
+            basis,
+            system,
+        );
+
         let price_formula = format!(
             "=ODDFPRICE(DATE(2019,6,1),DATE(2022,3,1),DATE(2019,1,1),DATE(2020,3,1),{rate},{yield_target},100,2,{basis})"
         );
@@ -2669,18 +2690,22 @@ fn odd_first_coupon_bond_functions_round_trip_long_stub() {
             return;
         };
 
-        // Round-trip: compute yield from the computed price.
-        let yield_formula = format!(
-            "=ODDFYIELD(DATE(2019,6,1),DATE(2022,3,1),DATE(2019,1,1),DATE(2020,3,1),{rate},A1,100,2,{basis})"
-        );
-        let Some(y) = eval_number_or_skip(&mut sheet, &yield_formula) else {
-            return;
-        };
+        assert_close(price, expected_price, 1e-10);
 
         assert!(
             price.is_finite() && price > 0.0,
             "expected positive finite price, got {price}"
         );
+
+        // Round-trip yield using the model price (so ODDFYIELD is validated independently
+        // of the ODDFPRICE implementation).
+        sheet.set("B1", expected_price);
+        let yield_formula = format!(
+            "=ODDFYIELD(DATE(2019,6,1),DATE(2022,3,1),DATE(2019,1,1),DATE(2020,3,1),{rate},B1,100,2,{basis})"
+        );
+        let Some(y) = eval_number_or_skip(&mut sheet, &yield_formula) else {
+            return;
+        };
         assert_close(y, yield_target, 1e-9);
     }
 }
@@ -3742,8 +3767,25 @@ fn odd_last_coupon_bond_functions_round_trip_long_stub() {
     // and maturity, so the functions must correctly scale the final coupon amount.
     let yield_target = 0.0625;
     let rate = 0.0785;
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    let settlement = serial(2021, 2, 1, system);
+    let maturity = serial(2022, 3, 1, system);
+    let last_interest = serial(2020, 10, 15, system);
 
     for basis in [0, 1] {
+        let expected_price = oddl_price_excel_model(
+            settlement,
+            maturity,
+            last_interest,
+            rate,
+            yield_target,
+            100.0,
+            2,
+            basis,
+            system,
+        );
+
         let price_formula = format!(
             "=ODDLPRICE(DATE(2021,2,1),DATE(2022,3,1),DATE(2020,10,15),{rate},{yield_target},100,2,{basis})"
         );
@@ -3754,17 +3796,20 @@ fn odd_last_coupon_bond_functions_round_trip_long_stub() {
             return;
         };
 
-        let yield_formula = format!(
-            "=ODDLYIELD(DATE(2021,2,1),DATE(2022,3,1),DATE(2020,10,15),{rate},A1,100,2,{basis})"
-        );
-        let Some(y) = eval_number_or_skip(&mut sheet, &yield_formula) else {
-            return;
-        };
+        assert_close(price, expected_price, 1e-10);
 
         assert!(
             price.is_finite() && price > 0.0,
             "expected positive finite price, got {price}"
         );
+
+        sheet.set("B1", expected_price);
+        let yield_formula = format!(
+            "=ODDLYIELD(DATE(2021,2,1),DATE(2022,3,1),DATE(2020,10,15),{rate},B1,100,2,{basis})"
+        );
+        let Some(y) = eval_number_or_skip(&mut sheet, &yield_formula) else {
+            return;
+        };
         assert_close(y, yield_target, 1e-9);
     }
 }
