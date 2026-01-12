@@ -599,6 +599,7 @@ const FUTURE_UDF_FUNCTIONS: &[&str] = &[
     "ACOT",
     "ACOTH",
     "AGGREGATE",
+    "ARABIC",
     "BASE",
     "BETA.DIST",
     "BETA.INV",
