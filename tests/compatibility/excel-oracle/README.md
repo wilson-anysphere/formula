@@ -221,6 +221,12 @@ python tools/excel-oracle/pin_dataset.py \
   --versioned-dir tests/compatibility/excel-oracle/datasets/versioned
 ```
 
+To validate the dataset and preview the output paths without writing files, use:
+
+```bash
+python tools/excel-oracle/pin_dataset.py --dataset /path/to/dataset.json --dry-run
+```
+
 ## Incremental pinned dataset updates (smaller diffs)
 
 If you *only added new cases* to `cases.json` (i.e. existing `caseId`s remain valid), regenerating the

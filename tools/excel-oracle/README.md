@@ -194,6 +194,12 @@ python tools/excel-oracle/pin_dataset.py \
   --versioned-dir tests/compatibility/excel-oracle/datasets/versioned
 ```
 
+To validate the dataset and preview the output paths without writing files, use:
+
+```bash
+python tools/excel-oracle/pin_dataset.py --dataset /path/to/dataset.json --dry-run
+```
+
 Note: `pin_dataset.py` enforces that the dataset includes Excel version/build/OS metadata
 from COM automation when pinning a real Excel dataset, to avoid accidentally pinning
 something that simply sets `source.kind="excel"`.

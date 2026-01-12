@@ -68,6 +68,11 @@ def main() -> int:
         default="",
         help="If set, also write a version-tagged copy into this directory.",
     )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate the dataset and print the destination paths without writing any files.",
+    )
     args = p.parse_args()
 
     dataset_path = Path(args.dataset)
@@ -122,6 +127,19 @@ def main() -> int:
     excel_build = _sanitize_fragment(str(source.get("build", "unknown")))
     cases_sha = _sanitize_fragment(str(case_set.get("sha256", "unknown")))
 
+    versioned_name = f"excel-{excel_version}-build-{excel_build}-cases-{cases_sha[:8]}.json"
+    versioned_path = (versioned_dir / versioned_name) if versioned_dir is not None else None
+
+    if args.dry_run:
+        print("Dry run: pin_dataset")
+        print(f"dataset: {dataset_path.as_posix()}")
+        print(f"pinned:  {pinned_path.as_posix()}")
+        if versioned_path is not None:
+            print(f"versioned: {versioned_path.as_posix()}")
+        else:
+            print("versioned: <skipped>")
+        return 0
+
     if source_kind == "excel":
         pinned_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(dataset_path, pinned_path)
@@ -131,8 +149,7 @@ def main() -> int:
 
     if versioned_dir is not None:
         versioned_dir.mkdir(parents=True, exist_ok=True)
-        versioned_name = f"excel-{excel_version}-build-{excel_build}-cases-{cases_sha[:8]}.json"
-        versioned_path = versioned_dir / versioned_name
+        assert versioned_path is not None
         shutil.copyfile(pinned_path, versioned_path)
         print(f"Versioned copy -> {versioned_path.as_posix()}")
 
