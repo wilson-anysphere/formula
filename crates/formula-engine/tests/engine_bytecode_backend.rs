@@ -262,6 +262,49 @@ fn bytecode_backend_matches_ast_for_sum_and_countif() {
 }
 
 #[test]
+fn bytecode_backend_supports_array_literal_arguments_for_sum() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM({1,2;3,4})")
+        .unwrap();
+
+    // Ensure the formula was compiled to bytecode (array literals should not force an AST fallback
+    // in supported contexts).
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=SUM({1,2;3,4})", "A1");
+}
+
+#[test]
+fn bytecode_backend_supports_array_literal_arguments_for_count() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=COUNT({1,\"x\";TRUE,2})")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=COUNT({1,\"x\";TRUE,2})", "A1");
+}
+
+#[test]
+fn array_literal_errors_propagate_in_sum() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM({1,#DIV/0!})")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    // Array literals containing errors are not supported by the bytecode backend yet, but they
+    // must still evaluate with correct error propagation (either via AST fallback or bytecode).
+    assert_engine_matches_ast(&engine, "=SUM({1,#DIV/0!})", "A1");
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Div0));
+}
+
+#[test]
 fn bytecode_backend_inlines_defined_name_static_ranges() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();

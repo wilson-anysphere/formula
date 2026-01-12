@@ -25,6 +25,11 @@ fn array_literal_can_be_used_as_a_function_argument() {
     engine
         .set_cell_formula("Sheet1", "A1", "=SUM({1,2;3,4})")
         .unwrap();
+
+    // Inline array literals should be eligible for the bytecode backend when used as arguments to
+    // supported aggregate functions.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(10.0));
 }

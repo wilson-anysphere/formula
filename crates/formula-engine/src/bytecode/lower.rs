@@ -1,5 +1,5 @@
 use super::ast::{BinaryOp, Expr as BytecodeExpr, Function, UnaryOp};
-use super::value::{ErrorKind as BytecodeErrorKind, RangeRef, Ref, Value};
+use super::value::{Array, ErrorKind as BytecodeErrorKind, RangeRef, Ref, Value};
 use std::sync::Arc;
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -202,6 +202,52 @@ fn parse_error_kind(raw: &str) -> crate::value::ErrorKind {
     }
 }
 
+fn lower_array_literal_element(expr: &crate::Expr) -> Result<Option<f64>, LowerError> {
+    match expr {
+        crate::Expr::Number(raw) => Ok(Some(parse_number(raw)?)),
+        crate::Expr::Missing | crate::Expr::Boolean(_) | crate::Expr::String(_) => Ok(None),
+        crate::Expr::Unary(u) => match u.op {
+            crate::UnaryOp::Plus => match lower_array_literal_element(&u.expr)? {
+                Some(n) => Ok(Some(n)),
+                None => Err(LowerError::Unsupported),
+            },
+            crate::UnaryOp::Minus => match lower_array_literal_element(&u.expr)? {
+                Some(n) => Ok(Some(-n)),
+                None => Err(LowerError::Unsupported),
+            },
+            crate::UnaryOp::ImplicitIntersection => Err(LowerError::Unsupported),
+        },
+        // Array literals can contain error constants, but the bytecode backend's numeric-only
+        // arrays cannot represent them yet (they must be preserved for correct propagation).
+        crate::Expr::Error(_) => Err(LowerError::Unsupported),
+        // Reject any non-literal element (e.g. references or function calls).
+        _ => Err(LowerError::Unsupported),
+    }
+}
+
+fn lower_array_literal(arr: &crate::ArrayLiteral) -> Result<Value, LowerError> {
+    if arr.rows.is_empty() {
+        return Err(LowerError::Unsupported);
+    }
+    let rows = arr.rows.len();
+    let cols = arr.rows[0].len();
+    if cols == 0 {
+        return Err(LowerError::Unsupported);
+    }
+    if arr.rows.iter().any(|row| row.len() != cols) {
+        return Err(LowerError::Unsupported);
+    }
+
+    let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+    for row in &arr.rows {
+        for el in row {
+            let n = lower_array_literal_element(el)?;
+            values.push(n.unwrap_or(f64::NAN));
+        }
+    }
+
+    Ok(Value::Array(Array::new(rows, cols, values)))
+}
 pub fn lower_canonical_expr(
     expr: &crate::Expr,
     origin: crate::CellAddr,
@@ -216,6 +262,7 @@ pub fn lower_canonical_expr(
             BytecodeErrorKind::from(parse_error_kind(raw)),
         ))),
         crate::Expr::Missing => Ok(BytecodeExpr::Literal(Value::Empty)),
+        crate::Expr::Array(arr) => Ok(BytecodeExpr::Literal(lower_array_literal(arr)?)),
         crate::Expr::CellRef(r) => Ok(BytecodeExpr::CellRef(lower_cell_ref(
             r,
             origin,
@@ -331,7 +378,6 @@ pub fn lower_canonical_expr(
         crate::Expr::NameRef(_)
         | crate::Expr::ColRef(_)
         | crate::Expr::RowRef(_)
-        | crate::Expr::StructuredRef(_)
-        | crate::Expr::Array(_) => Err(LowerError::Unsupported),
+        | crate::Expr::StructuredRef(_) => Err(LowerError::Unsupported),
     }
 }

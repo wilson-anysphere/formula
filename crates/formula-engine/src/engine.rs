@@ -5572,7 +5572,10 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
             bytecode::Value::Text(_) => true,
             bytecode::Value::Empty => true,
             bytecode::Value::Error(_) => true,
-            bytecode::Value::Array(_) | bytecode::Value::Range(_) => false,
+            // Array literals are currently supported in the bytecode backend only as numeric arrays
+            // passed directly to supported aggregate functions (SUM/AVERAGE/MIN/MAX/COUNT).
+            bytecode::Value::Array(_) => allow_range,
+            bytecode::Value::Range(_) => false,
         },
         bytecode::Expr::CellRef(_) => true,
         bytecode::Expr::RangeRef(_) => allow_range,
