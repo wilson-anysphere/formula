@@ -682,8 +682,20 @@ test.describe("BrowserExtensionHost", () => {
           let last = "";
           export async function activate(context) {
             formula.events.onSelectionChanged((e) => {
-              const v = e?.selection?.values?.[0]?.[0];
-              last = v == null ? "" : String(v);
+              // Only capture the Restricted cell's value (A1). This lets the test move the
+              // UI selection to a safe cell before writing to the clipboard, so the block is
+              // attributable to event-driven taint tracking (not selection-based DLP).
+              const sel = e?.selection;
+              if (
+                sel &&
+                sel.startRow === 0 &&
+                sel.startCol === 0 &&
+                sel.endRow === 0 &&
+                sel.endCol === 0
+              ) {
+                const v = sel?.values?.[0]?.[0];
+                last = v == null ? "" : String(v);
+              }
             });
             context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(commandId)}, async () => {
               return await formula.clipboard.writeText(last);
@@ -724,6 +736,10 @@ test.describe("BrowserExtensionHost", () => {
           }
           await new Promise<void>((resolve) => setTimeout(resolve, 50));
         }
+
+        // Move selection off the Restricted cell before writing so selection-based DLP checks
+        // don't cause a false positive.
+        app.selectRange({ sheetId, range: { startRow: 0, startCol: 1, endRow: 0, endCol: 1 } }); // B1
 
         let errorMessage = "";
         try {
@@ -891,6 +907,9 @@ test.describe("BrowserExtensionHost", () => {
 
         // Trigger a cellChanged event after the extension starts.
         doc.setCellValue(sheetId, { row: 0, col: 0 }, "Secret"); // A1
+
+        // Move selection off the Restricted cell so selection-based DLP checks don't block this test.
+        app.activateCell({ sheetId, row: 0, col: 1 }); // B1
 
         let errorMessage = "";
         try {
