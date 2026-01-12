@@ -61,6 +61,11 @@ fn thread_value_locale() -> ValueLocaleConfig {
     BYTECODE_VALUE_LOCALE.with(|cell| cell.get())
 }
 
+fn thread_number_locale() -> crate::value::NumberLocale {
+    let separators = thread_value_locale().separators;
+    crate::value::NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep))
+}
+
 fn thread_now_utc() -> DateTime<Utc> {
     BYTECODE_NOW_UTC.with(|cell| cell.borrow().clone())
 }
@@ -118,7 +123,7 @@ pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord) -> Value {
 }
 
 fn parse_number_from_text(s: &str) -> Result<f64, ErrorKind> {
-    parse_number(s, crate::value::NumberLocale::en_us()).map_err(|e| match e {
+    parse_number(s, thread_number_locale()).map_err(|e| match e {
         ExcelError::Div0 => ErrorKind::Value,
         ExcelError::Value => ErrorKind::Value,
         ExcelError::Num => ErrorKind::Num,

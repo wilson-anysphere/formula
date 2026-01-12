@@ -380,7 +380,8 @@ fn bytecode_backend_countif_criteria_respects_engine_value_locale() {
     engine.set_value_locale(ValueLocaleConfig::de_de());
 
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
-    engine.set_cell_value("Sheet1", "A2", 1.5).unwrap();
+    // Text numbers should be coerced using the workbook locale ("," as decimal separator in de-DE).
+    engine.set_cell_value("Sheet1", "A2", "1,5").unwrap();
     engine.set_cell_value("Sheet1", "A3", 2.0).unwrap();
     engine
         .set_cell_value("Sheet1", "D1", Value::Text(">1,5".to_string()))
