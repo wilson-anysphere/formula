@@ -290,11 +290,31 @@ fn workbook_structure_edits_preserve_rich_data_parts_and_metadata_relationship()
         "metadata relationship Type must be preserved"
     );
 
+    // Ensure we didn't drop or overwrite unrelated workbook relationships when inserting sheets.
+    // This specifically guards against rId allocation strategies like `max(sheet_rId) + 1` which
+    // would collide with common low-numbered relationships (e.g. styles).
+    let style_rels: Vec<&Relationship> = rels.iter().filter(|r| r.id == "rId3").collect();
+    assert_eq!(
+        style_rels.len(),
+        1,
+        "expected exactly one workbook relationship with Id=rId3 (styles)"
+    );
+    assert_eq!(style_rels[0].target, "styles.xml");
+    assert_eq!(
+        style_rels[0].type_uri.as_deref(),
+        Some("http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles"),
+        "styles relationship Type must be preserved"
+    );
+
     // And ensure it did not collide with a sheet relationship id.
     let sheet_entries = workbook_sheet_entries(&zip_part(&saved, "xl/workbook.xml"));
     assert!(
         !sheet_entries.iter().any(|(_, _, rid)| rid == "rId99"),
         "a sheet unexpectedly reused metadata relationship id rId99"
+    );
+    assert!(
+        !sheet_entries.iter().any(|(_, _, rid)| rid == "rId3"),
+        "a sheet unexpectedly reused styles relationship id rId3"
     );
 
     // Workbook structure edits also patch `[Content_Types].xml` for sheet insertions/removals; ensure
