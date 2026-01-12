@@ -13,7 +13,7 @@ export type CheckServerIdentity = (hostname: string, cert: tls.PeerCertificate) 
 const CERT_PINNING_ERROR_CODE = "ERR_CERT_PINNING";
 
 export function normalizeFingerprintHex(value: string): string {
-  return value.replaceAll(":", "").toLowerCase();
+  return value.trim().replaceAll(":", "").toLowerCase();
 }
 
 export function sha256FingerprintHexFromCertRaw(raw: Buffer): string {

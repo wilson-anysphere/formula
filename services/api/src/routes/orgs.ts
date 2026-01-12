@@ -9,7 +9,7 @@ import { isOrgAdmin, type OrgRole } from "../rbac/roles";
 import { requireAuth } from "./auth";
 
 function normalizeFingerprintHex(value: string): string {
-  return value.replaceAll(":", "").toLowerCase();
+  return value.trim().replaceAll(":", "").toLowerCase();
 }
 
 function isSha256FingerprintHex(value: string): boolean {

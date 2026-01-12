@@ -22,7 +22,7 @@ function fixturesDir(): string {
 
 describe("TLS pinning helpers", () => {
   it("normalizes SHA-256 fingerprints (colon-separated vs hex)", () => {
-    expect(normalizeFingerprintHex("AA:bb:CC")).toBe("aabbcc");
+    expect(normalizeFingerprintHex("  AA:bb:CC\n")).toBe("aabbcc");
     expect(normalizeFingerprintHex("aabbcc")).toBe("aabbcc");
   });
 
