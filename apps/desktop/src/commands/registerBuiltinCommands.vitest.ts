@@ -31,6 +31,54 @@ describe("registerBuiltinCommands: panel toggles", () => {
     expect(getPanelPlacement(layoutController.layout, PanelIds.AI_CHAT).kind).toBe("closed");
   });
 
+  it("toggles Version History panel open/closed", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app: {} as any, layoutController });
+
+    expect(getPanelPlacement(layoutController.layout, PanelIds.VERSION_HISTORY).kind).toBe("closed");
+
+    await commandRegistry.executeCommand("view.togglePanel.versionHistory");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.VERSION_HISTORY)).toEqual({ kind: "docked", side: "right" });
+
+    await commandRegistry.executeCommand("view.togglePanel.versionHistory");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.VERSION_HISTORY).kind).toBe("closed");
+  });
+
+  it("toggles Branch Manager panel open/closed", async () => {
+    const commandRegistry = new CommandRegistry();
+
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app: {} as any, layoutController });
+
+    expect(getPanelPlacement(layoutController.layout, PanelIds.BRANCH_MANAGER).kind).toBe("closed");
+
+    await commandRegistry.executeCommand("view.togglePanel.branchManager");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.BRANCH_MANAGER)).toEqual({ kind: "docked", side: "left" });
+
+    await commandRegistry.executeCommand("view.togglePanel.branchManager");
+    expect(getPanelPlacement(layoutController.layout, PanelIds.BRANCH_MANAGER).kind).toBe("closed");
+  });
+
   it("invokes ensureExtensionsLoaded when toggling Extensions panel", async () => {
     const commandRegistry = new CommandRegistry();
 
@@ -65,4 +113,3 @@ describe("registerBuiltinCommands: panel toggles", () => {
     expect(onExtensionsLoaded).toHaveBeenCalledTimes(1);
   });
 });
-
