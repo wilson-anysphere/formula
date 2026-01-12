@@ -8,6 +8,7 @@ export class LayoutController {
 
   on(event: string, listener: (payload: any) => void): () => void;
   persistNow(): void;
+  save(): void;
   reload(): void;
 
   readonly activeWorkspaceId: string;

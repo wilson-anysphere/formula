@@ -94,6 +94,13 @@ export class LayoutController {
   }
 
   /**
+   * Alias for persistNow().
+   */
+  save() {
+    this.persistNow();
+  }
+
+  /**
    * Reload the active workspace layout from persistence (discarding in-memory changes).
    */
   reload() {
