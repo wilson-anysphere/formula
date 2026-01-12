@@ -68,6 +68,9 @@ SMOKE_INCLUDE_TAGS = [
     # Keep a small slice of the odd-coupon bond corpus in CI so ODDF*/ODDL* regressions are caught
     # without enabling the full `financial` tag set.
     "odd_coupon",
+    # Keep COUP* schedule/date-count behavior in the smoke gate (basis=4 February/EOM quirks are
+    # easy to regress, and this tag set is small).
+    "coupon_schedule",
     # Explicitly include value coercion cases so CI exercises the conversion rules
     # (text -> number/date/time) we implement and diff against Excel later.
     "coercion",
