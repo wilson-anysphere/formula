@@ -10004,6 +10004,73 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_sparse_sumproduct_matches_ast_for_huge_sparse_ranges() {
+        fn setup(engine: &mut Engine) {
+            engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+            engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+            engine.set_cell_value("Sheet1", "A500000", 2.0).unwrap();
+            engine.set_cell_value("Sheet1", "B500000", 20.0).unwrap();
+            engine.set_cell_value("Sheet1", "A1048576", 3.0).unwrap();
+            engine.set_cell_value("Sheet1", "B1048576", 30.0).unwrap();
+
+            engine
+                .set_cell_formula("Sheet1", "C1", "=SUMPRODUCT(A:A,B:B)")
+                .unwrap();
+        }
+
+        let mut bytecode_engine = Engine::new();
+        setup(&mut bytecode_engine);
+
+        // Ensure SUMPRODUCT compiled to bytecode.
+        let sheet_id = bytecode_engine.workbook.sheet_id("Sheet1").unwrap();
+        let c1 = parse_a1("C1").unwrap();
+        let cell_c1 = bytecode_engine.workbook.sheets[sheet_id]
+            .cells
+            .get(&c1)
+            .and_then(|c| c.compiled.as_ref())
+            .expect("compiled formula");
+        assert!(
+            matches!(cell_c1, CompiledFormula::Bytecode(_)),
+            "expected SUMPRODUCT(A:A,B:B) to compile to bytecode"
+        );
+
+        // Full-column ranges should skip building column slices.
+        let snapshot = Snapshot::from_workbook(
+            &bytecode_engine.workbook,
+            &bytecode_engine.spills,
+            bytecode_engine.external_value_provider.clone(),
+            bytecode_engine.external_data_provider.clone(),
+        );
+        let key_c1 = CellKey {
+            sheet: sheet_id,
+            addr: c1,
+        };
+        let tasks = vec![(key_c1, cell_c1.clone())];
+        let column_cache =
+            BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
+        assert!(
+            !column_cache
+                .by_sheet
+                .get(sheet_id)
+                .map(|cols| cols.contains_key(&0) || cols.contains_key(&1))
+                .unwrap_or(false),
+            "expected full-column ranges to skip column-slice cache allocation"
+        );
+
+        bytecode_engine.recalculate_single_threaded();
+        let bc_sumproduct = bytecode_engine.get_cell_value("Sheet1", "C1");
+
+        let mut ast_engine = Engine::new();
+        ast_engine.set_bytecode_enabled(false);
+        setup(&mut ast_engine);
+        ast_engine.recalculate_single_threaded();
+        let ast_sumproduct = ast_engine.get_cell_value("Sheet1", "C1");
+
+        assert_eq!(bc_sumproduct, ast_sumproduct, "SUMPRODUCT mismatch");
+        assert_eq!(bc_sumproduct, Value::Number(140.0));
+    }
+
+    #[test]
     fn bytecode_sparse_iteration_matches_ast_for_huge_sparse_3d_ranges_counta_countblank() {
         fn setup(engine: &mut Engine) {
             for sheet in ["Sheet1", "Sheet2", "Sheet3"] {

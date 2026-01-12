@@ -405,7 +405,16 @@ fn oddl_equation(
         return Err(ExcelError::Num);
     }
 
+    // Excel-style chronology:
+    //
+    // - settlement < maturity
+    // - last_interest < maturity
+    //
+    // Settlement may be before, on, or after `last_interest` (see `bonds_odd.rs`).
     if !(settlement < maturity) {
+        return Err(ExcelError::Num);
+    }
+    if !(last_interest < maturity) {
         return Err(ExcelError::Num);
     }
 
@@ -440,7 +449,7 @@ fn oddl_equation(
     validate_finite(maturity_amount)?;
 
     if settlement >= last_interest {
-        // Settlement inside the odd last coupon period (the legacy/Excel formula case).
+        // Settlement inside the odd last coupon period.
         let a = days_between(last_interest, settlement, basis, system)?;
         let dsm = days_between(settlement, maturity, basis, system)?;
         if a < 0.0 || dsm <= 0.0 {

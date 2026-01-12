@@ -7759,6 +7759,26 @@ fn record_error_row_major(
 }
 
 #[inline]
+fn record_error_sumproduct_offset(
+    best: &mut Option<(i32, i32, u8, ErrorKind)>,
+    col_off: i32,
+    row_off: i32,
+    source_priority: u8,
+    err: ErrorKind,
+) {
+    // `sumproduct_range` scans `col_offset` outermost and `row_offset` innermost, and within each
+    // element it evaluates A then B. Preserve that precedence when iterating sparse stored cells.
+    match best {
+        None => *best = Some((col_off, row_off, source_priority, err)),
+        Some((best_col, best_row, best_src, _)) => {
+            if (col_off, row_off, source_priority) < (*best_col, *best_row, *best_src) {
+                *best = Some((col_off, row_off, source_priority, err));
+            }
+        }
+    }
+}
+
+#[inline]
 fn range_in_bounds_on_sheet(grid: &dyn Grid, sheet: usize, range: ResolvedRange) -> bool {
     grid.in_bounds_on_sheet(
         sheet,
@@ -8732,6 +8752,182 @@ fn sumproduct_range(grid: &dyn Grid, a: ResolvedRange, b: ResolvedRange) -> Resu
     }
     let rows = a.rows();
     let cols = a.cols();
+
+    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut sum = 0.0;
+            let mut best_error: Option<(i32, i32, u8, ErrorKind)> = None;
+            let mut seen_offsets: HashSet<i64> = HashSet::new();
+            let cols_i64 = cols as i64;
+
+            for (coord, v) in iter {
+                let in_a = coord_in_range(coord, a);
+                let in_b = coord_in_range(coord, b);
+
+                match (in_a, in_b) {
+                    (false, false) => {}
+                    (true, false) => {
+                        let row_off = coord.row - a.row_start;
+                        let col_off = coord.col - a.col_start;
+                        let key = (row_off as i64) * cols_i64 + (col_off as i64);
+                        if !seen_offsets.insert(key) {
+                            continue;
+                        }
+
+                        let x = match coerce_sumproduct_number(&v) {
+                            Ok(n) => n,
+                            Err(e) => {
+                                record_error_sumproduct_offset(
+                                    &mut best_error,
+                                    col_off,
+                                    row_off,
+                                    0,
+                                    e,
+                                );
+                                continue;
+                            }
+                        };
+                        let rb = CellCoord {
+                            row: b.row_start + row_off,
+                            col: b.col_start + col_off,
+                        };
+                        let rb_value = grid.get_value(rb);
+                        let y = match coerce_sumproduct_number(&rb_value) {
+                            Ok(n) => n,
+                            Err(e) => {
+                                record_error_sumproduct_offset(
+                                    &mut best_error,
+                                    col_off,
+                                    row_off,
+                                    1,
+                                    e,
+                                );
+                                continue;
+                            }
+                        };
+                        sum += x * y;
+                    }
+                    (false, true) => {
+                        let row_off = coord.row - b.row_start;
+                        let col_off = coord.col - b.col_start;
+                        let key = (row_off as i64) * cols_i64 + (col_off as i64);
+                        if !seen_offsets.insert(key) {
+                            continue;
+                        }
+
+                        let ra = CellCoord {
+                            row: a.row_start + row_off,
+                            col: a.col_start + col_off,
+                        };
+                        let ra_value = grid.get_value(ra);
+                        let x = match coerce_sumproduct_number(&ra_value) {
+                            Ok(n) => n,
+                            Err(e) => {
+                                record_error_sumproduct_offset(
+                                    &mut best_error,
+                                    col_off,
+                                    row_off,
+                                    0,
+                                    e,
+                                );
+                                continue;
+                            }
+                        };
+                        let y = match coerce_sumproduct_number(&v) {
+                            Ok(n) => n,
+                            Err(e) => {
+                                record_error_sumproduct_offset(
+                                    &mut best_error,
+                                    col_off,
+                                    row_off,
+                                    1,
+                                    e,
+                                );
+                                continue;
+                            }
+                        };
+                        sum += x * y;
+                    }
+                    (true, true) => {
+                        // Overlap: the same stored cell may correspond to *two* different SUMPRODUCT
+                        // element offsets (once as A, once as B).
+                        let v_for_a = v.clone();
+                        let v_for_b = v;
+
+                        // As A
+                        let row_off_a = coord.row - a.row_start;
+                        let col_off_a = coord.col - a.col_start;
+                        let key_a = (row_off_a as i64) * cols_i64 + (col_off_a as i64);
+                        if seen_offsets.insert(key_a) {
+                            match coerce_sumproduct_number(&v_for_a) {
+                                Ok(x) => {
+                                    let rb = CellCoord {
+                                        row: b.row_start + row_off_a,
+                                        col: b.col_start + col_off_a,
+                                    };
+                                    let rb_value = grid.get_value(rb);
+                                    match coerce_sumproduct_number(&rb_value) {
+                                        Ok(y) => sum += x * y,
+                                        Err(e) => record_error_sumproduct_offset(
+                                            &mut best_error,
+                                            col_off_a,
+                                            row_off_a,
+                                            1,
+                                            e,
+                                        ),
+                                    }
+                                }
+                                Err(e) => record_error_sumproduct_offset(
+                                    &mut best_error,
+                                    col_off_a,
+                                    row_off_a,
+                                    0,
+                                    e,
+                                ),
+                            }
+                        }
+
+                        // As B
+                        let row_off_b = coord.row - b.row_start;
+                        let col_off_b = coord.col - b.col_start;
+                        let key_b = (row_off_b as i64) * cols_i64 + (col_off_b as i64);
+                        if seen_offsets.insert(key_b) {
+                            let ra = CellCoord {
+                                row: a.row_start + row_off_b,
+                                col: a.col_start + col_off_b,
+                            };
+                            let ra_value = grid.get_value(ra);
+                            match coerce_sumproduct_number(&ra_value) {
+                                Ok(x) => match coerce_sumproduct_number(&v_for_b) {
+                                    Ok(y) => sum += x * y,
+                                    Err(e) => record_error_sumproduct_offset(
+                                        &mut best_error,
+                                        col_off_b,
+                                        row_off_b,
+                                        1,
+                                        e,
+                                    ),
+                                },
+                                Err(e) => record_error_sumproduct_offset(
+                                    &mut best_error,
+                                    col_off_b,
+                                    row_off_b,
+                                    0,
+                                    e,
+                                ),
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some((_, _, _, err)) = best_error {
+                return Err(err);
+            }
+            return Ok(sum);
+        }
+    }
+
     let mut sum = 0.0;
     for col_offset in 0..cols {
         let col_a = a.col_start + col_offset;
