@@ -1756,6 +1756,7 @@ if (
         const tab = document.createElement("button");
         tab.type = "button";
         tab.className = "dock-panel__tab";
+        tab.dataset.testid = `dock-tab-${panelId}`;
         tab.textContent = panelTitle(panelId);
         tab.setAttribute("role", "tab");
         tab.setAttribute("aria-selected", panelId === active ? "true" : "false");

@@ -25,4 +25,33 @@ test.describe("dockable panels layout persistence", () => {
     await expect(page.getByTestId("dock-left").getByTestId("panel-aiChat")).toBeVisible();
     await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toHaveCount(0);
   });
+
+  test("dock tab strip switches between multiple open panels", async ({ page }) => {
+    await gotoDesktop(page);
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+
+    // Open AI panel (defaults to right dock).
+    await page.getByTestId("open-ai-panel").click();
+    const rightDock = page.getByTestId("dock-right");
+    await expect(rightDock.getByTestId("panel-aiChat")).toBeVisible();
+
+    // Open another panel in the same dock.
+    await page.getByTestId("open-macros-panel").click();
+    await expect(rightDock.getByTestId("panel-macros")).toBeVisible();
+
+    // Tab strip should be visible and allow switching between panels.
+    await expect(rightDock.getByRole("tablist")).toBeVisible();
+    await expect(rightDock.getByTestId("dock-tab-aiChat")).toBeVisible();
+    await expect(rightDock.getByTestId("dock-tab-macros")).toBeVisible();
+
+    await rightDock.getByTestId("dock-tab-aiChat").click();
+    await expect(rightDock.getByTestId("panel-aiChat")).toBeVisible();
+    await expect(rightDock.getByTestId("panel-macros")).toHaveCount(0);
+
+    await rightDock.getByTestId("dock-tab-macros").click();
+    await expect(rightDock.getByTestId("panel-macros")).toBeVisible();
+    await expect(rightDock.getByTestId("panel-aiChat")).toHaveCount(0);
+  });
 });
