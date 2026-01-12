@@ -488,28 +488,20 @@ function EngineDemoApp() {
     };
 
     const nextSheetSizes = getSheetSizes(activeSheet);
-    const prevSheet = lastAppliedAxisSheetRef.current;
-    const prevSheetSizes = prevSheet ? getSheetSizes(prevSheet) : null;
 
     const zoom = api.getZoom();
 
-    const allCols = new Set<number>();
-    for (const col of nextSheetSizes.cols.keys()) allCols.add(col);
-    if (prevSheetSizes) for (const col of prevSheetSizes.cols.keys()) allCols.add(col);
-    for (const col of allCols) {
-      const base = nextSheetSizes.cols.get(col);
-      if (base === undefined) api.resetColWidth(col);
-      else api.setColWidth(col, base * zoom);
+    const cols = new Map<number, number>();
+    for (const [col, base] of nextSheetSizes.cols) {
+      cols.set(col, base * zoom);
     }
 
-    const allRows = new Set<number>();
-    for (const row of nextSheetSizes.rows.keys()) allRows.add(row);
-    if (prevSheetSizes) for (const row of prevSheetSizes.rows.keys()) allRows.add(row);
-    for (const row of allRows) {
-      const base = nextSheetSizes.rows.get(row);
-      if (base === undefined) api.resetRowHeight(row);
-      else api.setRowHeight(row, base * zoom);
+    const rows = new Map<number, number>();
+    for (const [row, base] of nextSheetSizes.rows) {
+      rows.set(row, base * zoom);
     }
+
+    api.applyAxisSizeOverrides({ rows, cols }, { resetUnspecified: true });
 
     lastAppliedAxisSheetRef.current = activeSheet;
   }, [provider, activeSheet]);

@@ -23,6 +23,18 @@ export interface GridApi {
   setColWidth(col: number, width: number): void;
   resetRowHeight(row: number): void;
   resetColWidth(col: number): void;
+  /**
+   * Apply many row/column size overrides in one batch, triggering at most one full invalidation.
+   *
+   * Sizes are specified in CSS pixels at the current zoom.
+   *
+   * When `resetUnspecified` is set, any existing overrides for the provided axes that are *not*
+   * present in the new maps are cleared.
+   */
+  applyAxisSizeOverrides(
+    overrides: { rows?: ReadonlyMap<number, number>; cols?: ReadonlyMap<number, number> },
+    options?: { resetUnspecified?: boolean }
+  ): void;
   getRowHeight(row: number): number;
   getColWidth(col: number): number;
   setSelection(row: number, col: number): void;
@@ -579,6 +591,12 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         const renderer = rendererRef.current;
         if (!renderer) return;
         renderer.resetColWidth(col);
+        syncScrollbars();
+      },
+      applyAxisSizeOverrides: (overrides, options) => {
+        const renderer = rendererRef.current;
+        if (!renderer) return;
+        renderer.applyAxisSizeOverrides(overrides, options);
         syncScrollbars();
       },
       getRowHeight: (row) => rendererRef.current?.getRowHeight(row) ?? (props.defaultRowHeight ?? 21) * zoomRef.current,
