@@ -48,6 +48,8 @@ pub fn read_calc_settings_from_workbook_xml(
     let mut buf = Vec::new();
     loop {
         match reader.read_event_into(&mut buf)? {
+            // `workbook.xml` elements may be namespace-prefixed (e.g. `<x:calcPr>`). Match
+            // by local name so we can parse SpreadsheetML XML regardless of prefix.
             Event::Empty(e) | Event::Start(e) if e.local_name().as_ref() == b"calcPr" => {
                 apply_calc_pr_attributes(&mut reader, &e, &mut settings)?;
                 break;
@@ -234,5 +236,30 @@ mod tests {
         let xml = br#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"></workbook>"#;
         let settings = read_calc_settings_from_workbook_xml(xml).unwrap();
         assert_eq!(settings, CalcSettings::default());
+    }
+
+    #[test]
+    fn read_calc_pr_with_prefix_only_workbook_xml() {
+        let xml = br#"
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:calcPr
+    calcMode="manual"
+    calcOnSave="0"
+    fullCalcOnLoad="1"
+    fullPrecision="0"
+    iterative="1"
+    iterateCount="42"
+    iterateDelta="0.25"
+  />
+</x:workbook>
+"#;
+        let settings = read_calc_settings_from_workbook_xml(xml).unwrap();
+        assert_eq!(settings.calculation_mode, CalculationMode::Manual);
+        assert!(!settings.calculate_before_save);
+        assert!(settings.full_calc_on_load);
+        assert!(!settings.full_precision);
+        assert!(settings.iterative.enabled);
+        assert_eq!(settings.iterative.max_iterations, 42);
+        assert!((settings.iterative.max_change - 0.25).abs() < 1e-12);
     }
 }
