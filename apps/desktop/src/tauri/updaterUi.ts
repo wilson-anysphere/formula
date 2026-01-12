@@ -859,7 +859,9 @@ export async function installUpdaterUi(listenArg?: TauriListen): Promise<void> {
     try {
       return listen(eventName, (event) => {
         const payload = (event as any)?.payload as UpdaterEventPayload;
-        void handleUpdaterEvent(eventName, payload);
+        void handleUpdaterEvent(eventName, payload).catch((err) => {
+          console.error(`[formula][updater-ui] Failed to handle ${eventName}:`, err);
+        });
       }).catch((err) => {
         console.error(`[formula][updater-ui] Failed to listen for ${eventName}:`, err);
         throw err;
