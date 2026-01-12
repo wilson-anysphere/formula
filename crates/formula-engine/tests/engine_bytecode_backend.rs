@@ -1319,6 +1319,43 @@ fn bytecode_backend_choose_is_scalar_safe_for_abs() {
 }
 
 #[test]
+fn bytecode_backend_let_cell_ref_bindings_can_be_consumed_as_ranges_for_countif() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+
+    // A LET binding to a bare cell reference is stored as a reference in bytecode (to preserve
+    // reference semantics). Ensure it can still be consumed by range-taking functions like COUNTIF
+    // without forcing an AST fallback.
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=LET(r, A1, COUNTIF(r, ">0"))"#)
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_engine_matches_ast(&engine, r#"=LET(r, A1, COUNTIF(r, ">0"))"#, "B1");
+}
+
+#[test]
+fn bytecode_backend_let_cell_ref_bindings_can_be_consumed_as_ranges_for_match() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 10.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=LET(r, A1, MATCH(10, r, 0))")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
+    assert_engine_matches_ast(&engine, "=LET(r, A1, MATCH(10, r, 0))", "B1");
+}
+
+#[test]
 fn bytecode_backend_let_supports_range_bindings_when_consumed_by_sum() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
