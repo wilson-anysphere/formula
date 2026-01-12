@@ -178,6 +178,9 @@ describe("updaterUi (dialog + download)", () => {
       expect(downloadBtn).not.toBeNull();
 
       downloadBtn?.click();
+      // `startUpdateDownload()` yields to a timer so the dialog can render the "Downloading…"
+      // state before potentially-fast updater checks/downloads complete.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       await flushMicrotasks(12);
 
       expect(download).toHaveBeenCalledTimes(1);
@@ -393,6 +396,7 @@ describe("updaterUi (dialog + download)", () => {
       expect(downloadBtn).not.toBeNull();
       downloadBtn?.click();
 
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       await flushMicrotasks(8);
       expect(download).toHaveBeenCalledTimes(1);
 
@@ -458,6 +462,7 @@ describe("updaterUi (dialog + download)", () => {
       expect(downloadBtn).not.toBeNull();
 
       downloadBtn?.click();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
       await flushMicrotasks(12);
 
       const dialog = document.querySelector('[data-testid="updater-dialog"]') as HTMLElement | null;

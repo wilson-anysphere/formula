@@ -402,6 +402,9 @@ describe("updaterUi (events)", () => {
     expect(downloadBtn).not.toBeNull();
 
     downloadBtn?.click();
+    // `startUpdateDownload()` yields to a timer so the dialog can render the "Downloading…"
+    // state before potentially-fast updater checks/downloads complete.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     await flushMicrotasks(8);
 
     const progress = document.querySelector<HTMLProgressElement>('[data-testid="updater-progress"]');

@@ -576,7 +576,10 @@ function renderUpdateDialog(): void {
   els.releaseNotesTitle.hidden = !info?.body;
 
   els.laterBtn.disabled = anyDownloadInFlight;
-  els.viewVersionsBtn.disabled = anyDownloadInFlight;
+  // Keep "Open release page" enabled even while a download is in flight so users can
+  // inspect the release notes/versions without interrupting the download. The click
+  // handler already avoids closing the dialog while `downloadInFlight` is true.
+  els.viewVersionsBtn.disabled = false;
   els.downloadBtn.disabled =
     anyDownloadInFlight ||
     !!downloadedUpdate ||
@@ -709,6 +712,9 @@ async function startUpdateDownload(): Promise<void> {
   progressTotal = null;
   progressPercent = null;
   renderUpdateDialog();
+  // Give the UI at least one tick to reflect the "Downloading…" state before we call
+  // into the updater (which may complete synchronously in tests or on cached updates).
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
   try {
     const update = await updater.check();
