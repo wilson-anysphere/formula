@@ -9,7 +9,7 @@
 .grid-scrollbar-track {
   position: absolute;
   z-index: 5;
-  background: var(--bg-tertiary);
+  background: var(--formula-grid-scrollbar-track, var(--bg-tertiary));
   border-radius: 6px;
   opacity: 0.9;
   user-select: none;
@@ -17,7 +17,7 @@
 
 .grid-scrollbar-thumb {
   position: absolute;
-  background: var(--text-secondary);
+  background: var(--formula-grid-scrollbar-thumb, var(--text-secondary));
   border-radius: 6px;
   cursor: pointer;
   user-select: none;
@@ -28,12 +28,12 @@
 
 .grid-scrollbar-thumb:hover,
 .grid-scrollbar-thumb:active {
-  background: var(--text-primary);
-  box-shadow: 0 0 0 2px var(--selection-bg);
+  background: var(--formula-grid-cell-text, var(--text-primary));
+  box-shadow: 0 0 0 2px var(--formula-grid-selection-fill, var(--selection-fill, var(--selection-bg)));
 }
 
 .grid-scrollbar-thumb:focus-visible {
-  outline: 2px solid var(--selection-border);
+  outline: 2px solid var(--formula-grid-selection-border, var(--selection-border));
   outline-offset: 1px;
 }
 
@@ -48,4 +48,3 @@
   bottom: 1px;
   left: 0;
 }
-

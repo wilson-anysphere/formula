@@ -517,7 +517,7 @@ export class SpreadsheetApp {
   private formulaSelectionRenderer = new SelectionRenderer({
     fillColor: "transparent",
     borderColor: "transparent",
-    activeBorderColor: resolveCssVar("--selection-border", { fallback: "transparent" }),
+    activeBorderColor: resolveCssVar("--formula-grid-selection-border", { fallback: resolveCssVar("--selection-border", { fallback: "transparent" }) }),
     borderWidth: 2,
     activeBorderWidth: 3,
     fillHandleSize: 0,
@@ -3194,7 +3194,7 @@ export class SpreadsheetApp {
     ctx.restore();
 
     ctx.save();
-    ctx.fillStyle = resolveCssVar("--bg-primary", { fallback: "Canvas" });
+    ctx.fillStyle = resolveCssVar("--formula-grid-bg", { fallback: resolveCssVar("--bg-primary", { fallback: "Canvas" }) });
     ctx.fillRect(0, 0, this.width, this.height);
 
     const originX = this.rowHeaderWidth;
@@ -3215,16 +3215,16 @@ export class SpreadsheetApp {
     const startXScroll = originX + this.visibleColStart * this.cellWidth - this.scrollX;
     const startYScroll = originY + this.visibleRowStart * this.cellHeight - this.scrollY;
 
-    ctx.strokeStyle = resolveCssVar("--grid-line", { fallback: "CanvasText" });
+    ctx.strokeStyle = resolveCssVar("--formula-grid-line", { fallback: resolveCssVar("--grid-line", { fallback: "CanvasText" }) });
     ctx.lineWidth = 1;
 
     // Header backgrounds.
-    ctx.fillStyle = resolveCssVar("--grid-header-bg", { fallback: "Canvas" });
+    ctx.fillStyle = resolveCssVar("--formula-grid-header-bg", { fallback: resolveCssVar("--grid-header-bg", { fallback: "Canvas" }) });
     ctx.fillRect(0, 0, this.width, this.colHeaderHeight);
     ctx.fillRect(0, 0, this.rowHeaderWidth, this.height);
 
     // Corner cell.
-    ctx.fillStyle = resolveCssVar("--bg-tertiary", { fallback: "Canvas" });
+    ctx.fillStyle = resolveCssVar("--formula-grid-header-bg", { fallback: resolveCssVar("--grid-header-bg", { fallback: "Canvas" }) });
     ctx.fillRect(0, 0, this.rowHeaderWidth, this.colHeaderHeight);
 
     // Header separator lines.
@@ -3239,8 +3239,12 @@ export class SpreadsheetApp {
 
     const fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
     const fontSizePx = 14;
-    const defaultTextColor = resolveCssVar("--text-primary", { fallback: "CanvasText" });
-    const errorTextColor = resolveCssVar("--error", { fallback: defaultTextColor });
+    const defaultTextColor = resolveCssVar("--formula-grid-cell-text", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) });
+    const errorTextColor = resolveCssVar("--formula-grid-error-text", { fallback: resolveCssVar("--error", { fallback: defaultTextColor }) });
+    const commentIndicatorColor = resolveCssVar("--formula-grid-comment-indicator", { fallback: resolveCssVar("--warning", { fallback: "CanvasText" }) });
+    const commentIndicatorResolvedColor = resolveCssVar("--formula-grid-comment-indicator-resolved", {
+      fallback: resolveCssVar("--text-secondary", { fallback: commentIndicatorColor }),
+    });
 
     const renderCellRegion = (options: {
       clipX: number;
@@ -3343,11 +3347,14 @@ export class SpreadsheetApp {
           const col = cols[visualCol]!;
           const cellRef = cellToA1({ row, col });
           if (!this.commentCells.has(cellRef)) continue;
+          const resolved = this.commentMeta.get(cellRef)?.resolved ?? false;
           drawCommentIndicator(ctx, {
             x: startX + visualCol * this.cellWidth,
             y: startY + visualRow * this.cellHeight,
             width: this.cellWidth,
             height: this.cellHeight,
+          }, {
+            color: resolved ? commentIndicatorResolvedColor : commentIndicatorColor,
           });
         }
       }
@@ -3423,7 +3430,7 @@ export class SpreadsheetApp {
     ctx.restore();
 
     // Header labels.
-    ctx.fillStyle = resolveCssVar("--text-primary", { fallback: "CanvasText" });
+    ctx.fillStyle = resolveCssVar("--formula-grid-header-text", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) });
     ctx.font = "12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
