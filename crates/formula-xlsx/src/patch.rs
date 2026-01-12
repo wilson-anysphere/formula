@@ -1910,9 +1910,12 @@ fn patch_cell_element(
         }
     }
 
-    let patch_is_rich_value_placeholder =
-        matches!(patch_value, Some(CellValue::Error(ErrorValue::Value)));
-    let drop_vm = update_value && !patch_is_rich_value_placeholder;
+    // `vm` points into `xl/metadata.xml` value metadata for rich values (linked data types,
+    // images-in-cell, etc). When patching a cell value to anything other than the rich-value
+    // placeholder error (`#VALUE!` / `ErrorValue::Value`), drop `vm` so the cell no longer points
+    // at stale metadata.
+    let patch_is_value_error = matches!(patch_value, Some(CellValue::Error(ErrorValue::Value)));
+    let drop_vm = update_value && !patch_is_value_error;
 
     let mut c = BytesStart::new(cell_tag.as_str());
     let mut has_r = false;
