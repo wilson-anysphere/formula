@@ -112,6 +112,45 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("web: read recognizes rich mime types case-insensitively", async () => {
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        navigator: {
+          clipboard: {
+            async read() {
+              return [
+                {
+                  types: ["TEXT/PLAIN", "TEXT/HTML", "TEXT/RTF"],
+                  /**
+                   * @param {string} type
+                   */
+                  async getType(type) {
+                    switch (type) {
+                      case "TEXT/PLAIN":
+                        return new Blob(["hello"], { type });
+                      case "TEXT/HTML":
+                        return new Blob(["<b>hi</b>"], { type });
+                      case "TEXT/RTF":
+                        return new Blob(["{\\\\rtf1 hello}"], { type });
+                      default:
+                        throw new Error(`Unexpected clipboard type: ${type}`);
+                    }
+                  },
+                },
+              ];
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { text: "hello", html: "<b>hi</b>", rtf: "{\\\\rtf1 hello}" });
+      }
+    );
+  });
+
   await t.test("web: read falls back to readText when rich read throws", async () => {
     await withGlobals(
       {

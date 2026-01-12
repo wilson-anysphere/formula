@@ -507,8 +507,11 @@ function createWebClipboardProvider() {
         try {
           const items = await clipboard.read();
           for (const item of items) {
-            const matchMime = (value, exact) =>
-              value === exact || (typeof value === "string" && value.toLowerCase().startsWith(`${exact};`));
+            const matchMime = (value, exact) => {
+              if (typeof value !== "string") return false;
+              const normalized = value.trim().toLowerCase();
+              return normalized === exact || normalized.startsWith(`${exact};`);
+            };
 
             const htmlType = item.types.find((t) => matchMime(t, "text/html"));
             const textType = item.types.find((t) => matchMime(t, "text/plain"));
