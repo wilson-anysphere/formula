@@ -79,7 +79,9 @@ class SimpleEventEmitter {
       } catch (err) {
         // Avoid crashing the app due to a listener; surface the failure asynchronously
         // like many event emitter implementations do.
-        queueMicrotask(() => {
+        const enqueue =
+          typeof queueMicrotask === "function" ? queueMicrotask : (cb) => Promise.resolve().then(cb);
+        enqueue(() => {
           throw err;
         });
       }
@@ -95,6 +97,31 @@ class SimpleEventEmitter {
     this._listeners.delete(event);
     return this;
   }
+}
+
+function randomUUID() {
+  const cryptoObj = typeof globalThis !== "undefined" ? globalThis.crypto : undefined;
+  const randomUuid = cryptoObj && typeof cryptoObj.randomUUID === "function" ? cryptoObj.randomUUID : null;
+  if (randomUuid) {
+    try {
+      return randomUuid.call(cryptoObj);
+    } catch {
+      // fall through
+    }
+  }
+
+  const getRandomValues = cryptoObj && typeof cryptoObj.getRandomValues === "function" ? cryptoObj.getRandomValues : null;
+  if (getRandomValues) {
+    const bytes = new Uint8Array(16);
+    getRandomValues.call(cryptoObj, bytes);
+    // RFC 4122 v4 UUID.
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
 }
 
 /**
@@ -284,7 +311,7 @@ export class VersionManager extends SimpleEventEmitter {
     // Record new head version with the restored snapshot bytes.
     const restoredSnapshot = this.doc.encodeState();
     const head = /** @type {VersionRecord} */ ({
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       kind: "restore",
       timestampMs: this.nowMs(),
       userId: this.userId,
@@ -413,7 +440,7 @@ export class VersionManager extends SimpleEventEmitter {
   async _createVersion(opts) {
     const snapshot = this.doc.encodeState();
     const version = /** @type {VersionRecord} */ ({
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       kind: opts.kind,
       timestampMs: this.nowMs(),
       userId: this.userId,
