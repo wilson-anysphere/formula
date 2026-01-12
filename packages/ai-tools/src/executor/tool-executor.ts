@@ -233,6 +233,10 @@ type DlpRangeIndex = {
    */
   sheetRankMax: number;
   /**
+   * Cached `max(docRankMax, sheetRankMax)` used as the starting rank for per-cell checks.
+   */
+  baseRank: number;
+  /**
    * Cached selection bounds (0-based) used for fast column/cell array indexing.
    */
   startRow: number;
@@ -1337,9 +1341,12 @@ export class ToolExecutor {
       rangeRecords.sort((a, b) => b.rank - a.rank);
     }
 
+    const baseRank = Math.max(docRankMax, sheetRankMax);
+
     return {
       docRankMax,
       sheetRankMax,
+      baseRank,
       startRow,
       startCol,
       rowCount,
@@ -1382,8 +1389,7 @@ export class ToolExecutor {
       ? dlp.policyAllowsRestrictedContent
       : maxAllowedRank >= RESTRICTED_CLASSIFICATION_RANK;
 
-    let rank = index.docRankMax;
-    if (index.sheetRankMax > rank) rank = index.sheetRankMax;
+    let rank = index.baseRank;
 
     if (rank === RESTRICTED_CLASSIFICATION_RANK) {
       return restrictedAllowed;
