@@ -253,3 +253,81 @@ fn override_part_name_is_calc_chain(e: &BytesStart<'_>) -> Result<bool, RecalcPo
     }
     Ok(false)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use super::*;
+
+    fn content_types_override_part_names(xml: &[u8]) -> BTreeSet<String> {
+        let mut reader = Reader::from_reader(xml);
+        reader.config_mut().trim_text(true);
+
+        let mut buf = Vec::new();
+        let mut parts = BTreeSet::new();
+
+        loop {
+            match reader
+                .read_event_into(&mut buf)
+                .expect("read content types xml event")
+            {
+                Event::Eof => break,
+                Event::Start(ref e) | Event::Empty(ref e) if e.name().as_ref() == b"Override" => {
+                    for attr in e.attributes() {
+                        let attr = attr.expect("read Override attribute");
+                        if attr.key.as_ref() != b"PartName" {
+                            continue;
+                        }
+                        let part_name = attr
+                            .unescape_value()
+                            .expect("unescape PartName value")
+                            .into_owned();
+                        parts.insert(part_name.to_string());
+                    }
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        parts
+    }
+
+    #[test]
+    fn content_types_remove_calc_chain_preserves_metadata_and_richdata_overrides() {
+        // Regression test: removing calcChain overrides must not discard richData / metadata parts
+        // used for embedded images.
+        let content_types_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Override PartName="/xl/calcChain.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"></Override>
+  <Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>
+  <Override PartName="/xl/richData/rdrichvalue.xml" ContentType="application/vnd.ms-excel.rdrichvalue+xml"/>
+  <Override PartName="/xl/richData/rdrichvaluestructure.xml" ContentType="application/vnd.ms-excel.rdrichvaluestructure+xml"/>
+  <Override PartName="/xl/richData/rdRichValueTypes.xml" ContentType="application/vnd.ms-excel.rdRichValueTypes+xml"/>
+  <Override PartName="/xl/richData/richValueRel.xml" ContentType="application/vnd.ms-excel.richValueRel+xml"/>
+</Types>"#;
+
+        let updated = content_types_remove_calc_chain(content_types_xml.as_bytes())
+            .expect("remove calc chain from content types");
+        let updated_overrides = content_types_override_part_names(&updated);
+
+        assert!(
+            !updated_overrides.contains("/xl/calcChain.xml"),
+            "calcChain override should be removed"
+        );
+
+        let expected: BTreeSet<String> = [
+            "/xl/metadata.xml",
+            "/xl/richData/rdrichvalue.xml",
+            "/xl/richData/rdrichvaluestructure.xml",
+            "/xl/richData/rdRichValueTypes.xml",
+            "/xl/richData/richValueRel.xml",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+
+        assert_eq!(updated_overrides, expected);
+    }
+}
