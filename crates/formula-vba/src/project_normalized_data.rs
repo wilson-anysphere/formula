@@ -455,27 +455,41 @@ fn unicode_record_payload(data: &[u8]) -> Result<&[u8], DirParseError> {
     // (length can be either code units or byte count). Accept both:
     // - raw UTF-16LE bytes (no internal prefix), and
     // - `u32 length || utf16le_bytes`.
+    fn trim_trailing_utf16_nul(bytes: &[u8]) -> &[u8] {
+        if bytes.len() >= 2 && bytes.len().is_multiple_of(2) && bytes.ends_with(&[0x00, 0x00]) {
+            &bytes[..bytes.len() - 2]
+        } else {
+            bytes
+        }
+    }
+
     if data.len() < 4 {
-        return Ok(data);
+        return Ok(trim_trailing_utf16_nul(data));
     }
 
     let n = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
     let rest = &data[4..];
 
     // Treat the leading u32 as a length prefix only when it is consistent with the remaining bytes.
-    if n == rest.len() || n.saturating_mul(2) == rest.len() {
-        return Ok(rest);
-    }
-    // Some producers include a trailing UTF-16 NUL terminator but do not count it in the internal
-    // length prefix.
-    if rest.len() >= 2
+    let out = if n == rest.len()
+        || (rest.len().is_multiple_of(2) && n.saturating_mul(2) == rest.len())
+    {
+        rest
+    } else if rest.len() >= 2
         && rest.ends_with(&[0x00, 0x00])
         && (n.saturating_add(2) == rest.len()
-            || n.saturating_mul(2).saturating_add(2) == rest.len())
+            || (rest.len().is_multiple_of(2) && n.saturating_mul(2).saturating_add(2) == rest.len()))
     {
-        return Ok(&rest[..rest.len() - 2]);
-    }
+        // Some producers include a trailing UTF-16 NUL terminator but do not count it in the
+        // internal length prefix.
+        &rest[..rest.len() - 2]
+    } else {
+        // Otherwise assume the record is raw UTF-16LE bytes.
+        data
+    };
 
-    // Otherwise assume the record is raw UTF-16LE bytes.
-    Ok(data)
+    // Some producers include a trailing UTF-16 NUL terminator regardless of whether it is counted
+    // by the internal length prefix. Since these records represent string-like fields, strip a
+    // single trailing terminator for stable hashing.
+    Ok(trim_trailing_utf16_nul(out))
 }

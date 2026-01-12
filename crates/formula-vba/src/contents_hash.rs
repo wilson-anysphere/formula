@@ -2748,30 +2748,43 @@ fn trim_u32_len_prefix_unicode_string(bytes: &[u8]) -> &[u8] {
     // Heuristics:
     // - if the first u32 equals the remaining byte count, treat it as a byte-length prefix.
     // - if the first u32 equals the remaining UTF-16 code unit count, treat it as a char-length prefix.
-    if bytes.len() < 4 {
-        return bytes;
+    fn trim_trailing_utf16_nul(bytes: &[u8]) -> &[u8] {
+        if bytes.len() >= 2 && bytes.len().is_multiple_of(2) && bytes.ends_with(&[0x00, 0x00]) {
+            &bytes[..bytes.len() - 2]
+        } else {
+            bytes
+        }
     }
+
+    if bytes.len() < 4 {
+        return trim_trailing_utf16_nul(bytes);
+    }
+
     let n = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as usize;
     let rest = &bytes[4..];
-    if n == rest.len() {
-        return rest;
-    }
-    if rest.len().is_multiple_of(2) && n.saturating_mul(2) == rest.len() {
-        return rest;
-    }
-    // Some producers include a trailing UTF-16 NUL terminator but do not count it in the internal
-    // length prefix. Accept that form too, but only when an actual terminator is present (to avoid
-    // misclassifying random leading u32 values). When matched, strip the trailing terminator bytes
-    // so downstream hashing/transcripts operate on the actual string bytes.
-    if rest.len() >= 2 && rest.ends_with(&[0x00, 0x00]) {
-        if n.saturating_add(2) == rest.len() {
-            return &rest[..rest.len() - 2];
-        }
-        if rest.len().is_multiple_of(2) && n.saturating_mul(2).saturating_add(2) == rest.len() {
-            return &rest[..rest.len() - 2];
-        }
-    }
-    bytes
+
+    // Treat the leading u32 as a length prefix only when it is consistent with the remaining bytes.
+    let mut out = if n == rest.len() || (rest.len().is_multiple_of(2) && n.saturating_mul(2) == rest.len())
+    {
+        rest
+    } else if rest.len() >= 2
+        && rest.ends_with(&[0x00, 0x00])
+        && (n.saturating_add(2) == rest.len()
+            || (rest.len().is_multiple_of(2) && n.saturating_mul(2).saturating_add(2) == rest.len()))
+    {
+        // Some producers include a trailing UTF-16 NUL terminator but do not count it in the
+        // internal length prefix. Accept that form too, but only when an actual terminator is
+        // present (to avoid misclassifying random leading u32 values).
+        &rest[..rest.len() - 2]
+    } else {
+        bytes
+    };
+
+    // Some producers include a trailing UTF-16 NUL terminator regardless of whether it is counted
+    // by the internal length prefix. Since stream/module names should not contain embedded NULs,
+    // strip a single trailing terminator to keep hashing/transcripts stable across producers.
+    out = trim_trailing_utf16_nul(out);
+    out
 }
 
 fn looks_like_utf16le(bytes: &[u8]) -> bool {

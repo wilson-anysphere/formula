@@ -57,6 +57,12 @@ fn unicode_record_data_bytes_len(s: &str) -> Vec<u8> {
     out
 }
 
+fn utf16le_bytes_with_trailing_nul(s: &str) -> Vec<u8> {
+    let mut out = utf16le_bytes(s);
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out
+}
+
 fn unicode_record_data_bytes_len_excluding_trailing_nul(s: &str) -> Vec<u8> {
     let payload_without_nul = utf16le_bytes(s);
     let mut payload = payload_without_nul.clone();
@@ -75,6 +81,22 @@ fn unicode_record_data_code_units_excluding_trailing_nul(s: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(4 + payload.len());
     // Prefix is the UTF-16 code unit count excluding the trailing terminator.
     out.extend_from_slice(&((payload_without_nul.len() / 2) as u32).to_le_bytes());
+    out.extend_from_slice(&payload);
+    out
+}
+
+fn unicode_record_data_bytes_len_including_trailing_nul(s: &str) -> Vec<u8> {
+    let payload = utf16le_bytes_with_trailing_nul(s);
+    let mut out = Vec::with_capacity(4 + payload.len());
+    out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    out.extend_from_slice(&payload);
+    out
+}
+
+fn unicode_record_data_code_units_including_trailing_nul(s: &str) -> Vec<u8> {
+    let payload = utf16le_bytes_with_trailing_nul(s);
+    let mut out = Vec::with_capacity(4 + payload.len());
+    out.extend_from_slice(&((payload.len() / 2) as u32).to_le_bytes());
     out.extend_from_slice(&payload);
     out
 }
@@ -1287,6 +1309,59 @@ fn project_normalized_data_v3_strips_unicode_length_prefix_when_prefix_excludes_
             0x0032,
             &unicode_record_data_bytes_len_excluding_trailing_nul("UniStream"),
         );
+
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized =
+        project_normalized_data_v3_dir_records(&vba_bin).expect("ProjectNormalizedDataV3");
+
+    let expected = [
+        utf16le_bytes("UniDoc"),
+        utf16le_bytes("UniMod"),
+        utf16le_bytes("UniStream"),
+        0u16.to_le_bytes().to_vec(),
+    ]
+    .concat();
+
+    assert_eq!(normalized, expected);
+}
+
+#[test]
+fn project_normalized_data_v3_strips_trailing_utf16_nul_terminator_from_unicode_records() {
+    // Some producers include a UTF-16 NUL terminator at the end of Unicode dir record payloads,
+    // regardless of whether an internal length prefix is present or whether it counts the
+    // terminator. Ensure we strip a single trailing terminator so the transcript is stable.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // PROJECTDOCSTRINGUNICODE with an internal *byte-count* length prefix that *includes* the
+        // trailing terminator.
+        push_record(&mut out, 0x0005, b"AnsiDoc");
+        push_record(
+            &mut out,
+            0x0040,
+            &unicode_record_data_bytes_len_including_trailing_nul("UniDoc"),
+        );
+
+        // MODULENAMEUNICODE with an internal *code-unit-count* length prefix that *includes* the
+        // trailing terminator.
+        push_record(&mut out, 0x0019, b"AnsiMod");
+        push_record(
+            &mut out,
+            0x0047,
+            &unicode_record_data_code_units_including_trailing_nul("UniMod"),
+        );
+
+        // MODULESTREAMNAMEUNICODE with *no* internal prefix, but a trailing terminator.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"AnsiStream");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0032, &utf16le_bytes_with_trailing_nul("UniStream"));
 
         push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE
 

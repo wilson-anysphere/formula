@@ -471,6 +471,152 @@ fn build_project_with_modulenameunicode_internal_len_prefix_excluding_trailing_n
     ole.into_inner().into_inner()
 }
 
+fn build_project_with_modulenameunicode_internal_len_prefix_including_trailing_nul_byte_count(
+) -> Vec<u8> {
+    // Keep module source already in normalized form to make expected bytes simple.
+    let module_code = b"Sub Foo()\r\nEnd Sub\r\n";
+    let module_container = compress_container(module_code);
+
+    let name_utf16 = utf16le_bytes("Module1");
+    let mut name_utf16_with_nul = name_utf16.clone();
+    name_utf16_with_nul.extend_from_slice(&0u16.to_le_bytes());
+    let byte_len_including_nul = name_utf16_with_nul.len() as u32;
+
+    let mut unicode_name_payload = Vec::new();
+    unicode_name_payload.extend_from_slice(&byte_len_including_nul.to_le_bytes());
+    unicode_name_payload.extend_from_slice(&name_utf16_with_nul);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // MODULENAME (ANSI) + MODULENAMEUNICODE with an internal u32 length prefix that includes the
+        // trailing UTF-16 NUL terminator.
+        push_record(&mut out, 0x0019, b"Module1");
+        push_record(&mut out, 0x0047, &unicode_name_payload);
+
+        // MODULESTREAMNAME (ANSI) + reserved u16.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+
+        // MODULETYPE (procedural; TypeRecord.Id=0x0021)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET (0)
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+
+    ole.into_inner().into_inner()
+}
+
+fn build_project_with_modulenameunicode_internal_len_prefix_including_trailing_nul_code_units(
+) -> Vec<u8> {
+    // Keep module source already in normalized form to make expected bytes simple.
+    let module_code = b"Sub Foo()\r\nEnd Sub\r\n";
+    let module_container = compress_container(module_code);
+
+    let name_utf16 = utf16le_bytes("Module1");
+    let mut name_utf16_with_nul = name_utf16.clone();
+    name_utf16_with_nul.extend_from_slice(&0u16.to_le_bytes());
+    let code_unit_len_including_nul = (name_utf16_with_nul.len() / 2) as u32;
+
+    let mut unicode_name_payload = Vec::new();
+    unicode_name_payload.extend_from_slice(&code_unit_len_including_nul.to_le_bytes());
+    unicode_name_payload.extend_from_slice(&name_utf16_with_nul);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // MODULENAME (ANSI) + MODULENAMEUNICODE with an internal u32 length prefix that includes the
+        // trailing UTF-16 NUL terminator.
+        push_record(&mut out, 0x0019, b"Module1");
+        push_record(&mut out, 0x0047, &unicode_name_payload);
+
+        // MODULESTREAMNAME (ANSI) + reserved u16.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+
+        // MODULETYPE (procedural; TypeRecord.Id=0x0021)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET (0)
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+
+    ole.into_inner().into_inner()
+}
+
+fn build_project_with_modulenameunicode_trailing_nul_without_internal_len_prefix() -> Vec<u8> {
+    // Keep module source already in normalized form to make expected bytes simple.
+    let module_code = b"Sub Foo()\r\nEnd Sub\r\n";
+    let module_container = compress_container(module_code);
+
+    let mut name_utf16_with_nul = utf16le_bytes("Module1");
+    name_utf16_with_nul.extend_from_slice(&0u16.to_le_bytes());
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // MODULENAME (ANSI) + MODULENAMEUNICODE with a trailing UTF-16 NUL terminator but no
+        // internal length prefix.
+        push_record(&mut out, 0x0019, b"Module1");
+        push_record(&mut out, 0x0047, &name_utf16_with_nul);
+
+        // MODULESTREAMNAME (ANSI) + reserved u16.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+
+        // MODULETYPE (procedural; TypeRecord.Id=0x0021)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET (0)
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+
+    ole.into_inner().into_inner()
+}
+
 fn build_project_with_ansi_and_unicode_module_stream_name_records() -> Vec<u8> {
     // Keep module source already in normalized form to make expected bytes simple.
     let module_code = b"Sub Foo()\r\nEnd Sub\r\n";
@@ -1813,6 +1959,57 @@ fn v3_content_normalized_data_strips_internal_len_prefix_excluding_trailing_nul_
     expected.extend_from_slice(b"Sub Foo()\nEnd Sub\n\n");
     // The internal u32 length prefix and the trailing UTF-16 NUL terminator must NOT be present in
     // the transcript.
+    expected.extend_from_slice(&utf16le_bytes("Module1"));
+    expected.push(b'\n');
+
+    assert_eq!(v3, expected);
+}
+
+#[test]
+fn v3_content_normalized_data_strips_trailing_nul_in_modulenameunicode_payload_when_len_prefix_includes_it_byte_count(
+) {
+    let vba_bin = build_project_with_modulenameunicode_internal_len_prefix_including_trailing_nul_byte_count();
+    let v3 = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(&0x0021u16.to_le_bytes());
+    expected.extend_from_slice(&0u16.to_le_bytes());
+    expected.extend_from_slice(b"Sub Foo()\nEnd Sub\n\n");
+    // The trailing UTF-16 NUL terminator must NOT be present in the transcript.
+    expected.extend_from_slice(&utf16le_bytes("Module1"));
+    expected.push(b'\n');
+
+    assert_eq!(v3, expected);
+}
+
+#[test]
+fn v3_content_normalized_data_strips_trailing_nul_in_modulenameunicode_payload_when_len_prefix_includes_it_code_units(
+) {
+    let vba_bin = build_project_with_modulenameunicode_internal_len_prefix_including_trailing_nul_code_units();
+    let v3 = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(&0x0021u16.to_le_bytes());
+    expected.extend_from_slice(&0u16.to_le_bytes());
+    expected.extend_from_slice(b"Sub Foo()\nEnd Sub\n\n");
+    // The trailing UTF-16 NUL terminator must NOT be present in the transcript.
+    expected.extend_from_slice(&utf16le_bytes("Module1"));
+    expected.push(b'\n');
+
+    assert_eq!(v3, expected);
+}
+
+#[test]
+fn v3_content_normalized_data_strips_trailing_nul_in_modulenameunicode_payload_without_internal_len_prefix(
+) {
+    let vba_bin = build_project_with_modulenameunicode_trailing_nul_without_internal_len_prefix();
+    let v3 = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(&0x0021u16.to_le_bytes());
+    expected.extend_from_slice(&0u16.to_le_bytes());
+    expected.extend_from_slice(b"Sub Foo()\nEnd Sub\n\n");
+    // The trailing UTF-16 NUL terminator must NOT be present in the transcript.
     expected.extend_from_slice(&utf16le_bytes("Module1"));
     expected.push(b'\n');
 
