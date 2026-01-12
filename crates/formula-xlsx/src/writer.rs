@@ -216,37 +216,45 @@ fn workbook_protection_xml(workbook: &Workbook) -> String {
 }
 
 fn workbook_view_xml(workbook: &Workbook) -> String {
-    let Some(window) = workbook.view.window.as_ref() else {
-        return String::new();
-    };
-
     let mut attrs = String::new();
 
     if let Some(active_sheet_id) = workbook.view.active_sheet_id {
         if let Some(idx) = workbook.sheets.iter().position(|s| s.id == active_sheet_id) {
-            attrs.push_str(&format!(r#" activeTab="{idx}""#));
+            if idx != 0 {
+                attrs.push_str(&format!(r#" activeTab="{idx}""#));
+            }
         }
     }
 
-    if let Some(x) = window.x {
-        attrs.push_str(&format!(r#" xWindow="{x}""#));
-    }
-    if let Some(y) = window.y {
-        attrs.push_str(&format!(r#" yWindow="{y}""#));
-    }
-    if let Some(width) = window.width {
-        attrs.push_str(&format!(r#" windowWidth="{width}""#));
-    }
-    if let Some(height) = window.height {
-        attrs.push_str(&format!(r#" windowHeight="{height}""#));
-    }
-    if let Some(state) = window.state {
-        let v = match state {
-            WorkbookWindowState::Normal => "normal",
-            WorkbookWindowState::Minimized => "minimized",
-            WorkbookWindowState::Maximized => "maximized",
-        };
-        attrs.push_str(&format!(r#" windowState="{v}""#));
+    if let Some(window) = workbook.view.window.as_ref().filter(|window| {
+        window.x.is_some()
+            || window.y.is_some()
+            || window.width.is_some()
+            || window.height.is_some()
+            || window.state.is_some()
+    }) {
+        if let Some(x) = window.x {
+            attrs.push_str(&format!(r#" xWindow="{x}""#));
+        }
+        if let Some(y) = window.y {
+            attrs.push_str(&format!(r#" yWindow="{y}""#));
+        }
+        if let Some(width) = window.width {
+            attrs.push_str(&format!(r#" windowWidth="{width}""#));
+        }
+        if let Some(height) = window.height {
+            attrs.push_str(&format!(r#" windowHeight="{height}""#));
+        }
+        if let Some(state) = window.state {
+            let v = match state {
+                WorkbookWindowState::Normal => None,
+                WorkbookWindowState::Minimized => Some("minimized"),
+                WorkbookWindowState::Maximized => Some("maximized"),
+            };
+            if let Some(v) = v {
+                attrs.push_str(&format!(r#" windowState="{v}""#));
+            }
+        }
     }
 
     if attrs.is_empty() {
