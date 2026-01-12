@@ -217,14 +217,20 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
     } else if let Some(format) = format_image_png {
         try_get_clipboard_bytes(format, MAX_IMAGE_BYTES)?.map(|bytes| STANDARD.encode(bytes))
     } else if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIBV5, MAX_DIB_BYTES)? {
-        dibv5_to_png(&dib_bytes).ok().map(|png| STANDARD.encode(png))
+        dibv5_to_png(&dib_bytes)
+            .ok()
+            .filter(|png| png.len() <= MAX_IMAGE_BYTES)
+            .map(|png| STANDARD.encode(png))
     } else {
         None
     };
 
     if png_base64.is_none() {
         if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIB, MAX_DIB_BYTES)? {
-            png_base64 = dibv5_to_png(&dib_bytes).ok().map(|png| STANDARD.encode(png));
+            png_base64 = dibv5_to_png(&dib_bytes)
+                .ok()
+                .filter(|png| png.len() <= MAX_IMAGE_BYTES)
+                .map(|png| STANDARD.encode(png));
         }
     }
 
