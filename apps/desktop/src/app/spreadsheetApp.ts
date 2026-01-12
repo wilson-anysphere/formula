@@ -5320,11 +5320,13 @@ export class SpreadsheetApp {
   }
 
   private isRowHidden(row: number): boolean {
+    if (this.gridMode !== "legacy") return false;
     const entry = this.outline.rows.entry(row + 1);
     return isHidden(entry.hidden);
   }
 
   private isColHidden(col: number): boolean {
+    if (this.gridMode !== "legacy") return false;
     const entry = this.outline.cols.entry(col + 1);
     return isHidden(entry.hidden);
   }

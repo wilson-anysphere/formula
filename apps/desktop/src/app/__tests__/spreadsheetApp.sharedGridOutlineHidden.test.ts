@@ -136,8 +136,9 @@ describe("SpreadsheetApp shared-grid outline compatibility", () => {
       outline.toggleColGroup(5);
 
       // Sanity: the outline model considers the detail rows/cols hidden.
-      expect((app as any).isRowHidden(1)).toBe(true); // row 2 (0-based)
-      expect((app as any).isColHidden(1)).toBe(true); // col B (0-based)
+      // (Row/col indices are 1-based on the outline axes.)
+      expect(outline.rows.entry(2).hidden.outline).toBe(true); // row 2 (0-based row 1)
+      expect(outline.cols.entry(2).hidden.outline).toBe(true); // col B (0-based col 1)
 
       // But shared-grid navigation should ignore outline hidden state until the renderer supports it.
       const provider = (app as any).usedRangeProvider();
@@ -159,4 +160,3 @@ describe("SpreadsheetApp shared-grid outline compatibility", () => {
     }
   });
 });
-
