@@ -1278,6 +1278,70 @@ fn project_normalized_data_interleaves_baseclass_designer_bytes_with_other_prope
 }
 
 #[test]
+fn project_normalized_data_baseclass_strips_quotes_and_whitespace_for_designer_lookup() {
+    // Regression: BaseClass values may be quoted and/or surrounded by whitespace. We must:
+    // - strip surrounding quotes and whitespace for the BaseClass value when producing tokens, and
+    // - still resolve the designer storage and include its normalized bytes.
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    // PROJECT stream: whitespace around '=' and quoted value.
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"  BaseClass = \"FormB\"  \r\n")
+            .expect("write PROJECT");
+    }
+
+    // Minimal VBA/dir mapping (MODULENAME -> MODULESTREAMNAME).
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let dir_decompressed = {
+            let mut out = Vec::new();
+            push_record(&mut out, 0x0003, &1252u16.to_le_bytes()); // PROJECTCODEPAGE
+
+            push_record(&mut out, 0x0019, b"FormB"); // MODULENAME
+            let mut stream_name = Vec::new();
+            stream_name.extend_from_slice(b"FormB");
+            stream_name.extend_from_slice(&0u16.to_le_bytes());
+            push_record(&mut out, 0x001A, &stream_name); // MODULESTREAMNAME (+ reserved u16)
+            push_record(&mut out, 0x0021, &3u16.to_le_bytes()); // MODULETYPE (UserForm)
+            out
+        };
+        let dir_container = compress_container(&dir_decompressed);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    // Designer storage referenced by BaseClass=FormB.
+    ole.create_storage("FormB").expect("FormB storage");
+    {
+        let mut s = ole.create_stream("FormB/Payload").expect("FormB stream");
+        s.write_all(b"B").expect("write FormB bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = project_normalized_data(&vba_project_bin).expect("ProjectNormalizedData");
+
+    let mut formb_padded = Vec::new();
+    formb_padded.extend_from_slice(b"B");
+    formb_padded.extend(std::iter::repeat_n(0u8, 1022));
+
+    let idx_formb = find_subslice(&normalized, &formb_padded).expect("FormB designer bytes");
+    let idx_base_formb =
+        find_subslice(&normalized, b"BaseClassFormB").expect("BaseClassFormB tokens");
+
+    assert!(
+        idx_formb < idx_base_formb,
+        "expected normalized designer bytes before BaseClassFormB tokens"
+    );
+    assert!(
+        !normalized.contains(&b'"'),
+        "expected ProjectNormalizedData to strip quotes from BaseClass value"
+    );
+}
+
+#[test]
 fn project_normalized_data_preserves_designer_storage_element_traversal_order() {
     // Regression test for MS-OVBA `NormalizeDesignerStorage` / `NormalizeStorage` traversal order as
     // used by `ProjectNormalizedData` (MS-OVBA §2.4.2.2 + §2.4.2.6).
