@@ -438,32 +438,38 @@ mod tests {
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.oleObject"/>
   <Override PartName="/xl/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>
 </Types>"#;
 
         let mut pkg = package_with_content_types(destination_xml);
-        let inserted = vec!["xl/charts/chart1.xml".to_string()];
+        let inserted = vec![
+            "xl/embeddings/oleObject1.bin".to_string(),
+            "xl/charts/chart1.xml".to_string(),
+        ];
         pkg.merge_content_types(source_xml.as_bytes(), inserted.iter())
             .expect("merge content types");
 
         let updated =
             std::str::from_utf8(pkg.part("[Content_Types].xml").expect("content types part"))
                 .expect("utf8 content types");
-        let doc = Document::parse(updated).expect("parse updated content types");
 
-        let ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types";
-        let node = doc
-            .descendants()
-            .find(|n| {
-                n.is_element()
-                    && n.tag_name().name() == "Override"
-                    && n.attribute("PartName") == Some("/xl/charts/chart1.xml")
-            })
-            .expect("inserted Override");
-        assert_eq!(node.tag_name().namespace(), Some(ct_ns));
-        assert_eq!(
-            node.attribute("ContentType"),
-            Some("application/vnd.openxmlformats-officedocument.drawingml.chart+xml")
+        Document::parse(updated).expect("output XML should be well-formed");
+        assert!(
+            updated.contains(
+                r#"<ct:Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.oleObject"/>"#
+            ),
+            "expected prefixed <ct:Default> to be inserted, got:\n{updated}"
+        );
+        assert!(
+            updated.contains(
+                r#"<ct:Override PartName="/xl/charts/chart1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>"#
+            ),
+            "expected prefixed <ct:Override> to be inserted, got:\n{updated}"
+        );
+        assert!(
+            !updated.contains("<Default") && !updated.contains("<Override"),
+            "should not introduce unprefixed <Default>/<Override> elements, got:\n{updated}"
         );
     }
 }
