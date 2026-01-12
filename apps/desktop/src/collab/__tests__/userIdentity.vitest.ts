@@ -82,4 +82,13 @@ describe("collab user identity", () => {
     expect(identity.color).toMatch(/^#[0-9a-f]{6}$/);
     expect(storage.getItem(COLLAB_USER_STORAGE_KEY)).toContain("uuid-0000");
   });
+
+  it("chooses a deterministic default name + color from a provided collabUserId", () => {
+    const a = getCollabUserIdentity({ storage: createInMemoryLocalStorage(), search: "?collabUserId=abc123" });
+    const b = getCollabUserIdentity({ storage: createInMemoryLocalStorage(), search: "?collabUserId=abc123" });
+    expect(a).toEqual(b);
+    expect(a.id).toBe("abc123");
+    expect(a.name).toBe("User abc1");
+    expect(a.color).toMatch(/^#[0-9a-f]{6}$/);
+  });
 });
