@@ -277,7 +277,8 @@ pub fn list_vba_digital_signatures(
 
     let mut out = Vec::new();
     for path in candidates {
-        let stream_kind = signature_path_stream_kind(&path).unwrap_or(VbaSignatureStreamKind::Unknown);
+        let stream_kind =
+            signature_path_stream_kind(&path).unwrap_or(VbaSignatureStreamKind::Unknown);
         let signature = ole.read_stream_opt(&path)?.unwrap_or_default();
         let signer_subject = extract_first_certificate_subject(&signature);
         let verification = verify_signature_blob(&signature);
@@ -385,16 +386,15 @@ pub fn parse_vba_digital_signature(
 
     // Prefer the signature stream that Excel would treat as authoritative when more than one
     // signature stream exists (see `signature_path_rank` for the Excel-like stream-name ordering).
-    candidates.sort_by(|a, b| signature_path_rank(a).cmp(&signature_path_rank(b)).then(a.cmp(b)));
-    let chosen = candidates
-        .into_iter()
-        .next()
-        .expect("candidates non-empty");
+    candidates.sort_by(|a, b| {
+        signature_path_rank(a)
+            .cmp(&signature_path_rank(b))
+            .then(a.cmp(b))
+    });
+    let chosen = candidates.into_iter().next().expect("candidates non-empty");
     let stream_kind =
         signature_path_stream_kind(&chosen).unwrap_or(VbaSignatureStreamKind::Unknown);
-    let signature = ole
-        .read_stream_opt(&chosen)?
-        .unwrap_or_else(|| Vec::new());
+    let signature = ole.read_stream_opt(&chosen)?.unwrap_or_else(|| Vec::new());
 
     let signer_subject = extract_first_certificate_subject(&signature);
 
@@ -574,7 +574,8 @@ pub fn verify_vba_digital_signature_with_project(
     let mut first: Option<VbaDigitalSignature> = None;
     let mut first_verified: Option<VbaDigitalSignature> = None;
     for path in candidates {
-        let stream_kind = signature_path_stream_kind(&path).unwrap_or(VbaSignatureStreamKind::Unknown);
+        let stream_kind =
+            signature_path_stream_kind(&path).unwrap_or(VbaSignatureStreamKind::Unknown);
         let signature = ole.read_stream_opt(&path)?.unwrap_or_default();
         let signer_subject = extract_first_certificate_subject(&signature);
         let verification = verify_signature_blob(&signature);
