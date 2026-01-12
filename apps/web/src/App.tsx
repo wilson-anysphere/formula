@@ -1361,7 +1361,6 @@ function EngineDemoApp() {
                 const value = input.value;
                 const start = input.selectionStart ?? value.length;
                 const end = input.selectionEnd ?? value.length;
-
                 const toggled = toggleA1AbsoluteAtCursor(value, start, end);
                 if (!toggled) return;
 
