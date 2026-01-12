@@ -136,6 +136,7 @@
   min-height: 62px;
 }
 
+/* Ensure `hidden` tab panels stay hidden (author CSS can override the UA `[hidden]` rule). */
 .ribbon__tabpanel[hidden] {
   display: none;
 }

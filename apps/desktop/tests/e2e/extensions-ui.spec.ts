@@ -239,6 +239,7 @@ test.describe("Extensions UI integration", () => {
 
   test("right-clicking outside a multi-cell selection moves the active cell before showing the menu", async ({ page }) => {
     await gotoDesktop(page);
+    await grantSampleHelloPermissions(page);
 
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -276,5 +277,64 @@ test.describe("Extensions UI integration", () => {
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
     await expect(page.getByTestId("active-cell")).toHaveText("D4");
+  });
+
+  test("shared grid: right-click inside selection preserves it; outside selection moves active cell", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await grantSampleHelloPermissions(page);
+
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const sheetId = app.getCurrentSheetId();
+      app.selectRange({
+        sheetId,
+        range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+      });
+    });
+
+    // Ensure the extensions host is running so the contributed context menu renders.
+    await page.getByTestId("open-extensions-panel").click();
+    await expect(page.getByTestId("panel-extensions")).toBeVisible();
+    await expect(page.getByTestId("run-command-sampleHello.openPanel")).toBeVisible();
+
+    // Right-click inside the selection on a non-active cell; selection should remain multi-cell.
+    const b2 = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      return app.getCellRectA1("B2");
+    });
+    if (!b2) throw new Error("Missing B2 rect");
+    await page.locator("#grid").click({
+      button: "right",
+      position: { x: b2.x + b2.width / 2, y: b2.y + b2.height / 2 },
+    });
+
+    const menu = page.getByTestId("context-menu");
+    await expect(menu).toBeVisible();
+    const sumItem = menu.getByRole("button", { name: "Sample Hello: Sum Selection" });
+    await expect(sumItem, "inside selection should keep hasSelection=true").toBeEnabled();
+
+    // Close the menu so we can open it again on a different cell.
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+
+    // Right-click outside the selection should move active cell (and collapse selection).
+    const d4 = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      return app.getCellRectA1("D4");
+    });
+    if (!d4) throw new Error("Missing D4 rect");
+    await page.locator("#grid").click({
+      button: "right",
+      position: { x: d4.x + d4.width / 2, y: d4.y + d4.height / 2 },
+    });
+
+    await expect(menu).toBeVisible();
+    await expect(page.getByTestId("active-cell")).toHaveText("D4");
+    const sumItemAfter = menu.getByRole("button", { name: "Sample Hello: Sum Selection" });
+    await expect(sumItemAfter, "outside selection should collapse selection (hasSelection=false)").toBeDisabled();
   });
 });
