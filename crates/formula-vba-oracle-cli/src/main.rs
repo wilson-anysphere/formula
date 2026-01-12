@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
@@ -547,14 +547,67 @@ fn extract_from_xlsm(bytes: &[u8]) -> Result<(OracleWorkbook, Vec<ProcedureSumma
     Ok((workbook, procedures))
 }
 
-fn read_vba_modules_from_xlsm(zip: &mut ZipArchive<std::io::Cursor<&[u8]>>) -> Result<Vec<VbaModule>, String> {
-    let mut vba_project_bin = zip
-        .by_name("xl/vbaProject.bin")
-        .map_err(|e| format!("Missing xl/vbaProject.bin: {e}"))?;
-    let mut buf = Vec::new();
-    vba_project_bin
-        .read_to_end(&mut buf)
-        .map_err(|e| format!("Failed to read vbaProject.bin: {e}"))?;
+fn find_zip_entry_case_insensitive<R: Read + Seek>(zip: &ZipArchive<R>, name: &str) -> Option<String> {
+    let target = name.trim_start_matches('/').replace('\\', "/");
+
+    for candidate in zip.file_names() {
+        let mut normalized = candidate.trim_start_matches('/');
+        let replaced;
+        if normalized.contains('\\') {
+            replaced = normalized.replace('\\', "/");
+            normalized = &replaced;
+        }
+
+        if normalized.eq_ignore_ascii_case(&target) {
+            return Some(candidate.to_string());
+        }
+    }
+
+    None
+}
+
+fn read_zip_entry_bytes<R: Read + Seek>(
+    zip: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    let read_entry =
+        |zip: &mut ZipArchive<R>, entry_name: &str| -> Result<Vec<u8>, String> {
+            let mut entry = zip
+                .by_name(entry_name)
+                .map_err(|e| format!("Failed to open zip entry {entry_name}: {e}"))?;
+            let mut buf = Vec::with_capacity(entry.size() as usize);
+            entry
+                .read_to_end(&mut buf)
+                .map_err(|e| format!("Failed to read zip entry {entry_name}: {e}"))?;
+            Ok(buf)
+        };
+
+    // Fast path: exact entry name.
+    match zip.by_name(name) {
+        Ok(mut entry) => {
+            let mut buf = Vec::with_capacity(entry.size() as usize);
+            entry
+                .read_to_end(&mut buf)
+                .map_err(|e| format!("Failed to read zip entry {name}: {e}"))?;
+            return Ok(Some(buf));
+        }
+        Err(zip::result::ZipError::FileNotFound) => {}
+        Err(e) => return Err(format!("Failed to open zip entry {name}: {e}")),
+    }
+
+    // Fallback: tolerate a leading `/` and case-only mismatches.
+    let Some(actual) = find_zip_entry_case_insensitive(zip, name) else {
+        return Ok(None);
+    };
+    Ok(Some(read_entry(zip, &actual)?))
+}
+
+fn read_vba_modules_from_xlsm(
+    zip: &mut ZipArchive<std::io::Cursor<&[u8]>>,
+) -> Result<Vec<VbaModule>, String> {
+    let Some(buf) = read_zip_entry_bytes(zip, "xl/vbaProject.bin")? else {
+        return Err("Missing xl/vbaProject.bin".to_string());
+    };
 
     let project = formula_vba::VBAProject::parse(&buf).map_err(|e| format!("Failed to parse vbaProject.bin: {e}"))?;
     Ok(project
@@ -567,9 +620,7 @@ fn read_vba_modules_from_xlsm(zip: &mut ZipArchive<std::io::Cursor<&[u8]>>) -> R
 fn read_sheet_names_from_workbook_xml(
     zip: &mut ZipArchive<std::io::Cursor<&[u8]>>,
 ) -> Option<Vec<String>> {
-    let mut workbook_xml = zip.by_name("xl/workbook.xml").ok()?;
-    let mut buf = Vec::new();
-    workbook_xml.read_to_end(&mut buf).ok()?;
+    let buf = read_zip_entry_bytes(zip, "xl/workbook.xml").ok().flatten()?;
 
     let mut reader = XmlReader::from_reader(buf.as_slice());
     reader.config_mut().trim_text(true);
@@ -594,6 +645,80 @@ fn read_sheet_names_from_workbook_xml(
     }
 
     if names.is_empty() { None } else { Some(names) }
+}
+
+#[cfg(test)]
+mod leading_slash_zip_entries_tests {
+    use super::{extract_from_xlsm, OracleWorkbook};
+    use std::io::{Cursor, Read, Write};
+
+    use zip::write::FileOptions;
+    use zip::{ZipArchive, ZipWriter};
+
+    fn rewrite_zip_with_leading_slash_entry_names(bytes: &[u8]) -> Vec<u8> {
+        let mut input = ZipArchive::new(Cursor::new(bytes)).expect("read input zip");
+
+        let mut output = ZipWriter::new(Cursor::new(Vec::<u8>::new()));
+        let base_options = FileOptions::<()>::default();
+
+        for i in 0..input.len() {
+            let mut entry = input.by_index(i).expect("open zip entry");
+            let name = entry.name().to_string();
+            let new_name = if name.starts_with('/') {
+                name
+            } else {
+                format!("/{name}")
+            };
+
+            let mut contents = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut contents).expect("read entry bytes");
+
+            let options = base_options.clone().compression_method(entry.compression());
+
+            if entry.is_dir() {
+                output
+                    .add_directory(new_name, options)
+                    .expect("add directory");
+            } else {
+                output.start_file(new_name, options).expect("start file");
+                output.write_all(&contents).expect("write file");
+            }
+        }
+
+        output.finish().expect("finish zip").into_inner()
+    }
+
+    #[test]
+    fn extract_from_xlsm_tolerates_leading_slash_zip_entry_names() {
+        let fixture_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/xlsx/macros/basic.xlsm"
+        );
+        let base = std::fs::read(fixture_path).expect("read basic.xlsm fixture");
+        let bytes = rewrite_zip_with_leading_slash_entry_names(&base);
+
+        let (workbook, procedures) = extract_from_xlsm(&bytes).expect("extract");
+
+        assert_eq!(workbook.active_sheet.as_deref(), Some("Sheet1"));
+        assert_eq!(workbook.sheets.len(), 1);
+        assert_eq!(workbook.sheets[0].name, "Sheet1");
+        assert!(
+            !workbook.vba_modules.is_empty(),
+            "expected at least one VBA module"
+        );
+        assert!(
+            !procedures.is_empty(),
+            "expected at least one discovered procedure"
+        );
+
+        // Avoid unused warnings when this test is the only reference in this module.
+        let _ = OracleWorkbook {
+            schema_version: 0,
+            active_sheet: None,
+            sheets: Vec::new(),
+            vba_modules: Vec::new(),
+        };
+    }
 }
 
 fn list_procedures(modules: &[VbaModule]) -> Result<Vec<ProcedureSummary>, String> {
