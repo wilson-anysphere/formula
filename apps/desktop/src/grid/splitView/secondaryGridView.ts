@@ -71,9 +71,6 @@ export class SecondaryGridView {
     this.persistDebounceMs = options.persistDebounceMs ?? 150;
     this.sheetId = options.getSheetId();
 
-    // Match SpreadsheetApp behaviour: keep everything clipped to the grid viewport.
-    this.container.style.overflow = "hidden";
-
     // Clear any placeholder content from the split-view scaffolding.
     this.container.replaceChildren();
 
@@ -96,46 +93,24 @@ export class SecondaryGridView {
     const vTrack = document.createElement("div");
     vTrack.setAttribute("aria-hidden", "true");
     vTrack.setAttribute("data-testid", "scrollbar-track-y-secondary");
-    vTrack.style.position = "absolute";
-    vTrack.style.background = "var(--bg-tertiary)";
-    vTrack.style.borderRadius = "6px";
-    vTrack.style.zIndex = "5";
-    vTrack.style.opacity = "0.9";
+    vTrack.className = "grid-scrollbar-track grid-scrollbar-track--vertical";
 
     const vThumb = document.createElement("div");
     vThumb.setAttribute("aria-hidden", "true");
     vThumb.setAttribute("data-testid", "scrollbar-thumb-y-secondary");
-    vThumb.style.position = "absolute";
-    vThumb.style.left = "1px";
-    vThumb.style.right = "1px";
-    vThumb.style.top = "0";
-    vThumb.style.height = "40px";
-    vThumb.style.background = "var(--text-secondary)";
-    vThumb.style.borderRadius = "6px";
-    vThumb.style.cursor = "pointer";
+    vThumb.className = "grid-scrollbar-thumb";
     vTrack.appendChild(vThumb);
     this.container.appendChild(vTrack);
 
     const hTrack = document.createElement("div");
     hTrack.setAttribute("aria-hidden", "true");
     hTrack.setAttribute("data-testid", "scrollbar-track-x-secondary");
-    hTrack.style.position = "absolute";
-    hTrack.style.background = "var(--bg-tertiary)";
-    hTrack.style.borderRadius = "6px";
-    hTrack.style.zIndex = "5";
-    hTrack.style.opacity = "0.9";
+    hTrack.className = "grid-scrollbar-track grid-scrollbar-track--horizontal";
 
     const hThumb = document.createElement("div");
     hThumb.setAttribute("aria-hidden", "true");
     hThumb.setAttribute("data-testid", "scrollbar-thumb-x-secondary");
-    hThumb.style.position = "absolute";
-    hThumb.style.top = "1px";
-    hThumb.style.bottom = "1px";
-    hThumb.style.left = "0";
-    hThumb.style.width = "40px";
-    hThumb.style.background = "var(--text-secondary)";
-    hThumb.style.borderRadius = "6px";
-    hThumb.style.cursor = "pointer";
+    hThumb.className = "grid-scrollbar-thumb";
     hTrack.appendChild(hThumb);
     this.container.appendChild(hTrack);
 

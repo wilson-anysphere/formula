@@ -54,6 +54,7 @@
 #grid-secondary {
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 #grid-split[data-split-direction="none"] #grid-secondary,
