@@ -1,4 +1,5 @@
 use formula_engine::eval::parse_a1;
+use formula_engine::date::ExcelDateSystem;
 use formula_engine::functions::text;
 use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::{Engine, ErrorKind, ExcelError, Value};
@@ -89,12 +90,21 @@ fn dollar_formats_currency() {
 #[test]
 fn text_formats_numbers_with_simple_patterns() {
     assert_eq!(
-        text::text(&Value::Number(1234.567), "#,##0.00").unwrap(),
+        text::text(&Value::Number(1234.567), "#,##0.00", ExcelDateSystem::EXCEL_1900).unwrap(),
         "1,234.57"
     );
-    assert_eq!(text::text(&Value::Number(1.23), "0%").unwrap(), "123%");
-    assert_eq!(text::text(&Value::Number(-1.0), "$0.00").unwrap(), "-$1.00");
-    assert_eq!(text::text(&Value::from("x"), "0.00").unwrap(), "x");
+    assert_eq!(
+        text::text(&Value::Number(1.23), "0%", ExcelDateSystem::EXCEL_1900).unwrap(),
+        "123%"
+    );
+    assert_eq!(
+        text::text(&Value::Number(-1.0), "$0.00", ExcelDateSystem::EXCEL_1900).unwrap(),
+        "-$1.00"
+    );
+    assert_eq!(
+        text::text(&Value::from("x"), "0.00", ExcelDateSystem::EXCEL_1900).unwrap(),
+        "x"
+    );
 }
 
 #[test]
@@ -293,6 +303,84 @@ fn text_and_dollar_worksheet_functions_format_values() {
         sheet.eval(r#"=DOLLAR(-1234.567,2)"#),
         Value::Text("($1,234.57)".to_string())
     );
+}
+
+#[test]
+fn text_supports_sections_conditions_and_text_placeholders() {
+    let mut sheet = TestSheet::new();
+
+    // pos;neg;zero;text
+    let fmt = r#""0.00;(0.00);""zero"";""text:""@""#;
+    assert_eq!(
+        sheet.eval(&format!("=TEXT(1.2,{fmt})")),
+        Value::Text("1.20".to_string())
+    );
+    assert_eq!(
+        sheet.eval(&format!("=TEXT(-1.2,{fmt})")),
+        Value::Text("(1.20)".to_string())
+    );
+    assert_eq!(
+        sheet.eval(&format!("=TEXT(0,{fmt})")),
+        Value::Text("zero".to_string())
+    );
+    assert_eq!(
+        sheet.eval(&format!(r#"=TEXT("hi",{fmt})"#)),
+        Value::Text("text:hi".to_string())
+    );
+
+    // Conditions: first matching conditional section, else first unconditional.
+    assert_eq!(
+        sheet.eval(r#"=TEXT(-1,"[<0]""neg"";""pos""")"#),
+        Value::Text("neg".to_string())
+    );
+    assert_eq!(
+        sheet.eval(r#"=TEXT(1,"[<0]""neg"";""pos""")"#),
+        Value::Text("pos".to_string())
+    );
+
+    // `@` placeholder can appear in a non-4th section and still apply to text.
+    assert_eq!(
+        sheet.eval(r#"=TEXT("x","""pre-""@")"#),
+        Value::Text("pre-x".to_string())
+    );
+}
+
+#[test]
+fn text_formats_dates_using_workbook_date_system() {
+    let mut sheet = TestSheet::new();
+
+    sheet.set_date_system(ExcelDateSystem::EXCEL_1900);
+    assert_eq!(
+        sheet.eval(r#"=TEXT(1,"m/d/yyyy")"#),
+        Value::Text("1/1/1900".to_string())
+    );
+
+    sheet.set_date_system(ExcelDateSystem::Excel1904);
+    assert_eq!(
+        sheet.eval(r#"=TEXT(1,"m/d/yyyy")"#),
+        Value::Text("1/2/1904".to_string())
+    );
+}
+
+#[test]
+fn text_empty_format_code_falls_back_to_general() {
+    let mut sheet = TestSheet::new();
+    assert_eq!(
+        sheet.eval(r#"=TEXT(1234.5,"")"#),
+        Value::Text("1234.5".to_string())
+    );
+}
+
+#[test]
+fn text_spills_arrays_elementwise() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"=TEXT({1;2},"0")"#)
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text("1".to_string()));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Text("2".to_string()));
 }
 
 #[test]

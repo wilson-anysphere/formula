@@ -1182,6 +1182,89 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="dollar", tags=["text", "DOLLAR"], formula="=N(DOLLAR(1234.567,2))")
     _add_case(cases, prefix="dollar", tags=["text", "DOLLAR"], formula="=N(DOLLAR(-1234.567,2))")
 
+    # TEXT: Excel number format codes (dates/sections/conditions). These are
+    # locale-sensitive, but high-signal for Excel compatibility.
+    _add_case(
+        cases,
+        prefix="text_fmt",
+        tags=["text", "TEXT", "format"],
+        formula=r'=TEXT(A1,"0")',
+        inputs=[CellInput("A1", 1234.567)],
+    )
+    multi_section = '"0.00;(0.00);""zero"";""text:""@"'
+    _add_case(
+        cases,
+        prefix="text_fmt",
+        tags=["text", "TEXT", "format", "sections"],
+        formula=f"=TEXT(A1,{multi_section})",
+        inputs=[CellInput("A1", 1.2)],
+    )
+    _add_case(
+        cases,
+        prefix="text_fmt",
+        tags=["text", "TEXT", "format", "sections"],
+        formula=f"=TEXT(A1,{multi_section})",
+        inputs=[CellInput("A1", -1.2)],
+    )
+    _add_case(
+        cases,
+        prefix="text_fmt",
+        tags=["text", "TEXT", "format", "sections"],
+        formula=f"=TEXT(A1,{multi_section})",
+        inputs=[CellInput("A1", 0)],
+    )
+    _add_case(
+        cases,
+        prefix="text_fmt",
+        tags=["text", "TEXT", "format", "sections"],
+        formula=f"=TEXT(A1,{multi_section})",
+        inputs=[CellInput("A1", "hi")],
+    )
+    _add_case(
+        cases,
+        prefix="text_fmt",
+        tags=["text", "TEXT", "format", "conditions"],
+        formula=r'=TEXT(A1,"[<0]""neg"";""pos""")',
+        inputs=[CellInput("A1", -1)],
+    )
+    _add_case(
+        cases,
+        prefix="text_fmt",
+        tags=["text", "TEXT", "format", "conditions"],
+        formula=r'=TEXT(A1,"[<0]""neg"";""pos""")',
+        inputs=[CellInput("A1", 1)],
+    )
+    _add_case(
+        cases,
+        prefix="text_fmt",
+        tags=["text", "TEXT", "format", "date"],
+        formula=r'=TEXT(A1,"yyyy-mm-dd")',
+        inputs=[CellInput("A1", _excel_serial_1900(2024, 1, 10))],
+    )
+    _add_case(
+        cases,
+        prefix="text_fmt",
+        tags=["text", "TEXT", "format", "date", "time"],
+        formula=r'=TEXT(A1,"yyyy-mm-dd hh:mm")',
+        inputs=[CellInput("A1", _excel_serial_1900(2024, 1, 10) + 0.5)],
+    )
+    _add_case(
+        cases,
+        prefix="text_fmt",
+        tags=["text", "TEXT", "format", "locale"],
+        formula=r'=TEXT(A1,"[$€-407]0")',
+        inputs=[CellInput("A1", 1)],
+        description="Currency symbol bracket token + locale code (LCID 0x0407 de-DE)",
+    )
+    _add_case(
+        cases,
+        prefix="text_fmt",
+        tags=["text", "TEXT", "format", "invalid"],
+        formula=r'=TEXT(A1,"")',
+        inputs=[CellInput("A1", 1234.5)],
+        description="Empty format_text should fall back to General (Excel behavior)",
+    )
+
     # ------------------------------------------------------------------
     # Date functions (compare on raw serial values; display is locale-dependent)
     # ------------------------------------------------------------------

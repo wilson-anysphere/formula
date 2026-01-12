@@ -24865,6 +24865,195 @@
       "id": "dollar_239043fc35d2"
     },
     {
+      "formula": "=TEXT(A1,\"0\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1234.567
+        }
+      ],
+      "tags": [
+        "text",
+        "TEXT",
+        "format"
+      ],
+      "id": "text_fmt_db395997d255"
+    },
+    {
+      "formula": "=TEXT(A1,\"0.00;(0.00);\"\"zero\"\";\"\"text:\"\"@\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1.2
+        }
+      ],
+      "tags": [
+        "text",
+        "TEXT",
+        "format",
+        "sections"
+      ],
+      "id": "text_fmt_68846e6d7ec2"
+    },
+    {
+      "formula": "=TEXT(A1,\"0.00;(0.00);\"\"zero\"\";\"\"text:\"\"@\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": -1.2
+        }
+      ],
+      "tags": [
+        "text",
+        "TEXT",
+        "format",
+        "sections"
+      ],
+      "id": "text_fmt_3823502beb14"
+    },
+    {
+      "formula": "=TEXT(A1,\"0.00;(0.00);\"\"zero\"\";\"\"text:\"\"@\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 0
+        }
+      ],
+      "tags": [
+        "text",
+        "TEXT",
+        "format",
+        "sections"
+      ],
+      "id": "text_fmt_9ddd23aaf8bd"
+    },
+    {
+      "formula": "=TEXT(A1,\"0.00;(0.00);\"\"zero\"\";\"\"text:\"\"@\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "hi"
+        }
+      ],
+      "tags": [
+        "text",
+        "TEXT",
+        "format",
+        "sections"
+      ],
+      "id": "text_fmt_a8f771e37c40"
+    },
+    {
+      "formula": "=TEXT(A1,\"[<0]\"\"neg\"\";\"\"pos\"\"\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": -1
+        }
+      ],
+      "tags": [
+        "text",
+        "TEXT",
+        "format",
+        "conditions"
+      ],
+      "id": "text_fmt_01c1de3d4f3d"
+    },
+    {
+      "formula": "=TEXT(A1,\"[<0]\"\"neg\"\";\"\"pos\"\"\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        }
+      ],
+      "tags": [
+        "text",
+        "TEXT",
+        "format",
+        "conditions"
+      ],
+      "id": "text_fmt_36636159ee23"
+    },
+    {
+      "formula": "=TEXT(A1,\"yyyy-mm-dd\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 45301
+        }
+      ],
+      "tags": [
+        "text",
+        "TEXT",
+        "format",
+        "date"
+      ],
+      "id": "text_fmt_a0479ecb70c0"
+    },
+    {
+      "formula": "=TEXT(A1,\"yyyy-mm-dd hh:mm\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 45301.5
+        }
+      ],
+      "tags": [
+        "text",
+        "TEXT",
+        "format",
+        "date",
+        "time"
+      ],
+      "id": "text_fmt_c6de1eb501d7"
+    },
+    {
+      "formula": "=TEXT(A1,\"[$€-407]0\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1
+        }
+      ],
+      "tags": [
+        "text",
+        "TEXT",
+        "format",
+        "locale"
+      ],
+      "description": "Currency symbol bracket token + locale code (LCID 0x0407 de-DE)",
+      "id": "text_fmt_fa631bc92cda"
+    },
+    {
+      "formula": "=TEXT(A1,\"\")",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 1234.5
+        }
+      ],
+      "tags": [
+        "text",
+        "TEXT",
+        "format",
+        "invalid"
+      ],
+      "description": "Empty format_text should fall back to General (Excel behavior)",
+      "id": "text_fmt_fa7c778b2fb8"
+    },
+    {
       "formula": "=DATE(A1,B1,C1)",
       "outputCell": "D1",
       "inputs": [

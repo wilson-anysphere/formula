@@ -1,5 +1,7 @@
 use crate::error::{ExcelError, ExcelResult};
+use crate::date::ExcelDateSystem;
 use crate::{ErrorKind, Value};
+use formula_format::{DateSystem, FormatOptions, Locale, Value as FmtValue};
 
 /// DOLLAR(number, [decimals])
 pub fn dollar(number: f64, decimals: Option<i32>) -> ExcelResult<String> {
@@ -76,78 +78,42 @@ fn group_thousands(int_part: &str) -> String {
 
 /// TEXT(value, format_text)
 ///
-/// Excel's full formatting language is extensive; this implementation supports a
-/// high-coverage subset used by the P0 corpus:
-/// - Integer and fixed-decimal patterns like `0`, `0.00`
-/// - Thousands grouping with `#,##0` / `#,##0.00`
-/// - Percent formatting like `0%` / `0.00%`
-/// - Currency patterns starting with `$`
-pub fn text(value: &Value, format_text: &str) -> Result<String, ErrorKind> {
-    match value {
-        Value::Error(e) => Err(*e),
-        Value::Text(s) => Ok(s.clone()),
-        Value::Blank => Ok(String::new()),
-        Value::Bool(b) => Ok(if *b {
-            "TRUE".to_string()
-        } else {
-            "FALSE".to_string()
-        }),
-        Value::Number(n) => format_number_with_pattern(*n, format_text),
-        Value::Reference(_) | Value::ReferenceUnion(_) => Err(ErrorKind::Value),
-        Value::Array(arr) => text(&arr.top_left(), format_text),
-        Value::Lambda(_) => Err(ErrorKind::Value),
-        Value::Spill { .. } => Err(ErrorKind::Spill),
-    }
-}
-
-fn format_number_with_pattern(number: f64, format_text: &str) -> Result<String, ErrorKind> {
-    if !number.is_finite() {
-        return Err(ErrorKind::Num);
-    }
-
-    let fmt = format_text.trim();
-    if fmt.is_empty() || fmt.eq_ignore_ascii_case("GENERAL") || fmt == "@" {
-        return Ok(number.to_string());
-    }
-
-    let mut prefix = "";
-    let mut body = fmt;
-    if let Some(rest) = fmt.strip_prefix('$') {
-        prefix = "$";
-        body = rest;
-    }
-
-    let percent = body.ends_with('%');
-    if percent {
-        body = body.trim_end_matches('%');
-    }
-
-    let decimals = body
-        .split_once('.')
-        .map(|(_, frac)| frac.chars().filter(|c| *c == '0' || *c == '#').count())
-        .unwrap_or(0);
-
-    let grouping = body.contains(',');
-
-    let mut value = number;
-    if percent {
-        value *= 100.0;
-    }
-
-    let formatted = if grouping {
-        format_fixed_with_grouping(value.abs(), decimals)
-    } else {
-        format!("{:.*}", decimals, value.abs())
+/// Excel's TEXT function uses Excel's number format code language (the same one
+/// used for cell display formatting). Delegate formatting to `formula-format` so
+/// we support:
+/// - multi-section formats: `pos;neg;zero;text`
+/// - conditions: `[<1]...`
+/// - date/time formats: `m/d/yyyy`, etc.
+/// - locale overrides: `[$-409]...`
+/// - text placeholders (`@`), fill/underscore tokens, and more
+pub fn text(value: &Value, format_text: &str, date_system: ExcelDateSystem) -> Result<String, ErrorKind> {
+    // Match existing semantics: propagate errors/spills and treat non-finite
+    // numbers as Excel #NUM! (Excel doesn't have NaN/Inf cell values).
+    let fmt_value = match value {
+        Value::Error(e) => return Err(*e),
+        Value::Spill { .. } => return Err(ErrorKind::Spill),
+        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) => return Err(ErrorKind::Value),
+        Value::Array(arr) => return text(&arr.top_left(), format_text, date_system),
+        Value::Number(n) => {
+            if !n.is_finite() {
+                return Err(ErrorKind::Num);
+            }
+            FmtValue::Number(*n)
+        }
+        Value::Text(s) => FmtValue::Text(s.as_str()),
+        Value::Bool(b) => FmtValue::Bool(*b),
+        Value::Blank => FmtValue::Blank,
     };
 
-    let mut out = String::new();
-    if number.is_sign_negative() {
-        out.push('-');
-    }
-    out.push_str(prefix);
-    out.push_str(&formatted);
-    if percent {
-        out.push('%');
-    }
-    Ok(out)
+    let options = FormatOptions {
+        locale: Locale::en_us(),
+        date_system: match date_system {
+            // `formula-format` always uses the Lotus 1-2-3 leap-year bug behavior
+            // for the 1900 date system (Excel compatibility).
+            ExcelDateSystem::Excel1900 { .. } => DateSystem::Excel1900,
+            ExcelDateSystem::Excel1904 => DateSystem::Excel1904,
+        },
+    };
+
+    Ok(formula_format::format_value(fmt_value, Some(format_text), &options).text)
 }

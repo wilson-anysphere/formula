@@ -546,12 +546,13 @@ fn text_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
+    let date_system = ctx.date_system();
     elementwise_binary(value, format_text, |value, fmt| {
         let fmt = match fmt.coerce_to_string() {
             Ok(s) => s,
             Err(e) => return Value::Error(e),
         };
-        match crate::functions::text::text(value, &fmt) {
+        match crate::functions::text::text(value, &fmt, date_system) {
             Ok(s) => Value::Text(s),
             Err(e) => Value::Error(e),
         }
