@@ -139,13 +139,31 @@ fn parse_rich_value_rel_image_targets(rels_xml: &[u8]) -> Result<HashMap<String,
     let relationships = crate::openxml::parse_relationships(rels_xml)?;
     let mut out = HashMap::new();
     for rel in relationships {
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|m| m.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
         if rel.type_uri != REL_TYPE_IMAGE {
             continue;
         }
-        let resolved = resolve_target(RICH_VALUE_REL_PART, &rel.target);
+        let target = strip_fragment(&rel.target);
+        if target.is_empty() {
+            continue;
+        }
+        let resolved = resolve_target(RICH_VALUE_REL_PART, target);
         out.insert(rel.id, resolved);
     }
     Ok(out)
+}
+
+fn strip_fragment(target: &str) -> &str {
+    target
+        .split_once('#')
+        .map(|(base, _)| base)
+        .unwrap_or(target)
 }
 
 fn parse_sheet_vm_cells(sheet_xml: &str) -> Result<Vec<(CellRef, u32)>, XlsxError> {
@@ -207,4 +225,3 @@ fn resolve_rich_value_vm_to_image_part(
     let rel_id = rich_value_rel_ids.get(idx)?;
     image_targets_by_rel_id.get(rel_id).cloned()
 }
-
