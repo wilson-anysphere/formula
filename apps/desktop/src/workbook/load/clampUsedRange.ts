@@ -31,7 +31,9 @@ function parsePositiveInt(value: unknown): number | null {
  * Precedence:
  * 1) defaults
  * 2) env vars (DESKTOP_LOAD_MAX_ROWS/COLS)
- * 3) URL query params (?maxRows=…&maxCols=…)
+ * 3) URL query params (?loadMaxRows=…&loadMaxCols=…)
+ *
+ * Note: for backwards-compatibility we also accept `?maxRows=…&maxCols=…`.
  *
  * This function is intentionally pure so it can be unit-tested. Callers should
  * provide the query/env inputs from their environment (e.g. `window.location.search`,
@@ -73,8 +75,8 @@ export function resolveWorkbookLoadLimits(
   const queryString = options.queryString ?? "";
   if (queryString) {
     const params = new URLSearchParams(queryString.startsWith("?") ? queryString.slice(1) : queryString);
-    const queryMaxRows = parsePositiveInt(params.get("maxRows"));
-    const queryMaxCols = parsePositiveInt(params.get("maxCols"));
+    const queryMaxRows = parsePositiveInt(params.get("loadMaxRows") ?? params.get("maxRows"));
+    const queryMaxCols = parsePositiveInt(params.get("loadMaxCols") ?? params.get("maxCols"));
     if (queryMaxRows != null) maxRows = queryMaxRows;
     if (queryMaxCols != null) maxCols = queryMaxCols;
   }

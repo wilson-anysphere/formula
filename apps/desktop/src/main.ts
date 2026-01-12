@@ -72,7 +72,7 @@ import { installUpdaterUi } from "./tauri/updaterUi";
 import { notify } from "./tauri/notifications";
 import { registerAppQuitHandlers, requestAppQuit } from "./tauri/appQuit";
 import { checkForUpdatesFromCommandPalette } from "./tauri/updater.js";
-import type { WorkbookInfo } from "@formula/workbook-backend";
+import type { SheetUsedRange, WorkbookInfo } from "@formula/workbook-backend";
 import { chartThemeFromWorkbookPalette } from "./charts/theme";
 import { parseA1Range, splitSheetQualifier } from "../../../packages/search/index.js";
 import { refreshDefinedNameSignaturesFromBackend, refreshTableSignaturesFromBackend } from "./power-query/tableSignatures";
@@ -7222,8 +7222,16 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   const CHUNK_ROWS = 200;
   const { maxRows: MAX_ROWS, maxCols: MAX_COLS } = getWorkbookLoadLimits();
 
+  const truncations: Array<{
+    sheetId: string;
+    sheetName: string;
+    originalRange: SheetUsedRange;
+    loadedRange: { startRow: number; endRow: number; startCol: number; endCol: number };
+    truncatedRows: boolean;
+    truncatedCols: boolean;
+  }> = [];
+
   const snapshotSheets: Array<{ id: string; cells: any[] }> = [];
-  let truncated = false;
 
   for (const sheet of sheets) {
     const cells: Array<{ row: number; col: number; value: unknown | null; formula: string | null; format: null }> = [];
@@ -7238,7 +7246,16 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
       maxRows: MAX_ROWS,
       maxCols: MAX_COLS,
     });
-    if (truncatedRows || truncatedCols) truncated = true;
+    if (truncatedRows || truncatedCols) {
+      truncations.push({
+        sheetId: sheet.id,
+        sheetName: sheet.name,
+        originalRange: usedRange,
+        loadedRange: { startRow, endRow, startCol, endCol },
+        truncatedRows,
+        truncatedCols,
+      });
+    }
 
     if (startRow > endRow || startCol > endCol) {
       snapshotSheets.push({ id: sheet.id, cells });
@@ -7279,11 +7296,27 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     snapshotSheets.push({ id: sheet.id, cells });
   }
 
-  if (truncated) {
-    const message = `Workbook is larger than the current load limit; only the first ${MAX_ROWS} rows and ${MAX_COLS} columns were loaded.`;
-    console.warn(message);
-    showToast(message, "warning");
-  }
+  const truncationWarning =
+    truncations.length === 0
+      ? null
+      : (() => {
+          const formatBackendRange = (range: SheetUsedRange) =>
+            `rows ${range.start_row}-${range.end_row}, cols ${range.start_col}-${range.end_col}`;
+          const formatLoadedRange = (range: { startRow: number; endRow: number; startCol: number; endCol: number }) =>
+            range.startRow > range.endRow || range.startCol > range.endCol
+              ? "no cells loaded within caps"
+              : `rows ${range.startRow}-${range.endRow}, cols ${range.startCol}-${range.endCol}`;
+
+          const capText = `maxRows=${MAX_ROWS}, maxCols=${MAX_COLS}`;
+          const sheetText = truncations
+            .map(
+              (t) =>
+                `${t.sheetName || t.sheetId} (${t.sheetId}) used range ${formatBackendRange(t.originalRange)} → loaded ${formatLoadedRange(t.loadedRange)}`,
+            )
+            .join("; ");
+
+          return `Workbook partially loaded due to load limits (${capText}). ${sheetText}`;
+        })();
 
   const snapshot = encodeDocumentSnapshot({ schemaVersion: 1, sheets: snapshotSheets });
   const workbookSignature = await workbookSignaturePromise;
@@ -7293,6 +7326,11 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   refreshTableSignaturesFromBackend(doc, [], { workbookSignature });
   refreshDefinedNameSignaturesFromBackend(doc, [], { workbookSignature });
   await app.restoreDocumentState(snapshot);
+
+  if (truncationWarning) {
+    console.warn(`[formula][desktop] ${truncationWarning}`);
+    showToast(truncationWarning, "warning", { timeoutMs: 15_000 });
+  }
 
   // Refresh workbook metadata (defined names + tables) used by the name box and
   // AI completion. This is separate from the cell snapshot that populates the

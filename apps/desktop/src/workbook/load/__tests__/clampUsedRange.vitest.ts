@@ -101,7 +101,7 @@ describe("resolveWorkbookLoadLimits", () => {
 
   it("prefers query params over env vars", () => {
     const limits = resolveWorkbookLoadLimits({
-      queryString: "?maxRows=111&maxCols=222",
+      queryString: "?loadMaxRows=111&loadMaxCols=222",
       env: { DESKTOP_LOAD_MAX_ROWS: "123", DESKTOP_LOAD_MAX_COLS: "456" },
     });
 
