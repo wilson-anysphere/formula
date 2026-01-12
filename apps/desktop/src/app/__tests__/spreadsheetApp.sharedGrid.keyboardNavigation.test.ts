@@ -183,6 +183,27 @@ describe("SpreadsheetApp shared-grid keyboard navigation", () => {
       expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
       expect(app.getScroll().y).toBe(0);
 
+      // Shift+PageDown should extend the selection while keeping the anchor at A1.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", shiftKey: true, bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: pageRows, col: 0 });
+      expect((app as any).selection.ranges).toEqual([{ startRow: 0, endRow: pageRows, startCol: 0, endCol: 0 }]);
+
+      // Shift+PageDown again should extend further from the same anchor.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", shiftKey: true, bubbles: true, cancelable: true }));
+      const row2 = Math.min(limits.maxRows - 1, pageRows * 2);
+      expect(app.getActiveCell()).toEqual({ row: row2, col: 0 });
+      expect((app as any).selection.ranges).toEqual([{ startRow: 0, endRow: row2, startCol: 0, endCol: 0 }]);
+
+      // Shift+PageUp should move back up while still extending from the same anchor.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", shiftKey: true, bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: pageRows, col: 0 });
+      expect((app as any).selection.ranges).toEqual([{ startRow: 0, endRow: pageRows, startCol: 0, endCol: 0 }]);
+
+      // Collapse selection back to a single cell before continuing with other assertions.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+      expect(app.getScroll().y).toBe(0);
+
       // Alt+PageDown should page horizontally by approx one viewport.
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", altKey: true, bubbles: true, cancelable: true }));
       expect(app.getActiveCell()).toEqual({ row: 0, col: pageCols });
