@@ -408,8 +408,11 @@ export class ToolExecutor {
       return { range: this.formatRangeForUser(range), values, ...(formulas ? { formulas } : {}) };
     }
 
-    const cellDecisionCache = new Map<string, boolean>();
+    // Only cache per-cell decisions when we will query the same cell twice (values + formulas).
+    // When formulas are not requested, the cache adds overhead without improving performance.
+    const cellDecisionCache = params.include_formulas ? new Map<string, boolean>() : null;
     const isAllowedCell = (row: number, col: number) => {
+      if (!cellDecisionCache) return this.isDlpCellAllowed(dlp, row, col);
       const key = `${row},${col}`;
       const cached = cellDecisionCache.get(key);
       if (cached !== undefined) return cached;
