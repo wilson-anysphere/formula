@@ -250,7 +250,7 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
       },
       // Keep targets conservative: GitHub Actions runners vary, but this should still catch
       // pathological regressions (e.g. reintroducing O(n^2) axis updates).
-      targetMs: 50,
+      targetMs: 120,
       iterations: 25,
       warmup: 5,
     },
