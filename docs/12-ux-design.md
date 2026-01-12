@@ -155,6 +155,9 @@ The user experience must honor Excel's familiar mental model while introducing m
 | `Ctrl+Shift+;` | Insert current time |
 | `Ctrl+D` | Fill down |
 | `Ctrl+R` | Fill right |
+| `Cmd/Ctrl+F` | Find |
+| `Cmd+Option+F` (Mac) / `Ctrl+H` (Windows/Linux) | Replace |
+| `Cmd/Ctrl+G` | Go to… |
 
 ### Formatting
 
@@ -173,12 +176,12 @@ The user experience must honor Excel's familiar mental model while introducing m
 | Shortcut | Action |
 |----------|--------|
 | `Cmd+K` (Mac) / `Ctrl+K` (Windows/Linux) | Inline AI edit |
-| `Cmd+Shift+A` (Mac) / `Ctrl+Shift+A` (Windows/Linux) | Toggle AI chat sidebar |
+| `Cmd+I` (Mac) / `Ctrl+Shift+A` (Windows/Linux) | Toggle AI chat sidebar |
 | `Tab` (in formula bar, when an AI suggestion is shown) | Accept AI suggestion |
 
 Platform notes:
 
-- **macOS:** `Cmd+I` is reserved for **Italic** (Excel-compatible). Use `Cmd+Shift+A` to toggle the AI chat sidebar.
+- **macOS:** `Cmd+I` is reserved for **AI Chat**. Use `Ctrl+I` for **Italic** (Excel-compatible).
 - **Windows/Linux:** `Ctrl+I` is reserved for **Italic** (Excel-compatible). Use `Ctrl+Shift+A` to toggle the AI chat sidebar.
 
 ---
