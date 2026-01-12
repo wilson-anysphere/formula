@@ -1,13 +1,18 @@
-import type { CellBorderSpec, CellData, CellProvider, CellProviderUpdate, CellRange } from "../model/CellProvider";
-import { DirtyRegionTracker, type Rect } from "./DirtyRegionTracker";
-import { setupHiDpiCanvas } from "./HiDpiCanvas";
-import { LruCache } from "../utils/LruCache";
-import type { GridPresence } from "../presence/types";
-import type { GridTheme } from "../theme/GridTheme";
-import { DEFAULT_GRID_THEME, gridThemesEqual, resolveGridTheme } from "../theme/GridTheme";
-import type { GridViewportState } from "../virtualization/VirtualScrollManager";
-import { VirtualScrollManager } from "../virtualization/VirtualScrollManager";
-import { MergedCellIndex, isInteriorHorizontalGridline, isInteriorVerticalGridline, rangesIntersect } from "./mergedCells";
+import type { CellBorderSpec, CellData, CellProvider, CellProviderUpdate, CellRange } from "../model/CellProvider.ts";
+import { DirtyRegionTracker, type Rect } from "./DirtyRegionTracker.ts";
+import { setupHiDpiCanvas } from "./HiDpiCanvas.ts";
+import { LruCache } from "../utils/LruCache.ts";
+import type { GridPresence } from "../presence/types.ts";
+import type { GridTheme } from "../theme/GridTheme.ts";
+import { DEFAULT_GRID_THEME, gridThemesEqual, resolveGridTheme } from "../theme/GridTheme.ts";
+import type { GridViewportState } from "../virtualization/VirtualScrollManager.ts";
+import { VirtualScrollManager } from "../virtualization/VirtualScrollManager.ts";
+import {
+  MergedCellIndex,
+  isInteriorHorizontalGridline,
+  isInteriorVerticalGridline,
+  rangesIntersect
+} from "./mergedCells.ts";
 import {
   TextLayoutEngine,
   createCanvasTextMeasurer,

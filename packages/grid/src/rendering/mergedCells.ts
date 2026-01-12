@@ -1,4 +1,4 @@
-import type { CellRange } from "../model/CellProvider";
+import type { CellRange } from "../model/CellProvider.ts";
 
 export interface CellRef {
   row: number;
@@ -120,4 +120,3 @@ function buildRowIndex(ranges: CellRange[]): Map<number, Array<{ colStart: numbe
   });
   return index;
 }
-

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { formatMs, runBenchmark, type BenchmarkResult } from './benchmark.ts';
 import { createCollaborationBenchmarks } from './benchmarks/collaboration.bench.ts';
 import { createRenderBenchmarks } from './benchmarks/render.bench.ts';
+import { createSharedGridRendererBenchmarks } from './benchmarks/sharedGridRenderer.bench.ts';
 import { createStartupBenchmarks } from './benchmarks/startup.bench.ts';
 import { runDesktopStartupBenchmarks } from './desktopStartupBench.ts';
 
@@ -101,6 +102,7 @@ async function main(): Promise<void> {
   const benchmarks = [
     ...createStartupBenchmarks(),
     ...createRenderBenchmarks(),
+    ...createSharedGridRendererBenchmarks(),
     ...createCollaborationBenchmarks(),
   ];
 

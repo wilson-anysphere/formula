@@ -1,4 +1,4 @@
-import { VariableSizeAxis } from "./VariableSizeAxis";
+import { VariableSizeAxis } from "./VariableSizeAxis.ts";
 
 export interface GridViewportState {
   width: number;
