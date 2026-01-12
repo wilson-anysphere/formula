@@ -56,7 +56,8 @@ Extension panels are rendered as a sandboxed `<iframe>` (currently via a `blob:`
 - A restrictive **Content Security Policy** is injected into the webview HTML to prevent bypassing the
   extension host permission model (no network / remote scripts).
   - Note: desktop/Tauri CSP disallows inline scripts, so the injected webview policy uses `script-src blob: data:` (no `'unsafe-inline'`).
-- The desktop also injects a hardening script that scrubs Tauri IPC globals (`__TAURI__`, `__TAURI_IPC__`, etc) from the
+- The desktop also injects a hardening script that scrubs Tauri IPC globals (`__TAURI__`, `__TAURI_IPC__`, `__TAURI_INVOKE__`,
+  `__TAURI_INTERNALS__`, `__TAURI_METADATA__`, etc) from the
   iframe context (best-effort defense-in-depth).
   - The injected script also leaves a marker object at `window.__formulaWebviewSandbox` (used by e2e tests) so you can
     sanity-check that the hardening ran inside the iframe.
