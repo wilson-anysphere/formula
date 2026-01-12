@@ -30,6 +30,9 @@ Files written
 - tools/excel-oracle/odd_coupon_long_stub_cases.json
   - All cases tagged `odd_coupon` AND `long_stub`
 
+- tools/excel-oracle/odd_coupon_invalid_schedule_cases.json
+  - All cases tagged `odd_coupon` AND `invalid_schedule`
+
 After running, commit the resulting diffs.
 """
 
@@ -68,6 +71,9 @@ def main() -> int:
     validation_cases = [c for c in cases if _has_tag(c, "odd_coupon_validation")]
     boundary_cases = [c for c in cases if _has_tag(c, "odd_coupon") and _has_tag(c, "boundary")]
     long_stub_cases = [c for c in cases if _has_tag(c, "odd_coupon") and _has_tag(c, "long_stub")]
+    invalid_schedule_cases = [
+        c for c in cases if _has_tag(c, "odd_coupon") and _has_tag(c, "invalid_schedule")
+    ]
 
     _write_json(
         repo_root / "tools" / "excel-oracle" / "odd_coupon_validation_cases.json",
@@ -96,10 +102,22 @@ def main() -> int:
             "cases": long_stub_cases,
         },
     )
+    _write_json(
+        repo_root / "tools" / "excel-oracle" / "odd_coupon_invalid_schedule_cases.json",
+        {
+            "schemaVersion": 1,
+            "caseSet": "financial-odd-coupon-invalid-schedule",
+            "defaultSheet": "Sheet1",
+            "cases": invalid_schedule_cases,
+        },
+    )
 
     print(f"Wrote {len(validation_cases)} cases -> tools/excel-oracle/odd_coupon_validation_cases.json")
     print(f"Wrote {len(boundary_cases)} cases -> tools/excel-oracle/odd_coupon_boundary_cases.json")
     print(f"Wrote {len(long_stub_cases)} cases -> tools/excel-oracle/odd_coupon_long_stub_cases.json")
+    print(
+        f"Wrote {len(invalid_schedule_cases)} cases -> tools/excel-oracle/odd_coupon_invalid_schedule_cases.json"
+    )
     return 0
 
 
