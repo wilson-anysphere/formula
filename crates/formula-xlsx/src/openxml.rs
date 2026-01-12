@@ -1,7 +1,6 @@
 use crate::package::{XlsxError, XlsxPackage};
 use quick_xml::events::Event;
 use quick_xml::Reader;
-use std::borrow::Cow;
 use std::io::Cursor;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,70 +55,10 @@ pub fn resolve_relationship_target(
 }
 
 pub fn resolve_target(base_part: &str, target: &str) -> String {
-    // Be resilient to invalid/unescaped Windows-style path separators.
-    let base_part: Cow<'_, str> = if base_part.contains('\\') {
-        Cow::Owned(base_part.replace('\\', "/"))
-    } else {
-        Cow::Borrowed(base_part)
-    };
-
-    // Relationship targets are URIs; some producers include a fragment (e.g. `foo.xml#bar`).
-    // OPC part names do not include fragments, so strip them before resolving.
-    let target = target
-        .split_once('#')
-        .map(|(base, _)| base)
-        .unwrap_or(target);
-    // Be resilient to invalid/unescaped Windows-style path separators.
-    let target: Cow<'_, str> = if target.contains('\\') {
-        Cow::Owned(target.replace('\\', "/"))
-    } else {
-        Cow::Borrowed(target)
-    };
-    if target.is_empty() {
-        // A target of just `#fragment` refers to the source part itself.
-        return base_part
-            .strip_prefix('/')
-            .unwrap_or(base_part.as_ref())
-            .to_string();
-    }
-
-    let target = target.as_ref();
-
-    // Relationship targets can be relative to the source part's folder (e.g. `worksheets/sheet1.xml`)
-    // or absolute (e.g. `/xl/worksheets/sheet1.xml`). Absolute targets are rooted at the package
-    // root and must not be prefixed with the source part directory.
-    let (target, is_absolute) = match target.strip_prefix('/') {
-        Some(target) => (target, true),
-        None => (target, false),
-    };
-    let base_dir = if is_absolute {
-        ""
-    } else {
-        base_part
-            .rsplit_once('/')
-            .map(|(dir, _)| dir)
-            .unwrap_or("")
-    };
-
-    // `base_part` is typically an OPC part name without a leading slash, but be resilient and
-    // ignore any empty segments so callers can pass `/xl/...` and still get normalized output.
-    let mut components: Vec<&str> = if base_dir.is_empty() {
-        Vec::new()
-    } else {
-        base_dir.split('/').filter(|s| !s.is_empty()).collect()
-    };
-
-    for segment in target.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                components.pop();
-            }
-            _ => components.push(segment),
-        }
-    }
-
-    components.join("/")
+    // Keep relationship target resolution centralized in `path::resolve_target` so behavior stays
+    // consistent across the codebase (including fragment/query stripping and Windows-path
+    // tolerance).
+    crate::path::resolve_target(base_part, target)
 }
 
 pub fn parse_relationships(xml: &[u8]) -> Result<Vec<Relationship>, XlsxError> {

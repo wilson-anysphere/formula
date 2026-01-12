@@ -15,18 +15,23 @@ pub fn resolve_target(source_part: &str, target: &str) -> String {
         Cow::Borrowed(source_part)
     };
 
-    // Relationship targets are URIs; some producers include a URI fragment (e.g. `../media/img.png#id`).
-    // OPC part names do not include fragments, so strip them before resolving.
-    let target = target.split('#').next().unwrap_or(target);
     // Be resilient to invalid/unescaped Windows-style path separators.
     let target: Cow<'_, str> = if target.contains('\\') {
         Cow::Owned(target.replace('\\', "/"))
     } else {
         Cow::Borrowed(target)
     };
+
+    // Relationship targets are URIs. For in-package parts, the `#fragment` and `?query` portions
+    // are not part of the OPC part name and must be ignored when mapping to ZIP entry names.
+    //
+    // Some producers (and some Excel-generated parts) include fragments on image relationships,
+    // e.g. `../media/image1.png#something`. Excel itself treats this as a reference to the same
+    // underlying image part.
+    let target = strip_uri_suffixes(target.as_ref());
     if target.is_empty() {
         // A target of just `#fragment` refers to the source part itself.
-        return normalize(&source_part);
+        return normalize(source_part.as_ref());
     }
     if let Some(target) = target.strip_prefix('/') {
         return normalize(target);
@@ -34,6 +39,12 @@ pub fn resolve_target(source_part: &str, target: &str) -> String {
 
     let base_dir = source_part.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("");
     normalize(&format!("{base_dir}/{target}"))
+}
+
+fn strip_uri_suffixes(target: &str) -> &str {
+    let target = target.trim();
+    let target = target.split_once('#').map(|(t, _)| t).unwrap_or(target);
+    target.split_once('?').map(|(t, _)| t).unwrap_or(target)
 }
 
 fn normalize(path: &str) -> String {
@@ -76,6 +87,18 @@ mod tests {
     fn resolve_target_strips_fragments() {
         assert_eq!(
             resolve_target("xl/workbook.xml", "worksheets/sheet1.xml#rId1"),
+            "xl/worksheets/sheet1.xml"
+        );
+    }
+
+    #[test]
+    fn resolve_target_strips_query_strings() {
+        assert_eq!(
+            resolve_target("xl/workbook.xml", "worksheets/sheet1.xml?foo=bar"),
+            "xl/worksheets/sheet1.xml"
+        );
+        assert_eq!(
+            resolve_target("xl/workbook.xml", "worksheets/sheet1.xml?foo=bar#rId1"),
             "xl/worksheets/sheet1.xml"
         );
     }
