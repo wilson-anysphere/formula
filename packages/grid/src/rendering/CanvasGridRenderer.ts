@@ -2715,6 +2715,44 @@ export class CanvasGridRenderer {
 
           type DecorationSegment = { x1: number; x2: number; y: number; color: string; lineWidth: number };
 
+          const alignDecorationY = (pos: number, lineWidth: number): number => {
+            // When rotated, the decoration is no longer axis-aligned, so pixel snapping doesn't help.
+            if (rotationDeg !== 0) return pos;
+            if (lineWidth === 1) return crispLine(pos);
+            return pos;
+          };
+
+          const drawDecorationSegments = (segments: DecorationSegment[]): void => {
+            if (segments.length === 0) return;
+            // Ensure borders/dashes from other callers do not leak into text decorations.
+            (contentCtx as any).setLineDash?.([]);
+
+            type Bucket = { strokeStyle: string; lineWidth: number; coords: number[] };
+            const buckets = new Map<string, Bucket>();
+
+            for (const segment of segments) {
+              const key = `${segment.color}|${segment.lineWidth}`;
+              let bucket = buckets.get(key);
+              if (!bucket) {
+                bucket = { strokeStyle: segment.color, lineWidth: segment.lineWidth, coords: [] };
+                buckets.set(key, bucket);
+              }
+              bucket.coords.push(segment.x1, segment.y, segment.x2, segment.y);
+            }
+
+            for (const bucket of buckets.values()) {
+              contentCtx.strokeStyle = bucket.strokeStyle;
+              contentCtx.lineWidth = bucket.lineWidth;
+              contentCtx.beginPath();
+              const coords = bucket.coords;
+              for (let i = 0; i < coords.length; i += 4) {
+                contentCtx.moveTo(coords[i]!, coords[i + 1]!);
+                contentCtx.lineTo(coords[i + 2]!, coords[i + 3]!);
+              }
+              contentCtx.stroke();
+            }
+          };
+
           const offsets = buildCodePointIndex(text);
           const textLen = offsets.length - 1;
           const rawRuns = normalizeRichTextRuns(textLen, richText?.runs);
@@ -2801,24 +2839,29 @@ export class CanvasGridRenderer {
 
                 if (fragment.underline) {
                   const underlineOffset = Math.max(1, Math.round(fragment.font.sizePx * 0.08));
-                  const underlineY = baselineY + underlineOffset;
+                  const decorationLineWidth = Math.max(1, Math.round(fragment.font.sizePx / 16));
+                  const underlineY = alignDecorationY(baselineY + underlineOffset, decorationLineWidth);
                   underlineSegments.push({
                     x1: xCursor,
                     x2: xCursor + fragment.width,
                     y: underlineY,
                     color: contentCtx.fillStyle as string,
-                    lineWidth: Math.max(1, Math.round(fragment.font.sizePx / 16))
+                    lineWidth: decorationLineWidth
                   });
                 }
 
                 if (fragment.strike) {
-                  const strikeY = baselineY - Math.max(1, Math.round(fragment.ascent * 0.3));
+                  const decorationLineWidth = Math.max(1, Math.round(fragment.font.sizePx / 16));
+                  const strikeY = alignDecorationY(
+                    baselineY - Math.max(1, Math.round(fragment.ascent * 0.3)),
+                    decorationLineWidth
+                  );
                   strikeSegments.push({
                     x1: xCursor,
                     x2: xCursor + fragment.width,
                     y: strikeY,
                     color: contentCtx.fillStyle as string,
-                    lineWidth: Math.max(1, Math.round(fragment.font.sizePx / 16))
+                    lineWidth: decorationLineWidth
                   });
                 }
 
@@ -2898,22 +2941,8 @@ export class CanvasGridRenderer {
               contentCtx.beginPath();
               contentCtx.rect(clipX, y, clipWidth, height);
               contentCtx.clip();
-              for (const segment of underlineSegments) {
-                contentCtx.beginPath();
-                contentCtx.strokeStyle = segment.color;
-                contentCtx.lineWidth = segment.lineWidth;
-                contentCtx.moveTo(segment.x1, segment.y);
-                contentCtx.lineTo(segment.x2, segment.y);
-                contentCtx.stroke();
-              }
-              for (const segment of strikeSegments) {
-                contentCtx.beginPath();
-                contentCtx.strokeStyle = segment.color;
-                contentCtx.lineWidth = segment.lineWidth;
-                contentCtx.moveTo(segment.x1, segment.y);
-                contentCtx.lineTo(segment.x2, segment.y);
-                contentCtx.stroke();
-              }
+              drawDecorationSegments(underlineSegments);
+              drawDecorationSegments(strikeSegments);
               contentCtx.restore();
             }
           } else if (layoutEngine && availableWidth > 0) {
@@ -2939,7 +2968,7 @@ export class CanvasGridRenderer {
             const originX = x + paddingX;
             const shouldClip = layout.width > availableWidth || layout.height > availableHeight || rotationDeg !== 0;
 
-            const drawLayout = (collectDecorations: boolean) => {
+            const drawLayout = () => {
               const underlineSegments: DecorationSegment[] = [];
               const strikeSegments: DecorationSegment[] = [];
 
@@ -2956,45 +2985,30 @@ export class CanvasGridRenderer {
 
                   if (run.underline) {
                     const underlineOffset = Math.max(1, Math.round(run.font.sizePx * 0.08));
-                    const underlineY = baselineY + underlineOffset;
                     const lineWidth = Math.max(1, Math.round(run.font.sizePx / 16));
-                    if (collectDecorations) {
-                      underlineSegments.push({
-                        x1: xCursor,
-                        x2: xCursor + measurement.width,
-                        y: underlineY,
-                        color: contentCtx.fillStyle as string,
-                        lineWidth
-                      });
-                    } else {
-                      contentCtx.beginPath();
-                      contentCtx.strokeStyle = contentCtx.fillStyle;
-                      contentCtx.lineWidth = lineWidth;
-                      contentCtx.moveTo(xCursor, underlineY);
-                      contentCtx.lineTo(xCursor + measurement.width, underlineY);
-                      contentCtx.stroke();
-                    }
+                    const underlineY = alignDecorationY(baselineY + underlineOffset, lineWidth);
+                    underlineSegments.push({
+                      x1: xCursor,
+                      x2: xCursor + measurement.width,
+                      y: underlineY,
+                      color: contentCtx.fillStyle as string,
+                      lineWidth
+                    });
                   }
 
                   if (run.strike) {
-                    const strikeY = baselineY - Math.max(1, Math.round(measurement.ascent * 0.3));
                     const lineWidth = Math.max(1, Math.round(run.font.sizePx / 16));
-                    if (collectDecorations) {
-                      strikeSegments.push({
-                        x1: xCursor,
-                        x2: xCursor + measurement.width,
-                        y: strikeY,
-                        color: contentCtx.fillStyle as string,
-                        lineWidth
-                      });
-                    } else {
-                      contentCtx.beginPath();
-                      contentCtx.strokeStyle = contentCtx.fillStyle;
-                      contentCtx.lineWidth = lineWidth;
-                      contentCtx.moveTo(xCursor, strikeY);
-                      contentCtx.lineTo(xCursor + measurement.width, strikeY);
-                      contentCtx.stroke();
-                    }
+                    const strikeY = alignDecorationY(
+                      baselineY - Math.max(1, Math.round(measurement.ascent * 0.3)),
+                      lineWidth
+                    );
+                    strikeSegments.push({
+                      x1: xCursor,
+                      x2: xCursor + measurement.width,
+                      y: strikeY,
+                      color: contentCtx.fillStyle as string,
+                      lineWidth
+                    });
                   }
 
                   xCursor += measurement.width;
@@ -3018,31 +3032,21 @@ export class CanvasGridRenderer {
                 contentCtx.translate(-cx, -cy);
               }
 
-              drawLayout(false);
+              const { underlineSegments, strikeSegments } = drawLayout();
+              if (underlineSegments.length > 0 || strikeSegments.length > 0) {
+                drawDecorationSegments(underlineSegments);
+                drawDecorationSegments(strikeSegments);
+              }
               contentCtx.restore();
             } else {
-              const { underlineSegments, strikeSegments } = drawLayout(true);
+              const { underlineSegments, strikeSegments } = drawLayout();
               if (underlineSegments.length > 0 || strikeSegments.length > 0) {
                 contentCtx.save();
                 contentCtx.beginPath();
                 contentCtx.rect(x, y, width, height);
                 contentCtx.clip();
-                for (const segment of underlineSegments) {
-                  contentCtx.beginPath();
-                  contentCtx.strokeStyle = segment.color;
-                  contentCtx.lineWidth = segment.lineWidth;
-                  contentCtx.moveTo(segment.x1, segment.y);
-                  contentCtx.lineTo(segment.x2, segment.y);
-                  contentCtx.stroke();
-                }
-                for (const segment of strikeSegments) {
-                  contentCtx.beginPath();
-                  contentCtx.strokeStyle = segment.color;
-                  contentCtx.lineWidth = segment.lineWidth;
-                  contentCtx.moveTo(segment.x1, segment.y);
-                  contentCtx.lineTo(segment.x2, segment.y);
-                  contentCtx.stroke();
-                }
+                drawDecorationSegments(underlineSegments);
+                drawDecorationSegments(strikeSegments);
                 contentCtx.restore();
               }
             }
