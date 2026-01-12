@@ -22,7 +22,7 @@
     "test": "pnpm test:vitest && pnpm test:node && pnpm test:sync && pnpm -C apps/desktop test",
     "test:sync": "pnpm -C services/sync-server test",
     "test:vitest": "node scripts/run-vitest.mjs",
-    "test:node": "node scripts/check-cursor-ai-policy.mjs && node scripts/run-node-tests.mjs",
+    "test:node": "node scripts/test-node.mjs",
     "test:e2e": "pnpm -C apps/web test:e2e && pnpm -C apps/desktop test:e2e",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "bench:gpu-kernels": "node packages/gpu-kernels/bench/bench.mjs",
