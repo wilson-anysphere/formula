@@ -1,8 +1,9 @@
 use formula_model::{
     validate_value, CellRef, CellValue, DataValidation, DataValidationContext, DataValidationErrorAlert,
     DataValidationErrorKind, DataValidationErrorStyle, DataValidationKind, DataValidationOperator,
-    EntityValue, Range, RecordValue, Worksheet,
+    EntityValue, ImageValue, Range, RecordValue, Worksheet,
 };
+use formula_model::drawings::ImageId;
 
 struct TestCtx;
 
@@ -277,6 +278,14 @@ fn list_and_text_validations_use_rich_value_display_strings() {
     assert_eq!(result.ok, false);
     assert_eq!(result.error_kind, Some(DataValidationErrorKind::NotInList));
 
+    let image = CellValue::Image(ImageValue {
+        image_id: ImageId::new("image1.png"),
+        alt_text: Some("B".to_string()),
+        width: None,
+        height: None,
+    });
+    assert!(validate_value(&list, &image, &ctx).ok);
+
     let len_rule = dv(
         DataValidationKind::TextLength,
         Some(DataValidationOperator::Equal),
@@ -286,6 +295,17 @@ fn list_and_text_validations_use_rich_value_display_strings() {
     assert!(validate_value(
         &len_rule,
         &CellValue::Entity(EntityValue::new("🙂")),
+        &ctx
+    )
+    .ok);
+    assert!(validate_value(
+        &len_rule,
+        &CellValue::Image(ImageValue {
+            image_id: ImageId::new("image1.png"),
+            alt_text: Some("🙂".to_string()),
+            width: None,
+            height: None,
+        }),
         &ctx
     )
     .ok);
@@ -349,6 +369,17 @@ fn numeric_validation_parses_rich_value_display_strings() {
     assert!(validate_value(
         &rule,
         &CellValue::Entity(EntityValue::new("123")),
+        &ctx
+    )
+    .ok);
+    assert!(validate_value(
+        &rule,
+        &CellValue::Image(ImageValue {
+            image_id: ImageId::new("image1.png"),
+            alt_text: Some("123".to_string()),
+            width: None,
+            height: None,
+        }),
         &ctx
     )
     .ok);

@@ -586,6 +586,14 @@ fn coerce_number(value: &CellValue) -> Option<f64> {
         // string using the same coercion rules as plain strings.
         CellValue::Entity(e) => e.display_value.trim().parse::<f64>().ok(),
         CellValue::Record(r) => r.to_string().trim().parse::<f64>().ok(),
+        CellValue::Image(image) => image
+            .alt_text
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("[Image]")
+            .trim()
+            .parse::<f64>()
+            .ok(),
         _ => None,
     }
 }
@@ -607,6 +615,14 @@ fn coerce_text(value: &CellValue) -> Option<String> {
         }),
         CellValue::Entity(e) => Some(e.display_value.clone()),
         CellValue::Record(r) => Some(r.to_string()),
+        CellValue::Image(image) => Some(
+            image
+                .alt_text
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or("[Image]")
+                .to_string(),
+        ),
         _ => None,
     }
 }
@@ -628,6 +644,14 @@ fn coerce_date_serial(value: &CellValue) -> Option<f64> {
         // string using the same coercion rules as plain strings.
         CellValue::Entity(e) => parse_date_time_serial(e.display_value.trim()),
         CellValue::Record(r) => parse_date_time_serial(r.to_string().trim()),
+        CellValue::Image(image) => parse_date_time_serial(
+            image
+                .alt_text
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or("[Image]")
+                .trim(),
+        ),
         _ => None,
     }
 }
@@ -641,6 +665,14 @@ fn coerce_time_fraction(value: &CellValue) -> Option<f64> {
         // string using the same coercion rules as plain strings.
         CellValue::Entity(e) => parse_time_fraction(e.display_value.trim()),
         CellValue::Record(r) => parse_time_fraction(r.to_string().trim()),
+        CellValue::Image(image) => parse_time_fraction(
+            image
+                .alt_text
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or("[Image]")
+                .trim(),
+        ),
         _ => None,
     }
 }
