@@ -85,6 +85,12 @@ fn invalid_sheet_name_placeholder(sheet_id: Uuid) -> String {
     format!("_invalid_{prefix}")
 }
 
+fn invalid_workbook_name_placeholder(workbook_id: Uuid) -> String {
+    let id_str = workbook_id.to_string();
+    let prefix = id_str.get(0..8).unwrap_or(&id_str);
+    format!("_invalid_workbook_{prefix}")
+}
+
 #[derive(Clone)]
 pub struct Storage {
     conn: Arc<Mutex<Connection>>,
@@ -368,10 +374,17 @@ impl Storage {
                 params![id.to_string()],
                 |r| {
                     let id: String = r.get(0)?;
+                    let workbook_id =
+                        Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?;
+                    let name = r
+                        .get::<_, Option<String>>(1)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| invalid_workbook_name_placeholder(workbook_id));
                     let metadata_raw: Option<String> = r.get::<_, Option<String>>(2).ok().flatten();
                     Ok(WorkbookMeta {
-                        id: Uuid::parse_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-                        name: r.get(1)?,
+                        id: workbook_id,
+                        name,
                         metadata: parse_optional_json_value(metadata_raw),
                     })
                 },
@@ -391,9 +404,11 @@ impl Storage {
             let Ok(id) = Uuid::parse_str(&id_raw).map_err(|_| rusqlite::Error::InvalidQuery) else {
                 return Ok(None);
             };
-            let Some(name) = r.get::<_, Option<String>>(1).ok().flatten() else {
-                return Ok(None);
-            };
+            let name = r
+                .get::<_, Option<String>>(1)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| invalid_workbook_name_placeholder(id));
             let metadata_raw: Option<String> = r.get::<_, Option<String>>(2).ok().flatten();
             Ok(Some(WorkbookMeta {
                 id,
