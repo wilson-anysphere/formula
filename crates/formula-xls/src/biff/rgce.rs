@@ -1826,6 +1826,37 @@ mod tests {
     }
 
     #[test]
+    fn decodes_ptg_isect_intersection_operator() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // A1 B1 (intersection operator).
+        let row = 0u16;
+        let col_a = encode_col_field(0, true, true);
+        let col_b = encode_col_field(1, true, true);
+        let rgce = [
+            0x24, // PtgRef
+            row.to_le_bytes()[0],
+            row.to_le_bytes()[1],
+            col_a.to_le_bytes()[0],
+            col_a.to_le_bytes()[1],
+            0x24, // PtgRef
+            row.to_le_bytes()[0],
+            row.to_le_bytes()[1],
+            col_b.to_le_bytes()[0],
+            col_b.to_le_bytes()[1],
+            0x0F, // PtgIsect (intersection)
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "A1 B1");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn renders_unsupported_tokens_as_parseable_excel_errors() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = Vec::new();
