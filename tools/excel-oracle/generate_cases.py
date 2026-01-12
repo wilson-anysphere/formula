@@ -147,6 +147,13 @@ def _validate_against_function_catalog(payload: dict[str, Any]) -> None:
         if not isinstance(case, dict):
             continue
         used.update(_extract_function_names(case.get("formula")))
+        # Input cells can also contain formulas (e.g. error values like `=NA()`).
+        inputs = case.get("inputs", [])
+        if isinstance(inputs, list):
+            for cell_input in inputs:
+                if not isinstance(cell_input, dict):
+                    continue
+                used.update(_extract_function_names(cell_input.get("formula")))
 
     missing_nonvolatile = sorted(catalog_nonvolatile.difference(used))
     if missing_nonvolatile:

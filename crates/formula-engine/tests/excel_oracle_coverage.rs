@@ -31,6 +31,25 @@ fn excel_oracle_function_calls_are_registered() {
             panic!("parse excel oracle formula ({case_id}) {formula:?}: {e}")
         });
         collect_unknown_function_calls(&parsed, &mut unknown);
+
+        // Input cells can also contain formulas (e.g. `=NA()`).
+        if let Some(inputs) = case.get("inputs").and_then(|v| v.as_array()) {
+            for input in inputs {
+                let input_cell = input
+                    .get("cell")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("<unknown>");
+                let Some(input_formula) = input.get("formula").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let parsed = eval::Parser::parse(input_formula).unwrap_or_else(|e| {
+                    panic!(
+                        "parse excel oracle input formula ({case_id} {input_cell}) {input_formula:?}: {e}"
+                    )
+                });
+                collect_unknown_function_calls(&parsed, &mut unknown);
+            }
+        }
     }
 
     // The corpus intentionally includes `NO_SUCH_FUNCTION` to validate that unknown functions
@@ -83,6 +102,25 @@ fn excel_oracle_corpus_covers_nonvolatile_function_catalog() {
             panic!("parse excel oracle formula ({case_id}) {formula:?}: {e}")
         });
         collect_function_calls(&parsed, &mut called);
+
+        // Input cells can also contain formulas (e.g. `=NA()`).
+        if let Some(inputs) = case.get("inputs").and_then(|v| v.as_array()) {
+            for input in inputs {
+                let input_cell = input
+                    .get("cell")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("<unknown>");
+                let Some(input_formula) = input.get("formula").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let parsed = eval::Parser::parse(input_formula).unwrap_or_else(|e| {
+                    panic!(
+                        "parse excel oracle input formula ({case_id} {input_cell}) {input_formula:?}: {e}"
+                    )
+                });
+                collect_function_calls(&parsed, &mut called);
+            }
+        }
     }
 
     let mut catalog_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
