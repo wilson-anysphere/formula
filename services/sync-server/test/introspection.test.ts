@@ -97,6 +97,13 @@ test("sync-server rejects connections when introspection marks token inactive", 
     role: "editor",
     sessionId: "00000000-0000-0000-0000-000000000002"
   });
+  const notOrgMemberToken = signJwt({
+    sub: "u-not-org-member",
+    docId: docName,
+    orgId: "o1",
+    role: "editor",
+    sessionId: "00000000-0000-0000-0000-000000000003"
+  });
   const forbiddenActiveToken = signJwt({
     sub: "u-forbidden-active",
     docId: docName,
@@ -166,6 +173,8 @@ test("sync-server rejects connections when introspection marks token inactive", 
         body = { reason: "invalid_claims", error: "forbidden" };
       } else if (parsed.token === mfaRequiredToken) {
         body = { active: false, reason: "mfa_required" };
+      } else if (parsed.token === notOrgMemberToken) {
+        body = { active: false, reason: "not_org_member" };
       } else if (parsed.token === forbiddenActiveToken) {
         // Even if the body claims `{ active: true }`, a 403 response must be treated
         // as an inactive token.
@@ -248,16 +257,22 @@ test("sync-server rejects connections when introspection marks token inactive", 
   );
 
   await expectWebSocketUpgradeStatus(
+    `${syncServer.wsUrl}/${docName}?token=${encodeURIComponent(notOrgMemberToken)}`,
+    403
+  );
+
+  await expectWebSocketUpgradeStatus(
     `${syncServer.wsUrl}/${docName}?token=${encodeURIComponent(notMemberToken)}`,
     403
   );
 
-  assert.ok(calls.length >= 6);
+  assert.ok(calls.length >= 7);
   assert.ok(calls.some((c) => c.token === revokedToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === invalidClaimsToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === forbiddenActiveToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === apiKeyRevokedToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === mfaRequiredToken && c.docId === docName));
+  assert.ok(calls.some((c) => c.token === notOrgMemberToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === notMemberToken && c.docId === docName));
 
   for (const call of calls) {
