@@ -201,7 +201,9 @@ These boundaries are covered by:
   - `tests/compatibility/excel-oracle/cases.json` (search for e.g. “ODDFPRICE boundary: settlement == first_coupon”)
 
 Note: the engine currently allows `first_coupon == maturity` for ODDF\* (a single odd coupon paid
-at maturity). This behavior should be validated against real Excel.
+at maturity). This behavior is covered by `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`
+and by the excel-oracle boundary cases "ODDFPRICE boundary: first_coupon == maturity" and
+"ODDFYIELD boundary: first_coupon == maturity".
 
 ### Notes on `basis = 1` (Actual/Actual)
 
