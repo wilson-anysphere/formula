@@ -16,6 +16,7 @@ import { ClearIcon } from "./ClearIcon";
 import { ClipboardPaneIcon } from "./ClipboardPaneIcon";
 import { ClockIcon } from "./ClockIcon";
 import { CloseIcon } from "./CloseIcon";
+import { CommentIcon } from "./CommentIcon";
 import { ColumnWidthIcon } from "./ColumnWidthIcon";
 import { CommaIcon } from "./CommaIcon";
 import { ConditionalFormattingIcon } from "./ConditionalFormattingIcon";
@@ -30,6 +31,7 @@ import { DeleteSheetIcon } from "./DeleteSheetIcon";
 import { ExportIcon } from "./ExportIcon";
 import { EyeIcon } from "./EyeIcon";
 import { FileIcon } from "./FileIcon";
+import { ChartIcon } from "./ChartIcon";
 import { FillColorIcon } from "./FillColorIcon";
 import { FillDownIcon } from "./FillDownIcon";
 import { FilterIcon } from "./FilterIcon";
@@ -54,6 +56,7 @@ import { LockIcon } from "./LockIcon";
 import { MailIcon } from "./MailIcon";
 import { MergeCenterIcon } from "./MergeCenterIcon";
 import { MoreFormatsIcon } from "./MoreFormatsIcon";
+import { NoteIcon } from "./NoteIcon";
 import { NumberFormatIcon } from "./NumberFormatIcon";
 import { OrientationIcon } from "./OrientationIcon";
 import { OrganizeSheetsIcon } from "./OrganizeSheetsIcon";
@@ -62,17 +65,23 @@ import { PasteIcon } from "./PasteIcon";
 import { PasteSpecialIcon } from "./PasteSpecialIcon";
 import { PercentIcon } from "./PercentIcon";
 import { PinIcon } from "./PinIcon";
+import { PictureIcon } from "./PictureIcon";
 import { PrintIcon } from "./PrintIcon";
+import { PlusIcon } from "./PlusIcon";
 import { SaveIcon } from "./SaveIcon";
 import { SettingsIcon } from "./SettingsIcon";
 import { ShareIcon } from "./ShareIcon";
 import { ReplaceIcon } from "./ReplaceIcon";
 import { RowHeightIcon } from "./RowHeightIcon";
+import { ShapesIcon } from "./ShapesIcon";
+import { SmartArtIcon } from "./SmartArtIcon";
 import { SortFilterIcon } from "./SortFilterIcon";
 import { SortIcon } from "./SortIcon";
+import { StarIcon } from "./StarIcon";
 import { StrikethroughIcon } from "./StrikethroughIcon";
 import { SubscriptIcon } from "./SubscriptIcon";
 import { SuperscriptIcon } from "./SuperscriptIcon";
+import { TextBoxIcon } from "./TextBoxIcon";
 import { UnderlineIcon } from "./UnderlineIcon";
 import { UserIcon } from "./UserIcon";
 import { WrapTextIcon } from "./WrapTextIcon";
@@ -194,6 +203,59 @@ export const ribbonIconMap = {
   "home.editing.findSelect.find": FindIcon,
   "home.editing.findSelect.replace": ReplaceIcon,
   "home.editing.findSelect.goTo": GoToIcon,
+
+  // Insert
+  "insert.tables.pivotTable": ChartIcon,
+  "insert.tables.recommendedPivotTables": StarIcon,
+  "insert.tables.table": FormatAsTableIcon,
+  "insert.pivotcharts.pivotChart": ChartIcon,
+  "insert.pivotcharts.recommendedPivotCharts": StarIcon,
+  "insert.illustrations.pictures": PictureIcon,
+  "insert.illustrations.onlinePictures": PictureIcon,
+  "insert.illustrations.shapes": ShapesIcon,
+  "insert.illustrations.icons": StarIcon,
+  "insert.illustrations.smartArt": SmartArtIcon,
+  "insert.illustrations.screenshot": PictureIcon,
+  "insert.addins.getAddins": PlusIcon,
+  "insert.addins.myAddins": SmartArtIcon,
+  "insert.charts.recommendedCharts": StarIcon,
+  "insert.charts.column": ChartIcon,
+  "insert.charts.line": ChartIcon,
+  "insert.charts.pie": ChartIcon,
+  "insert.charts.bar": ChartIcon,
+  "insert.charts.area": ChartIcon,
+  "insert.charts.scatter": ChartIcon,
+  "insert.charts.map": GlobeIcon,
+  "insert.charts.histogram": ChartIcon,
+  "insert.charts.waterfall": ChartIcon,
+  "insert.charts.treemap": ChartIcon,
+  "insert.charts.sunburst": ChartIcon,
+  "insert.charts.funnel": ChartIcon,
+  "insert.charts.boxWhisker": ChartIcon,
+  "insert.charts.radar": ChartIcon,
+  "insert.charts.surface": ChartIcon,
+  "insert.charts.stock": ChartIcon,
+  "insert.charts.combo": ChartIcon,
+  "insert.charts.pivotChart": ChartIcon,
+  "insert.tours.3dMap": GlobeIcon,
+  "insert.tours.launchTour": ExportIcon,
+  "insert.sparklines.line": ChartIcon,
+  "insert.sparklines.column": ChartIcon,
+  "insert.sparklines.winLoss": ChartIcon,
+  "insert.filters.slicer": FilterIcon,
+  "insert.filters.timeline": ClockIcon,
+  "insert.links.link": LinkIcon,
+  "insert.comments.comment": CommentIcon,
+  "insert.comments.note": NoteIcon,
+  "insert.text.textBox": TextBoxIcon,
+  "insert.text.headerFooter": FileIcon,
+  "insert.text.wordArt": FontColorIcon,
+  "insert.text.signatureLine": ReplaceIcon,
+  "insert.text.object": FileIcon,
+  "insert.equations.equation": AutoSumIcon,
+  "insert.equations.inkEquation": ReplaceIcon,
+  "insert.symbols.equation": AutoSumIcon,
+  "insert.symbols.symbol": StarIcon,
 
   // Fallbacks (re-usable)
   sort: SortIcon,
