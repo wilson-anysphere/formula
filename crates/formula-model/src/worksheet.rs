@@ -383,7 +383,8 @@ impl Worksheet {
     ///
     /// Note: this is a helper for UI/engine consumers; it does not enforce edits automatically.
     pub fn is_cell_editable(&self, cell_ref: CellRef, styles: &StyleTable) -> bool {
-        if cell_ref.row >= crate::cell::EXCEL_MAX_ROWS
+        if cell_ref.row >= self.row_count
+            || cell_ref.col >= self.col_count
             || cell_ref.col >= crate::cell::EXCEL_MAX_COLS
         {
             return false;
@@ -466,7 +467,10 @@ impl Worksheet {
     /// If `cell` is inside a merged region, validations applied to any part of the merged region
     /// are treated as applying to the anchor cell (Excel-like behavior).
     pub fn data_validations_for_cell(&self, cell: CellRef) -> Vec<&DataValidationAssignment> {
-        if cell.row >= crate::cell::EXCEL_MAX_ROWS || cell.col >= crate::cell::EXCEL_MAX_COLS {
+        if cell.row >= self.row_count
+            || cell.col >= self.col_count
+            || cell.col >= crate::cell::EXCEL_MAX_COLS
+        {
             return Vec::new();
         }
 
@@ -892,7 +896,10 @@ impl Worksheet {
 
     /// Get a cell record if it is present in the sparse store.
     pub fn cell(&self, cell: CellRef) -> Option<&Cell> {
-        if cell.row >= crate::cell::EXCEL_MAX_ROWS || cell.col >= crate::cell::EXCEL_MAX_COLS {
+        if cell.row >= self.row_count
+            || cell.col >= self.col_count
+            || cell.col >= crate::cell::EXCEL_MAX_COLS
+        {
             return None;
         }
         let anchor = self.merged_regions.resolve_cell(cell);
@@ -901,7 +908,10 @@ impl Worksheet {
 
     /// Get a mutable cell record if it is present in the sparse store.
     pub fn cell_mut(&mut self, cell: CellRef) -> Option<&mut Cell> {
-        if cell.row >= crate::cell::EXCEL_MAX_ROWS || cell.col >= crate::cell::EXCEL_MAX_COLS {
+        if cell.row >= self.row_count
+            || cell.col >= self.col_count
+            || cell.col >= crate::cell::EXCEL_MAX_COLS
+        {
             return None;
         }
         self.cells.get_mut(&CellKey::from_ref(cell))
