@@ -132,7 +132,7 @@ fn streaming_patch_preserves_vm_error_cells_when_inserting_missing_cells(
 }
 
 #[test]
-fn streaming_patch_drops_vm_on_patched_cells_while_inserting_others(
+fn streaming_patch_preserves_vm_on_patched_cells_while_inserting_others(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let fixture_path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/row-col-attrs.xlsx");
@@ -170,7 +170,7 @@ fn streaming_patch_drops_vm_on_patched_cells_while_inserting_others(
         .descendants()
         .find(|n| n.has_tag_name((ns, "c")) && n.attribute("r") == Some("A2"))
         .expect("A2 cell should exist");
-    assert_eq!(a2.attribute("vm"), None, "A2 vm should be dropped after patching value");
+    assert_eq!(a2.attribute("vm"), Some("1"), "A2 should preserve vm after patching value");
     let a2_v = a2
         .children()
         .find(|n| n.has_tag_name((ns, "v")))

@@ -23,7 +23,7 @@ fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
     buf
 }
 
-fn assert_sheet_a1_drops_vm_but_preserves_cm(sheet_xml: &str) {
+fn assert_sheet_a1_preserves_vm_and_cm(sheet_xml: &str) {
     let doc = roxmltree::Document::parse(sheet_xml).expect("parse worksheet xml");
     let cell = doc
         .descendants()
@@ -31,8 +31,8 @@ fn assert_sheet_a1_drops_vm_but_preserves_cm(sheet_xml: &str) {
         .expect("expected A1 cell");
     assert_eq!(
         cell.attribute("vm"),
-        None,
-        "vm should be dropped when patching away from rich-value placeholder semantics (worksheet: {sheet_xml})"
+        Some("1"),
+        "expected vm attribute to be preserved (worksheet: {sheet_xml})"
     );
     assert_eq!(
         cell.attribute("cm"),
@@ -129,7 +129,7 @@ fn streaming_patcher_preserves_richdata_parts_and_metadata_rels() -> Result<(), 
     );
 
     let sheet_xml = String::from_utf8(zip_part(&out_bytes, "xl/worksheets/sheet1.xml"))?;
-    assert_sheet_a1_drops_vm_but_preserves_cm(&sheet_xml);
+    assert_sheet_a1_preserves_vm_and_cm(&sheet_xml);
 
     let workbook_xml = String::from_utf8(zip_part(&out_bytes, "xl/workbook.xml"))?;
     assert!(
@@ -211,7 +211,7 @@ fn package_patcher_preserves_richdata_parts_and_metadata_rels() -> Result<(), Bo
     );
 
     let sheet_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap())?;
-    assert_sheet_a1_drops_vm_but_preserves_cm(sheet_xml);
+    assert_sheet_a1_preserves_vm_and_cm(sheet_xml);
 
     let workbook_xml = std::str::from_utf8(pkg.part("xl/workbook.xml").unwrap())?;
     assert!(
@@ -299,7 +299,7 @@ fn document_roundtrip_preserves_richdata_parts_and_metadata_rels() -> Result<(),
     );
 
     let sheet_xml = String::from_utf8(zip_part(&saved, "xl/worksheets/sheet1.xml"))?;
-    assert_sheet_a1_drops_vm_but_preserves_cm(&sheet_xml);
+    assert_sheet_a1_preserves_vm_and_cm(&sheet_xml);
 
     Ok(())
 }

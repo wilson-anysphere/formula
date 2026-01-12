@@ -176,7 +176,7 @@ fn streaming_patch_preserves_cell_vm_cm_and_extlst_and_raw_copies_cellimages_par
         .expect("expected A1 cell");
 
     assert_eq!(cell.attribute("cm"), Some("7"));
-    assert_eq!(cell.attribute("vm"), None, "vm should be dropped on value edit");
+    assert_eq!(cell.attribute("vm"), Some("9"), "vm should be preserved on value edit");
     assert_eq!(cell.attribute("customAttr"), Some("x"));
 
     assert!(
@@ -278,7 +278,7 @@ fn streaming_workbook_cell_patches_preserves_cell_vm_cm_and_extlst_and_raw_copie
         .expect("expected A1 cell");
 
     assert_eq!(cell.attribute("cm"), Some("7"));
-    assert_eq!(cell.attribute("vm"), None, "vm should be dropped on value edit");
+    assert_eq!(cell.attribute("vm"), Some("9"), "vm should be preserved on value edit");
     assert_eq!(cell.attribute("customAttr"), Some("x"));
 
     assert!(

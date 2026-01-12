@@ -109,7 +109,7 @@ fn zip_part_exists(zip_bytes: &[u8], name: &str) -> bool {
     exists
 }
 
-fn assert_sheet_a1_drops_vm_but_preserves_cm(sheet_xml: &str) {
+fn assert_sheet_a1_preserves_vm_and_cm(sheet_xml: &str) {
     let doc = roxmltree::Document::parse(sheet_xml).expect("parse worksheet xml");
     let cell = doc
         .descendants()
@@ -117,8 +117,8 @@ fn assert_sheet_a1_drops_vm_but_preserves_cm(sheet_xml: &str) {
         .expect("expected A1 cell");
     assert_eq!(
         cell.attribute("vm"),
-        None,
-        "vm should be dropped when patching away from rich-value placeholder semantics (worksheet: {sheet_xml})"
+        Some("1"),
+        "expected vm attribute to be preserved (worksheet: {sheet_xml})"
     );
     assert_eq!(
         cell.attribute("cm"),
@@ -210,7 +210,7 @@ fn streaming_patcher_preserves_rich_value_metadata_parts_and_drops_vm_on_edit(
     let out_bytes = out.into_inner();
 
     let sheet_xml = String::from_utf8(zip_part(&out_bytes, "xl/worksheets/sheet1.xml"))?;
-    assert_sheet_a1_drops_vm_but_preserves_cm(&sheet_xml);
+    assert_sheet_a1_preserves_vm_and_cm(&sheet_xml);
 
     assert!(
         zip_part_exists(&out_bytes, "xl/metadata.xml"),
@@ -260,7 +260,7 @@ fn package_patcher_preserves_rich_value_metadata_parts_and_drops_vm_on_edit(
     pkg.apply_cell_patches(&patches)?;
 
     let sheet_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap())?;
-    assert_sheet_a1_drops_vm_but_preserves_cm(sheet_xml);
+    assert_sheet_a1_preserves_vm_and_cm(sheet_xml);
 
     assert!(
         pkg.part("xl/metadata.xml").is_some(),

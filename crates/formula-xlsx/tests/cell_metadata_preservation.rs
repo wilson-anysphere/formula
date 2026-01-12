@@ -117,7 +117,7 @@ fn apply_cell_patches_preserves_cell_attrs_and_extlst_when_updating_value() {
 }
 
 #[test]
-fn apply_cell_patches_drops_vm_attr_but_preserves_extlst_when_updating_value() {
+fn apply_cell_patches_preserves_vm_attr_but_preserves_extlst_when_updating_value() {
     let extlst =
         r#"<extLst><ext uri="{123}"><test xmlns="http://example.com">ok</test></ext></extLst>"#;
     let worksheet_xml = format!(
@@ -143,8 +143,8 @@ fn apply_cell_patches_drops_vm_attr_but_preserves_extlst_when_updating_value() {
 
     let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
     assert!(
-        !out_xml.contains(r#"vm="7""#),
-        "vm should be dropped when patching a cell value away from rich-value placeholder semantics, got: {out_xml}"
+        out_xml.contains(r#"vm="7""#),
+        "expected vm attribute to be preserved, got: {out_xml}"
     );
     assert!(
         out_xml.contains(r#"customAttr="x""#),
@@ -161,7 +161,7 @@ fn apply_cell_patches_drops_vm_attr_but_preserves_extlst_when_updating_value() {
 }
 
 #[test]
-fn apply_cell_patches_drops_vm_attr_but_preserves_extlst_when_updating_formula_and_value() {
+fn apply_cell_patches_preserves_vm_attr_but_preserves_extlst_when_updating_formula_and_value() {
     let extlst =
         r#"<extLst><ext uri="{123}"><test xmlns="http://example.com">ok</test></ext></extLst>"#;
     let worksheet_xml = format!(
@@ -187,8 +187,8 @@ fn apply_cell_patches_drops_vm_attr_but_preserves_extlst_when_updating_formula_a
 
     let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
     assert!(
-        !out_xml.contains(r#"vm="9""#),
-        "vm should be dropped when patching a cell value away from rich-value placeholder semantics, got: {out_xml}"
+        out_xml.contains(r#"vm="9""#),
+        "expected vm attribute to be preserved, got: {out_xml}"
     );
     assert!(
         out_xml.contains(r#"customAttr="x""#),
@@ -205,7 +205,7 @@ fn apply_cell_patches_drops_vm_attr_but_preserves_extlst_when_updating_formula_a
         .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
         .expect("expected A1 cell");
 
-    assert_eq!(cell.attribute("vm"), None);
+    assert_eq!(cell.attribute("vm"), Some("9"));
     assert_eq!(cell.attribute("customAttr"), Some("x"));
 
     let f = cell
@@ -272,7 +272,7 @@ fn apply_cell_patches_preserves_non_formula_children_when_updating_formula() {
 }
 
 #[test]
-fn apply_cell_patches_drops_vm_attr_when_updating_formula_and_value() {
+fn apply_cell_patches_preserves_vm_attr_when_updating_formula_and_value() {
     let extlst =
         r#"<extLst><ext uri="{123}"><test xmlns="http://example.com">ok</test></ext></extLst>"#;
     let worksheet_xml = format!(
@@ -298,8 +298,8 @@ fn apply_cell_patches_drops_vm_attr_when_updating_formula_and_value() {
 
     let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
     assert!(
-        !out_xml.contains(r#"vm="7""#),
-        "vm should be dropped when patching a cell value away from rich-value placeholder semantics, got: {out_xml}"
+        out_xml.contains(r#"vm="7""#),
+        "expected vm attribute to be preserved, got: {out_xml}"
     );
     assert!(
         out_xml.contains(extlst),
@@ -311,7 +311,7 @@ fn apply_cell_patches_drops_vm_attr_when_updating_formula_and_value() {
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
         .expect("expected A1 cell");
-    assert_eq!(cell.attribute("vm"), None);
+    assert_eq!(cell.attribute("vm"), Some("7"));
 
     let f = cell
         .children()

@@ -158,8 +158,9 @@ fn editing_cell_preserves_workbook_metadata_parts_and_drops_vm_on_edit(
     );
     assert_eq!(rel.attribute("Target"), Some("metadata.xml"));
 
-    // When the cell value changes away from the rich-value placeholder semantics, we must drop
-    // the `vm="..."` attribute to avoid leaving a dangling value-metadata pointer.
+    // The `vm="..."` attribute is a value-metadata pointer into `xl/metadata.xml`. When we rewrite
+    // worksheet XML we preserve it for fidelity (except for the embedded-image `#VALUE!`
+    // placeholder case, which is not exercised by this fixture).
     let sheet_bytes = zip_part(&saved, "xl/worksheets/sheet1.xml");
     let sheet_xml = std::str::from_utf8(&sheet_bytes)?;
     let sheet_doc = roxmltree::Document::parse(sheet_xml)?;
@@ -167,7 +168,7 @@ fn editing_cell_preserves_workbook_metadata_parts_and_drops_vm_on_edit(
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
         .ok_or("sheet1.xml missing A1 cell")?;
-    assert_eq!(cell.attribute("vm"), None);
+    assert_eq!(cell.attribute("vm"), Some("1"));
 
     Ok(())
 }

@@ -75,7 +75,7 @@ fn build_minimal_xlsx_with_styles(sheet_xml: &str, styles_xml: &str) -> Vec<u8> 
 }
 
 #[test]
-fn streaming_patch_drops_vm_attribute_on_value_update() -> Result<(), Box<dyn std::error::Error>> {
+fn streaming_patch_preserves_vm_attribute_on_value_update() -> Result<(), Box<dyn std::error::Error>> {
     let fixture_path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/row-col-attrs.xlsx");
     let bytes = fs::read(&fixture_path)?;
@@ -105,8 +105,8 @@ fn streaming_patch_drops_vm_attribute_on_value_update() -> Result<(), Box<dyn st
 
     assert_eq!(
         cell.attribute("vm"),
-        None,
-        "vm should be dropped when patching away from rich-value placeholder semantics, got: {sheet_xml}"
+        Some("1"),
+        "vm should be preserved on value edits for non-placeholder rich-data cells, got: {sheet_xml}"
     );
 
     let v_text = cell
@@ -123,7 +123,7 @@ fn streaming_patch_drops_vm_attribute_on_value_update() -> Result<(), Box<dyn st
 }
 
 #[test]
-fn streaming_patch_drops_vm_but_preserves_cm_on_value_update(
+fn streaming_patch_preserves_vm_and_cm_on_value_update(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -159,7 +159,7 @@ fn streaming_patch_drops_vm_but_preserves_cm_on_value_update(
         .find(|n| n.has_tag_name((ns, "c")) && n.attribute("r") == Some("A1"))
         .expect("expected cell A1 to exist");
 
-    assert_eq!(cell.attribute("vm"), None);
+    assert_eq!(cell.attribute("vm"), Some("1"));
     assert_eq!(cell.attribute("cm"), Some("2"));
 
     let v_text = cell

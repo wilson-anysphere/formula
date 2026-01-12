@@ -27,14 +27,13 @@ fn build_partial_zip_with_vm_cell() -> Vec<u8> {
 }
 
 fn build_minimal_xlsx() -> Vec<u8> {
-    // The low-level streaming patcher preserves `vm` when patching "partial" ZIPs that only
-    // contain worksheet XML (no `xl/workbook.xml`). Include `xl/workbook.xml` (and a minimal
-    // `[Content_Types].xml`) so this fixture exercises the full-workbook behavior where patched
-    // cells drop `vm`.
+    // Include a minimal `[Content_Types].xml` + workbook parts so this fixture exercises the full
+    // "normal workbook" streaming patcher behavior (as opposed to patching an extracted worksheet
+    // part ZIP).
     let content_types_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+ <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+   <Default Extension="xml" ContentType="application/xml"/>
+   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
 </Types>"#;
 
@@ -124,7 +123,7 @@ fn build_minimal_xlsx_without_content_types() -> Vec<u8> {
 }
 
 #[test]
-fn patch_xlsx_streaming_drops_vm_but_preserves_cm_on_existing_cells(
+fn patch_xlsx_streaming_preserves_vm_and_cm_on_existing_cells(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = build_minimal_xlsx();
 
@@ -152,8 +151,8 @@ fn patch_xlsx_streaming_drops_vm_but_preserves_cm_on_existing_cells(
 
     assert_eq!(
         cell.attribute("vm"),
-        None,
-        "vm should be dropped when patching away from rich-value placeholder semantics, got: {sheet_xml}"
+        Some("1"),
+        "expected cell to preserve vm attribute, got: {sheet_xml}"
     );
     assert_eq!(
         cell.attribute("cm"),

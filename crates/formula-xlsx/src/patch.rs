@@ -1910,12 +1910,19 @@ fn patch_cell_element(
         }
     }
 
-    // `vm` points into `xl/metadata.xml` value metadata for rich values (linked data types,
-    // images-in-cell, etc). When patching a cell value to anything other than the rich-value
-    // placeholder error (`#VALUE!` / `ErrorValue::Value`), drop `vm` so the cell no longer points
-    // at stale metadata.
-    let patch_is_value_error = matches!(patch_value, Some(CellValue::Error(ErrorValue::Value)));
-    let drop_vm = update_value && !patch_is_value_error;
+    // `vm="..."` points into `xl/metadata.xml` value metadata (rich values / images-in-cell).
+    //
+    // We preserve `vm` for most rich-data cells even when patching the cached value.
+    // The one case where we drop it is when the **original** cell was an embedded-image placeholder
+    // represented as an error cell with a `#VALUE!` cached value.
+    let existing_is_rich_value_placeholder = matches!(
+        &existing.value,
+        ExistingCellValue::Error(e) if e.trim() == ErrorValue::Value.as_str()
+    );
+    let patch_is_rich_value_placeholder =
+        matches!(patch_value, Some(CellValue::Error(ErrorValue::Value)));
+    let drop_vm =
+        update_value && existing_is_rich_value_placeholder && !patch_is_rich_value_placeholder;
 
     let mut c = BytesStart::new(cell_tag.as_str());
     let mut has_r = false;
@@ -1924,10 +1931,10 @@ fn patch_cell_element(
         match attr.key.as_ref() {
             b"s" if style_override.is_some() => continue,
             b"t" if update_value => continue,
-            // `vm` points into `xl/metadata.xml` richData/value metadata. Excel uses this for
-            // "place in cell" images and other rich values. When patching a cell's value to
-            // anything other than the rich-value placeholder error (`#VALUE!` / `ErrorValue::Value`),
-            // drop `vm` so the cell no longer points at stale metadata.
+            // `vm` points into `xl/metadata.xml` richData/value metadata.
+            //
+            // Only drop it when editing away from the embedded-image placeholder representation
+            // (`t="e"` + `#VALUE!`).
             b"vm" if drop_vm || vm_override.is_some() => continue,
             b"cm" if cm_override.is_some() => continue,
             b"r" => has_r = true,

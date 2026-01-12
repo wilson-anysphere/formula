@@ -214,17 +214,6 @@ pub fn patch_xlsx_streaming_with_recalc_policy<R: Read + Seek, W: Write + Seek>(
     }
  
     let mut archive = ZipArchive::new(input)?;
-    // `vm` points into `xl/metadata.xml` value metadata (rich values / images-in-cell).
-    //
-    // The low-level streaming patcher (`patch_xlsx_streaming`) is sometimes used on "partial" ZIPs
-    // that only contain worksheet XML (no `xl/workbook.xml` / root rels). In those cases, we
-    // preserve `vm` for maximum fidelity (callers may be patching an extracted worksheet part to
-    // reinsert into the original package).
-    //
-    // When patching a workbook package (detected by the presence of `xl/workbook.xml`), drop `vm`
-    // on patched cells to avoid leaving a dangling metadata pointer (we still preserve `cm` and all
-    // other unrelated attributes).
-    let drop_vm_on_patched_cells = zip_part_exists(&mut archive, "xl/workbook.xml")?;
     let mut formula_changed = cell_patches
         .iter()
         .any(|p| formula_is_material(p.formula.as_deref()));
@@ -244,7 +233,6 @@ pub fn patch_xlsx_streaming_with_recalc_policy<R: Read + Seek, W: Write + Seek>(
         &HashMap::new(),
         &HashMap::new(),
         &HashMap::new(),
-        drop_vm_on_patched_cells,
         recalc_policy,
     )?;
     Ok(())
@@ -403,7 +391,6 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy<
         &pre_read_parts,
         &HashMap::new(),
         &HashMap::new(),
-        true,
         recalc_policy,
     )?;
     Ok(())
@@ -457,7 +444,6 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc
             &HashMap::new(),
             &HashMap::new(),
             part_overrides,
-            true,
             RecalcPolicy::PRESERVE,
         )?;
         return Ok(());
@@ -544,7 +530,6 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc
         &pre_read_parts,
         &HashMap::new(),
         part_overrides,
-        true,
         recalc_policy,
     )?;
     Ok(())
@@ -1823,7 +1808,6 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy<
         &pre_read_parts,
         &updated_parts,
         &HashMap::new(),
-        true,
         recalc_policy,
     )?;
     Ok(())
@@ -2527,7 +2511,6 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
     pre_read_parts: &HashMap<String, Vec<u8>>,
     updated_parts: &HashMap<String, Vec<u8>>,
     part_overrides: &HashMap<String, PartOverride>,
-    drop_vm_on_patched_cells: bool,
     recalc_policy: RecalcPolicy,
 ) -> Result<(), StreamingPatchError> {
     let (shared_strings_part, shared_string_indices, shared_strings_updated) =
@@ -2643,7 +2626,6 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
                 patches,
                 indices,
                 worksheet_meta,
-                drop_vm_on_patched_cells,
                 recalc_policy,
             )?;
         } else if let Some(bytes) = updated_parts.get(canonical_name) {
@@ -3024,7 +3006,6 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     patches: &[WorksheetCellPatch],
     shared_string_indices: Option<&HashMap<(u32, u32), u32>>,
     worksheet_meta: WorksheetXmlMetadata,
-    drop_vm_on_patched_cells: bool,
     recalc_policy: RecalcPolicy,
 ) -> Result<(), StreamingPatchError> {
     let patch_bounds = bounds_for_patches(patches);
@@ -3357,7 +3338,6 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                         e,
                         &cell_ref,
                         &patch,
-                        drop_vm_on_patched_cells,
                     )?;
                 } else {
                     writer.write_event(Event::Start(e.to_owned()))?;
@@ -3388,7 +3368,6 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                         &cell_ref,
                         &patch,
                         cell_prefix,
-                        drop_vm_on_patched_cells,
                     )?;
                 } else {
                     writer.write_event(Event::Empty(e.to_owned()))?;
@@ -3600,7 +3579,7 @@ fn write_inserted_cells<W: Write>(
             continue;
         }
         let cell_ref = CellRef::new(patch.row_1 - 1, patch.col_0);
-        write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix, false)?;
+        write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix)?;
     }
     Ok(())
 }
@@ -3619,7 +3598,7 @@ fn write_remaining_row_cells<W: Write>(
             continue;
         }
         let cell_ref = CellRef::new(patch.row_1 - 1, patch.col_0);
-        write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix, false)?;
+        write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix)?;
     }
     Ok(())
 }
@@ -3634,7 +3613,7 @@ fn insert_pending_before_cell<W: Write>(
         if patch.col_0 < col_0 {
             if patch.material_for_insertion {
                 let cell_ref = CellRef::new(state.row_1 - 1, patch.col_0);
-                write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix, false)?;
+                write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix)?;
             }
             state.next_idx += 1;
         } else {
@@ -3655,7 +3634,7 @@ fn insert_pending_before_non_cell<W: Write>(
     for patch in &state.pending[state.next_idx..] {
         if patch.material_for_insertion {
             let cell_ref = CellRef::new(state.row_1 - 1, patch.col_0);
-            write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix, false)?;
+            write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix)?;
         }
     }
     state.next_idx = state.pending.len();
@@ -3682,7 +3661,6 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     cell_start: &BytesStart<'_>,
     cell_ref: &CellRef,
     patch: &CellPatchInternal,
-    drop_vm_on_patched_cells: bool,
 ) -> Result<(), StreamingPatchError> {
     let patch_formula = match patch.formula.as_deref() {
         Some(formula) if formula_is_material(Some(formula)) => Some(formula),
@@ -3721,13 +3699,11 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     }
 
     // Excel uses `vm="..."` to point into `xl/metadata.xml` value metadata (rich values / in-cell
-    // images). When we patch a cell's cached value we generally cannot update the metadata table,
-    // so leaving `vm` behind can create a dangling pointer.
+    // images).
     //
-    // We always drop `vm` when patching away from the images-in-cell placeholder representation
-    // (`t="e" <v>#VALUE!</v> vm="..."`). For full workbook packages (controlled by
-    // `drop_vm_on_patched_cells`) we also drop `vm` when the cached value changes, unless the
-    // patched value remains the rich-value placeholder error.
+    // We preserve `vm` for most rich-data cells. The one case where we drop it is when the
+    // **original** cell is an embedded-image placeholder represented as an error cell with a
+    // `#VALUE!` cached value, and the patch edits the cell away from that placeholder value.
     let existing_value_is_value_error = if existing_t.as_deref() == Some("e") {
         extract_cell_v_text(&inner_events)?.is_some_and(|v| v.trim() == "#VALUE!")
     } else {
@@ -3738,17 +3714,7 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         CellValue::Error(formula_model::ErrorValue::Value)
     );
     let clear_cached_value = patch.clear_cached_value && patch_formula.is_some();
-    let value_eq = cell_value_semantics_eq(
-        existing_t.as_deref(),
-        &inner_events,
-        &patch.value,
-        patch.shared_string_idx,
-    )?;
-    let value_changed = !value_eq;
-    let drop_vm = has_vm
-        && (clear_cached_value
-            || (!patch_value_is_value_error
-                && (existing_value_is_value_error || (drop_vm_on_patched_cells && value_changed))));
+    let drop_vm = has_vm && existing_value_is_value_error && !patch_value_is_value_error;
 
     let mut c = BytesStart::new(cell_tag.as_str());
     let mut has_r = false;
@@ -4080,17 +4046,11 @@ fn write_patched_cell<W: Write>(
     cell_ref: &CellRef,
     patch: &CellPatchInternal,
     prefix: Option<&str>,
-    drop_vm_on_patched_cells: bool,
 ) -> Result<(), StreamingPatchError> {
     let patch_formula = match patch.formula.as_deref() {
         Some(formula) if formula_is_material(Some(formula)) => Some(formula),
         _ => None,
     };
-    let patch_value_is_value_error = matches!(
-        patch.value,
-        CellValue::Error(formula_model::ErrorValue::Value)
-    );
-    let drop_vm = drop_vm_on_patched_cells && !patch_value_is_value_error;
     let mut existing_t: Option<String> = None;
     let shared_string_idx = patch.shared_string_idx;
 
@@ -4107,6 +4067,11 @@ fn write_patched_cell<W: Write>(
     let mut c = BytesStart::new(cell_tag_owned.as_str());
     let mut has_r = false;
     let style_override = patch.xf_index;
+    // This codepath only handles `<c .../>` (empty) cells, so there is no cached `<v>` value to
+    // inspect. The embedded-image placeholder representation we special-case elsewhere is
+    // `t="e"` + `<v>#VALUE!</v>`, so here we only drop `vm` when explicitly overridden by the
+    // patch.
+    let drop_vm = false;
 
     if let Some(orig) = original {
         for attr in orig.attributes() {

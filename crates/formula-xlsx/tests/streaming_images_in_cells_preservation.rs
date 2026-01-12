@@ -212,8 +212,8 @@ fn streaming_patch_preserves_images_in_cells_metadata_and_related_parts_and_drop
 
     assert_eq!(
         cell.attribute("vm"),
-        None,
-        "vm should be dropped when patching away from rich-value placeholder semantics"
+        Some("9"),
+        "expected vm attribute to be preserved on edit"
     );
     assert_eq!(cell.attribute("cm"), Some("7"));
     assert_eq!(cell.attribute("customAttr"), Some("x"));

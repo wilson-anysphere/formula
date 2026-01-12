@@ -160,7 +160,7 @@ fn editing_a_cell_does_not_strip_unrelated_row_col_or_cell_attrs() -> Result<(),
         .descendants()
         .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A2"))
         .expect("cell A2 exists");
-    assert_eq!(cell_a2.attribute("vm"), None, "vm should be dropped for normal values");
+    assert_eq!(cell_a2.attribute("vm"), Some("1"), "expected vm to be preserved");
     let v = cell_a2
         .children()
         .find(|n| n.is_element() && n.tag_name().name() == "v")
