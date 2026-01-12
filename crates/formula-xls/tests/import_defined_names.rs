@@ -100,10 +100,7 @@ fn imports_defined_names_from_biff_name_records() {
         .expect("Print_Area missing");
     assert!(print_area.hidden, "expected Print_Area to be hidden");
     assert_eq!(print_area.xlsx_local_sheet_id, Some(0));
-    assert_eq!(
-        print_area.refers_to,
-        "Sheet1!$A$1:$B$2,Sheet1!$D$4:$E$5"
-    );
+    assert_eq!(print_area.refers_to, "Sheet1!$A$1:$B$2,Sheet1!$D$4:$E$5");
     assert_parseable_refers_to(&print_area.refers_to);
 
     // All imported name formulas should be parseable by our formula parser (stored without `=`).
@@ -191,7 +188,7 @@ fn imports_workbook_defined_names_via_calamine_fallback_when_biff_unavailable() 
                 "TestName missing; defined_names={:?}; warnings={:?}",
                 result.workbook.defined_names, result.warnings
             )
-    });
+        });
     assert_eq!(name.scope, DefinedNameScope::Workbook);
     assert_eq!(name.refers_to, "Sheet1!$A$1:$A$1");
     assert_parseable_refers_to(&name.refers_to);
@@ -239,16 +236,15 @@ fn rewrites_calamine_defined_name_formulas_to_sanitized_sheet_names() {
                 "TestName missing; defined_names={:?}; warnings={:?}",
                 result.workbook.defined_names, result.warnings
             )
-    });
+        });
     assert_eq!(name.scope, DefinedNameScope::Workbook);
     assert_eq!(name.refers_to, "Bad_Name!$A$1:$A$1");
     assert_parseable_refers_to(&name.refers_to);
 
     assert!(
-        result
-            .warnings
-            .iter()
-            .any(|w| w.message.contains("sanitized sheet name `Bad:Name` -> `Bad_Name`")),
+        result.warnings.iter().any(|w| w
+            .message
+            .contains("sanitized sheet name `Bad:Name` -> `Bad_Name`")),
         "expected import warnings to mention sheet name sanitization; warnings={:?}",
         result.warnings
     );
