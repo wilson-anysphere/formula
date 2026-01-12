@@ -1,0 +1,266 @@
+export type SheetVisibility = "visible" | "hidden" | "veryHidden";
+
+// Keep in sync with `apps/desktop/src/workbook/workbook.ts`.
+export type TabColor = {
+  rgb?: string;
+  theme?: number;
+  indexed?: number;
+  tint?: number;
+  auto?: boolean;
+};
+
+export type SheetMeta = {
+  /**
+   * Stable identifier used by the DocumentController + backend.
+   * (Not necessarily the same as the user-facing sheet name.)
+   */
+  id: string;
+  /**
+   * User-facing sheet name shown on tabs and in the sheet switcher.
+   */
+  name: string;
+  /**
+   * Excel-style visibility.
+   */
+  visibility: SheetVisibility;
+  /**
+   * Excel-style tab color, round-trippable through XLSX.
+   */
+  tabColor?: TabColor;
+};
+
+export const SHEET_NAME_MAX_LENGTH = 31;
+export const SHEET_NAME_FORBIDDEN_CHARS = [":", "\\", "/", "?", "*", "[", "]"] as const;
+export const SHEET_NAME_FORBIDDEN_CHARS_REGEX = /[:\\\/\?\*\[\]]/;
+
+/**
+ * Trim the proposed sheet name (Excel does this) and return the normalized value.
+ */
+export function normalizeSheetName(name: string): string {
+  return String(name ?? "").trim();
+}
+
+/**
+ * Validate a proposed sheet name using Excel-like constraints.
+ *
+ * Returns the normalized (trimmed) name when valid; otherwise throws.
+ */
+export function validateSheetName(
+  name: string,
+  opts: {
+    /**
+     * Existing workbook sheets for uniqueness validation.
+     */
+    sheets: ReadonlyArray<Pick<SheetMeta, "id" | "name">>;
+    /**
+     * Sheet id to ignore during uniqueness validation (rename of current sheet).
+     */
+    ignoreId?: string | null;
+  },
+): string {
+  const normalized = normalizeSheetName(name);
+  if (!normalized) throw new Error("Sheet name cannot be empty");
+  if (normalized.length > SHEET_NAME_MAX_LENGTH) {
+    throw new Error(`Sheet name cannot exceed ${SHEET_NAME_MAX_LENGTH} characters`);
+  }
+  if (SHEET_NAME_FORBIDDEN_CHARS_REGEX.test(normalized)) {
+    throw new Error(`Sheet name cannot contain: ${SHEET_NAME_FORBIDDEN_CHARS.join(" ")}`);
+  }
+
+  const candidateCi = normalized.toLowerCase();
+  for (const sheet of opts.sheets) {
+    if (opts.ignoreId && sheet.id === opts.ignoreId) continue;
+    if (sheet.name.toLowerCase() === candidateCi) throw new Error("Duplicate sheet name");
+  }
+
+  return normalized;
+}
+
+/**
+ * Generate the next default sheet name (`Sheet1`, `Sheet2`, …), choosing the first
+ * available number (case-insensitive compare).
+ */
+export function generateDefaultSheetName(sheets: ReadonlyArray<Pick<SheetMeta, "name">>): string {
+  const existing = new Set(sheets.map((s) => s.name.toLowerCase()));
+  for (let n = 1; ; n += 1) {
+    const candidate = `Sheet${n}`;
+    if (!existing.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+function cloneSheetMeta(meta: SheetMeta): SheetMeta {
+  return { ...meta, tabColor: meta.tabColor ? { ...meta.tabColor } : undefined };
+}
+
+export type WorkbookSheetStoreListener = () => void;
+
+/**
+ * A simple, synchronous workbook sheet metadata store.
+ *
+ * This store is intentionally UI-framework agnostic so it can be shared between
+ * `main.ts` DOM wiring and React components.
+ */
+export class WorkbookSheetStore {
+  private sheets: SheetMeta[];
+  private readonly listeners = new Set<WorkbookSheetStoreListener>();
+
+  constructor(initialSheets: SheetMeta[] = []) {
+    // Validate invariants up-front so downstream consumers can rely on them.
+    const byId = new Set<string>();
+    for (const sheet of initialSheets) {
+      const id = String(sheet.id ?? "").trim();
+      if (!id) throw new Error("Sheet id cannot be empty");
+      if (byId.has(id)) throw new Error(`Duplicate sheet id: ${id}`);
+      byId.add(id);
+    }
+
+    const normalizedSheets: SheetMeta[] = [];
+    for (const sheet of initialSheets) {
+      const normalizedName = validateSheetName(sheet.name, { sheets: normalizedSheets, ignoreId: null });
+      normalizedSheets.push({
+        id: String(sheet.id).trim(),
+        name: normalizedName,
+        visibility: sheet.visibility ?? "visible",
+        tabColor: sheet.tabColor ? { ...sheet.tabColor } : undefined,
+      });
+    }
+
+    this.sheets = normalizedSheets;
+  }
+
+  subscribe(listener: WorkbookSheetStoreListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private emit(): void {
+    for (const listener of [...this.listeners]) {
+      try {
+        listener();
+      } catch {
+        // ignore listener errors
+      }
+    }
+  }
+
+  listAll(): SheetMeta[] {
+    return this.sheets.map(cloneSheetMeta);
+  }
+
+  listVisible(): SheetMeta[] {
+    return this.sheets.filter((s) => s.visibility === "visible").map(cloneSheetMeta);
+  }
+
+  getById(id: string): SheetMeta | undefined {
+    const sheet = this.sheets.find((s) => s.id === id);
+    return sheet ? cloneSheetMeta(sheet) : undefined;
+  }
+
+  getName(id: string): string | undefined {
+    return this.sheets.find((s) => s.id === id)?.name;
+  }
+
+  resolveIdByName(name: string): string | undefined {
+    const normalized = normalizeSheetName(name);
+    if (!normalized) return undefined;
+    const targetCi = normalized.toLowerCase();
+    return this.sheets.find((s) => s.name.toLowerCase() === targetCi)?.id;
+  }
+
+  addAfter(activeId: string, input: { id: string; name?: string }): SheetMeta {
+    const id = String(input.id ?? "").trim();
+    if (!id) throw new Error("Sheet id cannot be empty");
+    if (this.sheets.some((s) => s.id === id)) throw new Error(`Duplicate sheet id: ${id}`);
+
+    const name =
+      input.name !== undefined ? validateSheetName(input.name, { sheets: this.sheets, ignoreId: null }) : generateDefaultSheetName(this.sheets);
+
+    const sheet: SheetMeta = { id, name, visibility: "visible" };
+
+    const activeIdx = this.sheets.findIndex((s) => s.id === activeId);
+    const insertIdx = activeIdx === -1 ? this.sheets.length : activeIdx + 1;
+    const next = this.sheets.slice();
+    next.splice(insertIdx, 0, sheet);
+    this.sheets = next;
+    this.emit();
+    return cloneSheetMeta(sheet);
+  }
+
+  rename(id: string, newName: string): void {
+    const idx = this.sheets.findIndex((s) => s.id === id);
+    if (idx === -1) throw new Error("Sheet not found");
+
+    const normalized = validateSheetName(newName, { sheets: this.sheets, ignoreId: id });
+    const current = this.sheets[idx]!;
+    if (current.name === normalized) return;
+
+    const next = this.sheets.slice();
+    next[idx] = { ...current, name: normalized };
+    this.sheets = next;
+    this.emit();
+  }
+
+  move(id: string, toIndex: number): void {
+    const idx = this.sheets.findIndex((s) => s.id === id);
+    if (idx === -1) throw new Error("Sheet not found");
+    if (!Number.isInteger(toIndex)) throw new Error("Invalid index");
+    if (toIndex < 0 || toIndex >= this.sheets.length) throw new Error("Invalid index");
+    if (idx === toIndex) return;
+
+    const next = this.sheets.slice();
+    const [sheet] = next.splice(idx, 1);
+    if (!sheet) throw new Error("Sheet not found");
+    next.splice(toIndex, 0, sheet);
+    this.sheets = next;
+    this.emit();
+  }
+
+  remove(id: string): void {
+    if (this.sheets.length <= 1) throw new Error("Cannot delete the last sheet");
+    const idx = this.sheets.findIndex((s) => s.id === id);
+    if (idx === -1) throw new Error("Sheet not found");
+    const next = this.sheets.slice();
+    next.splice(idx, 1);
+    this.sheets = next;
+    this.emit();
+  }
+
+  hide(id: string): void {
+    const idx = this.sheets.findIndex((s) => s.id === id);
+    if (idx === -1) throw new Error("Sheet not found");
+    const sheet = this.sheets[idx]!;
+    if (sheet.visibility !== "visible") return;
+
+    const visibleCount = this.sheets.reduce((count, s) => count + (s.visibility === "visible" ? 1 : 0), 0);
+    if (visibleCount <= 1) throw new Error("Cannot hide the last visible sheet");
+
+    const next = this.sheets.slice();
+    next[idx] = { ...sheet, visibility: "hidden" };
+    this.sheets = next;
+    this.emit();
+  }
+
+  unhide(id: string): void {
+    const idx = this.sheets.findIndex((s) => s.id === id);
+    if (idx === -1) throw new Error("Sheet not found");
+    const sheet = this.sheets[idx]!;
+    if (sheet.visibility === "visible") return;
+
+    const next = this.sheets.slice();
+    next[idx] = { ...sheet, visibility: "visible" };
+    this.sheets = next;
+    this.emit();
+  }
+
+  setTabColor(id: string, color: TabColor | undefined): void {
+    const idx = this.sheets.findIndex((s) => s.id === id);
+    if (idx === -1) throw new Error("Sheet not found");
+    const sheet = this.sheets[idx]!;
+
+    const next = this.sheets.slice();
+    next[idx] = { ...sheet, tabColor: color ? { ...color } : undefined };
+    this.sheets = next;
+    this.emit();
+  }
+}
+
