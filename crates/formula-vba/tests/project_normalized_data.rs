@@ -899,11 +899,11 @@ fn project_normalized_data_multiple_baseclass_entries_preserve_order_and_precede
 
     let mut formb_padded = Vec::new();
     formb_padded.extend_from_slice(b"B");
-    formb_padded.extend(std::iter::repeat(0u8).take(1022));
+    formb_padded.extend(std::iter::repeat_n(0u8, 1022));
 
     let mut forma_padded = Vec::new();
     forma_padded.extend_from_slice(b"A");
-    forma_padded.extend(std::iter::repeat(0u8).take(1022));
+    forma_padded.extend(std::iter::repeat_n(0u8, 1022));
 
     let idx_formb = find_subslice(&normalized, &formb_padded).expect("FormB designer bytes");
     let idx_forma = find_subslice(&normalized, &forma_padded).expect("FormA designer bytes");
@@ -1015,9 +1015,9 @@ fn project_normalized_data_preserves_designer_storage_element_traversal_order() 
 
     let mut expected = Vec::new();
     expected.extend_from_slice(b"Y");
-    expected.extend(std::iter::repeat(0u8).take(1022));
+    expected.extend(std::iter::repeat_n(0u8, 1022));
     expected.extend_from_slice(b"X");
-    expected.extend(std::iter::repeat(0u8).take(1022));
+    expected.extend(std::iter::repeat_n(0u8, 1022));
 
     let pos = find_subslice(&normalized, &expected)
         .expect("expected normalized output to contain padded designer stream bytes");

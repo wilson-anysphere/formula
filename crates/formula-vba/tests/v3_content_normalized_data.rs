@@ -183,7 +183,7 @@ fn build_project_unicode_only_module_stream_name() -> Vec<u8> {
     }
     {
         let mut s = ole
-            .create_stream(&format!("VBA/{module_stream_name_unicode}"))
+            .create_stream(format!("VBA/{module_stream_name_unicode}"))
             .expect("module stream");
         s.write_all(&module_container).expect("write module");
     }
@@ -230,7 +230,7 @@ fn build_project_unicode_only_module_stream_name_with_project_stream() -> Vec<u8
     }
     {
         let mut s = ole
-            .create_stream(&format!("VBA/{module_stream_name_unicode}"))
+            .create_stream(format!("VBA/{module_stream_name_unicode}"))
             .expect("module stream");
         s.write_all(&module_container).expect("write module");
     }
@@ -278,7 +278,7 @@ fn build_project_unicode_module_stream_name_with_internal_len_prefix() -> Vec<u8
     }
     {
         let mut s = ole
-            .create_stream(&format!("VBA/{module_stream_name_unicode}"))
+            .create_stream(format!("VBA/{module_stream_name_unicode}"))
             .expect("module stream");
         s.write_all(&module_container).expect("write module");
     }
@@ -415,7 +415,7 @@ fn build_project_with_ansi_and_unicode_module_stream_name_records() -> Vec<u8> {
     }
     {
         let mut s = ole
-            .create_stream(&format!("VBA/{module_stream_name_unicode}"))
+            .create_stream(format!("VBA/{module_stream_name_unicode}"))
             .expect("module stream");
         s.write_all(&module_container).expect("write module");
     }
@@ -1075,7 +1075,7 @@ fn project_normalized_data_v3_appends_padded_forms_normalized_data_when_designer
 
     let mut expected_forms = Vec::new();
     expected_forms.extend_from_slice(b"ABC");
-    expected_forms.extend(std::iter::repeat(0u8).take(1020));
+    expected_forms.extend(std::iter::repeat_n(0u8, 1020));
     assert_eq!(forms, expected_forms);
 
     // ProjectNormalizedData v3 includes filtered PROJECT stream properties before the v3 dir/module

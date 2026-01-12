@@ -394,7 +394,7 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
 
     // FormsNormalizedData: one 1023-byte block for the designer stream.
     expected.extend_from_slice(designer_bytes);
-    expected.extend(std::iter::repeat(0u8).take(1023 - designer_bytes.len()));
+    expected.extend(std::iter::repeat_n(0u8, 1023 - designer_bytes.len()));
 
     let actual_project_normalized = project_normalized_data_v3_transcript(&vba_project_bin)
         .expect("ProjectNormalizedData v3");

@@ -92,7 +92,7 @@ fn project_normalized_data_project_properties_parse_name_and_value_tokens_withou
     // ProjectProperties token bytes.
     let mut expected_designer_storage = Vec::new();
     expected_designer_storage.extend_from_slice(b"DESIGNER");
-    expected_designer_storage.extend(std::iter::repeat(0u8).take(1023 - b"DESIGNER".len()));
+    expected_designer_storage.extend(std::iter::repeat_n(0u8, 1023 - b"DESIGNER".len()));
 
     let mut expected = Vec::new();
     expected.extend_from_slice(&1252u16.to_le_bytes());
@@ -168,7 +168,7 @@ fn project_normalized_data_project_properties_accepts_lfcr_newlines() {
     // bytes (`FormsNormalizedData`) before the PROJECT stream property tokens.
     let mut expected_designer_storage = Vec::new();
     expected_designer_storage.extend_from_slice(b"DESIGNER");
-    expected_designer_storage.extend(std::iter::repeat(0u8).take(1023 - b"DESIGNER".len()));
+    expected_designer_storage.extend(std::iter::repeat_n(0u8, 1023 - b"DESIGNER".len()));
 
     let mut expected = Vec::new();
     expected.extend_from_slice(&1252u16.to_le_bytes());

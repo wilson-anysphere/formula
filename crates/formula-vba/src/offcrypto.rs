@@ -1026,7 +1026,7 @@ mod tests {
         }
         assert_eq!(stream.len(), signature_offset);
         stream.extend_from_slice(&pkcs7);
-        if cb_siginfo % 2 != 0 {
+        if !cb_siginfo.is_multiple_of(2) {
             stream.push(0);
         }
         assert_eq!(stream.len(), 2 + cch * 2);
@@ -1061,7 +1061,7 @@ mod tests {
             stream.extend_from_slice(&0u32.to_le_bytes());
         }
         stream.extend_from_slice(pkcs7);
-        if cb_siginfo % 2 != 0 {
+        if !cb_siginfo.is_multiple_of(2) {
             stream.push(0);
         }
         assert_eq!(stream.len(), 2 + cch * 2);

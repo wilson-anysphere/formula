@@ -95,7 +95,7 @@ fn forms_normalized_data_pads_stream_to_1023_byte_blocks() {
     // MS-OVBA pads the final block to 1023 bytes with zeros.
     let mut expected = Vec::new();
     expected.extend_from_slice(b"ABC");
-    expected.extend(std::iter::repeat(0u8).take(1020));
+    expected.extend(std::iter::repeat_n(0u8, 1020));
 
     assert_eq!(normalized.len(), 1023);
     assert_eq!(normalized, expected);
@@ -181,9 +181,9 @@ fn forms_normalized_data_traverses_nested_storages_in_storage_element_order() {
     // - `UserForm1/Child/X`
     let mut expected = Vec::new();
     expected.extend_from_slice(b"Y");
-    expected.extend(std::iter::repeat(0u8).take(1022));
+    expected.extend(std::iter::repeat_n(0u8, 1022));
     expected.extend_from_slice(b"X");
-    expected.extend(std::iter::repeat(0u8).take(1022));
+    expected.extend(std::iter::repeat_n(0u8, 1022));
 
     assert_eq!(normalized.len(), 1023 * 2);
     assert_eq!(normalized, expected);
@@ -221,7 +221,7 @@ fn forms_normalized_data_uses_modulestreamname_to_find_designer_storage() {
 
     let mut expected = Vec::new();
     expected.extend_from_slice(b"ABC");
-    expected.extend(std::iter::repeat(0u8).take(1020));
+    expected.extend(std::iter::repeat_n(0u8, 1020));
 
     assert_eq!(normalized.len(), 1023);
     assert_eq!(normalized, expected);
@@ -278,7 +278,7 @@ fn forms_normalized_data_uses_modulestreamnameunicode_to_find_designer_storage()
 
     let mut expected = Vec::new();
     expected.extend_from_slice(b"ABC");
-    expected.extend(std::iter::repeat(0u8).take(1020));
+    expected.extend(std::iter::repeat_n(0u8, 1020));
 
     assert_eq!(normalized.len(), 1023);
     assert_eq!(normalized, expected);
@@ -317,7 +317,7 @@ fn forms_normalized_data_matches_baseclass_case_insensitively() {
 
     let mut expected = Vec::new();
     expected.extend_from_slice(b"ABC");
-    expected.extend(std::iter::repeat(0u8).take(1020));
+    expected.extend(std::iter::repeat_n(0u8, 1020));
 
     assert_eq!(normalized.len(), 1023);
     assert_eq!(normalized, expected);
@@ -369,9 +369,9 @@ fn forms_normalized_data_uses_project_stream_baseclass_order_and_ignores_unliste
     // PROJECT stream order: FormB then FormA.
     let mut expected = Vec::new();
     expected.extend_from_slice(b"B");
-    expected.extend(std::iter::repeat(0u8).take(1022));
+    expected.extend(std::iter::repeat_n(0u8, 1022));
     expected.extend_from_slice(b"A");
-    expected.extend(std::iter::repeat(0u8).take(1022));
+    expected.extend(std::iter::repeat_n(0u8, 1022));
 
     assert_eq!(normalized, expected);
 }
@@ -413,7 +413,7 @@ fn forms_normalized_data_ignores_baseclass_lines_after_project_section_headers()
     // Only FormA is referenced before `[Workspace]`.
     let mut expected = Vec::new();
     expected.extend_from_slice(b"A");
-    expected.extend(std::iter::repeat(0u8).take(1022));
+    expected.extend(std::iter::repeat_n(0u8, 1022));
     assert_eq!(normalized, expected);
 }
 

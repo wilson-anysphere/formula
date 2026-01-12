@@ -272,7 +272,7 @@ fn prefers_bound_verified_signature_stream_over_unbound_verified_candidate() {
 
     // Create an unbound signature stream that is still cryptographically valid, but whose signed
     // digest does not match the current project.
-    let mut wrong_digest = digest.clone();
+    let mut wrong_digest = digest;
     wrong_digest[0] ^= 0xFF;
     let unbound_content = build_spc_indirect_data_content_sha256(&wrong_digest);
     let unbound_pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&unbound_content);

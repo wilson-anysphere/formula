@@ -150,7 +150,7 @@ fn compute_vba_project_digest_matches_msovba_transcript_content_plus_forms() {
     let mut expected_forms = designer_stream.clone();
     let rem = expected_forms.len() % 1023;
     assert_ne!(rem, 0, "test requires non-zero padding");
-    expected_forms.extend(std::iter::repeat(0u8).take(1023 - rem));
+    expected_forms.extend(std::iter::repeat_n(0u8, 1023 - rem));
 
     let expected_transcript = [expected_content.as_slice(), expected_forms.as_slice()].concat();
 

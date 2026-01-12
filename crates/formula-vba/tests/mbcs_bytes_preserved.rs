@@ -65,7 +65,7 @@ fn v3_content_normalized_data_preserves_non_ascii_mbcs_bytes_verbatim() {
     {
         // The OLE stream name is Unicode; the `dir` stream records provide the MBCS bytes.
         let mut s = ole
-            .create_stream(&format!("VBA/{project_name}"))
+            .create_stream(format!("VBA/{project_name}"))
             .expect("module stream");
         s.write_all(&module_container).expect("write module");
     }
@@ -138,4 +138,3 @@ fn project_normalized_data_preserves_non_ascii_mbcs_bytes_verbatim() {
         "expected ProjectNormalizedData to NOT contain UTF-8 bytes for the same string"
     );
 }
-

@@ -65,7 +65,7 @@ fn v3_content_normalized_data_decodes_module_stream_name_using_project_codepage(
     }
     {
         let mut s = ole
-            .create_stream(&format!("VBA/{module_stream_name}"))
+            .create_stream(format!("VBA/{module_stream_name}"))
             .expect("module stream");
         s.write_all(&module_container).expect("write module");
     }
@@ -118,7 +118,7 @@ fn v3_content_normalized_data_prefers_module_stream_name_unicode_record_for_look
     }
     {
         let mut s = ole
-            .create_stream(&format!("VBA/{module_stream_name}"))
+            .create_stream(format!("VBA/{module_stream_name}"))
             .expect("module stream");
         s.write_all(&module_container).expect("write module");
     }
@@ -181,7 +181,7 @@ fn project_normalized_data_v3_decodes_baseclass_using_project_codepage() {
     }
     {
         let mut s = ole
-            .create_stream(&format!("VBA/{module_name}"))
+            .create_stream(format!("VBA/{module_name}"))
             .expect("module stream");
         s.write_all(&module_container).expect("write module");
     }
@@ -190,7 +190,7 @@ fn project_normalized_data_v3_decodes_baseclass_using_project_codepage() {
     ole.create_storage(module_name).expect("designer storage");
     {
         let mut s = ole
-            .create_stream(&format!("{module_name}/Payload"))
+            .create_stream(format!("{module_name}/Payload"))
             .expect("designer stream");
         s.write_all(designer_stream_bytes)
             .expect("write designer bytes");
@@ -245,7 +245,7 @@ fn v3_content_normalized_data_prefers_project_stream_codepage_over_dir_projectco
     }
     {
         let mut s = ole
-            .create_stream(&format!("VBA/{module_stream_name}"))
+            .create_stream(format!("VBA/{module_stream_name}"))
             .expect("module stream");
         s.write_all(&module_container).expect("write module");
     }
@@ -303,7 +303,7 @@ fn project_normalized_data_v3_falls_back_to_dir_projectcodepage_when_project_lac
     }
     {
         let mut s = ole
-            .create_stream(&format!("VBA/{module_name}"))
+            .create_stream(format!("VBA/{module_name}"))
             .expect("module stream");
         s.write_all(&module_container).expect("write module");
     }
@@ -312,7 +312,7 @@ fn project_normalized_data_v3_falls_back_to_dir_projectcodepage_when_project_lac
     ole.create_storage(module_name).expect("designer storage");
     {
         let mut s = ole
-            .create_stream(&format!("{module_name}/Payload"))
+            .create_stream(format!("{module_name}/Payload"))
             .expect("designer stream");
         s.write_all(designer_stream_bytes)
             .expect("write designer bytes");

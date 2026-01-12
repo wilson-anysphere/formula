@@ -314,7 +314,7 @@ fn content_normalized_data_decodes_utf16le_module_stream_name_without_bom() {
     }
     {
         let mut s = ole
-            .create_stream(&format!("VBA/{module_name}"))
+            .create_stream(format!("VBA/{module_name}"))
             .expect("module stream");
         s.write_all(&module_container).expect("write module");
     }
