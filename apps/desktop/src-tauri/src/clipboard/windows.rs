@@ -219,7 +219,8 @@ fn parse_png_dimensions(png_bytes: &[u8]) -> Option<(u32, u32)> {
     }
 
     let data_start = 16;
-    let data = png_bytes.get(data_start..data_start + ihdr_len)?;
+    let data_end = data_start.checked_add(ihdr_len)?;
+    let data = png_bytes.get(data_start..data_end)?;
     let width = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
     let height = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
     if width == 0 || height == 0 {
