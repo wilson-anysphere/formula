@@ -2056,7 +2056,13 @@ fn resolve_shared_strings_part_name<R: Read + Seek>(
         let rels = parse_relationships(&bytes)?;
         if let Some(rel) = rels
             .iter()
-            .find(|rel| rel.type_uri == REL_TYPE_SHARED_STRINGS)
+            .find(|rel| {
+                rel.type_uri == REL_TYPE_SHARED_STRINGS
+                    && !rel
+                        .target_mode
+                        .as_deref()
+                        .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+            })
         {
             return Ok(Some(resolve_target("xl/workbook.xml", &rel.target)));
         }
@@ -4758,5 +4764,65 @@ mod tests {
             &style_table,
         )
         .expect("streaming patch should succeed");
+    }
+
+    #[test]
+    fn streaming_patch_ignores_external_workbook_shared_strings_relationship() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        // External sharedStrings relationship is listed first and should be ignored.
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="https://example.com/sharedStrings.xml" TargetMode="External"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+</Relationships>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData/>
+</worksheet>"#;
+
+        let shared_strings_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0" uniqueCount="0"/>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options)
+            .unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/sharedStrings.xml", options).unwrap();
+        zip.write_all(shared_strings_xml.as_bytes()).unwrap();
+
+        let input_bytes = zip.finish().unwrap().into_inner();
+
+        let mut patches = WorkbookCellPatches::default();
+        patches.set_cell(
+            "Sheet1",
+            CellRef::from_a1("A1").unwrap(),
+            CellPatch::set_value(CellValue::String("Hello".to_string())),
+        );
+
+        let mut output = Cursor::new(Vec::new());
+        patch_xlsx_streaming_workbook_cell_patches(Cursor::new(input_bytes), &mut output, &patches)
+            .expect("streaming patch should succeed");
     }
 }

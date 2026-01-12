@@ -209,7 +209,13 @@ fn resolve_shared_strings_part_name(package: &XlsxPackage) -> Result<Option<Stri
     let rels = parse_relationships(rels_bytes)?;
     Ok(rels
         .into_iter()
-        .find(|rel| rel.type_uri == REL_TYPE_SHARED_STRINGS)
+        .find(|rel| {
+            rel.type_uri == REL_TYPE_SHARED_STRINGS
+                && !rel
+                    .target_mode
+                    .as_deref()
+                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        })
         .map(|rel| resolve_target(WORKBOOK_PART, &rel.target)))
 }
 
@@ -671,6 +677,8 @@ fn build_value_element(ns: Option<String>, tag: &str, value: Option<&str>) -> Xm
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::XlsxPackage;
+    use std::io::{Cursor, Write};
 
     #[test]
     fn parse_inline_string_ignores_phonetic_text() {
@@ -695,6 +703,58 @@ mod tests {
         assert_eq!(
             cells.get(&cell_ref),
             Some(&PivotCacheValue::String("Base".to_string()))
+        );
+    }
+
+    #[test]
+    fn resolve_shared_strings_part_name_ignores_external_relationship() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="https://example.com/sharedStrings.xml" TargetMode="External"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+</Relationships>"#;
+
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData/>
+</worksheet>"#;
+
+        let shared_strings_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0" uniqueCount="0"/>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(worksheet_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/sharedStrings.xml", options).unwrap();
+        zip.write_all(shared_strings_xml.as_bytes()).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+        assert_eq!(
+            super::resolve_shared_strings_part_name(&pkg).expect("resolve shared strings"),
+            Some("xl/sharedStrings.xml".to_string())
         );
     }
 }
