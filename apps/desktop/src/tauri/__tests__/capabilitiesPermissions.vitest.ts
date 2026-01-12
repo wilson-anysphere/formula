@@ -48,6 +48,7 @@ describe("Tauri capabilities", () => {
       expect(cmd.trim()).not.toBe("");
       // Disallow wildcard/pattern scopes; keep commands explicit.
       expect(cmd).not.toContain("*");
+ 
     }
   });
 
@@ -67,9 +68,9 @@ describe("Tauri capabilities", () => {
     expect(commands.length).toBe((allow as unknown[]).length);
     expect(new Set(commands).size).toBe(commands.length);
 
-    for (const command of commands) {
-      expect(command.trim()).not.toBe("");
-      expect(command).not.toContain("*");
+    for (const cmd of commands) {
+      expect(cmd.trim()).not.toBe("");
+      expect(cmd).not.toContain("*");
     }
   });
 

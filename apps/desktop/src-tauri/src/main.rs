@@ -862,6 +862,8 @@ fn main() {
         //  2) Registered here in `generate_handler![...]`
         //  3) Added to the explicit JS invoke allowlist in
         //     `src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission)
+        //  4) If invoked from the webview, added to the per-command allowlist in
+        //     `src-tauri/capabilities/main.json` (`core:allow-invoke`)
         //
         // Guardrails:
         // - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs` asserts this

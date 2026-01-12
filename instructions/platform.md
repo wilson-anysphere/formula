@@ -184,8 +184,9 @@ If you add new desktop IPC surface area, you must update the capability allowlis
 
 - new frontend↔backend events → `core:event:allow-listen` / `core:event:allow-emit`
 - new plugin API usage → add the corresponding `*:allow-*` permission string(s)
-- new invoked command (`#[tauri::command]`) →
+- new invoked app command (`#[tauri::command]`):
   - register it in `apps/desktop/src-tauri/src/main.rs`
+  - add it to `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke` allowlist; what the webview can call)
   - add it to `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission)
   - if the frontend starts invoking it via `__TAURI__.core.invoke("...")`, add it to `core:allow-invoke` in `apps/desktop/src-tauri/capabilities/main.json`
   - enforce window/origin/scope checks in Rust (never trust the webview)
@@ -196,6 +197,8 @@ We keep guardrail tests to ensure we don't accidentally broaden the desktop IPC 
   - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`
 - **Core/plugin + invoke permissions**: ensure required plugin permissions are explicitly granted (dialogs, window ops, clipboard plain text, updater, etc), we don't accidentally grant dangerous extras, and `core:allow-invoke` stays scoped + in sync with frontend invoke usage:
   - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`
+- **App command allowlist**: ensure invokable `#[tauri::command]` surface stays explicit + in sync:
+  - `apps/desktop/src-tauri/tests/tauri_ipc_allowlist.rs`
 
 Filesystem access for Power Query is handled via **custom Rust commands** (e.g. `read_text_file`, `list_dir`)
 instead of the optional Tauri FS plugin. Those commands enforce an explicit scope:
@@ -311,6 +314,10 @@ TypeScript ↔ Rust communication:
 //
 // In this repo, commands must also be:
 //  1) registered in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`)
+//  2) added to the explicit invoke allowlist in
+//     `apps/desktop/src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission)
+//  3) if invoked from the webview, added to the per-command allowlist in
+//     `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke`)
 //
 // Note: the capability system gates built-in core/plugin APIs (event/window/dialog/etc) and disables IPC entirely for
 // non-matching windows (scoped per-window via the capability file’s `"windows"` patterns).
@@ -319,8 +326,8 @@ TypeScript ↔ Rust communication:
 //  - `allow-invoke` (application permission manifest: `apps/desktop/src-tauri/permissions/allow-invoke.json`)
 //  - `core:allow-invoke` (scoped allowlist in `apps/desktop/src-tauri/capabilities/main.json`)
 //
-// Even with allowlisting, commands must be hardened in Rust (trusted-origin + window-label checks,
-// argument validation, filesystem/network scope checks, etc).
+// Even with allowlisting, commands must be hardened in Rust (trusted-origin + window-label checks, argument validation,
+// filesystem/network scope checks, etc).
 //
 #[tauri::command]
 fn check_for_updates(app: tauri::AppHandle, source: crate::updater::UpdateCheckSource) -> Result<(), String> {

@@ -171,6 +171,7 @@ Example excerpt:
   "windows": ["main"],
   "permissions": [
     "allow-invoke",
+    { "identifier": "core:allow-invoke", "allow": [{ "command": "open_workbook" }] },
     { "identifier": "core:event:allow-listen", "allow": [{ "event": "open-file" }] },
     { "identifier": "core:event:allow-emit", "allow": [{ "event": "open-file-ready" }] },
     "core:event:allow-unlisten",
@@ -183,10 +184,18 @@ Example excerpt:
 }
 ```
 
+Note: windows explicitly opt into capabilities via `app.windows[].capabilities` in
+`apps/desktop/src-tauri/tauri.conf.json` (e.g. the main window includes `"capabilities": ["main"]`). Keep this in sync
+with the capability file’s `"windows": [...]` scoping so adding a new window never implicitly grants it the main
+capability.
+
 When adding new uses of privileged plugin APIs (clipboard/dialog/updater/window APIs) or adding new desktop event names,
 update the relevant allowlists in `capabilities/main.json`.
-When adding a new Rust `#[tauri::command]` invoked from the frontend, also update
-`apps/desktop/src-tauri/permissions/allow-invoke.json`.
+
+When adding a new Rust `#[tauri::command]` invoked from the frontend, also update the invoke allowlists in:
+
+- `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke`)
+- `apps/desktop/src-tauri/permissions/allow-invoke.json`
 
 See “Tauri v2 Capabilities & Permissions” below for the concrete `main.json` contents.
 
@@ -837,7 +846,6 @@ two-file change (guardrailed by `apps/desktop/src/tauri/__tests__/tauriSecurityC
 `apps/desktop/src-tauri/capabilities/main.json` is intentionally an explicit allowlist for what the webview is allowed to do.
 
 It gates:
-
 - **`allow-invoke`** (application permission): allows the frontend to invoke Formula's app-defined Rust `#[tauri::command]` functions via
   `__TAURI__.core.invoke(...)`.
   - The command allowlist lives in `apps/desktop/src-tauri/permissions/allow-invoke.json`.
