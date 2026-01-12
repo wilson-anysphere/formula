@@ -21,6 +21,7 @@ describe("SpreadsheetApp.reindexCommentCells", () => {
     (app as any).commentMeta = new Map<string, { resolved: boolean }>();
     (app as any).commentMetaByCoord = new Map<number, { resolved: boolean }>();
     (app as any).commentPreviewByCoord = new Map<number, string>();
+    (app as any).commentThreadsByCellRef = new Map<string, any[]>();
     (app as any).commentManager = { listAll: () => comments };
 
     const invalidateAll = vi.fn();
@@ -39,6 +40,7 @@ describe("SpreadsheetApp.reindexCommentCells", () => {
     expect((app as any).commentMetaByCoord.get(1 * 16_384 + 1)).toEqual({ resolved: false }); // B2 => (1,1)
     expect((app as any).commentPreviewByCoord.get(0)).toBe("A1 note");
     expect((app as any).commentPreviewByCoord.get(1 * 16_384 + 1)).toBe("First B2");
+    expect((app as any).commentThreadsByCellRef.get("B2")).toHaveLength(2);
 
     expect(invalidateAll).toHaveBeenCalledTimes(1);
   });
@@ -51,6 +53,7 @@ describe("SpreadsheetApp.reindexCommentCells", () => {
     (app as any).commentMeta = new Map<string, { resolved: boolean }>();
     (app as any).commentMetaByCoord = new Map<number, { resolved: boolean }>();
     (app as any).commentPreviewByCoord = new Map<number, string>();
+    (app as any).commentThreadsByCellRef = new Map<string, any[]>();
     (app as any).commentManager = { listAll: () => comments };
 
     const invalidateAll = vi.fn();
@@ -63,6 +66,7 @@ describe("SpreadsheetApp.reindexCommentCells", () => {
 
     expect((app as any).commentMetaByCoord.size).toBe(0);
     expect((app as any).commentPreviewByCoord.size).toBe(0);
+    expect((app as any).commentThreadsByCellRef.get("Sheet1!A1")).toHaveLength(1);
 
     expect(invalidateAll).toHaveBeenCalledTimes(1);
   });
@@ -75,6 +79,7 @@ describe("SpreadsheetApp.reindexCommentCells", () => {
     (app as any).commentMeta = new Map<string, { resolved: boolean }>();
     (app as any).commentMetaByCoord = new Map<number, { resolved: boolean }>();
     (app as any).commentPreviewByCoord = new Map<number, string>();
+    (app as any).commentThreadsByCellRef = new Map<string, any[]>();
     (app as any).commentManager = { listAll: () => comments };
 
     const invalidateAll = vi.fn();

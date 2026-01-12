@@ -419,6 +419,7 @@ export class SpreadsheetApp {
   private readonly commentMeta = new Map<string, { resolved: boolean }>();
   private readonly commentMetaByCoord = new Map<number, { resolved: boolean }>();
   private readonly commentPreviewByCoord = new Map<number, string>();
+  private readonly commentThreadsByCellRef = new Map<string, Comment[]>();
   private sharedGridSelectionSyncInProgress = false;
   private sharedGridZoom = 1;
   private readonly sharedGridAxisCols = new Set<number>();
@@ -3383,6 +3384,7 @@ export class SpreadsheetApp {
     this.commentMeta.clear();
     this.commentMetaByCoord.clear();
     this.commentPreviewByCoord.clear();
+    this.commentThreadsByCellRef.clear();
     for (const comment of this.commentManager.listAll()) {
       const cellRef = comment.cellRef;
       this.commentCells.add(cellRef);
@@ -3395,6 +3397,10 @@ export class SpreadsheetApp {
         // Treat the cell as resolved only if all comment threads on the cell are resolved.
         existing.resolved = existing.resolved && resolved;
       }
+
+      const threads = this.commentThreadsByCellRef.get(cellRef);
+      if (threads) threads.push(comment);
+      else this.commentThreadsByCellRef.set(cellRef, [comment]);
 
       // Only populate coord-keyed maps when the stored cellRef looks like a plain A1 address.
       // This prevents corrupt/non-canonical refs from being mis-indexed into A1 (0,0).
@@ -3423,7 +3429,7 @@ export class SpreadsheetApp {
     const cellRef = cellToA1(this.selection.active);
     this.commentsPanelCell.textContent = tWithVars("comments.cellLabel", { cellRef });
 
-    const threads = this.commentManager.listForCell(cellRef);
+    const threads = this.commentThreadsByCellRef.get(cellRef) ?? [];
     this.commentsPanelThreads.replaceChildren();
 
     if (threads.length === 0) {
