@@ -5,6 +5,7 @@ import * as Y from "yjs";
 
 import { DocumentController } from "../apps/desktop/src/document/documentController.js";
 import { bindYjsToDocumentController } from "../packages/collab/binder/index.js";
+import { createUndoService } from "../packages/collab/undo/index.js";
 
 async function waitForCondition(predicate, timeoutMs = 2_000, intervalMs = 5) {
   const start = Date.now();
@@ -299,6 +300,61 @@ test("binder: observes deep view mutations when view is stored as nested Y.Maps"
       frozenCols: 0,
       colWidths: { "0": 111, "1": 222 },
     });
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
+
+test("binder: collab undo/redo reverts sheet view changes (sheets in undo scope)", async () => {
+  const ydoc = new Y.Doc();
+  const sheets = ydoc.getArray("sheets");
+  ydoc.transact(() => {
+    const entry = new Y.Map();
+    entry.set("id", "Sheet1");
+    entry.set("name", "Sheet1");
+    sheets.push([entry]);
+  });
+
+  const undo = createUndoService({ mode: "collab", doc: ydoc, scope: sheets });
+
+  const documentController = new DocumentController();
+  const binder = bindYjsToDocumentController({
+    ydoc,
+    documentController,
+    undoService: undo,
+    defaultSheetId: "Sheet1",
+  });
+
+  try {
+    documentController.setFrozen("Sheet1", 2, 1);
+
+    // Wait until the binder has applied the local view write into Yjs so the
+    // UndoManager has something to undo.
+    await waitForCondition(() => {
+      const entry = sheets.get(0);
+      if (!(entry instanceof Y.Map)) return false;
+      const view = entry.get("view");
+      return view?.frozenRows === 2 && view?.frozenCols === 1;
+    });
+
+    undo.stopCapturing();
+    assert.equal(undo.canUndo(), true);
+
+    undo.undo();
+    await waitForCondition(() => {
+      const view = documentController.getSheetView("Sheet1");
+      return view.frozenRows === 0 && view.frozenCols === 0;
+    });
+    assert.deepEqual(documentController.getSheetView("Sheet1"), { frozenRows: 0, frozenCols: 0 });
+
+    assert.equal(undo.canRedo(), true);
+    undo.redo();
+    await waitForCondition(() => {
+      const view = documentController.getSheetView("Sheet1");
+      return view.frozenRows === 2 && view.frozenCols === 1;
+    });
+    assert.deepEqual(documentController.getSheetView("Sheet1"), { frozenRows: 2, frozenCols: 1 });
   } finally {
     binder.destroy();
     ydoc.destroy();
