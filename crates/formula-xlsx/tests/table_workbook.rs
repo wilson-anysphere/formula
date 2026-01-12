@@ -72,7 +72,7 @@ fn set_engine_value(engine: &mut Engine, sheet: &str, addr: &str, value: &CellVa
         CellValue::Error(_) => Value::Error(formula_engine::ErrorKind::Value),
         CellValue::RichText(r) => Value::Text(r.text.clone()),
         CellValue::Entity(e) => Value::Text(e.display_value.clone()),
-        CellValue::Record(r) => Value::Text(r.display_value.clone()),
+        CellValue::Record(r) => Value::Text(r.to_string()),
         CellValue::Array(_) | CellValue::Spill(_) => Value::Blank,
     };
     engine
