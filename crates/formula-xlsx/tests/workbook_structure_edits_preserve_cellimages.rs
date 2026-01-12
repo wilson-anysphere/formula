@@ -103,7 +103,9 @@ fn build_minimal_xlsx_with_cellimages_relationship() -> CellImagesFixture {
         0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
     ];
 
-    let cellimages_content_type = "application/vnd.ms-excel.cellimages+xml";
+    // Use a non-standard content type string so we can assert that workbook structure edits preserve
+    // the original value rather than rewriting it to a hard-coded Excel default.
+    let cellimages_content_type = "application/vnd.example.cellimages+xml";
 
     let content_types = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
