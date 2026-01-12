@@ -103,9 +103,12 @@ pub fn apply_autofilter_to_outline(
 
     // Always clear any existing filter-hidden flags for the data rows within the range.
     // AutoFilter treats the first row as the header row, so we never set filter hidden on it.
-    let header_row_1based = range.start.row + 1;
-    let data_start_row_1based = header_row_1based + 1;
-    let end_row_1based = range.end.row + 1;
+    // Use saturating arithmetic so we don't panic on overflow for very large row indices.
+    // (Note: Outline metadata is stored as `u32` indices today, so callers cannot represent
+    // a 1-based row number greater than `u32::MAX` anyway.)
+    let header_row_1based = range.start.row.saturating_add(1);
+    let data_start_row_1based = header_row_1based.saturating_add(1);
+    let end_row_1based = range.end.row.saturating_add(1);
     if data_start_row_1based <= end_row_1based {
         outline
             .rows
@@ -151,9 +154,10 @@ pub fn apply_autofilter_to_outline(
     let result = apply_autofilter(&range_data, &filter);
 
     for hidden_row_0based in &result.hidden_sheet_rows {
-        outline
-            .rows
-            .set_filter_hidden((*hidden_row_0based as u32) + 1, true);
+        let row_1based = u32::try_from(*hidden_row_0based)
+            .unwrap_or(u32::MAX)
+            .saturating_add(1);
+        outline.rows.set_filter_hidden(row_1based, true);
     }
 
     result
