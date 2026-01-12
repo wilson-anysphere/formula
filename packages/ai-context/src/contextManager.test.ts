@@ -1,0 +1,75 @@
+import { describe, expect, it } from "vitest";
+
+import { ContextManager } from "./contextManager.js";
+
+describe("ContextManager promptContext", () => {
+  it("is deterministic and uses compact stable JSON (no pretty indentation)", async () => {
+    const cm = new ContextManager({
+      // Avoid trimming so output shape/size checks are stable.
+      tokenBudgetTokens: 1_000_000,
+      // Disable redaction for this test so we can compare prompt strings directly.
+      redactor: (text: string) => text,
+    });
+
+    const header = Array.from({ length: 8 }, (_v, idx) => `Col${idx + 1}`);
+    const rows = Array.from({ length: 14 }, (_v, rIdx) =>
+      Array.from({ length: 8 }, (_v2, cIdx) => `R${rIdx + 1}C${cIdx + 1}`),
+    );
+
+    const sheet = { name: "Sheet1", values: [header, ...rows] };
+    const attachments = [{ type: "range" as const, reference: "Sheet1!A1:H15" }];
+
+    const out1 = await cm.buildContext({ sheet, query: "col1", attachments });
+    const out2 = await cm.buildContext({ sheet, query: "col1", attachments });
+
+    expect(out1.promptContext).toEqual(out2.promptContext);
+
+    // The compact format should not include pretty-print indentation.
+    expect(out1.promptContext).not.toContain('\n  "');
+
+    const pretty = buildPrettyPromptContext({
+      schema: out1.schema,
+      attachments,
+      sampledRows: out1.sampledRows,
+      retrieved: out1.retrieved,
+    });
+    expect(out1.promptContext.length).toBeLessThan(pretty.length);
+    expect(pretty.length - out1.promptContext.length).toBeGreaterThan(100);
+  });
+});
+
+function buildPrettyPromptContext(params: {
+  schema: unknown;
+  attachments: unknown[];
+  sampledRows: unknown[][];
+  retrieved: unknown[];
+}): string {
+  const sections = [
+    {
+      key: "schema",
+      priority: 3,
+      text: `Sheet schema (schema-first):\n${JSON.stringify(params.schema, null, 2)}`,
+    },
+    {
+      key: "attachments",
+      priority: 2,
+      text: params.attachments.length ? `User-provided attachments:\n${JSON.stringify(params.attachments, null, 2)}` : "",
+    },
+    {
+      key: "samples",
+      priority: 1,
+      text: params.sampledRows.length
+        ? `Sample rows:\n${params.sampledRows.map((r) => JSON.stringify(r)).join("\n")}`
+        : "",
+    },
+    {
+      key: "retrieved",
+      priority: 4,
+      text: params.retrieved.length ? `Retrieved context:\n${JSON.stringify(params.retrieved, null, 2)}` : "",
+    },
+  ].filter((s) => s.text);
+
+  sections.sort((a, b) => b.priority - a.priority);
+  return sections.map((s) => `## ${s.key}\n${s.text}`).join("\n\n");
+}
+
