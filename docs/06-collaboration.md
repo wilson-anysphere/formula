@@ -732,6 +732,33 @@ The Yjs-backed branch store reserves:
 
 Source: [`packages/versioning/branches/src/store/YjsBranchStore.js`](../packages/versioning/branches/src/store/YjsBranchStore.js)
 
+### Branch commit size + sync-server message limits
+
+Branching history is stored *inside the shared Yjs document* under `branching:commits`.
+Each commit record can include a semantic `patch` (and sometimes a `snapshot`).
+
+For large workbooks (especially when cell payloads are **encrypted** or otherwise high-entropy),
+these payloads can become large enough that a single Yjs update exceeds the sync-server
+`SYNC_SERVER_MAX_MESSAGE_BYTES` limit (default **2MB**). When that happens, the server will close
+the websocket with code **1009** ("Message too big") and branching becomes unusable.
+
+To make large commits robust under realistic message-size limits, configure the Yjs-backed store
+to compress + chunk commit payloads:
+
+```js
+const store = new YjsBranchStore({
+  ydoc: session.doc,
+  payloadEncoding: "gzip-chunks",
+  chunkSize: 64 * 1024,
+  maxChunksPerTransaction: 16,
+});
+```
+
+Tuning notes:
+
+- `chunkSize` should be comfortably below your `SYNC_SERVER_MAX_MESSAGE_BYTES` (leave room for protocol overhead).
+- `maxChunksPerTransaction` bounds the size of each individual Yjs update message.
+
 ### “Use this in collaborative mode” snippet (CollabBranchingWorkflow)
 
 ```ts

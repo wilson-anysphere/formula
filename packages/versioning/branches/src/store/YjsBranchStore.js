@@ -12,6 +12,100 @@ import { randomUUID } from "../uuid.js";
  */
 
 const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder();
+
+function isNodeRuntime() {
+  const proc = /** @type {any} */ (globalThis.process);
+  return Boolean(proc?.versions?.node);
+}
+
+/**
+ * @param {Uint8Array} bytes
+ * @returns {Promise<Uint8Array>}
+ */
+async function gzipBytes(bytes) {
+  if (isNodeRuntime()) {
+    const zlib = await import(/* @vite-ignore */ "node:zlib");
+    return new Uint8Array(zlib.gzipSync(bytes));
+  }
+
+  // eslint-disable-next-line no-undef
+  if (typeof CompressionStream !== "undefined") {
+    // eslint-disable-next-line no-undef
+    const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"));
+    // eslint-disable-next-line no-undef
+    const compressed = await new Response(stream).arrayBuffer();
+    return new Uint8Array(compressed);
+  }
+
+  throw new Error("YjsBranchStore: gzip compression is not supported in this environment");
+}
+
+/**
+ * @param {Uint8Array} bytes
+ * @returns {Promise<Uint8Array>}
+ */
+async function gunzipBytes(bytes) {
+  if (isNodeRuntime()) {
+    const zlib = await import(/* @vite-ignore */ "node:zlib");
+    return new Uint8Array(zlib.gunzipSync(bytes));
+  }
+
+  // eslint-disable-next-line no-undef
+  if (typeof DecompressionStream !== "undefined") {
+    // eslint-disable-next-line no-undef
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+    // eslint-disable-next-line no-undef
+    const decompressed = await new Response(stream).arrayBuffer();
+    return new Uint8Array(decompressed);
+  }
+
+  throw new Error("YjsBranchStore: gzip decompression is not supported in this environment");
+}
+
+/**
+ * @param {Uint8Array[]} chunks
+ */
+function concatChunks(chunks) {
+  let total = 0;
+  for (const chunk of chunks) total += chunk.length;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
+/**
+ * @param {Uint8Array} bytes
+ * @param {number} chunkSize
+ */
+function splitIntoChunks(bytes, chunkSize) {
+  if (bytes.length === 0) return [new Uint8Array()];
+  /** @type {Uint8Array[]} */
+  const chunks = [];
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    chunks.push(bytes.slice(i, Math.min(i + chunkSize, bytes.length)));
+  }
+  return chunks;
+}
+
+/**
+ * @param {unknown} bytes
+ * @returns {Uint8Array}
+ */
+function normalizeBytes(bytes) {
+  if (bytes instanceof Uint8Array) return bytes;
+  if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
+  // Older structured clones can return `{ buffer, byteOffset, byteLength }` shapes.
+  if (bytes && typeof bytes === "object" && /** @type {any} */ (bytes).buffer instanceof ArrayBuffer) {
+    const s = /** @type {any} */ (bytes);
+    return new Uint8Array(s.buffer, s.byteOffset ?? 0, s.byteLength);
+  }
+  throw new Error("YjsBranchStore: invalid bytes");
+}
 
 /**
  * @param {unknown} value
@@ -28,6 +122,50 @@ function getYMap(value) {
   if (typeof maybe.set !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
   return /** @type {Y.Map<any>} */ (maybe);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {Y.Array<any> | null}
+ */
+function getYArray(value) {
+  if (value instanceof Y.Array) return value;
+  if (!value || typeof value !== "object") return null;
+  const maybe = /** @type {any} */ (value);
+  if (maybe.constructor?.name !== "YArray") return null;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.toArray !== "function") return null;
+  if (typeof maybe.push !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  return /** @type {Y.Array<any>} */ (maybe);
+}
+
+/**
+ * @param {any} map
+ * @returns {any}
+ */
+function mapConstructor(map) {
+  const ctor = map?.constructor;
+  return typeof ctor === "function" ? ctor : Y.Map;
+}
+
+/**
+ * @param {any} array
+ * @returns {any}
+ */
+function arrayConstructor(array) {
+  const ctor = array?.constructor;
+  return typeof ctor === "function" ? ctor : Y.Array;
+}
+
+/**
+ * @param {any} ctor
+ * @returns {any | null}
+ */
+function abstractTypeSuperclass(ctor) {
+  if (typeof ctor !== "function") return null;
+  const parent = Object.getPrototypeOf(ctor);
+  return typeof parent === "function" ? parent : null;
 }
 
 /**
@@ -51,16 +189,33 @@ export class YjsBranchStore {
   #snapshotEveryNCommits;
   /** @type {number | null} */
   #snapshotWhenPatchExceedsBytes;
+  /** @type {"json" | "gzip-chunks"} */
+  #payloadEncoding;
+  /** @type {number} */
+  #chunkSize;
+  /** @type {number} */
+  #maxChunksPerTransaction;
 
   /**
    * @param {{
    *   ydoc: Y.Doc,
    *   rootName?: string,
    *   snapshotEveryNCommits?: number,
-   *   snapshotWhenPatchExceedsBytes?: number
+   *   snapshotWhenPatchExceedsBytes?: number,
+   *   payloadEncoding?: "json" | "gzip-chunks",
+   *   chunkSize?: number,
+   *   maxChunksPerTransaction?: number
    * }} input
    */
-  constructor({ ydoc, rootName, snapshotEveryNCommits, snapshotWhenPatchExceedsBytes }) {
+  constructor({
+    ydoc,
+    rootName,
+    snapshotEveryNCommits,
+    snapshotWhenPatchExceedsBytes,
+    payloadEncoding,
+    chunkSize,
+    maxChunksPerTransaction,
+  }) {
     if (!ydoc) throw new Error("YjsBranchStore requires { ydoc }");
     this.#ydoc = ydoc;
     this.#rootName = rootName ?? "branching";
@@ -71,6 +226,173 @@ export class YjsBranchStore {
       snapshotEveryNCommits == null ? 50 : snapshotEveryNCommits;
     this.#snapshotWhenPatchExceedsBytes =
       snapshotWhenPatchExceedsBytes == null ? null : snapshotWhenPatchExceedsBytes;
+
+    /** @type {"json" | "gzip-chunks"} */
+    this.#payloadEncoding = payloadEncoding ?? "json";
+    this.#chunkSize = chunkSize ?? 64 * 1024;
+    this.#maxChunksPerTransaction = maxChunksPerTransaction ?? 16;
+
+    if (this.#payloadEncoding !== "json" && this.#payloadEncoding !== "gzip-chunks") {
+      throw new Error(`YjsBranchStore: invalid payloadEncoding: ${String(this.#payloadEncoding)}`);
+    }
+    if (!Number.isFinite(this.#chunkSize) || this.#chunkSize <= 0) {
+      throw new Error("YjsBranchStore: chunkSize must be > 0");
+    }
+    if (!Number.isFinite(this.#maxChunksPerTransaction) || this.#maxChunksPerTransaction <= 0) {
+      throw new Error("YjsBranchStore: maxChunksPerTransaction must be > 0");
+    }
+  }
+
+  /**
+   * Try to infer a `Y.Array` constructor compatible with the given map constructor.
+   *
+   * This is needed when multiple `yjs` module instances are loaded (ESM vs CJS).
+   * Yjs does strict `instanceof AbstractType` checks when integrating nested types.
+   *
+   * @param {any} mapCtor
+   * @returns {any | null}
+   */
+  #inferArrayCtorForMapCtor(mapCtor) {
+    const moduleId = abstractTypeSuperclass(mapCtor);
+    if (!moduleId) return null;
+    const localModuleId = abstractTypeSuperclass(Y.Map);
+
+    // Common case: same module instance.
+    if (moduleId === localModuleId) return Y.Array;
+
+    // Try to infer from existing commit chunk arrays (if any).
+    /** @type {any | null} */
+    let ctor = null;
+    this.#commits.forEach((value) => {
+      if (ctor) return;
+      const commitMap = getYMap(value);
+      if (!commitMap) return;
+      if (abstractTypeSuperclass(commitMap.constructor) !== moduleId) return;
+      const candidates = [commitMap.get("patchChunks"), commitMap.get("snapshotChunks")];
+      for (const c of candidates) {
+        const arr = getYArray(c);
+        if (!arr) continue;
+        const arrCtor = arrayConstructor(arr);
+        if (abstractTypeSuperclass(arrCtor) === moduleId) {
+          ctor = arrCtor;
+          return;
+        }
+      }
+    });
+    if (ctor) return ctor;
+
+    // Last resort: create a root array to obtain the correct constructor. This
+    // remains empty (minimal overhead), but ensures we can always create nested
+    // chunk arrays even when this package's `yjs` import is a different module
+    // instance than the one that created `ydoc`.
+    const probe = this.#ydoc.getArray(`${this.#rootName}:__chunkCtor`);
+    const probeCtor = arrayConstructor(probe);
+    if (abstractTypeSuperclass(probeCtor) === moduleId) return probeCtor;
+    return probeCtor;
+  }
+
+  /**
+   * @param {any} commitMap
+   */
+  #isCommitComplete(commitMap) {
+    return commitMap.get("commitComplete") !== false;
+  }
+
+  /**
+   * @param {any} commitMap
+   */
+  #commitHasPatch(commitMap) {
+    if (commitMap.get("patch") !== undefined) return true;
+    if (!this.#isCommitComplete(commitMap)) return false;
+    return getYArray(commitMap.get("patchChunks")) !== null;
+  }
+
+  /**
+   * @param {any} commitMap
+   */
+  #commitHasSnapshot(commitMap) {
+    if (commitMap.get("snapshot") !== undefined) return true;
+    if (!this.#isCommitComplete(commitMap)) return false;
+    return getYArray(commitMap.get("snapshotChunks")) !== null;
+  }
+
+  /**
+   * @param {unknown} value
+   * @returns {Promise<Uint8Array[]>}
+   */
+  async #encodeJsonToGzipChunks(value) {
+    const json = JSON.stringify(value);
+    const bytes = UTF8_ENCODER.encode(json);
+    const compressed = await gzipBytes(bytes);
+    return splitIntoChunks(compressed, this.#chunkSize);
+  }
+
+  /**
+   * @param {Y.Array<any>} chunksArr
+   * @param {string} label
+   * @returns {Promise<any>}
+   */
+  async #decodeJsonFromGzipChunks(chunksArr, label) {
+    const chunksRaw = chunksArr.toArray();
+    /** @type {Uint8Array[]} */
+    const chunks = [];
+    for (const chunk of chunksRaw) chunks.push(normalizeBytes(chunk));
+    const compressed = concatChunks(chunks);
+    const bytes = await gunzipBytes(compressed);
+    const json = UTF8_DECODER.decode(bytes);
+    try {
+      return JSON.parse(json);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`YjsBranchStore: failed to decode ${label}: ${message}`);
+    }
+  }
+
+  /**
+   * @param {Y.Map<any>} commitMap
+   * @param {string} commitId
+   * @returns {Promise<Patch>}
+   */
+  async #readCommitPatch(commitMap, commitId) {
+    const patchEncoding = commitMap.get("patchEncoding");
+    if (patchEncoding === "gzip-chunks" || commitMap.get("patchChunks") !== undefined) {
+      if (!this.#isCommitComplete(commitMap)) {
+        throw new Error(`Commit not fully written yet: ${commitId}`);
+      }
+      const chunksArr = getYArray(commitMap.get("patchChunks"));
+      if (!chunksArr) {
+        throw new Error(`YjsBranchStore: missing patchChunks for ${commitId}`);
+      }
+      const decoded = await this.#decodeJsonFromGzipChunks(chunksArr, `patch(${commitId})`);
+      return /** @type {Patch} */ (decoded);
+    }
+
+    return structuredClone(commitMap.get("patch") ?? { schemaVersion: 1 });
+  }
+
+  /**
+   * @param {Y.Map<any>} commitMap
+   * @param {string} commitId
+   * @returns {Promise<DocumentState | null>}
+   */
+  async #readCommitSnapshot(commitMap, commitId) {
+    const snapshot = commitMap.get("snapshot");
+    if (snapshot !== undefined) {
+      return normalizeDocumentState(structuredClone(snapshot));
+    }
+
+    const snapshotEncoding = commitMap.get("snapshotEncoding");
+    if (snapshotEncoding === "gzip-chunks" || commitMap.get("snapshotChunks") !== undefined) {
+      if (!this.#isCommitComplete(commitMap)) {
+        throw new Error(`Commit not fully written yet: ${commitId}`);
+      }
+      const chunksArr = getYArray(commitMap.get("snapshotChunks"));
+      if (!chunksArr) return null;
+      const decoded = await this.#decodeJsonFromGzipChunks(chunksArr, `snapshot(${commitId})`);
+      return normalizeDocumentState(decoded);
+    }
+
+    return null;
   }
 
   /**
@@ -103,10 +425,16 @@ export class YjsBranchStore {
         );
       }
 
-      // Migration: older docs may not have stored commit snapshots.
-      const patch = rootCommitMap.get("patch");
-      const needsSnapshot = rootCommitMap.get("snapshot") === undefined && patch;
-      const snapshot = needsSnapshot ? this._applyPatch(emptyDocumentState(), patch) : null;
+      // Migration: older docs may not have stored commit snapshots. (Snapshots are
+      // an optimization; we can still replay patches, but restoring at least the
+      // root snapshot helps keep history reads bounded.)
+      const needsSnapshot = !this.#commitHasSnapshot(rootCommitMap) && this.#commitHasPatch(rootCommitMap);
+      const snapshot = needsSnapshot
+        ? this._applyPatch(
+            emptyDocumentState(),
+            await this.#readCommitPatch(rootCommitMap, existingRoot),
+          )
+        : null;
 
       const headForMissingMainBranch = this.#inferLatestCommitId(docId) ?? existingRoot;
 
@@ -117,7 +445,8 @@ export class YjsBranchStore {
           const createdBy =
             typeof rootCommitMap.get("createdBy") === "string" ? rootCommitMap.get("createdBy") : actor.userId;
           const createdAt = Number(rootCommitMap.get("createdAt") ?? Date.now());
-          const main = new Y.Map();
+          const BranchCtor = mapConstructor(this.#branches);
+          const main = new BranchCtor();
           main.set("id", randomUUID());
           main.set("docId", docId);
           main.set("name", "main");
@@ -139,13 +468,65 @@ export class YjsBranchStore {
         if (!getYMap(this.#branches.get(current))) current = "main";
         this.#meta.set("currentBranchName", current);
 
-        if (snapshot) {
-          const commit = getYMap(this.#commits.get(existingRoot));
-          if (commit && commit.get("snapshot") === undefined) {
-            commit.set("snapshot", structuredClone(snapshot));
-          }
-        }
+        // Persist a recovered root snapshot for older histories. For gzip-chunks
+        // payloads, we write in a separate pass below so we can stream chunks
+        // without inflating message sizes.
       });
+
+      if (snapshot) {
+        if (this.#payloadEncoding === "gzip-chunks") {
+          const snapshotChunks = await this.#encodeJsonToGzipChunks(snapshot);
+          const MapCtor = mapConstructor(this.#commits);
+          const arrayCtor = this.#inferArrayCtorForMapCtor(MapCtor);
+          if (!arrayCtor) return;
+
+          let snapshotArr = null;
+          let snapshotIndex = 0;
+
+          const pushMore = () => {
+            if (snapshotIndex >= snapshotChunks.length) return true;
+            const remaining = Math.max(1, this.#maxChunksPerTransaction);
+            const slice = snapshotChunks.slice(snapshotIndex, snapshotIndex + remaining);
+            snapshotIndex += slice.length;
+            snapshotArr.push(slice);
+            return snapshotIndex >= snapshotChunks.length;
+          };
+
+          this.#ydoc.transact(() => {
+            const commit = getYMap(this.#commits.get(existingRoot));
+            if (!commit) return;
+            if (this.#commitHasSnapshot(commit)) return;
+
+            snapshotArr = new arrayCtor();
+            commit.set("commitComplete", false);
+            commit.set("snapshotEncoding", "gzip-chunks");
+            commit.set("snapshotChunks", snapshotArr);
+
+            const done = pushMore();
+            if (done) commit.set("commitComplete", true);
+          }, "branching-store");
+
+          while (snapshotArr && snapshotIndex < snapshotChunks.length) {
+            this.#ydoc.transact(() => {
+              const commit = getYMap(this.#commits.get(existingRoot));
+              if (!commit) return;
+              const arr = getYArray(commit.get("snapshotChunks"));
+              if (!arr) return;
+              snapshotArr = arr;
+              commit.set("commitComplete", false);
+              const done = pushMore();
+              if (done) commit.set("commitComplete", true);
+            }, "branching-store");
+          }
+        } else {
+          this.#ydoc.transact(() => {
+            const commit = getYMap(this.#commits.get(existingRoot));
+            if (commit && commit.get("snapshot") === undefined) {
+              commit.set("snapshot", structuredClone(snapshot));
+            }
+          }, "branching-store");
+        }
+      }
 
       return;
     }
@@ -158,11 +539,106 @@ export class YjsBranchStore {
     const patch = diffDocumentStates(emptyDocumentState(), initialState);
     const snapshot = this._applyPatch(emptyDocumentState(), patch);
 
+    if (this.#payloadEncoding === "gzip-chunks") {
+      const [patchChunks, snapshotChunks] = await Promise.all([
+        this.#encodeJsonToGzipChunks(patch),
+        this.#encodeJsonToGzipChunks(snapshot),
+      ]);
+
+      const CommitCtor = mapConstructor(this.#commits);
+      const BranchCtor = mapConstructor(this.#branches);
+      const arrayCtor = this.#inferArrayCtorForMapCtor(CommitCtor) ?? Y.Array;
+
+      let created = false;
+      let patchArr = null;
+      let snapshotArr = null;
+      let patchIndex = 0;
+      let snapshotIndex = 0;
+
+      const pushMore = () => {
+        let remaining = this.#maxChunksPerTransaction;
+        if (patchArr && patchIndex < patchChunks.length && remaining > 0) {
+          const slice = patchChunks.slice(patchIndex, patchIndex + remaining);
+          patchIndex += slice.length;
+          remaining -= slice.length;
+          if (slice.length > 0) patchArr.push(slice);
+        }
+        if (snapshotArr && snapshotIndex < snapshotChunks.length && remaining > 0) {
+          const slice = snapshotChunks.slice(snapshotIndex, snapshotIndex + remaining);
+          snapshotIndex += slice.length;
+          remaining -= slice.length;
+          if (slice.length > 0) snapshotArr.push(slice);
+        }
+        return patchIndex >= patchChunks.length && snapshotIndex >= snapshotChunks.length;
+      };
+
+      this.#ydoc.transact(() => {
+        const rootAfter = this.#meta.get("rootCommitId");
+        if (typeof rootAfter === "string" && rootAfter.length > 0) return;
+
+        const commit = new CommitCtor();
+        commit.set("id", rootCommitId);
+        commit.set("docId", docId);
+        commit.set("parentCommitId", null);
+        commit.set("mergeParentCommitId", null);
+        commit.set("createdBy", actor.userId);
+        commit.set("createdAt", now);
+        commit.set("message", "root");
+        commit.set("patchEncoding", "gzip-chunks");
+        commit.set("snapshotEncoding", "gzip-chunks");
+        commit.set("commitComplete", false);
+
+        patchArr = new arrayCtor();
+        snapshotArr = new arrayCtor();
+        commit.set("patchChunks", patchArr);
+        commit.set("snapshotChunks", snapshotArr);
+
+        const done = pushMore();
+        if (done) commit.set("commitComplete", true);
+
+        this.#commits.set(rootCommitId, commit);
+
+        const main = new BranchCtor();
+        main.set("id", mainBranchId);
+        main.set("docId", docId);
+        main.set("name", "main");
+        main.set("createdBy", actor.userId);
+        main.set("createdAt", now);
+        main.set("description", null);
+        main.set("headCommitId", rootCommitId);
+        this.#branches.set("main", main);
+
+        this.#meta.set("rootCommitId", rootCommitId);
+        this.#meta.set("currentBranchName", "main");
+
+        created = true;
+      }, "branching-store");
+
+      if (!created) return;
+
+      while (patchIndex < patchChunks.length || snapshotIndex < snapshotChunks.length) {
+        this.#ydoc.transact(() => {
+          const commit = getYMap(this.#commits.get(rootCommitId));
+          if (!commit) return;
+          patchArr = getYArray(commit.get("patchChunks"));
+          snapshotArr = getYArray(commit.get("snapshotChunks"));
+          if (!patchArr || !snapshotArr) return;
+
+          commit.set("commitComplete", false);
+          const done = pushMore();
+          if (done) commit.set("commitComplete", true);
+        }, "branching-store");
+      }
+
+      return;
+    }
+
     this.#ydoc.transact(() => {
       const rootAfter = this.#meta.get("rootCommitId");
       if (typeof rootAfter === "string" && rootAfter.length > 0) return;
 
-      const commit = new Y.Map();
+      const CommitCtor = mapConstructor(this.#commits);
+      const commit = new CommitCtor();
       commit.set("id", rootCommitId);
       commit.set("docId", docId);
       commit.set("parentCommitId", null);
@@ -174,7 +650,8 @@ export class YjsBranchStore {
       commit.set("snapshot", structuredClone(snapshot));
       this.#commits.set(rootCommitId, commit);
 
-      const main = new Y.Map();
+      const BranchCtor = mapConstructor(this.#branches);
+      const main = new BranchCtor();
       main.set("id", mainBranchId);
       main.set("docId", docId);
       main.set("name", "main");
@@ -339,9 +816,9 @@ export class YjsBranchStore {
 
   /**
    * @param {Y.Map<any>} commitMap
-   * @returns {Commit}
+   * @returns {Omit<Commit, "patch">}
    */
-  #commitFromYMap(commitMap) {
+  #commitMetaFromYMap(commitMap) {
     return {
       id: String(commitMap.get("id") ?? ""),
       docId: String(commitMap.get("docId") ?? ""),
@@ -350,7 +827,6 @@ export class YjsBranchStore {
       createdBy: String(commitMap.get("createdBy") ?? ""),
       createdAt: Number(commitMap.get("createdAt") ?? 0),
       message: commitMap.get("message") ?? null,
-      patch: structuredClone(commitMap.get("patch") ?? { schemaVersion: 1 })
     };
   }
 
@@ -399,7 +875,8 @@ export class YjsBranchStore {
       if (this.#branches.has(name)) {
         throw new Error(`Branch already exists: ${name}`);
       }
-      const branch = new Y.Map();
+      const BranchCtor = mapConstructor(this.#branches);
+      const branch = new BranchCtor();
       branch.set("id", id);
       branch.set("docId", docId);
       branch.set("name", name);
@@ -438,7 +915,8 @@ export class YjsBranchStore {
         throw new Error(`Branch not found: ${oldName}`);
       }
 
-      const next = new Y.Map();
+      const BranchCtor = mapConstructor(branchMap);
+      const next = new BranchCtor();
       branchMap.forEach((v, k) => {
         if (k === "name") return;
         next.set(k, v);
@@ -513,19 +991,91 @@ export class YjsBranchStore {
       ? await this.#resolveSnapshotState({ parentCommitId, patch, nextState })
       : null;
 
-    this.#ydoc.transact(() => {
-      const commit = new Y.Map();
-      commit.set("id", id);
-      commit.set("docId", docId);
-      commit.set("parentCommitId", parentCommitId);
-      commit.set("mergeParentCommitId", mergeParentCommitId);
-      commit.set("createdBy", createdBy);
-      commit.set("createdAt", createdAt);
-      commit.set("message", message ?? null);
-      commit.set("patch", structuredClone(patch));
-      if (snapshotState) commit.set("snapshot", structuredClone(snapshotState));
-      this.#commits.set(id, commit);
-    });
+    if (this.#payloadEncoding === "gzip-chunks") {
+      const patchChunks = await this.#encodeJsonToGzipChunks(patch);
+      const snapshotChunks = snapshotState ? await this.#encodeJsonToGzipChunks(snapshotState) : null;
+
+      const CommitCtor = mapConstructor(this.#commits);
+      const arrayCtor = this.#inferArrayCtorForMapCtor(CommitCtor) ?? Y.Array;
+
+      let patchArr = null;
+      let snapshotArr = null;
+      let patchIndex = 0;
+      let snapshotIndex = 0;
+
+      const pushMore = () => {
+        let remaining = this.#maxChunksPerTransaction;
+        if (patchArr && patchIndex < patchChunks.length && remaining > 0) {
+          const slice = patchChunks.slice(patchIndex, patchIndex + remaining);
+          patchIndex += slice.length;
+          remaining -= slice.length;
+          if (slice.length > 0) patchArr.push(slice);
+        }
+        if (snapshotArr && snapshotChunks && snapshotIndex < snapshotChunks.length && remaining > 0) {
+          const slice = snapshotChunks.slice(snapshotIndex, snapshotIndex + remaining);
+          snapshotIndex += slice.length;
+          remaining -= slice.length;
+          if (slice.length > 0) snapshotArr.push(slice);
+        }
+        return patchIndex >= patchChunks.length && (!snapshotChunks || snapshotIndex >= snapshotChunks.length);
+      };
+
+      this.#ydoc.transact(() => {
+        const commit = new CommitCtor();
+        commit.set("id", id);
+        commit.set("docId", docId);
+        commit.set("parentCommitId", parentCommitId);
+        commit.set("mergeParentCommitId", mergeParentCommitId);
+        commit.set("createdBy", createdBy);
+        commit.set("createdAt", createdAt);
+        commit.set("message", message ?? null);
+        commit.set("patchEncoding", "gzip-chunks");
+        commit.set("commitComplete", false);
+
+        patchArr = new arrayCtor();
+        commit.set("patchChunks", patchArr);
+
+        if (snapshotChunks) {
+          snapshotArr = new arrayCtor();
+          commit.set("snapshotEncoding", "gzip-chunks");
+          commit.set("snapshotChunks", snapshotArr);
+        }
+
+        const done = pushMore();
+        if (done) commit.set("commitComplete", true);
+
+        this.#commits.set(id, commit);
+      }, "branching-store");
+
+      while (patchIndex < patchChunks.length || (snapshotChunks && snapshotIndex < snapshotChunks.length)) {
+        this.#ydoc.transact(() => {
+          const commit = getYMap(this.#commits.get(id));
+          if (!commit) return;
+          patchArr = getYArray(commit.get("patchChunks"));
+          snapshotArr = snapshotChunks ? getYArray(commit.get("snapshotChunks")) : null;
+          if (!patchArr) return;
+
+          commit.set("commitComplete", false);
+          const done = pushMore();
+          if (done) commit.set("commitComplete", true);
+        }, "branching-store");
+      }
+    } else {
+      this.#ydoc.transact(() => {
+        const CommitCtor = mapConstructor(this.#commits);
+        const commit = new CommitCtor();
+        commit.set("id", id);
+        commit.set("docId", docId);
+        commit.set("parentCommitId", parentCommitId);
+        commit.set("mergeParentCommitId", mergeParentCommitId);
+        commit.set("createdBy", createdBy);
+        commit.set("createdAt", createdAt);
+        commit.set("message", message ?? null);
+        commit.set("patch", structuredClone(patch));
+        if (snapshotState) commit.set("snapshot", structuredClone(snapshotState));
+        this.#commits.set(id, commit);
+      }, "branching-store");
+    }
 
     return {
       id,
@@ -546,7 +1096,12 @@ export class YjsBranchStore {
   async getCommit(commitId) {
     const commitMap = getYMap(this.#commits.get(commitId));
     if (!commitMap) return null;
-    return structuredClone(this.#commitFromYMap(commitMap));
+    const meta = this.#commitMetaFromYMap(commitMap);
+    const patch = await this.#readCommitPatch(commitMap, commitId);
+    return {
+      ...structuredClone(meta),
+      patch: structuredClone(patch),
+    };
   }
 
   /**
@@ -557,28 +1112,26 @@ export class YjsBranchStore {
     const direct = getYMap(this.#commits.get(commitId));
     if (!direct) throw new Error(`Commit not found: ${commitId}`);
 
-    const directSnapshot = direct.get("snapshot");
-    if (directSnapshot !== undefined) {
-      return normalizeDocumentState(structuredClone(directSnapshot));
-    }
+    const directSnapshot = await this.#readCommitSnapshot(direct, commitId);
+    if (directSnapshot) return directSnapshot;
 
     /** @type {Patch[]} */
     const chain = [];
     let currentId = commitId;
-    /** @type {any} */
+    /** @type {DocumentState | null} */
     let baseSnapshot = null;
 
     while (currentId) {
       const commitMap = getYMap(this.#commits.get(currentId));
       if (!commitMap) throw new Error(`Commit not found: ${currentId}`);
 
-      const snapshot = commitMap.get("snapshot");
-      if (snapshot !== undefined) {
+      const snapshot = await this.#readCommitSnapshot(commitMap, currentId);
+      if (snapshot) {
         baseSnapshot = snapshot;
         break;
       }
 
-      chain.push(structuredClone(commitMap.get("patch") ?? {}));
+      chain.push(await this.#readCommitPatch(commitMap, currentId));
 
       const parent = commitMap.get("parentCommitId");
       if (!parent) break;
@@ -588,7 +1141,7 @@ export class YjsBranchStore {
     chain.reverse();
 
     /** @type {DocumentState} */
-    let state = baseSnapshot !== null ? normalizeDocumentState(structuredClone(baseSnapshot)) : emptyDocumentState();
+    let state = baseSnapshot ?? emptyDocumentState();
     for (const patch of chain) {
       state = this._applyPatch(state, patch);
     }
@@ -625,7 +1178,7 @@ export class YjsBranchStore {
     while (currentId) {
       const commitMap = getYMap(this.#commits.get(currentId));
       if (!commitMap) throw new Error(`Commit not found: ${currentId}`);
-      if (commitMap.get("snapshot") !== undefined) return distance;
+      if (this.#commitHasSnapshot(commitMap)) return distance;
       const parentId = commitMap.get("parentCommitId");
       if (!parentId) return distance;
       distance += 1;
