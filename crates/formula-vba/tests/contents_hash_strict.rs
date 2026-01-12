@@ -2,7 +2,10 @@
 
 use std::io::{Cursor, Write};
 
-use formula_vba::{compress_container, content_normalized_data, verify_vba_digital_signature, VbaSignatureBinding, VbaSignatureVerification};
+use formula_vba::{
+    compress_container, content_normalized_data, verify_vba_digital_signature, VBAProject,
+    VbaSignatureBinding, VbaSignatureVerification,
+};
 use md5::{Digest as _, Md5};
 
 mod signature_test_utils;
@@ -305,6 +308,24 @@ fn content_normalized_data_parses_spec_dir_stream() {
     let expected = [b"VBAProject".as_slice(), b"Answer=42".as_slice(), expected_module_normalized.as_slice()].concat();
 
     assert_eq!(normalized, expected);
+}
+
+#[test]
+fn vba_project_parse_accepts_spec_dir_stream() {
+    let module_source = b"Attribute VB_Name = \"Module1\"\r\nSub Foo()\r\nEnd Sub\r\n";
+    let vba_project_bin = build_vba_project_bin_spec(module_source, None);
+    let project = VBAProject::parse(&vba_project_bin).expect("parse VBA project");
+
+    assert_eq!(project.name.as_deref(), Some("VBAProject"));
+    assert_eq!(project.modules.len(), 1);
+    let module = &project.modules[0];
+    assert_eq!(module.name, "Module1");
+    assert_eq!(module.stream_name, "Module1");
+    assert!(module.code.contains("Sub Foo"));
+    assert_eq!(
+        module.attributes.get("VB_Name").map(String::as_str),
+        Some("Module1")
+    );
 }
 
 #[test]

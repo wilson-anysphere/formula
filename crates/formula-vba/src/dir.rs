@@ -55,10 +55,68 @@ impl DirStream {
         let mut current_module: Option<ModuleRecord> = None;
 
         while offset < decompressed.len() {
-            if offset + 6 > decompressed.len() {
+            if offset + 2 > decompressed.len() {
                 return Err(DirParseError::Truncated);
             }
             let id = u16::from_le_bytes([decompressed[offset], decompressed[offset + 1]]);
+
+            // Some spec-compliant `VBA/dir` record layouts include fixed-length records that do not
+            // follow the common `Id(u16) || Size(u32) || Data(Size)` pattern. The one we most care
+            // about for module enumeration is PROJECTVERSION (0x0009), which is:
+            //   Id(u16) || Reserved(u32) || VersionMajor(u32) || VersionMinor(u16)
+            // (12 bytes total).
+            //
+            // If we treat the u32 as a generic `Size` field, we can mis-align parsing and fail to
+            // reach the module record groups.
+            if id == 0x0009 {
+                // Attempt to disambiguate between:
+                // - a TLV-ish variant: Id(u16) || Size(u32) || Data(Size)
+                // - the MS-OVBA fixed-length layout described above.
+                //
+                // We pick the layout whose end offset is followed by a plausible record header.
+                let record_start = offset;
+                if record_start + 6 > decompressed.len() {
+                    return Err(DirParseError::Truncated);
+                }
+                let size_field = u32::from_le_bytes([
+                    decompressed[record_start + 2],
+                    decompressed[record_start + 3],
+                    decompressed[record_start + 4],
+                    decompressed[record_start + 5],
+                ]) as usize;
+
+                let tlv_end = record_start.saturating_add(6).saturating_add(size_field);
+                let fixed_end = record_start.saturating_add(12);
+
+                let tlv_next_ok = looks_like_projectversion_following_record(decompressed, tlv_end);
+                let fixed_next_ok =
+                    looks_like_projectversion_following_record(decompressed, fixed_end);
+
+                if fixed_end <= decompressed.len() && fixed_next_ok && !tlv_next_ok {
+                    offset = fixed_end;
+                    continue;
+                }
+                if fixed_end <= decompressed.len() && fixed_next_ok && size_field == 0 {
+                    // Size=0 is a strong signal for the fixed-length layout: a PROJECTVERSION record
+                    // with no payload bytes is unlikely.
+                    offset = fixed_end;
+                    continue;
+                }
+
+                // Fall back to treating it as a TLV record (skip the declared payload length).
+                if tlv_end > decompressed.len() {
+                    return Err(DirParseError::BadRecordLength {
+                        id,
+                        len: size_field,
+                    });
+                }
+                offset = tlv_end;
+                continue;
+            }
+
+            if offset + 6 > decompressed.len() {
+                return Err(DirParseError::Truncated);
+            }
             let len = u32::from_le_bytes([
                 decompressed[offset + 2],
                 decompressed[offset + 3],
@@ -231,6 +289,32 @@ impl DirStream {
         }
         None
     }
+}
+
+fn looks_like_projectversion_following_record(bytes: &[u8], offset: usize) -> bool {
+    if offset == bytes.len() {
+        return true;
+    }
+    if offset + 6 > bytes.len() {
+        return false;
+    }
+    let id = u16::from_le_bytes([bytes[offset], bytes[offset + 1]]);
+    // After PROJECTVERSION, we expect either PROJECTCONSTANTS (0x000C), a reference record, the
+    // ProjectModules header, or (in some real-world streams) PROJECTCOMPATVERSION.
+    if !matches!(
+        id,
+        0x000C | 0x003C | 0x004A | 0x000D | 0x000E | 0x0016 | 0x002F | 0x0030 | 0x0033 | 0x000F
+            | 0x0013 | 0x0010 | 0x0019 | 0x0047 | 0x001A | 0x0032
+    ) {
+        return false;
+    }
+    let len = u32::from_le_bytes([
+        bytes[offset + 2],
+        bytes[offset + 3],
+        bytes[offset + 4],
+        bytes[offset + 5],
+    ]) as usize;
+    offset + 6 + len <= bytes.len()
 }
 
 fn trim_reserved_u16(bytes: &[u8]) -> &[u8] {
