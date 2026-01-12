@@ -326,3 +326,51 @@ test("ExtensionHost: malformed api_call args do not prompt for permissions", asy
   assert.equal(messages[0]?.type, "api_error");
   assert.equal(messages[0]?.error?.message, "Workbook path must be a non-empty string");
 });
+
+test("ExtensionHost: malformed api_call namespace does not prompt for permissions", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-host-workbook-malformed-namespace-"));
+
+  let promptCalls = 0;
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => {
+      promptCalls += 1;
+      return true;
+    },
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  /** @type {any[]} */
+  const messages = [];
+
+  const extension = {
+    id: "test.no-prompt-malformed-namespace",
+    manifest: {
+      name: "no-prompt-malformed-namespace",
+      permissions: ["workbook.manage"],
+    },
+    worker: {
+      postMessage(msg) {
+        messages.push(msg);
+      },
+    },
+  };
+
+  await host._handleApiCall(extension, {
+    type: "api_call",
+    id: "req1",
+    namespace: Object.create(null),
+    method: "openWorkbook",
+    args: ["/tmp/opened.xlsx"],
+  });
+
+  assert.equal(promptCalls, 0);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0]?.type, "api_error");
+  assert.equal(messages[0]?.error?.message, "Unknown API method: .openWorkbook");
+});

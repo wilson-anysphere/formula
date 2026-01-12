@@ -1411,14 +1411,21 @@ class ExtensionHost {
     let networkUrl = null;
     let namespace = "";
     let method = "";
+    const safeCoerceString = (value) => {
+      try {
+        return String(value ?? "");
+      } catch {
+        return "";
+      }
+    };
 
     try {
-      namespace = typeof message?.namespace === "string" ? message.namespace : String(message?.namespace ?? "");
-      method = typeof message?.method === "string" ? message.method : String(message?.method ?? "");
+      namespace = typeof message?.namespace === "string" ? message.namespace : safeCoerceString(message?.namespace);
+      method = typeof message?.method === "string" ? message.method : safeCoerceString(message?.method);
       apiKey = `${namespace}.${method}`;
       permissions = API_PERMISSIONS[apiKey] ?? [];
       isNetworkApi = apiKey === "network.fetch" || apiKey === "network.openWebSocket";
-      networkUrl = isNetworkApi ? String(args?.[0] ?? "") : null;
+      networkUrl = isNetworkApi ? safeCoerceString(args?.[0]) : null;
 
       // Validate obvious argument errors before prompting for permissions to avoid
       // spurious permission prompts for calls that will fail fast anyway.
