@@ -16,12 +16,12 @@ function isYjsItemStruct(value) {
 }
 
 function patchForeignItemConstructor(item) {
-  if (!item || typeof item !== "object") return;
-  if (!isYjsItemStruct(item)) return;
-  if (item instanceof Y.Item) return;
+  if (!item || typeof item !== "object") return false;
+  if (!isYjsItemStruct(item)) return false;
+  if (item instanceof Y.Item) return false;
   const ctor = item.constructor;
-  if (!ctor || ctor === Y.Item) return;
-  if (patchedItemConstructors.has(ctor)) return;
+  if (!ctor || ctor === Y.Item) return false;
+  if (patchedItemConstructors.has(ctor)) return false;
   patchedItemConstructors.add(ctor);
 
   // When Yjs is loaded more than once (e.g. ESM + CJS in Node), documents can
@@ -38,6 +38,7 @@ function patchForeignItemConstructor(item) {
     // Best-effort: if we can't patch (frozen prototypes, etc), undo will behave
     // like upstream Yjs in mixed-module environments.
   }
+  return true;
 }
 
 function patchForeignItemsInType(type) {
@@ -67,6 +68,43 @@ function patchForeignItemsInScope(scope) {
   const types = Array.isArray(scope) ? scope : [scope];
   for (const type of types) {
     patchForeignItemsInType(type);
+  }
+}
+
+function patchForeignItemsInTransaction(transaction) {
+  if (!transaction || typeof transaction !== "object") return;
+
+  // Patch foreign item constructors referenced by deleted structs. This is the
+  // critical path for correctness: Yjs UndoManager uses `instanceof Item` checks
+  // when tracking deletions, and will otherwise fail to undo overwrites of
+  // foreign items (e.g. when remote updates were applied by a different Yjs
+  // module instance).
+  try {
+    Y.iterateDeletedStructs(transaction, transaction.deleteSet, patchForeignItemConstructor);
+  } catch {
+    // ignore
+  }
+
+  // Also patch constructors for newly-inserted structs so undo can later delete
+  // them even if they were created by foreign type methods.
+  //
+  // (We intentionally only do this for transactions that we expect to be tracked
+  // by UndoManager; see the caller in `createCollabUndoService`.)
+  try {
+    const insertions = Y.createDeleteSet();
+    const beforeState = transaction.beforeState;
+    transaction.afterState?.forEach?.((endClock, client) => {
+      const startClock = beforeState?.get?.(client) ?? 0;
+      const len = endClock - startClock;
+      if (len <= 0) return;
+      const arr = insertions.clients.get(client);
+      const entry = { clock: startClock, len };
+      if (arr) arr.push(entry);
+      else insertions.clients.set(client, [entry]);
+    });
+    Y.iterateDeletedStructs(transaction, insertions, patchForeignItemConstructor);
+  } catch {
+    // ignore
   }
 }
 
@@ -132,10 +170,37 @@ export function createCollabUndoService(opts) {
 
   patchForeignItemsInScope(scope);
 
-  const undoManager = new Y.UndoManager(scope, {
+  // Patch foreign `Item` constructors opportunistically for transactions tracked
+  // by this UndoManager.
+  //
+  // Important: register this handler *before* constructing the UndoManager so it
+  // runs before Yjs' own `afterTransaction` handler. This ensures that when a
+  // local transaction overwrites a foreign item (e.g. remote updates were applied
+  // via a different Yjs module instance), the UndoManager still recognizes the
+  // deleted foreign Item structs and records an undoable change.
+  //
+  // See regression: `yjs-undo-service.foreign-items-late.test.js`.
+  /** @type {any} */
+  let undoManager = null;
+  const patchAfterTransaction = (transaction) => {
+    const txnOrigin = transaction?.origin;
+    if (txnOrigin !== origin && txnOrigin !== undoManager) return;
+    patchForeignItemsInTransaction(transaction);
+  };
+  doc.on("afterTransaction", patchAfterTransaction);
+
+  undoManager = new Y.UndoManager(scope, {
     captureTimeout: captureTimeoutMs,
     trackedOrigins: new Set([origin])
   });
+
+  // Ensure our patching handler is removed if callers explicitly destroy the
+  // UndoManager instance.
+  const destroyUndoManager = undoManager.destroy.bind(undoManager);
+  undoManager.destroy = () => {
+    doc.off("afterTransaction", patchAfterTransaction);
+    destroyUndoManager();
+  };
 
   const localOrigins = new Set([origin, undoManager]);
 
