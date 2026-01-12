@@ -969,9 +969,17 @@ fn write_updated_cell<W: Write>(
             CellValueKind::Other { t } => c_start.push_attribute(("t", t.as_str())),
         }
     }
+    // `vm="..."` is a SpreadsheetML value-metadata pointer (typically into `xl/metadata.xml`).
+    //
+    // Excel uses this for rich value types (linked data types, embedded images, etc), which are
+    // often represented in the cell by a `#VALUE!` cached value placeholder. If the caller edits
+    // the cell into a normal value, we must drop `vm` to avoid leaving a dangling value-metadata
+    // reference.
     let preserve_vm = matches!(cell.value, CellValue::Error(ErrorValue::Value));
-    if let Some(vm) = &meta_vm {
-        c_start.push_attribute(("vm", vm.as_str()));
+    if preserve_vm {
+        if let Some(vm) = &meta_vm {
+            c_start.push_attribute(("vm", vm.as_str()));
+        }
     }
     if let Some(cm) = &meta_cm {
         c_start.push_attribute(("cm", cm.as_str()));
