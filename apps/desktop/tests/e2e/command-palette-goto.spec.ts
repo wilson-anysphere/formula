@@ -49,6 +49,33 @@ test.describe("command palette go to", () => {
     await expect(page.getByTestId("active-value")).toHaveText("Hello from Sheet2 C3");
   });
 
+  test("typing a named range navigates immediately", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+      const workbook = app.getSearchWorkbook?.();
+      if (!workbook || typeof workbook.defineName !== "function") throw new Error("Missing search workbook adapter");
+
+      // Name -> single cell B3 on Sheet1.
+      workbook.defineName("MyCell", {
+        sheetName: "Sheet1",
+        range: { startRow: 2, endRow: 2, startCol: 1, endCol: 1 },
+      });
+      app.getDocument().setCellValue("Sheet1", "B3", "Hello from named range");
+    });
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await page.keyboard.press(`${modifier}+Shift+P`);
+    await expect(page.getByTestId("command-palette-input")).toBeVisible();
+    await page.getByTestId("command-palette-input").fill("MyCell");
+    await page.keyboard.press("Enter");
+
+    await expect(page.getByTestId("active-cell")).toHaveText("B3");
+    await expect(page.getByTestId("active-value")).toHaveText("Hello from named range");
+  });
+
   test("sheet-qualified Go To resolves sheet display names to stable ids (no phantom sheets)", async ({ page }) => {
     await gotoDesktop(page);
 
