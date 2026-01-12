@@ -835,4 +835,36 @@ mod tests {
         let metadata = parse_metadata_xml(xml.as_bytes()).unwrap();
         assert_eq!(metadata.vm_to_rich_value_index(1), Some(7));
     }
+
+    #[test]
+    fn vm_to_rich_value_index_prefers_one_based_when_indices_overlap() {
+        // Real Excel fixtures often use:
+        // - `vm` as 1-based indices into `<valueMetadata>`
+        // - but with `vm="0"` also observed for the first entry in some workbooks.
+        //
+        // When `<valueMetadata>` has multiple `<bk>` entries, interpreting `vm="1"` as 0-based would
+        // point at the *second* entry, which is not correct for modern Excel outputs.
+        let xml = r#"
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <futureMetadata name="XLRICHVALUE" count="2">
+    <bk><extLst><ext uri="{00000000-0000-0000-0000-000000000000}"><xlrd:rvb i="0"/></ext></extLst></bk>
+    <bk><extLst><ext uri="{00000000-0000-0000-0000-000000000001}"><xlrd:rvb i="1"/></ext></extLst></bk>
+  </futureMetadata>
+  <valueMetadata count="2">
+    <bk><rc t="1" v="0"/></bk>
+    <bk><rc t="1" v="1"/></bk>
+  </valueMetadata>
+</metadata>
+"#;
+
+        let metadata = parse_metadata_xml(xml.as_bytes()).unwrap();
+        assert_eq!(metadata.vm_to_rich_value_index(0), Some(0));
+        assert_eq!(metadata.vm_to_rich_value_index(1), Some(0));
+        assert_eq!(metadata.vm_to_rich_value_index(2), Some(1));
+    }
 }
