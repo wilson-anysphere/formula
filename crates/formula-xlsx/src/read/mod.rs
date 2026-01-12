@@ -824,6 +824,8 @@ fn parse_worksheet_into_model(
     let mut current_ref: Option<CellRef> = None;
     let mut current_t: Option<String> = None;
     let mut current_style: u32 = 0;
+    let mut current_cm: Option<u32> = None;
+    let mut current_vm: Option<u32> = None;
     let mut current_formula: Option<FormulaMeta> = None;
     let mut current_value_text: Option<String> = None;
     let mut current_inline_text: Option<String> = None;
@@ -1004,6 +1006,8 @@ fn parse_worksheet_into_model(
                 current_ref = None;
                 current_t = None;
                 current_style = 0;
+                current_cm = None;
+                current_vm = None;
                 current_formula = None;
                 current_value_text = None;
                 current_inline_text = None;
@@ -1024,6 +1028,20 @@ fn parse_worksheet_into_model(
                             let xf_index = attr.unescape_value()?.into_owned().parse().unwrap_or(0);
                             current_style = styles_part.style_id_for_xf(xf_index);
                         }
+                        b"cm" => {
+                            current_cm = attr
+                                .unescape_value()?
+                                .into_owned()
+                                .parse::<u32>()
+                                .ok();
+                        }
+                        b"vm" => {
+                            current_vm = attr
+                                .unescape_value()?
+                                .into_owned()
+                                .parse::<u32>()
+                                .ok();
+                        }
                         _ => {}
                     }
                 }
@@ -1031,6 +1049,8 @@ fn parse_worksheet_into_model(
             Event::Empty(e) if in_sheet_data && e.local_name().as_ref() == b"c" => {
                 let mut cell_ref = None;
                 let mut style_id = 0u32;
+                let mut cm: Option<u32> = None;
+                let mut vm: Option<u32> = None;
                 for attr in e.attributes() {
                     let attr = attr?;
                     match attr.key.as_ref() {
@@ -1044,6 +1064,12 @@ fn parse_worksheet_into_model(
                             let xf_index = attr.unescape_value()?.into_owned().parse().unwrap_or(0);
                             style_id = styles_part.style_id_for_xf(xf_index);
                         }
+                        b"cm" => {
+                            cm = attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                        }
+                        b"vm" => {
+                            vm = attr.unescape_value()?.into_owned().parse::<u32>().ok();
+                        }
                         _ => {}
                     }
                 }
@@ -1055,6 +1081,19 @@ fn parse_worksheet_into_model(
                         let mut cell = Cell::default();
                         cell.style_id = style_id;
                         worksheet.set_cell(cell_ref, cell);
+                    }
+
+                    if let Some(cell_meta_map) = cell_meta_map.as_mut() {
+                        if cm.is_some() || vm.is_some() {
+                            cell_meta_map.insert(
+                                (worksheet_id, cell_ref),
+                                CellMeta {
+                                    cm,
+                                    vm,
+                                    ..Default::default()
+                                },
+                            );
+                        }
                     }
                 }
             }
@@ -1136,11 +1175,15 @@ fn parse_worksheet_into_model(
                             meta.value_kind = value_kind;
                             meta.raw_value = raw_value;
                             meta.formula = current_formula.take();
+                            meta.cm = current_cm;
+                            meta.vm = current_vm;
 
                             if meta.value_kind.is_some()
                                 || meta.raw_value.is_some()
                                 || meta.formula.is_some()
                                 || current_style != 0
+                                || meta.cm.is_some()
+                                || meta.vm.is_some()
                             {
                                 cell_meta_map.insert((worksheet_id, cell_ref), meta);
                             }
@@ -1151,6 +1194,8 @@ fn parse_worksheet_into_model(
                 current_ref = None;
                 current_t = None;
                 current_style = 0;
+                current_cm = None;
+                current_vm = None;
                 current_formula = None;
                 current_value_text = None;
                 current_inline_text = None;
@@ -1588,5 +1633,74 @@ fn interpret_cell_value_without_meta(
                 CellValue::Empty
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Cursor, Write};
+
+    use formula_model::CellRef;
+
+    use super::load_from_bytes;
+
+    fn build_minimal_xlsx(sheet_xml: &str) -> Vec<u8> {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+        let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::FileOptions::<()>::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/workbook.xml", options).unwrap();
+        zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
+        zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+        zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
+        zip.write_all(sheet_xml.as_bytes()).unwrap();
+
+        zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn reads_cell_cm_and_vm_attributes_into_cell_meta() {
+        // The cell is otherwise empty, so `cm`/`vm` are the only reason it should appear in
+        // `doc.meta.cell_meta`.
+        let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1">
+      <c r="A1" cm="7" vm="9"></c>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let bytes = build_minimal_xlsx(worksheet_xml);
+        let doc = load_from_bytes(&bytes).expect("load_from_bytes");
+        let sheet_id = doc.workbook.sheets[0].id;
+        let cell_ref = CellRef::from_a1("A1").unwrap();
+
+        let meta = doc
+            .meta
+            .cell_meta
+            .get(&(sheet_id, cell_ref))
+            .expect("expected cell meta entry for A1");
+        assert_eq!(meta.cm, Some(7));
+        assert_eq!(meta.vm, Some(9));
     }
 }

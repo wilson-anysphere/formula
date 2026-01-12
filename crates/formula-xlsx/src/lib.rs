@@ -199,6 +199,16 @@ pub struct CellMeta {
     pub value_kind: Option<CellValueKind>,
     pub raw_value: Option<String>,
     pub formula: Option<FormulaMeta>,
+    /// SpreadsheetML cell metadata index (`c/@cm`).
+    ///
+    /// This is a raw integer value that can be used to map the cell to entries in
+    /// `xl/metadata.xml` for rich-data / image-in-cell support.
+    pub cm: Option<u32>,
+    /// SpreadsheetML value metadata index (`c/@vm`).
+    ///
+    /// This is a raw integer value that can be used to map the cell to entries in
+    /// `xl/metadata.xml` for rich-data / image-in-cell support.
+    pub vm: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default)]
