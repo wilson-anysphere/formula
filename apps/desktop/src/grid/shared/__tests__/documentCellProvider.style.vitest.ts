@@ -165,6 +165,33 @@ describe("DocumentCellProvider (shared grid) style mapping", () => {
     expect((cell as any).style?.fill).toBeUndefined();
   });
 
+  it("allows font.color:null patches to clear legacy flat font_color (automatic font color)", () => {
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    doc.setCellValue(sheetId, "A1", "Auto font");
+    // Legacy/clipboard-ish payloads store font colors as flat keys.
+    doc.setRangeFormat(sheetId, "A1", { font_color: "#FF00FF00", bold: true });
+    // The ribbon "automatic" font color option writes `font.color: null`.
+    doc.setRangeFormat(sheetId, "A1", { font: { color: null } });
+
+    const provider = new DocumentCellProvider({
+      document: doc,
+      getSheetId: () => sheetId,
+      headerRows: 1,
+      headerCols: 1,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null
+    });
+
+    const cell = provider.getCell(1, 1);
+    expect(cell).not.toBeNull();
+    expect((cell as any).style?.fontWeight).toBe("700");
+    expect((cell as any).style?.color).toBeUndefined();
+  });
+
   it("prefers camelCase overrides when both snake_case + camelCase fields exist (imported style then user edits)", () => {
     const doc = new DocumentController();
     const sheetId = "Sheet1";

@@ -449,13 +449,17 @@ export class DocumentCellProvider implements CellProvider {
       }
     }
     if (fontSizePx != null) out.fontSize = fontSizePx;
-    const fontColor = normalizeCssColor(
-      font?.color ??
-        (docStyle as any).textColor ??
-        (docStyle as any).text_color ??
-        (docStyle as any).fontColor ??
-        (docStyle as any).font_color
-    );
+    // Like other style attributes, font colors can come from different serialization shapes.
+    // The UI clears back to "Automatic" by setting `font.color: null`, so treat the presence of
+    // that key (even when null) as authoritative and do not fall back to legacy flat keys.
+    let fontColorInput: unknown = undefined;
+    if (font && hasOwn(font, "color")) fontColorInput = (font as any).color;
+    else if (hasOwn(docStyle, "textColor")) fontColorInput = (docStyle as any).textColor;
+    else if (hasOwn(docStyle, "text_color")) fontColorInput = (docStyle as any).text_color;
+    else if (hasOwn(docStyle, "fontColor")) fontColorInput = (docStyle as any).fontColor;
+    else if (hasOwn(docStyle, "font_color")) fontColorInput = (docStyle as any).font_color;
+    else fontColorInput = font?.color;
+    const fontColor = normalizeCssColor(fontColorInput);
     if (fontColor) out.color = fontColor;
 
     const rawNumberFormat = hasOwn(docStyle, "numberFormat") ? (docStyle as any).numberFormat : (docStyle as any).number_format;
