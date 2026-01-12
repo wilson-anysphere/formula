@@ -123,6 +123,7 @@ class CompatGateTierPresetTests(unittest.TestCase):
             max_cases=0,
             include_tags=include_tags,
             exclude_tags=["error"],
+            use_cargo_agent=False,
         )
         self.assertNotIn("--include-tag", cmd)
         self.assertIn("--exclude-tag", cmd)
