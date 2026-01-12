@@ -170,6 +170,7 @@ describe("runAgentTask (agent mode orchestrator)", () => {
       documentController.setCellValue("Sheet1", { row: 0, col: 0 }, "TOP SECRET");
 
       const llmClient = { chat: vi.fn(async () => ({ message: { role: "assistant", content: "should not be called" } })) };
+      const onWorkbookContextBuildStats = vi.fn();
       const auditStore = new MemoryAIAuditStore();
 
       const result = await runAgentTask({
@@ -178,6 +179,7 @@ describe("runAgentTask (agent mode orchestrator)", () => {
         documentController,
         llmClient: llmClient as any,
         auditStore,
+        onWorkbookContextBuildStats,
         maxIterations: 2,
         maxDurationMs: 10_000,
         model: "unit-test-model"
@@ -186,6 +188,11 @@ describe("runAgentTask (agent mode orchestrator)", () => {
       expect(result.status).toBe("error");
       expect(result.error).toMatch(/Sending data to cloud AI is restricted/i);
       expect(llmClient.chat).not.toHaveBeenCalled();
+
+      expect(onWorkbookContextBuildStats).toHaveBeenCalledTimes(1);
+      const stats = onWorkbookContextBuildStats.mock.calls[0]![0];
+      expect(stats.ok).toBe(false);
+      expect(stats.error?.name).toBe("DlpViolationError");
 
       const events = getAiDlpAuditLogger().list();
       expect(events.some((e: any) => e.details?.type === "ai.workbook_context")).toBe(true);

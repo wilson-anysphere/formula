@@ -579,6 +579,7 @@ describe("ai chat orchestrator", () => {
 
       const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_dlp_block" });
       const llmClient = { chat: vi.fn(async () => ({ message: { role: "assistant", content: "should not be called" } })) };
+      const onWorkbookContextBuildStats = vi.fn();
 
       const orchestrator = createAiChatOrchestrator({
         documentController: controller,
@@ -588,13 +589,20 @@ describe("ai chat orchestrator", () => {
         getActiveSheetId: () => "Sheet1",
         auditStore,
         sessionId: "session_dlp_block",
-        contextManager
+        contextManager,
+        onWorkbookContextBuildStats,
       });
 
       await expect(orchestrator.sendMessage({ text: "What is in A1?", history: [] })).rejects.toThrow(
         /Sending data to cloud AI is restricted/i
       );
       expect(llmClient.chat).not.toHaveBeenCalled();
+
+      expect(onWorkbookContextBuildStats).toHaveBeenCalledTimes(1);
+      const stats = onWorkbookContextBuildStats.mock.calls[0]![0];
+      expect(stats.ok).toBe(false);
+      expect(stats.error?.name).toBe("DlpViolationError");
+      expect(stats.error?.message).toMatch(/Sending data to cloud AI is restricted/i);
 
       const events = getAiDlpAuditLogger().list();
       expect(events.some((e: any) => e.details?.type === "ai.workbook_context")).toBe(true);
