@@ -27,6 +27,11 @@ test("ScriptEditorPanel avoids static inline styles and uses token-based classes
     false,
     "mountScriptEditorPanel should not set inline styles; use token-based CSS classes instead",
   );
+  assert.equal(
+    /setAttribute\(\s*["']style["']/.test(mountSection),
+    false,
+    "mountScriptEditorPanel should not set inline styles via setAttribute('style', ...); use token-based CSS classes instead",
+  );
 
   assert.match(
     mountSection,
@@ -58,5 +63,12 @@ test("ScriptEditorPanel avoids static inline styles and uses token-based classes
     /fallbackEditor\.className\s*=\s*"script-editor__fallback-editor"/,
     "mountScriptEditorPanel should apply the script-editor__fallback-editor class",
   );
-});
 
+  const mainPath = path.join(__dirname, "..", "src", "main.ts");
+  const mainSrc = fs.readFileSync(mainPath, "utf8");
+  assert.equal(
+    /import\s+["'][^"']*styles\/script-editor\.css["']/.test(mainSrc),
+    true,
+    "apps/desktop/src/main.ts should import src/styles/script-editor.css so the Script Editor panel is styled in production builds",
+  );
+});
