@@ -1,4 +1,3 @@
-export { Titlebar } from "./Titlebar";
-export type { TitlebarAction, TitlebarProps } from "./Titlebar";
-export { mountTitlebar } from "./mountTitlebar";
-
+export { Titlebar } from "./Titlebar.js";
+export type { TitlebarAction, TitlebarProps } from "./Titlebar.js";
+export { mountTitlebar } from "./mountTitlebar.js";
