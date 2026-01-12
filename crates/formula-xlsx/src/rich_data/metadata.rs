@@ -290,7 +290,7 @@ fn parse_value_metadata_mappings(
     let mut out = HashMap::new();
 
     let v_indexing_is_one_based =
-        infer_value_metadata_rc_v_indexing(doc, xlrichvalue_t_values, future_bk_indices);
+        infer_value_metadata_rc_v_indexing(value_metadata, xlrichvalue_t_values, future_bk_indices);
 
     let mut vm_start_1_based: u32 = 1;
 
@@ -343,17 +343,10 @@ fn parse_value_metadata_mappings(
 }
 
 fn infer_value_metadata_rc_v_indexing(
-    doc: &Document<'_>,
+    value_metadata: roxmltree::Node<'_, '_>,
     xlrichvalue_t_values: &[u32],
     future_bk_indices: &[BkRun<Option<u32>>],
 ) -> bool {
-    let Some(value_metadata) = doc
-        .descendants()
-        .find(|n| n.is_element() && n.tag_name().name() == "valueMetadata")
-    else {
-        return false;
-    };
-
     let mut zero_based_matches = 0usize;
     let mut one_based_matches = 0usize;
     let mut saw_zero = false;
