@@ -235,6 +235,59 @@ test.describe("sheet tabs", () => {
     await expect(tab).not.toContainText("ShouldNotCommit");
   });
 
+  test("Ctrl+PgUp/PgDn does not switch sheets while a tab rename input is focused", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Create a second sheet so sheet navigation would be observable.
+    await page.getByTestId("sheet-add").click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    // Ensure Sheet1 is active, then enter rename mode.
+    const sheet1Tab = page.getByTestId("sheet-tab-Sheet1");
+    await sheet1Tab.click();
+    await expect(sheet1Tab).toHaveAttribute("data-active", "true");
+
+    await sheet1Tab.dblclick();
+    const input = sheet1Tab.locator("input.sheet-tab__input");
+    await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
+
+    // Dispatch directly to the input so the global shortcut handler must *not* steal it.
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-testid="sheet-tab-Sheet1"] input.sheet-tab__input') as HTMLInputElement | null;
+      if (!input) throw new Error("Missing rename input");
+      const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
+      input.dispatchEvent(evt);
+    });
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+    await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
+  });
+
+  test("Ctrl+PgUp/PgDn does not switch sheets while the formula bar input is focused", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Create a second sheet so sheet navigation would be observable.
+    await page.getByTestId("sheet-add").click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    // Focus the formula bar input (it is a textarea).
+    const formulaInput = page.getByTestId("formula-input");
+    await formulaInput.click();
+    await expect(formulaInput).toBeFocused();
+
+    await page.evaluate(() => {
+      const input = document.querySelector('[data-testid="formula-input"]') as HTMLTextAreaElement | null;
+      if (!input) throw new Error("Missing formula bar input");
+      const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
+      input.dispatchEvent(evt);
+    });
+
+    // Active sheet should remain unchanged (Sheet2 is active after using the add button once).
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
+  });
+
   test("invalid rename keeps editing and blocks switching sheets", async ({ page }) => {
     await gotoDesktop(page);
 
