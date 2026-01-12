@@ -853,7 +853,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
               userEmail: request.user!.email,
               sessionId: request.session?.id,
               ipAddress: getClientIp(request),
-              userAgent: getUserAgent(request),
+              userAgent: getUserAgent(request)
             },
             resource: { type: "document", id: docId },
             success: false,
@@ -863,7 +863,8 @@ export function registerDocRoutes(app: FastifyInstance): void {
               docId,
               classification: evaluation.classification,
               maxAllowed: evaluation.maxAllowed,
-            },
+              reasonCode: evaluation.reasonCode,
+            }
           })
         );
 
@@ -1040,6 +1041,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
               docId,
               classification: evaluation.classification,
               maxAllowed: evaluation.maxAllowed,
+              reasonCode: evaluation.reasonCode,
             },
           })
         );

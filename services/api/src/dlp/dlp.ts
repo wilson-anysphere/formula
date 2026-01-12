@@ -4,6 +4,7 @@ import {
   classificationRank,
   DLP_ACTION,
   DLP_DECISION,
+  DLP_POLICY_VERSION,
   DLP_REASON_CODE,
   evaluatePolicy,
   isAllowed,
@@ -32,6 +33,7 @@ export {
   classificationRank,
   DLP_ACTION,
   DLP_DECISION,
+  DLP_POLICY_VERSION,
   DLP_REASON_CODE,
   evaluatePolicy,
   isAllowed,
@@ -41,7 +43,7 @@ export {
   redact,
   resolveClassification,
   selectorKey,
-  validateDlpPolicy,
+  validateDlpPolicy
 };
 export type { Classification, ClassificationLevel, DlpAiRule, DlpPolicy, DlpRuleBase, PolicyEvaluationResult };
 
