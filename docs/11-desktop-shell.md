@@ -164,6 +164,53 @@ The desktop application uses **Tauri** for a native shell with a Rust backend. T
   We also rely on `unsafe-eval` for the TypeScript scripting sandbox (it evaluates compiled code via `new Function` inside a Worker).
 - Older WebKit versions may still gate worker creation behind `child-src`, so we include `child-src 'self' blob:` as a fallback.
 
+#### Cross-origin isolation notes (COOP/COEP, Pyodide Worker backend)
+
+Formula’s Pyodide-based Python runtime prefers running Pyodide in a **Worker** and using a `SharedArrayBuffer + Atomics` bridge so
+spreadsheet RPC can remain synchronous. In Chromium/WebView2 this requires a **cross-origin isolated** browsing context:
+
+- `globalThis.crossOriginIsolated === true`
+- `typeof SharedArrayBuffer !== "undefined"`
+
+Cross-origin isolation is enabled by serving the app’s top-level document with the following headers:
+
+```
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+Where this is configured:
+
+- **Dev / preview (Vite):** `apps/desktop/vite.config.ts` sets the headers on the Vite dev/preview server responses.
+- **Packaged Tauri builds (production):** the same headers must be present on responses served by Tauri’s
+  **asset/custom protocol** (i.e. the production WebView is not talking to Vite). If the packaged app does not emit these headers,
+  `crossOriginIsolated` will be `false` and Pyodide will fall back to the main-thread backend (or fail if forced to worker mode).
+
+**Warning: COEP + `asset:` / `asset://` subresources**
+
+With `Cross-Origin-Embedder-Policy: require-corp`, *every* subresource must be same-origin or explicitly opt-in via CORS/CORP.
+In a Tauri production app it’s common to load images/fonts/etc from `asset:`/`asset://…` URLs, which are **not the same origin**
+as the main `tauri://…` page (different scheme).
+
+In practice this often means you will also need to return:
+
+```
+Cross-Origin-Resource-Policy: cross-origin
+```
+
+…on `asset:` protocol responses (or otherwise ensure those subresources are served from the same origin as the main document).
+
+**How to verify (packaged build):**
+
+1. Open DevTools for the WebView.
+2. In the console, check:
+   ```js
+   globalThis.crossOriginIsolated
+   typeof SharedArrayBuffer !== "undefined"
+   ```
+3. Open the **Python** panel (status bar) and run a script:
+   - If you see `SharedArrayBuffer unavailable; running Pyodide on main thread…`, COOP/COEP is not correctly applied.
+
 ---
 
 ## Rust Backend
