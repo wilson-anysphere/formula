@@ -133,7 +133,18 @@ export interface WorkbookContextBuildStats {
     /**
      * `block` refers to the per-range sampled block cache in `WorkbookContextBuilder`.
      */
-    block: { hits: number; misses: number; entries: number; entriesByKind: Record<WorkbookContextBlockKind, number> };
+    block: {
+      hits: number;
+      misses: number;
+      /**
+       * Current number of cached blocks (at end of build).
+       */
+      entries: number;
+      /**
+       * Breakdown of cached blocks by kind.
+       */
+      entriesByKind: Record<WorkbookContextBlockKind, number>;
+    };
   };
   rag: {
     enabled: boolean;
