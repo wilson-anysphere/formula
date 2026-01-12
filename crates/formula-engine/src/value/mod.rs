@@ -99,18 +99,35 @@ impl ErrorKind {
     ///
     /// Returns `None` for error literals that this engine does not model (e.g. `#GETTING_DATA`).
     pub fn from_code(raw: &str) -> Option<Self> {
-        match raw.trim().to_ascii_uppercase().as_str() {
-            "#NULL!" => Some(ErrorKind::Null),
-            "#DIV/0!" => Some(ErrorKind::Div0),
-            "#VALUE!" => Some(ErrorKind::Value),
-            "#REF!" => Some(ErrorKind::Ref),
-            "#NAME?" => Some(ErrorKind::Name),
-            "#NUM!" => Some(ErrorKind::Num),
-            "#N/A" => Some(ErrorKind::NA),
-            "#SPILL!" => Some(ErrorKind::Spill),
-            "#CALC!" => Some(ErrorKind::Calc),
-            _ => None,
+        let raw = raw.trim();
+        if raw.eq_ignore_ascii_case("#NULL!") {
+            return Some(ErrorKind::Null);
         }
+        if raw.eq_ignore_ascii_case("#DIV/0!") {
+            return Some(ErrorKind::Div0);
+        }
+        if raw.eq_ignore_ascii_case("#VALUE!") {
+            return Some(ErrorKind::Value);
+        }
+        if raw.eq_ignore_ascii_case("#REF!") {
+            return Some(ErrorKind::Ref);
+        }
+        if raw.eq_ignore_ascii_case("#NAME?") {
+            return Some(ErrorKind::Name);
+        }
+        if raw.eq_ignore_ascii_case("#NUM!") {
+            return Some(ErrorKind::Num);
+        }
+        if raw.eq_ignore_ascii_case("#N/A") {
+            return Some(ErrorKind::NA);
+        }
+        if raw.eq_ignore_ascii_case("#SPILL!") {
+            return Some(ErrorKind::Spill);
+        }
+        if raw.eq_ignore_ascii_case("#CALC!") {
+            return Some(ErrorKind::Calc);
+        }
+        None
     }
 }
 

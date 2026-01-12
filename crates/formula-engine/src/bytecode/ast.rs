@@ -340,33 +340,6 @@ impl<'a> Parser<'a> {
     fn parse_error_literal(&mut self) -> Result<Expr, ParseError> {
         debug_assert_eq!(self.peek_byte(), Some(b'#'));
         let start = self.pos;
-
-        const ERROR_LITERALS: &[(&str, ErrorKind)] = &[
-            ("#NULL!", ErrorKind::Null),
-            ("#DIV/0!", ErrorKind::Div0),
-            ("#VALUE!", ErrorKind::Value),
-            ("#REF!", ErrorKind::Ref),
-            ("#NAME?", ErrorKind::Name),
-            ("#NUM!", ErrorKind::Num),
-            ("#N/A", ErrorKind::NA),
-            ("#SPILL!", ErrorKind::Spill),
-            ("#CALC!", ErrorKind::Calc),
-        ];
-
-        for &(lit, kind) in ERROR_LITERALS {
-            let end = start.saturating_add(lit.len());
-            if self
-                .input
-                .get(start..end)
-                .is_some_and(|slice| slice.eq_ignore_ascii_case(lit.as_bytes()))
-            {
-                self.pos = end;
-                return Ok(Expr::Literal(Value::Error(kind)));
-            }
-        }
-
-        // Fallback: accept unknown `#...` sequences as error tokens and coerce them to `#VALUE!`,
-        // mirroring the canonical parser + compiler behavior.
         self.pos += 1; // '#'
         while let Some(b) = self.peek_byte() {
             if matches!(b, b'_' | b'/' | b'.' | b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z') {
@@ -384,7 +357,10 @@ impl<'a> Parser<'a> {
             self.pos += 1;
         }
 
-        Ok(Expr::Literal(Value::Error(ErrorKind::Value)))
+        let raw = std::str::from_utf8(&self.input[start..self.pos])
+            .map_err(|_| ParseError::UnexpectedToken(start))?;
+        let kind = ErrorKind::from_code(raw).unwrap_or(ErrorKind::Value);
+        Ok(Expr::Literal(Value::Error(kind)))
     }
 
     fn parse_number(&mut self) -> Result<Expr, ParseError> {

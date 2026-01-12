@@ -120,6 +120,12 @@ pub enum ErrorKind {
     Calc,
 }
 
+impl ErrorKind {
+    pub fn from_code(raw: &str) -> Option<Self> {
+        crate::value::ErrorKind::from_code(raw).map(Self::from)
+    }
+}
+
 impl From<crate::value::ErrorKind> for ErrorKind {
     fn from(value: crate::value::ErrorKind) -> Self {
         match value {
