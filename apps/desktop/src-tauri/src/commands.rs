@@ -411,10 +411,13 @@ pub async fn add_sheet(name: String, state: State<'_, SharedAppState>) -> Result
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn read_text_file(path: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || std::fs::read_to_string(path))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+        crate::ipc_file_limits::validate_full_read_size(metadata.len()).map_err(|e| e.to_string())?;
+        std::fs::read_to_string(path).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -456,10 +459,13 @@ pub async fn stat_file(path: String) -> Result<FileStat, String> {
 pub async fn read_binary_file(path: String) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
 
-    let bytes = tauri::async_runtime::spawn_blocking(move || std::fs::read(path))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+        crate::ipc_file_limits::validate_full_read_size(metadata.len()).map_err(|e| e.to_string())?;
+        std::fs::read(path).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
     Ok(STANDARD.encode(bytes))
 }
@@ -478,17 +484,18 @@ pub async fn read_binary_file_range(
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     use std::io::{Read, Seek, SeekFrom};
 
+    let len =
+        crate::ipc_file_limits::validate_read_range_length(length).map_err(|e| e.to_string())?;
+    if len == 0 {
+        return Ok(String::new());
+    }
+
     tauri::async_runtime::spawn_blocking(move || {
-        if length == 0 {
-            return Ok::<_, String>(String::new());
-        }
 
         let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
         file.seek(SeekFrom::Start(offset))
             .map_err(|e| e.to_string())?;
 
-        let len = usize::try_from(length)
-            .map_err(|_| "Requested length exceeds platform limits".to_string())?;
         let mut buf = vec![0u8; len];
         let read = file.read(&mut buf).map_err(|e| e.to_string())?;
         buf.truncate(read);

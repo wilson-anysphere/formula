@@ -469,7 +469,41 @@ function createDefaultFileAdapter(): FileAdapter {
   const invoke = getTauriInvoke();
   return {
     readText: async (path) => String(await invoke("read_text_file", { path })),
-    readBinary: async (path) => normalizeBinaryPayload(await invoke("read_binary_file", { path })),
+    readBinary: async (path) => {
+      const statPayload = await invoke("stat_file", { path });
+      const fileSize = normalizeFileSize(statPayload);
+      if (fileSize <= 0) return new Uint8Array(0);
+
+      // Keep single-call reads for small payloads, but avoid `read_binary_file` for large files
+      // because the backend enforces a full-read size limit and base64 payloads get expensive.
+      const chunkSize = 1024 * 1024; // 1MiB (must be <= backend MAX_READ_RANGE_BYTES)
+      const smallFileThreshold = 4 * chunkSize;
+      if (fileSize <= smallFileThreshold) {
+        return normalizeBinaryPayload(await invoke("read_binary_file", { path }));
+      }
+
+      const chunks: Uint8Array[] = [];
+      let offset = 0;
+
+      while (offset < fileSize) {
+        const nextLength = Math.min(chunkSize, fileSize - offset);
+        const payload = await invoke("read_binary_file_range", { path, offset, length: nextLength });
+        const bytes = normalizeBinaryPayload(payload);
+        if (bytes.length === 0) break;
+        chunks.push(bytes);
+        offset += bytes.length;
+        if (bytes.length < nextLength) break;
+      }
+
+      const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+      const out = new Uint8Array(totalLength);
+      let pos = 0;
+      for (const chunk of chunks) {
+        out.set(chunk, pos);
+        pos += chunk.length;
+      }
+      return out;
+    },
     readBinaryStream: async function* (path, options = {}) {
       const signal = options.signal;
       const chunkSize = 1024 * 1024; // 1MiB
@@ -533,15 +567,48 @@ function createDefaultFileAdapter(): FileAdapter {
         async arrayBuffer(): Promise<ArrayBuffer> {
           const length = this.size;
           if (length <= 0) return new ArrayBuffer(0);
-          const payload = await this.invoke("read_binary_file_range", { path: this.path, offset: this.start, length });
-          const bytes = normalizeBinaryPayload(payload);
-          return uint8ArrayToArrayBuffer(bytes);
+          const chunkSize = 1024 * 1024; // 1MiB (must be <= backend MAX_READ_RANGE_BYTES)
+          const chunks: Uint8Array[] = [];
+          let offset = this.start;
+          let remaining = length;
+
+          while (remaining > 0) {
+            const nextLength = Math.min(chunkSize, remaining);
+            const payload = await this.invoke("read_binary_file_range", { path: this.path, offset, length: nextLength });
+            const bytes = normalizeBinaryPayload(payload);
+            if (bytes.length === 0) break;
+            chunks.push(bytes);
+            offset += bytes.length;
+            remaining -= bytes.length;
+            if (bytes.length < nextLength) break;
+          }
+
+          const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+          const out = new Uint8Array(totalLength);
+          let pos = 0;
+          for (const chunk of chunks) {
+            out.set(chunk, pos);
+            pos += chunk.length;
+          }
+          return out.buffer;
         }
       }
 
       return new TauriFileBlob(path, invoke, 0, fileSize) as unknown as Blob;
     },
-    stat: async (path) => ({ mtimeMs: normalizeMtimeMs(await invoke("stat_file", { path })) }),
+    stat: async (path) => {
+      const payload = await invoke("stat_file", { path });
+      return {
+        mtimeMs: normalizeMtimeMs(payload),
+        size: (() => {
+          try {
+            return normalizeFileSize(payload);
+          } catch {
+            return undefined;
+          }
+        })(),
+      };
+    },
     listDir: async (path, options = {}) => {
       const recursive = options.recursive ?? false;
       let payload: unknown;

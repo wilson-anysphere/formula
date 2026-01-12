@@ -96,7 +96,10 @@ mod tests {
 
         let on_disk = fs::read_to_string(&file_path).expect("read store file");
         assert!(on_disk.contains("\"encrypted\": true"));
-        assert!(!on_disk.contains("intervalMs"), "expected encrypted blob not to contain plaintext schedule");
+        assert!(
+            !on_disk.contains("\"intervalMs\""),
+            "expected encrypted blob not to contain plaintext schedule"
+        );
         assert!(
             !on_disk.contains(query_id),
             "expected encrypted blob not to contain plaintext query ids"
