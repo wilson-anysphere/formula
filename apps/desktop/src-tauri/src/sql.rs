@@ -84,14 +84,18 @@ const SQLITE_SCOPE_DENIED_ERROR: &str =
 
 fn validate_sqlite_db_path(path: &str) -> Result<PathBuf> {
     let raw = Path::new(path);
-    let canonical =
-        std::fs::canonicalize(raw).with_context(|| format!("canonicalize sqlite path {path:?}"))?;
     let allowed_roots = crate::fs_scope::desktop_allowed_roots()
         .context("determine allowed filesystem scope roots")?;
-    if crate::fs_scope::path_in_allowed_roots(&canonical, &allowed_roots) {
-        Ok(canonical)
-    } else {
-        Err(anyhow!(SQLITE_SCOPE_DENIED_ERROR))
+
+    match crate::fs_scope::canonicalize_in_allowed_roots_with_error(raw, &allowed_roots) {
+        Ok(canonical) => Ok(canonical),
+        Err(crate::fs_scope::CanonicalizeInAllowedRootsError::OutsideScope { .. }) => {
+            Err(anyhow!(SQLITE_SCOPE_DENIED_ERROR))
+        }
+        Err(crate::fs_scope::CanonicalizeInAllowedRootsError::Canonicalize { path, source }) => {
+            Err(anyhow::Error::new(source))
+                .context(format!("canonicalize sqlite path {}", path.display()))
+        }
     }
 }
 

@@ -1,4 +1,6 @@
 use anyhow::{anyhow, Result};
+#[cfg(any(feature = "desktop", test))]
+use anyhow::Context;
 use directories::{BaseDirs, UserDirs};
 use std::path::{Path, PathBuf};
 
@@ -34,21 +36,53 @@ pub(crate) fn path_in_allowed_roots(path: &Path, allowed_roots: &[PathBuf]) -> b
     allowed_roots.iter().any(|root| path.starts_with(root))
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum CanonicalizeInAllowedRootsError {
+    #[error("failed to canonicalize '{path}'")]
+    Canonicalize {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("path '{path}' is outside the allowed filesystem scope")]
+    OutsideScope { path: PathBuf },
+}
+
+/// Canonicalize `path` and verify it is contained within `allowed_roots`.
+///
+/// This variant returns a structured error so callers can distinguish canonicalization failures
+/// (e.g. missing files) from out-of-scope denials.
+pub(crate) fn canonicalize_in_allowed_roots_with_error(
+    path: &Path,
+    allowed_roots: &[PathBuf],
+) -> std::result::Result<PathBuf, CanonicalizeInAllowedRootsError> {
+    let canonical =
+        std::fs::canonicalize(path).map_err(|e| CanonicalizeInAllowedRootsError::Canonicalize {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+    if path_in_allowed_roots(&canonical, allowed_roots) {
+        Ok(canonical)
+    } else {
+        Err(CanonicalizeInAllowedRootsError::OutsideScope { path: canonical })
+    }
+}
+
 /// Canonicalize `path` and verify it is contained within `allowed_roots`.
 ///
 /// This is used by IPC commands that proxy filesystem access to the webview. Canonicalization
 /// normalizes `..` segments and resolves symlinks, preventing symlink-based scope escapes.
 #[cfg(any(feature = "desktop", test))]
 pub(crate) fn canonicalize_in_allowed_roots(path: &Path, allowed_roots: &[PathBuf]) -> Result<PathBuf> {
-    let canonical =
-        std::fs::canonicalize(path).map_err(|e| anyhow!("canonicalize {}: {e}", path.display()))?;
-    if path_in_allowed_roots(&canonical, allowed_roots) {
-        Ok(canonical)
-    } else {
-        Err(anyhow!(
+    match canonicalize_in_allowed_roots_with_error(path, allowed_roots) {
+        Ok(path) => Ok(path),
+        Err(CanonicalizeInAllowedRootsError::OutsideScope { path }) => Err(anyhow!(
             "Refusing to access '{}' because it is outside the allowed filesystem scope",
-            canonical.display()
-        ))
+            path.display()
+        )),
+        Err(CanonicalizeInAllowedRootsError::Canonicalize { path, source }) => {
+            Err(anyhow::Error::new(source)).context(format!("canonicalize {}", path.display()))
+        }
     }
 }
 
