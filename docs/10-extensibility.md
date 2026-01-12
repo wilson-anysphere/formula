@@ -52,7 +52,7 @@ the primary boundaries are the WebView’s own process sandbox + the extension w
 The desktop implements a small, VS Code-inspired subset of `when` syntax for menus/keybindings:
 
 - Operators: `&&`, `||`, `!`, parentheses
-- Identifiers (context keys): `sheetName`, `cellHasValue`, `selectionType`, `activeCellA1`, `commentsPanelVisible`, …
+- Identifiers (context keys): `sheetName`, `cellHasValue`, `selectionType`, `activeCellA1`, `commentsPanelVisible`, `cellHasComment`, …
 - Equality: `==` / `!=` against string/number/boolean literals
 
 Built-in keys (desktop UI):
