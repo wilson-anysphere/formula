@@ -110,8 +110,11 @@ fn discover_cell_images_part(pkg: &XlsxPackage) -> Result<Option<String>> {
                     continue;
                 }
 
-                if rel.target.to_ascii_lowercase().ends_with("cellimages.xml") {
-                    let candidate = resolve_target(WORKBOOK_PART, &rel.target);
+                // Relationship targets are URIs; some producers include a fragment (e.g.
+                // `cellimages.xml#something`). OPC part names do not include fragments.
+                let target = rel.target.split('#').next().unwrap_or(rel.target.as_str());
+                if target.to_ascii_lowercase().ends_with("cellimages.xml") {
+                    let candidate = resolve_target(WORKBOOK_PART, target);
                     if pkg.part(&candidate).is_some() {
                         return Ok(Some(candidate));
                     }
@@ -214,9 +217,11 @@ fn parse_cell_images_image_relationships(
         {
             continue;
         }
+        // Be conservative: only resolve image relationships.
         if !rel.type_uri.eq_ignore_ascii_case(IMAGE_REL_TYPE) {
             continue;
         }
+
         let mut target_part = resolve_target(cell_images_part, &rel.target);
         // Some producers emit targets like `../media/image1.png` for workbook-level parts such as
         // `xl/cellimages.xml`, which resolves to `media/image1.png` with strict URI resolution.
