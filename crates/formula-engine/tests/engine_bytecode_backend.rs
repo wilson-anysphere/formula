@@ -782,14 +782,55 @@ fn bytecode_backend_let_supports_reference_bindings() {
 }
 
 #[test]
-fn bytecode_backend_rejects_let_range_bindings_that_spill() {
+fn bytecode_backend_let_supports_range_bindings_when_consumed_by_sum() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=LET(r, A1:A2, SUM(r))")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+    assert_engine_matches_ast(&engine, "=LET(r, A1:A2, SUM(r))", "B1");
+}
+
+#[test]
+fn bytecode_backend_let_supports_array_literal_bindings_when_consumed_by_sum() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(a, {1,2;3,4}, SUM(a))")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(10.0));
+    assert_engine_matches_ast(&engine, "=LET(a, {1,2;3,4}, SUM(a))", "A1");
+}
+
+#[test]
+fn bytecode_backend_sum_can_consume_array_literal_returned_from_let() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SUM(LET(a, {1,2;3,4}, a))")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(10.0));
+    assert_engine_matches_ast(&engine, "=SUM(LET(a, {1,2;3,4}, a))", "A1");
+}
+
+#[test]
+fn bytecode_backend_supports_let_range_bindings_that_spill() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
     engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
     engine
         .set_cell_formula("Sheet1", "B1", "=LET(r, A1:A2, r)")
         .unwrap();
-    assert_eq!(engine.bytecode_program_count(), 0);
+    assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));

@@ -6440,8 +6440,20 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BytecodeLocalBindingKind {
+    /// Scalar value (number/text/bool/empty/error).
+    Scalar,
+    /// Range reference value.
+    Range,
+    /// Array literal constant value.
+    ///
+    /// Note: bytecode array literals are currently numeric-only (f64 + NaN for blanks/non-numeric).
+    ArrayLiteral,
+}
+
 fn bytecode_expr_is_eligible(expr: &bytecode::Expr) -> bool {
-    let mut lexical_scopes: Vec<HashSet<Arc<str>>> = Vec::new();
+    let mut lexical_scopes: Vec<HashMap<Arc<str>, BytecodeLocalBindingKind>> = Vec::new();
     // Top-level formulas use dynamic reference dereference, so range references are eligible and
     // may spill (e.g. `=A1:A3` / `=A1:A3+1`).
     bytecode_expr_is_eligible_inner(expr, true, false, &mut lexical_scopes)
@@ -6556,10 +6568,13 @@ fn bytecode_expr_is_eligible_inner(
     expr: &bytecode::Expr,
     allow_range: bool,
     allow_array_literals: bool,
-    lexical_scopes: &mut Vec<HashSet<Arc<str>>>,
+    lexical_scopes: &mut Vec<HashMap<Arc<str>, BytecodeLocalBindingKind>>,
 ) -> bool {
-    fn name_is_local(scopes: &[HashSet<Arc<str>>], name: &Arc<str>) -> bool {
-        scopes.iter().rev().any(|scope| scope.contains(name))
+    fn local_binding_kind(
+        scopes: &[HashMap<Arc<str>, BytecodeLocalBindingKind>],
+        name: &Arc<str>,
+    ) -> Option<BytecodeLocalBindingKind> {
+        scopes.iter().rev().find_map(|scope| scope.get(name).copied())
     }
 
     match expr {
@@ -6583,7 +6598,12 @@ fn bytecode_expr_is_eligible_inner(
         bytecode::Expr::SpillRange(inner) => {
             allow_range && bytecode_expr_is_eligible_inner(inner, true, false, lexical_scopes)
         }
-        bytecode::Expr::NameRef(name) => name_is_local(lexical_scopes, name),
+        bytecode::Expr::NameRef(name) => match local_binding_kind(lexical_scopes, name) {
+            Some(BytecodeLocalBindingKind::Scalar) => true,
+            Some(BytecodeLocalBindingKind::Range) => allow_range,
+            Some(BytecodeLocalBindingKind::ArrayLiteral) => allow_array_literals,
+            None => false,
+        },
         bytecode::Expr::MultiRangeRef(_) => allow_range,
         bytecode::Expr::Unary { op, expr } => match op {
             bytecode::ast::UnaryOp::Plus | bytecode::ast::UnaryOp::Neg => {
@@ -6670,7 +6690,7 @@ fn bytecode_expr_is_eligible_inner(
                     return false;
                 }
 
-                lexical_scopes.push(HashSet::new());
+                lexical_scopes.push(HashMap::new());
 
                 for pair in args[..args.len() - 1].chunks_exact(2) {
                     let bytecode::Expr::NameRef(name) = &pair[0] else {
@@ -6681,27 +6701,51 @@ fn bytecode_expr_is_eligible_inner(
                         lexical_scopes.pop();
                         return false;
                     }
-                    // Disallow ranges and array literals within LET bindings for now:
-                    // - Range bindings can spill (`LET(r, A1:A2, r)`) and are not yet supported
-                    //   in the bytecode backend.
-                    // - Array literal lowering is numeric-only and we do not yet track array-typed
-                    //   locals through LET.
-                    if !bytecode_expr_is_eligible_inner(&pair[1], false, false, lexical_scopes) {
+
+                    // LET bindings can hold scalars, ranges, and array literals. We only need to
+                    // ensure the overall LET expression remains non-spilling in scalar contexts;
+                    // that is enforced by the `NameRef` eligibility check, which gates range/array
+                    // locals based on the `allow_range` / `allow_array_literals` flags.
+                    if !bytecode_expr_is_eligible_inner(&pair[1], true, true, lexical_scopes) {
                         lexical_scopes.pop();
                         return false;
                     }
+
+                    let kind = match &pair[1] {
+                        bytecode::Expr::RangeRef(_) | bytecode::Expr::MultiRangeRef(_) => {
+                            BytecodeLocalBindingKind::Range
+                        }
+                        bytecode::Expr::Literal(bytecode::Value::Array(_)) => {
+                            BytecodeLocalBindingKind::ArrayLiteral
+                        }
+                        bytecode::Expr::Literal(bytecode::Value::MultiRange(_)) => {
+                            BytecodeLocalBindingKind::Range
+                        }
+                        bytecode::Expr::Unary { op, .. }
+                            if matches!(op, bytecode::ast::UnaryOp::ImplicitIntersection) =>
+                        {
+                            BytecodeLocalBindingKind::Scalar
+                        }
+                        bytecode::Expr::NameRef(other) => {
+                            local_binding_kind(lexical_scopes, other)
+                                .unwrap_or(BytecodeLocalBindingKind::Scalar)
+                        }
+                        _ => BytecodeLocalBindingKind::Scalar,
+                    };
+
                     lexical_scopes
                         .last_mut()
                         .expect("pushed scope")
-                        .insert(name.clone());
+                        .insert(name.clone(), kind);
                 }
 
-                // Similarly, keep array literals ineligible in the LET body until the bytecode
-                // backend can represent typed/mixed arrays and propagate them through locals.
+                // LET can return scalars, ranges, or array literals depending on context:
+                // - Range references are gated by `allow_range`.
+                // - Array literals are gated by `allow_array_literals`.
                 let ok = bytecode_expr_is_eligible_inner(
                     &args[args.len() - 1],
                     allow_range,
-                    false,
+                    allow_array_literals,
                     lexical_scopes,
                 );
                 lexical_scopes.pop();
