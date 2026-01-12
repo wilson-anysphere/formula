@@ -3155,9 +3155,6 @@ export class SpreadsheetApp {
     // Charts should scroll with the grid but stay clipped under headers.
     this.chartLayer.style.left = `${this.rowHeaderWidth}px`;
     this.chartLayer.style.top = `${this.colHeaderHeight}px`;
-    this.chartLayer.style.right = "0";
-    this.chartLayer.style.bottom = "0";
-    this.chartLayer.style.overflow = "hidden";
 
     this.clampScroll();
     this.syncScrollbars();
@@ -3594,9 +3591,6 @@ export class SpreadsheetApp {
     // quadrants to mimic Excel behavior (objects are constrained to their pane).
     this.chartLayer.style.left = `${headerWidthClamped}px`;
     this.chartLayer.style.top = `${headerHeightClamped}px`;
-    this.chartLayer.style.right = "0";
-    this.chartLayer.style.bottom = "0";
-    this.chartLayer.style.overflow = "hidden";
 
     const applyPaneRect = (pane: HTMLDivElement, rect: { x: number; y: number; width: number; height: number }) => {
       pane.style.left = `${rect.x}px`;
@@ -3780,9 +3774,7 @@ export class SpreadsheetApp {
         host = document.createElement("div");
         host.setAttribute("data-testid", "chart-object");
         host.dataset.chartId = chart.id;
-        host.style.position = "absolute";
-        host.style.pointerEvents = "none";
-        host.style.overflow = "hidden";
+        host.className = "chart-object";
         this.chartElements.set(chart.id, host);
         container.appendChild(host);
       } else if (host.parentElement !== container) {

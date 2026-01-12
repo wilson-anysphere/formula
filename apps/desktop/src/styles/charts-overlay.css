@@ -8,6 +8,22 @@
   height: 0;
 }
 
+/* The outer chart overlay should be clipped to the grid body (under headers). */
+.chart-layer {
+  overflow: hidden;
+}
+
+/* Individual chart host elements (positioned within the chart overlay). */
+.chart-object {
+  position: absolute;
+  pointer-events: none;
+  overflow: hidden;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+}
+
 /* Modifier classes exist for debugging hooks / future styling extensions. */
 .chart-pane--top-left,
 .chart-pane--top-right,
@@ -15,4 +31,3 @@
 .chart-pane--bottom-right {
   /* no-op */
 }
-
