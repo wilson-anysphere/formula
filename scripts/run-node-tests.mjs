@@ -217,7 +217,11 @@ async function filterExternalDependencyTests(files) {
   const visiting = new Set();
   const builtins = new Set(builtinModules);
 
-  const importFromRe = /\b(?:import|export)\s+(?:type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
+  // Treat `import type ... from "..."` / `export type ... from "..."` as *type-only* when
+  // deciding whether a test can run without external deps. These statements are erased by
+  // TypeScript (and Node's `--experimental-strip-types`) and do not create runtime module
+  // dependencies.
+  const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
   const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
   const dynamicImportRe = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
   const requireCallRe = /\brequire\(\s*["']([^"']+)["']\s*\)/g;
@@ -405,7 +409,11 @@ async function filterExternalDependencyTests(files) {
     /** @type {string[]} */
     const specifiers = [];
     for (const match of text.matchAll(importFromRe)) {
-      specifiers.push(match[1]);
+      const typeOnly = Boolean(match[1]);
+      const specifier = match[2];
+      if (!specifier) continue;
+      if (typeOnly) continue;
+      specifiers.push(specifier);
     }
     for (const match of text.matchAll(sideEffectImportRe)) {
       specifiers.push(match[1]);
