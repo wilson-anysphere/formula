@@ -146,8 +146,6 @@ import {
 } from "./tauri/startupMetrics.js";
 import { openExternalHyperlink } from "./hyperlinks/openExternal.js";
 import { clampUsedRange, resolveWorkbookLoadLimits } from "./workbook/load/clampUsedRange.js";
-import { createDesktopDlpContext } from "./dlp/desktopDlp.js";
-import { enforceClipboardCopy } from "./dlp/enforceClipboardCopy.js";
 
 // Best-effort: older desktop builds persisted provider selection + API keys in localStorage.
 // Cursor desktop no longer supports user-provided keys; proactively delete stale secrets on startup.
