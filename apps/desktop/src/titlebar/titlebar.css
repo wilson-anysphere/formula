@@ -50,7 +50,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-surface);
-  color: var(--text-primary);
+  color: var(--text-secondary);
 
   cursor: pointer;
   transition:
@@ -61,6 +61,7 @@
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__quick-access-button:hover:not(:disabled) {
   background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__quick-access-button:focus-visible {
