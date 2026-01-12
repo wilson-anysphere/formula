@@ -1,4 +1,93 @@
-import { EventEmitter } from "node:events";
+/**
+ * Minimal EventEmitter implementation that works in both browser and Node
+ * runtimes.
+ *
+ * The versioning package is consumed by the desktop/web UI bundles (Vite), so we
+ * cannot depend on Node built-ins like `node:events` here.
+ *
+ * Only the small subset of the Node EventEmitter API that we rely on is
+ * implemented (`on`, `off`/`removeListener`, `once`, `emit`).
+ */
+class SimpleEventEmitter {
+  constructor() {
+    /** @type {Map<string, Set<(...args: any[]) => void>>} */
+    this._listeners = new Map();
+  }
+
+  /**
+   * @param {string} event
+   * @param {(...args: any[]) => void} listener
+   */
+  on(event, listener) {
+    let set = this._listeners.get(event);
+    if (!set) {
+      set = new Set();
+      this._listeners.set(event, set);
+    }
+    set.add(listener);
+    return this;
+  }
+
+  /**
+   * Alias for Node compatibility.
+   */
+  addListener(event, listener) {
+    return this.on(event, listener);
+  }
+
+  /**
+   * @param {string} event
+   * @param {(...args: any[]) => void} listener
+   */
+  off(event, listener) {
+    const set = this._listeners.get(event);
+    if (!set) return this;
+    set.delete(listener);
+    if (set.size === 0) this._listeners.delete(event);
+    return this;
+  }
+
+  /**
+   * Alias for Node compatibility.
+   */
+  removeListener(event, listener) {
+    return this.off(event, listener);
+  }
+
+  /**
+   * @param {string} event
+   * @param {(...args: any[]) => void} listener
+   */
+  once(event, listener) {
+    const wrapped = (...args) => {
+      this.off(event, wrapped);
+      listener(...args);
+    };
+    return this.on(event, wrapped);
+  }
+
+  /**
+   * @param {string} event
+   * @param  {...any} args
+   */
+  emit(event, ...args) {
+    const set = this._listeners.get(event);
+    if (!set || set.size === 0) return false;
+    // Snapshot so listeners can mutate subscriptions safely.
+    for (const listener of Array.from(set)) {
+      try {
+        listener(...args);
+      } catch (err) {
+        // Avoid crashing the app due to a listener; surface the failure asynchronously
+        // like many event emitter implementations do.
+        queueMicrotask(() => {
+          throw err;
+        });
+      }
+    }
+    return true;
+  }
+}
 
 /**
  * @typedef {{ userId: string, userName: string }} UserInfo
@@ -47,7 +136,7 @@ import { EventEmitter } from "node:events";
  * document-agnostic (VersionedDoc adapter) so it can be used with a Yjs doc in
  * production and a lightweight fake doc in tests.
  */
-export class VersionManager extends EventEmitter {
+export class VersionManager extends SimpleEventEmitter {
   /**
    * @param {{
    *   doc: VersionedDoc;

@@ -21,7 +21,9 @@ import type { CollabSession } from "@formula/collab-session";
 import { buildVersionHistoryItems } from "./version-history/index.js";
 import { BranchManagerPanel, type Actor as BranchActor } from "./branch-manager/BranchManagerPanel.js";
 import { MergeBranchPanel } from "./branch-manager/MergeBranchPanel.js";
-import { BranchService, YjsBranchStore, applyDocumentStateToYjsDoc, yjsDocToDocumentState } from "../../../../packages/versioning/branches/src/index.js";
+import { BranchService } from "../../../../packages/versioning/branches/src/BranchService.js";
+import { YjsBranchStore } from "../../../../packages/versioning/branches/src/store/YjsBranchStore.js";
+import { applyDocumentStateToYjsDoc, yjsDocToDocumentState } from "../../../../packages/versioning/branches/src/yjs/index.js";
 import { getMarketplaceBaseUrl } from "./marketplace/getMarketplaceBaseUrl.js";
 import { MarketplaceClient, WebExtensionManager } from "@formula/extension-marketplace";
 

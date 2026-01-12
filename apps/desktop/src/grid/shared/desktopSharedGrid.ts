@@ -372,6 +372,10 @@ export class DesktopSharedGrid {
 
   setPerfStatsEnabled(enabled: boolean): void {
     this.renderer.setPerfStatsEnabled(enabled);
+    // Perf stats are drawn as part of the grid content layer, which only repaints
+    // when there are dirty regions. Force a repaint so toggling via the Ribbon
+    // updates immediately even when the grid is otherwise idle.
+    this.renderer.markAllDirty();
   }
 
   setSelectionRanges(
