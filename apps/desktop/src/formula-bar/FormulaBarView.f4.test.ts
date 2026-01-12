@@ -48,8 +48,8 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
 
     expect(view.textarea.value).toBe("=$A$1");
     expect(view.model.draft).toBe("=$A$1");
-    // Keep the toggled token selected so repeated F4 presses keep cycling it.
-    expect(view.textarea.selectionStart).toBe(1);
+    // Caret remains at the end of the token after expansion.
+    expect(view.textarea.selectionStart).toBe(5);
     expect(view.textarea.selectionEnd).toBe(5);
 
     host.remove();
