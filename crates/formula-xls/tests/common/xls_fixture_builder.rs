@@ -286,7 +286,26 @@ pub fn build_defined_names_quoting_fixture_xls() -> Vec<u8> {
 /// This fixture is intended to validate the importer’s calamine `Reader::defined_names()` fallback
 /// path (i.e. when BIFF workbook parsing is unavailable).
 pub fn build_defined_name_calamine_fixture_xls() -> Vec<u8> {
-    let workbook_stream = build_defined_name_calamine_workbook_stream();
+    let workbook_stream = build_defined_name_calamine_workbook_stream_with_sheet_name("Sheet1");
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture where the sheet name is invalid and will be sanitized by the
+/// importer, but a calamine-surfaced defined name still references the original name.
+///
+/// This is used to verify that calamine fallback defined-name formulas are rewritten after
+/// sheet-name sanitization, matching the cell formula rewrite behavior.
+pub fn build_defined_name_sheet_name_sanitization_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_defined_name_calamine_workbook_stream_with_sheet_name("Bad:Name");
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -1488,7 +1507,7 @@ fn build_defined_names_quoting_workbook_stream() -> Vec<u8> {
     globals
 }
 
-fn build_defined_name_calamine_workbook_stream() -> Vec<u8> {
+fn build_defined_name_calamine_workbook_stream_with_sheet_name(sheet_name: &str) -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
     push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
@@ -1510,7 +1529,7 @@ fn build_defined_name_calamine_workbook_stream() -> Vec<u8> {
     let mut boundsheet = Vec::<u8>::new();
     boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
     boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
-    write_short_unicode_string(&mut boundsheet, "Sheet1");
+    write_short_unicode_string(&mut boundsheet, sheet_name);
     push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
     let boundsheet_offset_pos = boundsheet_start + 4;
 
@@ -1528,7 +1547,7 @@ fn build_defined_name_calamine_workbook_stream() -> Vec<u8> {
     // Minimal EXTERNSHEET table with a single internal sheet entry.
     push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
 
-    // One workbook-scoped defined name: TestName -> Sheet1!$A$1:$A$1.
+    // One workbook-scoped defined name: TestName -> <sheet_name>!$A$1:$A$1.
     let rgce = ptg_area3d(0, 0, 0, 0, 0);
     push_record(
         &mut globals,

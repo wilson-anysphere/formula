@@ -151,3 +151,27 @@ fn imports_workbook_defined_names_via_calamine_fallback_when_biff_unavailable() 
     assert_eq!(name.scope, DefinedNameScope::Workbook);
     assert_eq!(name.refers_to, "Sheet1!$A$1:$A$1");
 }
+
+#[test]
+fn rewrites_calamine_defined_name_formulas_to_sanitized_sheet_names() {
+    let bytes = xls_fixture_builder::build_defined_name_sheet_name_sanitization_fixture_xls();
+    let result = import_fixture_without_biff(&bytes);
+
+    assert!(
+        result.workbook.sheet_by_name("Bad:Name").is_none(),
+        "expected invalid sheet name to be sanitized"
+    );
+    assert!(
+        result.workbook.sheet_by_name("Bad_Name").is_some(),
+        "expected sanitized sheet to be present"
+    );
+
+    let name = result
+        .workbook
+        .defined_names
+        .iter()
+        .find(|n| n.name == "TestName")
+        .unwrap_or_else(|| panic!("TestName missing; defined_names={:?}", result.workbook.defined_names));
+    assert_eq!(name.scope, DefinedNameScope::Workbook);
+    assert_eq!(name.refers_to, "Bad_Name!$A$1:$A$1");
+}
