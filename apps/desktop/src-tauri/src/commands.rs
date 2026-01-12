@@ -644,6 +644,8 @@ pub async fn power_query_credential_set(
     scope_key: String,
     secret: JsonValue,
 ) -> Result<PowerQueryCredentialEntry, String> {
+    crate::power_query_validation::validate_power_query_credential_payload(&scope_key, &secret)
+        .map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryCredentialStore::open_default().map_err(|e| e.to_string())?;
         store.set(&scope_key, secret).map_err(|e| e.to_string())
@@ -697,6 +699,8 @@ pub async fn power_query_refresh_state_set(
     workbook_id: String,
     state: JsonValue,
 ) -> Result<(), String> {
+    crate::power_query_validation::validate_power_query_refresh_state_payload(&state)
+        .map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let store = PowerQueryRefreshStateStore::open_default().map_err(|e| e.to_string())?;
         store.save(&workbook_id, state).map_err(|e| e.to_string())
@@ -724,12 +728,21 @@ pub fn power_query_state_get(state: State<'_, SharedAppState>) -> Option<String>
 /// persist it to disk until the workbook is saved.
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub fn power_query_state_set(xml: Option<String>, state: State<'_, SharedAppState>) {
+pub fn power_query_state_set(
+    xml: Option<String>,
+    state: State<'_, SharedAppState>,
+) -> Result<(), String> {
+    if let Some(xml) = xml.as_deref() {
+        crate::power_query_validation::validate_power_query_xml_payload(xml)
+            .map_err(|e| e.to_string())?;
+    }
+
     let mut state = state.inner().lock().unwrap();
     let Ok(workbook) = state.get_workbook_mut() else {
-        return;
+        return Ok(());
     };
     workbook.power_query_xml = xml.map(String::into_bytes);
+    Ok(())
 }
 
 /// Execute a SQL query against a local database connection.
