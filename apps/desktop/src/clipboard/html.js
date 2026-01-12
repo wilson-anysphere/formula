@@ -96,7 +96,6 @@ function normalizeClipboardHtml(html) {
     }
     return null;
   };
-
   /** @type {TextDecoder | null | undefined} */
   let cachedUtf8Decoder;
   const getUtf8Decoder = () => {

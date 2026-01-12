@@ -241,12 +241,16 @@ test("clipboard HTML honors CF_HTML offsets when payload has leading NUL padding
 });
 
 test("clipboard HTML tolerates leading NUL padding when CF_HTML offsets do not include it", () => {
-  const cfHtml = `\u0000${buildCfHtmlPayload("<table><tr><td>RIGHT</td></tr></table>", {
+  // Some clipboard bridges strip leading NUL bytes before computing CF_HTML offsets, while others
+  // include them. Ensure we handle both by trying offset extraction against both the raw payload
+  // and a version with leading NULs removed.
+  const base = buildCfHtmlPayload("<table><tr><td>RIGHT</td></tr></table>", {
     beforeFragmentHtml: "<table><tr><td>WRONG</td></tr></table>",
     includeFragmentMarkers: false,
     offsets: "bytes",
-  })}`;
+  });
 
+  const cfHtml = `\u0000${base}`;
   const grid = parseHtmlToCellGrid(cfHtml);
   assert.ok(grid);
   assert.equal(grid[0][0].value, "RIGHT");
