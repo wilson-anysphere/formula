@@ -824,5 +824,20 @@ mod tests {
             rich_model_cell_value_to_sort_value(&record_display_field_image),
             Some(CellValue::Text("Logo".to_string()))
         );
+
+        let record_display_field_image_no_alt: ModelCellValue = serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "displayField": "logo",
+                "fields": {
+                    "logo": { "type": "image", "value": { "imageId": "logo.png" } }
+                }
+            }
+        }))
+        .expect("record should deserialize");
+        assert_eq!(
+            rich_model_cell_value_to_sort_value(&record_display_field_image_no_alt),
+            Some(CellValue::Text("[Image]".to_string()))
+        );
     }
 }
