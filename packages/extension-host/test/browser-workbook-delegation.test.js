@@ -317,6 +317,97 @@ test("BrowserExtensionHost: workbook.saveAs delegates to spreadsheetApi and emit
   });
 });
 
+test("BrowserExtensionHost: workbook.saveAs permission denial does not call spreadsheetApi or emit beforeSave", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let saveAsCalls = 0;
+  const sheets = [{ id: "sheet1", name: "Sheet1" }];
+  const activeSheet = sheets[0];
+
+  /** @type {any} */
+  let beforeSave;
+  /** @type {any} */
+  let apiError;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "event" && msg.event === "beforeSave") {
+          beforeSave = msg.data;
+          return;
+        }
+        if (msg?.type === "api_error" && msg.id === "req1") {
+          apiError = msg.error;
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      listSheets() {
+        return sheets;
+      },
+      getActiveSheet() {
+        return activeSheet;
+      },
+      async saveWorkbookAs() {
+        saveAsCalls += 1;
+      },
+    },
+    permissionPrompt: async () => false,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-saveas-permission-denied";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-saveas-permission-denied/",
+    mainUrl: "memory://workbook-saveas-permission-denied/main.mjs",
+    manifest: {
+      name: "workbook-saveas-permission-denied",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+  extension.active = true;
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "saveAs",
+    args: ["/tmp/test.xlsx"],
+  });
+
+  await done;
+
+  assert.equal(saveAsCalls, 0);
+  assert.equal(beforeSave, undefined);
+  assert.equal(apiError?.name, "PermissionError");
+  assert.equal(apiError?.message, "Permission denied: workbook.manage");
+});
+
 test("BrowserExtensionHost: workbook.saveAs rejects whitespace-only paths", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
@@ -724,6 +815,101 @@ test("BrowserExtensionHost: workbook.openWorkbook delegates to spreadsheetApi an
       activeSheet,
     },
   });
+});
+
+test("BrowserExtensionHost: workbook.openWorkbook permission denial does not call spreadsheetApi or emit workbookOpened", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let openCalls = 0;
+  const sheets = [{ id: "sheet1", name: "Sheet1" }];
+  const activeSheet = sheets[0];
+  const active = { name: "Initial", path: "/tmp/initial.xlsx" };
+
+  /** @type {any} */
+  let apiError;
+  /** @type {any} */
+  let workbookOpened;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "event" && msg.event === "workbookOpened") {
+          workbookOpened = msg.data;
+          return;
+        }
+        if (msg?.type === "api_error" && msg.id === "req1") {
+          apiError = msg.error;
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      listSheets() {
+        return sheets;
+      },
+      getActiveSheet() {
+        return activeSheet;
+      },
+      async getActiveWorkbook() {
+        return active;
+      },
+      async openWorkbook() {
+        openCalls += 1;
+      },
+    },
+    permissionPrompt: async () => false,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-open-permission-denied";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-open-permission-denied/",
+    mainUrl: "memory://workbook-open-permission-denied/main.mjs",
+    manifest: {
+      name: "workbook-open-permission-denied",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+  extension.active = true;
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "openWorkbook",
+    args: ["/tmp/opened.xlsx"],
+  });
+
+  await done;
+
+  assert.equal(openCalls, 0);
+  assert.equal(workbookOpened, undefined);
+  assert.equal(apiError?.name, "PermissionError");
+  assert.equal(apiError?.message, "Permission denied: workbook.manage");
 });
 
 test("BrowserExtensionHost: workbook.openWorkbook cancellation does not emit workbookOpened", async (t) => {
