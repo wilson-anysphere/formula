@@ -393,6 +393,17 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                             .unwrap_or(formula_model::ErrorValue::Unknown);
                                         CellValue::Error(err)
                                     }),
+                                "image" => {
+                                    let alt_text = display_value.get("value").and_then(|value| {
+                                        value
+                                            .get("altText")
+                                            .or_else(|| value.get("alt_text"))
+                                            .and_then(|v| v.as_str())
+                                    });
+                                    let display =
+                                        alt_text.filter(|s| !s.is_empty()).unwrap_or("[Image]");
+                                    Some(CellValue::Text(display.to_string()))
+                                }
                                 "rich_text" => display_value
                                     .get("value")
                                     .and_then(|v| v.get("text"))
@@ -421,9 +432,9 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                                  _ => None,
                              };
 
-                             if parsed.is_some() {
-                                 return parsed;
-                             }
+                            if parsed.is_some() {
+                                return parsed;
+                            }
                         }
                     }
                 }
