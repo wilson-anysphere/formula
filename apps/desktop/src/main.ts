@@ -3874,9 +3874,12 @@ if (
       applyFormattingToSelection(
         "Format Cells",
         (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, patch, { label: "Format Cells" });
+            const ok = doc.setRangeFormat(sheetId, range, patch, { label: "Format Cells" });
+            if (ok === false) applied = false;
           }
+          return applied;
         },
         { forceBatch: true },
       );
@@ -6093,9 +6096,12 @@ mountRibbon(ribbonReactRoot, {
         return;
       case "home.font.strikethrough":
         applyFormattingToSelection("Strikethrough", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { font: { strike: pressed } }, { label: "Strikethrough" });
+            const ok = doc.setRangeFormat(sheetId, range, { font: { strike: pressed } }, { label: "Strikethrough" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       case "home.alignment.wrapText":
@@ -6428,10 +6434,13 @@ mountRibbon(ribbonReactRoot, {
         applyFormattingToSelection(
           "Clear all",
           (doc, sheetId, ranges) => {
+            let applied = true;
             for (const range of ranges) {
               doc.clearRange(sheetId, range, { label: "Clear all" });
-              doc.setRangeFormat(sheetId, range, null, { label: "Clear all" });
+              const ok = doc.setRangeFormat(sheetId, range, null, { label: "Clear all" });
+              if (ok === false) applied = false;
             }
+            return applied;
           },
           { forceBatch: true },
         );
@@ -6446,9 +6455,12 @@ mountRibbon(ribbonReactRoot, {
       const defaultBorderColor = ["#", "FF", "000000"].join("");
       if (kind === "none") {
         applyFormattingToSelection("Borders", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { border: null }, { label: "Borders" });
+            const ok = doc.setRangeFormat(sheetId, range, { border: null }, { label: "Borders" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       }
@@ -6464,6 +6476,11 @@ mountRibbon(ribbonReactRoot, {
         applyFormattingToSelection(
           "Borders",
           (doc, sheetId, ranges) => {
+            let applied = true;
+            const applyBorder = (targetRange: CellRange, patch: Record<string, any> | null) => {
+              const ok = doc.setRangeFormat(sheetId, targetRange, patch, { label: "Borders" });
+              if (ok === false) applied = false;
+            };
             for (const range of ranges) {
               const startRow = range.start.row;
               const endRow = range.end.row;
@@ -6471,37 +6488,18 @@ mountRibbon(ribbonReactRoot, {
               const endCol = range.end.col;
 
               // Top edge.
-              doc.setRangeFormat(
-                sheetId,
-                { start: { row: startRow, col: startCol }, end: { row: startRow, col: endCol } },
-                { border: { top: edge } },
-                { label: "Borders" },
-              );
+              applyBorder({ start: { row: startRow, col: startCol }, end: { row: startRow, col: endCol } }, { border: { top: edge } });
 
               // Bottom edge.
-              doc.setRangeFormat(
-                sheetId,
-                { start: { row: endRow, col: startCol }, end: { row: endRow, col: endCol } },
-                { border: { bottom: edge } },
-                { label: "Borders" },
-              );
+              applyBorder({ start: { row: endRow, col: startCol }, end: { row: endRow, col: endCol } }, { border: { bottom: edge } });
 
               // Left edge.
-              doc.setRangeFormat(
-                sheetId,
-                { start: { row: startRow, col: startCol }, end: { row: endRow, col: startCol } },
-                { border: { left: edge } },
-                { label: "Borders" },
-              );
+              applyBorder({ start: { row: startRow, col: startCol }, end: { row: endRow, col: startCol } }, { border: { left: edge } });
 
               // Right edge.
-              doc.setRangeFormat(
-                sheetId,
-                { start: { row: startRow, col: endCol }, end: { row: endRow, col: endCol } },
-                { border: { right: edge } },
-                { label: "Borders" },
-              );
+              applyBorder({ start: { row: startRow, col: endCol }, end: { row: endRow, col: endCol } }, { border: { right: edge } });
             }
+            return applied;
           },
           { forceBatch: true },
         );
@@ -6528,6 +6526,7 @@ mountRibbon(ribbonReactRoot, {
         applyFormattingToSelection(
           "Borders",
           (doc, sheetId, ranges) => {
+            let applied = true;
             for (const range of ranges) {
               const startRow = range.start.row;
               const endRow = range.end.row;
@@ -6549,8 +6548,10 @@ mountRibbon(ribbonReactRoot, {
                 }
               })();
 
-              doc.setRangeFormat(sheetId, targetRange, borderPatch, { label: "Borders" });
+              const ok = doc.setRangeFormat(sheetId, targetRange, borderPatch, { label: "Borders" });
+              if (ok === false) applied = false;
             }
+            return applied;
           },
           { forceBatch: true },
         );
@@ -6563,17 +6564,23 @@ mountRibbon(ribbonReactRoot, {
       const kind = commandId.slice(numberFormatPrefix.length);
       if (kind === "general") {
         applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { numberFormat: null }, { label: "Number format" });
+            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: null }, { label: "Number format" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       }
       if (kind === "number") {
         applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { numberFormat: "0.00" }, { label: "Number format" });
+            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "0.00" }, { label: "Number format" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       }
@@ -6593,33 +6600,45 @@ mountRibbon(ribbonReactRoot, {
       }
       if (kind === "time") {
         applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { numberFormat: "h:mm:ss" }, { label: "Number format" });
+            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "h:mm:ss" }, { label: "Number format" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       }
       if (kind === "fraction") {
         applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { numberFormat: "# ?/?" }, { label: "Number format" });
+            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "# ?/?" }, { label: "Number format" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       }
       if (kind === "scientific") {
         applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { numberFormat: "0.00E+00" }, { label: "Number format" });
+            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "0.00E+00" }, { label: "Number format" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       }
       if (kind === "text") {
         applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { numberFormat: "@" }, { label: "Number format" });
+            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "@" }, { label: "Number format" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       }
@@ -6644,9 +6663,12 @@ mountRibbon(ribbonReactRoot, {
       })();
 
       applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+        let applied = true;
         for (const range of ranges) {
-          doc.setRangeFormat(sheetId, range, { numberFormat: `${symbol}#,##0.00` }, { label: "Number format" });
+          const ok = doc.setRangeFormat(sheetId, range, { numberFormat: `${symbol}#,##0.00` }, { label: "Number format" });
+          if (ok === false) applied = false;
         }
+        return applied;
       });
       return;
     }
@@ -7036,24 +7058,33 @@ mountRibbon(ribbonReactRoot, {
         return;
       case "home.alignment.topAlign":
         applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { alignment: { vertical: "top" } }, { label: "Vertical align" });
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { vertical: "top" } }, { label: "Vertical align" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       case "home.alignment.middleAlign":
         applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
             // Spreadsheet vertical alignment uses "center" (Excel/OOXML); the grid maps this to CSS middle.
-            doc.setRangeFormat(sheetId, range, { alignment: { vertical: "center" } }, { label: "Vertical align" });
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { vertical: "center" } }, { label: "Vertical align" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       case "home.alignment.bottomAlign":
         applyFormattingToSelection("Vertical align", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { alignment: { vertical: "bottom" } }, { label: "Vertical align" });
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { vertical: "bottom" } }, { label: "Vertical align" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       case "home.alignment.center":
@@ -7064,38 +7095,53 @@ mountRibbon(ribbonReactRoot, {
         return;
       case "home.alignment.orientation.angleCounterclockwise":
         applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 45 } }, { label: "Text orientation" });
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 45 } }, { label: "Text orientation" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       case "home.alignment.orientation.angleClockwise":
         applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { alignment: { textRotation: -45 } }, { label: "Text orientation" });
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: -45 } }, { label: "Text orientation" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       case "home.alignment.orientation.verticalText":
         applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
             // Excel/OOXML uses 255 as a sentinel for vertical text (stacked).
-            doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 255 } }, { label: "Text orientation" });
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 255 } }, { label: "Text orientation" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       case "home.alignment.orientation.rotateUp":
         applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 90 } }, { label: "Text orientation" });
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 90 } }, { label: "Text orientation" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       case "home.alignment.orientation.rotateDown":
         applyFormattingToSelection("Text orientation", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { alignment: { textRotation: -90 } }, { label: "Text orientation" });
+            const ok = doc.setRangeFormat(sheetId, range, { alignment: { textRotation: -90 } }, { label: "Text orientation" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       case "home.alignment.orientation.formatCellAlignment":
@@ -7113,18 +7159,24 @@ mountRibbon(ribbonReactRoot, {
         return;
       case "home.number.comma":
         applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { numberFormat: "#,##0.00" }, { label: "Number format" });
+            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: "#,##0.00" }, { label: "Number format" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       case "home.number.increaseDecimal": {
         const next = stepDecimalPlacesInNumberFormat(activeCellNumberFormat(), "increase");
         if (!next) return;
         applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { numberFormat: next }, { label: "Number format" });
+            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: next }, { label: "Number format" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       }
@@ -7132,9 +7184,12 @@ mountRibbon(ribbonReactRoot, {
         const next = stepDecimalPlacesInNumberFormat(activeCellNumberFormat(), "decrease");
         if (!next) return;
         applyFormattingToSelection("Number format", (doc, sheetId, ranges) => {
+          let applied = true;
           for (const range of ranges) {
-            doc.setRangeFormat(sheetId, range, { numberFormat: next }, { label: "Number format" });
+            const ok = doc.setRangeFormat(sheetId, range, { numberFormat: next }, { label: "Number format" });
+            if (ok === false) applied = false;
           }
+          return applied;
         });
         return;
       }
