@@ -3493,34 +3493,14 @@ if (
 
   let extensionPanelBridge: ExtensionPanelBridge | null = null;
 
-  type ExtensionClipboardSelectionContext = {
-    sheetId: string;
-    startRow: number;
-    startCol: number;
-    endRow: number;
-    endCol: number;
-    timestampMs: number;
-  };
-
-  // Extensions can read selection values via `formula.cells.getSelection()` and then write arbitrary
-  // text to the system clipboard via `formula.clipboard.writeText()`. SpreadsheetApp's copy/cut
-  // handlers already enforce clipboard-copy DLP, but extensions would otherwise bypass it.
+  // Extensions can access spreadsheet data via `formula.cells.*` and `formula.events.*` and then write
+  // arbitrary text to the system clipboard via `formula.clipboard.writeText()`. SpreadsheetApp's
+  // copy/cut handlers already enforce clipboard-copy DLP, but extensions would otherwise bypass it.
   //
-  // Track the last selection returned to extensions and enforce clipboard-copy DLP on clipboard writes
-  // that occur shortly afterwards.
+  // The BrowserExtensionHost runtime tracks which ranges have been exposed to each extension
+  // (via `cells.getCell/getRange/getSelection` and event payloads) and forwards them through the
+  // `clipboardWriteGuard` hook so the desktop adapter can apply the same DLP policy.
   const extensionClipboardDlp = createDesktopDlpContext({ documentId: workbookId });
-  let lastExtensionSelection: ExtensionClipboardSelectionContext | null = null;
-
-  const clearLastExtensionSelection = () => {
-    lastExtensionSelection = null;
-  };
-
-  const recordLastExtensionSelection = (
-    sheetId: string,
-    range: { startRow: number; startCol: number; endRow: number; endCol: number },
-  ) => {
-    lastExtensionSelection = { sheetId, ...range, timestampMs: Date.now() };
-  };
 
   const normalizeSelectionRange = (range: { startRow: number; startCol: number; endRow: number; endCol: number }) => {
     const startRow = Math.min(range.startRow, range.endRow);
@@ -3528,6 +3508,79 @@ if (
     const startCol = Math.min(range.startCol, range.endCol);
     const endCol = Math.max(range.startCol, range.endCol);
     return { startRow, startCol, endRow, endCol };
+  };
+
+  const getClipboardDlpSelection = () => {
+    const sheetId = app.getCurrentSheetId();
+    const active = app.getActiveCell();
+    const activeRange = { startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
+    const ranges = app.getSelectionRanges?.() ?? [];
+    const normalizedRanges = ranges.map(normalizeSelectionRange);
+    const containing = normalizedRanges.find(
+      (r) => active.row >= r.startRow && active.row <= r.endRow && active.col >= r.startCol && active.col <= r.endCol,
+    );
+    // If selection state is somehow inconsistent, prefer the active cell (matches typical copy semantics).
+    const range = containing ?? activeRange;
+    return { sheetId, range };
+  };
+
+  const enforceExtensionClipboardDlpForRange = (params: {
+    sheetId: string;
+    range: { startRow: number; startCol: number; endRow: number; endCol: number };
+  }) => {
+    enforceClipboardCopy({
+      documentId: extensionClipboardDlp.documentId,
+      sheetId: params.sheetId,
+      range: {
+        start: { row: params.range.startRow, col: params.range.startCol },
+        end: { row: params.range.endRow, col: params.range.endCol },
+      },
+      classificationStore: extensionClipboardDlp.classificationStore,
+      policy: extensionClipboardDlp.policy,
+    });
+  };
+
+  const extensionClipboardWriteGuard = async (params: { extensionId: string; taintedRanges: any[] }) => {
+    try {
+      const selection = getClipboardDlpSelection();
+      enforceExtensionClipboardDlpForRange({ sheetId: selection.sheetId, range: selection.range });
+
+      const taintedRanges = Array.isArray(params.taintedRanges) ? params.taintedRanges : [];
+      for (const raw of taintedRanges) {
+        if (!raw || typeof raw !== "object") continue;
+        const sheetId = typeof (raw as any).sheetId === "string" ? String((raw as any).sheetId) : "";
+        if (!sheetId) continue;
+        const startRow = Number((raw as any).startRow);
+        const startCol = Number((raw as any).startCol);
+        const endRow = Number((raw as any).endRow);
+        const endCol = Number((raw as any).endCol);
+        if (![startRow, startCol, endRow, endCol].every((v) => Number.isFinite(v))) continue;
+
+        enforceExtensionClipboardDlpForRange({
+          sheetId,
+          range: normalizeSelectionRange({
+            startRow: Math.trunc(startRow),
+            startCol: Math.trunc(startCol),
+            endRow: Math.trunc(endRow),
+            endCol: Math.trunc(endCol),
+          }),
+        });
+      }
+    } catch (err) {
+      const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
+      if (isDlpViolation) {
+        try {
+          const message =
+            typeof (err as any)?.message === "string" && (err as any).message.trim()
+              ? String((err as any).message)
+              : "Clipboard copy blocked by data loss prevention policy.";
+          showToast(message, "error");
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
+      }
+      throw err;
+    }
   };
 
   // The desktop UI is used both inside the Tauri shell and as a pure-web fallback (e2e, local dev).
@@ -3774,7 +3827,6 @@ if (
         app.getSelectionRanges()[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
       );
       assertExtensionRangeWithinLimits(range, { label: "Selection" });
-      recordLastExtensionSelection(sheetId, range);
       const values: Array<Array<string | number | boolean | null>> = [];
       for (let r = range.startRow; r <= range.endRow; r++) {
         const row: Array<string | number | boolean | null> = [];
@@ -3789,7 +3841,6 @@ if (
     async getCell(row: number, col: number) {
       const sheetId = app.getCurrentSheetId();
       const cell = app.getDocument().getCell(sheetId, { row, col }) as any;
-      recordLastExtensionSelection(sheetId, { startRow: row, startCol: col, endRow: row, endCol: col });
       return normalizeExtensionCellValue(cell?.value ?? null);
     },
     async setCell(row: number, col: number, value: unknown) {
@@ -3799,7 +3850,6 @@ if (
     async getRange(ref: string) {
       const { sheetId, startRow, startCol, endRow, endCol } = parseSheetQualifiedRange(ref);
       assertExtensionRangeWithinLimits({ startRow, startCol, endRow, endCol });
-      recordLastExtensionSelection(sheetId, { startRow, startCol, endRow, endCol });
       const values: Array<Array<string | number | boolean | null>> = [];
       for (let r = startRow; r <= endRow; r++) {
         const row: Array<string | number | boolean | null> = [];
@@ -3910,6 +3960,7 @@ if (
   const extensionHostManager = new DesktopExtensionHostManager({
     engineVersion: "1.0.0",
     spreadsheetApi: extensionSpreadsheetApi,
+    clipboardWriteGuard: extensionClipboardWriteGuard,
     clipboardApi: {
       readText: async () => {
         const provider = await clipboardProviderPromise;
@@ -3917,22 +3968,8 @@ if (
         return text ?? "";
       },
       writeText: async (text: string) => {
-        if (lastExtensionSelection && Date.now() - lastExtensionSelection.timestampMs <= 2000) {
-          enforceClipboardCopy({
-            documentId: extensionClipboardDlp.documentId,
-            sheetId: lastExtensionSelection.sheetId,
-            range: {
-              start: { row: lastExtensionSelection.startRow, col: lastExtensionSelection.startCol },
-              end: { row: lastExtensionSelection.endRow, col: lastExtensionSelection.endCol },
-            },
-            classificationStore: extensionClipboardDlp.classificationStore,
-            policy: extensionClipboardDlp.policy,
-          });
-        }
-
         const provider = await clipboardProviderPromise;
         await provider.write({ text: String(text ?? "") });
-        clearLastExtensionSelection();
       },
     },
     uiApi: {

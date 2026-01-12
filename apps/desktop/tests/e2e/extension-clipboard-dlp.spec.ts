@@ -1,15 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { gotoDesktop } from "./helpers";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const repoRoot = path.resolve(__dirname, "../../../..");
-
-function viteFsUrl(absPath: string) {
-  return `/@fs${absPath}`;
-}
 
 async function grantExtensionPermissions(page: Page, extensionId: string, permissions: string[]): Promise<void> {
   await page.addInitScript(
@@ -77,8 +67,6 @@ async function assertClipboardSupportedOrSkip(page: Page): Promise<void> {
 
 test.describe("Extension clipboard DLP (taint tracking)", () => {
   test("blocks clipboard.writeText when the extension read-taint intersects a Restricted range", async ({ page }) => {
-    const extensionApiUrl = viteFsUrl(path.join(repoRoot, "packages/extension-api/index.mjs"));
-
     const extensionId = "formula-test.dlp-clipboard-block";
     const commandId = "dlpClipboard.blocked";
 
@@ -98,7 +86,7 @@ test.describe("Extension clipboard DLP (taint tracking)", () => {
     }, marker);
 
     const result = await page.evaluate(
-      async ({ extensionApiUrl, extensionId, commandId }) => {
+      async ({ extensionId, commandId }) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const manager: any = (window as any).__formulaExtensionHostManager;
         if (!manager?.host) throw new Error("Missing window.__formulaExtensionHostManager.host");
@@ -122,12 +110,13 @@ test.describe("Extension clipboard DLP (taint tracking)", () => {
         };
 
         const code = `
-          import * as formula from ${JSON.stringify(extensionApiUrl)};
           export async function activate(context) {
-            context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(commandId)}, async () => {
+            const api = globalThis[Symbol.for("formula.extensionApi.api")];
+            if (!api) throw new Error("Missing Formula extension API runtime");
+            context.subscriptions.push(await api.commands.registerCommand(${JSON.stringify(commandId)}, async () => {
               // Taint the A1 cell, then attempt to write to clipboard.
-              await formula.cells.getCell(0, 0);
-              await formula.clipboard.writeText("leak");
+              await api.cells.getCell(0, 0);
+              await api.clipboard.writeText("leak");
               return "wrote";
             }));
           }
@@ -162,7 +151,7 @@ test.describe("Extension clipboard DLP (taint tracking)", () => {
           URL.revokeObjectURL(mainUrl);
         }
       },
-      { extensionApiUrl, extensionId, commandId },
+      { extensionId, commandId },
     );
 
     expect(result.errorMessage).toContain("Clipboard copy is blocked");
@@ -176,8 +165,6 @@ test.describe("Extension clipboard DLP (taint tracking)", () => {
   test("allows clipboard.writeText when the extension did not read any cells (even if Restricted cells exist)", async ({
     page,
   }) => {
-    const extensionApiUrl = viteFsUrl(path.join(repoRoot, "packages/extension-api/index.mjs"));
-
     const extensionId = "formula-test.dlp-clipboard-allow";
     const commandId = "dlpClipboard.allowed";
 
@@ -191,13 +178,21 @@ test.describe("Extension clipboard DLP (taint tracking)", () => {
     await gotoDesktop(page);
     await assertClipboardSupportedOrSkip(page);
 
+    // Move off the Restricted cell so selection-based DLP enforcement doesn't block this test.
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      app.activateCell({ sheetId, row: 0, col: 1 }); // B1
+    });
+
     const marker = `__formula_clipboard_marker__${Math.random().toString(16).slice(2)}`;
     await page.evaluate(async (marker) => {
       await navigator.clipboard.writeText(marker);
     }, marker);
 
     const result = await page.evaluate(
-      async ({ extensionApiUrl, extensionId, commandId }) => {
+      async ({ extensionId, commandId }) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const manager: any = (window as any).__formulaExtensionHostManager;
         if (!manager?.host) throw new Error("Missing window.__formulaExtensionHostManager.host");
@@ -214,11 +209,12 @@ test.describe("Extension clipboard DLP (taint tracking)", () => {
         };
 
         const code = `
-          import * as formula from ${JSON.stringify(extensionApiUrl)};
           export async function activate(context) {
-            context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(commandId)}, async () => {
+            const api = globalThis[Symbol.for("formula.extensionApi.api")];
+            if (!api) throw new Error("Missing Formula extension API runtime");
+            context.subscriptions.push(await api.commands.registerCommand(${JSON.stringify(commandId)}, async () => {
               // No cell reads => no taint => should not trigger clipboard DLP enforcement.
-              await formula.clipboard.writeText("hello-from-extension");
+              await api.clipboard.writeText("hello-from-extension");
               return "wrote";
             }));
           }
@@ -247,7 +243,7 @@ test.describe("Extension clipboard DLP (taint tracking)", () => {
           URL.revokeObjectURL(mainUrl);
         }
       },
-      { extensionApiUrl, extensionId, commandId },
+      { extensionId, commandId },
     );
 
     expect(result.out).toBe("wrote");
