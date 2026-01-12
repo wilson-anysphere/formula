@@ -9,6 +9,7 @@
 
 mod authenticode;
 mod compression;
+mod contents_hash;
 mod dir;
 mod offcrypto;
 mod ole;
@@ -19,6 +20,7 @@ pub use authenticode::{
     extract_vba_signature_signed_digest, VbaSignatureSignedDigestError, VbaSignedDigest,
 };
 pub use compression::{compress_container, decompress_container, CompressionError};
+pub use contents_hash::content_normalized_data;
 pub use dir::{DirParseError, DirStream, ModuleRecord, ModuleType};
 pub use ole::{OleError, OleFile};
 pub use project_digest::{compute_vba_project_digest, DigestAlg};
