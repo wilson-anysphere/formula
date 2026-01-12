@@ -354,8 +354,11 @@ Excel uses Multi-Threaded Recalculation (MTR) for independent branches:
         D1        <- Must wait for C1, C2
 ```
 
-**Thread-safe functions**: Most built-in functions
-**Non-thread-safe**: VBA UDFs, certain volatile functions
+**Thread-safe functions**: Most built-in functions (including many volatile functions like `NOW()`, `TODAY()`, `RAND()`)
+**Non-thread-safe**: VBA UDFs, functions that depend on external system state (e.g. `RTD()`)
+
+Note: Volatility and thread-safety are independent: volatility affects *when* a formula must be recalculated, while
+thread-safety affects whether it can be evaluated in parallel.
 
 Implementation approach:
 1. Partition calc chain into independent subgraphs
