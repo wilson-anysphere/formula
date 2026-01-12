@@ -2,7 +2,7 @@
 
 use std::io::{Cursor, Write};
 
-use formula_model::{indexed_color_argb, EXCEL_MAX_COLS};
+use formula_model::{indexed_color_argb, EXCEL_MAX_COLS, XLNM_PRINT_AREA, XLNM_PRINT_TITLES};
 
 // This fixture builder writes just enough BIFF8 to exercise the importer. Keep record ids and
 // commonly-used BIFF constants named so the intent stays readable.
@@ -372,6 +372,27 @@ pub fn build_defined_name_sheet_name_sanitization_fixture_xls() -> Vec<u8> {
 /// sheet name sanitization, similar to how it rewrites cell formulas and internal hyperlinks.
 pub fn build_defined_name_sheet_name_sanitization_calamine_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_defined_name_sheet_name_sanitization_calamine_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing workbook-scoped defined names that mimic print
+/// settings:
+/// - `_xlnm.Print_Area` referencing Sheet1,
+/// - `_xlnm.Print_Titles` referencing Sheet2.
+///
+/// This is intended to validate the `.xls` importer’s ability to infer sheet-scoped print
+/// settings from calamine-defined names when BIFF workbook parsing is unavailable.
+pub fn build_print_settings_calamine_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_print_settings_calamine_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -1952,6 +1973,89 @@ fn build_defined_name_sheet_name_sanitization_calamine_workbook_stream() -> Vec<
         .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
 
     globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_print_settings_calamine_workbook_stream() -> Vec<u8> {
+    // Similar to `build_defined_names_builtins_workbook_stream`, but encodes print built-ins as
+    // regular defined name strings so calamine surfaces them via `Reader::defined_names()`.
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Two worksheets.
+    let boundsheet1_start = globals.len();
+    let mut boundsheet1 = Vec::<u8>::new();
+    boundsheet1.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet1.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet1, "Sheet1");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet1);
+    let boundsheet1_offset_pos = boundsheet1_start + 4;
+
+    let boundsheet2_start = globals.len();
+    let mut boundsheet2 = Vec::<u8>::new();
+    boundsheet2.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet2.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet2, "Sheet2");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet2);
+    let boundsheet2_offset_pos = boundsheet2_start + 4;
+
+    // External reference tables so calamine can decode 3D references in the NAME formula stream.
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(2));
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0), (1, 1)]),
+    );
+
+    // `_xlnm.Print_Area` for Sheet1: Sheet1!$A$1:$A$2.
+    //
+    // Note: Although Excel can store multiple print areas using the union operator (`,` /
+    // `PtgUnion`), calamine's `.xls` defined-name decoder does not currently preserve all union
+    // operands reliably. Keep this fixture to a single rectangular range so it remains stable.
+    let print_area_rgce = ptg_area3d(0, 0, 1, 0, 0);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record_calamine_compat(XLNM_PRINT_AREA, &print_area_rgce),
+    );
+
+    // `_xlnm.Print_Titles` for Sheet2: Sheet2!$1:$1 (repeat first row).
+    let print_titles_rgce = ptg_area3d(1, 0, 0, 0, 0x00FF);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record_calamine_compat(XLNM_PRINT_TITLES, &print_titles_rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    // -- Sheet substreams -------------------------------------------------------
+    let sheet1_offset = globals.len();
+    let sheet1 = build_empty_sheet_stream(xf_general);
+    let sheet2_offset = sheet1_offset + sheet1.len();
+    let sheet2 = build_empty_sheet_stream(xf_general);
+
+    globals[boundsheet1_offset_pos..boundsheet1_offset_pos + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals[boundsheet2_offset_pos..boundsheet2_offset_pos + 4]
+        .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet1);
+    globals.extend_from_slice(&sheet2);
+
     globals
 }
 

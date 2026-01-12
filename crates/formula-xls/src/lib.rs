@@ -1557,13 +1557,68 @@ fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
         .eq(b.chars().flat_map(|ch| ch.to_uppercase()))
 }
 
+fn infer_sheet_name_from_workbook_scoped_print_name(
+    workbook: &Workbook,
+    name: &str,
+    refers_to: &str,
+    warnings: &mut Vec<ImportWarning>,
+) -> Option<String> {
+    let refers_to = refers_to.trim();
+    if refers_to.is_empty() {
+        return None;
+    }
+
+    let areas = match split_print_name_areas(refers_to) {
+        Ok(v) => v,
+        Err(err) => {
+            warnings.push(ImportWarning::new(format!(
+                "failed to infer sheet scope for workbook-scoped `{name}`: {err}"
+            )));
+            return None;
+        }
+    };
+
+    let mut inferred: Option<String> = None;
+    for area in areas {
+        let (sheet_name, _) = match split_print_name_sheet_ref(area) {
+            Ok(v) => v,
+            Err(err) => {
+                warnings.push(ImportWarning::new(format!(
+                    "failed to infer sheet scope for workbook-scoped `{name}` entry {area:?}: {err}"
+                )));
+                return None;
+            }
+        };
+
+        let Some(sheet_name) = sheet_name else {
+            // We only infer sheet scope from explicit `Sheet!` prefixes.
+            return None;
+        };
+        let sheet_name = strip_workbook_prefix_from_sheet_ref(&sheet_name).to_string();
+
+        match inferred.as_ref() {
+            None => inferred = Some(sheet_name),
+            Some(existing) => {
+                if !sheet_name_eq_case_insensitive(existing, &sheet_name) {
+                    warnings.push(ImportWarning::new(format!(
+                        "skipping workbook-scoped `{name}`: references multiple sheets (`{existing}` and `{sheet_name}`)"
+                    )));
+                    return None;
+                }
+            }
+        }
+    }
+
+    let inferred = inferred?;
+    workbook.sheet_by_name(&inferred).map(|s| s.name.clone())
+}
+
 fn populate_print_settings_from_defined_names(workbook: &mut Workbook, warnings: &mut Vec<ImportWarning>) {
     // We need to snapshot the defined names up-front so we can mutably update print settings while
     // iterating.
     let builtins: Vec<(DefinedNameScope, String, String)> = workbook
         .defined_names
         .iter()
-        .filter(|n| matches!(n.scope, DefinedNameScope::Sheet(_)))
         .filter(|n| {
             n.name
                 .eq_ignore_ascii_case(formula_model::XLNM_PRINT_AREA)
@@ -1573,27 +1628,47 @@ fn populate_print_settings_from_defined_names(workbook: &mut Workbook, warnings:
         .map(|n| (n.scope, n.name.clone(), n.refers_to.clone()))
         .collect();
 
-    for (scope, name, refers_to) in builtins {
-        let DefinedNameScope::Sheet(sheet_id) = scope else {
-            continue;
-        };
-        let Some(sheet_name) = workbook.sheet(sheet_id).map(|s| s.name.clone()) else {
-            continue;
-        };
+    // Pass 1: sheet-scoped print names (canonical Excel encoding).
+    // Pass 2: workbook-scoped print names (calamine fallback loses sheet scope).
+    for pass in 0u8..=1u8 {
+        for (scope, name, refers_to) in &builtins {
+            let sheet_name = match (pass, scope) {
+                (0, DefinedNameScope::Sheet(sheet_id)) => workbook.sheet(*sheet_id).map(|s| s.name.clone()),
+                (1, DefinedNameScope::Workbook) => infer_sheet_name_from_workbook_scoped_print_name(
+                    workbook,
+                    name,
+                    refers_to,
+                    warnings,
+                ),
+                _ => None,
+            };
 
-        if name.eq_ignore_ascii_case(formula_model::XLNM_PRINT_AREA) {
-            match parse_print_area_refers_to(&sheet_name, &refers_to, warnings) {
-                Some(ranges) => {
+            let Some(sheet_name) = sheet_name else {
+                continue;
+            };
+
+            if name.eq_ignore_ascii_case(formula_model::XLNM_PRINT_AREA) {
+                if workbook
+                    .sheet_print_settings_by_name(&sheet_name)
+                    .print_area
+                    .is_some()
+                {
+                    continue;
+                }
+                if let Some(ranges) = parse_print_area_refers_to(&sheet_name, refers_to, warnings) {
                     workbook.set_sheet_print_area_by_name(&sheet_name, Some(ranges));
                 }
-                None => {}
-            }
-        } else if name.eq_ignore_ascii_case(formula_model::XLNM_PRINT_TITLES) {
-            match parse_print_titles_refers_to(&sheet_name, &refers_to, warnings) {
-                Some(titles) => {
+            } else if name.eq_ignore_ascii_case(formula_model::XLNM_PRINT_TITLES) {
+                if workbook
+                    .sheet_print_settings_by_name(&sheet_name)
+                    .print_titles
+                    .is_some()
+                {
+                    continue;
+                }
+                if let Some(titles) = parse_print_titles_refers_to(&sheet_name, refers_to, warnings) {
                     workbook.set_sheet_print_titles_by_name(&sheet_name, Some(titles));
                 }
-                None => {}
             }
         }
     }
@@ -1724,10 +1799,27 @@ fn parse_print_titles_refers_to(
         match parse_print_name_range(range_str) {
             Ok(ParsedA1Range::Row(rows)) => titles.repeat_rows = Some(rows),
             Ok(ParsedA1Range::Col(cols)) => titles.repeat_cols = Some(cols),
-            Ok(ParsedA1Range::Cell(_)) => warnings.push(ImportWarning::new(format!(
-                "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: print titles must be a row or column range",
-                formula_model::XLNM_PRINT_TITLES
-            ))),
+            Ok(ParsedA1Range::Cell(range)) => {
+                // Some decoders (e.g. calamine `.xls` defined-name fallback) represent whole-row/
+                // whole-column print titles as explicit cell ranges (`$A$1:$IV$1`, `$A$1:$A$65536`)
+                // rather than row/col-only references (`$1:$1`, `$A:$A`).
+                if range.start.row == range.end.row && range.start.col != range.end.col {
+                    titles.repeat_rows = Some(RowRange {
+                        start: range.start.row,
+                        end: range.end.row,
+                    });
+                } else if range.start.col == range.end.col && range.start.row != range.end.row {
+                    titles.repeat_cols = Some(ColRange {
+                        start: range.start.col,
+                        end: range.end.col,
+                    });
+                } else {
+                    warnings.push(ImportWarning::new(format!(
+                        "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: print titles must be a row or column range",
+                        formula_model::XLNM_PRINT_TITLES
+                    )));
+                }
+            }
             Err(err) => warnings.push(ImportWarning::new(format!(
                 "skipping `{}` entry {area:?} for sheet `{expected_sheet_name}`: {err}",
                 formula_model::XLNM_PRINT_TITLES
