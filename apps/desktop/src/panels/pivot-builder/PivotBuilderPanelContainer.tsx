@@ -15,6 +15,7 @@ import { TauriPivotBackend } from "../../tauri/pivotBackend.js";
 import { applyPivotCellUpdates } from "../../pivots/applyUpdates.js";
 import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
+import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 
 type RangeRect = { startRow: number; startCol: number; endRow: number; endCol: number };
 
@@ -34,13 +35,6 @@ type Props = {
 
 function cellToA1(row: number, col: number): string {
   return `${colToName(col)}${row + 1}`;
-}
-
-function formatSheetNameForA1(sheetName: string): string {
-  const name = String(sheetName ?? "").trim();
-  if (!name) return "";
-  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
-  return `'${name.replace(/'/g, "''")}'`;
 }
 
 function rangeToA1(range: RangeRect): string {

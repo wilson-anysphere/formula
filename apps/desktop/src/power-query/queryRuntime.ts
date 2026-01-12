@@ -1,6 +1,7 @@
 import type { Query } from "@formula/power-query";
 import { formatDlpDecisionMessage } from "../../../../packages/security/dlp/src/errors.js";
 import type { SheetNameResolver } from "../sheet/sheetNameResolver";
+import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
 
 export type QueryRunStatus = "idle" | "queued" | "refreshing" | "applying" | "success" | "error" | "cancelled";
 
@@ -146,13 +147,6 @@ function isQuerySheetDestination(dest: unknown): dest is { sheetId: string; star
   if (!obj.start || typeof obj.start !== "object") return false;
   if (typeof obj.start.row !== "number" || typeof obj.start.col !== "number") return false;
   return true;
-}
-
-function formatSheetNameForA1(sheetName: string): string {
-  const name = String(sheetName ?? "").trim();
-  if (!name) return "";
-  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
-  return `'${name.replace(/'/g, "''")}'`;
 }
 
 function sheetDisplayName(sheetId: string, sheetNameResolver?: SheetNameResolver | null): string {

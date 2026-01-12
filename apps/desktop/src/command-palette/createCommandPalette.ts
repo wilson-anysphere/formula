@@ -16,6 +16,7 @@ import { getRecentCommandIdsForDisplay, type StorageLike } from "./recents.js";
 import { installCommandPaletteRecentsTracking } from "./installCommandPaletteRecentsTracking.js";
 import { searchShortcutCommands } from "./shortcutSearch.js";
 import { formatA1Range, parseGoTo, type GoToParseResult, type GoToWorkbookLookup } from "../../../../packages/search/index.js";
+import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
 
 type RenderableCommand = PreparedCommandForFuzzy<CommandContribution> & {
   score: number;
@@ -101,13 +102,6 @@ function groupLabel(category: string | null): string {
 
 function sortCommandsAlpha(a: CommandContribution, b: CommandContribution): number {
   return a.title.localeCompare(b.title);
-}
-
-function formatSheetNameForA1(sheetName: string): string {
-  const name = String(sheetName ?? "").trim();
-  if (!name) return "";
-  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
-  return `'${name.replace(/'/g, "''")}'`;
 }
 
 function buildGroupsForEmptyQuery(

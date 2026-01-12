@@ -2,6 +2,7 @@ import type { DocumentController } from "../../document/documentController.js";
 import { rangeToA1 as rangeToA1Selection } from "../../selection/a1.ts";
 import type { Range } from "../../selection/types.ts";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
+import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 
 import type { SheetSchema } from "../../../../../packages/ai-context/src/schema.js";
 import { extractSheetSchema } from "../../../../../packages/ai-context/src/schema.js";
@@ -1714,13 +1715,6 @@ function columnIndexToA1(columnIndex: number): string {
     n = Math.floor((n - 1) / 26);
   }
   return letters;
-}
-
-function formatSheetNameForA1(sheetName: string): string {
-  const name = String(sheetName ?? "").trim();
-  if (!name) return "";
-  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
-  return `'${name.replace(/'/g, "''")}'`;
 }
 
 function rectToRange(rect: any): Range | null {

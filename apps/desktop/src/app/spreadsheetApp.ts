@@ -65,6 +65,7 @@ import { evaluateFormula, type SpreadsheetValue } from "../spreadsheet/evaluateF
 import { AiCellFunctionEngine } from "../spreadsheet/AiCellFunctionEngine.js";
 import { DocumentWorkbookAdapter } from "../search/documentWorkbookAdapter.js";
 import type { SheetNameResolver } from "../sheet/sheetNameResolver";
+import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
 import { parseGoTo, splitSheetQualifier } from "../../../../packages/search/index.js";
 import type { CreateChartResult, CreateChartSpec } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { colToName as colToNameA1, fromA1 as fromA1A1 } from "@formula/spreadsheet-frontend/a1";
@@ -133,13 +134,6 @@ const AI_FUNCTION_CALL_RE = /\bAI(?:\.(?:EXTRACT|CLASSIFY|TRANSLATE))?\s*\(/i;
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {
   return typeof (value as { then?: unknown } | null)?.then === "function";
-}
-
-function formatSheetNameForA1(sheetName: string): string {
-  const name = String(sheetName ?? "").trim();
-  if (!name) return "";
-  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
-  return `'${name.replace(/'/g, "''")}'`;
 }
 
 function isInteger(value: unknown): value is number {

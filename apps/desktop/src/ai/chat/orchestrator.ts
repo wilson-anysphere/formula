@@ -31,6 +31,7 @@ import { DlpViolationError } from "../../../../../packages/security/dlp/src/erro
 import type { DocumentController } from "../../document/documentController.js";
 import type { Range } from "../../selection/types";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver.js";
+import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 
 import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpreadsheetApi.js";
 import { createDesktopRagService, type DesktopRagService, type DesktopRagServiceOptions } from "../rag/ragService.js";
@@ -733,12 +734,4 @@ function extractRetrievedRanges(retrieved: any[], sheetNameResolver?: SheetNameR
     }
   }
   return out;
-}
-
-function formatSheetNameForA1(sheetName: string): string {
-  // Quote when needed (Excel style): 'Sheet Name'!A1
-  const name = String(sheetName ?? "").trim();
-  if (!name) return "";
-  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
-  return `'${name.replace(/'/g, "''")}'`;
 }

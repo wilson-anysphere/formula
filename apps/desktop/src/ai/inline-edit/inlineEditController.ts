@@ -23,6 +23,7 @@ import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "..
 import { WorkbookContextBuilder, type WorkbookContextBuildStats, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
 import { getDesktopLLMClient, getDesktopModel } from "../llm/desktopLLMClient.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
+import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 
 export interface InlineEditLLMClient {
   chat: (request: any) => Promise<any>;
@@ -450,13 +451,6 @@ function buildMessages(options: {
     { role: "system", content: system },
     { role: "user", content: user }
   ];
-}
-
-function formatSheetNameForA1(sheetName: string): string {
-  const name = String(sheetName ?? "").trim();
-  if (!name) return "";
-  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
-  return `'${name.replace(/'/g, "''")}'`;
 }
 
 function sheetDisplayName(sheetId: string, sheetNameResolver?: SheetNameResolver | null): string {

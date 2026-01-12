@@ -1,4 +1,5 @@
 import { cellRefFromKey, numberToCol } from "../../../../../packages/collab/conflicts/src/cell-ref.js";
+import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.ts";
 
 /**
  * A minimal DOM-based UI for resolving *structural* (move/delete-vs-edit) cell
@@ -385,13 +386,6 @@ function summarizeOp(op, sheetNameResolver) {
  *
  * @param {string} sheetName
  */
-function formatSheetNameForA1(sheetName) {
-  const name = String(sheetName ?? "").trim();
-  if (!name) return "";
-  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
-  return `'${name.replace(/'/g, "''")}'`;
-}
-
 /**
  * @param {any} value
  */

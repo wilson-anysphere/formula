@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 
 import { t, tWithVars } from "../../i18n/index.js";
 import type { SheetNameResolver } from "../../sheet/sheetNameResolver";
+import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.js";
 import { showInputBox } from "../../extensions/ui.js";
 
 export type Cell = { value?: unknown; formula?: string; format?: Record<string, unknown> };
@@ -135,13 +136,6 @@ function jsonSummary(value: unknown) {
   } catch {
     return String(value);
   }
-}
-
-function formatSheetNameForA1(sheetName: string): string {
-  const name = String(sheetName ?? "").trim();
-  if (!name) return "";
-  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
-  return `'${name.replace(/'/g, "''")}'`;
 }
 
 function conflictHeader(c: MergeConflict, sheetNameResolver: SheetNameResolver | null) {

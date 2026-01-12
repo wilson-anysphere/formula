@@ -2,6 +2,7 @@ import { parseA1Range } from "./a1.js";
 
 import type { ChartType, CreateChartResult, CreateChartSpec } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 import type { SheetNameResolver } from "../sheet/sheetNameResolver";
+import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
 
 export type ChartSeriesDef = {
   name?: string | null;
@@ -84,18 +85,12 @@ function columnIndexToLetters(col: number): string {
   return out;
 }
 
-function quoteSheetName(sheet: string): string {
-  // Follow Excel conventions: quote when the name contains spaces/special chars.
-  if (/^[A-Za-z0-9_]+$/.test(sheet)) return sheet;
-  return `'${sheet.replace(/'/g, "''")}'`;
-}
-
 function formatAbsCellRef(row: number, col: number): string {
   return `$${columnIndexToLetters(col)}$${row + 1}`;
 }
 
 function formatAbsRange(sheet: string, startRow: number, startCol: number, endRow: number, endCol: number): string {
-  const sheetPrefix = quoteSheetName(sheet);
+  const sheetPrefix = formatSheetNameForA1(sheet);
   const start = formatAbsCellRef(startRow, startCol);
   const end = formatAbsCellRef(endRow, endCol);
   const body = start === end ? start : `${start}:${end}`;

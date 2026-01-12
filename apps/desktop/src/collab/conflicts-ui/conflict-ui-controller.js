@@ -1,4 +1,5 @@
 import { numberToCol } from "../../../../../packages/collab/conflicts/src/cell-ref.js";
+import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.ts";
 
 /**
  * A minimal DOM-based conflict UX for the desktop app.
@@ -306,18 +307,6 @@ function formatCell(cell, sheetNameResolver) {
   const sheetId = String(cell?.sheetId ?? "");
   const sheetName = sheetNameResolver?.getSheetNameById?.(sheetId) ?? sheetId;
   return `${formatSheetNameForA1(sheetName)}!${numberToCol(cell.col)}${cell.row + 1}`;
-}
-
-/**
- * Format a sheet name token for A1 references using Excel quoting conventions.
- *
- * @param {string} sheetName
- */
-function formatSheetNameForA1(sheetName) {
-  const name = String(sheetName ?? "").trim();
-  if (!name) return "";
-  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
-  return `'${name.replace(/'/g, "''")}'`;
 }
 
 /**

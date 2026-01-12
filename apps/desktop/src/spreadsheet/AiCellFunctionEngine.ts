@@ -20,6 +20,7 @@ import {
 } from "./evaluateFormula.js";
 
 import type { SheetNameResolver } from "../sheet/sheetNameResolver";
+import { formatSheetNameForA1 } from "../sheet/formatSheetNameForA1.js";
 
 import { getDesktopAIAuditStore } from "../ai/audit/auditStore.js";
 import { getAiCloudDlpOptions } from "../ai/dlp/aiDlp.js";
@@ -550,13 +551,6 @@ function sheetDisplayName(sheetId: string, sheetNameResolver: SheetNameResolver 
   const id = String(sheetId ?? "").trim();
   if (!id) return "";
   return sheetNameResolver?.getSheetNameById(id) ?? id;
-}
-
-function formatSheetNameForA1(sheetName: string): string {
-  const name = String(sheetName ?? "").trim();
-  if (!name) return "";
-  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
-  return `'${name.replace(/'/g, "''")}'`;
 }
 
 type ParsedProvenanceRef = { sheetId: string; range: RangeAddress; canonical: string; isCell: boolean };

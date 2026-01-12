@@ -1,11 +1,5 @@
 import { formatA1Address } from "../../../../../packages/search/index.js";
-
-function formatSheetNameForA1(sheetName) {
-  const name = String(sheetName ?? "").trim();
-  if (!name) return "";
-  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
-  return `'${name.replace(/'/g, "''")}'`;
-}
+import { formatSheetNameForA1 } from "../../sheet/formatSheetNameForA1.ts";
 
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
