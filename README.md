@@ -62,6 +62,15 @@ This command:
 
 The web + desktop Vite entrypoints run this automatically via `predev`/`prebuild` so `createEngineClient()` can load the engine without extra manual steps.
 
+#### Formula editor tooling (lexing + partial parse)
+
+`@formula/engine` also exposes **workbook-independent** editor tooling helpers that run in the same Worker-backed WASM module:
+
+- `engine.lexFormula(formula, options?)` → token DTOs for syntax highlighting
+- `engine.parseFormulaPartial(formula, cursor?, options?)` → best-effort partial parse + function-call context for autocomplete/signature help
+
+Note: spans and cursor positions are expressed as **UTF-16 code unit offsets** (matching JS string indexing).
+
 Smoke-check that the generated wrapper (`packages/engine/pkg/formula_wasm.js`) exists:
 
 ```bash
