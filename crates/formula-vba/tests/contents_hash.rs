@@ -955,6 +955,51 @@ fn content_normalized_data_finds_module_source_without_text_offset_using_signatu
 }
 
 #[test]
+fn content_normalized_data_signature_scan_skips_invalid_container_candidates() {
+    // When MODULETEXTOFFSET is missing, we fall back to a signature scan to locate the compressed
+    // source container. That scan should not stop at the first “looks like a container” match if
+    // decompression fails; it should keep searching for a later valid container.
+    let module_code = "Option Explicit\r\n";
+    let module_container = compress_container(module_code.as_bytes());
+
+    // False CompressedContainer signature:
+    // - 0x01 signature
+    // - u16 header 0x3FFF (uncompressed, size_field=0x0FFF => expects 4096 bytes of chunk data)
+    // This will fail to decompress because the buffer is much shorter than that.
+    let mut module_stream = vec![0x01, 0xFF, 0x3F];
+    module_stream.extend_from_slice(&module_container);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, b"Module1");
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        // Intentionally omit MODULETEXTOFFSET (0x0031) so the signature scan is used.
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_stream).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+    assert_eq!(normalized, module_code.as_bytes());
+}
+
+#[test]
 fn content_hash_md5_matches_md5_of_content_normalized_data() {
     let vba_bin = build_two_module_project(["ModuleA", "ModuleB"]);
     let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");

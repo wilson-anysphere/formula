@@ -335,7 +335,12 @@ fn guess_text_offset(module_stream: &[u8]) -> usize {
         let header = u16::from_le_bytes([module_stream[idx + 1], module_stream[idx + 2]]);
         let signature_bits = (header & 0x7000) >> 12;
         if signature_bits == 0b011 {
-            return idx;
+            // Best-effort validation: module streams can contain header bytes before the compressed
+            // source container, and those bytes can occasionally look like a container signature.
+            // Attempt decompression; if it fails, keep scanning for a later candidate.
+            if decompress_container(&module_stream[idx..]).is_ok() {
+                return idx;
+            }
         }
     }
     0
