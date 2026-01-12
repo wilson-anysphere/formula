@@ -348,3 +348,49 @@ fn prefers_verified_stream_over_parse_error_candidate() {
         sig.stream_path
     );
 }
+
+#[test]
+fn prefers_digital_signature_ex_over_legacy_when_both_verify() {
+    let legacy = make_pkcs7_signed_message(b"legacy-signed");
+    let ex = make_pkcs7_signed_message(b"ex-signed");
+
+    let vba = build_vba_project_bin_with_signature_streams(&[
+        ("\u{0005}DigitalSignature", &legacy),
+        ("\u{0005}DigitalSignatureEx", &ex),
+    ]);
+
+    let sig = verify_vba_digital_signature(&vba)
+        .expect("signature inspection should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert!(
+        sig.stream_path.contains("DigitalSignatureEx"),
+        "expected DigitalSignatureEx to be treated as authoritative when both legacy and Ex signatures verify, got {}",
+        sig.stream_path
+    );
+    assert_eq!(sig.signature, ex);
+}
+
+#[test]
+fn prefers_digital_signature_ext_over_ex_when_both_verify() {
+    let ex = make_pkcs7_signed_message(b"ex-signed");
+    let ext = make_pkcs7_signed_message(b"ext-signed");
+
+    let vba = build_vba_project_bin_with_signature_streams(&[
+        ("\u{0005}DigitalSignatureEx", &ex),
+        ("\u{0005}DigitalSignatureExt", &ext),
+    ]);
+
+    let sig = verify_vba_digital_signature(&vba)
+        .expect("signature inspection should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert!(
+        sig.stream_path.contains("DigitalSignatureExt"),
+        "expected DigitalSignatureExt to be treated as authoritative when both Ex and Ext signatures verify, got {}",
+        sig.stream_path
+    );
+    assert_eq!(sig.signature, ext);
+}

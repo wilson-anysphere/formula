@@ -8,13 +8,15 @@ fn parse_prefers_signature_component_even_when_stream_is_nested_under_storage() 
     let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
 
     // Some producers store the signature as a storage containing a stream rather than a single
-    // `\x05DigitalSignature` stream. Ensure we still prefer it over other `DigitalSignature*`
-    // candidates.
-    ole.create_storage("\u{0005}DigitalSignature")
+    // `\x05DigitalSignature*` stream. Ensure we still detect it, and that we apply Excel/MS-OVBA
+    // precedence rules when multiple signature streams exist.
+    //
+    // `DigitalSignatureEx` is preferred over the legacy `DigitalSignature`.
+    ole.create_storage("\u{0005}DigitalSignatureEx")
         .expect("create signature storage");
     {
         let mut stream = ole
-            .create_stream("\u{0005}DigitalSignature/sig")
+            .create_stream("\u{0005}DigitalSignatureEx/sig")
             .expect("create nested signature stream");
         stream
             .write_all(b"nested-signature")
@@ -23,7 +25,7 @@ fn parse_prefers_signature_component_even_when_stream_is_nested_under_storage() 
 
     {
         let mut stream = ole
-            .create_stream("\u{0005}DigitalSignatureEx")
+            .create_stream("\u{0005}DigitalSignature")
             .expect("create signature stream");
         stream
             .write_all(b"other-signature")
@@ -37,9 +39,8 @@ fn parse_prefers_signature_component_even_when_stream_is_nested_under_storage() 
 
     assert!(
         sig.stream_path.contains("/sig"),
-        "expected nested DigitalSignature stream to be selected, got {}",
+        "expected nested DigitalSignatureEx stream to be selected, got {}",
         sig.stream_path
     );
     assert_eq!(sig.signature, b"nested-signature");
 }
-

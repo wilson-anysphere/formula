@@ -132,7 +132,8 @@ pub fn parse_vba_digital_signature(
         return Ok(None);
     }
 
-    // Prefer the canonical stream name when present.
+    // Prefer the signature stream that Excel would treat as authoritative when more than one
+    // signature stream exists (see `signature_path_rank` for the MS-OVBA-defined ordering).
     candidates.sort_by(|a, b| signature_path_rank(a).cmp(&signature_path_rank(b)).then(a.cmp(b)));
     let chosen = candidates
         .into_iter()
@@ -164,7 +165,8 @@ pub fn parse_vba_digital_signature(
 /// streams (excluding any signature streams).
 ///
 /// If multiple signature streams are present, we return the first one (by Excel's preferred stream
-/// name ordering) that verifies successfully, falling back to the first candidate if none verify.
+/// name ordering; see `signature_path_rank`) that verifies successfully, falling back to the first
+/// candidate if none verify.
 pub fn verify_vba_digital_signature(
     vba_project_bin: &[u8],
 ) -> Result<Option<VbaDigitalSignature>, SignatureError> {
@@ -338,13 +340,23 @@ fn is_signature_component(component: &str) -> bool {
 
 fn signature_path_rank(path: &str) -> u8 {
     // Lower = higher priority.
+    //
+    // MS-OVBA defines three possible signature streams that can appear in a VBA project storage:
+    // - "\x05DigitalSignature"     (legacy; SHA-1 era)
+    // - "\x05DigitalSignatureEx"   (extended; SHA-2 era)
+    // - "\x05DigitalSignatureExt"  (extension; newest format)
+    //
+    // When more than one exists, Office apps (including Excel) prefer the newest stream.
+    //
+    // Spec: MS-OVBA "Project Signature" streams (§2.3.4.1–2.3.4.3).
+    // https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
     path.split('/')
         .map(|component| {
             let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
             match trimmed {
-                "DigitalSignature" => 0,
+                "DigitalSignatureExt" => 0,
                 "DigitalSignatureEx" => 1,
-                "DigitalSignatureExt" => 2,
+                "DigitalSignature" => 2,
                 _ => 3,
             }
         })
