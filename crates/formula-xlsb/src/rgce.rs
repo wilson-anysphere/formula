@@ -2119,6 +2119,27 @@ mod encode_ast {
             return Ok(());
         }
 
+        // Workbook-defined names can also be invoked like functions (e.g. a LAMBDA stored in a
+        // name). BIFF encodes this the same way as UDF calls, but uses `PtgName` (defined name
+        // index) instead of `PtgNameX` (extern name).
+        if let Some(name_index) = ctx.name_index(upper, None) {
+            let argc_total = argc
+                .checked_add(1)
+                .ok_or_else(|| EncodeError::Parse("too many function arguments".to_string()))?;
+            let argc_total_u8: u8 = argc_total
+                .try_into()
+                .map_err(|_| EncodeError::Parse("too many function arguments".to_string()))?;
+
+            rgce.push(PTG_NAME);
+            rgce.extend_from_slice(&name_index.to_le_bytes());
+            rgce.extend_from_slice(&0u16.to_le_bytes());
+
+            rgce.push(PTG_FUNCVAR);
+            rgce.push(argc_total_u8);
+            rgce.extend_from_slice(&0x00FFu16.to_le_bytes());
+            return Ok(());
+        }
+
         Err(EncodeError::UnknownFunction {
             name: upper.to_string(),
         })
