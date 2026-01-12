@@ -1,10 +1,46 @@
 use anyhow::{anyhow, Context, Result};
+use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use sqlx::{Column, Connection, Executor, Row, TypeInfo};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::Duration;
+
+// Resource limits for `sql_query`.
+//
+// These are backend-enforced guards to prevent compromised/buggy webviews (or accidental queries
+// like `SELECT * FROM huge_table`) from consuming unbounded memory/CPU in the Rust process.
+pub const MAX_SQL_QUERY_ROWS: usize = 50_000;
+pub const MAX_SQL_QUERY_CELLS: usize = 5_000_000;
+pub const SQL_QUERY_TIMEOUT_MS: u64 = 10_000;
+
+fn sql_query_timeout_ms() -> u64 {
+    std::env::var("FORMULA_SQL_QUERY_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(SQL_QUERY_TIMEOUT_MS)
+}
+
+fn sql_query_timeout_duration() -> Duration {
+    Duration::from_millis(sql_query_timeout_ms())
+}
+
+async fn with_sql_query_timeout<T>(
+    kind: &'static str,
+    fut: impl std::future::Future<Output = Result<T>>,
+) -> Result<T> {
+    let timeout_ms = sql_query_timeout_ms();
+    tokio::time::timeout(sql_query_timeout_duration(), fut)
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "{kind} query exceeded the maximum execution time ({timeout_ms}ms). \
+                 Try adding a LIMIT clause or optimizing the query."
+            )
+        })?
+}
 
 const SQLITE_SCOPE_DENIED_ERROR: &str =
     "Access denied: SQLite database path is outside the allowed filesystem scope";
@@ -494,52 +530,97 @@ async fn query_sqlite(
     sql: &str,
     params: &[JsonValue],
 ) -> Result<SqlQueryResult> {
-    // Fetch schema first (best-effort). We do this on a separate connection so schema discovery
-    // failures don't prevent query execution.
-    let schema = sqlite_schema(opts, sql).await.ok();
+    with_sql_query_timeout("SQLite", async {
+        // Fetch schema first (best-effort). We do this on a separate connection so schema discovery
+        // failures don't prevent query execution.
+        let schema = sqlite_schema(opts, sql).await.ok();
 
-    let mut conn = sqlx::SqliteConnection::connect_with(opts)
-        .await
-        .context("connect sqlite")?;
+        let mut conn = sqlx::SqliteConnection::connect_with(opts)
+            .await
+            .context("connect sqlite")?;
 
-    let mut query = sqlx::query(sql);
-    for value in params {
-        query = bind_sqlite_param(query, value);
-    }
-    let rows = query.fetch_all(&mut conn).await.context("execute sqlite query")?;
-
-    let columns = schema
-        .as_ref()
-        .map(|s| s.columns.clone())
-        .or_else(|| rows.first().map(|r| r.columns().iter().map(|c| c.name().to_string()).collect()))
-        .unwrap_or_default();
-
-    let types = schema.as_ref().and_then(|s| s.types.clone());
-    let column_types: Vec<SqlDataType> = columns
-        .iter()
-        .map(|name| {
-            types
-                .as_ref()
-                .and_then(|m| m.get(name))
-                .cloned()
-                .unwrap_or(SqlDataType::Any)
-        })
-        .collect();
-
-    let mut out_rows = Vec::with_capacity(rows.len());
-    for row in rows {
-        let mut out = Vec::with_capacity(columns.len());
-        for idx in 0..columns.len() {
-            out.push(sqlite_cell_to_json(&row, idx, &column_types[idx]));
+        let mut query = sqlx::query(sql);
+        for value in params {
+            query = bind_sqlite_param(query, value);
         }
-        out_rows.push(out);
-    }
 
-    Ok(SqlQueryResult {
-        columns,
-        types,
-        rows: out_rows,
+        let mut stream = query.fetch(&mut conn);
+
+        let mut columns = schema
+            .as_ref()
+            .map(|s| s.columns.clone())
+            .unwrap_or_default();
+        let types = schema.as_ref().and_then(|s| s.types.clone());
+
+        let mut column_types: Vec<SqlDataType> = Vec::new();
+        if !columns.is_empty() {
+            column_types = columns
+                .iter()
+                .map(|name| {
+                    types
+                        .as_ref()
+                        .and_then(|m| m.get(name))
+                        .cloned()
+                        .unwrap_or(SqlDataType::Any)
+                })
+                .collect();
+        }
+
+        let mut out_rows: Vec<Vec<JsonValue>> = Vec::new();
+        let mut row_count: usize = 0;
+
+        while let Some(row) = stream
+            .try_next()
+            .await
+            .context("execute sqlite query")?
+        {
+            row_count += 1;
+            if row_count > MAX_SQL_QUERY_ROWS {
+                return Err(anyhow!(
+                    "SQL query returned more than {MAX_SQL_QUERY_ROWS} rows. Please add a LIMIT clause."
+                ));
+            }
+
+            if columns.is_empty() {
+                columns = row
+                    .columns()
+                    .iter()
+                    .map(|c| c.name().to_string())
+                    .collect();
+                column_types = columns
+                    .iter()
+                    .map(|name| {
+                        types
+                            .as_ref()
+                            .and_then(|m| m.get(name))
+                            .cloned()
+                            .unwrap_or(SqlDataType::Any)
+                    })
+                    .collect();
+            }
+
+            let cell_count = row_count.saturating_mul(columns.len());
+            if cell_count > MAX_SQL_QUERY_CELLS {
+                return Err(anyhow!(
+                    "SQL query returned too many values (>{MAX_SQL_QUERY_CELLS} cells). \
+                     Please add a LIMIT clause or select fewer columns."
+                ));
+            }
+
+            let mut out = Vec::with_capacity(columns.len());
+            for idx in 0..columns.len() {
+                out.push(sqlite_cell_to_json(&row, idx, &column_types[idx]));
+            }
+            out_rows.push(out);
+        }
+
+        Ok(SqlQueryResult {
+            columns,
+            types,
+            rows: out_rows,
+        })
     })
+    .await
 }
 
 async fn query_postgres(
@@ -547,48 +628,82 @@ async fn query_postgres(
     sql: &str,
     params: &[JsonValue],
 ) -> Result<SqlQueryResult> {
-    let schema = postgres_schema(opts, sql).await.ok();
+    with_sql_query_timeout("Postgres", async {
+        let schema = postgres_schema(opts, sql).await.ok();
 
-    let mut conn = sqlx::PgConnection::connect_with(opts)
-        .await
-        .context("connect postgres")?;
+        let mut conn = sqlx::PgConnection::connect_with(opts)
+            .await
+            .context("connect postgres")?;
 
-    let mut query = sqlx::query(sql);
-    for value in params {
-        query = bind_postgres_param(query, value);
-    }
-    let rows = query
-        .fetch_all(&mut conn)
-        .await
-        .context("execute postgres query")?;
+        // Defense-in-depth: enforce a server-side statement timeout as well.
+        let timeout_ms = sql_query_timeout_ms();
+        let _ = sqlx::query(&format!("SET statement_timeout = {timeout_ms}"))
+            .execute(&mut conn)
+            .await;
 
-    let columns = schema
-        .as_ref()
-        .map(|s| s.columns.clone())
-        .or_else(|| rows.first().map(|r| r.columns().iter().map(|c| c.name().to_string()).collect()))
-        .unwrap_or_default();
-
-    let types = schema.as_ref().and_then(|s| s.types.clone());
-
-    let mut out_rows = Vec::with_capacity(rows.len());
-    for row in rows {
-        let mut out = Vec::with_capacity(columns.len());
-        for idx in 0..columns.len() {
-            let type_name = row
-                .columns()
-                .get(idx)
-                .map(|c| c.type_info().name())
-                .unwrap_or("");
-            out.push(postgres_cell_to_json(&row, idx, type_name));
+        let mut query = sqlx::query(sql);
+        for value in params {
+            query = bind_postgres_param(query, value);
         }
-        out_rows.push(out);
-    }
 
-    Ok(SqlQueryResult {
-        columns,
-        types,
-        rows: out_rows,
+        let mut stream = query.fetch(&mut conn);
+
+        let mut columns = schema
+            .as_ref()
+            .map(|s| s.columns.clone())
+            .unwrap_or_default();
+        let types = schema.as_ref().and_then(|s| s.types.clone());
+
+        let mut out_rows: Vec<Vec<JsonValue>> = Vec::new();
+        let mut row_count: usize = 0;
+
+        while let Some(row) = stream
+            .try_next()
+            .await
+            .context("execute postgres query")?
+        {
+            row_count += 1;
+            if row_count > MAX_SQL_QUERY_ROWS {
+                return Err(anyhow!(
+                    "SQL query returned more than {MAX_SQL_QUERY_ROWS} rows. Please add a LIMIT clause."
+                ));
+            }
+
+            if columns.is_empty() {
+                columns = row
+                    .columns()
+                    .iter()
+                    .map(|c| c.name().to_string())
+                    .collect();
+            }
+
+            let cell_count = row_count.saturating_mul(columns.len());
+            if cell_count > MAX_SQL_QUERY_CELLS {
+                return Err(anyhow!(
+                    "SQL query returned too many values (>{MAX_SQL_QUERY_CELLS} cells). \
+                     Please add a LIMIT clause or select fewer columns."
+                ));
+            }
+
+            let mut out = Vec::with_capacity(columns.len());
+            for idx in 0..columns.len() {
+                let type_name = row
+                    .columns()
+                    .get(idx)
+                    .map(|c| c.type_info().name())
+                    .unwrap_or("");
+                out.push(postgres_cell_to_json(&row, idx, type_name));
+            }
+            out_rows.push(out);
+        }
+
+        Ok(SqlQueryResult {
+            columns,
+            types,
+            rows: out_rows,
+        })
     })
+    .await
 }
 
 pub async fn sql_query(
@@ -906,5 +1021,103 @@ pub async fn sql_get_schema(
         other => Err(anyhow!(
             "Unsupported SQL connection kind '{other}' (supported: sqlite, postgres, odbc)"
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::Connection;
+    use std::sync::{Mutex, OnceLock};
+
+    static ENV_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn env_mutex() -> &'static Mutex<()> {
+        ENV_MUTEX.get_or_init(|| Mutex::new(()))
+    }
+
+    async fn make_shared_in_memory_sqlite() -> (sqlx::sqlite::SqliteConnectOptions, sqlx::SqliteConnection) {
+        // SQLite shared-cache in-memory database. We keep one connection open for the lifetime of
+        // each test so the database doesn't get dropped.
+        let db_id = uuid::Uuid::new_v4();
+        let dsn = format!("sqlite://file:formula_sql_test_{db_id}?mode=memory&cache=shared");
+        let opts = sqlx::sqlite::SqliteConnectOptions::from_str(&dsn).expect("parse sqlite dsn");
+        let keeper = sqlx::SqliteConnection::connect_with(&opts)
+            .await
+            .expect("connect sqlite");
+        (opts, keeper)
+    }
+
+    async fn seed_numbers_table(conn: &mut sqlx::SqliteConnection, count: i64) {
+        sqlx::query("CREATE TABLE numbers (n INTEGER NOT NULL);")
+            .execute(&mut *conn)
+            .await
+            .expect("create table");
+        // Use a recursive CTE to insert a moderate number of rows quickly/deterministically.
+        // (SQLite's default recursion limit is 1000, so keep `count` comfortably below that.)
+        sqlx::query(
+            "WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM cnt WHERE x < ?1)
+             INSERT INTO numbers SELECT x FROM cnt;",
+        )
+        .bind(count)
+        .execute(&mut *conn)
+        .await
+        .expect("seed rows");
+    }
+
+    #[tokio::test]
+    async fn sqlite_query_enforces_max_rows() {
+        let (opts, mut keeper) = make_shared_in_memory_sqlite().await;
+        seed_numbers_table(&mut keeper, 400).await;
+
+        // 400x400 = 160k rows (> MAX_SQL_QUERY_ROWS).
+        let sql = "SELECT a.n, b.n FROM numbers a CROSS JOIN numbers b";
+        let err = query_sqlite(&opts, sql, &[]).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("LIMIT") || msg.contains("limit"),
+            "expected error to suggest adding LIMIT, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sqlite_query_allows_exact_limit() {
+        let (opts, mut keeper) = make_shared_in_memory_sqlite().await;
+        seed_numbers_table(&mut keeper, 400).await;
+
+        let sql = format!(
+            "SELECT a.n, b.n FROM numbers a CROSS JOIN numbers b LIMIT {}",
+            MAX_SQL_QUERY_ROWS
+        );
+        let result = query_sqlite(&opts, &sql, &[]).await.expect("query");
+        assert_eq!(result.rows.len(), MAX_SQL_QUERY_ROWS);
+    }
+
+    #[tokio::test]
+    async fn with_sql_query_timeout_times_out() {
+        // Keep env overrides (if any) isolated from other tests in this crate.
+        let _guard = env_mutex().lock().unwrap();
+
+        let key = "FORMULA_SQL_QUERY_TIMEOUT_MS";
+        let prev = std::env::var(key).ok();
+        std::env::set_var(key, "1");
+
+        let err = with_sql_query_timeout("Test", async {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            Ok::<_, anyhow::Error>(())
+        })
+        .await
+        .unwrap_err();
+
+        if let Some(prev) = prev {
+            std::env::set_var(key, prev);
+        } else {
+            std::env::remove_var(key);
+        }
+
+        assert!(
+            err.to_string().contains("exceeded"),
+            "expected timeout error message, got: {err}"
+        );
     }
 }

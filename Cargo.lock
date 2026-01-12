@@ -1387,6 +1387,7 @@ dependencies = [
  "formula-xls",
  "formula-xlsb",
  "formula-xlsx",
+ "futures-util",
  "hex",
  "http-range",
  "keyring",
