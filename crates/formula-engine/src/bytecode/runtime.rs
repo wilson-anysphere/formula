@@ -143,7 +143,11 @@ fn multirange_unique_areas(r: &MultiRangeRef, base: CellCoord) -> Vec<ResolvedSh
         }
 
         seen.extend(pieces.iter().copied());
-        out.extend(pieces.into_iter().map(|range| ResolvedSheetRange { sheet, range }));
+        out.extend(
+            pieces
+                .into_iter()
+                .map(|range| ResolvedSheetRange { sheet, range }),
+        );
     }
 
     out
@@ -1107,8 +1111,12 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         (Value::Number(_), Value::Empty | Value::Missing) => (left.clone(), Value::Number(0.0)),
         (Value::Empty | Value::Missing, Value::Bool(_)) => (Value::Bool(false), right.clone()),
         (Value::Bool(_), Value::Empty | Value::Missing) => (left.clone(), Value::Bool(false)),
-        (Value::Empty | Value::Missing, Value::Text(_)) => (Value::Text(Arc::from("")), right.clone()),
-        (Value::Text(_), Value::Empty | Value::Missing) => (left.clone(), Value::Text(Arc::from(""))),
+        (Value::Empty | Value::Missing, Value::Text(_)) => {
+            (Value::Text(Arc::from("")), right.clone())
+        }
+        (Value::Text(_), Value::Empty | Value::Missing) => {
+            (left.clone(), Value::Text(Arc::from("")))
+        }
         _ => (left.clone(), right.clone()),
     };
 
@@ -1671,7 +1679,9 @@ fn fn_iserror(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         // treats these as a reference-union argument which evaluates to `#VALUE!`, and then
         // ISERROR returns TRUE for that error value.
         Value::MultiRange(r) if r.areas.len() != 1 => Value::Bool(true),
-        other => map_arg(other, grid, base, |v| Value::Bool(matches!(v, Value::Error(_)))),
+        other => map_arg(other, grid, base, |v| {
+            Value::Bool(matches!(v, Value::Error(_)))
+        }),
     }
 }
 
@@ -1679,7 +1689,9 @@ fn fn_isna(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    map_arg(&args[0], grid, base, |v| Value::Bool(matches!(v, Value::Error(ErrorKind::NA))))
+    map_arg(&args[0], grid, base, |v| {
+        Value::Bool(matches!(v, Value::Error(ErrorKind::NA)))
+    })
 }
 
 fn fn_na(args: &[Value]) -> Value {
@@ -2254,7 +2266,10 @@ where
     match value {
         Value::Array(arr) => {
             let mut out = Vec::new();
-            if out.try_reserve_exact(arr.rows.saturating_mul(arr.cols)).is_err() {
+            if out
+                .try_reserve_exact(arr.rows.saturating_mul(arr.cols))
+                .is_err()
+            {
                 return Value::Error(ErrorKind::Num);
             }
             for v in arr.iter() {
@@ -2370,7 +2385,9 @@ fn fn_isblank(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    map_arg(&args[0], grid, base, |v| Value::Bool(matches!(v, Value::Empty | Value::Missing)))
+    map_arg(&args[0], grid, base, |v| {
+        Value::Bool(matches!(v, Value::Empty | Value::Missing))
+    })
 }
 
 fn fn_isnumber(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
@@ -2386,14 +2403,18 @@ fn fn_istext(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    map_arg(&args[0], grid, base, |v| Value::Bool(matches!(v, Value::Text(_))))
+    map_arg(&args[0], grid, base, |v| {
+        Value::Bool(matches!(v, Value::Text(_)))
+    })
 }
 
 fn fn_islogical(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() != 1 {
         return Value::Error(ErrorKind::Value);
     }
-    map_arg(&args[0], grid, base, |v| Value::Bool(matches!(v, Value::Bool(_))))
+    map_arg(&args[0], grid, base, |v| {
+        Value::Bool(matches!(v, Value::Bool(_)))
+    })
 }
 
 fn fn_iserr(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
@@ -3228,12 +3249,7 @@ fn fn_countif(
             RangeArg::MultiRange(r) => {
                 let mut count = 0usize;
                 for area in multirange_unique_areas(r, base) {
-                    match count_if_range_on_sheet(
-                        grid,
-                        area.sheet,
-                        area.range,
-                        numeric,
-                    ) {
+                    match count_if_range_on_sheet(grid, area.sheet, area.range, numeric) {
                         Ok(c) => count += c,
                         Err(e) => return Value::Error(e),
                     }
@@ -3253,12 +3269,7 @@ fn fn_countif(
         RangeArg::MultiRange(r) => {
             let mut count = 0usize;
             for area in multirange_unique_areas(r, base) {
-                match count_if_range_criteria_on_sheet(
-                    grid,
-                    area.sheet,
-                    area.range,
-                    &criteria,
-                ) {
+                match count_if_range_criteria_on_sheet(grid, area.sheet, area.range, &criteria) {
                     Ok(c) => count += c,
                     Err(e) => return Value::Error(e),
                 }
@@ -5521,8 +5532,10 @@ fn counta_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, ErrorKin
             count += simd::count_ignore_nan_f64(slice);
         } else {
             for row in range.row_start..=range.row_end {
-                if !matches!(grid.get_value(CellCoord { row, col }), Value::Empty | Value::Missing)
-                {
+                if !matches!(
+                    grid.get_value(CellCoord { row, col }),
+                    Value::Empty | Value::Missing
+                ) {
                     count += 1;
                 }
             }
@@ -6281,9 +6294,6 @@ mod tests {
         );
 
         let criteria_gt = NumericCriteria::new(CmpOp::Gt, 0.0);
-        assert_eq!(
-            count_if_range_on_sheet(&grid, 0, range, criteria_gt),
-            Ok(2)
-        );
+        assert_eq!(count_if_range_on_sheet(&grid, 0, range, criteria_gt), Ok(2));
     }
 }
