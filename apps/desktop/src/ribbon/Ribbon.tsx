@@ -78,19 +78,16 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
       const kind = button.kind ?? "button";
 
       if (kind === "toggle") {
-        setPressedById((prev) => {
-          const nextPressed = !prev[button.id];
-          const next = { ...prev, [button.id]: nextPressed };
-          actions.onToggle?.(button.id, nextPressed);
-          actions.onCommand?.(button.id);
-          return next;
-        });
+        const nextPressed = !pressedById[button.id];
+        setPressedById((prev) => ({ ...prev, [button.id]: !prev[button.id] }));
+        actions.onToggle?.(button.id, nextPressed);
+        actions.onCommand?.(button.id);
         return;
       }
 
       actions.onCommand?.(button.id);
     },
-    [actions],
+    [actions, pressedById],
   );
 
   const selectTabByIndex = React.useCallback(
