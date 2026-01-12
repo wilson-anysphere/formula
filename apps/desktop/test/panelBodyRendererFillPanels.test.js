@@ -46,6 +46,41 @@ test("panelBodyRenderer keeps key dock panels full-height (panel-body--fill)", (
       start: "if (panelId === PanelIds.DATA_QUERIES)",
       end: "if (panelId === PanelIds.MARKETPLACE)",
     },
+    {
+      name: "Marketplace",
+      start: "if (panelId === PanelIds.MARKETPLACE)",
+      end: "if (panelId === PanelIds.PYTHON)",
+    },
+    {
+      name: "Python",
+      start: "if (panelId === PanelIds.PYTHON)",
+      end: "const panelDef = options.panelRegistry?.get(panelId) as any;",
+    },
+    {
+      name: "Extension panel bodies",
+      start: "if (panelDef?.source?.kind === \"extension\"",
+      end: "if (panelId === PanelIds.AI_AUDIT)",
+    },
+    {
+      name: "AI audit",
+      start: "if (panelId === PanelIds.AI_AUDIT)",
+      end: "if (panelId === PanelIds.VERSION_HISTORY)",
+    },
+    {
+      name: "Version history",
+      start: "if (panelId === PanelIds.VERSION_HISTORY)",
+      end: "if (panelId === PanelIds.BRANCH_MANAGER)",
+    },
+    {
+      name: "Branch manager",
+      start: "if (panelId === PanelIds.BRANCH_MANAGER)",
+      end: "if (panelId === PanelIds.MACROS)",
+    },
+    {
+      name: "VBA migrate",
+      start: "if (panelId === PanelIds.VBA_MIGRATE)",
+      end: "body.textContent = `Panel: ${panelId}`;",
+    },
   ];
 
   for (const panel of fillPanels) {
@@ -53,4 +88,3 @@ test("panelBodyRenderer keeps key dock panels full-height (panel-body--fill)", (
     assert.match(section, /makeBodyFillAvailableHeight\(body\);/, `Expected ${panel.name} panel to call makeBodyFillAvailableHeight(body)`);
   }
 });
-
