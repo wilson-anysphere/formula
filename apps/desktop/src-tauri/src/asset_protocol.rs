@@ -21,9 +21,14 @@ use tauri::{Manager, Runtime, UriSchemeContext};
 /// Note:
 /// We intentionally do **not** set `Access-Control-Allow-Origin: *` to avoid making
 /// arbitrary local files readable via `fetch()` from unexpected origins; instead we
-/// mirror Tauri's default behavior of reflecting the current window origin.
+/// mirror Tauri's upstream behavior of reflecting the *initial* webview origin.
+///
+/// Important security property:
+/// The origin is computed from configuration/platform rules instead of the current
+/// webview URL so that an external navigation cannot gain CORS access to `asset://`
+/// resources.
 pub fn handler<R: Runtime>(ctx: UriSchemeContext<'_, R>, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
-    let window_origin = window_origin(&ctx);
+    let window_origin = stable_window_origin(&ctx);
 
     if !ctx.app_handle().config().app.security.asset_protocol.enable {
         // Match the intent of Tauri's built-in asset protocol: if it's not enabled,
@@ -61,26 +66,15 @@ pub fn handler<R: Runtime>(ctx: UriSchemeContext<'_, R>, request: Request<Vec<u8
     }
 }
 
-fn window_origin<R: Runtime>(ctx: &UriSchemeContext<'_, R>) -> String {
-    // This mirrors Tauri's internal computation from `manager/webview.rs`.
+fn stable_window_origin<R: Runtime>(ctx: &UriSchemeContext<'_, R>) -> String {
+    // Mirror Tauri upstream behavior: the window origin is computed once from the
+    // *initial* webview URL and then used by the protocol handler.
     //
-    // We need this so `fetch()` can request `asset://` resources with the correct CORS origin,
-    // and so we avoid enabling `Access-Control-Allow-Origin: *`.
-    let Some(window) = ctx.app_handle().get_webview_window(ctx.webview_label()) else {
-        return "null".to_string();
-    };
+    // We compute the equivalent stable origin from the app config + platform so an
+    // arbitrary navigation cannot change the effective CORS policy.
+    let config = ctx.app_handle().config();
 
-    let Ok(window_url) = window.as_ref().url() else {
-        return "null".to_string();
-    };
-
-    if window_url.scheme() == "data" {
-        return "null".to_string();
-    }
-
-    let use_https_scheme = ctx
-        .app_handle()
-        .config()
+    let use_https_scheme = config
         .app
         .windows
         .iter()
@@ -88,27 +82,17 @@ fn window_origin<R: Runtime>(ctx: &UriSchemeContext<'_, R>) -> String {
         .map(|w| w.use_https_scheme)
         .unwrap_or(false);
 
-    if (cfg!(windows) || cfg!(target_os = "android"))
-        && window_url.scheme() != "http"
-        && window_url.scheme() != "https"
-    {
-        let scheme = if use_https_scheme { "https" } else { "http" };
-        return format!("{scheme}://{}.localhost", window_url.scheme());
-    }
+    // `dev_url` is represented as either `String` or `Url` depending on the Tauri version.
+    // Both expose `as_str()`, so prefer that over `as_deref()` to avoid tying this code to a
+    // specific config representation.
+    let dev_url = config.build.dev_url.as_ref().map(|url| url.as_str());
 
-    if let Some(host) = window_url.host() {
-        return format!(
-            "{}://{}{}",
-            window_url.scheme(),
-            host,
-            window_url
-                .port()
-                .map(|p| format!(":{p}"))
-                .unwrap_or_default()
-        );
-    }
-
-    "null".to_string()
+    desktop::tauri_origin::stable_webview_origin(
+        tauri::is_dev(),
+        dev_url,
+        use_https_scheme,
+        desktop::tauri_origin::DesktopPlatform::current(),
+    )
 }
 
 fn get_response(

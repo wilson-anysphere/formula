@@ -24,6 +24,7 @@ pub(crate) mod sheet_name;
 pub mod sql;
 pub mod state;
 pub mod storage;
+pub mod tauri_origin;
 #[cfg(feature = "desktop")]
 pub mod tray_status;
 #[cfg(feature = "desktop")]
