@@ -39,9 +39,11 @@ test.describe("Extensions UI integration", () => {
 
     await page.getByTestId("command-palette-input").fill("Sum Selection");
 
-    await expect(page.getByTestId("command-palette-list")).toContainText("Sample Hello: Sum Selection", {
-      timeout: 10_000,
-    });
+    // Command palette groups commands by category, rendering the category as a group header
+    // and the command title as the selectable row.
+    const list = page.getByTestId("command-palette-list");
+    await expect(list).toContainText("Sample Hello", { timeout: 10_000 });
+    await expect(list).toContainText("Sum Selection", { timeout: 10_000 });
   });
 
   test("runs sampleHello.openPanel and renders the panel webview", async ({ page }) => {
