@@ -666,6 +666,13 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
       return;
     }
 
+    if (!networkOnline) {
+      // Browser/network reports offline; show a clear offline status regardless of provider state.
+      stopProviderPoll();
+      setIndicatorText(`${docId} • Offline`, { mode: "collab", conn: "offline", sync: "offline", docId });
+      return;
+    }
+
     // Provider exists. If it doesn't support event subscriptions, fall back to polling
     // so the UI eventually reflects connection/sync changes.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -711,9 +718,9 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
 
     const syncLabel = connected ? (synced ? "Synced" : "Syncing…") : connecting ? "Syncing…" : hasEverSynced ? "Not synced" : "Syncing…";
 
-    setIndicatorText(`${docId} • ${networkOnline ? connectionLabel : "Offline"} • ${syncLabel}`, {
+    setIndicatorText(`${docId} • ${connectionLabel} • ${syncLabel}`, {
       mode: "collab",
-      conn: networkOnline ? (connected ? "connected" : connecting ? "connecting" : "disconnected") : "offline",
+      conn: connected ? "connected" : connecting ? "connecting" : "disconnected",
       sync: connected ? (synced ? "synced" : "syncing") : connecting ? "syncing" : hasEverSynced ? "unsynced" : "syncing",
       docId,
     });

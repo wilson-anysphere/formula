@@ -66,6 +66,8 @@ test.describe("collab status indicator (collab mode)", () => {
     await page.context().setOffline(true);
     await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-conn", "offline", { timeout: 10_000 });
     await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-conn", "offline", { timeout: 10_000 });
+    await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "offline", { timeout: 10_000 });
+    await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "offline", { timeout: 10_000 });
     await expect
       .poll(async () => page.getByTestId("collab-status").getAttribute("data-collab-conn"))
       .not.toBe("connected");
