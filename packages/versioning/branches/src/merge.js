@@ -27,6 +27,66 @@ function isRecord(value) {
 }
 
 /**
+ * Merge per-sheet view state (frozen panes, axis sizes, default formatting, range-run formatting).
+ *
+ * Treat missing keys as "no change" (important for older clients).
+ *
+ * @param {Record<string, any> | null | undefined} baseView
+ * @param {Record<string, any> | null | undefined} oursView
+ * @param {Record<string, any> | null | undefined} theirsView
+ * @returns {Record<string, any>}
+ */
+function mergeSheetView(baseView, oursView, theirsView) {
+  const base = isRecord(baseView) ? baseView : {};
+  const ours = isRecord(oursView) ? oursView : {};
+  const theirs = isRecord(theirsView) ? theirsView : {};
+
+  /** @type {Record<string, any>} */
+  const merged = {
+    frozenRows: Number(base.frozenRows ?? 0) || 0,
+    frozenCols: Number(base.frozenCols ?? 0) || 0,
+  };
+
+  /** @type {string[]} */
+  const keys = [
+    "frozenRows",
+    "frozenCols",
+    "colWidths",
+    "rowHeights",
+    "defaultFormat",
+    "rowFormats",
+    "colFormats",
+    "formatRunsByCol",
+  ];
+
+  for (const key of keys) {
+    const baseVal = base[key];
+    let oursVal = ours[key];
+    let theirsVal = theirs[key];
+
+    // Treat omissions as "no change" when base has a value.
+    if (baseVal !== undefined && oursVal === undefined) oursVal = baseVal;
+    if (baseVal !== undefined && theirsVal === undefined) theirsVal = baseVal;
+
+    let nextVal = oursVal;
+    if (deepEqual(oursVal, theirsVal)) nextVal = oursVal;
+    else if (deepEqual(baseVal, oursVal)) nextVal = theirsVal;
+    else if (deepEqual(baseVal, theirsVal)) nextVal = oursVal;
+    // else: both changed differently; prefer ours (existing behavior for view state).
+
+    if (key === "frozenRows" || key === "frozenCols") {
+      merged[key] = Number(nextVal ?? 0) || 0;
+      continue;
+    }
+
+    if (nextVal !== undefined) merged[key] = structuredClone(nextVal);
+    else delete merged[key];
+  }
+
+  return merged;
+}
+
+/**
  * @param {Record<string, any> | null} baseFormat
  * @param {Record<string, any> | null} oursFormat
  * @param {Record<string, any> | null} theirsFormat
@@ -520,11 +580,7 @@ export function mergeDocumentStates({ base, ours, theirs }) {
     const baseView = baseMeta?.view ?? { frozenRows: 0, frozenCols: 0 };
     const oursView = oursMeta?.view ?? { frozenRows: 0, frozenCols: 0 };
     const theirsView = theirsMeta?.view ?? { frozenRows: 0, frozenCols: 0 };
-
-    let mergedView = oursView;
-    if (deepEqual(oursView, theirsView)) mergedView = oursView;
-    else if (deepEqual(baseView, oursView)) mergedView = theirsView;
-    else if (deepEqual(baseView, theirsView)) mergedView = oursView;
+    const mergedView = mergeSheetView(baseView, oursView, theirsView);
 
     // Optional sheet metadata (visibility/tabColor) is stored outside the grid and should
     // survive branching/merges once callers support it. Treat missing values as "no change"

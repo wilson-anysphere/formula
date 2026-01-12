@@ -185,3 +185,42 @@ test("merge: sheet view (frozen panes) changes merge when only theirs changed", 
   assert.equal(result.conflicts.length, 0);
   assert.deepEqual(result.merged.sheets.metaById.Sheet1.view, { frozenRows: 3, frozenCols: 0 });
 });
+
+test("merge: sheet view merges independent keys (frozen panes + range-run formatting)", () => {
+  const base = {
+    schemaVersion: 1,
+    sheets: { order: ["Sheet1"], metaById: { Sheet1: { id: "Sheet1", name: "Sheet1", view: { frozenRows: 0, frozenCols: 0 } } } },
+    cells: { Sheet1: {} },
+    metadata: {},
+    namedRanges: {},
+    comments: {},
+  };
+
+  const ours = structuredClone(base);
+  ours.sheets.metaById.Sheet1.view = { frozenRows: 2, frozenCols: 1 };
+
+  const theirs = structuredClone(base);
+  theirs.sheets.metaById.Sheet1.view = {
+    frozenRows: 0,
+    frozenCols: 0,
+    formatRunsByCol: [
+      {
+        col: 0,
+        runs: [{ startRow: 0, endRowExclusive: 10, format: { font: { bold: true } } }],
+      },
+    ],
+  };
+
+  const result = mergeDocumentStates({ base, ours, theirs });
+  assert.equal(result.conflicts.length, 0);
+  assert.deepEqual(result.merged.sheets.metaById.Sheet1.view, {
+    frozenRows: 2,
+    frozenCols: 1,
+    formatRunsByCol: [
+      {
+        col: 0,
+        runs: [{ startRow: 0, endRowExclusive: 10, format: { font: { bold: true } } }],
+      },
+    ],
+  });
+});
