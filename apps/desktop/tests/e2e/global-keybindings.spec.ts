@@ -197,8 +197,11 @@ test.describe("global keybindings", () => {
       .toBe(true);
 
     // Ensure we're still "typing in an input" for the remaining assertions.
-    await page.getByTestId("formula-highlight").click();
-    await expect(page.getByTestId("formula-input")).toBeFocused();
+    // (The formula bar textarea is rendered on top of the highlight <pre> in edit mode, so
+    // re-focus the textarea directly instead of clicking the highlight.)
+    const formulaInput = page.getByTestId("formula-input");
+    await formulaInput.focus();
+    await expect(formulaInput).toBeFocused();
 
     // Comments shortcuts should not fire while typing in an input.
     await page.evaluate(() => {
