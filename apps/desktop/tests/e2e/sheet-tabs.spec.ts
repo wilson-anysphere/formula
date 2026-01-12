@@ -1300,7 +1300,20 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
     // Delete Sheet2 via context menu.
-    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing Sheet2 tab");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     await page.getByTestId("sheet-tab-context-menu").getByRole("button", { name: "Delete" }).click();
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
@@ -1311,7 +1324,19 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("active-value")).toHaveText("Seed");
 
     // Deleting the last remaining sheet is blocked.
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    await page.evaluate(() => {
+      const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+      if (!tab) throw new Error("Missing Sheet1 tab");
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     const deleteBtn = page.getByTestId("sheet-tab-context-menu").getByRole("button", { name: "Delete" });
     await expect(deleteBtn).toBeDisabled();
   });
