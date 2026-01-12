@@ -182,7 +182,7 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub fn clipboard_read(app: tauri::AppHandle) -> Result<ClipboardContent, String> {
+pub async fn clipboard_read(app: tauri::AppHandle) -> Result<ClipboardContent, String> {
     // Clipboard APIs on macOS call into AppKit, which is not thread-safe.
     // Dispatch to the main thread before touching NSPasteboard.
     #[cfg(target_os = "macos")]
@@ -197,13 +197,18 @@ pub fn clipboard_read(app: tauri::AppHandle) -> Result<ClipboardContent, String>
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
-        read().map_err(|e| e.to_string())
+        tauri::async_runtime::spawn_blocking(|| read().map_err(|e| e.to_string()))
+            .await
+            .map_err(|e| e.to_string())?
     }
 }
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub fn clipboard_write(app: tauri::AppHandle, payload: ClipboardWritePayload) -> Result<(), String> {
+pub async fn clipboard_write(
+    app: tauri::AppHandle,
+    payload: ClipboardWritePayload,
+) -> Result<(), String> {
     // See `clipboard_read` for why we dispatch to the main thread on macOS.
     #[cfg(target_os = "macos")]
     {
@@ -217,7 +222,9 @@ pub fn clipboard_write(app: tauri::AppHandle, payload: ClipboardWritePayload) ->
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
-        write(&payload).map_err(|e| e.to_string())
+        tauri::async_runtime::spawn_blocking(move || write(&payload).map_err(|e| e.to_string()))
+            .await
+            .map_err(|e| e.to_string())?
     }
 }
 
