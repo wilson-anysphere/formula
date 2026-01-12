@@ -3267,7 +3267,7 @@ if (
 
   commandRegistry.registerBuiltinCommand(
     "checkForUpdates",
-    "Check for Updates",
+    t("commandPalette.command.checkForUpdates"),
     () => {
       void checkForUpdatesFromCommandPalette().catch((err) => {
         console.error("Failed to check for updates:", err);
@@ -5316,7 +5316,7 @@ try {
 
       const doc = app.getDocument();
       if (doc.isDirty) {
-        const discard = await nativeDialogs.confirm("You have unsaved changes. Discard them?");
+        const discard = await nativeDialogs.confirm(t("prompt.unsavedChangesDiscardConfirm"));
         if (!discard) return;
       }
 

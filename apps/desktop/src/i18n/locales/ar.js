@@ -6,6 +6,8 @@ export const ar = {
   "settings.language": "اللغة",
   "presence.anonymous": "مجهول",
   "prompt.unsavedChanges": "لديك تغييرات غير محفوظة.",
+  "prompt.unsavedChangesDiscardConfirm": "لديك تغييرات غير محفوظة. هل تريد تجاهلها؟",
+  "commandPalette.command.checkForUpdates": "التحقق من التحديثات",
   "versionHistory.checkpoint": "نقطة حفظ",
   "versionHistory.autoSave": "حفظ تلقائي",
   "versionHistory.restore": "تمت الاستعادة"

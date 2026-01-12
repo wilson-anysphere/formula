@@ -1,4 +1,5 @@
 import { showToast } from "../extensions/ui.js";
+import { t } from "../i18n/index.js";
 
 import * as nativeDialogs from "./nativeDialogs";
 
@@ -69,7 +70,7 @@ export async function requestAppQuit(options: RequestAppQuitOptions = {}): Promi
 
     if (handlers.isDirty()) {
       const discard = await nativeDialogs.confirm(
-        options.dirtyConfirmMessage ?? "You have unsaved changes. Discard them?",
+        options.dirtyConfirmMessage ?? t("prompt.unsavedChangesDiscardConfirm"),
       );
       if (!discard) return false;
     }
@@ -107,7 +108,7 @@ export async function requestAppRestart(options: {
 }): Promise<boolean> {
   return requestAppQuit({
     beforeQuit: options.beforeQuit,
-    beforeQuitErrorToast: options.beforeQuitErrorToast ?? "Failed to restart to install update.",
+    beforeQuitErrorToast: options.beforeQuitErrorToast ?? t("updater.restartFailed"),
     dirtyConfirmMessage: options.dirtyConfirmMessage,
   });
 }
