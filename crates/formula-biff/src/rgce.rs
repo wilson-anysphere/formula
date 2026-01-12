@@ -986,10 +986,25 @@ fn encode_structured_ref(
             start,
             end,
         ),
-        (_, formula_engine::structured_refs::StructuredColumns::Multi(_)) => {
-            return Err(EncodeRgceError::Unsupported(
-                "structured reference column unions",
-            ));
+        (item, formula_engine::structured_refs::StructuredColumns::Multi(cols)) => {
+            // BIFF12 `PtgList` can encode either a single column or a contiguous range. For
+            // multi-column unions, only accept the degenerate case of a single selection.
+            let item_code = item.map(structured_ref_item_code).unwrap_or(0u16);
+            let mut cols = cols.into_iter();
+            let Some(first) = cols.next() else {
+                return Err(EncodeRgceError::Unsupported("empty structured reference column list"));
+            };
+            if cols.next().is_some() {
+                return Err(EncodeRgceError::Unsupported("structured reference column unions"));
+            }
+            match first {
+                formula_engine::structured_refs::StructuredColumn::Single(col) => {
+                    (item_code, 1u16, col, String::new())
+                }
+                formula_engine::structured_refs::StructuredColumn::Range { start, end } => {
+                    (item_code, 2u16, start, end)
+                }
+            }
         }
     };
 

@@ -109,12 +109,18 @@ fn ast_encoder_roundtrips_sheet_range_ref() {
     let mut ctx = WorkbookContext::default();
     ctx.add_extern_sheet("Sheet1", "Sheet3", 1);
 
-    let encoded =
+    let encoded_unquoted =
         encode_rgce_with_context_ast("=SUM(Sheet1:Sheet3!A1)", &ctx, CellCoord::new(0, 0))
             .expect("encode");
-    assert!(encoded.rgcb.is_empty());
+    assert!(encoded_unquoted.rgcb.is_empty());
 
-    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    let encoded_quoted =
+        encode_rgce_with_context_ast("=SUM('Sheet1:Sheet3'!A1)", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+    assert!(encoded_quoted.rgcb.is_empty());
+    assert_eq!(encoded_unquoted.rgce, encoded_quoted.rgce);
+
+    let decoded = decode_rgce_with_context(&encoded_unquoted.rgce, &ctx).expect("decode");
     assert_eq!(decoded, "SUM('Sheet1:Sheet3'!A1)");
 }
 
