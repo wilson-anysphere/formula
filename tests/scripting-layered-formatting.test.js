@@ -137,6 +137,32 @@ test("Macro recorder receives formatChanged for row style deltas (layered format
   workbook.dispose();
 });
 
+test("Macro recorder receives formatChanged for rowFormats changes in sheetViewDeltas (layered formatting)", () => {
+  const doc = new FakeDocumentController();
+  const italicId = doc.styleTable.intern({ font: { italic: true } });
+
+  const workbook = new DocumentControllerWorkbookAdapter(doc, { activeSheetName: "Sheet1" });
+  const recorder = new MacroRecorder(workbook);
+  recorder.start();
+
+  doc.emitChange({
+    deltas: [],
+    sheetViewDeltas: [
+      {
+        sheetId: "Sheet1",
+        before: { frozenRows: 0, frozenCols: 0, rowFormats: {} },
+        after: { frozenRows: 0, frozenCols: 0, rowFormats: { "5": italicId } },
+      },
+    ],
+  });
+
+  assert.deepEqual(recorder.stop(), [
+    { type: "setFormat", sheetName: "Sheet1", address: "A6:XFD6", format: { italic: true } },
+  ]);
+
+  workbook.dispose();
+});
+
 test("Macro recorder receives formatChanged for sheet default style deltas (layered formatting)", () => {
   const doc = new FakeDocumentController();
   const fillId = doc.styleTable.intern({ fill: { fgColor: "#FF00FF00" } });
@@ -148,6 +174,32 @@ test("Macro recorder receives formatChanged for sheet default style deltas (laye
   doc.emitChange({
     deltas: [],
     sheetStyleIdDeltas: [{ sheetId: "Sheet1", beforeStyleId: 0, afterStyleId: fillId }],
+  });
+
+  assert.deepEqual(recorder.stop(), [
+    { type: "setFormat", sheetName: "Sheet1", address: "A1:XFD1048576", format: { backgroundColor: "#FF00FF00" } },
+  ]);
+
+  workbook.dispose();
+});
+
+test("Macro recorder receives formatChanged for defaultFormat changes in sheetViewDeltas (layered formatting)", () => {
+  const doc = new FakeDocumentController();
+  const fillId = doc.styleTable.intern({ fill: { fgColor: "#FF00FF00" } });
+
+  const workbook = new DocumentControllerWorkbookAdapter(doc, { activeSheetName: "Sheet1" });
+  const recorder = new MacroRecorder(workbook);
+  recorder.start();
+
+  doc.emitChange({
+    deltas: [],
+    sheetViewDeltas: [
+      {
+        sheetId: "Sheet1",
+        before: { frozenRows: 0, frozenCols: 0, defaultFormat: 0 },
+        after: { frozenRows: 0, frozenCols: 0, defaultFormat: fillId },
+      },
+    ],
   });
 
   assert.deepEqual(recorder.stop(), [
