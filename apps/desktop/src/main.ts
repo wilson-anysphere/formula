@@ -92,6 +92,7 @@ import { createClipboardProvider } from "./clipboard/platform/provider.js";
 import { createDesktopDlpContext } from "./dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "./dlp/enforceClipboardCopy.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
+import { assertExtensionRangeWithinLimits } from "./extensions/rangeSizeGuard.js";
 import { openFormatCellsDialog } from "./formatting/openFormatCellsDialog.js";
 import { parseCollabShareLink, serializeCollabShareLink } from "./sharing/collabLink.js";
 import { saveCollabConnectionForWorkbook, loadCollabConnectionForWorkbook } from "./sharing/collabConnectionStore.js";
@@ -3707,6 +3708,7 @@ if (
       const range = normalizeSelectionRange(
         app.getSelectionRanges()[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
       );
+      assertExtensionRangeWithinLimits(range, { label: "Selection" });
       recordLastExtensionSelection(sheetId, range);
       const values: Array<Array<string | number | boolean | null>> = [];
       for (let r = range.startRow; r <= range.endRow; r++) {
@@ -3731,6 +3733,7 @@ if (
     },
     async getRange(ref: string) {
       const { sheetId, startRow, startCol, endRow, endCol } = parseSheetQualifiedRange(ref);
+      assertExtensionRangeWithinLimits({ startRow, startCol, endRow, endCol });
       recordLastExtensionSelection(sheetId, { startRow, startCol, endRow, endCol });
       const values: Array<Array<string | number | boolean | null>> = [];
       for (let r = startRow; r <= endRow; r++) {
@@ -3745,6 +3748,7 @@ if (
     },
     async setRange(ref: string, values: unknown[][]) {
       const { sheetId, startRow, startCol, endRow, endCol } = parseSheetQualifiedRange(ref);
+      assertExtensionRangeWithinLimits({ startRow, startCol, endRow, endCol });
       const expectedRows = endRow - startRow + 1;
       const expectedCols = endCol - startCol + 1;
 
