@@ -118,7 +118,7 @@ fn defined_name_formulas_quote_sheet_names() {
         ("SpaceRef", "'Sheet One'!$A$1"),
         ("QuoteRef", "'O''Brien'!$B$2"),
         ("ReservedRef", "'TRUE'!$C$3"),
-        ("SpanRef", "'Sheet One':'O''Brien'!$D$4"),
+        ("SpanRef", "'Sheet One:O''Brien'!$D$4"),
     ];
 
     for (name, expected_refers_to) in cases {

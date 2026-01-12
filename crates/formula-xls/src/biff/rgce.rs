@@ -928,9 +928,8 @@ fn format_sheet_ref(ixti: u16, ctx: &RgceDecodeContext<'_>) -> Result<String, St
         Ok(format!("{}!", quote_sheet_name_if_needed(first)))
     } else {
         Ok(format!(
-            "{}:{}!",
-            quote_sheet_name_if_needed(first),
-            quote_sheet_name_if_needed(last)
+            "{}!",
+            quote_sheet_range_name_if_needed(first, last)
         ))
     }
 }
@@ -941,6 +940,25 @@ fn quote_sheet_name_if_needed(name: &str) -> String {
     }
     let escaped = name.replace('\'', "''");
     format!("'{escaped}'")
+}
+
+fn quote_sheet_range_name_if_needed(start: &str, end: &str) -> String {
+    // Excel represents 3D sheet ranges as:
+    // - `Sheet1:Sheet3!A1` for simple sheet identifiers
+    // - `'Sheet 1:Sheet3'!A1` when either side requires quoting.
+    //
+    // Note: quoting each side independently (`'Sheet 1':Sheet3!A1`) is not a valid 3D sheet range.
+    if is_unquoted_sheet_name(start) && is_unquoted_sheet_name(end) {
+        return format!("{start}:{end}");
+    }
+
+    let mut out = String::new();
+    out.push('\'');
+    out.push_str(&start.replace('\'', "''"));
+    out.push(':');
+    out.push_str(&end.replace('\'', "''"));
+    out.push('\'');
+    out
 }
 
 fn is_unquoted_sheet_name(name: &str) -> bool {
@@ -1612,7 +1630,7 @@ mod tests {
     }
 
     #[test]
-    fn defined_name_3d_ref_renders_sheet_ranges_as_two_quoted_idents() {
+    fn defined_name_3d_ref_renders_sheet_ranges_as_single_quoted_ident() {
         let sheet_names: Vec<String> = vec![
             "Sheet 1".to_string(),
             "Sheet 2".to_string(),
@@ -1627,8 +1645,64 @@ mod tests {
 
         let rgce = [0x3Au8, 0, 0, 0, 0, 0, 0];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
-        assert_eq!(decoded.text, "'Sheet 1':'Sheet 3'!$A$1");
+        assert_eq!(decoded.text, "'Sheet 1:Sheet 3'!$A$1");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
         assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_area3d_sheet_range_with_quoting() {
+        let sheet_names = vec!["Sheet 1".to_string(), "Sheet3".to_string()];
+        let externsheet = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 1,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgArea3d (0x3B): [ixti=0][A1:B2] on sheet range Sheet 1:Sheet3.
+        let mut rgce = Vec::new();
+        rgce.push(0x3B);
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rowFirst0
+        rgce.extend_from_slice(&1u16.to_le_bytes()); // rowLast0
+        rgce.extend_from_slice(&0xC000u16.to_le_bytes()); // colFirst=A relative
+        rgce.extend_from_slice(&0xC001u16.to_le_bytes()); // colLast=B relative
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'Sheet 1:Sheet3'!A1:B2");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptgname_workbook_and_sheet_scope() {
+        let sheet_names = vec!["Sheet 1".to_string()];
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names = vec![
+            DefinedNameMeta {
+                name: "MyName".to_string(),
+                scope_sheet: None,
+            },
+            DefinedNameMeta {
+                name: "LocalName".to_string(),
+                scope_sheet: Some(0),
+            },
+        ];
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // Workbook-scoped name (id=1).
+        let rgce1 = [0x23, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let decoded1 = decode_biff8_rgce(&rgce1, &ctx);
+        assert_eq!(decoded1.text, "MyName");
+        assert!(decoded1.warnings.is_empty(), "warnings={:?}", decoded1.warnings);
+        assert_parseable(&decoded1.text);
+
+        // Sheet-scoped name (id=2).
+        let rgce2 = [0x23, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let decoded2 = decode_biff8_rgce(&rgce2, &ctx);
+        assert_eq!(decoded2.text, "'Sheet 1'!LocalName");
+        assert!(decoded2.warnings.is_empty(), "warnings={:?}", decoded2.warnings);
+        assert_parseable(&decoded2.text);
     }
 }
