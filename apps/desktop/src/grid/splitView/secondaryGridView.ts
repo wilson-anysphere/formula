@@ -53,6 +53,7 @@ export class SecondaryGridView {
   private readonly headerCols = 1;
   private readonly editor: CellEditorOverlay;
   private editingCell: { row: number; col: number } | null = null;
+  private suppressFocusRestoreOnNextCommandCommit = false;
 
   private sheetId: string;
 
@@ -156,19 +157,38 @@ export class SecondaryGridView {
     // Editor overlay for in-place cell editing in the secondary pane.
     this.editor = new CellEditorOverlay(this.container, {
       onCommit: (commit) => {
+        const suppressFocusRestore =
+          commit.reason === "command" && this.suppressFocusRestoreOnNextCommandCommit;
+        this.suppressFocusRestoreOnNextCommandCommit = false;
         this.editingCell = null;
         this.applyEdit(commit.cell, commit.value);
         if (commit.reason === "enter" || commit.reason === "tab") {
           this.advanceSelectionAfterEdit(commit);
         }
         this.onRequestRefresh?.();
-        focusWithoutScroll(this.container);
+        if (!suppressFocusRestore) focusWithoutScroll(this.container);
       },
       onCancel: () => {
+        this.suppressFocusRestoreOnNextCommandCommit = false;
         this.editingCell = null;
         focusWithoutScroll(this.container);
       }
     });
+
+    // Excel behavior: leaving in-cell editing (e.g. clicking the primary pane, ribbon, etc)
+    // should commit the draft text.
+    //
+    // IMPORTANT: Avoid stealing focus back from whatever surface the user clicked. When the
+    // editor blurs to an element outside the secondary pane, suppress the focus-restore
+    // logic that normally runs after a command commit.
+    const onEditorBlur = (event: FocusEvent) => {
+      if (!this.editor.isOpen()) return;
+      const next = event.relatedTarget as Node | null;
+      this.suppressFocusRestoreOnNextCommandCommit = !next || !this.container.contains(next);
+      this.editor.commit("command");
+    };
+    this.editor.element.addEventListener("blur", onEditorBlur);
+    this.disposeFns.push(() => this.editor.element.removeEventListener("blur", onEditorBlur));
 
     this.provider =
       options.provider ??

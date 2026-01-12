@@ -919,6 +919,35 @@ test.describe("split view", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("F2");
   });
 
+  test("clicking the primary pane commits an in-progress secondary-pane edit", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    // Start editing C2 in the secondary pane but do NOT press Enter/Tab.
+    await secondary.click({ position: { x: 48 + 2 * 100 + 12, y: 24 + 1 * 24 + 12 } });
+    await page.keyboard.press("h");
+    const editor = secondary.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("ello");
+
+    // Click A1 in the primary pane; this should blur/commit the secondary editor.
+    const rectA1 = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"));
+    if (!rectA1) throw new Error("Missing A1 rect");
+    await page.locator("#grid").click({ position: { x: rectA1.x + rectA1.width / 2, y: rectA1.y + rectA1.height / 2 } });
+
+    await expect(editor).not.toBeVisible();
+    await waitForIdle(page);
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C2"))).toBe("hello");
+  });
+
   test("disabling split view commits an in-progress secondary-pane edit", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
