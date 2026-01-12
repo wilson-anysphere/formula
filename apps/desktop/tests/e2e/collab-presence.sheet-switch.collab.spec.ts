@@ -37,6 +37,7 @@ test.describe("collab presence: sheet switching", () => {
 
     const urlForUser = (userId: string): string => {
       const params = new URLSearchParams({
+        grid: "shared",
         collab: "1",
         docId,
         wsUrl,
@@ -54,15 +55,33 @@ test.describe("collab presence: sheet switching", () => {
     await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 30_000 });
     await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 30_000 });
 
-    // With both clients on the initial sheet, user2 should see user1's presence.
+    const remotePresenceIds = async (targetPage: typeof page): Promise<string[]> => {
+      return targetPage.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        if (!app) return [];
+        const mode = app.getGridMode?.() ?? null;
+
+        // Shared-grid mode: presences are pushed into the CanvasGridRenderer selection layer.
+        if (mode === "shared") {
+          const renderer = (app as any).sharedGrid?.renderer;
+          const presences = renderer?.remotePresences ?? [];
+          return Array.isArray(presences)
+            ? presences.map((presence: any) => presence?.id).filter((id: any) => typeof id === "string")
+            : [];
+        }
+
+        // Legacy mode fallback (shouldn't happen here because we pass `grid=shared`).
+        const presences = (app as any).remotePresences ?? [];
+        return Array.isArray(presences)
+          ? presences.map((presence: any) => presence?.id).filter((id: any) => typeof id === "string")
+          : [];
+      });
+    };
+
+    // With both clients on the initial sheet, user2 should see user1's presence in the renderer.
     await expect
       .poll(async () => {
-        return page2.evaluate(() => {
-          const app = (window as any).__formulaApp;
-          const session = app?.getCollabSession?.() ?? null;
-          const presences = session?.presence?.getRemotePresences?.() ?? [];
-          return presences.map((p: any) => p?.id ?? null).filter((id: any) => typeof id === "string");
-        });
+        return remotePresenceIds(page2);
       })
       .toEqual(["user1"]);
 
@@ -76,12 +95,7 @@ test.describe("collab presence: sheet switching", () => {
     // user2 stays on Sheet1, so user1 should no longer appear in user2's filtered remote presences.
     await expect
       .poll(async () => {
-        return page2.evaluate(() => {
-          const app = (window as any).__formulaApp;
-          const session = app?.getCollabSession?.() ?? null;
-          const presences = session?.presence?.getRemotePresences?.() ?? [];
-          return presences.map((p: any) => p?.id ?? null).filter((id: any) => typeof id === "string");
-        });
+        return remotePresenceIds(page2);
       })
       .toEqual([]);
 
@@ -91,12 +105,7 @@ test.describe("collab presence: sheet switching", () => {
 
     await expect
       .poll(async () => {
-        return page2.evaluate(() => {
-          const app = (window as any).__formulaApp;
-          const session = app?.getCollabSession?.() ?? null;
-          const presences = session?.presence?.getRemotePresences?.() ?? [];
-          return presences.map((p: any) => p?.id ?? null).filter((id: any) => typeof id === "string");
-        });
+        return remotePresenceIds(page2);
       })
       .toEqual(["user1"]);
   });
