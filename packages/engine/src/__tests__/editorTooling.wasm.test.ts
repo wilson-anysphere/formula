@@ -1,0 +1,215 @@
+import { describe, expect, it } from "vitest";
+
+import { formulaWasmNodeEntryUrl } from "../../../../scripts/build-formula-wasm-node.mjs";
+
+import { EngineWorker, type MessageChannelLike, type WorkerLike } from "../worker/EngineWorker.ts";
+import type {
+  InitMessage,
+  RpcRequest,
+  WorkerInboundMessage,
+  WorkerOutboundMessage
+} from "../protocol.ts";
+
+class MockMessagePort {
+  onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
+  private listeners = new Set<(event: MessageEvent<unknown>) => void>();
+  private other: MockMessagePort | null = null;
+
+  connect(other: MockMessagePort) {
+    this.other = other;
+  }
+
+  postMessage(message: unknown): void {
+    queueMicrotask(() => {
+      this.other?.dispatchMessage(message);
+    });
+  }
+
+  start(): void {}
+
+  close(): void {
+    this.listeners.clear();
+    this.onmessage = null;
+    this.other = null;
+  }
+
+  addEventListener(_type: "message", listener: (event: MessageEvent<unknown>) => void): void {
+    this.listeners.add(listener);
+  }
+
+  removeEventListener(_type: "message", listener: (event: MessageEvent<unknown>) => void): void {
+    this.listeners.delete(listener);
+  }
+
+  private dispatchMessage(data: unknown): void {
+    const event = { data } as MessageEvent<unknown>;
+    this.onmessage?.(event);
+    for (const listener of this.listeners) {
+      listener(event);
+    }
+  }
+}
+
+function createMockChannel(): MessageChannelLike {
+  const port1 = new MockMessagePort();
+  const port2 = new MockMessagePort();
+  port1.connect(port2);
+  port2.connect(port1);
+  return { port1, port2: port2 as unknown as MessagePort };
+}
+
+async function loadFormulaWasm() {
+  const entry = formulaWasmNodeEntryUrl();
+  // wasm-pack `--target nodejs` outputs CommonJS. Under ESM dynamic import, the exports
+  // are exposed on `default`.
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore - `@vite-ignore` is required for runtime-defined file URLs.
+  const mod = await import(/* @vite-ignore */ entry);
+  return (mod as any).default ?? mod;
+}
+
+class WasmBackedWorker implements WorkerLike {
+  private readonly wasm: any;
+  private port: MockMessagePort | null = null;
+
+  constructor(wasm: any) {
+    this.wasm = wasm;
+  }
+
+  postMessage(message: unknown): void {
+    const init = message as InitMessage;
+    if (!init || typeof init !== "object" || (init as any).type !== "init") {
+      return;
+    }
+
+    this.port = init.port as unknown as MockMessagePort;
+
+    this.port.addEventListener("message", (event) => {
+      const msg = event.data as WorkerInboundMessage;
+      if (!msg || typeof msg !== "object" || (msg as any).type !== "request") {
+        return;
+      }
+
+      const req = msg as RpcRequest;
+      const params = req.params as any;
+
+      try {
+        let result: unknown;
+        switch (req.method) {
+          case "lexFormula":
+            result = this.wasm.lexFormula(params.formula, params.options);
+            break;
+          case "parseFormulaPartial":
+            result = this.wasm.parseFormulaPartial(params.formula, params.cursor, params.options);
+            break;
+          default:
+            throw new Error(`unsupported method: ${req.method}`);
+        }
+
+        const response: WorkerOutboundMessage = { type: "response", id: req.id, ok: true, result };
+        this.port?.postMessage(response);
+      } catch (err) {
+        const response: WorkerOutboundMessage = {
+          type: "response",
+          id: req.id,
+          ok: false,
+          error: err instanceof Error ? err.message : String(err)
+        };
+        this.port?.postMessage(response);
+      }
+    });
+
+    const ready: WorkerOutboundMessage = { type: "ready" };
+    this.port.postMessage(ready);
+  }
+
+  terminate(): void {
+    this.port?.close();
+    this.port = null;
+  }
+}
+
+const skipWasmBuild = process.env.FORMULA_SKIP_WASM_BUILD === "1" || process.env.FORMULA_SKIP_WASM_BUILD === "true";
+const describeWasm = skipWasmBuild ? describe.skip : describe;
+
+describeWasm("EngineWorker editor tooling RPCs (wasm)", () => {
+  it("lexFormula returns token DTOs with UTF-16 spans", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      expect(await engine.lexFormula("=1+2")).toEqual([
+        { kind: "Number", span: { start: 1, end: 2 }, value: "1" },
+        { kind: "Plus", span: { start: 2, end: 3 } },
+        { kind: "Number", span: { start: 3, end: 4 }, value: "2" },
+        { kind: "Eof", span: { start: 4, end: 4 } }
+      ]);
+    } finally {
+      engine.terminate();
+    }
+  });
+
+  it("lexFormula spans use UTF-16 code unit indexing (surrogate pairs)", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      const formula = '=\"😀\"+1';
+      expect(formula.length).toBe(7); // `😀` is 2 UTF-16 code units.
+      const tokens = await engine.lexFormula(formula);
+      expect(tokens[0]).toEqual({ kind: "String", span: { start: 1, end: 5 }, value: "😀" });
+    } finally {
+      engine.terminate();
+    }
+  });
+
+  it("parseFormulaPartial returns function call context", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      const result = await engine.parseFormulaPartial("=SUM(1,", 6);
+      expect(result.context.function).toEqual({ name: "SUM", argIndex: 0 });
+      expect(result.error?.span).toEqual({ start: 6, end: 6 });
+    } finally {
+      engine.terminate();
+    }
+  });
+
+  it("parseFormulaPartial cursor is UTF-16 indexed (surrogate pairs before cursor)", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      const formula = '=\"😀\"&SUM(1,';
+      // Ensure we pass a UTF-16 code unit cursor (JS string indexing).
+      const cursor = formula.indexOf(",") + 1;
+      const result = await engine.parseFormulaPartial(formula, cursor);
+      expect(result.context.function).toEqual({ name: "SUM", argIndex: 1 });
+      expect(result.error?.span).toEqual({ start: cursor, end: cursor });
+    } finally {
+      engine.terminate();
+    }
+  });
+});
+
