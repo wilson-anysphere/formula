@@ -17,7 +17,7 @@ fn loaded_state_with_two_sheets() -> (AppState, String, String) {
 fn add_sheet_rejects_invalid_character() {
     let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
     let err = state
-        .add_sheet("Bad/Name".to_string(), None)
+        .add_sheet("Bad/Name".to_string(), None, None)
         .expect_err("expected invalid sheet name error");
     match err {
         AppStateError::WhatIf(msg) => {

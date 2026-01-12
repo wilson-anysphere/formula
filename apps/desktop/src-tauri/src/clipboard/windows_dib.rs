@@ -118,25 +118,20 @@ fn encode_png_rgba8(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, Str
 pub fn png_to_dibv5(png_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let (width, height, rgba) = decode_png_rgba8(png_bytes)?;
 
+    let width_i32 = i32::try_from(width).map_err(|_| "png width exceeds DIB limits".to_string())?;
+    let height_i32 = i32::try_from(height).map_err(|_| "png height exceeds DIB limits".to_string())?;
+
     let width_usize = width as usize;
     let height_usize = height as usize;
 
-    // DIB is stored bottom-up when height is positive.
+    // Use a top-down DIB (negative height) so the pixel buffer can stay in row-major order.
     let mut bgra = vec![0u8; width_usize * height_usize * 4];
-    for y in 0..height_usize {
-        let dst_y = height_usize - 1 - y;
-        for x in 0..width_usize {
-            let src = (y * width_usize + x) * 4;
-            let dst = (dst_y * width_usize + x) * 4;
-            let r = rgba[src];
-            let g = rgba[src + 1];
-            let b = rgba[src + 2];
-            let a = rgba[src + 3];
-            bgra[dst] = b;
-            bgra[dst + 1] = g;
-            bgra[dst + 2] = r;
-            bgra[dst + 3] = a;
-        }
+    for (src_px, dst_px) in rgba.chunks_exact(4).zip(bgra.chunks_exact_mut(4)) {
+        let r = src_px[0];
+        let g = src_px[1];
+        let b = src_px[2];
+        let a = src_px[3];
+        dst_px.copy_from_slice(&[b, g, r, a]);
     }
 
     let size_image = bgra.len() as u32;
@@ -145,8 +140,8 @@ pub fn png_to_dibv5(png_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     // BITMAPV5HEADER
     push_u32_le(&mut out, BITMAPV5HEADER_SIZE as u32); // bV5Size
-    push_i32_le(&mut out, width as i32); // bV5Width
-    push_i32_le(&mut out, height as i32); // bV5Height (positive => bottom-up)
+    push_i32_le(&mut out, width_i32); // bV5Width
+    push_i32_le(&mut out, -height_i32); // bV5Height (negative => top-down)
     push_u16_le(&mut out, 1); // bV5Planes
     push_u16_le(&mut out, 32); // bV5BitCount
     push_u32_le(&mut out, BI_BITFIELDS); // bV5Compression
@@ -345,6 +340,19 @@ mod tests {
     fn png_dibv5_png_roundtrip_preserves_pixels() {
         let png = encode_test_png();
         let dib = png_to_dibv5(&png).expect("png_to_dibv5 failed");
+
+        // Header sanity checks.
+        assert_eq!(read_u32_le(&dib, 0), Some(BITMAPV5HEADER_SIZE as u32));
+        assert_eq!(read_i32_le(&dib, 4), Some(2));
+        assert_eq!(read_i32_le(&dib, 8), Some(-2), "DIB should be top-down (negative height)");
+        assert_eq!(read_u16_le(&dib, 12), Some(1));
+        assert_eq!(read_u16_le(&dib, 14), Some(32));
+        assert_eq!(read_u32_le(&dib, 16), Some(BI_BITFIELDS));
+        assert_eq!(read_u32_le(&dib, 40), Some(0x00FF_0000));
+        assert_eq!(read_u32_le(&dib, 44), Some(0x0000_FF00));
+        assert_eq!(read_u32_le(&dib, 48), Some(0x0000_00FF));
+        assert_eq!(read_u32_le(&dib, 52), Some(0xFF00_0000));
+
         let png2 = dibv5_to_png(&dib).expect("dibv5_to_png failed");
 
         let (w1, h1, px1) = decode_png(&png);
