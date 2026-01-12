@@ -2120,6 +2120,65 @@ fn bytecode_backend_if_family_trailing_blank_args_match_ast() {
 }
 
 #[test]
+fn bytecode_backend_if_family_missing_args_match_ast() {
+    let mut engine = Engine::new();
+    engine
+        // Missing value_if_true returns blank when the condition is TRUE.
+        .set_cell_formula("Sheet1", "A1", "=IF(TRUE,)")
+        .unwrap();
+    engine
+        // Missing value_if_true does not affect the default FALSE value_if_false behavior.
+        .set_cell_formula("Sheet1", "A2", "=IF(FALSE,)")
+        .unwrap();
+    engine
+        // Missing value_if_true with an explicit else branch.
+        .set_cell_formula("Sheet1", "A3", "=IF(FALSE,,7)")
+        .unwrap();
+    engine
+        // IF should remain lazy when the selected branch is missing/blank.
+        .set_cell_formula("Sheet1", "A4", "=IF(TRUE,,1/0)")
+        .unwrap();
+    engine
+        // IFERROR should treat missing arg0 as blank (not error) and still short-circuit.
+        .set_cell_formula("Sheet1", "A5", "=IFERROR(,1/0)")
+        .unwrap();
+    engine
+        // IFNA should treat missing arg0 as blank (not #N/A) and still short-circuit.
+        .set_cell_formula("Sheet1", "A6", "=IFNA(,1/0)")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected all formulas to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, 6);
+    assert_eq!(stats.compiled, 6);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Blank);
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Bool(false));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(7.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Blank);
+    assert_eq!(engine.get_cell_value("Sheet1", "A5"), Value::Blank);
+    assert_eq!(engine.get_cell_value("Sheet1", "A6"), Value::Blank);
+
+    for (formula, cell) in [
+        ("=IF(TRUE,)", "A1"),
+        ("=IF(FALSE,)", "A2"),
+        ("=IF(FALSE,,7)", "A3"),
+        ("=IF(TRUE,,1/0)", "A4"),
+        ("=IFERROR(,1/0)", "A5"),
+        ("=IFNA(,1/0)", "A6"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_logical_error_functions_with_error_literals() {
     let mut engine = Engine::new();
     engine
