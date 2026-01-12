@@ -323,6 +323,57 @@ fn engine_accepts_localized_external_data_formulas_and_persists_canonical() {
 }
 
 #[test]
+fn engine_accepts_localized_external_data_r1c1_formulas_and_persists_canonical_a1() {
+    for (locale, localized_cube, localized_err) in [
+        (
+            &locale::DE_DE,
+            "=CUBEWERT(\"conn\";R[-5]C[-2];1,5)",
+            "=#DATEN_ABRUFEN",
+        ),
+        (
+            &locale::FR_FR,
+            "=VALEUR.CUBE(\"conn\";R[-5]C[-2];1,5)",
+            "=#OBTENTION_DONNEES",
+        ),
+        (
+            &locale::ES_ES,
+            "=VALOR.CUBO(\"conn\";R[-5]C[-2];1,5)",
+            "=#OBTENIENDO_DATOS",
+        ),
+    ] {
+        let mut engine = Engine::new();
+
+        // Use an R1C1 reference in the function arguments to ensure the full pipeline
+        // (localized separators + function-name translation + R1C1->A1 rewrite) works.
+        engine
+            .set_cell_formula_localized_r1c1(
+                "Sheet1",
+                "C5",
+                "=RTD(\"my.server\";\"topic\";R[-4]C[-2];1,5)",
+                locale,
+            )
+            .unwrap();
+        assert_eq!(
+            engine.get_cell_formula("Sheet1", "C5"),
+            Some("=RTD(\"my.server\",\"topic\",A1,1.5)")
+        );
+
+        engine
+            .set_cell_formula_localized_r1c1("Sheet1", "C6", localized_cube, locale)
+            .unwrap();
+        assert_eq!(
+            engine.get_cell_formula("Sheet1", "C6"),
+            Some("=CUBEVALUE(\"conn\",A1,1.5)")
+        );
+
+        engine
+            .set_cell_formula_localized_r1c1("Sheet1", "A1", localized_err, locale)
+            .unwrap();
+        assert_eq!(engine.get_cell_formula("Sheet1", "A1"), Some("=#GETTING_DATA"));
+    }
+}
+
+#[test]
 fn engine_accepts_localized_r1c1_formulas_and_persists_canonical_a1() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
