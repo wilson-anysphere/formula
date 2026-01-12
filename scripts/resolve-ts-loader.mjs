@@ -139,6 +139,7 @@ export async function load(url, context, defaultLoad) {
         const isTsx = pathname.endsWith(".tsx");
         const result = ts.transpileModule(source, {
           fileName: pathname,
+          reportDiagnostics: true,
           compilerOptions: {
             module: ts.ModuleKind.ESNext,
             target: ts.ScriptTarget.ES2022,
