@@ -42,6 +42,12 @@ describe("ExtensionPanelBody hardening script", () => {
       configurable: false,
       enumerable: true,
     });
+    Object.defineProperty(fakeWindow, "__TAURI_INVOKE__", {
+      value: { secret: "y" },
+      writable: true,
+      configurable: false,
+      enumerable: true,
+    });
 
     const run = new Function("window", "document", "setTimeout", "Promise", scriptSource) as (
       win: any,
@@ -56,13 +62,16 @@ describe("ExtensionPanelBody hardening script", () => {
     expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsPresent).toBe(true);
     expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsScrubbed).toBe(true);
 
-    expect(typeof fakeWindow.__TAURI__).toBe("undefined");
-    const desc = Object.getOwnPropertyDescriptor(fakeWindow, "__TAURI__") as any;
-    expect(desc).toBeTruthy();
-    expect(desc.value).toBeUndefined();
-    expect(desc.writable).toBe(false);
-    expect(desc.configurable).toBe(false);
-    expect(desc.enumerable).toBe(true);
+    for (const key of ["__TAURI__", "__TAURI_INVOKE__"] as const) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(typeof (fakeWindow as any)[key]).toBe("undefined");
+      const desc = Object.getOwnPropertyDescriptor(fakeWindow, key) as any;
+      expect(desc).toBeTruthy();
+      expect(desc.value).toBeUndefined();
+      expect(desc.writable).toBe(false);
+      expect(desc.configurable).toBe(false);
+      expect(desc.enumerable).toBe(true);
+    }
   });
 
   it("deletes configurable Tauri globals without reintroducing them", async () => {
@@ -88,6 +97,7 @@ describe("ExtensionPanelBody hardening script", () => {
     };
 
     fakeWindow.__TAURI__ = { secret: "x" };
+    fakeWindow.__TAURI_INVOKE__ = { secret: "y" };
 
     const run = new Function("window", "document", "setTimeout", "Promise", scriptSource) as (
       win: any,
@@ -102,8 +112,11 @@ describe("ExtensionPanelBody hardening script", () => {
     expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsPresent).toBe(true);
     expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsScrubbed).toBe(true);
 
-    expect(typeof fakeWindow.__TAURI__).toBe("undefined");
-    expect("__TAURI__" in fakeWindow).toBe(false);
+    for (const key of ["__TAURI__", "__TAURI_INVOKE__"] as const) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(typeof (fakeWindow as any)[key]).toBe("undefined");
+      expect(key in fakeWindow).toBe(false);
+    }
   });
 
   it("scrubs globals injected after initial evaluation (via delayed scrub passes)", async () => {
@@ -151,6 +164,7 @@ describe("ExtensionPanelBody hardening script", () => {
     expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsPresent).toBe(false);
 
     fakeWindow.__TAURI__ = { injected: true };
+    fakeWindow.__TAURI_INVOKE__ = { injected: true };
 
     // Run remaining delayed timeouts (including the 1000ms pass) and simulate load events.
     for (const t of sorted) {
@@ -162,5 +176,6 @@ describe("ExtensionPanelBody hardening script", () => {
     expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsPresent).toBe(true);
     expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsScrubbed).toBe(true);
     expect(typeof fakeWindow.__TAURI__).toBe("undefined");
+    expect(typeof fakeWindow.__TAURI_INVOKE__).toBe("undefined");
   });
 });
