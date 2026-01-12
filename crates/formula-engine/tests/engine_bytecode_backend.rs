@@ -246,6 +246,7 @@ fn bytecode_value_to_engine(value: formula_engine::bytecode::Value) -> Value {
         ByteValue::Empty => Value::Blank,
         ByteValue::Missing => Value::Blank,
         ByteValue::Error(e) => Value::Error(e.into()),
+        ByteValue::Lambda(_) => Value::Error(ErrorKind::Calc),
         // Array/range values are not valid scalar results for the engine API; treat them as spills.
         ByteValue::Array(_) | ByteValue::Range(_) | ByteValue::MultiRange(_) => {
             Value::Error(ErrorKind::Spill)
@@ -717,6 +718,43 @@ fn bytecode_backend_rejects_invalid_let_name_arg() {
         Value::Error(ErrorKind::Value)
     );
     assert_engine_matches_ast(&engine, "=LET(A1, 2, 3)", "A2");
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_lambda_invocation_call_expr() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LAMBDA(x,x+1)(2)")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=LAMBDA(x,x+1)(2)", "A1");
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_let_captured_env_lambda_call() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(a,10,LAMBDA(x,a+x)(2))")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=LET(a,10,LAMBDA(x,a+x)(2))", "A1");
+}
+
+#[test]
+fn bytecode_backend_enforces_lambda_recursion_limit() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(f,LAMBDA(x,f(x)),f(1))")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=LET(f,LAMBDA(x,f(x)),f(1))", "A1");
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Calc));
 }
 
 #[test]

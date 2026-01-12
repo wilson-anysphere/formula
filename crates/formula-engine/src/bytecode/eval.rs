@@ -3,10 +3,11 @@ use super::grid::Grid;
 use super::runtime::{
     apply_binary, apply_implicit_intersection, apply_unary, call_function, deref_value_dynamic,
 };
-use super::value::{CellCoord, Value};
+use super::value::{CellCoord, ErrorKind, Lambda, Value};
 use crate::date::ExcelDateSystem;
 use crate::locale::ValueLocaleConfig;
 use chrono::{DateTime, Utc};
+use std::sync::Arc;
 
 use super::program::{OpCode, Program};
 
@@ -15,23 +16,33 @@ use super::program::{OpCode, Program};
 pub struct Vm {
     stack: Vec<Value>,
     locals: Vec<Value>,
+    lambda_depth: u32,
+    sheet_id: usize,
 }
-
+ 
+// Keep lambda recursion bounded well below the Rust stack limit to avoid process aborts for
+// accidental infinite recursion (matching the AST evaluator).
+const LAMBDA_RECURSION_LIMIT: u32 = 64;
+ 
 impl Vm {
     pub fn new() -> Self {
         Self {
             stack: Vec::new(),
             locals: Vec::new(),
+            lambda_depth: 0,
+            sheet_id: 0,
         }
     }
-
+ 
     pub fn with_capacity(stack: usize) -> Self {
         Self {
             stack: Vec::with_capacity(stack),
             locals: Vec::new(),
+            lambda_depth: 0,
+            sheet_id: 0,
         }
     }
-
+ 
     pub fn eval(
         &mut self,
         program: &Program,
@@ -42,9 +53,20 @@ impl Vm {
     ) -> Value {
         super::runtime::set_thread_current_sheet_id(sheet_id);
         super::runtime::reset_thread_rng_counter();
+        self.sheet_id = sheet_id;
         self.stack.clear();
         self.locals.clear();
         self.locals.resize(program.locals.len(), Value::Empty);
+        self.eval_program(program, grid, base, locale)
+    }
+ 
+    fn eval_program(
+        &mut self,
+        program: &Program,
+        grid: &dyn Grid,
+        base: CellCoord,
+        locale: &crate::LocaleConfig,
+    ) -> Value {
         let instrs = program.instrs();
         let mut pc: usize = 0;
         while pc < instrs.len() {
@@ -148,7 +170,43 @@ impl Vm {
                 OpCode::SpillRange => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
                     self.stack
-                        .push(super::runtime::apply_spill_range(v, grid, sheet_id, base));
+                        .push(super::runtime::apply_spill_range(v, grid, self.sheet_id, base));
+                }
+                OpCode::MakeLambda => {
+                    let template = program.lambdas[inst.a() as usize].clone();
+                    let mut captures: Vec<Value> = Vec::with_capacity(template.captures.len());
+                    for cap in template.captures.iter() {
+                        let outer_idx = cap.outer_local as usize;
+                        captures.push(self.locals.get(outer_idx).cloned().unwrap_or(Value::Empty));
+                    }
+                    self.stack.push(Value::Lambda(Lambda {
+                        template,
+                        captures: Arc::from(captures.into_boxed_slice()),
+                    }));
+                }
+                OpCode::CallValue => {
+                    let argc = inst.b() as usize;
+                    if argc > crate::EXCEL_MAX_ARGS {
+                        // Should be prevented by parsing/lowering.
+                        self.stack.truncate(self.stack.len().saturating_sub(argc));
+                        self.stack.push(Value::Error(ErrorKind::Value));
+                        pc += 1;
+                        continue;
+                    }
+  
+                    let mut args: Vec<Value> = Vec::with_capacity(argc);
+                    for _ in 0..argc {
+                        args.push(self.stack.pop().unwrap_or(Value::Empty));
+                    }
+                    args.reverse();
+                    let callee = self.stack.pop().unwrap_or(Value::Empty);
+  
+                    let result = match callee {
+                        Value::Lambda(lambda) => self.call_lambda(lambda, args, grid, base, locale),
+                        Value::Error(e) => Value::Error(e),
+                        _ => Value::Error(ErrorKind::Value),
+                    };
+                    self.stack.push(result);
                 }
                 OpCode::JumpIfFalseOrError => {
                     let v = self.stack.pop().unwrap_or(Value::Empty);
@@ -178,7 +236,10 @@ impl Vm {
                     let _ = self.stack.pop();
                 }
                 OpCode::JumpIfNotNaError => {
-                    let is_na = matches!(self.stack.last(), Some(Value::Error(super::value::ErrorKind::NA)));
+                    let is_na = matches!(
+                        self.stack.last(),
+                        Some(Value::Error(super::value::ErrorKind::NA))
+                    );
                     if !is_na {
                         pc = inst.a() as usize;
                         continue;
@@ -193,7 +254,69 @@ impl Vm {
         // spill instead of producing a scalar `#SPILL!`.
         deref_value_dynamic(v, grid, base)
     }
-
+ 
+    fn call_lambda(
+        &mut self,
+        lambda: Lambda,
+        args: Vec<Value>,
+        grid: &dyn Grid,
+        base: CellCoord,
+        locale: &crate::LocaleConfig,
+    ) -> Value {
+        if args.len() > crate::EXCEL_MAX_ARGS {
+            return Value::Error(ErrorKind::Value);
+        }
+ 
+        if args.len() > lambda.template.params.len() {
+            return Value::Error(ErrorKind::Value);
+        }
+ 
+        if self.lambda_depth >= LAMBDA_RECURSION_LIMIT {
+            return Value::Error(ErrorKind::Calc);
+        }
+ 
+        self.lambda_depth += 1;
+ 
+        let body_program = lambda.template.body.clone();
+        let mut locals: Vec<Value> = vec![Value::Empty; body_program.locals.len()];
+ 
+        // Populate captured values.
+        debug_assert_eq!(lambda.template.captures.len(), lambda.captures.len());
+        for (cap, value) in lambda.template.captures.iter().zip(lambda.captures.iter()) {
+            if let Some(slot) = locals.get_mut(cap.inner_local as usize) {
+                *slot = value.clone();
+            }
+        }
+ 
+        // Bind the lambda value itself for recursion (if requested by the compiler).
+        if let Some(self_idx) = lambda.template.self_local {
+            if let Some(slot) = locals.get_mut(self_idx as usize) {
+                *slot = Value::Lambda(lambda.clone());
+            }
+        }
+ 
+        // Bind parameters. Missing args are treated as blank.
+        for (idx, local_idx) in lambda.template.param_locals.iter().copied().enumerate() {
+            if let Some(slot) = locals.get_mut(local_idx as usize) {
+                *slot = args.get(idx).cloned().unwrap_or(Value::Empty);
+            }
+        }
+ 
+        // Evaluate the lambda body with a fresh stack + locals.
+        let saved_stack = std::mem::take(&mut self.stack);
+        let saved_locals = std::mem::take(&mut self.locals);
+ 
+        self.stack = Vec::new();
+        self.locals = locals;
+        let result = self.eval_program(&body_program, grid, base, locale);
+ 
+        self.stack = saved_stack;
+        self.locals = saved_locals;
+ 
+        self.lambda_depth = self.lambda_depth.saturating_sub(1);
+        result
+    }
+ 
     pub fn eval_with_value_locale(
         &mut self,
         program: &Program,
@@ -215,7 +338,7 @@ impl Vm {
             Utc::now(),
         )
     }
-
+ 
     pub fn eval_with_coercion_context(
         &mut self,
         program: &Program,
@@ -239,14 +362,14 @@ impl Vm {
         self.eval(program, grid, sheet_id, base, &locale_config)
     }
 }
-
+ 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::date::{ymd_to_serial, ExcelDate};
     use chrono::TimeZone;
     use std::sync::atomic::{AtomicUsize, Ordering};
-
+ 
     #[test]
     fn eval_with_value_locale_parses_numeric_text_using_locale() {
         let origin = CellCoord::new(0, 0);
@@ -254,7 +377,7 @@ mod tests {
         let cache = super::super::BytecodeCache::new();
         let program = cache.get_or_compile(&expr);
         let grid = super::super::grid::ColumnarGrid::new(1, 1);
-
+  
         let mut vm = Vm::with_capacity(32);
         let value = vm.eval_with_value_locale(
             &program,
@@ -263,13 +386,12 @@ mod tests {
             origin,
             ValueLocaleConfig::de_de(),
         );
-
         match value {
             Value::Number(n) => assert!((n - 1235.56).abs() < 1e-9, "got {n}"),
             other => panic!("expected Value::Number, got {other:?}"),
         }
     }
-
+ 
     #[test]
     fn eval_with_coercion_context_respects_date_system() {
         let origin = CellCoord::new(0, 0);
@@ -277,10 +399,10 @@ mod tests {
         let cache = super::super::BytecodeCache::new();
         let program = cache.get_or_compile(&expr);
         let grid = super::super::grid::ColumnarGrid::new(1, 1);
-
+ 
         let expected =
             ymd_to_serial(ExcelDate::new(2020, 1, 1), ExcelDateSystem::Excel1904).unwrap() as f64;
-
+ 
         let mut vm = Vm::with_capacity(32);
         let value = vm.eval_with_coercion_context(
             &program,
@@ -291,13 +413,13 @@ mod tests {
             ValueLocaleConfig::en_us(),
             Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
         );
-
+ 
         match value {
             Value::Number(n) => assert!((n - expected).abs() < 1e-9, "got {n}"),
             other => panic!("expected Value::Number, got {other:?}"),
         }
     }
-
+ 
     #[test]
     fn eval_with_coercion_context_uses_now_year_for_missing_year_dates() {
         let origin = CellCoord::new(0, 0);
@@ -305,11 +427,10 @@ mod tests {
         let cache = super::super::BytecodeCache::new();
         let program = cache.get_or_compile(&expr);
         let grid = super::super::grid::ColumnarGrid::new(1, 1);
-
+  
         let now_utc = Utc.with_ymd_and_hms(2024, 6, 15, 0, 0, 0).unwrap();
         let expected =
             ymd_to_serial(ExcelDate::new(2024, 1, 2), ExcelDateSystem::EXCEL_1900).unwrap() as f64;
-
         let mut vm = Vm::with_capacity(32);
         let value = vm.eval_with_coercion_context(
             &program,
@@ -320,18 +441,18 @@ mod tests {
             ValueLocaleConfig::en_us(),
             now_utc,
         );
-
+ 
         match value {
             Value::Number(n) => assert!((n - expected).abs() < 1e-9, "got {n}"),
             other => panic!("expected Value::Number, got {other:?}"),
         }
     }
-
+ 
     struct CountingGrid {
         inner: super::super::grid::ColumnarGrid,
         reads: AtomicUsize,
     }
-
+ 
     impl CountingGrid {
         fn new(rows: i32, cols: i32) -> Self {
             Self {
@@ -339,18 +460,18 @@ mod tests {
                 reads: AtomicUsize::new(0),
             }
         }
-
+ 
         fn reads(&self) -> usize {
             self.reads.load(Ordering::SeqCst)
         }
     }
-
+ 
     impl super::super::grid::Grid for CountingGrid {
         fn get_value(&self, coord: CellCoord) -> Value {
             self.reads.fetch_add(1, Ordering::SeqCst);
             self.inner.get_value(coord)
         }
-
+ 
         fn column_slice(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]> {
             // Count columnar reads too (used by bulk range functions like SUM) so short-circuit
             // tests can catch unused branch evaluation even when it uses column slices instead of
@@ -358,7 +479,7 @@ mod tests {
             self.reads.fetch_add(1, Ordering::SeqCst);
             self.inner.column_slice(col, row_start, row_end)
         }
-
+ 
         fn bounds(&self) -> (i32, i32) {
             self.inner.bounds()
         }
@@ -409,11 +530,10 @@ mod tests {
         // IF(FALSE, A1, 1) should not evaluate the TRUE branch.
         let expr = super::super::parse_formula("=IF(FALSE, A1, 1)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
-
+  
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
         let value = vm.eval(&program, &grid, 0, origin, &locale);
-
         assert_eq!(value, Value::Number(1.0));
         assert_eq!(grid.reads(), 0, "unused IF branch should not be evaluated");
 
@@ -474,12 +594,12 @@ mod tests {
             "IF branches should not be evaluated when condition is an error"
         );
     }
-
+ 
     #[test]
     fn vm_short_circuits_iferror_and_ifna_fallbacks() {
         let origin = CellCoord::new(0, 0);
         let locale = crate::LocaleConfig::en_us();
-
+ 
         // IFERROR(1, A1) should not evaluate the fallback.
         let expr = super::super::parse_formula("=IFERROR(1, A1)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
@@ -523,7 +643,6 @@ mod tests {
             grid.reads() > 0,
             "IFERROR fallback should be evaluated for errors (including range reads)"
         );
-
         // IFNA(1, A1) should not evaluate the fallback.
         let expr = super::super::parse_formula("=IFNA(1, A1)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
@@ -567,7 +686,6 @@ mod tests {
             0,
             "IFNA fallback should not be evaluated for non-#N/A errors (including range reads)"
         );
-
         // IFNA(NA(), A1) should evaluate the fallback.
         let expr = super::super::parse_formula("=IFNA(NA(), A1)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
@@ -589,12 +707,12 @@ mod tests {
             "IFNA fallback should be evaluated for #N/A (including range reads)"
         );
     }
-
+ 
     #[test]
     fn vm_short_circuits_ifs_pairs() {
         let origin = CellCoord::new(0, 0);
         let locale = crate::LocaleConfig::en_us();
-
+ 
         // IFS(TRUE, 1, A1, 2) should not evaluate later conditions.
         let expr = super::super::parse_formula("=IFS(TRUE, 1, A1, 2)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
@@ -618,7 +736,6 @@ mod tests {
             0,
             "unused IFS condition should not be evaluated (including range reads)"
         );
-
         // IFS(FALSE, A1, TRUE, 2) should not evaluate the value for a FALSE condition.
         let expr = super::super::parse_formula("=IFS(FALSE, A1, TRUE, 2)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
@@ -647,15 +764,14 @@ mod tests {
             "unused IFS value expression should not be evaluated (including range reads)"
         );
     }
-
+ 
     #[test]
     fn vm_short_circuits_switch_cases() {
         let origin = CellCoord::new(0, 0);
         let locale = crate::LocaleConfig::en_us();
-
+ 
         // SWITCH(1, 1, 10, A1, 20) should not evaluate later case values after a match.
-        let expr =
-            super::super::parse_formula("=SWITCH(1, 1, 10, A1, 20)", origin).expect("parse");
+        let expr = super::super::parse_formula("=SWITCH(1, 1, 10, A1, 20)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
@@ -677,10 +793,8 @@ mod tests {
             0,
             "unused SWITCH case value should not be evaluated (including range reads)"
         );
-
         // SWITCH(2, 1, A1, 2, 20) should not evaluate the result for a non-matching case.
-        let expr =
-            super::super::parse_formula("=SWITCH(2, 1, A1, 2, 20)", origin).expect("parse");
+        let expr = super::super::parse_formula("=SWITCH(2, 1, A1, 2, 20)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
@@ -706,10 +820,8 @@ mod tests {
             0,
             "unused SWITCH result expression should not be evaluated (including range reads)"
         );
-
         // If the discriminant expression is an error, SWITCH should not evaluate any case values.
-        let expr =
-            super::super::parse_formula("=SWITCH(1/0, 1, 10, A1, 20)", origin).expect("parse");
+        let expr = super::super::parse_formula("=SWITCH(1/0, 1, 10, A1, 20)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
@@ -958,3 +1070,4 @@ mod tests {
         assert_eq!(grid.reads(), 0, "unused CHOOSE branch should not be evaluated");
     }
 }
+ 

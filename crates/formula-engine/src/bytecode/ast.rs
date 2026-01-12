@@ -321,6 +321,7 @@ pub enum Expr {
     CellRef(Ref),
     RangeRef(RangeRef),
     MultiRangeRef(MultiRangeRef),
+    /// Lexical name reference (LET/LAMBDA bindings). Names are stored case-folded.
     NameRef(Arc<str>),
     /// Excel spill-range reference operator (`#`), e.g. `A1#`.
     ///
@@ -339,6 +340,16 @@ pub enum Expr {
     },
     FuncCall {
         func: Function,
+        args: Vec<Expr>,
+    },
+    /// LAMBDA(param1, ..., body) lowered into explicit params + body.
+    Lambda {
+        params: Arc<[Arc<str>]>,
+        body: Box<Expr>,
+    },
+    /// Postfix call expression: `callee(args...)`.
+    Call {
+        callee: Box<Expr>,
         args: Vec<Expr>,
     },
 }

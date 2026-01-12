@@ -43,6 +43,10 @@ pub enum OpCode {
     Union = 26,
     /// Reference intersection (whitespace).
     Intersect = 27,
+    /// Create a closure capturing the current lexical environment.
+    MakeLambda = 28,
+    /// Call a closure value with `b` arguments.
+    CallValue = 29,
 }
 
 /// Packed instruction:
@@ -91,6 +95,8 @@ impl Instruction {
             25 => OpCode::SpillRange,
             26 => OpCode::Union,
             27 => OpCode::Intersect,
+            28 => OpCode::MakeLambda,
+            29 => OpCode::CallValue,
             _ => unreachable!("invalid opcode"),
         }
     }
@@ -129,7 +135,23 @@ pub struct Program {
     pub(crate) multi_range_refs: Vec<MultiRangeRef>,
     pub(crate) funcs: Vec<Function>,
     pub(crate) locals: Vec<Arc<str>>,
+    pub(crate) lambdas: Vec<Arc<LambdaTemplate>>,
     pub(crate) key: Arc<str>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LambdaTemplate {
+    pub params: Arc<[Arc<str>]>,
+    pub body: Arc<Program>,
+    pub param_locals: Arc<[u32]>,
+    pub captures: Arc<[Capture]>,
+    pub self_local: Option<u32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Capture {
+    pub outer_local: u32,
+    pub inner_local: u32,
 }
 
 impl Program {
@@ -142,6 +164,7 @@ impl Program {
             multi_range_refs: Vec::new(),
             funcs: Vec::new(),
             locals: Vec::new(),
+            lambdas: Vec::new(),
             key,
         }
     }

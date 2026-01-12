@@ -731,6 +731,10 @@ fn eval_ast_inner(
             }
             call_function(func, &evaluated, grid, base, locale)
         }
+        // The bytecode AST evaluator is a lightweight reference implementation for the bytecode
+        // module's internal parser/tests. Higher-order constructs (LAMBDA/call) are evaluated
+        // through the bytecode VM.
+        Expr::Lambda { .. } | Expr::Call { .. } => Value::Error(ErrorKind::Name),
     }
 }
 
@@ -779,6 +783,7 @@ fn coerce_to_number(v: &Value) -> Result<f64, ErrorKind> {
         Value::Empty | Value::Missing => Ok(0.0),
         Value::Text(s) => parse_value_from_text(s),
         Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
+        Value::Lambda(_) => Err(ErrorKind::Value),
         Value::Error(e) => Err(*e),
         // Dynamic arrays / range-as-scalar: treat as a spill attempt (engine semantics).
         Value::Array(_) | Value::Range(_) => Err(ErrorKind::Spill),
@@ -812,6 +817,7 @@ pub(crate) fn coerce_to_bool(v: &Value) -> Result<bool, ErrorKind> {
             Ok(n != 0.0)
         }
         Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
+        Value::Lambda(_) => Err(ErrorKind::Value),
         Value::Error(e) => Err(*e),
         Value::Array(_) | Value::Range(_) => Err(ErrorKind::Spill),
         Value::MultiRange(r) => match r.areas.as_ref() {
@@ -946,6 +952,7 @@ fn coerce_countif_value_to_number(v: &Value) -> Option<f64> {
         Value::Text(s) => parse_number(s, thread_number_locale()).ok(),
         Value::Entity(v) => parse_number(v.display.as_str(), thread_number_locale()).ok(),
         Value::Record(v) => parse_number(v.display.as_str(), thread_number_locale()).ok(),
+        Value::Lambda(_) => None,
         Value::Error(_) | Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => None,
     }
 }
@@ -1683,10 +1690,10 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     }
     if matches!(
         left,
-        Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) | Value::Lambda(_)
     ) || matches!(
         right,
-        Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) | Value::Lambda(_)
     ) {
         return Err(ErrorKind::Value);
     }
@@ -1736,13 +1743,15 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         (_, Value::Empty | Value::Missing) => Ordering::Greater,
         // Errors are handled above.
         (Value::Error(_), _) | (_, Value::Error(_)) => Ordering::Equal,
-        // Arrays/ranges are rejected above.
+        // Arrays/ranges/lambdas are rejected above.
         (Value::Array(_), _)
         | (_, Value::Array(_))
         | (Value::Range(_), _)
         | (_, Value::Range(_))
         | (Value::MultiRange(_), _)
-        | (_, Value::MultiRange(_)) => Ordering::Equal,
+        | (_, Value::MultiRange(_))
+        | (Value::Lambda(_), _)
+        | (_, Value::Lambda(_)) => Ordering::Equal,
         _ => Ordering::Equal,
     })
 }
@@ -3499,7 +3508,9 @@ fn and_scalar(v: &Value, all_true: &mut bool, any: &mut bool) -> Option<ErrorKin
             None
         }
         Value::Empty | Value::Missing => None,
-        Value::Text(_) | Value::Entity(_) | Value::Record(_) => Some(ErrorKind::Value),
+        Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Lambda(_) => {
+            Some(ErrorKind::Value)
+        }
         // Ranges/arrays are handled by the caller.
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Some(ErrorKind::Spill),
     }
@@ -3525,6 +3536,7 @@ fn xor_scalar(v: &Value, acc: &mut bool) -> Option<ErrorKind> {
             }
             Err(e) => Some(e),
         },
+        Value::Lambda(_) => Some(ErrorKind::Value),
         // Ranges/arrays are handled by the caller.
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Some(ErrorKind::Spill),
     }
@@ -3548,7 +3560,9 @@ fn or_scalar(v: &Value, any_true: &mut bool, any: &mut bool) -> Option<ErrorKind
             None
         }
         Value::Empty | Value::Missing => None,
-        Value::Text(_) | Value::Entity(_) | Value::Record(_) => Some(ErrorKind::Value),
+        Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Lambda(_) => {
+            Some(ErrorKind::Value)
+        }
         // Ranges/arrays are handled by the caller.
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Some(ErrorKind::Spill),
     }
@@ -3574,6 +3588,7 @@ fn and_array(a: &ArrayValue, all_true: &mut bool, any: &mut bool) -> Option<Erro
             Value::Text(_)
             | Value::Entity(_)
             | Value::Record(_)
+            | Value::Lambda(_)
             | Value::Empty
             | Value::Missing => {}
             // Arrays should be scalar values; ignore any nested arrays/references rather than
@@ -3604,6 +3619,7 @@ fn or_array(a: &ArrayValue, any_true: &mut bool, any: &mut bool) -> Option<Error
             Value::Text(_)
             | Value::Entity(_)
             | Value::Record(_)
+            | Value::Lambda(_)
             | Value::Empty
             | Value::Missing => {}
             // Arrays should be scalar values; ignore any nested arrays/references rather than
@@ -3627,6 +3643,7 @@ fn xor_array(a: &ArrayValue, acc: &mut bool) -> Option<ErrorKind> {
             Value::Text(_)
             | Value::Entity(_)
             | Value::Record(_)
+            | Value::Lambda(_)
             | Value::Empty
             | Value::Missing => {}
             // Arrays should be scalar values; ignore any nested arrays/references rather than
@@ -3672,6 +3689,7 @@ fn and_range(
                     Value::Text(_)
                     | Value::Entity(_)
                     | Value::Record(_)
+                    | Value::Lambda(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -3710,7 +3728,8 @@ fn and_range(
                 | Value::Missing
                 | Value::Array(_)
                 | Value::Range(_)
-                | Value::MultiRange(_) => {}
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -3752,6 +3771,7 @@ fn or_range(
                     Value::Text(_)
                     | Value::Entity(_)
                     | Value::Record(_)
+                    | Value::Lambda(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -3786,6 +3806,7 @@ fn or_range(
                 Value::Text(_)
                 | Value::Entity(_)
                 | Value::Record(_)
+                | Value::Lambda(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -3850,6 +3871,7 @@ fn and_range_on_sheet(
                     Value::Text(_)
                     | Value::Entity(_)
                     | Value::Record(_)
+                    | Value::Lambda(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -3884,6 +3906,7 @@ fn and_range_on_sheet(
                 Value::Text(_)
                 | Value::Entity(_)
                 | Value::Record(_)
+                | Value::Lambda(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -3948,6 +3971,7 @@ fn or_range_on_sheet(
                     Value::Text(_)
                     | Value::Entity(_)
                     | Value::Record(_)
+                    | Value::Lambda(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -3982,6 +4006,7 @@ fn or_range_on_sheet(
                 Value::Text(_)
                 | Value::Entity(_)
                 | Value::Record(_)
+                | Value::Lambda(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -4165,7 +4190,7 @@ fn type_code_for_scalar(value: &Value) -> i32 {
         Value::Number(_) | Value::Empty | Value::Missing => 1,
         Value::Text(_) | Value::Entity(_) | Value::Record(_) => 2,
         Value::Bool(_) => 4,
-        Value::Error(_) => 16,
+        Value::Error(_) | Value::Lambda(_) => 16,
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => 64,
     }
 }
@@ -4242,7 +4267,9 @@ fn fn_n(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         Value::Empty | Value::Missing | Value::Text(_) | Value::Entity(_) | Value::Record(_) => {
             Value::Number(0.0)
         }
-        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Value::Error(ErrorKind::Value),
+        Value::Lambda(_) | Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {
+            Value::Error(ErrorKind::Value)
+        }
     })
 }
 
@@ -4255,7 +4282,7 @@ fn fn_t(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         Value::Text(s) => Value::Text(s.clone()),
         Value::Entity(ent) => Value::Text(Arc::from(ent.display.as_str())),
         Value::Record(rec) => Value::Text(Arc::from(rec.display.as_str())),
-        Value::Number(_) | Value::Bool(_) | Value::Empty | Value::Missing => {
+        Value::Number(_) | Value::Bool(_) | Value::Empty | Value::Missing | Value::Lambda(_) => {
             Value::Text(Arc::from(""))
         }
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Value::Text(Arc::from("")),
@@ -4582,6 +4609,7 @@ fn xor_range(grid: &dyn Grid, range: ResolvedRange, acc: &mut bool) -> Option<Er
                     Value::Text(_)
                     | Value::Entity(_)
                     | Value::Record(_)
+                    | Value::Lambda(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -4606,6 +4634,7 @@ fn xor_range(grid: &dyn Grid, range: ResolvedRange, acc: &mut bool) -> Option<Er
                 Value::Text(_)
                 | Value::Entity(_)
                 | Value::Record(_)
+                | Value::Lambda(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -4656,6 +4685,7 @@ fn xor_range_on_sheet(
                     Value::Text(_)
                     | Value::Entity(_)
                     | Value::Record(_)
+                    | Value::Lambda(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -4684,7 +4714,8 @@ fn xor_range_on_sheet(
                 | Value::Missing
                 | Value::Array(_)
                 | Value::Range(_)
-                | Value::MultiRange(_) => {}
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -4722,6 +4753,7 @@ fn coerce_to_string(v: Value) -> Result<String, ErrorKind> {
         Value::Bool(b) => Ok(if b { "TRUE" } else { "FALSE" }.to_string()),
         Value::Empty | Value::Missing => Ok(String::new()),
         Value::Error(e) => Err(e),
+        Value::Lambda(_) => Err(ErrorKind::Value),
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Value),
     }
 }
@@ -4772,6 +4804,7 @@ fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                             | Value::Text(_)
                             | Value::Entity(_)
                             | Value::Record(_)
+                            | Value::Lambda(_)
                             | Value::Empty
                             | Value::Missing
                             | Value::Array(_)
@@ -4797,6 +4830,7 @@ fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                             | Value::Text(_)
                             | Value::Entity(_)
                             | Value::Record(_)
+                            | Value::Lambda(_)
                             | Value::Empty
                             | Value::Missing
                             | Value::Array(_)
@@ -4820,6 +4854,7 @@ fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             }
             Value::Empty | Value::Missing => {}
             Value::Error(e) => return Value::Error(*e),
+            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
             Value::Text(s) => match parse_value_from_text(s) {
                 Ok(v) => sum += v,
                 Err(e) => return Value::Error(e),
@@ -4881,6 +4916,7 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                             | Value::Text(_)
                             | Value::Entity(_)
                             | Value::Record(_)
+                            | Value::Lambda(_)
                             | Value::Empty
                             | Value::Missing
                             | Value::Array(_)
@@ -4912,6 +4948,7 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                             | Value::Text(_)
                             | Value::Entity(_)
                             | Value::Record(_)
+                            | Value::Lambda(_)
                             | Value::Empty
                             | Value::Missing
                             | Value::Array(_)
@@ -4945,6 +4982,7 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             }
             Value::Empty | Value::Missing => {}
             Value::Error(e) => return Value::Error(*e),
+            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
             Value::Text(s) => match parse_value_from_text(s) {
                 Ok(v) => {
                     if v.is_nan() {
@@ -5013,17 +5051,18 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                                     len = 0;
                                 }
                             }
-                            Value::Bool(_)
-                            | Value::Text(_)
-                            | Value::Entity(_)
-                            | Value::Record(_)
-                            | Value::Empty
-                            | Value::Missing
-                            | Value::Array(_)
-                            | Value::Range(_)
-                            | Value::MultiRange(_) => {}
-                        }
-                    }
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Entity(_)
+                             | Value::Record(_)
+                             | Value::Empty
+                             | Value::Missing
+                             | Value::Array(_)
+                             | Value::Range(_)
+                             | Value::MultiRange(_)
+                             | Value::Lambda(_) => {}
+                         }
+                     }
 
                     if len > 0 {
                         if let Some(m) = simd::min_ignore_nan_f64(&buf[..len]) {
@@ -5044,19 +5083,20 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                                 }
                             }
                             Value::Error(e) => return Value::Error(*e),
-                            Value::Bool(_)
-                            | Value::Text(_)
-                            | Value::Entity(_)
-                            | Value::Record(_)
-                            | Value::Empty
-                            | Value::Missing
-                            | Value::Array(_)
-                            | Value::Range(_)
-                            | Value::MultiRange(_) => {}
-                        }
-                    }
-                }
-            }
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Entity(_)
+                             | Value::Record(_)
+                             | Value::Empty
+                             | Value::Missing
+                             | Value::Array(_)
+                             | Value::Range(_)
+                             | Value::MultiRange(_)
+                             | Value::Lambda(_) => {}
+                         }
+                     }
+                 }
+             }
             Value::Range(r) => match min_range(grid, r.resolve(base)) {
                 Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.min(m))),
                 Ok(None) => {}
@@ -5073,6 +5113,7 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             }
             Value::Empty | Value::Missing => out = Some(out.map_or(0.0, |prev| prev.min(0.0))),
             Value::Error(e) => return Value::Error(*e),
+            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
             Value::Text(s) => match parse_value_from_text(s) {
                 Ok(v) => {
                     if v.is_nan() {
@@ -5136,17 +5177,18 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                                     len = 0;
                                 }
                             }
-                            Value::Bool(_)
-                            | Value::Text(_)
-                            | Value::Entity(_)
-                            | Value::Record(_)
-                            | Value::Empty
-                            | Value::Missing
-                            | Value::Array(_)
-                            | Value::Range(_)
-                            | Value::MultiRange(_) => {}
-                        }
-                    }
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Entity(_)
+                             | Value::Record(_)
+                             | Value::Empty
+                             | Value::Missing
+                             | Value::Array(_)
+                             | Value::Range(_)
+                             | Value::MultiRange(_)
+                             | Value::Lambda(_) => {}
+                         }
+                     }
 
                     if len > 0 {
                         if let Some(m) = simd::max_ignore_nan_f64(&buf[..len]) {
@@ -5167,19 +5209,20 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                                 }
                             }
                             Value::Error(e) => return Value::Error(*e),
-                            Value::Bool(_)
-                            | Value::Text(_)
-                            | Value::Entity(_)
-                            | Value::Record(_)
-                            | Value::Empty
-                            | Value::Missing
-                            | Value::Array(_)
-                            | Value::Range(_)
-                            | Value::MultiRange(_) => {}
-                        }
-                    }
-                }
-            }
+                             Value::Bool(_)
+                             | Value::Text(_)
+                             | Value::Entity(_)
+                             | Value::Record(_)
+                             | Value::Empty
+                             | Value::Missing
+                             | Value::Array(_)
+                             | Value::Range(_)
+                             | Value::MultiRange(_)
+                             | Value::Lambda(_) => {}
+                         }
+                     }
+                 }
+             }
             Value::Range(r) => match max_range(grid, r.resolve(base)) {
                 Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.max(m))),
                 Ok(None) => {}
@@ -5196,6 +5239,7 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             }
             Value::Empty | Value::Missing => out = Some(out.map_or(0.0, |prev| prev.max(0.0))),
             Value::Error(e) => return Value::Error(*e),
+            Value::Lambda(_) => return Value::Error(ErrorKind::Value),
             Value::Text(s) => match parse_value_from_text(s) {
                 Ok(v) => {
                     if v.is_nan() {
@@ -5265,7 +5309,8 @@ fn fn_count(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             | Value::Error(_)
             | Value::Text(_)
             | Value::Entity(_)
-            | Value::Record(_) => {}
+            | Value::Record(_)
+            | Value::Lambda(_) => {}
         }
     }
     Value::Number(count as f64)
@@ -5282,7 +5327,8 @@ fn fn_counta(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             | Value::Text(_)
             | Value::Entity(_)
             | Value::Record(_)
-            | Value::Error(_) => total += 1,
+            | Value::Error(_)
+            | Value::Lambda(_) => total += 1,
             Value::Array(a) => {
                 total += a
                     .iter()
@@ -5344,9 +5390,10 @@ fn fn_countblank(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Value::Number(_)
             | Value::Bool(_)
             | Value::Text(_)
+            | Value::Error(_)
             | Value::Entity(_)
             | Value::Record(_)
-            | Value::Error(_) => {}
+            | Value::Lambda(_) => {}
         }
     }
     Value::Number(total as f64)
@@ -5494,7 +5541,8 @@ fn fn_sumif(
                         | Value::Missing
                         | Value::Array(_)
                         | Value::Range(_)
-                        | Value::MultiRange(_) => {}
+                        | Value::MultiRange(_)
+                        | Value::Lambda(_) => {}
                     }
                 }
                 if let Some((_, _, e)) = earliest_error {
@@ -5572,7 +5620,8 @@ fn fn_sumif(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
         }
@@ -5627,7 +5676,8 @@ fn fn_sumif(
                 | Value::Missing
                 | Value::Array(_)
                 | Value::Range(_)
-                | Value::MultiRange(_) => {}
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -5736,7 +5786,8 @@ fn fn_sumifs(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
             if let Some((_, _, e)) = earliest_error {
@@ -5877,7 +5928,8 @@ fn fn_sumifs(
                 | Value::Missing
                 | Value::Array(_)
                 | Value::Range(_)
-                | Value::MultiRange(_) => {}
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -5944,7 +5996,8 @@ fn sumifs_with_array_ranges(
                 | Value::Missing
                 | Value::Array(_)
                 | Value::Range(_)
-                | Value::MultiRange(_) => {}
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -6331,7 +6384,8 @@ fn fn_averageif(
                         | Value::Missing
                         | Value::Array(_)
                         | Value::Range(_)
-                        | Value::MultiRange(_) => {}
+                        | Value::MultiRange(_)
+                        | Value::Lambda(_) => {}
                     }
                 }
 
@@ -6424,7 +6478,8 @@ fn fn_averageif(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
         }
@@ -6486,7 +6541,8 @@ fn fn_averageif(
                 | Value::Missing
                 | Value::Array(_)
                 | Value::Range(_)
-                | Value::MultiRange(_) => {}
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -6602,7 +6658,8 @@ fn fn_averageifs(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
 
@@ -6759,7 +6816,8 @@ fn fn_averageifs(
                 | Value::Missing
                 | Value::Array(_)
                 | Value::Range(_)
-                | Value::MultiRange(_) => {}
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -6833,7 +6891,8 @@ fn averageifs_with_array_ranges(
                 | Value::Missing
                 | Value::Array(_)
                 | Value::Range(_)
-                | Value::MultiRange(_) => {}
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -6945,7 +7004,8 @@ fn fn_minifs(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
 
@@ -7060,7 +7120,8 @@ fn fn_minifs(
                 | Value::Missing
                 | Value::Array(_)
                 | Value::Range(_)
-                | Value::MultiRange(_) => {}
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -7130,7 +7191,8 @@ fn minifs_with_array_ranges(
                 | Value::Missing
                 | Value::Array(_)
                 | Value::Range(_)
-                | Value::MultiRange(_) => {}
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -7239,7 +7301,8 @@ fn fn_maxifs(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
 
@@ -7354,7 +7417,8 @@ fn fn_maxifs(
                 | Value::Missing
                 | Value::Array(_)
                 | Value::Range(_)
-                | Value::MultiRange(_) => {}
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -7424,7 +7488,8 @@ fn maxifs_with_array_ranges(
                 | Value::Missing
                 | Value::Array(_)
                 | Value::Range(_)
-                | Value::MultiRange(_) => {}
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -7650,6 +7715,9 @@ fn fn_vlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
+    }
     if matches!(
         lookup_value,
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
@@ -7712,6 +7780,9 @@ fn fn_hlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     let lookup_value = apply_implicit_intersection(args[0].clone(), grid, base);
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
+    }
+    if matches!(lookup_value, Value::Lambda(_)) {
+        return Value::Error(ErrorKind::Value);
     }
     if matches!(
         lookup_value,
@@ -8238,7 +8309,7 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
             Value::Bool(_) => Some(2),
             Value::Empty | Value::Missing => Some(3),
             Value::Error(_) => Some(4),
-            Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => None,
+            Value::Array(_) | Value::Range(_) | Value::MultiRange(_) | Value::Lambda(_) => None,
         }
     }
 
@@ -8554,6 +8625,8 @@ fn bytecode_value_to_engine(value: Value) -> EngineValue {
         },
         Value::Empty | Value::Missing => EngineValue::Blank,
         Value::Error(e) => EngineValue::Error(e.into()),
+        // Lambdas are not valid scalar values in criteria matching contexts.
+        Value::Lambda(_) => EngineValue::Error(EngineErrorKind::Value),
         // Array/range values are not valid scalar values, but the bytecode runtime uses `#SPILL!`
         // for "range-as-scalar" cases elsewhere.
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {
@@ -8571,6 +8644,7 @@ fn bytecode_value_to_engine_ref(value: &Value) -> EngineValue {
         Value::Record(v) => EngineValue::Record(v.as_ref().clone()),
         Value::Empty | Value::Missing => EngineValue::Blank,
         Value::Error(e) => EngineValue::Error((*e).into()),
+        Value::Lambda(_) => EngineValue::Error(EngineErrorKind::Value),
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {
             EngineValue::Error(EngineErrorKind::Spill)
         }
@@ -8595,7 +8669,9 @@ fn parse_countif_criteria(
         | Value::Empty
         | Value::Missing => bytecode_value_to_engine_ref(criteria),
         Value::Error(_) => unreachable!("handled above"),
-        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => return Err(ErrorKind::Value),
+        Value::Lambda(_) | Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {
+            return Err(ErrorKind::Value);
+        }
     };
 
     EngineCriteria::parse_with_date_system_and_locales(
@@ -8872,7 +8948,8 @@ fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
             if let Some((_, _, err)) = best_error {
@@ -8900,7 +8977,8 @@ fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
         }
@@ -8937,7 +9015,8 @@ fn sum_range_on_sheet(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
             if let Some((_, _, err)) = best_error {
@@ -8966,7 +9045,8 @@ fn sum_range_on_sheet(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
         }
@@ -9003,7 +9083,8 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize)
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
             if let Some((_, _, err)) = best_error {
@@ -9037,7 +9118,8 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize)
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
         }
@@ -9078,7 +9160,8 @@ fn sum_count_range_on_sheet(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
             if let Some((_, _, err)) = best_error {
@@ -9113,7 +9196,8 @@ fn sum_count_range_on_sheet(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
         }
@@ -9409,7 +9493,8 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
             if let Some((_, _, err)) = best_error {
@@ -9437,7 +9522,8 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
             m
@@ -9477,7 +9563,8 @@ fn min_range_on_sheet(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
             if let Some((_, _, err)) = best_error {
@@ -9507,7 +9594,8 @@ fn min_range_on_sheet(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
             m
@@ -9543,7 +9631,8 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
             if let Some((_, _, err)) = best_error {
@@ -9571,7 +9660,8 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
             m
@@ -9611,7 +9701,8 @@ fn max_range_on_sheet(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
             if let Some((_, _, err)) = best_error {
@@ -9641,7 +9732,8 @@ fn max_range_on_sheet(
                     | Value::Missing
                     | Value::Array(_)
                     | Value::Range(_)
-                    | Value::MultiRange(_) => {}
+                    | Value::MultiRange(_)
+                    | Value::Lambda(_) => {}
                 }
             }
             m
@@ -9791,7 +9883,9 @@ fn coerce_sumproduct_number(v: &Value) -> Result<f64, ErrorKind> {
         },
         Value::Empty | Value::Missing => Ok(0.0),
         Value::Error(e) => Err(*e),
-        Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Value),
+        Value::Lambda(_) | Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {
+            Err(ErrorKind::Value)
+        }
     }
 }
 

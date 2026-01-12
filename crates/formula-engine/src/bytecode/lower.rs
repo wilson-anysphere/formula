@@ -2,7 +2,9 @@ use super::ast::{BinaryOp, Expr as BytecodeExpr, Function, UnaryOp};
 use super::value::{
     Array, ErrorKind as BytecodeErrorKind, MultiRangeRef, RangeRef, Ref, SheetRangeRef, Value,
 };
+use crate::value::casefold;
 use formula_model::{EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 /// Excel's maximum row index (0-indexed) used by the bytecode backend.
@@ -401,11 +403,54 @@ fn collect_concat_operands<'a>(expr: &'a crate::Expr, out: &mut Vec<&'a crate::E
     }
 }
 
+#[derive(Default)]
+struct LexicalScopes {
+    scopes: Vec<HashSet<String>>,
+}
+
+impl LexicalScopes {
+    fn push_scope(&mut self) {
+        self.scopes.push(HashSet::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    fn define(&mut self, key: String) {
+        if self.scopes.is_empty() {
+            self.push_scope();
+        }
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(key);
+        }
+    }
+
+    fn is_defined(&self, key: &str) -> bool {
+        self.scopes.iter().rev().any(|scope| scope.contains(key))
+    }
+}
+
+fn value_error_literal() -> BytecodeExpr {
+    BytecodeExpr::Literal(Value::Error(super::value::ErrorKind::Value))
+}
+
+fn bare_identifier(expr: &crate::Expr) -> Option<&str> {
+    match expr {
+        crate::Expr::NameRef(nref) if nref.workbook.is_none() && nref.sheet.is_none() => {
+            Some(nref.name.as_str())
+        }
+        _ => None,
+    }
+}
+
 fn lower_canonical_reference_expr(
     expr: &crate::Expr,
     origin: crate::CellAddr,
     current_sheet: usize,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    scopes: &mut LexicalScopes,
+    lambda_self_name: Option<&str>,
 ) -> Result<BytecodeExpr, LowerError> {
     match expr {
         crate::Expr::CellRef(r) => {
@@ -415,16 +460,25 @@ fn lower_canonical_reference_expr(
         crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
             lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet)
         }
-        crate::Expr::Postfix(p) if p.op == crate::PostfixOp::SpillRange => Ok(BytecodeExpr::SpillRange(
-            Box::new(lower_canonical_reference_expr(
+        crate::Expr::Postfix(p) if p.op == crate::PostfixOp::SpillRange => Ok(
+            BytecodeExpr::SpillRange(Box::new(lower_canonical_reference_expr(
                 &p.expr,
                 origin,
                 current_sheet,
                 resolve_sheet,
-            )?),
-        )),
+                scopes,
+                lambda_self_name,
+            )?)),
+        ),
         // Fall back to normal lowering for non-reference expressions; runtime will surface #VALUE!.
-        _ => lower_canonical_expr(expr, origin, current_sheet, resolve_sheet),
+        _ => lower_canonical_expr_inner(
+            expr,
+            origin,
+            current_sheet,
+            resolve_sheet,
+            scopes,
+            lambda_self_name,
+        ),
     }
 }
 
@@ -433,6 +487,25 @@ pub fn lower_canonical_expr(
     origin: crate::CellAddr,
     current_sheet: usize,
     resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+) -> Result<BytecodeExpr, LowerError> {
+    let mut scopes = LexicalScopes::default();
+    lower_canonical_expr_inner(
+        expr,
+        origin,
+        current_sheet,
+        resolve_sheet,
+        &mut scopes,
+        None,
+    )
+}
+
+fn lower_canonical_expr_inner(
+    expr: &crate::Expr,
+    origin: crate::CellAddr,
+    current_sheet: usize,
+    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    scopes: &mut LexicalScopes,
+    lambda_self_name: Option<&str>,
 ) -> Result<BytecodeExpr, LowerError> {
     match expr {
         crate::Expr::Number(raw) => Ok(BytecodeExpr::Literal(Value::Number(parse_number(raw)?))),
@@ -467,10 +540,17 @@ pub fn lower_canonical_expr(
                 let mut operands = Vec::new();
                 collect_concat_operands(&b.left, &mut operands);
                 collect_concat_operands(&b.right, &mut operands);
-                let args = operands
-                    .into_iter()
-                    .map(|expr| lower_canonical_expr(expr, origin, current_sheet, resolve_sheet))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let mut args = Vec::with_capacity(operands.len());
+                for expr in operands {
+                    args.push(lower_canonical_expr_inner(
+                        expr,
+                        origin,
+                        current_sheet,
+                        resolve_sheet,
+                        scopes,
+                        lambda_self_name,
+                    )?);
+                }
                 Ok(BytecodeExpr::FuncCall {
                     func: Function::Concat,
                     args,
@@ -503,17 +583,21 @@ pub fn lower_canonical_expr(
                 };
                 Ok(BytecodeExpr::Binary {
                     op,
-                    left: Box::new(lower_canonical_expr(
+                    left: Box::new(lower_canonical_expr_inner(
                         &b.left,
                         origin,
                         current_sheet,
                         resolve_sheet,
+                        scopes,
+                        lambda_self_name,
                     )?),
-                    right: Box::new(lower_canonical_expr(
+                    right: Box::new(lower_canonical_expr_inner(
                         &b.right,
                         origin,
                         current_sheet,
                         resolve_sheet,
+                        scopes,
+                        lambda_self_name,
                     )?),
                 })
              }
@@ -524,69 +608,316 @@ pub fn lower_canonical_expr(
         crate::Expr::Unary(u) => match u.op {
             crate::UnaryOp::Plus => Ok(BytecodeExpr::Unary {
                 op: UnaryOp::Plus,
-                expr: Box::new(lower_canonical_expr(
+                expr: Box::new(lower_canonical_expr_inner(
                     &u.expr,
                     origin,
                     current_sheet,
                     resolve_sheet,
+                    scopes,
+                    lambda_self_name,
                 )?),
             }),
             crate::UnaryOp::Minus => Ok(BytecodeExpr::Unary {
                 op: UnaryOp::Neg,
-                expr: Box::new(lower_canonical_expr(
+                expr: Box::new(lower_canonical_expr_inner(
                     &u.expr,
                     origin,
                     current_sheet,
                     resolve_sheet,
+                    scopes,
+                    lambda_self_name,
                 )?),
             }),
             crate::UnaryOp::ImplicitIntersection => Ok(BytecodeExpr::Unary {
                 op: UnaryOp::ImplicitIntersection,
-                expr: Box::new(lower_canonical_expr(
+                expr: Box::new(lower_canonical_expr_inner(
                     &u.expr,
                     origin,
                     current_sheet,
                     resolve_sheet,
+                    scopes,
+                    lambda_self_name,
                 )?),
             }),
         },
-        crate::Expr::FunctionCall(call) => {
-            let func = Function::from_name(&call.name.name_upper);
+        crate::Expr::Call(call) => {
+            let callee = lower_canonical_expr_inner(
+                &call.callee,
+                origin,
+                current_sheet,
+                resolve_sheet,
+                scopes,
+                lambda_self_name,
+            )?;
             let args = call
                 .args
                 .iter()
-                .map(|a| lower_canonical_expr(a, origin, current_sheet, resolve_sheet))
+                .map(|a| {
+                    lower_canonical_expr_inner(
+                        a,
+                        origin,
+                        current_sheet,
+                        resolve_sheet,
+                        scopes,
+                        lambda_self_name,
+                    )
+                })
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(BytecodeExpr::FuncCall { func, args })
+            Ok(BytecodeExpr::Call {
+                callee: Box::new(callee),
+                args,
+            })
         }
-        crate::Expr::Call(_) => Err(LowerError::Unsupported),
+        crate::Expr::FunctionCall(call) => match call.name.name_upper.as_str() {
+            "LET" => lower_let(call, origin, current_sheet, resolve_sheet, scopes),
+            "LAMBDA" => lower_lambda(
+                call,
+                origin,
+                current_sheet,
+                resolve_sheet,
+                scopes,
+                lambda_self_name,
+            ),
+            name_upper => {
+                let func = Function::from_name(name_upper);
+                match func {
+                    Function::Unknown(name) => {
+                        let args = call
+                            .args
+                            .iter()
+                            .map(|a| {
+                                lower_canonical_expr_inner(
+                                    a,
+                                    origin,
+                                    current_sheet,
+                                    resolve_sheet,
+                                    scopes,
+                                    lambda_self_name,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+
+                        // If this name is a known builtin function (e.g. RAND), do not treat it as
+                        // a lambda invocation. Lower it as an unknown function call so bytecode
+                        // eligibility can reject it (yielding `IneligibleExpr` rather than a lower
+                        // error).
+                        if crate::functions::lookup_function(name_upper).is_some() {
+                            return Ok(BytecodeExpr::FuncCall {
+                                func: Function::Unknown(name),
+                                args,
+                            });
+                        }
+
+                        // Non-builtin function call. Treat this as a lambda invocation only when the
+                        // name is in lexical scope (LET/LAMBDA parameters).
+                        let key = casefold(name_upper.trim());
+                        if !scopes.is_defined(&key) {
+                            return Err(LowerError::Unsupported);
+                        }
+
+                        Ok(BytecodeExpr::Call {
+                            callee: Box::new(BytecodeExpr::NameRef(Arc::from(key))),
+                            args,
+                        })
+                    }
+                    other => {
+                        let args = call
+                            .args
+                            .iter()
+                            .map(|a| {
+                                lower_canonical_expr_inner(
+                                    a,
+                                    origin,
+                                    current_sheet,
+                                    resolve_sheet,
+                                    scopes,
+                                    lambda_self_name,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>()?;
+                        Ok(BytecodeExpr::FuncCall { func: other, args })
+                    }
+                }
+            }
+        },
+        crate::Expr::NameRef(nref) => {
+            let prefix = RefPrefix::from_parts(&nref.workbook, &nref.sheet);
+            validate_prefix(&prefix, current_sheet, resolve_sheet)?;
+
+            // Bytecode currently supports only lexical names (LET/LAMBDA bindings), not workbook
+            // defined names. Reject non-local name refs so the engine falls back to AST evaluation.
+            if !prefix.is_unprefixed() {
+                return Err(LowerError::Unsupported);
+            }
+            let key = casefold(nref.name.trim());
+            if !scopes.is_defined(&key) {
+                return Err(LowerError::Unsupported);
+            }
+            Ok(BytecodeExpr::NameRef(Arc::from(key)))
+        }
         crate::Expr::Postfix(p) => match p.op {
             crate::PostfixOp::Percent => Ok(BytecodeExpr::Binary {
                 op: BinaryOp::Div,
-                left: Box::new(lower_canonical_expr(
+                left: Box::new(lower_canonical_expr_inner(
                     &p.expr,
                     origin,
                     current_sheet,
                     resolve_sheet,
+                    scopes,
+                    lambda_self_name,
                 )?),
                 right: Box::new(BytecodeExpr::Literal(Value::Number(100.0))),
             }),
             crate::PostfixOp::SpillRange => Ok(BytecodeExpr::SpillRange(Box::new(
-                lower_canonical_reference_expr(&p.expr, origin, current_sheet, resolve_sheet)?,
+                lower_canonical_reference_expr(
+                    &p.expr,
+                    origin,
+                    current_sheet,
+                    resolve_sheet,
+                    scopes,
+                    lambda_self_name,
+                )?,
             ))),
         },
-        crate::Expr::NameRef(nref) => {
-            // Bytecode locals (LET) only support unqualified identifiers.
-            // Defined names / sheet-qualified names are currently handled by the AST evaluator.
-            if nref.workbook.is_some() {
-                return Err(LowerError::ExternalReference);
-            }
-            if nref.sheet.is_some() {
-                return Err(LowerError::Unsupported);
-            }
-            let key = crate::value::casefold(nref.name.trim());
-            Ok(BytecodeExpr::NameRef(Arc::from(key)))
-        }
-        crate::Expr::FieldAccess(_) | crate::Expr::StructuredRef(_) => Err(LowerError::Unsupported),
+        crate::Expr::FieldAccess(_) => Err(LowerError::Unsupported),
+        crate::Expr::StructuredRef(_) => Err(LowerError::Unsupported),
     }
+}
+
+fn lower_let(
+    call: &crate::FunctionCall,
+    origin: crate::CellAddr,
+    current_sheet: usize,
+    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    scopes: &mut LexicalScopes,
+) -> Result<BytecodeExpr, LowerError> {
+    scopes.push_scope();
+    let result = (|| {
+        let mut args_out: Vec<BytecodeExpr> = Vec::with_capacity(call.args.len());
+        if call.args.len() < 3 || call.args.len() % 2 == 0 {
+            // Invalid LET arity: still lower into a LET call so bytecode eligibility can reject it
+            // (ensuring we fall back to the AST evaluator for validation + error semantics).
+            for (idx, arg) in call.args.iter().enumerate() {
+                if idx % 2 == 0 {
+                    if let Some(name) = bare_identifier(arg) {
+                        let key = casefold(name.trim());
+                        args_out.push(BytecodeExpr::NameRef(Arc::from(key.as_str())));
+                        scopes.define(key);
+                        continue;
+                    }
+                }
+
+                args_out.push(lower_canonical_expr_inner(
+                    arg,
+                    origin,
+                    current_sheet,
+                    resolve_sheet,
+                    scopes,
+                    None,
+                )?);
+            }
+
+            return Ok(BytecodeExpr::FuncCall {
+                func: Function::Let,
+                args: args_out,
+            });
+        }
+
+        let last = call.args.len() - 1;
+        for pair in call.args[..last].chunks_exact(2) {
+            let Some(name) = bare_identifier(&pair[0]) else {
+                // LET binding identifiers must be bare unqualified names. For invalid name args,
+                // fall back to the AST evaluator so it can surface Excel's exact validation and
+                // error semantics.
+                return Err(LowerError::Unsupported);
+            };
+            let key = casefold(name.trim());
+            args_out.push(BytecodeExpr::NameRef(Arc::from(key.as_str())));
+
+            // Allow the LET binding name to be referenced inside any LAMBDA bodies produced by the
+            // value expression (for recursion via `f(x)`).
+            let value_expr = lower_canonical_expr_inner(
+                &pair[1],
+                origin,
+                current_sheet,
+                resolve_sheet,
+                scopes,
+                Some(&key),
+            )?;
+            args_out.push(value_expr);
+            scopes.define(key);
+        }
+
+        let body = lower_canonical_expr_inner(
+            &call.args[last],
+            origin,
+            current_sheet,
+            resolve_sheet,
+            scopes,
+            None,
+        )?;
+        args_out.push(body);
+
+        Ok(BytecodeExpr::FuncCall {
+            func: Function::Let,
+            args: args_out,
+        })
+    })();
+    scopes.pop_scope();
+    result
+}
+
+fn lower_lambda(
+    call: &crate::FunctionCall,
+    origin: crate::CellAddr,
+    current_sheet: usize,
+    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
+    scopes: &mut LexicalScopes,
+    lambda_self_name: Option<&str>,
+) -> Result<BytecodeExpr, LowerError> {
+    if call.args.is_empty() {
+        return Ok(value_error_literal());
+    }
+
+    let mut params: Vec<Arc<str>> = Vec::with_capacity(call.args.len().saturating_sub(1));
+    let mut seen: HashSet<String> = HashSet::new();
+
+    for param_expr in &call.args[..call.args.len() - 1] {
+        let Some(name) = bare_identifier(param_expr) else {
+            return Ok(value_error_literal());
+        };
+        let key = casefold(name.trim());
+        if !seen.insert(key.clone()) {
+            return Ok(value_error_literal());
+        }
+        params.push(Arc::from(key));
+    }
+
+    let body_expr = call.args.last().expect("checked args non-empty");
+
+    scopes.push_scope();
+    let result = (|| {
+        if let Some(self_name) = lambda_self_name {
+            scopes.define(self_name.to_string());
+        }
+        for p in &params {
+            scopes.define(p.as_ref().to_string());
+        }
+
+        let body = lower_canonical_expr_inner(
+            body_expr,
+            origin,
+            current_sheet,
+            resolve_sheet,
+            scopes,
+            None,
+        )?;
+
+        Ok(BytecodeExpr::Lambda {
+            params: Arc::from(params.into_boxed_slice()),
+            body: Box::new(body),
+        })
+    })();
+    scopes.pop_scope();
+    result
 }

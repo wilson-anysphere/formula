@@ -284,6 +284,13 @@ fn collect_deps_inner(expr: &Expr, base: CellCoord, out: &mut AHashSet<(i32, i32
                 collect_deps_inner(arg, base, out);
             }
         }
+        Expr::Lambda { body, .. } => collect_deps_inner(body, base, out),
+        Expr::Call { callee, args } => {
+            collect_deps_inner(callee, base, out);
+            for arg in args {
+                collect_deps_inner(arg, base, out);
+            }
+        }
     }
 }
 

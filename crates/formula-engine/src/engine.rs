@@ -6718,6 +6718,8 @@ fn bytecode_value_to_engine(value: bytecode::Value) -> Value {
             }
             Value::Array(Array::new(arr.rows, arr.cols, values))
         }
+        // Lambdas cannot be returned from cells; match `apply_eval_result` by surfacing `#CALC!`.
+        bytecode::Value::Lambda(_) => Value::Error(ErrorKind::Calc),
         // Discontiguous reference unions (e.g. `=A1,B1`) cannot be returned as a spillable array
         // result; treat them as a scalar #VALUE! like the AST evaluator.
         bytecode::Value::MultiRange(_) => Value::Error(ErrorKind::Value),
@@ -6887,6 +6889,19 @@ impl BytecodeColumnCache {
                                 StackValue::Other => {}
                             }
                         }
+                        stack.push(StackValue::Other);
+                    }
+                    bytecode::OpCode::MakeLambda => {
+                        // Lambdas are opaque values for the purpose of range-cache analysis.
+                        stack.push(StackValue::Other);
+                    }
+                    bytecode::OpCode::CallValue => {
+                        // Pops args + callee and pushes the call result.
+                        let argc = inst.b() as usize;
+                        for _ in 0..argc {
+                            let _ = stack.pop();
+                        }
+                        let _ = stack.pop(); // callee
                         stack.push(StackValue::Other);
                     }
                 }
@@ -7473,6 +7488,9 @@ fn bytecode_expr_first_unsupported_function(expr: &bytecode::Expr) -> Option<Arc
             bytecode_expr_first_unsupported_function(left)
                 .or_else(|| bytecode_expr_first_unsupported_function(right))
         }
+        bytecode::Expr::Lambda { body, .. } => bytecode_expr_first_unsupported_function(body),
+        bytecode::Expr::Call { callee, args } => bytecode_expr_first_unsupported_function(callee)
+            .or_else(|| args.iter().find_map(|arg| bytecode_expr_first_unsupported_function(arg))),
         bytecode::Expr::Literal(_)
         | bytecode::Expr::CellRef(_)
         | bytecode::Expr::RangeRef(_)
@@ -7583,6 +7601,14 @@ fn bytecode_expr_within_grid_limits(
             }
             Ok(())
         }
+        bytecode::Expr::Lambda { body, .. } => bytecode_expr_within_grid_limits(body, origin),
+        bytecode::Expr::Call { callee, args } => {
+            bytecode_expr_within_grid_limits(callee, origin)?;
+            for arg in args {
+                bytecode_expr_within_grid_limits(arg, origin)?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -7659,6 +7685,11 @@ fn bytecode_expr_is_eligible_inner(
                     _ => BytecodeLocalBindingKind::ArrayLiteral,
                 }
             }
+            bytecode::Expr::Lambda { .. } => BytecodeLocalBindingKind::Scalar,
+            bytecode::Expr::Call { callee, .. } => match callee.as_ref() {
+                bytecode::Expr::Lambda { body, .. } => infer_binding_kind(body, scopes),
+                _ => BytecodeLocalBindingKind::Scalar,
+            },
             bytecode::Expr::FuncCall {
                 func: Function::Let,
                 args,
@@ -7768,7 +7799,9 @@ fn bytecode_expr_is_eligible_inner(
             // (e.g. `ABS({1;2})` should spill via the AST evaluator). Gate array literals by
             // context using the `allow_array_literals` flag.
             bytecode::Value::Array(_) => allow_array_literals,
-            bytecode::Value::Range(_) | bytecode::Value::MultiRange(_) => false,
+            bytecode::Value::Range(_) | bytecode::Value::MultiRange(_) | bytecode::Value::Lambda(_) => {
+                false
+            }
         },
         bytecode::Expr::CellRef(_) => true,
         bytecode::Expr::RangeRef(_) => allow_range,
@@ -7923,6 +7956,14 @@ fn bytecode_expr_is_eligible_inner(
                         lexical_scopes.pop();
                         return false;
                     }
+
+                    // Allow recursive lambdas of the form:
+                    // `LET(f, LAMBDA(x, f(x)), f(1))`
+                    // by treating the binding name as visible while checking the RHS.
+                    lexical_scopes
+                        .last_mut()
+                        .expect("pushed scope")
+                        .insert(name.clone(), BytecodeLocalBindingKind::Scalar);
                     // LET bindings can hold scalars, ranges, and array literals. We only need to
                     // ensure the overall LET expression remains non-spilling in scalar contexts;
                     // that is enforced by the `NameRef` eligibility check, which gates range/array
@@ -8304,6 +8345,28 @@ fn bytecode_expr_is_eligible_inner(
             }
             bytecode::ast::Function::Unknown(_) => false,
         },
+        bytecode::Expr::Lambda { params, body } => {
+            lexical_scopes.push(HashMap::new());
+            for p in params.iter() {
+                if p.is_empty() {
+                    lexical_scopes.pop();
+                    return false;
+                }
+                lexical_scopes
+                    .last_mut()
+                    .expect("pushed scope")
+                    .insert(p.clone(), BytecodeLocalBindingKind::Scalar);
+            }
+            let ok = bytecode_expr_is_eligible_inner(body, false, false, lexical_scopes);
+            lexical_scopes.pop();
+            ok
+        }
+        bytecode::Expr::Call { callee, args } => {
+            if !bytecode_expr_is_eligible_inner(callee, false, false, lexical_scopes) {
+                return false;
+            }
+            args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, true, false, lexical_scopes))
+        }
     }
 }
 
@@ -8480,6 +8543,21 @@ fn walk_expr_flags(
                                 lexical_scopes.pop();
                                 return;
                             };
+
+                            // Allow recursive lambdas of the form:
+                            //   LET(f, LAMBDA(x, f(x)), f(1))
+                            //
+                            // The LET binding name isn't in scope while evaluating the value expression, but
+                            // Excel's lambda invocation semantics inject the call name into the call scope
+                            // at runtime, enabling recursion. Treat the binding name as local while walking
+                            // the lambda body so we don't incorrectly mark it as an unresolved UDF / defined
+                            // name reference (which would disable the bytecode backend).
+                            if matches!(&pair[1], Expr::FunctionCall { name, .. } if name == "LAMBDA") {
+                                lexical_scopes
+                                    .last_mut()
+                                    .expect("pushed scope")
+                                    .insert(name_key.clone());
+                            }
 
                             walk_expr_flags(
                                 &pair[1],

@@ -1,5 +1,5 @@
 use super::ast::{BinaryOp, Expr, Function, UnaryOp};
-use super::program::{ConstValue, Instruction, OpCode, Program};
+use super::program::{Capture, ConstValue, Instruction, LambdaTemplate, OpCode, Program};
 use super::value::{ErrorKind, RangeRef, SheetRangeRef, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,6 +32,13 @@ struct LocalInfo {
 struct CompileCtx<'a> {
     program: &'a mut Program,
     lexical_scopes: Vec<HashMap<Arc<str>, LocalInfo>>,
+    lambda_self_name: Option<Arc<str>>,
+    closure: Option<ClosureCtx>,
+}
+
+struct ClosureCtx {
+    outer_locals: HashMap<Arc<str>, LocalInfo>,
+    captures: Vec<Capture>,
 }
 
 impl<'a> CompileCtx<'a> {
@@ -39,6 +46,8 @@ impl<'a> CompileCtx<'a> {
         Self {
             program,
             lexical_scopes: Vec::new(),
+            lambda_self_name: None,
+            closure: None,
         }
     }
 
@@ -127,6 +136,40 @@ impl<'a> CompileCtx<'a> {
                         .instrs
                         .push(Instruction::new(OpCode::LoadLocal, info.idx, 0));
                     if !allow_range && info.kind == LocalKind::RefSingle {
+                        self.program.instrs.push(Instruction::new(
+                            OpCode::ImplicitIntersection,
+                            0,
+                            0,
+                        ));
+                    }
+                } else if let Some(outer_info) = self
+                    .closure
+                    .as_ref()
+                    .and_then(|closure| closure.outer_locals.get(name))
+                    .copied()
+                {
+                    // Capture an outer local into this lambda.
+                    let inner_idx = self.alloc_local(name.clone());
+                    if self.lexical_scopes.is_empty() {
+                        self.lexical_scopes.push(HashMap::new());
+                    }
+                    self.lexical_scopes[0].insert(
+                        name.clone(),
+                        LocalInfo {
+                            idx: inner_idx,
+                            kind: outer_info.kind,
+                        },
+                    );
+                    if let Some(closure) = self.closure.as_mut() {
+                        closure.captures.push(Capture {
+                            outer_local: outer_info.idx,
+                            inner_local: inner_idx,
+                        });
+                    }
+                    self.program
+                        .instrs
+                        .push(Instruction::new(OpCode::LoadLocal, inner_idx, 0));
+                    if !allow_range && outer_info.kind == LocalKind::RefSingle {
                         self.program.instrs.push(Instruction::new(
                             OpCode::ImplicitIntersection,
                             0,
@@ -278,7 +321,107 @@ impl<'a> CompileCtx<'a> {
                         .push(Instruction::new(OpCode::CallFunc, func_idx, argc));
                 }
             },
+            Expr::Lambda { params, body } => self.compile_lambda(params, body),
+            Expr::Call { callee, args } => self.compile_call(callee, args),
         }
+    }
+
+    fn compile_lambda(&mut self, params: &Arc<[Arc<str>]>, body: &Expr) {
+        let outer_locals = self.collect_visible_locals();
+        let self_name = self.lambda_self_name.clone();
+
+        let body_key = normalized_key(body);
+        let mut body_program = Program::new(body_key);
+        let mut body_ctx = CompileCtx::new(&mut body_program);
+        body_ctx.closure = Some(ClosureCtx {
+            outer_locals,
+            captures: Vec::new(),
+        });
+
+        // Root scope: holds captures, optional self binding, and parameters.
+        body_ctx.lexical_scopes.push(HashMap::new());
+
+        let mut self_local = None;
+        if let Some(name) = self_name {
+            let idx = body_ctx.alloc_local(name.clone());
+            body_ctx.lexical_scopes[0].insert(
+                name,
+                LocalInfo {
+                    idx,
+                    kind: LocalKind::Scalar,
+                },
+            );
+            self_local = Some(idx);
+        }
+
+        let mut param_locals: Vec<u32> = Vec::with_capacity(params.len());
+        for p in params.iter() {
+            let idx = body_ctx.alloc_local(p.clone());
+            body_ctx.lexical_scopes[0].insert(
+                p.clone(),
+                LocalInfo {
+                    idx,
+                    kind: LocalKind::Scalar,
+                },
+            );
+            param_locals.push(idx);
+        }
+
+        body_ctx.compile_expr(body);
+
+        let closure = body_ctx
+            .closure
+            .take()
+            .expect("lambda body compilation should have closure context");
+
+        let template = Arc::new(LambdaTemplate {
+            params: params.clone(),
+            body: Arc::new(body_program),
+            param_locals: Arc::from(param_locals.into_boxed_slice()),
+            captures: Arc::from(closure.captures.into_boxed_slice()),
+            self_local,
+        });
+        let idx = self.program.lambdas.len() as u32;
+        self.program.lambdas.push(template);
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::MakeLambda, idx, 0));
+    }
+
+    fn compile_call(&mut self, callee: &Expr, args: &[Expr]) {
+        self.compile_expr(callee);
+        for arg in args {
+            self.compile_call_arg(arg);
+        }
+        self.program
+            .instrs
+            .push(Instruction::new(OpCode::CallValue, 0, args.len() as u32));
+    }
+
+    fn compile_call_arg(&mut self, arg: &Expr) {
+        // Preserve reference semantics for lambda arguments:
+        // Excel evaluates references first and implicitly dereferences only when needed.
+        // Passing a cell reference as a reference (not as a scalar value) is important for
+        // correct behavior in nested aggregate calls (e.g. `LAMBDA(r, SUM(r))(A1)`).
+        if let Expr::CellRef(r) = arg {
+            let idx = self.program.range_refs.len() as u32;
+            self.program.range_refs.push(RangeRef::new(*r, *r));
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::LoadRange, idx, 0));
+            return;
+        }
+        self.compile_expr(arg);
+    }
+
+    fn collect_visible_locals(&self) -> HashMap<Arc<str>, LocalInfo> {
+        let mut out = HashMap::new();
+        for scope in self.lexical_scopes.iter().rev() {
+            for (name, info) in scope {
+                out.entry(name.clone()).or_insert(*info);
+            }
+        }
+        out
     }
 
     fn infer_let_value_kind(&self, expr: &Expr) -> LocalKind {
@@ -387,8 +530,16 @@ impl<'a> CompileCtx<'a> {
             // The binding name becomes visible to subsequent bindings and the final body.
             let kind = self.infer_let_value_kind(&pair[1]);
 
+            // Allow the LET binding name to be referenced inside any LAMBDA bodies produced by
+            // the value expression (for recursion via `f(x)`).
+            let prev_self_name = self.lambda_self_name.take();
+            self.lambda_self_name = Some(name.clone());
+
             // LET binding values are evaluated in "argument mode" (may preserve references).
             self.compile_expr_inner(&pair[1], true);
+
+            self.lambda_self_name = prev_self_name;
+
             let idx = self.alloc_local(name.clone());
             self.program
                 .instrs
@@ -892,6 +1043,30 @@ fn expr_to_key(expr: &Expr, out: &mut String) {
         Expr::FuncCall { func, args } => {
             out.push_str("FN(");
             out.push_str(func.name());
+            out.push(',');
+            out.push_str(&args.len().to_string());
+            out.push(':');
+            for arg in args {
+                expr_to_key(arg, out);
+                out.push(',');
+            }
+            out.push(')');
+        }
+        Expr::Lambda { params, body } => {
+            out.push_str("LAMBDA(");
+            out.push_str(&params.len().to_string());
+            out.push(':');
+            for p in params.iter() {
+                out.push_str(p);
+                out.push(',');
+            }
+            out.push_str("BODY=");
+            expr_to_key(body, out);
+            out.push(')');
+        }
+        Expr::Call { callee, args } => {
+            out.push_str("CALL(");
+            expr_to_key(callee, out);
             out.push(',');
             out.push_str(&args.len().to_string());
             out.push(':');

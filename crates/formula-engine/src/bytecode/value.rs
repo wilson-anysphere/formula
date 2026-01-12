@@ -1,5 +1,6 @@
-use std::sync::Arc;
+use super::program::LambdaTemplate;
 use std::fmt;
+use std::sync::Arc;
 
 use crate::value::{EntityValue, RecordValue};
 
@@ -251,6 +252,31 @@ impl Array {
     }
 }
 
+#[derive(Clone)]
+pub struct Lambda {
+    pub template: Arc<LambdaTemplate>,
+    /// Captured values aligned with `template.captures`.
+    pub captures: Arc<[Value]>,
+}
+
+impl fmt::Debug for Lambda {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Lambda")
+            .field("params", &self.template.params)
+            .field("body_key", &self.template.body.key())
+            .field("captures_len", &self.captures.len())
+            .finish()
+    }
+}
+
+impl PartialEq for Lambda {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.template, &other.template) && Arc::ptr_eq(&self.captures, &other.captures)
+    }
+}
+
+impl Eq for Lambda {}
+
 /// Runtime value used by both AST and bytecode evaluators.
 #[derive(Clone, Debug)]
 pub enum Value {
@@ -262,6 +288,7 @@ pub enum Value {
     Array(Array),
     Range(RangeRef),
     MultiRange(MultiRangeRef),
+    Lambda(Lambda),
     Empty,
     /// Placeholder for a missing/omitted function argument (e.g. `IF(,1,2)`).
     ///
@@ -297,6 +324,7 @@ impl PartialEq for Value {
             (Error(a), Error(b)) => a == b,
             (Range(a), Range(b)) => a == b,
             (MultiRange(a), MultiRange(b)) => a == b,
+            (Lambda(a), Lambda(b)) => a == b,
             (Array(a), Array(b)) => {
                 a.rows == b.rows && a.cols == b.cols && a.values == b.values
             }
