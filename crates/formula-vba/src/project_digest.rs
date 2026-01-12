@@ -12,19 +12,18 @@ use crate::{
     ParseError,
 };
 
-/// Digest algorithm used by [`compute_vba_project_digest`].
+/// Digest algorithm used by helper digest computations in this module.
 ///
-/// Note: actual Office VBA signature *binding* uses an MD5 digest (16 bytes) per MS-OSHARED §4.3.
-/// The hash algorithm OID stored in Authenticode `DigestInfo` is often SHA-256 in the wild, but is
-/// not used to select the VBA project digest algorithm.
+/// Note: for VBA signature *binding*, Office stores a 16-byte MD5 digest regardless of the
+/// `DigestInfo.digestAlgorithm` OID (MS-OSHARED §4.3).
+/// https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DigestAlg {
     /// MD5 (16 bytes).
-    ///
-    /// Per MS-OSHARED §4.3 this is the VBA project "source hash" algorithm even when the PKCS#7/CMS
-    /// signature uses SHA-1/SHA-256 (and even when `DigestInfo.digestAlgorithm` indicates SHA-256).
     Md5,
+    /// SHA-1 (supported for debugging/tests; not used by VBA signature binding).
     Sha1,
+    /// SHA-256 (supported for debugging/tests; not used by VBA signature binding).
     Sha256,
 }
 
@@ -60,7 +59,7 @@ impl Hasher {
     }
 }
 
-/// Compute a digest over a VBA project's MS-OVBA §2.4.2 digest transcript.
+/// Compute a digest over a VBA project's MS-OVBA §2.4.2 (v1/v2) normalized-data transcript.
 ///
 /// Transcript (deterministic):
 ///
@@ -93,11 +92,17 @@ pub fn compute_vba_project_digest(
     Ok(hasher.finalize())
 }
 
-/// Compute the MS-OVBA "Contents Hash" v3 digest of a `vbaProject.bin`.
+/// Compute the MS-OVBA §2.4.2 V3 Content Hash binding digest of a `vbaProject.bin`.
 ///
-/// This is the project digest used by the MS-OVBA §2.4.2 v3 transcript (`ProjectNormalizedData`
-/// constructed from `V3ContentNormalizedData` + `FormsNormalizedData`), commonly associated with
-/// the `\x05DigitalSignatureExt` signature stream.
+/// MS-OVBA defines:
+///
+/// `V3ContentHash = MD5(V3ContentNormalizedData || ProjectNormalizedData)`
+///
+/// (see MS-OVBA §2.4.2.5/§2.4.2.6/§2.4.2.7).
+///
+/// Note: for VBA signatures the embedded digest bytes are always a 16-byte MD5 per MS-OSHARED §4.3,
+/// even when the `DigestInfo.digestAlgorithm` OID is SHA-256. Callers performing binding verification
+/// should therefore use [`DigestAlg::Md5`] regardless of the OID.
 pub fn compute_vba_project_digest_v3(
     vba_project_bin: &[u8],
     alg: DigestAlg,

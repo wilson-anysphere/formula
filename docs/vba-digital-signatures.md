@@ -1,28 +1,27 @@
 # VBA Digital Signatures (vbaProject.bin / vbaProjectSignature.bin)
 
 This document captures how Excel/VBA macro signatures are stored in XLSM files, and how we extract
-and **bind** those signatures against the MS-OVBA “VBA project digest”.
+and **bind** those signatures against the MS-OVBA **Contents Hash** (specifically the **V3 Content
+Hash** used by `DigitalSignatureExt`).
 
 In this repo, `crates/formula-vba` implements best-effort:
 
-- signature stream parsing + PKCS#7/CMS internal verification (`verify_vba_digital_signature`)
-- extraction of the signed digest:
-  - classic Authenticode `SpcIndirectDataContent` → `DigestInfo.digest`
-  - newer MS-OSHARED `SpcIndirectDataContentV2` → `SigDataV1Serialized.sourceHash`
-- MS-OVBA §2.4.2 “Contents Hash” binding verification (signature is bound to the VBA project via a
-  versioned normalized-data transcript, `ProjectNormalizedData`), exposed via
-  `VbaDigitalSignature::binding`
+- signature stream discovery + PKCS#7/CMS internal verification (`verify_vba_digital_signature`)
+- extraction of the signed binding digest from the Authenticode-style signed content
+  - classic `SpcIndirectDataContent` → `DigestInfo.digest`
+  - (some producers) MS-OSHARED `SpcIndirectDataContentV2` → `SigDataV1Serialized.sourceHash`
+- MS-OVBA “Contents Hash” binding verification (signature is bound to the VBA project)
 
 API notes:
 
 - `formula_vba::verify_vba_digital_signature` returns a [`VbaDigitalSignature`] with a coarse
-  binding enum (`VbaSignatureBinding::{Bound, NotBound, Unknown}`).
+  binding enum (`VbaSignatureBinding::{Bound, NotBound, Unknown}`) and the detected signature stream
+  variant (`stream_kind: VbaSignatureStreamKind`).
 - `formula_vba::verify_vba_digital_signature_bound` returns a [`VbaDigitalSignatureBound`] with a
-  richer binding enum (`VbaProjectBindingVerification`) and best-effort debug info (algorithm OID,
-  signed digest bytes, computed digest bytes).
-- Signature structs also expose `stream_kind: VbaSignatureStreamKind` to identify which
-  `DigitalSignature*` variant was selected (needed for variant-aware binding/digest logic,
-  especially the `DigitalSignatureExt` / V3 variant).
+  richer binding enum (`VbaProjectBindingVerification`) and best-effort debug info (the `DigestInfo`
+  algorithm OID, signed digest bytes, computed digest bytes).
+  - Note: for VBA signatures the binding digest bytes are **always MD5**; the algorithm OID is not
+    authoritative (details below).
 - PKCS#7/CMS verification is *internal* signature verification only: by default we do **not**
   validate the signer certificate chain (OpenSSL `NOVERIFY`). If you need opt-in “trusted publisher”
   evaluation, use `formula_vba::verify_vba_digital_signature_with_trust` with an explicit root
@@ -85,12 +84,6 @@ over the VBA project streams in `xl/vbaProject.bin`. As a result:
   verifying/binding a signature stored in the signature part.
 - If you only have the signature-part bytes (no project bytes), you can still verify the PKCS#7/CMS
   signature, but binding cannot be evaluated and should be treated as `Unknown`.
-- When the signature-part payload is an **OLE/CFB container** containing a `\x05DigitalSignature*`
-  stream, `formula-vba` can inspect the contained stream name to select the correct binding rules
-  (`DigitalSignatureExt` => v3; `DigitalSignatureEx`/`DigitalSignature` => legacy).
-- When the signature-part payload is **raw PKCS#7/CMS bytes** (not an OLE container), the original
-  stream name is unknown; binding verification falls back to a digest-length heuristic (16 bytes =>
-  legacy MD5 binding; otherwise => v3).
 
 ## Signature stream payload variants (what the bytes look like)
 
@@ -106,32 +99,11 @@ In the wild, the signature stream bytes are not always “just a PKCS#7 blob”.
 3. **Length-prefixed `DigSigInfoSerialized`-like wrapper/prefix**
    - Many real-world Excel `\x05DigitalSignature*` streams start with a shorter, *length-prefixed*
      header that does **not** match the MS-OSHARED `DigSigInfoSerialized` layout.
-   - This on-disk shape is still often referred to as `DigSigInfoSerialized` in the wild, and is
-     sometimes attributed to MS-OFFCRYPTO in older references.
    - The structure is little-endian and length-prefixed; parsing it lets us locate the embedded CMS
      payload deterministically instead of scanning for a DER `SEQUENCE`.
-   - Common (but not universal) layout:
-     - `u32le cbSignature`
-     - `u32le cbSigningCertStore`
-     - `u32le cchProjectName` (often a UTF-16 code unit count, but some producers treat this as a
-       byte length)
-     - followed by variable-size blobs (often: `projectNameUtf16le`, `certStoreBytes`,
-       `signatureBytes`)
-     - some producers include a `version` and/or `reserved` DWORD before the length fields.
-   - The ordering of the variable blobs can vary across producers/versions. A robust parser should
-     compute candidate offsets and **validate** by checking that the bytes at the computed offset
-     parse as a CMS `signedData` `ContentInfo`.
-   - The wrapper's `cbSignature` region can include padding; prefer using the DER length inside the
-     region to find the actual CMS payload size.
-   - Some real-world files have inconsistent size fields or additional unknown fields. A permissive
-     parser can often still recover by assuming the signature is the **final** blob and locating it
-     by counting back from the end of the stream using `cbSignature`.
-   - ⚠️ The `cbSigningCertStore` blob may itself contain a PKCS#7/CMS structure (often beginning
-     with `0x30`). This means naive “scan for the first PKCS#7 SignedData” logic can pick the
-     **certificate store** rather than the actual signature. Prefer the header-derived `(offset, len)`
-     when available, and when falling back to scanning heuristics, prefer the **last** plausible
-     `SignedData` candidate in the stream. Also validate the inner `SignedData` structure
-     (version/digestAlgorithms/encapContentInfo) to reduce false positives.
+   - ⚠️ The wrapper's `cbSigningCertStore` region may itself contain a PKCS#7/CMS structure (often
+     beginning with `0x30`). When scanning heuristically, prefer the **last** plausible `SignedData`
+     candidate in the stream and validate the inner `SignedData` structure.
 4. **Detached `content || pkcs7`**
    - The stream contains `signed_content_bytes` followed by a detached CMS signature (`pkcs7_der`).
    - Verification must pass the prefix bytes as the detached content when verifying the CMS blob.
@@ -144,12 +116,11 @@ includes the digest we need for MS-OVBA binding.
 High-level extraction steps:
 
 1. **Obtain the CMS `ContentInfo` bytes**
-    - If the stream is raw CMS DER, use it directly.
-    - If the stream uses an Office DigSig wrapper, unwrap it:
-      - MS-OSHARED `DigSigBlob` / `DigSigInfoSerialized` (offset-based), or
-      - the length-prefixed DigSigInfoSerialized-like prefix (common in the wild).
-    - If the stream is `content || pkcs7`, split it (find the CMS DER start); the `content` prefix is
-      the detached signed content.
+   - If the stream is raw CMS DER, use it directly.
+   - If the stream uses an Office DigSig wrapper, unwrap it (MS-OSHARED `DigSigBlob` or the
+     length-prefixed DigSigInfoSerialized-like prefix).
+   - If the stream is `content || pkcs7`, split it (find the CMS DER start); the `content` prefix is
+     the detached signed content.
 2. **Parse CMS and locate `SignedData.encapContentInfo`**
    - `ContentInfo.contentType` should be `signedData` (`1.2.840.113549.1.7.2`).
    - `SignedData.encapContentInfo.eContentType` is typically `SpcIndirectDataContent`
@@ -161,20 +132,15 @@ High-level extraction steps:
      same role as `eContent`.
 4. **Parse the encapsulated signed-content structure**
    - Classic Authenticode uses `SpcIndirectDataContent` and stores the digest in
-      `messageDigest: DigestInfo`:
-      - `DigestInfo.digestAlgorithm.algorithm` (OID; informational for v1/v2 binding, but meaningful for v3 / `DigitalSignatureExt`)
-      - `DigestInfo.digest` (digest bytes)
-   - Newer Office VBA signatures can use `SpcIndirectDataContentV2`, which stores the digest in
+     `messageDigest: DigestInfo`:
+     - `DigestInfo.digestAlgorithm.algorithm` (OID; informational for VBA binding)
+     - `DigestInfo.digest` (digest bytes)
+   - Newer Office producers can use `SpcIndirectDataContentV2`, which stores the digest in
      `SigDataV1Serialized.sourceHash` (MS-OSHARED).
 
-That `(hash_oid, digest_bytes)` pair is the “signed digest” we extract from the signature.
-
-- For v1/v2 signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), the digest bytes
-  we bind against are an **MD5 digest (16 bytes)** per MS-OSHARED §4.3, even if `hash_oid` indicates
-  SHA-256.
-- For v3 signature streams (`\x05DigitalSignatureExt`), the digest bytes are a hash over the v3
-  `ProjectNormalizedData` transcript (MS-OVBA §2.4.2.5/§2.4.2.6), using the digest algorithm OID
-  stored in `DigestInfo.digestAlgorithm.algorithm` (typically SHA-256 / 32 bytes).
+That `(hash_oid, digest_bytes)` pair is the “signed digest” we use to bind a VBA signature to a
+specific VBA project. For VBA signatures, the `digest_bytes` are the *binding* value; the `hash_oid`
+is frequently misleading and should be treated as metadata only.
 
 ### Relevant ASN.1 shapes (high level)
 
@@ -220,246 +186,57 @@ For VBA binding, we ignore `SpcIndirectDataContent.data` and use only `messageDi
 | Digest algorithm: SHA-1 | `1.3.14.3.2.26` |
 | Digest algorithm: SHA-256 | `2.16.840.1.101.3.4.2.1` |
 
-## Binding (MS-OVBA project digest verification)
+## Binding (MS-OVBA Contents Hash / V3 Content Hash verification)
 
 CMS signature verification alone answers “is this a valid CMS signature over *some bytes*?”, but it
 does not, by itself, prove that the signature is bound to the rest of the VBA project.
 
-### MS-OVBA §2.4.2 “Contents Hash” (digest transcript versions)
+### MD5-always rule (important)
+
+For VBA signatures, the digest embedded in:
+
+- classic `SpcIndirectDataContent.messageDigest.digest`, and
+- MS-OSHARED `SigDataV1Serialized.sourceHash`
+
+is **always a 16-byte MD5** (the “VBA project source hash”), even when
+`DigestInfo.digestAlgorithm.algorithm` is SHA-256.
+
+This behavior is specified in **MS-OSHARED §4.3**:
+https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
+
+Practical implication: the `DigestInfo` *algorithm OID* should be treated as informational only for
+VBA binding; the verifier must compute **MD5** and compare it to the 16 digest bytes.
+
+### Spec-correct transcripts
 
 MS-OVBA defines a **versioned** “Contents Hash” computation (§2.4.2) used to bind a
 `\x05DigitalSignature*` stream to the rest of `vbaProject.bin`.
 
-Terminology gotcha: there are *two* hash concepts in play:
+At a high level:
 
-- **CMS/PKCS#7 signature algorithm**: the algorithm used by the signer to sign the CMS `SignedData`
-  (often SHA-256 + RSA today). This is what OpenSSL validates when we say the signature is
-  cryptographically verified.
-- **MS-OVBA “Contents Hash” digest bytes**: the bytes stored in Authenticode’s
-  `SpcIndirectDataContent.messageDigest: DigestInfo.digest`, intended to be compared against a hash
-  computed from the current VBA project.
+- **v1 / `DigitalSignature`**: `ContentHash = MD5(ContentNormalizedData)`
+- **v2 / `DigitalSignatureEx`**: `AgileContentHash = MD5(ContentNormalizedData || FormsNormalizedData)`
+- **v3 / `DigitalSignatureExt`**: `V3ContentHash = MD5(V3ContentNormalizedData || ProjectNormalizedData)`
 
-The second one is what MS-OVBA §2.4.2 defines: it specifies a deterministic **byte transcript**
-(`ProjectNormalizedData`) and then hashes that transcript to produce the digest bytes embedded in
-`DigestInfo.digest`.
+V3 spec references:
 
-#### Signature stream variant → contents-hash version → digest algorithm
+- §2.4.2.5 V3ContentNormalizedData:
+  https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/becd5647-d4e9-4d7d-ab86-484421a086eb
+- §2.4.2.6 ProjectNormalizedData:
+  https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/eda9d57a-a862-4927-9554-6750dada9b37
+- §2.4.2.7 V3 Content Hash:
+  https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/601a4412-00cc-46a0-b8e0-3001c011308e
 
-MS-OVBA has three on-disk signature stream names. Their **contents-hash version** affects both:
-1) how to build `ProjectNormalizedData`, and 2) which hash algorithm produces the digest bytes.
+### `formula-vba` binding implementation (high level)
 
-| OLE signature stream | Contents hash version | Digest that `DigestInfo.digest` should match | Digest bytes algorithm | Digest bytes length |
-|---|---:|---|---|---:|
-| `\x05DigitalSignature` | v1 | **Content Hash** (§2.4.2.3): `MD5(ContentNormalizedData)` | MD5 | 16 |
-| `\x05DigitalSignatureEx` | v2 | **Agile Content Hash** (§2.4.2.4): `MD5(ContentNormalizedData \|\| FormsNormalizedData)` | MD5 | 16 |
-| `\x05DigitalSignatureExt` | v3 | v3 digest (hash over `ProjectNormalizedData`; see §2.4.2.5/§2.4.2.6) | from `DigestInfo.algorithm` (typically SHA-256) | typically 32 |
+To bind the signature to the VBA project contents, `formula-vba`:
 
-Important: for v1/v2, Office can store **MD5 digest bytes** even when
-`DigestInfo.digestAlgorithm.algorithm` is *not* the MD5 OID (see MS-OSHARED §4.3, and the comments
-in `crates/formula-vba/src/signature.rs` describing legacy v1/v2 binding). This is why binding code
-should primarily trust the *digest length* and the stream variant, not the `DigestInfo` algorithm
-OID, when choosing how to compute the expected digest bytes.
+1. Extracts the signed digest bytes from the signature payload.
+2. Computes the appropriate MS-OVBA Contents Hash transcript (v1/v2/v3) for the current project.
+3. Computes **MD5** of that transcript (regardless of the signature's `DigestInfo` OID).
+4. Compares the computed digest bytes to the signed digest bytes.
 
-Evidence in this repo: the regression test
-[`crates/formula-vba/tests/signature_binding_md5_sha256.rs`](../crates/formula-vba/tests/signature_binding_md5_sha256.rs)
-constructs a signature where `DigestInfo.digestAlgorithm.algorithm` advertises SHA-256 but the digest
-bytes are MD5, and asserts that binding verification still succeeds.
-
-#### §2.4.2.1 ContentNormalizedData (v1)
-
-`ContentNormalizedData` is the v1 transcript for module source + selected project metadata / reference
-record data.
-
-Transcript construction (as defined by MS-OVBA pseudocode; see also
-`formula_vba::content_normalized_data` in `crates/formula-vba/src/contents_hash.rs`):
-
-1. Read the `VBA/dir` stream.
-2. Decompress it using the MS-OVBA `CompressedContainer` algorithm (§2.4.1).
-3. Parse the decompressed bytes as a sequence of “dir records”:
-   - `id: u16le`
-   - `len: u32le`
-   - `data: [u8; len]`
-4. Initialize `ContentNormalizedData = []`.
-5. As you scan records in order:
-    - For each **`PROJECTNAME.ProjectName`** record (`id == 0x0004`), append the record `data` bytes
-      verbatim to `ContentNormalizedData` (**in `VBA/dir` record order**).
-    - For each **`PROJECTCONSTANTS.Constants`** record (`id == 0x000C`), append the record `data`
-      bytes verbatim to `ContentNormalizedData` (**in `VBA/dir` record order**).
-    - For selected **`REFERENCE*`** records (MS-OVBA §2.4.2.1 allowlist), incorporate reference data in
-      `VBA/dir` record order. Not all reference-related records contribute (for example
-      `REFERENCENAME` (`0x0016`) must **not** be included).
-    - For each **`REFERENCEREGISTERED`** record (`id == 0x000D`), append the record `data` bytes
-      verbatim to `ContentNormalizedData`.
-    - For each **`REFERENCEPROJECT`** record (`id == 0x000E`), append a *normalized* byte sequence:
-      1. Parse `LibidAbsolute` and `LibidRelative` as `u32le length || bytes`.
-      2. Parse `MajorVersion` as `u32le` and `MinorVersion` as `u16le`.
-      3. Build `TempBuffer = LibidAbsolute || LibidRelative || MajorVersion || MinorVersion`.
-      4. Append bytes from `TempBuffer` up to (but not including) the first `0x00` byte.
-    - For each **`REFERENCECONTROL`** record (`id == 0x002F`), append a *normalized* byte sequence:
-      1. Parse `LibidTwiddled` as `u32le length || bytes`.
-      2. Parse `Reserved1` as `u32le` and `Reserved2` as `u16le`.
-      3. Build `TempBuffer = LibidTwiddled || Reserved1 || Reserved2`.
-      4. Append bytes from `TempBuffer` up to (but not including) the first `0x00` byte.
-    - For each **`REFERENCEEXTENDED`** record (`id == 0x0030`), append the record `data` bytes
-      verbatim.
-    - For each **`REFERENCEORIGINAL`** record (`id == 0x0033`), append a *normalized* byte sequence:
-      1. Parse `LibidOriginal` as `u32le length || bytes`.
-      2. Append bytes from `LibidOriginal` up to (but not including) the first `0x00` byte.
-    - For each module (as described by the module record groups in `VBA/dir`), locate the module
-      stream name (`MODULESTREAMNAME` / `MODULENAME`) and `MODULETEXTOFFSET`. The **module ordering**
-      is the order of the module groups in `VBA/dir`, not alphabetical and not OLE directory order.
-6. For each module stream in that stored order:
-   1. Read `VBA/<ModuleStreamName>` bytes.
-   2. Find the compressed source container starting at `MODULETEXTOFFSET` (or, if missing, locate the
-      start of a compressed container via signature scan; see `contents_hash.rs` / `lib.rs`).
-   3. Decompress the module’s `CompressedContainer` bytes.
-   4. Normalize the module source bytes:
-      - Split into lines where a line break is either `CR` (`0x0D`) or a lone `LF` (`0x0A`); treat
-        `CRLF` as a single break (ignore the `LF`).
-      - Drop any line whose first token is `Attribute` (ASCII case-insensitive match at start of
-        line, followed by end-of-line or whitespace).
-      - For every remaining line, append the line bytes followed by `CRLF` (`0x0D 0x0A`).
-
-The resulting concatenated byte sequence is `ContentNormalizedData`.
-
-Tests in this repo:
-[`crates/formula-vba/tests/contents_hash.rs`](../crates/formula-vba/tests/contents_hash.rs) exercises
-record inclusion/order (including `PROJECTNAME`/`PROJECTCONSTANTS`), module ordering, and module
-source normalization. Reference record handling is covered more directly by:
-[`crates/formula-vba/tests/content_normalized_data_references.rs`](../crates/formula-vba/tests/content_normalized_data_references.rs)
-and
-[`crates/formula-vba/tests/contents_hash_reference_records.rs`](../crates/formula-vba/tests/contents_hash_reference_records.rs).
-
-#### §2.4.2.2 FormsNormalizedData
-
-`FormsNormalizedData` is a transcript over “designer” streams (UserForms, etc).
-
-Transcript construction (see also `formula_vba::forms_normalized_data` in
-`crates/formula-vba/src/normalized_data.rs`):
-
-1. Read the `PROJECT` stream (text) and discover designer modules by extracting every `BaseClass=...`
-   line (MS-OVBA §2.3.1.7). Each `BaseClass` value is a *module identifier* for a designer/UserForm
-   module.
-2. Read and decompress `VBA/dir`, then use its module record groups to map each `BaseClass` module
-   identifier to the module’s `MODULESTREAMNAME`. (`formula-vba` matches by name, falling back to an
-   ASCII case-insensitive comparison.)
-3. Treat that `MODULESTREAMNAME` as the name of the **root-level designer storage** (MS-OVBA §2.2.10
-   requires that such a storage exists at the OLE root).
-4. For each discovered designer storage (deduplicated if `PROJECT` contains duplicates):
-   1. Traverse the storage recursively. To approximate MS-OVBA’s “stored order” in a deterministic
-      way (because our CFB/OLE library does not expose raw sibling ordering), `formula-vba` sorts each
-      storage’s immediate children by **case-insensitive entry name** (tie-breaking by the original
-      name), then processes them depth-first.
-   2. For each stream encountered, append its bytes in **1023-byte blocks**:
-      - Split the stream bytes into chunks of up to 1023 bytes.
-      - For each chunk, append exactly 1023 bytes: the chunk bytes followed by `0x00` padding for the
-        remainder of the block.
-      (So a stream of length `n` contributes `1023 * ceil(n/1023)` bytes; the final partial block is
-      zero-padded.)
-
-Tests in this repo:
-[`crates/formula-vba/tests/forms_normalized_data.rs`](../crates/formula-vba/tests/forms_normalized_data.rs)
-covers the 1023-byte padding behavior and deterministic traversal ordering.
-
-#### §2.4.2.3 Content Hash (v1)
-
-Content Hash (MS-OVBA §2.4.2.3) is the **16-byte MD5 digest** of `ContentNormalizedData`:
-
-```text
-ContentHash = MD5(ContentNormalizedData)
-```
-
-This is the legacy digest most commonly associated with the `\x05DigitalSignature` stream variant.
-
-#### §2.4.2.4 Agile Content Hash (v2 / forms-aware)
-
-Agile Content Hash (MS-OVBA §2.4.2.4) is the **16-byte MD5 digest** of:
-
-```text
-AgileContentHash = MD5(ContentNormalizedData || FormsNormalizedData)
-```
-
-This is the digest most commonly associated with the `\x05DigitalSignatureEx` stream variant.
-
-#### §2.4.2.5 V3ContentNormalizedData (Contents hash v3)
-
-`V3ContentNormalizedData` is the v3 replacement for `ContentNormalizedData`, used by the
-`DigitalSignatureExt` stream variant.
-
-Transcript construction (MS-OVBA §2.4.2.5):
-
-1. Read and decompress `VBA/dir` as in §2.4.2.1.
-2. Parse it as a sequence of `(id, len, data)` records (same physical format as v1).
-3. Append bytes derived from selected reference records from `VBA/dir` (same record-type allowlist and
-   normalization rules as §2.4.2.1):
-   - **`REFERENCEREGISTERED`** (`0x000D`): append raw `data` bytes
-   - **`REFERENCEPROJECT`** (`0x000E`): append normalized bytes (TempBuffer + “copy until NUL”)
-   - **`REFERENCECONTROL`** (`0x002F`): append normalized bytes (TempBuffer + “copy until NUL”)
-   - **`REFERENCEEXTENDED`** (`0x0030`): append raw `data` bytes
-   - **`REFERENCEORIGINAL`** (`0x0033`): append normalized bytes (“copy until NUL” over `LibidOriginal`)
-4. For each module record group (in `VBA/dir` stored order), append **module metadata bytes before
-   the normalized source**:
-   1. `MODULENAME` (`0x0019`) record `data` bytes
-   2. `MODULESTREAMNAME` (`0x001A`) record `data` bytes, with the trailing reserved `u16` trimmed when
-      present (many files store `MODULESTREAMNAME || 0x0000`)
-   3. `MODULETYPE` (`0x0021`) record `data` bytes
-   4. Then append the module’s normalized source bytes (same newline + `Attribute` stripping rules as
-      §2.4.2.1).
-
-The main point for implementers: this is **not** just “`ContentNormalizedData` hashed with a stronger
-algorithm”. v3 defines a distinct transcript (`V3ContentNormalizedData`) and `DigitalSignatureExt`
-uses SHA-256 over `ProjectNormalizedData` (§2.4.2.6).
-
-Repo status:
-
-- `formula-vba` implements the v3 transcript and digest:
-  - `formula_vba::v3_content_normalized_data` and `formula_vba::project_normalized_data_v3` in
-    `crates/formula-vba/src/contents_hash.rs`
-  - `formula_vba::contents_hash_v3` (SHA-256 digest bytes for `DigitalSignatureExt`) in
-    `crates/formula-vba/src/contents_hash.rs`
-  - `formula_vba::compute_vba_project_digest_v3` in `crates/formula-vba/src/project_digest.rs`
-- Binding logic in `crates/formula-vba/src/signature.rs` treats `\x05DigitalSignatureExt` as a v3
-  signature stream and compares its signed digest bytes against the computed v3 project digest
-  (hashing v3 `ProjectNormalizedData` with the `DigestInfo` algorithm OID; typically SHA-256, 32 bytes).
-- For v1/v2 binding, Office-produced signatures use **MD5** (16-byte digests per MS-OSHARED §4.3),
-  even when `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
-
-Tests in this repo:
-[`crates/formula-vba/tests/contents_hash_v3.rs`](../crates/formula-vba/tests/contents_hash_v3.rs)
-exercises v3 reference record inclusion, module metadata inclusion, module ordering, and end-to-end
-SHA-256 digest computation.
-
-#### §2.4.2.6 ProjectNormalizedData (the hashed transcript)
-
-`ProjectNormalizedData` is the spec-defined transcript that is actually hashed to produce the digest
-bytes placed in `DigestInfo.digest`.
-
-Per MS-OVBA §2.4.2.6, the transcript depends on the **contents-hash version**:
-
-- v1 (`DigitalSignature`): `ProjectNormalizedData = ContentNormalizedData`
-- v2 (`DigitalSignatureEx`): `ProjectNormalizedData = ContentNormalizedData || FormsNormalizedData`
-- v3 (`DigitalSignatureExt`): `ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData`
-
-### `formula-vba` binding implementation (current)
-
-To bind the signature to the VBA project contents, `formula-vba` currently:
-
-1. Extracts the signed digest structure from the signature payload, yielding:
-   - `hash_oid` (typically `DigestInfo.digestAlgorithm.algorithm`), and
-   - `digest_bytes` (the signed digest bytes).
-2. Chooses the MS-OVBA §2.4.2 transcript version based on the signature stream variant (`stream_kind`):
-   - `DigitalSignature` / `DigitalSignatureEx` (v1/v2):
-      - compute **Content Hash** (v1) and **Agile Content Hash** (v2) by hashing
-        `ContentNormalizedData` and `ContentNormalizedData || FormsNormalizedData`.
-      - Per MS-OSHARED §4.3, the digest bytes are expected to be **MD5 (16 bytes)** even when
-        `hash_oid` indicates SHA-256 (the OID is informational for v1/v2 binding).
-    - `DigitalSignatureExt` (v3):
-      - compute the v3 digest by hashing v3 `ProjectNormalizedData` (`V3ContentNormalizedData || FormsNormalizedData`)
-        with the digest algorithm indicated by `hash_oid` (expected SHA-256, 32 bytes).
-3. Compares the computed digest bytes to `digest_bytes` to determine the binding result
-   (`VbaSignatureBinding::{Bound, NotBound, Unknown}`).
-
-Result interpretation (current behavior):
+Result interpretation:
 
 - If CMS verification fails ⇒ signature invalid (`VbaSignatureVerification::SignedInvalid` /
   `SignedParseError`).
@@ -467,34 +244,8 @@ Result interpretation (current behavior):
   (`VbaSignatureBinding::Bound`).
 - If CMS verification succeeds and binding mismatches ⇒ signature is present but **not bound** to the
   current VBA project bytes (`VbaSignatureBinding::NotBound`).
-- If CMS verification succeeds but binding cannot be evaluated (missing/unparseable data, or we can't
-  distinguish mismatch vs missing forms data) ⇒ binding is conservative/unknown
-  (`VbaSignatureBinding::Unknown`).
-
-### Implementation notes / caveats
-
-- For v1/v2 signature streams (`\x05DigitalSignature` / `\x05DigitalSignatureEx`), per MS-OSHARED
-  §4.3, Office stores the VBA project digest used for binding as **MD5 (16 bytes)**, even if the
-  PKCS#7/CMS signature uses SHA-1/SHA-256 and even if `DigestInfo.digestAlgorithm.algorithm`
-  indicates SHA-256. For these streams, the digest algorithm OID is treated as informational when
-  selecting the expected digest bytes.
-- For v3 signature streams (`\x05DigitalSignatureExt`), Office uses **SHA-256 (32 bytes)** over the
-  v3 transcript (`V3ContentNormalizedData || FormsNormalizedData`), and `DigestInfo` is expected to
-  indicate SHA-256.
-- The primary binding path uses MS-OVBA §2.4.2 normalized data:
-  - `ContentNormalizedData` is derived from the `VBA/dir` stream and the module streams referenced
-    by it (including module ordering and module source normalization).
-  - `FormsNormalizedData` is derived from streams inside root-level “designer” storages (for
-    example UserForms), with per-stream padding to 1023-byte blocks.
-- The project digest computation is **best-effort** and deterministic (to support stable tests and
-  predictable behavior), but may not match Excel's exact transcript for all real-world files. This
-  can produce false negatives (a valid signature treated as not bound).
-- `DigitalSignatureExt` / v3 contents hashes are supported, but correctness depends on matching
-  MS-OVBA's v3 transcript details. Future work: validate against additional real-world Excel fixtures
-  over time.
-- Callers should treat `VbaSignatureBinding::Unknown` as "could not verify binding", not as "bound".
-- Treat `binding == Bound` as a strong signal, but validate against Excel fixtures before relying on
-  it as a hard security boundary.
+- If CMS verification succeeds but binding cannot be evaluated (missing/unparseable data, incomplete
+  project bytes, etc.) ⇒ binding is conservative/unknown (`VbaSignatureBinding::Unknown`).
 
 ## Repo implementation pointers
 
@@ -504,16 +255,11 @@ If you need to update or extend signature handling, start with:
   - signature stream discovery (`\x05DigitalSignature*`)
   - CMS verification and the `VbaDigitalSignature::binding` decision
 - `crates/formula-vba/src/offcrypto.rs`
-  - `DigSigBlob` parsing (MS-OSHARED) + parsing for the length-prefixed DigSigInfoSerialized-like wrapper
-    (deterministic CMS offset/length)
+  - MS-OSHARED / MS-OFFCRYPTO DigSig wrapper parsing (deterministic CMS offset/length)
 - `crates/formula-vba/src/authenticode.rs`
   - `SignedData.encapContentInfo.eContent` parsing and `SpcIndirectDataContent` → `DigestInfo`
 - `crates/formula-vba/src/contents_hash.rs`
-  - MS-OVBA §2.4.2.1 `ContentNormalizedData` (`content_normalized_data`)
-  - MS-OVBA §2.4.2.5 `V3ContentNormalizedData` (`v3_content_normalized_data`)
-  - MS-OVBA §2.4.2.6 v3 `ProjectNormalizedData` (`project_normalized_data_v3`)
-- `crates/formula-vba/src/normalized_data.rs`
-  - MS-OVBA §2.4.2.2 `FormsNormalizedData` (`forms_normalized_data`)
+  - MS-OVBA normalized-data transcript builders
 - `crates/formula-vba/src/project_digest.rs`
   - `compute_vba_project_digest` (v1/v2 digest over MS-OVBA transcripts; strict transcript-only, no raw-stream fallback)
   - `compute_vba_project_digest_v3` (MS-OVBA §2.4.2 v3 digest for `DigitalSignatureExt`)
@@ -544,13 +290,13 @@ and binding behavior:
 
 ## Specs / references
 
-- **MS-OVBA**: VBA project storage and VBA project digest computation / binding verification.
+- **MS-OVBA**: VBA project storage, signature streams, and Contents Hash (V3 Content Hash) computation.
   - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
-- **MS-OSHARED**: VBA digital signature storage (`DigSigInfoSerialized`) and the MD5 “VBA project hash” rule (MS-OSHARED §4.3).
-  - `DigSigInfoSerialized`: MS-OSHARED §2.3.2.1
-  - `DigSigBlob`: MS-OSHARED §2.3.2.2
-  - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
-  - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/30a00273-dbee-422f-b488-f4b8430ae046
-  - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/bc21c922-b7ae-4736-90aa-86afb6403462
+- **MS-OSHARED**: Office shared structures; documents the MD5-always “VBA project source hash”
+  behavior used by VBA signatures.
+  - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
+- **MS-OFFCRYPTO**: Office cryptography structures (historical references; some real-world wrappers
+  are MS-OSHARED).
+  - https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-offcrypto/
 - **RFC 5652**: Cryptographic Message Syntax (CMS) (PKCS#7 `SignedData`).
   - https://www.rfc-editor.org/rfc/rfc5652

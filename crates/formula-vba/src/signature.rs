@@ -71,17 +71,21 @@ pub struct VbaDigitalSignature {
     pub signature: Vec<u8>,
     /// Verification state (best-effort).
     pub verification: VbaSignatureVerification,
-    /// Whether the signature is bound to the VBA project streams via the MS-OVBA digest ("Contents
-    /// Hash") mechanism.
+    /// Whether the signature is bound to the VBA project via the MS-OVBA digest ("Contents Hash")
+    /// mechanism (V3 Content Hash for `DigitalSignatureExt`).
+    ///
+    /// Note: for VBA signatures the binding digest bytes embedded in Authenticode
+    /// `SpcIndirectDataContent.messageDigest.digest` are always a **16-byte MD5**, even when
+    /// `DigestInfo.digestAlgorithm` is SHA-256 (MS-OSHARED §4.3).
     pub binding: VbaSignatureBinding,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VbaSignatureBinding {
-    /// The signature's signed digest matches the computed Content Hash (MS-OVBA §2.4.2.3) or Agile
-    /// Content Hash (MS-OVBA §2.4.2.4) of the project.
+    /// The signature's signed digest matches the computed MS-OVBA Contents Hash for the project
+    /// (Content Hash / Agile Content Hash, or the V3 Content Hash for `DigitalSignatureExt`).
     Bound,
-    /// We extracted the signed digest and computed the relevant project digests, but they do not
+    /// We extracted the signed digest and computed the relevant MS-OVBA digests, but they do not
     /// match.
     NotBound,
     /// Binding could not be verified (unsupported/unknown format, missing data, or signature not
@@ -90,7 +94,7 @@ pub enum VbaSignatureBinding {
 }
 
 /// Result of verifying a VBA digital signature *and* verifying that the signature is bound to the
-/// current VBA project streams via the MS-OVBA "project digest".
+/// current VBA project via the MS-OVBA Contents Hash (V3 Content Hash for `DigitalSignatureExt`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VbaDigitalSignatureBound {
     /// The parsed signature stream, including PKCS#7 verification result.
@@ -99,10 +103,13 @@ pub struct VbaDigitalSignatureBound {
     pub binding: VbaProjectBindingVerification,
 }
 
-/// Best-effort debug information for MS-OVBA project digest binding verification.
+/// Best-effort debug information for MS-OVBA Contents Hash binding verification.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VbaProjectDigestDebugInfo {
-    /// OID of the hash algorithm used by the signed digest structure (if found).
+    /// OID from `DigestInfo.digestAlgorithm.algorithm` (if found).
+    ///
+    /// Note: for VBA signatures this OID is not authoritative for binding; the digest bytes are
+    /// always MD5 per MS-OSHARED §4.3.
     pub hash_algorithm_oid: Option<String>,
     /// Human-readable name for the hash algorithm (best-effort).
     pub hash_algorithm_name: Option<String>,
@@ -112,7 +119,7 @@ pub struct VbaProjectDigestDebugInfo {
     pub computed_digest: Option<Vec<u8>>,
 }
 
-/// Binding verification result for the MS-OVBA "project digest".
+/// Binding verification result for the MS-OVBA Contents Hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VbaProjectBindingVerification {
     /// Signature is present and the signed digest matches the digest computed from the current
@@ -410,7 +417,7 @@ pub fn parse_vba_digital_signature(
     }))
 }
 
-/// Parse and verify a VBA digital signature (if present) and return additional project digest
+/// Parse and verify a VBA digital signature (if present) and return additional Contents Hash
 /// binding verification details.
 ///
 /// This is a convenience wrapper around [`verify_vba_digital_signature`] that returns a richer
@@ -463,10 +470,9 @@ pub fn verify_vba_digital_signature_bound(
             }
 
             _ => {
-                // MS-OSHARED §4.3: for legacy VBA signatures, Office stores an MD5 digest in
-                // `DigestInfo.digest` even when `DigestInfo.algorithm` indicates SHA-256. Some
-                // fixtures/tests may use other lengths; in that case we can still treat the digest
-                // as "not bound" (it cannot match the 16-byte Content/Agile hashes we compute).
+                // MS-OSHARED §4.3: Office stores the VBA signature binding digest bytes as MD5 (16
+                // bytes) even when `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
+                // https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
                 if let Ok(content_normalized) = content_normalized_data(vba_project_bin) {
                     let content_hash: [u8; 16] = Md5::digest(&content_normalized).into();
 
@@ -523,10 +529,13 @@ pub fn verify_vba_digital_signature_bound(
 /// Verification is "internal" CMS/PKCS#7 verification only: we validate that the signature blob
 /// is well-formed and that the signature matches the signed attributes / embedded content.
 ///
-/// We also perform a best-effort MS-OVBA binding check: we extract the signed 16-byte VBA project
-/// digest (`SpcIndirectDataContent.messageDigest.digest`) and compare it against:
-/// - the legacy `Content Hash` (MS-OVBA §2.4.2.3), and
-/// - the `Agile Content Hash` (MS-OVBA §2.4.2.4), which incorporates UserForm/designer storages.
+/// We also perform a best-effort MS-OVBA binding check by extracting the signed binding digest
+/// (Authenticode `SpcIndirectDataContent.messageDigest`) and comparing it against the relevant
+/// MS-OVBA Contents Hash transcript (Content Hash / Agile Content Hash, or the V3 Content Hash for
+/// `DigitalSignatureExt`).
+///
+/// Note: per MS-OSHARED §4.3, the embedded digest bytes are always a 16-byte MD5 even when
+/// `DigestInfo.digestAlgorithm` indicates SHA-256.
 ///
 /// If multiple signature streams are present, we prefer:
 /// 1) The first signature stream (by Excel-like stream-name ordering; see `signature_path_rank`)
@@ -547,7 +556,7 @@ pub fn verify_vba_digital_signature(
 ///
 /// In that situation:
 /// - the signature stream bytes live in `signature_container_bin`, but
-/// - the MS-OVBA \"project digest\" binding must be computed over `vba_project_bin`.
+/// - the MS-OVBA Contents Hash binding must be computed over `vba_project_bin`.
 ///
 /// This helper verifies signature streams found in `signature_container_bin` and computes binding
 /// against `vba_project_bin`.
@@ -705,9 +714,12 @@ pub fn verify_vba_digital_signature_with_trust(
 /// Verify whether a VBA signature blob is bound to the given `vbaProject.bin` payload via the
 /// MS-OVBA "Contents Hash" mechanism.
 ///
-/// This is a best-effort helper: it returns [`VbaSignatureBinding::Unknown`] when the signature
-/// does not contain a supported digest structure, uses an unsupported hash algorithm, or the VBA
-/// project digest cannot be computed.
+/// Note: for VBA signatures the embedded digest bytes are always a 16-byte MD5 per MS-OSHARED §4.3,
+/// even when the `DigestInfo.digestAlgorithm` OID indicates SHA-256.
+///
+/// This is a best-effort helper: it returns [`VbaSignatureBinding::Unknown`] when the signature does
+/// not contain a supported digest structure, uses an unsupported hash algorithm, or the binding
+/// digest cannot be computed.
 pub fn verify_vba_signature_binding_with_stream_path(
     vba_project_bin: &[u8],
     signature_stream_path: &str,
@@ -798,11 +810,11 @@ pub fn verify_vba_signature_binding_with_stream_path(
 }
 
 /// Verify whether a VBA signature blob is bound to the given `vbaProject.bin` payload via the
-/// MS-OVBA "project digest" mechanism.
+/// MS-OVBA "Contents Hash" mechanism.
 ///
 /// This is a best-effort helper: it returns [`VbaSignatureBinding::Unknown`] when the signature
 /// does not contain a supported digest structure, uses an unsupported hash algorithm, or the VBA
-/// project digest cannot be computed.
+/// binding digest cannot be computed.
 ///
 /// Note: signature binding for `\x05DigitalSignatureExt` depends on knowing which signature stream
 /// variant is being verified. If you know the stream path, prefer
@@ -1343,7 +1355,7 @@ fn extract_first_certificate_subject(bytes: &[u8]) -> Option<String> {
     None
 }
 
-/// Verify MS-OVBA "project digest" signature binding when the signature payload is provided
+/// Verify MS-OVBA "Contents Hash" signature binding when the signature payload is provided
 /// separately (e.g. `xl/vbaProjectSignature.bin` in OOXML / XLSM).
 ///
 /// `signature_bytes` can be:
@@ -1351,7 +1363,7 @@ fn extract_first_certificate_subject(bytes: &[u8]) -> Option<String> {
 /// - A raw `\u{0005}DigitalSignature*` stream payload
 /// - A raw PKCS#7/CMS blob (DER), optionally wrapped in an Office DigSig structure
 ///
-/// Returns [`VbaProjectBindingVerification::BoundUnknown`] when no signed project digest could be
+/// Returns [`VbaProjectBindingVerification::BoundUnknown`] when no signed binding digest could be
 /// extracted (or when we can't compare it to the project bytes).
 pub fn verify_vba_project_signature_binding(
     project_ole: &[u8],
@@ -1366,8 +1378,7 @@ pub fn verify_vba_project_signature_binding(
     let mut content_hash_md5: Option<[u8; 16]> = None;
     // Outer Option = attempted; inner Option = computed successfully.
     let mut agile_hash_md5: Option<Option<[u8; 16]>> = None;
-    // Lazily computed MS-OVBA v3 digest (for `\x05DigitalSignatureExt`-style signatures) keyed by
-    // digest algorithm.
+    // Lazily computed MS-OVBA v3 digest (for `\x05DigitalSignatureExt`-style signatures).
     let mut v3_digest: Option<(DigestAlg, Vec<u8>)> = None;
     for payload in payloads {
         let signed = match extract_vba_signature_signed_digest(&payload.bytes) {
@@ -1387,11 +1398,10 @@ pub fn verify_vba_project_signature_binding(
 
         let signed_digest = signed.digest.as_slice();
 
-        // Prefer v3 digest computation when we know this signature was loaded from a
+        // Prefer v3 transcript computation when we know this signature was loaded from a
         // `\x05DigitalSignatureExt` stream. When verifying signature payloads outside the main
         // `vbaProject.bin` (e.g. `xl/vbaProjectSignature.bin`) we may not know the original stream
-        // name; in that case use the digest length to select between legacy (v1/v2, always 16-byte
-        // MD5 per MS-OSHARED §4.3) and v3 binding computation.
+        // name; in that case we fall back to heuristics (including digest-length heuristics).
         //
         // If we *do* know the stream kind and it is a legacy `DigitalSignature`/`DigitalSignatureEx`
         // stream, keep legacy semantics even if the digest length is unexpected.
@@ -1432,8 +1442,9 @@ pub fn verify_vba_project_signature_binding(
             continue;
         }
 
-        // MS-OSHARED §4.3: for VBA signatures, Office stores an MD5 digest in `DigestInfo.digest`
-        // even when `DigestInfo.algorithm` indicates SHA-256.
+        // MS-OSHARED §4.3: for VBA signatures, the binding digest bytes in `DigestInfo.digest` are
+        // always a 16-byte MD5 even when `DigestInfo.digestAlgorithm.algorithm` indicates SHA-256.
+        // https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/40c8dab3-e8db-4c66-a6be-8cec06351b1e
         if content_hash_md5.is_none() {
             match content_normalized_data(project_ole) {
                 Ok(content_normalized) => {
