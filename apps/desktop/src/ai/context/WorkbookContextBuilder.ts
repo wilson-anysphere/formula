@@ -74,6 +74,9 @@ export interface WorkbookContextBuildStats {
   model: string;
   sheetCountSummarized: number;
   blockCount: number;
+  blockCountByKind: Record<WorkbookContextBlockKind, number>;
+  blockCellCount: number;
+  blockCellCountByKind: Record<WorkbookContextBlockKind, number>;
   promptContextChars: number;
   promptContextTokens: number;
   readBlockCount: number;
@@ -349,23 +352,26 @@ export class WorkbookContextBuilder {
           durationMs: 0,
           mode: this.options.mode,
           model: this.options.model,
-           sheetCountSummarized: 0,
-           blockCount: 0,
-           promptContextChars: 0,
-           promptContextTokens: 0,
-           readBlockCount: 0,
-           readBlockCellCount: 0,
-           readBlockCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
-           readBlockCellCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
-           cache: {
-             schema: { hits: 0, misses: 0 },
-             block: { hits: 0, misses: 0 },
-           },
-          rag: { enabled: false, retrievedCount: 0, retrievedBlockCount: 0 },
-          timingsMs: {
-            ragMs: 0,
-            schemaMs: 0,
-            readBlockMs: 0,
+          sheetCountSummarized: 0,
+          blockCount: 0,
+          blockCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
+          blockCellCount: 0,
+          blockCellCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
+          promptContextChars: 0,
+          promptContextTokens: 0,
+          readBlockCount: 0,
+          readBlockCellCount: 0,
+          readBlockCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
+          readBlockCellCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
+          cache: {
+            schema: { hits: 0, misses: 0 },
+            block: { hits: 0, misses: 0 },
+          },
+           rag: { enabled: false, retrievedCount: 0, retrievedBlockCount: 0 },
+           timingsMs: {
+             ragMs: 0,
+             schemaMs: 0,
+             readBlockMs: 0,
             promptContextMs: 0,
            readBlockMsByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
          },
@@ -569,6 +575,18 @@ export class WorkbookContextBuilder {
       stats.durationMs = nowMs() - stats.startedAtMs;
       stats.sheetCountSummarized = sheetSummaries.length;
       stats.blockCount = blocks.length;
+      const blockCountByKind: Record<WorkbookContextBlockKind, number> = { selection: 0, sheet_sample: 0, retrieved: 0 };
+      const blockCellCountByKind: Record<WorkbookContextBlockKind, number> = { selection: 0, sheet_sample: 0, retrieved: 0 };
+      let blockCellCount = 0;
+      for (const block of blocks) {
+        blockCountByKind[block.kind] += 1;
+        const cells = countCellMatrix(block.values);
+        blockCellCount += cells;
+        blockCellCountByKind[block.kind] += cells;
+      }
+      stats.blockCountByKind = blockCountByKind;
+      stats.blockCellCount = blockCellCount;
+      stats.blockCellCountByKind = blockCellCountByKind;
       stats.promptContextChars = promptContext.length;
       stats.promptContextTokens = usedPromptContextTokens;
       stats.rag.retrievedBlockCount = blocks.filter((b) => b.kind === "retrieved").length;
@@ -1361,6 +1379,15 @@ function rowHeaders(range: Range): string[] {
 function colHeaders(range: Range): string[] {
   const cols = Math.max(0, range.endCol - range.startCol + 1);
   return Array.from({ length: cols }, (_v, idx) => columnIndexToA1(range.startCol + idx));
+}
+
+function countCellMatrix(values: CellScalar[][]): number {
+  if (!Array.isArray(values)) return 0;
+  let out = 0;
+  for (const row of values) {
+    if (Array.isArray(row)) out += row.length;
+  }
+  return out;
 }
 
 function columnIndexToA1(columnIndex: number): string {

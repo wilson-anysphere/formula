@@ -585,6 +585,9 @@ describe("WorkbookContextBuilder", () => {
     expect(first.durationMs).toBeGreaterThanOrEqual(0);
     expect(first.sheetCountSummarized).toBe(1);
     expect(first.blockCount).toBe(1);
+    expect(first.blockCountByKind).toEqual({ selection: 0, sheet_sample: 1, retrieved: 0 });
+    expect(first.blockCellCount).toBeGreaterThan(0);
+    expect(first.blockCellCountByKind.sheet_sample).toBeGreaterThan(0);
     expect(first.promptContextChars).toBe(ctx1.promptContext.length);
     expect(first.promptContextTokens).toBe(ctx1.payload.budget.usedPromptContextTokens);
     expect(first.cache.schema.misses).toBeGreaterThanOrEqual(1);
@@ -599,6 +602,9 @@ describe("WorkbookContextBuilder", () => {
     expect(second.cache.block.hits).toBeGreaterThanOrEqual(1);
     expect(second.readBlockCellCount).toBe(0);
     expect(second.readBlockCellCountByKind.sheet_sample).toBe(0);
+    expect(second.blockCountByKind).toEqual({ selection: 0, sheet_sample: 1, retrieved: 0 });
+    expect(second.blockCellCount).toBeGreaterThan(0);
+    expect(second.blockCellCountByKind.sheet_sample).toBeGreaterThan(0);
     expect(second.promptContextChars).toBe(ctx2.promptContext.length);
     expect(second.promptContextTokens).toBe(ctx2.payload.budget.usedPromptContextTokens);
   });
