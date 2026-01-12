@@ -545,7 +545,12 @@ def get_sheet(name: str) -> Sheet:
     return _workbook.get_sheet(name)
 
 def create_sheet(name: str, index: Optional[int] = None) -> Sheet:
-    """Create a new sheet (optionally inserting at a specific 0-based index)."""
+    """
+    Create a new sheet.
+
+    By default, Formula inserts the new sheet after the active sheet (Excel-like).
+    Pass `index` to insert at a specific 0-based sheet position instead.
+    """
     return _workbook.create_sheet(name, index=index)
 
 # Decorators for custom functions
@@ -951,7 +956,7 @@ Available Python API:
 - sheet["A1"] or sheet.range("A1:B10")
 - range.value, range.formula
 - range.to_dataframe(), range.from_dataframe(df)
-- formula.get_sheet(name), formula.create_sheet(name, index=None)
+- formula.get_sheet(name), formula.create_sheet(name, index=None) (inserts after active by default)
 - @formula.custom_function decorator for UDFs
 
 Convert the code, preserving the logic and making it idiomatic Python.
