@@ -174,6 +174,72 @@ test.describe("formula bar editing + range insertion", () => {
       await expect(input).toHaveValue("=Sheet2!A1");
     });
 
+    test(`sheet switcher <select> switches sheets while editing a formula and keeps the formula bar focused (${mode})`, async ({
+      page,
+    }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
+
+      // Lazily create Sheet2 and seed A1.
+      await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        app.getDocument().setCellValue("Sheet2", "A1", 7);
+      });
+      await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+      // Start editing on Sheet1!C1.
+      await page.click("#grid", { position: { x: 260, y: 40 } });
+      await expect(page.getByTestId("active-cell")).toHaveText("C1");
+
+      await page.getByTestId("formula-highlight").click();
+      const input = page.getByTestId("formula-input");
+      await expect(input).toBeVisible();
+      await input.fill("=");
+
+      const switcher = page.getByTestId("sheet-switcher");
+      await switcher.selectOption("Sheet2", { force: true });
+
+      await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
+      await expect(input).toBeFocused();
+
+      await page.click("#grid", { position: { x: 53, y: 29 } });
+      await expect(input).toHaveValue("=Sheet2!A1");
+    });
+
+    test(`sheet overflow quick pick switches sheets while editing a formula and keeps the formula bar focused (${mode})`, async ({
+      page,
+    }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
+
+      // Lazily create Sheet2 and seed A1.
+      await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        app.getDocument().setCellValue("Sheet2", "A1", 7);
+      });
+      await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+      // Start editing on Sheet1!C1.
+      await page.click("#grid", { position: { x: 260, y: 40 } });
+      await expect(page.getByTestId("active-cell")).toHaveText("C1");
+
+      await page.getByTestId("formula-highlight").click();
+      const input = page.getByTestId("formula-input");
+      await expect(input).toBeVisible();
+      await input.fill("=");
+
+      await page.getByTestId("sheet-overflow").click();
+      const quickPick = page.getByTestId("quick-pick");
+      await expect(quickPick).toBeVisible();
+      await quickPick.getByRole("button", { name: "Sheet2" }).click();
+
+      await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
+      await expect(input).toBeFocused();
+
+      await page.click("#grid", { position: { x: 53, y: 29 } });
+      await expect(input).toHaveValue("=Sheet2!A1");
+    });
+
     test(`canceling after switching sheets restores the original edit location without applying edits (${mode})`, async ({ page }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
       await waitForIdle(page);
