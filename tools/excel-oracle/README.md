@@ -52,6 +52,55 @@ The Rust test suite enforces the same invariants (see
 `crates/formula-engine/tests/excel_oracle_coverage.rs`) so drift is caught even if
 `cases.json` is edited without re-running the generator.
 
+## How to add oracle coverage for a new function
+
+1) Add at least one new case to the appropriate module under:
+
+`tools/excel-oracle/case_generators/`
+
+Common buckets:
+
+- `arith.py` (operators)
+- `math.py`
+- `engineering.py`
+- `statistical.py` (aggregates + criteria semantics + stats/regression)
+- `logical.py`
+- `coercion.py` (type/boolean/blank coercion semantics)
+- `text.py`
+- `date_time.py`
+- `lookup.py`
+- `database.py`
+- `financial.py`
+- `spill.py` (dynamic arrays / spill behavior)
+- `info.py`
+- `lambda_cases.py` (LAMBDA / LET / MAP, etc.)
+- `errors.py` (error creation/propagation)
+
+Each module exposes `generate(cases, *, add_case, CellInput, ...) -> None` and is invoked
+in a deterministic order from `tools/excel-oracle/generate_cases.py`.
+
+Guidelines:
+
+- Keep the corpus **deterministic**: do not add volatile functions (e.g. `RAND`, `NOW`).
+- Keep the corpus **small**: the generator hard-caps at 2000 cases so it can run in real Excel in CI.
+- Prefer locale-independent formulas/inputs where possible (avoid ambiguous date strings).
+
+2) Regenerate the committed case corpus:
+
+```bash
+python tools/excel-oracle/generate_cases.py --out tests/compatibility/excel-oracle/cases.json
+```
+
+3) Validate:
+
+```bash
+python -m unittest tools/excel-oracle/tests/test_*.py
+```
+
+If you intentionally changed the case corpus, you may also need to re-pin the Excel dataset
+(`tools/excel-oracle/pin_dataset.py`) so `tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json`
+stays in sync.
+
 ## Generate oracle dataset from Excel
 
 From repo root on Windows:
