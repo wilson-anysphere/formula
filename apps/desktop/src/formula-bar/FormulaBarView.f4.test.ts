@@ -110,6 +110,29 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
     host.remove();
   });
 
+  it("does not toggle when the selection is not contained within a reference token", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=A1+B1";
+    // Selection spans the first reference and the "+" operator.
+    view.textarea.setSelectionRange(1, 4);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
+
+    expect(view.textarea.value).toBe("=A1+B1");
+    expect(view.model.draft).toBe("=A1+B1");
+    expect(view.textarea.selectionStart).toBe(1);
+    expect(view.textarea.selectionEnd).toBe(4);
+
+    host.remove();
+  });
+
   it("does not toggle non-formula text", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

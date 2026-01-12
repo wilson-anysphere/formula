@@ -97,6 +97,25 @@ describe("CellEditorOverlay F4 absolute reference toggle", () => {
     container.remove();
   });
 
+  it("does not toggle when the selection is not contained within a reference token", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const overlay = new CellEditorOverlay(container, { onCancel: () => {}, onCommit: () => {} });
+    overlay.open({ row: 0, col: 0 }, { x: 0, y: 0, width: 100, height: 24 }, "=A1+B1");
+
+    // Selection spans A1 and the "+" operator.
+    overlay.element.setSelectionRange(1, 4);
+    overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
+
+    expect(overlay.element.value).toBe("=A1+B1");
+    expect(overlay.element.selectionStart).toBe(1);
+    expect(overlay.element.selectionEnd).toBe(4);
+
+    overlay.close();
+    container.remove();
+  });
+
   it("does not toggle non-formula text", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
