@@ -1379,6 +1379,18 @@ export class SpreadsheetApp {
           };
           provider.on("sync", onSync);
           if ((provider as any).synced) onSync(true);
+          // If the user creates a comment before the provider reports `sync=true`,
+          // the `comments` root will already exist locally. Attach the comments
+          // observer immediately in that case so the UI updates in real time.
+          //
+          // This remains safe for legacy Array-backed docs because we only attach
+          // once the root exists (and `getCommentsRoot` peeks at the underlying
+          // placeholder before choosing a constructor).
+          try {
+            if (this.commentsDoc.share.get("comments")) attach();
+          } catch {
+            // Best-effort.
+          }
         } else {
           attach();
         }
