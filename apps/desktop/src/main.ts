@@ -1985,7 +1985,10 @@ async function handleAddSheet(): Promise<void> {
   addSheetInFlight = true;
   try {
     const activeId = app.getCurrentSheetId();
-    const desiredName = generateDefaultSheetName(workbookSheetStore.listAll());
+    const allSheets = workbookSheetStore.listAll();
+    const desiredName = generateDefaultSheetName(allSheets);
+    const activeIndex = allSheets.findIndex((sheet) => sheet.id === activeId);
+    const insertIndex = activeIndex >= 0 ? activeIndex + 1 : allSheets.length;
     const doc = app.getDocument();
 
     const collabSession = app.getCollabSession?.() ?? null;
@@ -2038,7 +2041,7 @@ async function handleAddSheet(): Promise<void> {
       // Allow any microtask-batched workbook edits to enqueue before we request a new sheet id.
       await new Promise<void>((resolve) => queueMicrotask(resolve));
 
-      const info = (await invoke("add_sheet", { name: desiredName })) as SheetUiInfo;
+      const info = (await invoke("add_sheet", { name: desiredName, index: insertIndex })) as SheetUiInfo;
       const id = String((info as any)?.id ?? "").trim();
       const name = String((info as any)?.name ?? "").trim();
       if (!id) throw new Error("Backend returned empty sheet id");
@@ -3559,7 +3562,11 @@ if (
         // Allow any microtask-batched workbook edits to enqueue before we request a new sheet id.
         await new Promise<void>((resolve) => queueMicrotask(resolve));
 
-        const info = (await invoke("add_sheet", { name: validatedName })) as SheetUiInfo;
+        const sheets = workbookSheetStore.listAll();
+        const activeIndex = sheets.findIndex((sheet) => sheet.id === activeId);
+        const insertIndex = activeIndex >= 0 ? activeIndex + 1 : sheets.length;
+
+        const info = (await invoke("add_sheet", { name: validatedName, index: insertIndex })) as SheetUiInfo;
         const id = String((info as any)?.id ?? "").trim();
         const resolvedName = String((info as any)?.name ?? "").trim();
         if (!id) throw new Error("Backend returned empty sheet id");

@@ -372,8 +372,12 @@ impl AppState {
         Ok(candidate)
     }
 
-    pub fn add_sheet(&mut self, name: String) -> Result<SheetInfoData, AppStateError> {
-        let (candidate_id, candidate_name, position) = {
+    pub fn add_sheet(
+        &mut self,
+        name: String,
+        index: Option<usize>,
+    ) -> Result<SheetInfoData, AppStateError> {
+        let (candidate_id, candidate_name, insert_index) = {
             let workbook = self.get_workbook()?;
             let base = name.trim();
             formula_model::validate_sheet_name(base)
@@ -418,25 +422,29 @@ impl AppState {
                 candidate_id = format!("{base_id}-{id_counter}");
             }
 
-            // Append by default.
-            let position = workbook.sheets.len() as i64;
-            (candidate_id, candidate_name, position)
+            let insert_index = index.unwrap_or(workbook.sheets.len()).min(workbook.sheets.len());
+            (candidate_id, candidate_name, insert_index)
         };
 
         if let Some(persistent) = self.persistent.as_mut() {
             let sheet = persistent
                 .storage
-                .create_sheet(persistent.workbook_id, &candidate_name, position, None)
+                .create_sheet(
+                    persistent.workbook_id,
+                    &candidate_name,
+                    insert_index as i64,
+                    None,
+                )
                 .map_err(|e| AppStateError::Persistence(e.to_string()))?;
             persistent.sheet_map.insert(candidate_id.clone(), sheet.id);
         }
 
         {
             let workbook = self.get_workbook_mut()?;
-            workbook.sheets.push(crate::file_io::Sheet::new(
-                candidate_id.clone(),
-                candidate_name.clone(),
-            ));
+            workbook.sheets.insert(
+                insert_index,
+                crate::file_io::Sheet::new(candidate_id.clone(), candidate_name.clone()),
+            );
 
             // Adding sheets is a structural XLSX edit. The patch-based save path (which relies on
             // `origin_xlsx_bytes`) can only patch existing worksheet parts; it cannot add new sheets.
@@ -3875,6 +3883,61 @@ mod tests {
         assert_eq!(
             normalize_formula(Some("==1+1".to_string())),
             Some("==1+1".to_string())
+        );
+    }
+
+    #[test]
+    fn add_sheet_inserts_at_index_and_persists_order() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let db_path = tmp.path().join("autosave.sqlite");
+        let location = WorkbookPersistenceLocation::OnDisk(db_path);
+
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+
+        let mut state = AppState::new();
+        state
+            .load_workbook_persistent(workbook, location)
+            .expect("load persistent workbook");
+
+        state
+            .add_sheet("Inserted".to_string(), Some(1))
+            .expect("add sheet");
+
+        let info = state.workbook_info().expect("workbook info");
+        let sheet_names = info
+            .sheets
+            .iter()
+            .map(|s| s.name.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            sheet_names,
+            vec![
+                "Sheet1".to_string(),
+                "Inserted".to_string(),
+                "Sheet2".to_string(),
+                "Sheet3".to_string()
+            ]
+        );
+
+        let storage = state.persistent_storage().expect("storage");
+        let workbook_id = state.persistent_workbook_id().expect("workbook id");
+        let meta_names = storage
+            .list_sheets(workbook_id)
+            .expect("list sheets")
+            .into_iter()
+            .map(|s| s.name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            meta_names,
+            vec![
+                "Sheet1".to_string(),
+                "Inserted".to_string(),
+                "Sheet2".to_string(),
+                "Sheet3".to_string()
+            ]
         );
     }
 

@@ -651,4 +651,62 @@ test.describe("sheet tabs", () => {
     });
     await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveAttribute("data-active", "true");
   });
+
+  test("add sheet inserts immediately after the active sheet", async ({ page }) => {
+    await page.addInitScript(() => {
+      const listeners: Record<string, any> = {};
+      (window as any).__tauriListeners = listeners;
+
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async (cmd: string, args: any) => {
+            switch (cmd) {
+              case "add_sheet":
+                return { id: args?.name ?? "SheetX", name: args?.name ?? "SheetX" };
+              default:
+                return null;
+            }
+          },
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            listeners[name] = handler;
+            return () => {
+              delete listeners[name];
+            };
+          },
+        },
+      };
+    });
+
+    await gotoDesktop(page);
+
+    // Create Sheet2 + Sheet3 so we have three tabs.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      doc.setCellValue("Sheet2", "A1", "Two");
+      doc.setCellValue("Sheet3", "A1", "Three");
+    });
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet3")).toBeVisible();
+
+    // Activate the middle sheet (Sheet2) and add a sheet.
+    await page.getByTestId("sheet-tab-Sheet2").click();
+    await page.getByTestId("sheet-add").click();
+
+    await expect(page.getByTestId("sheet-tab-Sheet4")).toBeVisible();
+
+    const ids = await page.evaluate(() => {
+      const root = document.querySelector('[data-testid="sheet-tabs"]');
+      if (!root) return [];
+      return Array.from(root.querySelectorAll<HTMLButtonElement>("button[data-sheet-id]")).map(
+        (btn) => btn.dataset.sheetId ?? "",
+      );
+    });
+
+    expect(ids).toEqual(["Sheet1", "Sheet2", "Sheet4", "Sheet3"]);
+  });
 });

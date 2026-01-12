@@ -563,12 +563,13 @@ pub async fn new_workbook(state: State<'_, SharedAppState>) -> Result<WorkbookIn
 #[tauri::command]
 pub async fn add_sheet(
     name: String,
+    index: Option<usize>,
     state: State<'_, SharedAppState>,
 ) -> Result<SheetInfo, String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
-        let sheet = state.add_sheet(name).map_err(app_error)?;
+        let sheet = state.add_sheet(name, index).map_err(app_error)?;
         Ok::<_, String>(SheetInfo {
             id: sheet.id,
             name: sheet.name,
