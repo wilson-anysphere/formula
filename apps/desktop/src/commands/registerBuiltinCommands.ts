@@ -700,7 +700,10 @@ export function registerBuiltinCommands(params: {
   commandRegistry.registerBuiltinCommand(
     "edit.editCell",
     t("command.edit.editCell"),
-    () => app.openCellEditorAtActiveCell(),
+    () => {
+      if (app.isEditing()) return;
+      app.openCellEditorAtActiveCell();
+    },
     {
       category: t("commandCategory.editing"),
       icon: null,
