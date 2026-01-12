@@ -114,7 +114,15 @@ test.describe("Extensions UI integration", () => {
       try {
         document.addEventListener("DOMContentLoaded", injectTauriGlobals, { once: true });
         window.addEventListener("load", injectTauriGlobals, { once: true });
-        setTimeout(injectTauriGlobals, 500);
+        setTimeout(() => {
+          injectTauriGlobals();
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (window as any).__formulaTestTauriInjectedLate = true;
+          } catch {
+            // Ignore.
+          }
+        }, 500);
       } catch {
         // Ignore.
       }
@@ -187,8 +195,16 @@ test.describe("Extensions UI integration", () => {
     // Ensure the document lifecycle has advanced far enough that our simulated Tauri injection
     // (DOMContentLoaded/load) and the hardening script's re-scrub passes have both executed.
     await webviewFrame!.waitForFunction(() => document.readyState === "complete");
+    await webviewFrame!.waitForFunction(() => (window as any).__formulaTestTauriInjectedLate === true, undefined, {
+      timeout: 5_000,
+    });
     await webviewFrame!.waitForFunction(
       () => (window as any).__formulaWebviewSandbox?.tauriGlobalsPresent === true,
+      undefined,
+      { timeout: 5_000 },
+    );
+    await webviewFrame!.waitForFunction(
+      () => (window as any).__formulaWebviewSandbox?.tauriGlobalsScrubbed === true,
       undefined,
       { timeout: 5_000 },
     );
