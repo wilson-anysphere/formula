@@ -748,7 +748,7 @@ Where it’s defined:
   - The desktop binary (`[[bin]]`) has `required-features = ["desktop"]`.
   - The `desktop` feature enables the optional deps: `tauri`, `tauri-build`, and the desktop-only Tauri plugins
     (currently `tauri-plugin-global-shortcut`, `tauri-plugin-single-instance`, `tauri-plugin-notification`, `tauri-plugin-dialog`,
-    `tauri-plugin-clipboard-manager`, `tauri-plugin-shell`, `tauri-plugin-updater`), plus a few desktop-only helpers (e.g.
+    `tauri-plugin-clipboard-manager`, `tauri-plugin-shell`, `tauri-plugin-updater`, `tauri-plugin-deep-link`), plus a few desktop-only helpers (e.g.
     `http-range`, `percent-encoding`), plus Linux-only GTK deps for the clipboard backend, and enables the `parquet` feature.
 - `apps/desktop/src-tauri/tauri.conf.json`
   - `build.features: ["desktop"]` ensures the desktop binary is compiled with the correct feature set when running the Tauri CLI
