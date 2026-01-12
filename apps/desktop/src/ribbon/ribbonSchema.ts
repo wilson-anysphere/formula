@@ -938,9 +938,23 @@ export const defaultRibbonSchema: RibbonSchema = {
           id: "home.debug.split",
           label: "Split view",
           buttons: [
-            { id: "split-vertical", label: "Split vertical", ariaLabel: "Split vertically", icon: "⇵", testId: "split-vertical", size: "icon" },
-            { id: "split-horizontal", label: "Split horizontal", ariaLabel: "Split horizontally", icon: "⇆", testId: "split-horizontal", size: "icon" },
-            { id: "split-none", label: "Unsplit", ariaLabel: "Remove split", icon: "⨉", testId: "split-none", size: "icon" },
+            {
+              id: "split-vertical",
+              label: "Split vertical",
+              ariaLabel: "Split vertically",
+              iconId: "arrowLeftRight",
+              testId: "split-vertical",
+              size: "icon",
+            },
+            {
+              id: "split-horizontal",
+              label: "Split horizontal",
+              ariaLabel: "Split horizontally",
+              iconId: "arrowUpDown",
+              testId: "split-horizontal",
+              size: "icon",
+            },
+            { id: "split-none", label: "Unsplit", ariaLabel: "Remove split", iconId: "close", testId: "split-none", size: "icon" },
           ],
         },
         {
