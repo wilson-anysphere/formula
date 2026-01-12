@@ -1240,15 +1240,18 @@ export class ToolExecutor {
       const selector = record.selector;
       if (selector.documentId !== ref.documentId) continue;
 
+      // The index only needs to track restrictions above the baseline (Public). Public-scoped
+      // records do not affect max-classification enforcement and would just add Map churn.
+      const recordRank = rankFromClassification(record.classification);
+      if (recordRank <= DEFAULT_CLASSIFICATION_RANK) continue;
+
       switch (selector.scope) {
         case "document": {
-          const recordRank = rankFromClassification(record.classification);
           docRankMax = Math.max(docRankMax, recordRank);
           break;
         }
         case "sheet": {
           if (selector.sheetId === ref.sheetId) {
-            const recordRank = rankFromClassification(record.classification);
             sheetRankMax = Math.max(sheetRankMax, recordRank);
           }
           break;
@@ -1258,7 +1261,6 @@ export class ToolExecutor {
           if (typeof selector.columnIndex === "number") {
             const colIndex = selector.columnIndex;
             if (colIndex < selectionRange.start.col || colIndex > selectionRange.end.col) break;
-            const recordRank = rankFromClassification(record.classification);
             const existing = columnRankByIndex.get(colIndex) ?? DEFAULT_CLASSIFICATION_RANK;
             columnRankByIndex.set(colIndex, Math.max(existing, recordRank));
           } else {
@@ -1279,7 +1281,6 @@ export class ToolExecutor {
           ) {
             break;
           }
-          const recordRank = rankFromClassification(record.classification);
           const key = `${selector.row},${selector.col}`;
           const existing = cellRankByCoord.get(key) ?? DEFAULT_CLASSIFICATION_RANK;
           cellRankByCoord.set(key, Math.max(existing, recordRank));
@@ -1290,7 +1291,6 @@ export class ToolExecutor {
           if (!selector.range) break;
           const normalized = normalizeRange(selector.range);
           if (!rangesIntersectNormalized(normalized, selectionRange)) break;
-          const recordRank = rankFromClassification(record.classification);
           rangeRecords.push({
             startRow: normalized.start.row,
             endRow: normalized.end.row,
