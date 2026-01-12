@@ -74,7 +74,6 @@ import {
 import { createPowerQueryRefreshStateStore } from "./power-query/refreshStateStore.js";
 import { showInputBox, showQuickPick, showToast } from "./extensions/ui.js";
 import { openFormatCellsDialog } from "./formatting/openFormatCellsDialog.js";
-import { installFormattingShortcuts } from "./formatting/shortcuts.js";
 import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.js";
 import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
 import { ContextKeyService } from "./extensions/contextKeys.js";
@@ -100,6 +99,7 @@ import { WorkbookSheetStore, generateDefaultSheetName } from "./sheets/workbookS
 import {
   applyAllBorders,
   applyNumberFormatPreset,
+  NUMBER_FORMATS,
   setFillColor,
   setFontColor,
   setFontSize,
@@ -108,7 +108,6 @@ import {
   toggleItalic,
   toggleUnderline,
   toggleWrap,
-  NUMBER_FORMATS,
   type CellRange,
 } from "./formatting/toolbar.js";
 import { PageSetupDialog, type CellRange as PrintCellRange, type PageSetup } from "./print/index.js";
@@ -469,7 +468,6 @@ function openFormatCells(): void {
   });
 }
 
-installFormattingShortcuts(window, { openFormatCells });
 const onUndo = () => {
   app.undo();
   app.focus();
@@ -1662,6 +1660,103 @@ if (
 
   registerBuiltinCommands({ commandRegistry, app, layoutController });
 
+  const applyToSelectionInCommandBatch = (label: string, apply: (sheetId: string, range: CellRange) => void): void => {
+    const doc = app.getDocument();
+    const sheetId = app.getCurrentSheetId();
+    const ranges = selectionRangesForFormatting();
+    doc.beginBatch({ label });
+    let committed = false;
+    try {
+      for (const range of ranges) {
+        apply(sheetId, range);
+      }
+      committed = true;
+    } finally {
+      if (committed) doc.endBatch();
+      else doc.cancelBatch();
+    }
+    app.focus();
+  };
+
+  commandRegistry.registerBuiltinCommand(
+    "format.toggleBold",
+    "Bold",
+    () => applyToSelectionInCommandBatch("Bold", (sheetId, range) => toggleBold(app.getDocument(), sheetId, range)),
+    { category: "Format" },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.toggleItalic",
+    "Italic",
+    () => applyToSelectionInCommandBatch("Italic", (sheetId, range) => toggleItalic(app.getDocument(), sheetId, range)),
+    { category: "Format" },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.toggleUnderline",
+    "Underline",
+    () => applyToSelectionInCommandBatch("Underline", (sheetId, range) => toggleUnderline(app.getDocument(), sheetId, range)),
+    { category: "Format" },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.numberFormat.currency",
+    "Currency",
+    () =>
+      applyToSelectionInCommandBatch("Currency", (sheetId, range) =>
+        applyNumberFormatPreset(app.getDocument(), sheetId, range, "currency"),
+      ),
+    { category: "Format" },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.numberFormat.percent",
+    "Percent",
+    () =>
+      applyToSelectionInCommandBatch("Percent", (sheetId, range) =>
+        applyNumberFormatPreset(app.getDocument(), sheetId, range, "percent"),
+      ),
+    { category: "Format" },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.numberFormat.date",
+    "Date",
+    () =>
+      applyToSelectionInCommandBatch("Date", (sheetId, range) => applyNumberFormatPreset(app.getDocument(), sheetId, range, "date")),
+    { category: "Format" },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "format.openFormatCells",
+    "Format Cells…",
+    async () => {
+      type Choice = "general" | "currency" | "percent" | "date";
+      const choice = await showQuickPick<Choice>(
+        [
+          { label: "General", description: "Clear number format", value: "general" },
+          { label: "Currency", description: NUMBER_FORMATS.currency, value: "currency" },
+          { label: "Percent", description: NUMBER_FORMATS.percent, value: "percent" },
+          { label: "Date", description: NUMBER_FORMATS.date, value: "date" },
+        ],
+        { placeHolder: "Format Cells" },
+      );
+      if (!choice) return;
+
+      const patch =
+        choice === "general"
+          ? { numberFormat: null }
+          : {
+              numberFormat: NUMBER_FORMATS[choice],
+            };
+
+      applyToSelectionInCommandBatch("Format Cells", (sheetId, range) => {
+        app.getDocument().setRangeFormat(sheetId, range, patch);
+      });
+    },
+    { category: "Format" },
+  );
+
   extensionPanelBridge = new ExtensionPanelBridge({
     host: extensionHostManager.host as any,
     panelRegistry,
@@ -1690,6 +1785,17 @@ if (
     }
   };
 
+  const executeCommand = (commandId: string) => {
+    const cmd = commandRegistry.getCommand(commandId);
+    if (cmd?.source.kind === "builtin") {
+      void commandRegistry.executeCommand(commandId).catch((err) => {
+        showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+      });
+      return;
+    }
+    executeExtensionCommand(commandId);
+  };
+
   const openExtensionPanel = (panelId: string) => {
     void (async () => {
       await ensureExtensionsLoaded();
@@ -1700,6 +1806,60 @@ if (
       showToast(`Failed to open panel: ${String((err as any)?.message ?? err)}`, "error");
     });
   };
+
+  // Built-in keyboard shortcuts (Excel-compatible formatting).
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.defaultPrevented) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+
+      const primary = e.ctrlKey || e.metaKey;
+      if (!primary || e.altKey) return;
+
+      const key = e.key;
+
+      // Font style toggles.
+      if (!e.shiftKey && (key === "b" || key === "B")) {
+        e.preventDefault();
+        executeCommand("format.toggleBold");
+        return;
+      }
+      if (!e.shiftKey && (key === "i" || key === "I")) {
+        e.preventDefault();
+        executeCommand("format.toggleItalic");
+        return;
+      }
+      if (!e.shiftKey && (key === "u" || key === "U")) {
+        e.preventDefault();
+        executeCommand("format.toggleUnderline");
+        return;
+      }
+
+      // Number formats.
+      if (!e.shiftKey && key === "1") {
+        e.preventDefault();
+        executeCommand("format.openFormatCells");
+        return;
+      }
+      if (e.shiftKey && key === "$") {
+        e.preventDefault();
+        executeCommand("format.numberFormat.currency");
+        return;
+      }
+      if (e.shiftKey && key === "%") {
+        e.preventDefault();
+        executeCommand("format.numberFormat.percent");
+        return;
+      }
+      if (e.shiftKey && key === "#") {
+        e.preventDefault();
+        executeCommand("format.numberFormat.date");
+      }
+    },
+    true,
+  );
 
   // Keybindings (foundation): execute contributed commands.
   const parsedKeybindings: Array<ReturnType<typeof parseKeybinding>> = [];
@@ -1901,6 +2061,7 @@ if (
 
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
   const primaryShortcut = (key: string) => (isMac ? `⌘${key}` : `Ctrl+${key}`);
+  const primaryShiftShortcut = (key: string) => (isMac ? `⌘⇧${key}` : `Ctrl+Shift+${key}`);
 
   const buildGridContextMenuItems = (): ContextMenuItem[] => {
     const menuItems: ContextMenuItem[] = [
@@ -1942,6 +2103,57 @@ if (
         shortcut:
           getPrimaryCommandKeybindingDisplay("edit.clearContents", commandKeybindingDisplayIndex) ?? (isMac ? "⌫" : "Del"),
         onSelect: () => executeBuiltinCommand("edit.clearContents"),
+      },
+      { type: "separator" },
+      {
+        type: "submenu",
+        label: "Format",
+        items: [
+          {
+            type: "item",
+            label: "Bold",
+            shortcut: primaryShortcut("B"),
+            onSelect: () => executeBuiltinCommand("format.toggleBold"),
+          },
+          {
+            type: "item",
+            label: "Italic",
+            shortcut: primaryShortcut("I"),
+            onSelect: () => executeBuiltinCommand("format.toggleItalic"),
+          },
+          {
+            type: "item",
+            label: "Underline",
+            shortcut: primaryShortcut("U"),
+            onSelect: () => executeBuiltinCommand("format.toggleUnderline"),
+          },
+          { type: "separator" },
+          {
+            type: "item",
+            label: "Currency",
+            shortcut: primaryShiftShortcut("$"),
+            onSelect: () => executeBuiltinCommand("format.numberFormat.currency"),
+          },
+          {
+            type: "item",
+            label: "Percent",
+            shortcut: primaryShiftShortcut("%"),
+            onSelect: () => executeBuiltinCommand("format.numberFormat.percent"),
+          },
+          {
+            type: "item",
+            label: "Date",
+            shortcut: primaryShiftShortcut("#"),
+            onSelect: () => executeBuiltinCommand("format.numberFormat.date"),
+          },
+          { type: "separator" },
+          {
+            type: "item",
+            label: "Format Cells…",
+            shortcut: primaryShortcut("1"),
+            onSelect: () => executeBuiltinCommand("format.openFormatCells"),
+          },
+        ],
       },
     ];
 
