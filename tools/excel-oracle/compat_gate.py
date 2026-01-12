@@ -527,7 +527,15 @@ def main() -> int:
             for m in mismatches[:10]:
                 if not isinstance(m, dict):
                     continue
-                lines.append(f"* `{m.get('caseId')}` `{m.get('reason')}` `{m.get('formula')}`")
+                tags = m.get("tags")
+                tags_str = ""
+                if isinstance(tags, list) and tags:
+                    tags_str = ",".join(str(t) for t in tags)
+                else:
+                    tags_str = "<none>"
+                lines.append(
+                    f"* `{m.get('caseId')}` `{m.get('reason')}` `tags={tags_str}` `{m.get('formula')}`"
+                )
             lines.append("")
 
         md_path.parent.mkdir(parents=True, exist_ok=True)

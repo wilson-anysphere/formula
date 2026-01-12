@@ -24,7 +24,7 @@ class ComparePartialDatasetsTests(unittest.TestCase):
                 "schemaVersion": 1,
                 "cases": [
                     {"id": "case-a", "formula": "=1+1", "inputs": []},
-                    {"id": "case-b", "formula": "=2+2", "inputs": []},
+                    {"id": "case-b", "formula": "=2+2", "inputs": [], "tags": ["tag-b"]},
                 ],
             }
             cases_path.write_text(
@@ -92,6 +92,11 @@ class ComparePartialDatasetsTests(unittest.TestCase):
             self.assertEqual(report["summary"]["casesPath"], str(cases_path))
             self.assertEqual(report["summary"]["expectedPath"], str(expected_path))
             self.assertEqual(report["summary"]["actualPath"], str(actual_path))
+            mismatches = report.get("mismatches", [])
+            self.assertIsInstance(mismatches, list)
+            self.assertEqual(len(mismatches), 1)
+            self.assertEqual(mismatches[0]["caseId"], "case-b")
+            self.assertEqual(mismatches[0]["tags"], ["tag-b"])
 
 
 class CompareTagToleranceTests(unittest.TestCase):

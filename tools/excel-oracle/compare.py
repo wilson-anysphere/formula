@@ -378,6 +378,7 @@ def main() -> int:
                     "reason": mismatch_reason,
                     "formula": case.get("formula"),
                     "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
+                    "tags": sorted(tag_set),
                 }
             )
             reason_counts[mismatch_reason] = reason_counts.get(mismatch_reason, 0) + 1
@@ -390,6 +391,7 @@ def main() -> int:
                     "reason": mismatch_reason,
                     "formula": case.get("formula"),
                     "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
+                    "tags": sorted(tag_set),
                     "expected": exp.get("result"),
                 }
             )
@@ -411,6 +413,7 @@ def main() -> int:
                         "reason": mismatch_reason,
                         "formula": case.get("formula"),
                         "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
+                        "tags": sorted(tag_set),
                         "expected": exp.get("result"),
                         "actual": act.get("result"),
                     }
