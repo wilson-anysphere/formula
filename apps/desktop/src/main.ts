@@ -1404,6 +1404,9 @@ function syncSheetStoreFromCollabSession(session: CollabSession): void {
     );
   }
 
+  // The sheet store instance is replaced whenever collab metadata changes; keep any
+  // main.ts listeners (status bar, context keys, etc) subscribed to the latest store.
+  installSheetStoreSubscription();
   syncWorkbookSheetNamesFromSheetStore();
 }
 
