@@ -355,7 +355,12 @@ impl<'a> PythonRpcHost<'a> {
                     .to_string();
                 self.state
                     .rename_sheet(sheet_id, name)
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| match e {
+                        // Match `create_sheet` behavior: surface canonical sheet-name validation
+                        // strings without the AppStateError wrapper prefix.
+                        AppStateError::WhatIf(msg) => msg,
+                        other => other.to_string(),
+                    })?;
                 Ok(JsonValue::Null)
             }
             "get_selection" => Ok(serde_json::to_value(&self.selection).unwrap_or(JsonValue::Null)),
@@ -1014,6 +1019,136 @@ mod tests {
         let err = host
             .handle_rpc("create_sheet", Some(json!({ "name": long_name })))
             .expect_err("expected create_sheet to reject too-long name");
+        assert_eq!(
+            err,
+            formula_model::SheetNameError::TooLong.to_string(),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn python_rpc_rename_sheet_rejects_blank_name_with_canonical_error() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        let err = host
+            .handle_rpc(
+                "rename_sheet",
+                Some(json!({ "sheet_id": "Sheet1", "name": "   " })),
+            )
+            .expect_err("expected rename_sheet to reject blank name");
+        assert_eq!(
+            err,
+            formula_model::SheetNameError::EmptyName.to_string(),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn python_rpc_rename_sheet_rejects_duplicate_name_with_canonical_error() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        let err = host
+            .handle_rpc(
+                "rename_sheet",
+                Some(json!({ "sheet_id": "Sheet2", "name": "sheet1" })),
+            )
+            .expect_err("expected rename_sheet to reject duplicate name");
+        assert_eq!(
+            err,
+            formula_model::SheetNameError::DuplicateName.to_string(),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn python_rpc_rename_sheet_rejects_invalid_character_with_canonical_error() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        let err = host
+            .handle_rpc(
+                "rename_sheet",
+                Some(json!({ "sheet_id": "Sheet1", "name": "Bad/Name" })),
+            )
+            .expect_err("expected rename_sheet to reject invalid name");
+        assert_eq!(
+            err,
+            formula_model::SheetNameError::InvalidCharacter('/').to_string(),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn python_rpc_rename_sheet_rejects_leading_or_trailing_apostrophe_with_canonical_error() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        let err = host
+            .handle_rpc(
+                "rename_sheet",
+                Some(json!({ "sheet_id": "Sheet1", "name": "'Leading" })),
+            )
+            .expect_err("expected rename_sheet to reject invalid name");
+        assert_eq!(
+            err,
+            formula_model::SheetNameError::LeadingOrTrailingApostrophe.to_string(),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn python_rpc_rename_sheet_rejects_too_long_name_with_canonical_error() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        let long_name = "a".repeat(formula_model::EXCEL_MAX_SHEET_NAME_LEN + 1);
+        let err = host
+            .handle_rpc(
+                "rename_sheet",
+                Some(json!({ "sheet_id": "Sheet1", "name": long_name })),
+            )
+            .expect_err("expected rename_sheet to reject too-long name");
+        assert_eq!(
+            err,
+            formula_model::SheetNameError::TooLong.to_string(),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn python_rpc_rename_sheet_rejects_too_long_name_by_utf16_units_with_canonical_error() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let mut host = PythonRpcHost::new(&mut state, None).expect("host should init");
+        // 🙂 is 2 UTF-16 code units; 16 of them is 32 units (over Excel's 31-unit limit).
+        let long_name = "🙂".repeat(16);
+        let err = host
+            .handle_rpc(
+                "rename_sheet",
+                Some(json!({ "sheet_id": "Sheet1", "name": long_name })),
+            )
+            .expect_err("expected rename_sheet to reject too-long name");
         assert_eq!(
             err,
             formula_model::SheetNameError::TooLong.to_string(),
