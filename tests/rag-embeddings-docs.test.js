@@ -46,6 +46,7 @@ test("docs: RAG Over Cells describes deterministic HashEmbedder embeddings (not 
   assert.match(lower, /deterministic hash embeddings/);
   assert.match(lower, /does not accept user api keys/);
   assert.match(lower, /local model[\s>]+setup/);
+  assert.match(lower, /cursor[- ]managed embedding service/);
 
   // Negative assertions: prevent regressions where provider-specific embedding
   // setup instructions creep back into the RAG docs.
