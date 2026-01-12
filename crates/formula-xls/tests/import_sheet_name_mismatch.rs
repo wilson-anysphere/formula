@@ -4,6 +4,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use calamine::{open_workbook, Reader, Xls};
 
+const RECORD_BOF_BIFF8: u16 = 0x0809;
+const RECORD_BOF_BIFF5: u16 = 0x0009;
+const RECORD_BOUNDSHEET: u16 = 0x0085;
+
+const BOF_VERSION_BIFF8: u16 = 0x0600;
+
+const STR_FLAG_HIGH_BYTE: u8 = 0x01;
+const STR_FLAG_EXT: u8 = 0x04;
+const STR_FLAG_RICH_TEXT: u8 = 0x08;
+
 fn read_workbook_stream_from_xls_bytes(data: &[u8]) -> Vec<u8> {
     let cursor = Cursor::new(data.to_vec());
     let mut ole = cfb::CompoundFile::open(cursor).expect("open xls cfb");
@@ -11,9 +21,7 @@ fn read_workbook_stream_from_xls_bytes(data: &[u8]) -> Vec<u8> {
     for candidate in ["/Workbook", "/Book", "Workbook", "Book"] {
         if let Ok(mut stream) = ole.open_stream(candidate) {
             let mut buf = Vec::new();
-            stream
-                .read_to_end(&mut buf)
-                .expect("read workbook stream");
+            stream.read_to_end(&mut buf).expect("read workbook stream");
             return buf;
         }
     }
@@ -50,14 +58,14 @@ fn detect_biff8(buf: &[u8]) -> bool {
     let Some((record_id, len)) = read_biff_record_header(buf, 0) else {
         return true;
     };
-    if record_id != 0x0809 && record_id != 0x0009 {
+    if record_id != RECORD_BOF_BIFF8 && record_id != RECORD_BOF_BIFF5 {
         return true;
     }
     let data = buf.get(4..4 + len).unwrap_or(&[]);
     let Some(v) = data.get(0..2).map(|v| u16::from_le_bytes([v[0], v[1]])) else {
         return true;
     };
-    v == 0x0600
+    v == BOF_VERSION_BIFF8
 }
 
 /// Patch the first BoundSheet name in-place so it contains an embedded NUL byte.
@@ -75,7 +83,7 @@ fn patch_first_boundsheet_name(workbook_stream: &mut [u8]) -> (String, usize) {
         let data_start = offset + 4;
         let data_end = data_start + len;
 
-        if record_id == 0x0085 {
+        if record_id == RECORD_BOUNDSHEET {
             let data = workbook_stream
                 .get_mut(data_start..data_end)
                 .expect("boundsheet data in range");
@@ -92,11 +100,11 @@ fn patch_first_boundsheet_name(workbook_stream: &mut [u8]) -> (String, usize) {
                 let flags = string_data[1];
                 let mut string_offset = 2usize;
 
-                if flags & 0x08 != 0 {
+                if flags & STR_FLAG_RICH_TEXT != 0 {
                     // Skip rich-text run count (2 bytes)
                     string_offset += 2;
                 }
-                if flags & 0x04 != 0 {
+                if flags & STR_FLAG_EXT != 0 {
                     // Skip extended string size (4 bytes)
                     string_offset += 4;
                 }
@@ -104,7 +112,7 @@ fn patch_first_boundsheet_name(workbook_stream: &mut [u8]) -> (String, usize) {
                 // We specifically want the compressed 8-bit path so that calamine's
                 // codepage decoding can diverge from our naive UTF-8 decoding.
                 assert_eq!(
-                    flags & 0x01,
+                    flags & STR_FLAG_HIGH_BYTE,
                     0,
                     "expected fixture sheet name to be stored in compressed 8-bit form"
                 );
@@ -154,7 +162,8 @@ fn imports_row_col_properties_even_when_biff_sheet_name_is_sanitized() {
 
     let workbook_stream = read_workbook_stream_from_xls_bytes(&fixture_bytes);
     let mut patched_workbook_stream = workbook_stream.clone();
-    let (biff_utf8_lossy_name, patch_offset) = patch_first_boundsheet_name(&mut patched_workbook_stream);
+    let (biff_utf8_lossy_name, patch_offset) =
+        patch_first_boundsheet_name(&mut patched_workbook_stream);
 
     let sector_size = cfb_sector_size(&fixture_bytes);
     let sector_base = patch_offset - (patch_offset % sector_size);
@@ -174,8 +183,7 @@ fn imports_row_col_properties_even_when_biff_sheet_name_is_sanitized() {
     let mut patched_file = fixture_bytes.clone();
     let file_offset = matches[0] + patch_offset_in_window;
     assert_eq!(
-        patched_file[file_offset],
-        workbook_stream[patch_offset],
+        patched_file[file_offset], workbook_stream[patch_offset],
         "expected located CFB window to contain original workbook byte"
     );
     patched_file[file_offset] = 0x00;
