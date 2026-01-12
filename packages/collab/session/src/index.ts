@@ -1856,8 +1856,14 @@ export async function bindCollabSessionToDocumentController(options: {
   undoService?: { transact?: (fn: () => void) => void; origin?: any; localOrigins?: Set<any> } | null;
   defaultSheetId?: string;
   userId?: string | null;
+  /**
+   * Opt-in binder write semantics needed for `FormulaConflictMonitor` to reliably
+   * detect true offline/concurrent conflicts when edits flow through the desktop
+   * UI path (DocumentController → binder → Yjs).
+   */
+  formulaConflictsMode?: "off" | "formula" | "formula+value";
 }): Promise<DocumentControllerBinder> {
-  const { session, documentController, undoService, defaultSheetId, userId } = options ?? ({} as any);
+  const { session, documentController, undoService, defaultSheetId, userId, formulaConflictsMode } = options ?? ({} as any);
   if (!session) throw new Error("bindCollabSessionToDocumentController requires { session }");
   if (!documentController)
     throw new Error("bindCollabSessionToDocumentController requires { documentController }");
@@ -1882,10 +1888,20 @@ export async function bindCollabSessionToDocumentController(options: {
         }
       : undoService;
 
+  // Ensure the binder's origin is treated as "local" for downstream monitors
+  // (e.g. FormulaConflictMonitor), even when callers provide a custom undo service.
+  //
+  // Note: the binder uses an `applyingLocal` guard for echo suppression, so it is
+  // safe (and preferable) for DocumentController-driven writes to share the
+  // session's origin token by default.
+  const binderOrigin = defaultUndoService?.origin ?? { type: "document-controller:binder" };
+  session.localOrigins.add(binderOrigin);
+  const normalizedUndoService = defaultUndoService ? { ...defaultUndoService, origin: binderOrigin } : { origin: binderOrigin };
+
   return bindYjsToDocumentController({
     ydoc: session.doc,
     documentController,
-    undoService: defaultUndoService ?? null,
+    undoService: normalizedUndoService,
     defaultSheetId,
     userId,
     encryption: session.getEncryptionConfig(),
@@ -1894,5 +1910,6 @@ export async function bindCollabSessionToDocumentController(options: {
     // Use the standard enterprise mask. The binder also uses this hook for
     // encrypted cells that cannot be decrypted.
     maskCellValue: (value) => maskCellValue(value),
+    formulaConflictsMode,
   }) as DocumentControllerBinder;
 }

@@ -302,10 +302,9 @@ export class FormulaConflictMonitor {
       // If it didn't change in this transaction, we can't reliably attribute the overwrite.
       const remoteUserId = modifiedByChange ? currentModifiedBy : "";
       const oldModifiedBy = modifiedByChange ? (modifiedByChange.oldValue ?? "").toString() : currentModifiedBy;
-
       const valueChange = event.changes.keys.get("value");
       const formulaChange = event.changes.keys.get("formula");
-
+ 
       // Local-origin transactions should not emit conflicts, but they *should* be
       // recorded so we can later detect true offline concurrent overwrites via
       // causality (even when the writer didn't call `setLocalFormula` /
@@ -319,7 +318,7 @@ export class FormulaConflictMonitor {
         });
         continue;
       }
-
+ 
       if (formulaChange) {
         const oldFormula = (formulaChange.oldValue ?? "").toString();
         const newFormula = (cellMap.get("formula") ?? "").toString();

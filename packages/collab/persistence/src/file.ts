@@ -319,11 +319,37 @@ export class FileCollabPersistence implements CollabPersistence {
       if (timer) clearTimeout(timer);
       this.compactTimers.delete(docId);
 
-      // If the document never changed after binding, we don't need to enqueue a final snapshot
-      // compaction. This avoids creating empty persistence files when the caller simply opened
-      // and closed a document without edits (and prevents teardown races in tests where the
-      // session is destroyed without awaiting `binding.destroy()` / `persistence.flush()`).
-      if (!sawUpdate) return;
+      if (!sawUpdate) {
+        // If the document never changed after binding, we don't need to enqueue a
+        // final snapshot compaction. This avoids creating empty persistence files
+        // when the caller simply opened and closed a document without edits (and
+        // prevents teardown races in tests where the session is destroyed without
+        // awaiting `binding.destroy()` / `persistence.flush()`).
+        //
+        // However, if the doc has content but there's no persistence file yet, we
+        // still need to write a snapshot so state isn't lost. This can happen if
+        // the caller made edits before `bind()` was attached (e.g. during initial
+        // async session setup).
+        const hasContent = doc.store.clients.size > 0;
+        if (!hasContent) return;
+
+        let shouldWriteSnapshot = false;
+        try {
+          const st = await fs.stat(filePath);
+          const isEmptyPlaintext = st.size === 0;
+          const isHeaderOnlyEncrypted = this.encryption.mode === "keyring" && st.size === FILE_HEADER_BYTES;
+          shouldWriteSnapshot = isEmptyPlaintext || isHeaderOnlyEncrypted;
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException).code;
+          if (code === "ENOENT") {
+            shouldWriteSnapshot = true;
+          } else {
+            throw err;
+          }
+        }
+
+        if (!shouldWriteSnapshot) return;
+      }
 
       // Capture the final document state immediately so callers can destroy the
       // Y.Doc without racing the async persistence queue.

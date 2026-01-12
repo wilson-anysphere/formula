@@ -376,6 +376,26 @@ function sameNormalizedCell(a, b) {
  *     | { role: string, restrictions?: any[], userId?: string | null },
  *   maskCellValue?: (value: unknown, cell?: { sheetId: string, row: number, col: number }) => unknown,
  *   onEditRejected?: (deltas: any[]) => void,
+ *   /**
+ *    * Enables Yjs write semantics that are compatible with `FormulaConflictMonitor`'s
+ *    * causal conflict detection (e.g. representing clears with explicit `null`
+ *    * marker Items so later overwrites can reference them via `Item.origin`).
+ *    *
+ *    * When `"formula"`:
+ *    * - formula clears write `cell.set("formula", null)` (instead of `delete("formula")`)
+ *    * - empty cell maps created by formula clears are preserved (not deleted) so
+ *    *   the clear marker Item remains in the CRDT
+ *    *
+ *    * When `"formula+value"`:
+ *    * - value writes also clear formulas via `cell.set("formula", null)` so
+ *    *   formula-vs-value content conflicts are detectable
+ *    * - empty cell maps created by value/formula clears are preserved when they
+ *    *   would otherwise delete the clear marker Items
+ *    *
+ *    * Defaults to `"off"` to avoid doc growth/regressions when conflict monitoring
+ *    * is not enabled.
+ *    *\/
+ *   formulaConflictsMode?: "off" | "formula" | "formula+value",
  * }} options
  */
 export function bindYjsToDocumentController(options) {
@@ -391,10 +411,19 @@ export function bindYjsToDocumentController(options) {
     permissions = null,
     maskCellValue = defaultMaskCellValue,
     onEditRejected = null,
+    formulaConflictsMode: formulaConflictsModeRaw = "off",
   } = options ?? {};
 
   if (!ydoc) throw new Error("bindYjsToDocumentController requires { ydoc }");
   if (!documentController) throw new Error("bindYjsToDocumentController requires { documentController }");
+
+  /** @type {"off" | "formula" | "formula+value"} */
+  const formulaConflictsMode =
+    formulaConflictsModeRaw === "formula" || formulaConflictsModeRaw === "formula+value" || formulaConflictsModeRaw === "off"
+      ? formulaConflictsModeRaw
+      : "off";
+  const formulaConflictSemanticsEnabled = formulaConflictsMode !== "off";
+  const valueConflictSemanticsEnabled = formulaConflictsMode === "formula+value";
 
   const { cells, sheets } = getWorkbookRoots(ydoc);
   const YMapCtor = cells?.constructor ?? Y.Map;
@@ -1480,6 +1509,8 @@ export function bindYjsToDocumentController(options) {
 
       const value = delta.after?.value ?? null;
       const formula = normalizeFormula(delta.after?.formula ?? null);
+      const beforeFormula = normalizeFormula(delta.before?.formula ?? null);
+      const beforeValue = delta.before?.value ?? null;
       const styleId = Number.isInteger(delta.after?.styleId) ? delta.after.styleId : 0;
       const format = styleId === 0 ? null : documentController.styleTable.get(styleId);
       const formatKey = styleId === 0 ? undefined : stableStringify(format);
@@ -1532,6 +1563,8 @@ export function bindYjsToDocumentController(options) {
         targets,
         value,
         formula,
+        beforeFormula,
+        beforeValue,
         styleId,
         format,
         formatKey,
@@ -1554,8 +1587,33 @@ export function bindYjsToDocumentController(options) {
 
     const apply = () => {
       for (const item of prepared) {
-        const { canonicalKey, targets, value, formula, styleId, format, encryptedPayload, formatKey } = item;
+        const { canonicalKey, targets, value, formula, beforeFormula, beforeValue, styleId, format, encryptedPayload, formatKey } =
+          item;
 
+        const beforeHadFormula = beforeFormula != null;
+        const beforeHadValue = beforeValue != null;
+
+        // When formula conflict semantics are enabled, represent clears with explicit
+        // `null` markers so downstream conflict monitors can deterministically
+        // detect delete-vs-overwrite concurrency via causal Item.origin ids.
+        const shouldWriteFormulaNull =
+          formulaConflictSemanticsEnabled &&
+          formula == null &&
+          (valueConflictSemanticsEnabled || (beforeHadFormula && value == null));
+
+        // Preserve empty cell maps created by clears when we'd otherwise delete the
+        // entire cell entry (which would discard the marker Items).
+        const preserveEmptyCellMap =
+          shouldWriteFormulaNull && value == null && formula == null && styleId === 0 && (beforeHadFormula || (valueConflictSemanticsEnabled && beforeHadValue));
+
+        if (value == null && formula == null && styleId === 0 && !encryptedPayload && !preserveEmptyCellMap) {
+          for (const rawKey of targets) {
+            cells.delete(rawKey);
+            untrackRawKey(canonicalKey, rawKey);
+          }
+          cache.delete(canonicalKey);
+          continue;
+        }
         for (const rawKey of targets) {
           let cellData = cells.get(rawKey);
           let cell = getYMapCell(cellData);
@@ -1574,13 +1632,11 @@ export function bindYjsToDocumentController(options) {
               cell.set("formula", formula);
               cell.set("value", null);
             } else {
-              // Preserve explicit formula clear markers (`formula=null`) so other
-              // CRDT observers (e.g. conflict monitors) can reason about
-              // delete-vs-overwrite causality via Yjs Item origin ids.
-              //
-              // This is also a safe superset for value writes: writing a literal
-              // value always clears any prior formula via an explicit marker.
-              cell.set("formula", null);
+              if (shouldWriteFormulaNull) {
+                cell.set("formula", null);
+              } else {
+                cell.delete("formula");
+              }
               cell.set("value", value);
             }
           }
