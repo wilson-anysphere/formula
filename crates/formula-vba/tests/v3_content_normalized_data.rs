@@ -157,11 +157,14 @@ fn build_project_with_projectcompatversion(include_compat: bool) -> (Vec<u8>, [u
         // PROJECTLIBFLAGS (0x0008): u32.
         push_record(&mut out, 0x0008, &0u32.to_le_bytes());
 
-        // PROJECTVERSION (0x0009): Major(u16) + Minor(u16).
-        let mut version = Vec::new();
-        version.extend_from_slice(&1u16.to_le_bytes());
-        version.extend_from_slice(&0u16.to_le_bytes());
-        push_record(&mut out, 0x0009, &version);
+        // PROJECTVERSION (0x0009).
+        //
+        // MS-OVBA §2.3.4.2.1.11: This record is fixed-length (no u32 Size field):
+        //   Id(u16) || Reserved(u32=4) || VersionMajor(u32) || VersionMinor(u16)
+        out.extend_from_slice(&0x0009u16.to_le_bytes());
+        out.extend_from_slice(&0x00000004u32.to_le_bytes());
+        out.extend_from_slice(&1u32.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
 
         // PROJECTCOMPATVERSION (0x004A): present in many real-world files but must be skipped by
         // the MS-OVBA §2.4.2.5 V3ContentNormalizedData pseudocode.
@@ -183,7 +186,6 @@ fn build_project_with_projectcompatversion(include_compat: bool) -> (Vec<u8>, [u
 
         push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE (standard)
         push_record(&mut out, 0x0031, &0u32.to_le_bytes()); // MODULETEXTOFFSET (0)
-
         out
     };
     let dir_container = compress_container(&dir_decompressed);
@@ -210,6 +212,96 @@ fn build_project_with_projectcompatversion(include_compat: bool) -> (Vec<u8>, [u
     (ole.into_inner().into_inner(), compat_version)
 }
 
+fn build_project_with_project_info_records_only() -> Vec<u8> {
+    // ---- Spec-backed project-information records (MS-OVBA §2.4.2.5) ----
+    //
+    // We deliberately use recognizable values so we can assert which bytes are included vs.
+    // excluded by V3ContentNormalizedData.
+
+    let project_name = b"MyV3Project";
+
+    let syskind = 0xA1B2C3D4u32; // value bytes must NOT appear in V3 transcript
+    let lcid = 0x11223344u32;
+    let lcid_invoke = 0x55667788u32;
+    let codepage = 0xCAFEu16; // value bytes must NOT appear in V3 transcript
+
+    let docstring = b"__DOCSTRING_BYTES__"; // must NOT appear in V3 transcript
+    // UTF-16LE bytes; do not include NULs.
+    let docstring_unicode = b"D\0O\0C\0U\0N\0I\0";
+
+    let helpfile1 = b"__HELPFILE1_PATH__"; // must NOT appear in V3 transcript
+    let helpfile2 = b"__HELPFILE2_PATH__"; // must NOT appear in V3 transcript
+
+    let helpcontext = 0x0BADF00Du32; // value bytes must NOT appear in V3 transcript
+
+    let project_lib_flags = 0x01020304u32;
+
+    let version_major = 0xCAFEBABEu32;
+    let version_minor = 0xBEEFu16;
+
+    let constants = b"ABC=1";
+    // UTF-16LE("ABC=1").
+    let constants_unicode = b"A\x00B\x00C\x00=\x001\x00";
+
+    // Build a decompressed `VBA/dir` stream containing the project-information records referenced
+    // by MS-OVBA §2.4.2.5 `V3ContentNormalizedData`.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // PROJECTSYSKIND (0x0001): u32 SysKind
+        push_record(&mut out, 0x0001, &syskind.to_le_bytes());
+
+        // PROJECTLCID (0x0002): u32 Lcid
+        push_record(&mut out, 0x0002, &lcid.to_le_bytes());
+
+        // PROJECTLCIDINVOKE (0x0014): u32 LcidInvoke
+        push_record(&mut out, 0x0014, &lcid_invoke.to_le_bytes());
+
+        // PROJECTCODEPAGE (0x0003): u16 CodePage
+        push_record(&mut out, 0x0003, &codepage.to_le_bytes());
+
+        // PROJECTNAME (0x0004): bytes ProjectName
+        push_record(&mut out, 0x0004, project_name);
+
+        // PROJECTDOCSTRING (0x0005) and its unicode sub-record (0x0040).
+        push_record(&mut out, 0x0005, docstring);
+        push_record(&mut out, 0x0040, docstring_unicode);
+
+        // PROJECTHELPFILEPATH (0x0006) and its second path sub-record (0x003D).
+        push_record(&mut out, 0x0006, helpfile1);
+        push_record(&mut out, 0x003D, helpfile2);
+
+        // PROJECTHELPCONTEXT (0x0007): u32 HelpContext
+        push_record(&mut out, 0x0007, &helpcontext.to_le_bytes());
+
+        // PROJECTLIBFLAGS (0x0008): u32 ProjectLibFlags
+        push_record(&mut out, 0x0008, &project_lib_flags.to_le_bytes());
+
+        // PROJECTVERSION (0x0009): fixed-length record (no u32 Size field).
+        out.extend_from_slice(&0x0009u16.to_le_bytes()); // Id
+        out.extend_from_slice(&0x00000004u32.to_le_bytes()); // Reserved (MUST be 4)
+        out.extend_from_slice(&version_major.to_le_bytes());
+        out.extend_from_slice(&version_minor.to_le_bytes());
+
+        // PROJECTCONSTANTS (0x000C) and its unicode sub-record (0x003C).
+        push_record(&mut out, 0x000C, constants);
+        push_record(&mut out, 0x003C, constants_unicode);
+
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    ole.into_inner().into_inner()
+}
+
 #[test]
 fn v3_content_normalized_data_includes_module_metadata_even_without_designers() {
     let vba_bin = build_project_no_designers();
@@ -232,6 +324,164 @@ fn v3_content_normalized_data_includes_module_metadata_even_without_designers() 
         "v3 transcript includes module metadata and should differ from ContentNormalizedData"
     );
     assert_eq!(v3, expected);
+}
+
+#[test]
+fn v3_content_normalized_data_project_information_includes_only_fields_listed_in_ms_ovba_pseudocode()
+{
+    let vba_bin = build_project_with_project_info_records_only();
+    let v3 = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
+
+    // Project-info values (must match those used in the builder).
+    let project_name = b"MyV3Project";
+
+    let syskind = 0xA1B2C3D4u32;
+    let lcid = 0x11223344u32;
+    let lcid_invoke = 0x55667788u32;
+    let codepage = 0xCAFEu16;
+
+    let docstring = b"__DOCSTRING_BYTES__";
+    let docstring_unicode = b"D\0O\0C\0U\0N\0I\0";
+
+    let helpfile1 = b"__HELPFILE1_PATH__";
+    let helpfile2 = b"__HELPFILE2_PATH__";
+
+    let helpcontext = 0x0BADF00Du32;
+
+    let project_lib_flags = 0x01020304u32;
+
+    let version_major = 0xCAFEBABEu32;
+    let version_minor = 0xBEEFu16;
+
+    let constants = b"ABC=1";
+    // UTF-16LE("ABC=1").
+    let constants_unicode = b"A\x00B\x00C\x00=\x001\x00";
+
+    // Expected prefix per MS-OVBA §2.4.2.5 `V3ContentNormalizedData` pseudocode:
+    // - includes only specific fields for some project-info records (e.g. header bytes only)
+    // - excludes record payload bytes for others (DocString, HelpFile path bytes, HelpContext value, etc.)
+    let mut expected_prefix = Vec::new();
+
+    // PROJECTSYSKIND: include Id + Size, exclude SysKind value.
+    expected_prefix.extend_from_slice(&0x0001u16.to_le_bytes());
+    expected_prefix.extend_from_slice(&4u32.to_le_bytes());
+
+    // PROJECTLCID: include Id + Size + Lcid value.
+    expected_prefix.extend_from_slice(&0x0002u16.to_le_bytes());
+    expected_prefix.extend_from_slice(&4u32.to_le_bytes());
+    expected_prefix.extend_from_slice(&lcid.to_le_bytes());
+
+    // PROJECTLCIDINVOKE: include Id + Size + LcidInvoke value.
+    expected_prefix.extend_from_slice(&0x0014u16.to_le_bytes());
+    expected_prefix.extend_from_slice(&4u32.to_le_bytes());
+    expected_prefix.extend_from_slice(&lcid_invoke.to_le_bytes());
+
+    // PROJECTCODEPAGE: include Id + Size, exclude CodePage value.
+    expected_prefix.extend_from_slice(&0x0003u16.to_le_bytes());
+    expected_prefix.extend_from_slice(&2u32.to_le_bytes());
+
+    // PROJECTNAME: include Id + SizeOfProjectName + ProjectName bytes.
+    expected_prefix.extend_from_slice(&0x0004u16.to_le_bytes());
+    expected_prefix.extend_from_slice(&(project_name.len() as u32).to_le_bytes());
+    expected_prefix.extend_from_slice(project_name);
+
+    // PROJECTDOCSTRING: include Id + SizeOfDocString + Reserved + SizeOfDocStringUnicode,
+    // but NOT the DocString bytes or DocStringUnicode bytes.
+    expected_prefix.extend_from_slice(&0x0005u16.to_le_bytes());
+    expected_prefix.extend_from_slice(&(docstring.len() as u32).to_le_bytes());
+    expected_prefix.extend_from_slice(&0x0040u16.to_le_bytes());
+    expected_prefix.extend_from_slice(&(docstring_unicode.len() as u32).to_le_bytes());
+
+    // PROJECTHELPFILEPATH: include Id + SizeOfHelpFile1 + Reserved + SizeOfHelpFile2,
+    // but NOT the help file path bytes.
+    expected_prefix.extend_from_slice(&0x0006u16.to_le_bytes());
+    expected_prefix.extend_from_slice(&(helpfile1.len() as u32).to_le_bytes());
+    expected_prefix.extend_from_slice(&0x003Du16.to_le_bytes());
+    expected_prefix.extend_from_slice(&(helpfile2.len() as u32).to_le_bytes());
+
+    // PROJECTHELPCONTEXT: include Id + Size, exclude HelpContext value.
+    expected_prefix.extend_from_slice(&0x0007u16.to_le_bytes());
+    expected_prefix.extend_from_slice(&4u32.to_le_bytes());
+
+    // PROJECTLIBFLAGS: include Id + Size + ProjectLibFlags value.
+    expected_prefix.extend_from_slice(&0x0008u16.to_le_bytes());
+    expected_prefix.extend_from_slice(&4u32.to_le_bytes());
+    expected_prefix.extend_from_slice(&project_lib_flags.to_le_bytes());
+
+    // PROJECTVERSION: include all fields (fixed-length record).
+    expected_prefix.extend_from_slice(&0x0009u16.to_le_bytes());
+    expected_prefix.extend_from_slice(&0x00000004u32.to_le_bytes()); // Reserved
+    expected_prefix.extend_from_slice(&version_major.to_le_bytes());
+    expected_prefix.extend_from_slice(&version_minor.to_le_bytes());
+
+    // PROJECTCONSTANTS: include Id + SizeOfConstants + Constants bytes + Reserved +
+    // SizeOfConstantsUnicode + ConstantsUnicode bytes.
+    expected_prefix.extend_from_slice(&0x000Cu16.to_le_bytes());
+    expected_prefix.extend_from_slice(&(constants.len() as u32).to_le_bytes());
+    expected_prefix.extend_from_slice(constants);
+    expected_prefix.extend_from_slice(&0x003Cu16.to_le_bytes());
+    expected_prefix.extend_from_slice(&(constants_unicode.len() as u32).to_le_bytes());
+    expected_prefix.extend_from_slice(constants_unicode);
+
+    assert!(
+        v3.len() >= expected_prefix.len(),
+        "expected V3ContentNormalizedData to be at least {} bytes, got {}",
+        expected_prefix.len(),
+        v3.len()
+    );
+    let prefix = &v3[..expected_prefix.len()];
+    assert_eq!(prefix, expected_prefix);
+
+    // Explicitly assert that omitted bytes do not appear in the project-info prefix.
+    let syskind_record = {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&0x0001u16.to_le_bytes());
+        buf.extend_from_slice(&4u32.to_le_bytes());
+        buf.extend_from_slice(&syskind.to_le_bytes());
+        buf
+    };
+    assert!(
+        !contains_subslice(prefix, &syskind_record),
+        "SysKind value bytes must not be present (only Id/Size are appended)"
+    );
+    let codepage_record = {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&0x0003u16.to_le_bytes());
+        buf.extend_from_slice(&2u32.to_le_bytes());
+        buf.extend_from_slice(&codepage.to_le_bytes());
+        buf
+    };
+    assert!(
+        !contains_subslice(prefix, &codepage_record),
+        "CodePage value bytes must not be present (only Id/Size are appended)"
+    );
+    assert!(
+        !contains_subslice(prefix, docstring),
+        "DocString bytes must not be present (only lengths + reserved fields are appended)"
+    );
+    assert!(
+        !contains_subslice(prefix, docstring_unicode),
+        "DocStringUnicode bytes must not be present (only length + reserved fields are appended)"
+    );
+    assert!(
+        !contains_subslice(prefix, helpfile1),
+        "HelpFile1 bytes must not be present (only lengths + reserved fields are appended)"
+    );
+    assert!(
+        !contains_subslice(prefix, helpfile2),
+        "HelpFile2 bytes must not be present (only lengths + reserved fields are appended)"
+    );
+    let helpcontext_record = {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&0x0007u16.to_le_bytes());
+        buf.extend_from_slice(&4u32.to_le_bytes());
+        buf.extend_from_slice(&helpcontext.to_le_bytes());
+        buf
+    };
+    assert!(
+        !contains_subslice(prefix, &helpcontext_record),
+        "HelpContext value bytes must not be present (only Id/Size are appended)"
+    );
 }
 
 #[test]

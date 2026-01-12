@@ -1078,29 +1078,112 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
 
     let mut offset = 0usize;
     while offset < dir_decompressed.len() {
-        if offset + 6 > dir_decompressed.len() {
+        if offset + 2 > dir_decompressed.len() {
             return Err(DirParseError::Truncated.into());
         }
 
         let id = u16::from_le_bytes([dir_decompressed[offset], dir_decompressed[offset + 1]]);
+
+        // Most `VBA/dir` structures begin with an `Id` (u16) followed by a `Size` (u32) and
+        // `Size` bytes of payload. However, some fixed-size records (notably `PROJECTVERSION`)
+        // do not include a `Size` field in the on-disk representation (MS-OVBA §2.3.4.2.1.11).
+        //
+        // V3ContentNormalizedData (MS-OVBA §2.4.2.5) needs to be able to scan through these
+        // project-information records to reach references/modules, so we special-case them here.
+        if id == 0x0009 {
+            // PROJECTVERSION: fixed-length record (12 bytes total):
+            // - Id (u16)
+            // - Reserved (u32)
+            // - VersionMajor (u32)
+            // - VersionMinor (u16)
+            let end = offset.saturating_add(12);
+            if end > dir_decompressed.len() {
+                return Err(DirParseError::Truncated.into());
+            }
+
+            // For v3 transcript, include the full record bytes (MS-OVBA §2.4.2.5).
+            out.extend_from_slice(&dir_decompressed[offset..end]);
+            offset = end;
+            continue;
+        }
+
+        if offset + 6 > dir_decompressed.len() {
+            return Err(DirParseError::Truncated.into());
+        }
+
         let len = u32::from_le_bytes([
             dir_decompressed[offset + 2],
             dir_decompressed[offset + 3],
             dir_decompressed[offset + 4],
             dir_decompressed[offset + 5],
         ]) as usize;
+
+        let record_start = offset;
+        let header_end = offset + 6;
         offset += 6;
+
         if offset + len > dir_decompressed.len() {
             return Err(DirParseError::BadRecordLength { id, len }.into());
         }
         let data = &dir_decompressed[offset..offset + len];
-        offset += len;
+        let record_end = offset + len;
+        offset = record_end;
 
         if id != 0x003E {
             expect_reference_name_unicode = false;
         }
 
         match id {
+            // ---- Project information (MS-OVBA §2.4.2.5) ----
+            //
+            // NOTE: The v3 pseudocode appends only a subset of fields for some records.
+            // In particular:
+            // - `PROJECTSYSKIND` includes Id+Size but not SysKind.
+            // - `PROJECTCODEPAGE` includes Id+Size but not CodePage.
+            // - `PROJECTDOCSTRING` includes Id+Size and the unicode sub-record header (0x0040 + size),
+            //   but not the DocString bytes.
+            // - `PROJECTHELPFILEPATH` includes Id+Size and the second path sub-record header (0x003D + size),
+            //   but not the HelpFile bytes.
+            // - `PROJECTHELPCONTEXT` includes Id+Size but not HelpContext.
+            //
+            // These rules are easy to regress by accidentally appending entire records.
+
+            // PROJECTSYSKIND (0x0001): include header only.
+            0x0001 => out.extend_from_slice(&dir_decompressed[record_start..header_end]),
+
+            // PROJECTLCID (0x0002): include full record.
+            0x0002 => out.extend_from_slice(&dir_decompressed[record_start..record_end]),
+
+            // PROJECTLCIDINVOKE (0x0014): include full record.
+            0x0014 => out.extend_from_slice(&dir_decompressed[record_start..record_end]),
+
+            // PROJECTCODEPAGE (0x0003): include header only.
+            0x0003 => out.extend_from_slice(&dir_decompressed[record_start..header_end]),
+
+            // PROJECTNAME (0x0004): include full record.
+            0x0004 => out.extend_from_slice(&dir_decompressed[record_start..record_end]),
+
+            // PROJECTDOCSTRING (0x0005): include header only.
+            0x0005 => out.extend_from_slice(&dir_decompressed[record_start..header_end]),
+            // PROJECTDOCSTRING unicode sub-record (0x0040): include header only.
+            0x0040 => out.extend_from_slice(&dir_decompressed[record_start..header_end]),
+
+            // PROJECTHELPFILEPATH (0x0006): include header only.
+            0x0006 => out.extend_from_slice(&dir_decompressed[record_start..header_end]),
+            // PROJECTHELPFILEPATH "HelpFile2" sub-record (0x003D): include header only.
+            0x003D => out.extend_from_slice(&dir_decompressed[record_start..header_end]),
+
+            // PROJECTHELPCONTEXT (0x0007): include header only.
+            0x0007 => out.extend_from_slice(&dir_decompressed[record_start..header_end]),
+
+            // PROJECTLIBFLAGS (0x0008): include full record.
+            0x0008 => out.extend_from_slice(&dir_decompressed[record_start..record_end]),
+
+            // PROJECTCONSTANTS (0x000C): include full record.
+            0x000C => out.extend_from_slice(&dir_decompressed[record_start..record_end]),
+            // PROJECTCONSTANTS unicode sub-record (0x003C): include full record.
+            0x003C => out.extend_from_slice(&dir_decompressed[record_start..record_end]),
+
             // ---- References ----
             //
             // See MS-OVBA §2.4.2 for which reference record types are incorporated in each content
