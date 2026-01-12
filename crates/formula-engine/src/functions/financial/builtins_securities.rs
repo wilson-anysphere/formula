@@ -70,10 +70,7 @@ fn basis_from_optional_arg(
         return Err(ErrorKind::Num);
     }
     let basis = t as i32;
-    if !(0..=4).contains(&basis) {
-        return Err(ErrorKind::Num);
-    }
-    Ok(basis)
+    super::coupon_schedule::validate_basis(basis).map_err(excel_error_kind)
 }
 
 inventory::submit! {
@@ -528,4 +525,3 @@ fn tbilleq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     excel_result_number(super::tbilleq(settlement, maturity, discount))
 }
-

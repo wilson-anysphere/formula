@@ -17,9 +17,9 @@ fn validate_finite(n: f64) -> ExcelResult<()> {
 }
 
 fn validate_basis(basis: i32) -> ExcelResult<()> {
-    if !(0..=4).contains(&basis) {
-        return Err(ExcelError::Num);
-    }
+    // Reuse the shared financial basis validation helper so all bond/security functions stay
+    // consistent about what constitutes a valid `basis` value.
+    super::coupon_schedule::validate_basis(basis)?;
     Ok(())
 }
 
@@ -361,4 +361,3 @@ pub fn tbilleq(settlement: i32, maturity: i32, discount: f64) -> ExcelResult<f64
         }
     }
 }
-

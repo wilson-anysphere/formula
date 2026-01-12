@@ -77,10 +77,7 @@ fn basis_from_optional_arg(
         return Err(ErrorKind::Num);
     }
     let basis = t as i32;
-    if !(0..=4).contains(&basis) {
-        return Err(ErrorKind::Num);
-    }
-    Ok(basis)
+    super::coupon_schedule::validate_basis(basis).map_err(excel_error_kind)
 }
 
 fn frequency_from_value(ctx: &dyn FunctionContext, v: &Value) -> Result<i32, ErrorKind> {
@@ -90,10 +87,7 @@ fn frequency_from_value(ctx: &dyn FunctionContext, v: &Value) -> Result<i32, Err
         return Err(ErrorKind::Num);
     }
     let frequency = t as i32;
-    if !(frequency == 1 || frequency == 2 || frequency == 4) {
-        return Err(ErrorKind::Num);
-    }
-    Ok(frequency)
+    super::coupon_schedule::validate_frequency(frequency).map_err(excel_error_kind)
 }
 
 inventory::submit! {
