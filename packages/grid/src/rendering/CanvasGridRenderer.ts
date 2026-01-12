@@ -267,10 +267,26 @@ function normalizeRichTextRuns(
   return out;
 }
 
-function resolveUnderline(style: RichTextRunStyle | undefined, defaultValue: boolean): boolean {
+type UnderlineSpec = { underline: boolean; underlineStyle?: "double" };
+
+function resolveUnderline(style: RichTextRunStyle | undefined, defaultValue: boolean): UnderlineSpec {
   const value = style?.underline;
-  if (value === undefined) return defaultValue;
-  return Boolean(value && value !== "none");
+  if (value === undefined) return { underline: defaultValue, underlineStyle: undefined };
+
+  if (value === false) return { underline: false, underlineStyle: undefined };
+  if (value === true) return { underline: true, underlineStyle: undefined };
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "" || normalized === "none") return { underline: false, underlineStyle: undefined };
+    // Excel commonly serializes underline variants as strings (e.g. `"double"`).
+    if (normalized === "double" || normalized === "doubleaccounting") {
+      return { underline: true, underlineStyle: "double" };
+    }
+    return { underline: true, underlineStyle: undefined };
+  }
+
+  return { underline: Boolean(value), underlineStyle: undefined };
 }
 
 function resolveStrike(style: RichTextRunStyle | undefined, defaultValue: boolean): boolean {
@@ -2694,11 +2710,13 @@ export class CanvasGridRenderer {
           const layoutRuns = rawRuns.map((run) => {
             const runStyle =
               run.style && typeof run.style === "object" ? (run.style as RichTextRunStyle) : (undefined as RichTextRunStyle | undefined);
+            const underlineSpec = resolveUnderline(runStyle, cellUnderline);
             return {
               text: sliceByCodePointRange(text, offsets, run.start, run.end),
               font: fontSpecForRichTextStyle(runStyle, defaults, zoom),
               color: engineColorToCanvasColor(runStyle?.color),
-              underline: resolveUnderline(runStyle, cellUnderline),
+              underline: underlineSpec.underline,
+              underlineStyle: underlineSpec.underlineStyle,
               strike: resolveStrike(runStyle, cellStrike)
             };
           });
@@ -2772,6 +2790,18 @@ export class CanvasGridRenderer {
                     color: contentCtx.fillStyle as string,
                     lineWidth: decorationLineWidth
                   });
+
+                  if (fragment.underlineStyle === "double") {
+                    const doubleGap = Math.max(2, Math.round(decorationLineWidth * 2));
+                    const underlineY2 = alignDecorationY(baselineY + underlineOffset + doubleGap, decorationLineWidth);
+                    underlineSegments.push({
+                      x1: xCursor,
+                      x2: xCursor + fragment.width,
+                      y: underlineY2,
+                      color: contentCtx.fillStyle as string,
+                      lineWidth: decorationLineWidth
+                    });
+                  }
                 }
 
                 if (fragment.strike) {
@@ -2874,7 +2904,14 @@ export class CanvasGridRenderer {
             }
           } else if (layoutEngine && availableWidth > 0) {
             const layout = layoutEngine.layout({
-              runs: layoutRuns.map((r) => ({ text: r.text, font: r.font, color: r.color, underline: r.underline, strike: r.strike })),
+              runs: layoutRuns.map((r) => ({
+                text: r.text,
+                font: r.font,
+                color: r.color,
+                underline: r.underline,
+                underlineStyle: r.underlineStyle,
+                strike: r.strike
+              })),
               text: undefined,
               font: defaults,
               maxWidth: availableWidth,
@@ -2904,7 +2941,14 @@ export class CanvasGridRenderer {
                 let xCursor = originX + line.x;
                 const baselineY = originY + i * layout.lineHeight + line.ascent;
 
-                for (const run of line.runs as Array<{ text: string; font: FontSpec; color?: string; underline?: boolean; strike?: boolean }>) {
+                for (const run of line.runs as Array<{
+                  text: string;
+                  font: FontSpec;
+                  color?: string;
+                  underline?: boolean;
+                  underlineStyle?: "single" | "double";
+                  strike?: boolean;
+                }>) {
                   const measurement = layoutEngine.measure(run.text, run.font);
                   contentCtx.font = toCanvasFontString(run.font);
                   contentCtx.fillStyle = run.color ?? fillStyle;
@@ -2921,6 +2965,18 @@ export class CanvasGridRenderer {
                       color: contentCtx.fillStyle as string,
                       lineWidth
                     });
+
+                    if (run.underlineStyle === "double") {
+                      const doubleGap = Math.max(2, Math.round(lineWidth * 2));
+                      const underlineY2 = alignDecorationY(baselineY + underlineOffset + doubleGap, lineWidth);
+                      underlineSegments.push({
+                        x1: xCursor,
+                        x2: xCursor + measurement.width,
+                        y: underlineY2,
+                        color: contentCtx.fillStyle as string,
+                        lineWidth
+                      });
+                    }
                   }
 
                   if (run.strike) {

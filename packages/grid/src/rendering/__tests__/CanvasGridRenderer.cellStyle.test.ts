@@ -239,6 +239,50 @@ describe("CanvasGridRenderer CellStyle primitives", () => {
     expect(content.rec.strokes).toBeGreaterThan(0);
   });
 
+  it("renders double underline for rich text runs", () => {
+    const provider: CellProvider = {
+      getCell: (row, col) =>
+        row === 0 && col === 0
+          ? {
+              row,
+              col,
+              value: "Hi",
+              richText: { text: "Hi", runs: [{ start: 0, end: 2, style: { underline: "double" } }] }
+            }
+          : null
+    };
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const grid = createRecordingContext(gridCanvas);
+    const content = createRecordingContext(contentCanvas);
+    const selection = createRecordingContext(selectionCanvas);
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>([
+      [gridCanvas, grid.ctx],
+      [contentCanvas, content.ctx],
+      [selectionCanvas, selection.ctx]
+    ]);
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const created = createRecordingContext(this).ctx;
+      contexts.set(this, created);
+      return created;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 2, colCount: 2 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(200, 80, 1);
+    renderer.renderImmediately();
+
+    const lineToCalls = ((content.ctx as unknown as { lineTo: unknown }).lineTo as any).mock?.calls?.length ?? 0;
+    expect(lineToCalls).toBeGreaterThanOrEqual(2);
+  });
+
   it("renders per-cell borders with zoom-scaled widths", () => {
     const borderColor = "#ff0000";
     const provider: CellProvider = {

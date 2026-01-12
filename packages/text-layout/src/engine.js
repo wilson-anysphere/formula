@@ -55,6 +55,7 @@ function runExtrasKey(run) {
  * @property {FontSpec} [font]
  * @property {string} [color]
  * @property {boolean} [underline]
+ * @property {"single" | "double"} [underlineStyle]
  * @property {boolean} [strike]
  *
  * @typedef {Object} LayoutOptions

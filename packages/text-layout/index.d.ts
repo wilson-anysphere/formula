@@ -27,6 +27,7 @@ export type TextRun = {
   color?: string;
   underline?: boolean;
   strike?: boolean;
+  underlineStyle?: "single" | "double";
 };
 
 export type LayoutOptions = {
