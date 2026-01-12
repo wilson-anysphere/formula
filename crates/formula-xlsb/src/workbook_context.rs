@@ -405,6 +405,7 @@ impl WorkbookContext {
         Some((ixti, name_index))
     }
 
+    #[cfg(feature = "write")]
     pub(crate) fn namex_ref(
         &self,
         workbook: Option<&str>,
