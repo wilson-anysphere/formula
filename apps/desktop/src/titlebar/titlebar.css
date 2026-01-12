@@ -102,7 +102,6 @@
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__window-button:disabled {
-  background: var(--bg-tertiary);
   cursor: default;
   opacity: 0.6;
 }
@@ -181,7 +180,6 @@
 }
 
 .formula-titlebar.formula-titlebar--component .formula-titlebar__action-button:disabled {
-  color: var(--text-secondary);
   cursor: default;
   opacity: 0.6;
 }
