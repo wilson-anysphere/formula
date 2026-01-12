@@ -234,32 +234,40 @@ pub async fn install_downloaded_update(_app: AppHandle) -> Result<(), String> {
         };
         let notified = notify.notified();
 
-        let mut state = update_download_state().lock().await;
+        // Try to grab the downloaded update bytes without holding the mutex while we run the
+        // (potentially slow / IO-heavy) install step.
+        let downloaded = {
+            let mut state = update_download_state().lock().await;
 
-        // If we already have a downloaded update, attempt to install it.
-        //
-        // NOTE: We intentionally do *not* `take()` the downloaded update before installing.
-        // Installation can fail (e.g. file system issues), and keeping the bytes available
-        // allows the user to retry without forcing a re-download.
-        if let Some(downloaded) = state.downloaded.as_ref() {
+            if let Some(downloaded) = state.downloaded.take() {
+                Some(downloaded)
+            } else if !state.in_flight {
+                if let Some(err) = state.last_error.clone() {
+                    return Err(err);
+                }
+                return Err("No downloaded update is available".to_string());
+            } else {
+                None
+            }
+        };
+
+        if let Some(downloaded) = downloaded {
             let result = downloaded
                 .update
                 .install(&downloaded.bytes)
                 .map_err(|err| err.to_string());
-            if result.is_ok() {
-                state.downloaded = None;
+
+            if result.is_err() {
+                // Restore the downloaded update so the user can retry without forcing a re-download.
+                let mut state = update_download_state().lock().await;
+                if state.downloaded.is_none() {
+                    state.downloaded = Some(downloaded);
+                }
             }
+
             return result;
         }
 
-        if !state.in_flight {
-            if let Some(err) = state.last_error.clone() {
-                return Err(err);
-            }
-            return Err("No downloaded update is available".to_string());
-        }
-
-        drop(state);
         notified.await;
     }
 }
