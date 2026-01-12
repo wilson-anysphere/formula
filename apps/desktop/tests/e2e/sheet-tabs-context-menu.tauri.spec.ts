@@ -1,6 +1,18 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { gotoDesktop, openSheetTabContextMenu } from "./helpers";
+
+async function openWorkbookFromFileDrop(page: Page, path: string = "/tmp/fake.xlsx"): Promise<void> {
+  // The desktop shell only starts workbookSync (and therefore sheet-metadata persistence)
+  // once a workbook is opened via the Tauri backend. Simulate a native file drop so the
+  // app runs `open_workbook` and installs the sync bridge.
+  await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+  await page.evaluate((workbookPath) => {
+    (window as any).__tauriListeners["file-dropped"]({ payload: [workbookPath] });
+  }, path);
+  // Wait for the workbook snapshot to be applied (our stub returns "Hello" in A1).
+  await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+}
 
 test.describe("sheet tab context menu (tauri persistence)", () => {
   test("invokes Tauri persistence commands for visibility + tab color", async ({ page }) => {
@@ -46,8 +58,15 @@ test.describe("sheet tab context menu (tauri persistence)", () => {
                 const endCol = Number(args?.end_col ?? startCol);
                 const rows = Math.max(0, endRow - startRow + 1);
                 const cols = Math.max(0, endCol - startCol + 1);
-                const values = Array.from({ length: rows }, () =>
-                  Array.from({ length: cols }, () => ({ value: null, formula: null, display_value: "" })),
+                const values = Array.from({ length: rows }, (_v, r) =>
+                  Array.from({ length: cols }, (_w, c) => {
+                    const row = startRow + r;
+                    const col = startCol + c;
+                    if (row === 0 && col === 0) {
+                      return { value: "Hello", formula: null, display_value: "Hello" };
+                    }
+                    return { value: null, formula: null, display_value: "" };
+                  }),
                 );
                 return { values, start_row: startRow, start_col: startCol };
               }
@@ -102,21 +121,13 @@ test.describe("sheet tab context menu (tauri persistence)", () => {
     });
 
     await gotoDesktop(page);
-
-    // The demo workbook seeded into the desktop-web harness only includes Sheet1.
-    // Create a second sheet (Sheet2) via the DocumentController so we can exercise
-    // hide/unhide + tab color persistence hooks.
-    await page.evaluate(() => {
-      const app = window.__formulaApp as any;
-      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
-    });
+    await openWorkbookFromFileDrop(page);
 
     const sheet2Tab = page.getByTestId("sheet-tab-Sheet2");
     await expect(sheet2Tab).toBeVisible();
 
     // Hide Sheet2.
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await openSheetTabContextMenu(page, "Sheet2");
+    const menu = await openSheetTabContextMenu(page, "Sheet2");
     await menu.getByRole("button", { name: "Hide", exact: true }).click();
     await expect(sheet2Tab).toHaveCount(0);
 
