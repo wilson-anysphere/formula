@@ -17,7 +17,7 @@ set -euo pipefail
 #
 # Environment:
 #   FORMULA_CARGO_JOBS       cargo build jobs (default: 4)
-#   FORMULA_CARGO_LIMIT_AS   Address-space cap (default: 12G)
+#   FORMULA_CARGO_LIMIT_AS   Address-space cap (default: 14G)
 #   FORMULA_RUST_TEST_THREADS  Default RUST_TEST_THREADS for cargo test (default: min(nproc, 16))
 #   FORMULA_RAYON_NUM_THREADS  Default RAYON_NUM_THREADS (default: FORMULA_CARGO_JOBS)
 #   FORMULA_CARGO_RETRY_ATTEMPTS  Retry count for transient rustc EAGAIN panics (default: 5)
@@ -37,7 +37,7 @@ Examples:
 
 Environment:
   FORMULA_CARGO_JOBS         cargo -j value (default: 4)
-  FORMULA_CARGO_LIMIT_AS     Address-space cap (default: 12G)
+  FORMULA_CARGO_LIMIT_AS     Address-space cap (default: 14G)
   FORMULA_RUST_TEST_THREADS  RUST_TEST_THREADS for cargo test (default: min(nproc, 16))
   FORMULA_RAYON_NUM_THREADS  RAYON_NUM_THREADS (default: FORMULA_CARGO_JOBS)
   FORMULA_CARGO_RETRY_ATTEMPTS  Retry count for transient rustc EAGAIN panics (default: 5)

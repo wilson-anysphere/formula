@@ -39,12 +39,12 @@ This is simpler and more robust than cgroups/systemd-run.
 | Operation           | Expected Peak | Limit | Notes                            |
 | ------------------- | ------------- | ----- | -------------------------------- |
 | Node.js process     | 512MB-2GB     | 4GB   | Use `--max-old-space-size`       |
-| Rust compilation    | 2-8GB         | 12GB  | Use `scripts/cargo_agent.sh`     |
+| Rust compilation    | 2-8GB         | 14GB  | Use `scripts/cargo_agent.sh`     |
 | TypeScript check    | 500MB-2GB     | 2GB   | Can spike with large projects    |
 | npm install         | 500MB-1GB     | 2GB   | Transient                        |
 | Tests (unit)        | 200MB-1GB     | 2GB   |                                  |
 | Tests (e2e/browser) | 500MB-2GB     | 2GB   | Headless Chrome                  |
-| Total concurrent    | -             | 12GB  | Hard ceiling per agent workspace |
+| Total concurrent    | -             | 14GB  | Hard ceiling per agent workspace |
 
 
 ### Required: Always Use Wrapper Scripts for Cargo
@@ -63,7 +63,7 @@ cargo test
 ```
 
 The wrapper script:
-1. Enforces a **12GB address space limit** via `RLIMIT_AS`
+1. Enforces a **14GB address space limit** via `RLIMIT_AS`
 2. Limits parallelism to **-j4** by default
 3. Caps **RUST_TEST_THREADS** to avoid spawning hundreds of threads
 4. Caps **RAYON_NUM_THREADS** (defaults to `FORMULA_CARGO_JOBS`) to avoid huge per-process Rayon thread pools on high-core agent hosts
@@ -104,7 +104,7 @@ bash scripts/cargo_agent.sh bench --bench perf_regressions
 
 Environment variables to tune behavior:
 - `FORMULA_CARGO_JOBS` - parallelism (default: 4)
-- `FORMULA_CARGO_LIMIT_AS` - address space limit (default: 12G)
+- `FORMULA_CARGO_LIMIT_AS` - address space limit (default: 14G)
 - `FORMULA_RUST_TEST_THREADS` - test parallelism (default: min(nproc, 16))
 - `FORMULA_RAYON_NUM_THREADS` - Rayon thread pool size (`RAYON_NUM_THREADS`) (default: `FORMULA_CARGO_JOBS`)
 

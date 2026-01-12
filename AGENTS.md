@@ -102,9 +102,9 @@ Per-agent:        ~7 GB soft target
 | Operation | Expected Peak | Limit |
 |-----------|---------------|-------|
 | Node.js process | 512MB-2GB | 4GB |
-| Rust compilation | 2-8GB | 12GB |
+| Rust compilation | 2-8GB | 14GB |
 | TypeScript check | 500MB-2GB | 2GB |
-| Total concurrent | - | 12GB |
+| Total concurrent | - | 14GB |
 
 ### Required: Use Wrapper Scripts
 
