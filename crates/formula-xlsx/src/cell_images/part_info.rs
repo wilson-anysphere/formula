@@ -230,6 +230,7 @@ fn parse_cell_images_image_relationships(
         if target_part.starts_with("media/") {
             target_part = format!("xl/{target_part}");
         }
+
         out.insert(rel.id, target_part);
     }
 
