@@ -80,6 +80,7 @@ export class DesktopOAuthBroker implements OAuthBroker {
   private deviceCodePromptHandler: ((code: string, verificationUri: string) => Promise<void> | void) | null = null;
   private pendingRedirects = new Map<string, Deferred<string>>();
   private observedRedirects: Array<{ url: string; observedAtMs: number }> = [];
+  private lastAuthUrlOpenedAtMs: number | null = null;
 
   // Small buffer to avoid dropping redirects that arrive before `waitForRedirect(...)`
   // is registered (e.g. fast redirects, or deep-link events emitted at app startup).
@@ -112,6 +113,11 @@ export class DesktopOAuthBroker implements OAuthBroker {
     if (protocol !== "http" && protocol !== "https") {
       throw new Error(`Refusing to open OAuth auth URL with untrusted protocol "${protocol}:"`);
     }
+
+    // Used to gate buffering of early redirects. We only expect redirects very
+    // shortly after opening an auth URL (PKCE flow), so avoid holding onto deep
+    // links indefinitely if they're delivered at unrelated times.
+    this.lastAuthUrlOpenedAtMs = Date.now();
 
     if (!this.openAuthUrlHandler) {
       await shellOpen(url);
@@ -165,6 +171,15 @@ export class DesktopOAuthBroker implements OAuthBroker {
 
     // Otherwise, store it briefly so we don't drop redirects that race ahead of
     // `waitForRedirect`.
+    //
+    // Only buffer if we've opened an auth URL very recently; this prevents an
+    // unrelated deep link (or a redirect from an old flow) from being consumed by
+    // a future PKCE attempt.
+    const lastOpen = this.lastAuthUrlOpenedAtMs;
+    if (typeof lastOpen !== "number" || Date.now() - lastOpen > DesktopOAuthBroker.OBSERVED_REDIRECT_TTL_MS) {
+      return false;
+    }
+
     this.pruneObservedRedirects();
     this.observedRedirects.push({ url: redirectUrl, observedAtMs: Date.now() });
     if (this.observedRedirects.length > DesktopOAuthBroker.OBSERVED_REDIRECT_LIMIT) {

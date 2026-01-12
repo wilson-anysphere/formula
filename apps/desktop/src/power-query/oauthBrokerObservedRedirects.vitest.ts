@@ -7,6 +7,9 @@ describe("DesktopOAuthBroker.observeRedirect", () => {
     const broker = new DesktopOAuthBroker();
     const redirectUrl = "formula://oauth/callback?code=abc";
 
+    broker.setOpenAuthUrlHandler(async () => {});
+    await broker.openAuthUrl("https://example.com/oauth/authorize");
+
     // Redirect arrives before the PKCE flow registers the wait.
     expect(broker.observeRedirect(redirectUrl)).toBe(false);
 
@@ -17,6 +20,9 @@ describe("DesktopOAuthBroker.observeRedirect", () => {
     const broker = new DesktopOAuthBroker();
     const redirectUrl = "formula://oauth/callback?code=abc";
 
+    broker.setOpenAuthUrlHandler(async () => {});
+    await broker.openAuthUrl("https://example.com/oauth/authorize");
+
     broker.observeRedirect(redirectUrl);
 
     const wait = broker.waitForRedirect("formula://other/callback");
@@ -25,4 +31,3 @@ describe("DesktopOAuthBroker.observeRedirect", () => {
     await expect(wait).resolves.toBe("formula://other/callback?code=def");
   });
 });
-
