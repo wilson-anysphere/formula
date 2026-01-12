@@ -2266,6 +2266,7 @@ dependencies = [
  "formula-biff",
  "formula-engine",
  "formula-format",
+ "formula-fs",
  "formula-model",
  "pretty_assertions",
  "proptest",

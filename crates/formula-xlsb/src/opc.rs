@@ -11,6 +11,7 @@ use crate::shared_strings_write::SharedStringsWriter;
 use crate::styles::Styles;
 use crate::workbook_context::WorkbookContext;
 use crate::SharedString;
+use formula_fs::{atomic_write_with_path, AtomicWriteError};
 use quick_xml::events::Event;
 use quick_xml::Reader as XmlReader;
 use quick_xml::Writer as XmlWriter;
@@ -1138,8 +1139,15 @@ impl XlsbWorkbook {
         dest: impl AsRef<Path>,
         overrides: &HashMap<String, Vec<u8>>,
     ) -> Result<(), ParseError> {
-        let out = File::create(dest)?;
-        self.save_with_part_overrides_to_writer(out, overrides)
+        let dest = dest.as_ref();
+        atomic_write_with_path(dest, |tmp_path| {
+            let out = File::create(tmp_path)?;
+            self.save_with_part_overrides_to_writer(out, overrides)
+        })
+        .map_err(|err| match err {
+            AtomicWriteError::Io(err) => ParseError::Io(err),
+            AtomicWriteError::Writer(err) => err,
+        })
     }
 
     /// Save the workbook while overriding specific part payloads, writing the output ZIP to
@@ -1322,198 +1330,206 @@ impl XlsbWorkbook {
         }
 
         let dest = dest.as_ref();
+        atomic_write_with_path(dest, |tmp_path| {
+            let file = File::open(&self.path)?;
+            let mut zip = ZipArchive::new(file)?;
 
-        let file = File::open(&self.path)?;
-        let mut zip = ZipArchive::new(file)?;
+            let edited_by_bytes = worksheets_edited(&mut zip, &self.sheets, overrides)?;
 
-        let edited_by_bytes = worksheets_edited(&mut zip, &self.sheets, overrides)?;
+            let worksheet_paths: HashSet<&str> =
+                self.sheets.iter().map(|s| s.part_path.as_str()).collect();
 
-        let worksheet_paths: HashSet<&str> = self.sheets.iter().map(|s| s.part_path.as_str()).collect();
-
-        let mut edited_by_stream = false;
-        for stream_part in stream_parts {
-            if !worksheet_paths.contains(stream_part.as_str()) {
-                continue;
-            }
-
-            let mut sink = io::sink();
-            let edited = if let Some(bytes) = self.preserved_parts.get(stream_part) {
-                let mut cursor = Cursor::new(bytes);
-                stream_override(stream_part, &mut cursor, &mut sink)?
-            } else {
-                let mut entry = zip.by_name(stream_part)?;
-                stream_override(stream_part, &mut entry, &mut sink)?
-            };
-            edited_by_stream = edited_by_stream || edited;
-        }
-
-        let edited = edited_by_bytes || edited_by_stream;
-
-        let ignored_overrides: HashSet<String> = if edited {
-            overrides
-                .keys()
-                .filter(|key| is_calc_chain_part_name(key))
-                .cloned()
-                .collect()
-        } else {
-            HashSet::new()
-        };
-
-        // Compute updated plumbing parts if we need to invalidate calcChain.
-        let mut updated_content_types: Option<Vec<u8>> = None;
-        let mut updated_workbook_rels: Option<Vec<u8>> = None;
-        let mut updated_workbook_bin: Option<Vec<u8>> = None;
-
-        if edited {
-            let content_types = get_part_bytes(
-                &mut zip,
-                &self.preserved_parts,
-                overrides,
-                "[Content_Types].xml",
-            )?;
-            if let Some(content_types) = content_types {
-                updated_content_types = Some(remove_calc_chain_from_content_types(&content_types)?);
-            }
-
-            let workbook_rels = get_part_bytes(
-                &mut zip,
-                &self.preserved_parts,
-                overrides,
-                &self.workbook_rels_part,
-            )?;
-            if let Some(workbook_rels) = workbook_rels {
-                updated_workbook_rels = Some(remove_calc_chain_from_workbook_rels(&workbook_rels)?);
-            }
-
-            let workbook_bin = get_part_bytes(
-                &mut zip,
-                &self.preserved_parts,
-                overrides,
-                &self.workbook_part,
-            )?;
-            if let Some(workbook_bin) = workbook_bin {
-                if let Some(patched) = patch_workbook_bin_full_calc_on_load(&workbook_bin)? {
-                    updated_workbook_bin = Some(patched);
-                }
-            }
-        }
-
-        let out = File::create(dest)?;
-        let mut writer = ZipWriter::new(out);
-
-        // Use a consistent compression method for output. This does *not* affect payload
-        // preservation: we always copy/write the uncompressed part bytes.
-        let options =
-            FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
-
-        let mut used_overrides: HashSet<String> = HashSet::new();
-        let mut used_stream_overrides: HashSet<String> = HashSet::new();
-
-        for i in 0..zip.len() {
-            let mut entry = zip.by_index(i)?;
-            let name = entry.name().to_string();
-
-            if entry.is_dir() {
-                writer.add_directory(name, options.clone())?;
-                continue;
-            }
-
-            // Drop calcChain when any worksheet was edited.
-            if edited && is_calc_chain_part_name(&name) {
-                if overrides.contains_key(&name) {
-                    used_overrides.insert(name);
-                }
-                continue;
-            }
-
-            writer.start_file(name.as_str(), options.clone())?;
-
-            // When invalidating calcChain, we may need to rewrite XML parts even if they're
-            // present in `overrides`.
-            if edited && is_content_types_part_name(&name) {
-                if let Some(updated) = &updated_content_types {
-                    if overrides.contains_key(&name) {
-                        used_overrides.insert(name.clone());
-                    }
-                    writer.write_all(updated)?;
+            let mut edited_by_stream = false;
+            for stream_part in stream_parts {
+                if !worksheet_paths.contains(stream_part.as_str()) {
                     continue;
                 }
-            }
-            if edited && name == self.workbook_rels_part {
-                if let Some(updated) = &updated_workbook_rels {
-                    if overrides.contains_key(&name) {
-                        used_overrides.insert(name.clone());
-                    }
-                    writer.write_all(updated)?;
-                    continue;
-                }
-            }
-            if edited && name == self.workbook_part {
-                if let Some(updated) = &updated_workbook_bin {
-                    if overrides.contains_key(&name) {
-                        used_overrides.insert(name.clone());
-                    }
-                    writer.write_all(updated)?;
-                    continue;
-                }
-            }
 
-            if stream_parts.contains(&name) {
-                used_stream_overrides.insert(name.clone());
-                if let Some(bytes) = self.preserved_parts.get(&name) {
+                let mut sink = io::sink();
+                let edited = if let Some(bytes) = self.preserved_parts.get(stream_part) {
                     let mut cursor = Cursor::new(bytes);
-                    stream_override(&name, &mut cursor, &mut writer)?;
+                    stream_override(stream_part, &mut cursor, &mut sink)?
                 } else {
-                    stream_override(&name, &mut entry, &mut writer)?;
-                }
-                continue;
+                    let mut entry = zip.by_name(stream_part)?;
+                    stream_override(stream_part, &mut entry, &mut sink)?
+                };
+                edited_by_stream = edited_by_stream || edited;
             }
 
-            if let Some(bytes) = overrides.get(&name) {
-                used_overrides.insert(name.clone());
-                writer.write_all(bytes)?;
-            } else if let Some(bytes) = self.preserved_parts.get(&name) {
-                writer.write_all(bytes)?;
+            let edited = edited_by_bytes || edited_by_stream;
+
+            let ignored_overrides: HashSet<String> = if edited {
+                overrides
+                    .keys()
+                    .filter(|key| is_calc_chain_part_name(key))
+                    .cloned()
+                    .collect()
             } else {
-                io::copy(&mut entry, &mut writer)?;
-            }
-        }
+                HashSet::new()
+            };
 
-        if used_stream_overrides.len() != stream_parts.len() {
-            let mut missing: Vec<String> = stream_parts
-                .iter()
-                .filter(|part| !used_stream_overrides.contains(part.as_str()))
-                .cloned()
-                .collect();
-            missing.sort();
-            return Err(ParseError::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "override parts not found in source package: {}",
-                    missing.join(", ")
-                ),
-            )));
-        }
+            // Compute updated plumbing parts if we need to invalidate calcChain.
+            let mut updated_content_types: Option<Vec<u8>> = None;
+            let mut updated_workbook_rels: Option<Vec<u8>> = None;
+            let mut updated_workbook_bin: Option<Vec<u8>> = None;
 
-        if used_overrides.len() + ignored_overrides.len() != overrides.len() {
-            let mut missing = Vec::new();
-            for key in overrides.keys() {
-                if !used_overrides.contains(key) && !ignored_overrides.contains(key) {
-                    missing.push(key.clone());
+            if edited {
+                let content_types = get_part_bytes(
+                    &mut zip,
+                    &self.preserved_parts,
+                    overrides,
+                    "[Content_Types].xml",
+                )?;
+                if let Some(content_types) = content_types {
+                    updated_content_types =
+                        Some(remove_calc_chain_from_content_types(&content_types)?);
+                }
+
+                let workbook_rels = get_part_bytes(
+                    &mut zip,
+                    &self.preserved_parts,
+                    overrides,
+                    &self.workbook_rels_part,
+                )?;
+                if let Some(workbook_rels) = workbook_rels {
+                    updated_workbook_rels =
+                        Some(remove_calc_chain_from_workbook_rels(&workbook_rels)?);
+                }
+
+                let workbook_bin = get_part_bytes(
+                    &mut zip,
+                    &self.preserved_parts,
+                    overrides,
+                    &self.workbook_part,
+                )?;
+                if let Some(workbook_bin) = workbook_bin {
+                    if let Some(patched) = patch_workbook_bin_full_calc_on_load(&workbook_bin)? {
+                        updated_workbook_bin = Some(patched);
+                    }
                 }
             }
-            missing.sort();
-            return Err(ParseError::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "override parts not found in source package: {}",
-                    missing.join(", ")
-                ),
-            )));
-        }
 
-        writer.finish()?;
-        Ok(())
+            let out = File::create(tmp_path)?;
+            let mut writer = ZipWriter::new(out);
+
+            // Use a consistent compression method for output. This does *not* affect payload
+            // preservation: we always copy/write the uncompressed part bytes.
+            let options =
+                FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+
+            let mut used_overrides: HashSet<String> = HashSet::new();
+            let mut used_stream_overrides: HashSet<String> = HashSet::new();
+
+            for i in 0..zip.len() {
+                let mut entry = zip.by_index(i)?;
+                let name = entry.name().to_string();
+
+                if entry.is_dir() {
+                    writer.add_directory(name, options.clone())?;
+                    continue;
+                }
+
+                // Drop calcChain when any worksheet was edited.
+                if edited && is_calc_chain_part_name(&name) {
+                    if overrides.contains_key(&name) {
+                        used_overrides.insert(name);
+                    }
+                    continue;
+                }
+
+                writer.start_file(name.as_str(), options.clone())?;
+
+                // When invalidating calcChain, we may need to rewrite XML parts even if they're
+                // present in `overrides`.
+                if edited && is_content_types_part_name(&name) {
+                    if let Some(updated) = &updated_content_types {
+                        if overrides.contains_key(&name) {
+                            used_overrides.insert(name.clone());
+                        }
+                        writer.write_all(updated)?;
+                        continue;
+                    }
+                }
+                if edited && name == self.workbook_rels_part {
+                    if let Some(updated) = &updated_workbook_rels {
+                        if overrides.contains_key(&name) {
+                            used_overrides.insert(name.clone());
+                        }
+                        writer.write_all(updated)?;
+                        continue;
+                    }
+                }
+                if edited && name == self.workbook_part {
+                    if let Some(updated) = &updated_workbook_bin {
+                        if overrides.contains_key(&name) {
+                            used_overrides.insert(name.clone());
+                        }
+                        writer.write_all(updated)?;
+                        continue;
+                    }
+                }
+
+                if stream_parts.contains(&name) {
+                    used_stream_overrides.insert(name.clone());
+                    if let Some(bytes) = self.preserved_parts.get(&name) {
+                        let mut cursor = Cursor::new(bytes);
+                        stream_override(&name, &mut cursor, &mut writer)?;
+                    } else {
+                        stream_override(&name, &mut entry, &mut writer)?;
+                    }
+                    continue;
+                }
+
+                if let Some(bytes) = overrides.get(&name) {
+                    used_overrides.insert(name.clone());
+                    writer.write_all(bytes)?;
+                } else if let Some(bytes) = self.preserved_parts.get(&name) {
+                    writer.write_all(bytes)?;
+                } else {
+                    io::copy(&mut entry, &mut writer)?;
+                }
+            }
+
+            if used_stream_overrides.len() != stream_parts.len() {
+                let mut missing: Vec<String> = stream_parts
+                    .iter()
+                    .filter(|part| !used_stream_overrides.contains(part.as_str()))
+                    .cloned()
+                    .collect();
+                missing.sort();
+                return Err(ParseError::Io(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "override parts not found in source package: {}",
+                        missing.join(", ")
+                    ),
+                )));
+            }
+
+            if used_overrides.len() + ignored_overrides.len() != overrides.len() {
+                let mut missing = Vec::new();
+                for key in overrides.keys() {
+                    if !used_overrides.contains(key) && !ignored_overrides.contains(key) {
+                        missing.push(key.clone());
+                    }
+                }
+                missing.sort();
+                return Err(ParseError::Io(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "override parts not found in source package: {}",
+                        missing.join(", ")
+                    ),
+                )));
+            }
+
+            writer.finish()?;
+            Ok(())
+        })
+        .map_err(|err| match err {
+            AtomicWriteError::Io(err) => ParseError::Io(err),
+            AtomicWriteError::Writer(err) => err,
+        })
     }
 
     /// Save the workbook while overriding a single part via a streaming patch callback.

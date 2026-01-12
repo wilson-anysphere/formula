@@ -10,6 +10,7 @@ write = ["formula-biff/encode", "dep:formula-engine"]
 
 [dependencies]
 formula-format = { path = "../formula-format" }
+formula-fs = { path = "../formula-fs" }
 formula-model = { path = "../formula-model" }
 quick-xml = "0.31"
 serde = { version = "1.0", features = ["derive"] }
