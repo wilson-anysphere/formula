@@ -47,6 +47,7 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("view.toggleShowFormulas", macIndex)).toBe("⌘`");
     expect(getPrimaryCommandKeybindingDisplay("audit.togglePrecedents", macIndex)).toBe("⌘[");
     expect(getPrimaryCommandKeybindingDisplay("audit.toggleDependents", macIndex)).toBe("⌘]");
+    // macOS: avoid Cmd+H which is reserved for the system "Hide" shortcut.
     expect(getPrimaryCommandKeybindingDisplay("edit.replace", macIndex)).toBe("⌥⌘F");
     expect(getPrimaryCommandKeybindingDisplay("audit.tracePrecedents", macIndex)).toBe("⌘[");
     expect(getPrimaryCommandKeybindingDisplay("audit.traceDependents", macIndex)).toBe("⌘]");
