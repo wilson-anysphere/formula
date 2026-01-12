@@ -31,6 +31,7 @@ export class CellEditorOverlay {
   ) {
     this.element = document.createElement("textarea");
     this.element.className = "cell-editor";
+    this.element.setAttribute("data-testid", "cell-editor");
     this.element.spellcheck = false;
     this.element.autocapitalize = "off";
     this.element.autocomplete = "off";

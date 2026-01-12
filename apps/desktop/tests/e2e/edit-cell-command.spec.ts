@@ -32,7 +32,7 @@ test.describe("Edit Cell command", () => {
     await page.getByTestId("command-palette-input").fill("Edit Cell");
     await page.keyboard.press("Enter");
 
-    const editor = page.locator("textarea.cell-editor");
+    const editor = page.getByTestId("cell-editor");
     await expect(editor).toBeVisible();
     await expect(editor).toBeFocused();
   });
