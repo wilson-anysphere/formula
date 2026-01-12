@@ -1108,6 +1108,10 @@ fn project_normalized_data_multiple_baseclass_entries_preserve_order_and_precede
         idx_base_formb < idx_base_forma,
         "expected BaseClass tokens for FormB to precede FormA (PROJECT order)"
     );
+    assert!(
+        idx_base_formb < idx_forma,
+        "expected BaseClass tokens for FormB to be emitted before FormA designer bytes (per-property ordering)"
+    );
     let baseclass_occurrences = normalized
         .windows(b"BaseClass".len())
         .filter(|w| *w == b"BaseClass")
