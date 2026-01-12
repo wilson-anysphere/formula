@@ -3228,11 +3228,45 @@ export class SpreadsheetApp {
   getSelectionSummary(): SpreadsheetSelectionSummary {
     const sheetId = this.sheetId;
     const sheetContentVersion = this.document.getSheetContentVersion(sheetId);
+
+    const cached = this.selectionSummaryCache;
+    if (
+      cached &&
+      cached.sheetId === sheetId &&
+      cached.sheetContentVersion === sheetContentVersion &&
+      cached.computedValuesVersion === this.computedValuesVersion &&
+      cached.rangesKey.length === this.selection.ranges.length * 4
+    ) {
+      let sameRanges = true;
+      for (let rangeIdx = 0; rangeIdx < this.selection.ranges.length; rangeIdx += 1) {
+        const r = this.selection.ranges[rangeIdx]!;
+        const startRow = Math.min(r.startRow, r.endRow);
+        const endRow = Math.max(r.startRow, r.endRow);
+        const startCol = Math.min(r.startCol, r.endCol);
+        const endCol = Math.max(r.startCol, r.endCol);
+        const keyIdx = rangeIdx * 4;
+        if (
+          cached.rangesKey[keyIdx] !== startRow ||
+          cached.rangesKey[keyIdx + 1] !== endRow ||
+          cached.rangesKey[keyIdx + 2] !== startCol ||
+          cached.rangesKey[keyIdx + 3] !== endCol
+        ) {
+          sameRanges = false;
+          break;
+        }
+      }
+      if (sameRanges) return cached.summary;
+    }
+
     const SELECTION_AREA_SCAN_THRESHOLD = 10_000;
- 
+
     // Encode the selection ranges as a compact numeric key:
     // [startRow, endRow, startCol, endCol, ...] (normalized to start<=end).
+    //
+    // We keep this separate from `ranges` so we can store it in `selectionSummaryCache`
+    // without retaining references to the mutable selection objects.
     const rangesKey: number[] = [];
+    const ranges: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> = [];
     let selectionArea = 0;
     for (const r of this.selection.ranges) {
       const startRow = Math.min(r.startRow, r.endRow);
@@ -3240,6 +3274,7 @@ export class SpreadsheetApp {
       const startCol = Math.min(r.startCol, r.endCol);
       const endCol = Math.max(r.startCol, r.endCol);
       rangesKey.push(startRow, endRow, startCol, endCol);
+      ranges.push({ startRow, endRow, startCol, endCol });
 
       if (selectionArea <= SELECTION_AREA_SCAN_THRESHOLD) {
         const rows = Math.max(0, endRow - startRow + 1);
@@ -3251,34 +3286,6 @@ export class SpreadsheetApp {
           selectionArea = SELECTION_AREA_SCAN_THRESHOLD + 1;
         }
       }
-    }
-
-    const cached = this.selectionSummaryCache;
-    if (
-      cached &&
-      cached.sheetId === sheetId &&
-      cached.sheetContentVersion === sheetContentVersion &&
-      cached.computedValuesVersion === this.computedValuesVersion &&
-      cached.rangesKey.length === rangesKey.length
-    ) {
-      let sameRanges = true;
-      for (let i = 0; i < rangesKey.length; i += 1) {
-        if (cached.rangesKey[i] !== rangesKey[i]) {
-          sameRanges = false;
-          break;
-        }
-      }
-      if (sameRanges) return cached.summary;
-    }
-
-    const ranges: Array<{ startRow: number; endRow: number; startCol: number; endCol: number }> = [];
-    for (let i = 0; i < rangesKey.length; i += 4) {
-      ranges.push({
-        startRow: rangesKey[i]!,
-        endRow: rangesKey[i + 1]!,
-        startCol: rangesKey[i + 2]!,
-        endCol: rangesKey[i + 3]!,
-      });
     }
     let countNonEmpty = 0;
     let numericCount = 0;
