@@ -56,3 +56,34 @@ fn anchors_note_comments_to_merged_region_top_left_cell() {
     assert_eq!(comments[0].content, "Hello from note");
 }
 
+#[test]
+fn imports_note_comment_text_using_workbook_codepage() {
+    let bytes = xls_fixture_builder::build_note_comment_codepage_1251_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("NotesCp1251")
+        .expect("NotesCp1251 missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let comments = sheet.comments_for_cell(a1);
+    assert_eq!(comments.len(), 1, "expected 1 comment on A1");
+    assert_eq!(comments[0].content, "\u{0410}");
+}
+
+#[test]
+fn imports_note_comment_text_split_across_multiple_continue_records() {
+    let bytes = xls_fixture_builder::build_note_comment_split_across_continues_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("NotesSplit")
+        .expect("NotesSplit missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let comments = sheet.comments_for_cell(a1);
+    assert_eq!(comments.len(), 1, "expected 1 comment on A1");
+    assert_eq!(comments[0].content, "ABCDE");
+}

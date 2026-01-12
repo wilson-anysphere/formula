@@ -378,10 +378,23 @@ mod tests {
         record(RECORD_TXO, &payload)
     }
 
+    fn txo_with_cch_text(cch_text: u16) -> Vec<u8> {
+        let mut payload = vec![0u8; 18];
+        payload[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2].copy_from_slice(&cch_text.to_le_bytes());
+        record(RECORD_TXO, &payload)
+    }
+
     fn continue_text_ascii(text: &str) -> Vec<u8> {
         let mut payload = Vec::new();
         payload.push(0); // fHighByte=0 (compressed 8-bit)
         payload.extend_from_slice(text.as_bytes());
+        record(records::RECORD_CONTINUE, &payload)
+    }
+
+    fn continue_text_compressed_bytes(bytes: &[u8]) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.push(0); // fHighByte=0 (compressed 8-bit)
+        payload.extend_from_slice(bytes);
         record(records::RECORD_CONTINUE, &payload)
     }
 
@@ -546,5 +559,43 @@ mod tests {
         let notes = parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hi");
+    }
+
+    #[test]
+    fn parses_compressed_text_from_continue_using_codepage() {
+        // In Windows-1251, 0xC0 is Cyrillic 'А' (U+0410); in Windows-1252 it's 'À'.
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text(1),
+            continue_text_compressed_bytes(&[0xC0]),
+            eof(),
+        ]
+        .concat();
+
+        let notes = parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1251).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "\u{0410}");
+    }
+
+    #[test]
+    fn parses_text_split_across_multiple_continue_records() {
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text(5),
+            continue_text_compressed_bytes(b"AB"),
+            continue_text_compressed_bytes(b"CDE"),
+            // Formatting runs CONTINUE payload (dummy bytes).
+            record(records::RECORD_CONTINUE, &[0u8; 4]),
+            eof(),
+        ]
+        .concat();
+
+        let notes = parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "ABCDE");
     }
 }

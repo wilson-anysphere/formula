@@ -257,6 +257,43 @@ pub fn build_note_comment_in_merged_region_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment, using
+/// `CODEPAGE=1251` and a compressed 8-bit TXO text payload.
+///
+/// In Windows-1251, byte `0xC0` maps to Cyrillic "А" (U+0410). This fixture ensures we decode
+/// comment text bytes using the workbook `CODEPAGE` record rather than assuming 1252.
+pub fn build_note_comment_codepage_1251_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_codepage_1251_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment, where the
+/// TXO text is split across multiple `CONTINUE` records.
+///
+/// Each continued segment starts with the BIFF8 string option flags byte (0 for compressed 8-bit).
+pub fn build_note_comment_split_across_continues_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_split_across_continues_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single external hyperlink on `A1`.
 ///
 /// This is used to ensure we preserve BIFF `HLINK` records when importing `.xls` workbooks.
@@ -438,10 +475,30 @@ fn build_note_comment_workbook_stream(kind: NoteCommentSheetKind) -> Vec<u8> {
         }
     };
 
+    build_single_sheet_workbook_stream(sheet_name, &sheet_stream, 1252)
+}
+
+fn build_note_comment_codepage_1251_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "NotesCp1251",
+        &build_note_comment_codepage_1251_sheet_stream(),
+        1251,
+    )
+}
+
+fn build_note_comment_split_across_continues_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "NotesSplit",
+        &build_note_comment_split_across_continues_sheet_stream(),
+        1252,
+    )
+}
+
+fn build_single_sheet_workbook_stream(sheet_name: &str, sheet_stream: &[u8], codepage: u16) -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
     push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
-    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_CODEPAGE, &codepage.to_le_bytes());
     push_record(&mut globals, RECORD_WINDOW1, &window1());
     push_record(&mut globals, RECORD_FONT, &font("Arial"));
 
@@ -466,7 +523,7 @@ fn build_note_comment_workbook_stream(kind: NoteCommentSheetKind) -> Vec<u8> {
     globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
         .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
 
-    globals.extend_from_slice(&sheet_stream);
+    globals.extend_from_slice(sheet_stream);
     globals
 }
 
@@ -475,6 +532,35 @@ fn build_note_comment_sheet_stream(include_merged_region: bool) -> Vec<u8> {
     const AUTHOR: &str = "Alice";
     const TEXT: &str = "Hello from note";
 
+    let segments: [&[u8]; 1] = [TEXT.as_bytes()];
+    build_note_comment_sheet_stream_with_compressed_txo(include_merged_region, OBJECT_ID, AUTHOR, &segments)
+}
+
+fn build_note_comment_codepage_1251_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const AUTHOR: &str = "Alice";
+
+    // In Windows-1251, 0xC0 maps to Cyrillic "А" (U+0410).
+    let text = [0xC0u8];
+    let segments: [&[u8]; 1] = [&text];
+    build_note_comment_sheet_stream_with_compressed_txo(false, OBJECT_ID, AUTHOR, &segments)
+}
+
+fn build_note_comment_split_across_continues_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const AUTHOR: &str = "Alice";
+
+    // "ABCDE" split as "AB" + "CDE" across two `CONTINUE` records.
+    let segments: [&[u8]; 2] = [b"AB", b"CDE"];
+    build_note_comment_sheet_stream_with_compressed_txo(false, OBJECT_ID, AUTHOR, &segments)
+}
+
+fn build_note_comment_sheet_stream_with_compressed_txo(
+    include_merged_region: bool,
+    object_id: u16,
+    author: &str,
+    text_segments: &[&[u8]],
+) -> Vec<u8> {
     let (note_row, note_col) = if include_merged_region {
         // NOTE targets B1 (non-anchor) while A1:B1 is merged.
         (0u16, 1u16)
@@ -482,6 +568,15 @@ fn build_note_comment_sheet_stream(include_merged_region: bool) -> Vec<u8> {
         // NOTE targets A1.
         (0u16, 0u16)
     };
+
+    // `cchText` in TXO is a u16 character count; our fixtures use BIFF8 compressed 8-bit text, so
+    // bytes == chars and we can sum segment byte lengths.
+    let cch_text: u16 = text_segments
+        .iter()
+        .map(|seg| seg.len())
+        .sum::<usize>()
+        .try_into()
+        .expect("comment text too long for u16 length");
 
     // The workbook globals above create 16 style XFs + 1 cell XF, so the first usable
     // cell XF index is 16.
@@ -520,10 +615,10 @@ fn build_note_comment_sheet_stream(include_merged_region: bool) -> Vec<u8> {
     push_record(
         &mut sheet,
         RECORD_NOTE,
-        &note_record(note_row, note_col, OBJECT_ID, AUTHOR),
+        &note_record(note_row, note_col, object_id, author),
     );
-    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
-    push_txo_logical_record(&mut sheet, TEXT);
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(object_id));
+    push_txo_logical_record_compressed_segments(&mut sheet, cch_text, text_segments);
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
@@ -591,6 +686,31 @@ fn push_txo_logical_record(out: &mut Vec<u8>, text: &str) {
     push_record(out, RECORD_CONTINUE, &cont_text);
 
     // Second CONTINUE record: formatting runs. We use 4 bytes of dummy data.
+    push_record(out, RECORD_CONTINUE, &[0u8; 4]);
+}
+
+fn push_txo_logical_record_compressed_segments(
+    out: &mut Vec<u8>,
+    cch_text: u16,
+    segments: &[&[u8]],
+) {
+    // TXO record payload (18 bytes).
+    // Store `cchText` as u16 at offset 6, and `cbRuns` as u16 at offset 12.
+    let mut txo = [0u8; 18];
+    txo[6..8].copy_from_slice(&cch_text.to_le_bytes());
+    txo[12..14].copy_from_slice(&4u16.to_le_bytes()); // cbRuns
+    push_record(out, RECORD_TXO, &txo);
+
+    // One or more `CONTINUE` records containing the continued-string payload.
+    // Each segment must begin with the BIFF8 string option flags byte.
+    for seg in segments {
+        let mut cont_text = Vec::<u8>::new();
+        cont_text.push(0); // flags: compressed 8-bit chars
+        cont_text.extend_from_slice(seg);
+        push_record(out, RECORD_CONTINUE, &cont_text);
+    }
+
+    // Final `CONTINUE` record: formatting runs. We use 4 bytes of dummy data.
     push_record(out, RECORD_CONTINUE, &[0u8; 4]);
 }
 
