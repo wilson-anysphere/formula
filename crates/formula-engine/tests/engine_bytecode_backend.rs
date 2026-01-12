@@ -862,6 +862,132 @@ fn bytecode_backend_supports_countifs_array_literal_locals_via_let() {
 }
 
 #[test]
+fn bytecode_backend_supports_sumifs_averageifs_minifs_maxifs_array_literal_ranges() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            r#"=SUMIFS({10,20,30,40},{"A","A","B","B"},"A",{1,2,3,4},">1")"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            r#"=AVERAGEIFS({10,20,30,40},{"A","A","B","B"},"A",{1,2,3,4},">1")"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", r#"=MAXIFS({10,20,30,40},{1,2,3,4},">2")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", r#"=MINIFS({10,20,30,40},{1,2,3,4},">2")"#)
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        4,
+        "expected criteria aggregates with array literal ranges to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(40.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Number(30.0));
+
+    assert_engine_matches_ast(
+        &engine,
+        r#"=SUMIFS({10,20,30,40},{"A","A","B","B"},"A",{1,2,3,4},">1")"#,
+        "A1",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        r#"=AVERAGEIFS({10,20,30,40},{"A","A","B","B"},"A",{1,2,3,4},">1")"#,
+        "A2",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        r#"=MAXIFS({10,20,30,40},{1,2,3,4},">2")"#,
+        "A3",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        r#"=MINIFS({10,20,30,40},{1,2,3,4},">2")"#,
+        "A4",
+    );
+}
+
+#[test]
+fn bytecode_backend_supports_sumifs_averageifs_minifs_maxifs_array_literal_locals_via_let() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            r#"=LET(sum,{10,20,30,40},cats,{"A","A","B","B"},nums,{1,2,3,4},SUMIFS(sum,cats,"A",nums,">1"))"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            r#"=LET(avg,{10,20,30,40},cats,{"A","A","B","B"},nums,{1,2,3,4},AVERAGEIFS(avg,cats,"A",nums,">1"))"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            r#"=LET(vals,{10,20,30,40},nums,{1,2,3,4},MAXIFS(vals,nums,">2"))"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A4",
+            r#"=LET(vals,{10,20,30,40},nums,{1,2,3,4},MINIFS(vals,nums,">2"))"#,
+        )
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        4,
+        "expected criteria aggregates with LET-bound array literals to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(40.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Number(30.0));
+
+    assert_engine_matches_ast(
+        &engine,
+        r#"=LET(sum,{10,20,30,40},cats,{"A","A","B","B"},nums,{1,2,3,4},SUMIFS(sum,cats,"A",nums,">1"))"#,
+        "A1",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        r#"=LET(avg,{10,20,30,40},cats,{"A","A","B","B"},nums,{1,2,3,4},AVERAGEIFS(avg,cats,"A",nums,">1"))"#,
+        "A2",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        r#"=LET(vals,{10,20,30,40},nums,{1,2,3,4},MAXIFS(vals,nums,">2"))"#,
+        "A3",
+    );
+    assert_engine_matches_ast(
+        &engine,
+        r#"=LET(vals,{10,20,30,40},nums,{1,2,3,4},MINIFS(vals,nums,">2"))"#,
+        "A4",
+    );
+}
+
+#[test]
 fn array_literal_errors_propagate_in_sum() {
     let mut engine = Engine::new();
     engine
