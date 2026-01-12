@@ -12,6 +12,7 @@
         "open_workbook",
         "new_workbook",
         "add_sheet",
+        "rename_sheet",
         "read_text_file",
         "read_binary_file",
         "read_binary_file_range",

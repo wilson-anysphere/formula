@@ -597,6 +597,7 @@ fn main() {
             commands::open_workbook,
             commands::new_workbook,
             commands::add_sheet,
+            commands::rename_sheet,
             commands::read_text_file,
             commands::read_binary_file,
             commands::read_binary_file_range,

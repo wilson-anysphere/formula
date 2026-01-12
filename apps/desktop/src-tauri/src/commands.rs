@@ -568,6 +568,23 @@ pub async fn add_sheet(
     .map_err(|e| e.to_string())?
 }
 
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn rename_sheet(
+    sheet_id: String,
+    name: String,
+    state: State<'_, SharedAppState>,
+) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        state.rename_sheet(&sheet_id, name).map_err(app_error)?;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(any(feature = "desktop", test))]
 fn read_text_file_blocking(path: &std::path::Path) -> Result<String, String> {
     use std::io::Read;

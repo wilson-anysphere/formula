@@ -100,8 +100,9 @@ import { createCommandPalette } from "./command-palette/index.js";
 import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
 import type { Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
-import { WorkbookSheetStore, generateDefaultSheetName } from "./sheets/workbookSheetStore";
+import { validateSheetName, WorkbookSheetStore, generateDefaultSheetName } from "./sheets/workbookSheetStore";
 import { startSheetStoreDocumentSync } from "./sheets/sheetStoreDocumentSync";
+import { rewriteSheetNamesInFormula } from "./workbook/formulaRewrite";
 import {
   applyAllBorders,
   applyNumberFormatPreset,
@@ -2601,7 +2602,65 @@ if (
       return { id: newSheetId, name: workbookSheetStore.getName(newSheetId) ?? sheetName };
     },
     async renameSheet(_oldName: string, _newName: string) {
-      throw new Error("Not implemented");
+      const oldName = String(_oldName ?? "");
+      const sheetId = findSheetIdByName(oldName);
+      if (!sheetId) {
+        throw new Error(`Unknown sheet: ${oldName}`);
+      }
+
+      const oldDisplayName = workbookSheetStore.getName(sheetId) ?? sheetId;
+      const normalizedNewName = validateSheetName(String(_newName ?? ""), {
+        sheets: workbookSheetStore.listAll(),
+        ignoreId: sheetId,
+      });
+
+      // No-op rename; preserve the same return shape as other sheet APIs.
+      if (oldDisplayName === normalizedNewName) {
+        return { id: sheetId, name: oldDisplayName };
+      }
+
+      const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+      if (typeof baseInvoke === "function") {
+        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
+        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
+
+        // Allow any microtask-batched workbook edits to enqueue before we rename.
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+        await invoke("rename_sheet", { sheet_id: sheetId, name: normalizedNewName });
+      }
+
+      // Update UI metadata first so follow-up operations (eg: `getActiveSheet`) observe the new name.
+      workbookSheetStore.rename(sheetId, normalizedNewName);
+      syncSheetUi();
+      updateContextKeys();
+
+      // Rewrite existing formulas that reference the old sheet name (Excel-style behavior).
+      const doc = app.getDocument();
+      const rewrittenInputs: Array<{ sheetId: string; row: number; col: number; value: null; formula: string }> = [];
+      for (const id of doc.getSheetIds()) {
+        doc.forEachCellInSheet(id, ({ row, col, cell }: any) => {
+          const formula = typeof cell?.formula === "string" ? cell.formula : null;
+          if (!formula) return;
+          const rewritten = rewriteSheetNamesInFormula(formula, oldDisplayName, normalizedNewName);
+          if (rewritten === formula) return;
+          rewrittenInputs.push({ sheetId: id, row, col, value: null, formula: rewritten });
+        });
+      }
+
+      if (rewrittenInputs.length > 0) {
+        doc.beginBatch({ label: "Rename sheet" });
+        let committed = false;
+        try {
+          doc.setCellInputs(rewrittenInputs, { label: "Rename sheet", source: "extension" });
+          committed = true;
+        } finally {
+          if (committed) doc.endBatch();
+          else doc.cancelBatch();
+        }
+      }
+
+      return { id: sheetId, name: workbookSheetStore.getName(sheetId) ?? normalizedNewName };
     },
     async deleteSheet(_name: string) {
       throw new Error("Not implemented");
