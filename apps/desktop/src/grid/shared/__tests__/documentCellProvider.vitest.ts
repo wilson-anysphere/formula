@@ -138,7 +138,7 @@ describe("DocumentCellProvider formatting integration", () => {
     const cell = provider.getCell(headerRows, headerCols);
     expect(cell).not.toBeNull();
     expect(cell?.style?.diagonalBorders).toEqual({
-      down: { width: 1, style: "solid", color: "#0000ff" }
+      down: { width: 1, style: "solid", color: "rgba(0,0,255,1)" }
     });
   });
 
