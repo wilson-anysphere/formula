@@ -491,7 +491,7 @@ export class SecondaryGridView {
     }, this.persistDebounceMs);
   }
 
-  private flushPersistence(): void {
+  flushPersistence(): void {
     if (this.scrollPersistTimer != null) {
       window.clearTimeout(this.scrollPersistTimer);
       this.scrollPersistTimer = null;

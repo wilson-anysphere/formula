@@ -750,57 +750,6 @@ const app = new SpreadsheetApp(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (window as any).__workbookSheetStore = workbookSheetStore;
 
-function sharedGridZoomStorageKey(): string {
-  // Scope zoom persistence by workbook/session id. For file-backed workbooks this can be
-  // swapped to a path-based id if/when the desktop shell exposes it.
-  return `formula:shared-grid:zoom:${workbookId}`;
-}
-
-function loadPersistedSharedGridZoom(): number | null {
-  try {
-    const storage = globalThis.localStorage;
-    if (!storage) return null;
-    const raw = storage.getItem(sharedGridZoomStorageKey());
-    if (!raw) return null;
-    const value = Number(raw);
-    if (!Number.isFinite(value) || value <= 0) return null;
-    return value;
-  } catch {
-    return null;
-  }
-}
-
-function persistSharedGridZoom(value: number): void {
-  try {
-    const storage = globalThis.localStorage;
-    if (!storage) return;
-    storage.setItem(sharedGridZoomStorageKey(), String(value));
-  } catch {
-    // Ignore storage errors (disabled storage, quota, etc).
-  }
-}
-
-function persistCurrentSharedGridZoom(): void {
-  if (!app.supportsZoom()) return;
-  persistSharedGridZoom(app.getZoom());
-}
-
-function applyPersistedSharedGridZoom(): void {
-  if (!app.supportsZoom()) return;
-  const persisted = loadPersistedSharedGridZoom();
-  if (persisted == null) return;
-  app.setZoom(persisted);
-}
-
-// Apply persisted zoom as early as possible so shared-grid renders at the user's
-// preferred zoom before they interact with the sheet.
-applyPersistedSharedGridZoom();
-
-window.addEventListener("formula:zoom-changed", () => {
-  syncZoomControl();
-  persistCurrentSharedGridZoom();
-});
-
 function getGridLimitsForFormatting(): GridLimits {
   const anyApp = app as any;
   const raw = anyApp.limits ?? { maxRows: 10_000, maxCols: 200 };
@@ -1375,7 +1324,6 @@ zoomControlEl.addEventListener("change", () => {
   if (!Number.isFinite(nextPercent) || nextPercent <= 0) return;
   app.setZoom(nextPercent / 100);
   syncZoomControl();
-  persistCurrentSharedGridZoom();
   app.focus();
 });
 
@@ -2627,6 +2575,9 @@ if (
   };
 
   const persistLayoutNow = () => {
+    // SecondaryGridView debounces persistence of scroll/zoom into the layout. Flush
+    // any pending values first so the final viewport state is not lost on reload.
+    secondaryGridView?.flushPersistence();
     if (splitPanePersistTimer != null) {
       window.clearTimeout(splitPanePersistTimer);
       splitPanePersistTimer = null;
@@ -2634,6 +2585,13 @@ if (
     splitPanePersistDirty = false;
     layoutController.persistNow();
   };
+
+  // Always flush any in-memory (persist:false) layout updates on unload.
+  //
+  // Split view interactions update layout at high frequency and rely on debounced
+  // persistence. Persisting here ensures we don't lose the user's final scroll/zoom
+  // if they close/reload immediately after interacting.
+  window.addEventListener("beforeunload", persistLayoutNow);
 
   const persistPrimaryZoomFromApp = () => {
     const pane = layoutController.layout.splitView.panes.primary;
@@ -2790,7 +2748,6 @@ if (
     stopPrimaryScrollSubscription = null;
     stopPrimaryZoomSubscription?.();
     stopPrimaryZoomSubscription = null;
-    window.removeEventListener("beforeunload", persistLayoutNow);
   };
 
   const ensurePrimarySplitPanePersistence = () => {
@@ -2816,7 +2773,6 @@ if (
       scheduleSplitPanePersist();
     });
 
-    window.addEventListener("beforeunload", persistLayoutNow);
   };
 
   const restorePrimarySplitPaneViewport = () => {
