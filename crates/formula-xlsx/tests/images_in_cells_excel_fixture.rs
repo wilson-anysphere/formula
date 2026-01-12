@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Seek};
 
-use formula_model::CellRef;
+use formula_model::{CellRef, CellValue};
 use formula_model::drawings::ImageId;
 use formula_xlsx::XlsxPackage;
 use roxmltree::Document;
@@ -48,7 +48,7 @@ fn open_fixture_zip() -> ZipArchive<Cursor<&'static [u8]>> {
     ZipArchive::new(Cursor::new(FIXTURE)).expect("fixture must be a valid zip")
 }
 
-fn zip_part(zip: &mut ZipArchive<Cursor<&'static [u8]>>, name: &str) -> Vec<u8> {
+fn zip_part<R: Read + Seek>(zip: &mut ZipArchive<R>, name: &str) -> Vec<u8> {
     let mut file = zip.by_name(name).unwrap_or_else(|_| panic!("missing part {name}"));
     let mut buf = Vec::new();
     file.read_to_end(&mut buf)
@@ -56,7 +56,7 @@ fn zip_part(zip: &mut ZipArchive<Cursor<&'static [u8]>>, name: &str) -> Vec<u8> 
     buf
 }
 
-fn zip_names(zip: &mut ZipArchive<Cursor<&'static [u8]>>) -> HashSet<String> {
+fn zip_names<R: Read + Seek>(zip: &mut ZipArchive<R>) -> HashSet<String> {
     (0..zip.len())
         .map(|i| zip.by_index(i).expect("zip index").name().to_string())
         .collect()
@@ -221,6 +221,116 @@ fn excel_images_in_cells_fixture_extracts_embedded_cell_images() {
             pkg.part("xl/media/image1.png").unwrap()
         );
     }
+}
+
+#[test]
+fn excel_images_in_cells_fixture_roundtrip_preserves_richdata_parts_and_vm_attributes() {
+    let mut doc = formula_xlsx::load_from_bytes(FIXTURE).expect("load fixture");
+
+    // Insert a new cell to force worksheet patching, and ensure we don't drop `vm="..."`
+    // metadata pointers on the existing image cells.
+    let sheet_id = doc.workbook.sheets[0].id;
+    assert!(
+        doc.set_cell_value(
+            sheet_id,
+            CellRef::from_a1("C1").unwrap(),
+            CellValue::Number(42.0)
+        ),
+        "expected set_cell_value to succeed"
+    );
+
+    let saved = doc.save_to_vec().expect("save");
+
+    // The rich-data and image payload parts should be preserved byte-for-byte.
+    let mut fixture_zip = open_fixture_zip();
+    let mut saved_zip = ZipArchive::new(Cursor::new(saved.as_slice())).expect("saved must be zip");
+    for part in [
+        "xl/cellimages.xml",
+        "xl/_rels/cellimages.xml.rels",
+        "xl/metadata.xml",
+        "xl/richData/richValue.xml",
+        "xl/richData/richValueRel.xml",
+        "xl/richData/richValueTypes.xml",
+        "xl/richData/richValueStructure.xml",
+        "xl/richData/_rels/richValueRel.xml.rels",
+        "xl/media/image1.png",
+    ] {
+        assert_eq!(
+            zip_part(&mut saved_zip, part),
+            zip_part(&mut fixture_zip, part),
+            "expected {part} to be preserved byte-for-byte"
+        );
+    }
+
+    // Verify the `vm` attributes on both image cells survive the write.
+    let sheet1_xml = zip_part(&mut saved_zip, "xl/worksheets/sheet1.xml");
+    let sheet1_xml = std::str::from_utf8(&sheet1_xml).expect("sheet1.xml must be utf-8");
+    let sheet_doc = Document::parse(sheet1_xml).expect("sheet1.xml must parse");
+
+    for (cell, expected_vm) in [("A1", "1"), ("B1", "2")] {
+        let node = sheet_doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some(cell))
+            .unwrap_or_else(|| panic!("expected cell {cell} in saved sheet1.xml:\n{sheet1_xml}"));
+        assert_eq!(
+            node.attribute("vm"),
+            Some(expected_vm),
+            "expected {cell} to preserve vm=\"{expected_vm}\", got:\n{sheet1_xml}"
+        );
+    }
+
+    // Verify workbook relationships still advertise the richData + cellImages parts.
+    let workbook_rels = zip_part(&mut saved_zip, "xl/_rels/workbook.xml.rels");
+    let workbook_rels = std::str::from_utf8(&workbook_rels).expect("workbook.xml.rels utf-8");
+    let rels: HashSet<(String, String)> = parse_relationship_targets(workbook_rels)
+        .into_iter()
+        .collect();
+
+    for (ty, target) in [
+        (
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata",
+            "metadata.xml",
+        ),
+        (
+            "http://schemas.microsoft.com/office/2017/06/relationships/cellImages",
+            "cellimages.xml",
+        ),
+        (
+            "http://schemas.microsoft.com/office/2017/06/relationships/richValue",
+            "richData/richValue.xml",
+        ),
+        (
+            "http://schemas.microsoft.com/office/2017/06/relationships/richValueRel",
+            "richData/richValueRel.xml",
+        ),
+        (
+            "http://schemas.microsoft.com/office/2017/06/relationships/richValueTypes",
+            "richData/richValueTypes.xml",
+        ),
+        (
+            "http://schemas.microsoft.com/office/2017/06/relationships/richValueStructure",
+            "richData/richValueStructure.xml",
+        ),
+    ] {
+        assert!(
+            rels.contains(&(ty.to_string(), target.to_string())),
+            "expected saved workbook.xml.rels to contain (Type={ty}, Target={target}), got:\n{workbook_rels}"
+        );
+    }
+
+    // Verify content type overrides for rich-data parts survive the write.
+    let content_types_xml = zip_part(&mut saved_zip, "[Content_Types].xml");
+    let content_types_xml =
+        std::str::from_utf8(&content_types_xml).expect("[Content_Types].xml utf-8");
+    let overrides = parse_content_types_overrides(content_types_xml);
+    assert_eq!(
+        overrides.get("/xl/cellimages.xml").map(String::as_str),
+        Some("application/vnd.ms-excel.cellimages+xml")
+    );
+    assert_eq!(
+        overrides.get("/xl/metadata.xml").map(String::as_str),
+        Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml")
+    );
 }
 
 #[test]
