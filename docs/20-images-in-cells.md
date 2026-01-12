@@ -29,8 +29,8 @@ Workbooks using images-in-cells are expected to include some/all of the followin
 
 ```
 xl/
-├── cellImages.xml
-├── cellImages1.xml (optional; allow numeric suffixes like other indexed XLSX parts)
+├── cellImages.xml                # Optional (some files use richData-only wiring; preserve if present)
+├── cellImages1.xml               # Optional; allow numeric suffixes like other indexed XLSX parts
 ├── media/
 │   └── image*.{png,jpg,gif,...}
 ├── metadata.xml
@@ -52,6 +52,9 @@ Notes:
   lowercase) instead of `xl/cellImages.xml`. OPC part names are case-sensitive inside the ZIP, so:
   - readers should handle both variants, and
   - writers should preserve the original casing when round-tripping an existing file.
+- **`cellImages.xml` is optional:** Some “Place in Cell” / richData workbooks store image bytes via
+  `xl/richData/richValueRel.xml` → `xl/richData/_rels/richValueRel.xml.rels` → `xl/media/*` without a
+  separate `xl/cellImages.xml` part. If `cellImages.xml` exists, preserve it and its relationship graph.
 - `xl/media/*` contains the actual image bytes (usually `.png`, but Excel may use other formats).
 - The exact `xl/richData/*` file set can vary across Excel builds; the `richValue*` names shown above are
   common, but Formula should preserve the entire `xl/richData/` directory byte-for-byte unless we
