@@ -22,8 +22,9 @@ export class CollabBranchingWorkflow {
 
   /**
    * Origin configuration for checkout/merge:
-   * - default uses a dedicated origin token (`{type:"collab-branching-apply"}`) so bulk
-   *   rewrites aren't captured by collaborative undo tracking (`session.origin`).
+   * - default uses a dedicated origin token (`"branching-apply"`) so bulk rewrites aren't
+   *   captured by collaborative undo tracking (`session.origin`). CollabSession also treats
+   *   this origin as an ignored "time travel" operation for conflict monitors.
    * - pass `applyWithSessionOrigin: true` (or `applyOrigin: session.origin`) to opt back
    *   into the historical undoable behavior.
    *
@@ -43,7 +44,7 @@ export class CollabBranchingWorkflow {
       ? this.#session.origin
       : applyOrigin !== undefined
         ? applyOrigin
-        : { type: "collab-branching-apply" };
+        : "branching-apply";
   }
 
   /**
