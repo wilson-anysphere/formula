@@ -280,19 +280,18 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveAttribute("data-active", "true");
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
 
-    // Move Sheet2 after Sheet3 (new order: Sheet1, Sheet3, Sheet2).
+    // Move Sheet3 before Sheet1 (new order: Sheet3, Sheet1, Sheet2).
     try {
       await page
-        .getByTestId("sheet-tab-Sheet2")
-        // targetPosition is relative to the Sheet3 tab; use a large X so it lands on the "after" side.
-        .dragTo(page.getByTestId("sheet-tab-Sheet3"), { targetPosition: { x: 999, y: 1 } });
+        .getByTestId("sheet-tab-Sheet3")
+        .dragTo(page.getByTestId("sheet-tab-Sheet1"), { targetPosition: { x: 1, y: 1 } });
     } catch {
       // Ignore; we'll fall back to a synthetic drop below.
     }
 
     // Playwright drag/drop can be flaky with HTML5 DataTransfer. If the order doesn't match,
     // dispatch a synthetic drop event that exercises the sheet tab DnD plumbing.
-    const desiredOrder = ["Sheet1", "Sheet3", "Sheet2"];
+    const desiredOrder = ["Sheet3", "Sheet1", "Sheet2"];
     const orderKey = (order: Array<string | null>) => order.filter(Boolean).slice(0, 3).join(",");
     const didReorder = orderKey(
       await page.evaluate(() =>
@@ -304,9 +303,9 @@ test.describe("sheet tabs", () => {
 
     if (didReorder !== desiredOrder.join(",")) {
       await page.evaluate(() => {
-        const fromId = "Sheet2";
-        const target = document.querySelector('[data-testid="sheet-tab-Sheet3"]') as HTMLElement | null;
-        if (!target) throw new Error("Missing Sheet3 tab");
+        const fromId = "Sheet3";
+        const target = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+        if (!target) throw new Error("Missing Sheet1 tab");
         const rect = target.getBoundingClientRect();
 
         const dt = new DataTransfer();
@@ -316,7 +315,7 @@ test.describe("sheet tabs", () => {
         const drop = new DragEvent("drop", {
           bubbles: true,
           cancelable: true,
-          clientX: rect.left + rect.width - 1,
+          clientX: rect.left + 1,
           clientY: rect.top + rect.height / 2,
         });
         Object.defineProperty(drop, "dataTransfer", { value: dt });
@@ -331,8 +330,8 @@ test.describe("sheet tabs", () => {
         ),
       ),
     ).toEqual(desiredOrder);
-    // Active sheet is still Sheet3, but its position is now 2nd.
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
+    // Active sheet is still Sheet3, but its position is now 1st.
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
 
     // Focus the grid: Ctrl/Cmd+PgUp/PgDn must work when the grid is focused (real workflow).
     await page.click("#grid", { position: { x: 5, y: 5 } });
@@ -348,7 +347,20 @@ test.describe("sheet tabs", () => {
       const evt = new KeyboardEvent("keydown", {
         key: "PageDown",
         ctrlKey: true,
-        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      grid.dispatchEvent(evt);
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
+
+    await page.evaluate(() => {
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid");
+      const evt = new KeyboardEvent("keydown", {
+        key: "PageDown",
+        ctrlKey: true,
         bubbles: true,
         cancelable: true,
       });
@@ -357,35 +369,20 @@ test.describe("sheet tabs", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
 
+    // Wrap around to Sheet3.
     await page.evaluate(() => {
       const grid = document.getElementById("grid");
       if (!grid) throw new Error("Missing #grid");
       const evt = new KeyboardEvent("keydown", {
         key: "PageDown",
         ctrlKey: true,
-        metaKey: true,
-        bubbles: true,
-        cancelable: true,
-      });
-      grid.dispatchEvent(evt);
-    });
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
-
-    await page.evaluate(() => {
-      const grid = document.getElementById("grid");
-      if (!grid) throw new Error("Missing #grid");
-      const evt = new KeyboardEvent("keydown", {
-        key: "PageDown",
-        ctrlKey: true,
-        metaKey: true,
         bubbles: true,
         cancelable: true,
       });
       grid.dispatchEvent(evt);
     });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet3");
-    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
   });
 
   test("drag reorder maps visible tab positions onto full sheet order with hidden sheets", async ({ page }) => {
