@@ -131,6 +131,7 @@ import {
   reportStartupWebviewLoaded,
 } from "./tauri/startupMetrics.js";
 import { openExternalHyperlink } from "./hyperlinks/openExternal.js";
+import { clampUsedRange, resolveWorkbookLoadLimits } from "./workbook/load/clampUsedRange.js";
 
 // Apply theme + reduced motion settings as early as possible to avoid rendering with
 // default tokens before the user's preference is known.
@@ -5579,11 +5580,17 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   );
   syncWorkbookSheetNamesFromSheetStore();
 
-  const MAX_COLS = 200;
   const CHUNK_ROWS = 200;
-  const MAX_ROWS = 10_000;
+  const { maxRows: MAX_ROWS, maxCols: MAX_COLS } = resolveWorkbookLoadLimits({
+    queryString: typeof window !== "undefined" ? window.location.search : "",
+    env: {
+      ...((import.meta as any).env ?? {}),
+      ...(typeof process !== "undefined" ? (process as any).env ?? {} : {}),
+    },
+  });
 
   const snapshotSheets: Array<{ id: string; cells: any[] }> = [];
+  let truncated = false;
 
   for (const sheet of sheets) {
     const cells: Array<{ row: number; col: number; value: unknown | null; formula: string | null; format: null }> = [];
@@ -5594,10 +5601,11 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
       continue;
     }
 
-    const startCol = Math.max(0, Math.min(usedRange.start_col, MAX_COLS - 1));
-    const endCol = Math.max(0, Math.min(usedRange.end_col, MAX_COLS - 1));
-    const startRow = Math.max(0, Math.min(usedRange.start_row, MAX_ROWS - 1));
-    const endRow = Math.max(0, Math.min(usedRange.end_row, MAX_ROWS - 1));
+    const { startRow, endRow, startCol, endCol, truncatedRows, truncatedCols } = clampUsedRange(usedRange, {
+      maxRows: MAX_ROWS,
+      maxCols: MAX_COLS,
+    });
+    if (truncatedRows || truncatedCols) truncated = true;
 
     if (startRow > endRow || startCol > endCol) {
       snapshotSheets.push({ id: sheet.id, cells });
@@ -5636,6 +5644,12 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     }
 
     snapshotSheets.push({ id: sheet.id, cells });
+  }
+
+  if (truncated) {
+    const message = `Workbook is larger than the current load limit; only the first ${MAX_ROWS} rows and ${MAX_COLS} columns were loaded.`;
+    console.warn(message);
+    showToast(message, "warning");
   }
 
   const snapshot = encodeDocumentSnapshot({ schemaVersion: 1, sheets: snapshotSheets });
