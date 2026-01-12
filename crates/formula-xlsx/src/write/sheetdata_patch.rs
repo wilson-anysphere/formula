@@ -578,13 +578,19 @@ fn patch_or_copy_cell<W: Write>(
                 // `vm="..."` is a value-metadata pointer into `xl/metadata.xml` (rich values /
                 // images-in-cell).
                 //
-                // We can only safely preserve `vm` when the cell's cached value is unchanged (or
-                // still uses the rich-data placeholder value, e.g. `#VALUE!` for in-cell images).
-                // Otherwise we'd be leaving a dangling metadata pointer that no longer matches the
-                // cell value.
-                let value_changed = original.value != desired_semantics.value;
-                let preserve_vm =
-                    !value_changed || matches!(desired_semantics.value, CellValue::Error(ErrorValue::Value));
+                // We generally preserve unknown SpreadsheetML metadata for fidelity, even when the
+                // cached value changes.
+                //
+                // The exception is the rich-value placeholder semantics used by in-cell images:
+                // Excel stores the image itself in `xl/richData/*` and represents the cell's cached
+                // value as the error `#VALUE!` with a `vm` pointer. When the cell is edited away
+                // from that placeholder value, we must drop `vm` to avoid leaving dangling rich-value
+                // metadata pointers.
+                let original_is_rich_placeholder =
+                    matches!(original.value, CellValue::Error(ErrorValue::Value));
+                let desired_is_rich_placeholder =
+                    matches!(desired_semantics.value, CellValue::Error(ErrorValue::Value));
+                let preserve_vm = !(original_is_rich_placeholder && !desired_is_rich_placeholder);
                 write_updated_cell(
                     doc,
                     sheet_meta,
