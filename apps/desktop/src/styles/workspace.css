@@ -246,7 +246,6 @@
   overflow: auto;
 }
 
-.dock-panel__body--fill,
 .panel-body--fill {
   flex: 1;
   min-height: 0;
@@ -255,8 +254,6 @@
   flex-direction: column;
 }
 
-.dock-panel__mount,
-.panel-mount--fill-column,
 .panel-body__container {
   height: 100%;
   display: flex;

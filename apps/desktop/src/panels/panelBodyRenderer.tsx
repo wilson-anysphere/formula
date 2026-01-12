@@ -493,7 +493,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
 
   function renderPanelBody(panelId: string, body: HTMLDivElement) {
     // Reset any previous renderer-specific body modifiers before applying this panel's layout.
-    body.classList.remove("dock-panel__body--fill", "panel-body--fill");
+    body.classList.remove("panel-body--fill");
     const workbookId = options.getWorkbookId?.() ?? options.workbookId;
 
     if (panelId === PanelIds.AI_CHAT) {
