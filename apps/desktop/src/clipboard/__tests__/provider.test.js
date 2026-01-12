@@ -151,6 +151,43 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("web: read recognizes application/x-rtf", async () => {
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        navigator: {
+          clipboard: {
+            async read() {
+              return [
+                {
+                  types: ["text/plain", "application/x-rtf"],
+                  /**
+                   * @param {string} type
+                   */
+                  async getType(type) {
+                    switch (type) {
+                      case "text/plain":
+                        return new Blob(["hello"], { type });
+                      case "application/x-rtf":
+                        return new Blob(["{\\\\rtf1 hello}"], { type });
+                      default:
+                        throw new Error(`Unexpected clipboard type: ${type}`);
+                    }
+                  },
+                },
+              ];
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { text: "hello", rtf: "{\\\\rtf1 hello}" });
+      }
+    );
+  });
+
   await t.test("web: read falls back to readText when rich read throws", async () => {
     await withGlobals(
       {

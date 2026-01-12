@@ -504,7 +504,7 @@ function createWebClipboardProvider() {
             const htmlType = item.types.find((t) => matchMime(t, "text/html"));
             const textType = item.types.find((t) => matchMime(t, "text/plain"));
             const rtfType = item.types.find(
-              (t) => matchMime(t, "text/rtf") || matchMime(t, "application/rtf")
+              (t) => matchMime(t, "text/rtf") || matchMime(t, "application/rtf") || matchMime(t, "application/x-rtf")
             );
             const imagePngType = item.types.find((t) => matchMime(t, "image/png"));
 
