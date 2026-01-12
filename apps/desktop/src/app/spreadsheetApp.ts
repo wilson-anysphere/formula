@@ -3707,6 +3707,12 @@ export class SpreadsheetApp {
   }
 
   private reindexCommentCells(): void {
+    // Comment updates can happen while the user is hovering. Clear any shared-grid
+    // hover caches so the next pointermove re-evaluates comment presence and preview
+    // content (otherwise we may "stick" to stale hover state).
+    this.clearSharedHoverCellCache();
+    this.hideCommentTooltip();
+
     this.commentCells.clear();
     this.commentMeta.clear();
     this.commentMetaByCoord.clear();
