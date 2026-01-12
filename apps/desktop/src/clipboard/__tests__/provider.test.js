@@ -209,6 +209,23 @@ test("clipboard provider: rich MIME handling", async (t) => {
     );
   });
 
+  await t.test("web provider tolerates missing Clipboard APIs", async () => {
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        navigator: {},
+        ClipboardItem: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { text: undefined });
+
+        await provider.write({ text: "plain" });
+      }
+    );
+  });
+
   await t.test("tauri provider merges invoke('read_clipboard') results without clobbering web fields", async () => {
     await withGlobals(
       {
@@ -356,6 +373,22 @@ test("clipboard provider: rich MIME handling", async (t) => {
         const content = await provider.read();
         assert.deepEqual(content, { text: "tauri text" });
         assert.equal(webReadTextCalls, 0);
+      }
+    );
+  });
+
+  await t.test("tauri provider tolerates missing core.invoke and clipboard APIs", async () => {
+    await withGlobals(
+      {
+        __TAURI__: {},
+        navigator: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { text: undefined });
+
+        await provider.write({ text: "plain" });
       }
     );
   });
