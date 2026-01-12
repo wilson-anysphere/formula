@@ -71,6 +71,12 @@ http://localhost:4174/?collab=1&wsUrl=ws://127.0.0.1:1234&docId=demo&token=dev-t
 
 Edits and comments should sync in real-time.
 
+The status bar shows a collaboration indicator (`Collab: …`) with:
+
+- the current `docId`
+- websocket connectivity (`Connecting…` / `Connected` / `Disconnected` / `Offline`)
+- sync state (`Syncing…` / `Synced`)
+
 To exercise the conflict UI, edit the same cell concurrently in two windows (e.g. different formulas in the same cell).
 
 ## Pyodide / Python scripting
