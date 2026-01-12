@@ -12,6 +12,7 @@ import { toRustPivotConfig } from "./pivotConfigMapping.js";
 import type { PivotTableSummary } from "../../tauri/pivotBackend.js";
 import { TauriPivotBackend } from "../../tauri/pivotBackend.js";
 import { applyPivotCellUpdates } from "../../pivots/applyUpdates.js";
+import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 
 type RangeRect = { startRow: number; startCol: number; endRow: number; endCol: number };
 
@@ -384,7 +385,7 @@ export function PivotBuilderPanelContainer(props: Props) {
   }, [destCellA1, destSheetId, destinationKind, newSheetName]);
 
   const guardDestination = useCallback(
-    (cfg: PivotTableConfig, dest: { sheetId: string; startRow: number; startCol: number }): boolean => {
+    async (cfg: PivotTableConfig, dest: { sheetId: string; startRow: number; startCol: number }): Promise<boolean> => {
       if (availableFields.length === 0) return false;
       const rect = estimatePivotOutputRect({
         document: doc,
@@ -398,7 +399,7 @@ export function PivotBuilderPanelContainer(props: Props) {
       if (canEditCell) {
         // Always validate at least the anchor cell; scanning everything can be expensive.
         if (!canEditCell({ sheetId: dest.sheetId, row: dest.startRow, col: dest.startCol })) {
-          window.alert(t("pivotBuilder.destination.error.protected"));
+          await nativeDialogs.alert(t("pivotBuilder.destination.error.protected"));
           return false;
         }
 
@@ -408,7 +409,7 @@ export function PivotBuilderPanelContainer(props: Props) {
           for (let r = rect.startRow; r <= rect.endRow; r += 1) {
             for (let c = rect.startCol; c <= rect.endCol; c += 1) {
               if (!canEditCell({ sheetId: dest.sheetId, row: r, col: c })) {
-                window.alert(t("pivotBuilder.destination.error.protected"));
+                await nativeDialogs.alert(t("pivotBuilder.destination.error.protected"));
                 return false;
               }
             }
@@ -418,7 +419,7 @@ export function PivotBuilderPanelContainer(props: Props) {
 
       // For large pivots, avoid scanning the full output region; just require an explicit confirmation.
       if (rect.cellCount > 10_000) {
-        return window.confirm(tWithVars("pivotBuilder.destination.confirm.large", { destination: destinationSummary }));
+        return nativeDialogs.confirm(tWithVars("pivotBuilder.destination.confirm.large", { destination: destinationSummary }));
       }
 
       let nonEmpty = 0;
@@ -434,7 +435,7 @@ export function PivotBuilderPanelContainer(props: Props) {
       }
 
       if (nonEmpty > 0) {
-        return window.confirm(
+        return nativeDialogs.confirm(
           tWithVars("pivotBuilder.destination.confirm.overwrite", { destination: destinationSummary }),
         );
       }
@@ -486,7 +487,7 @@ export function PivotBuilderPanelContainer(props: Props) {
       }
 
       const dest = { sheetId: destinationSheetIdResolved, startRow: destinationStart.row, startCol: destinationStart.col };
-      if (!guardDestination(cfg, dest)) return;
+      if (!(await guardDestination(cfg, dest))) return;
 
       setBusy({ kind: "create" });
 

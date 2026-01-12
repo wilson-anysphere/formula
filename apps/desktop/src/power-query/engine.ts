@@ -22,6 +22,7 @@ import { effectiveDocumentClassification, effectiveRangeClassification } from ".
 
 import type { DocumentController } from "../document/documentController.js";
 import { getTableSignatureRegistry } from "./tableSignatures.ts";
+import * as nativeDialogs from "../tauri/nativeDialogs.js";
 
 type DlpContext = {
   documentId: string;
@@ -945,22 +946,22 @@ function parseConnectionIdentity(connection: unknown): unknown {
   return null;
 }
 
-function defaultPermissionPrompt(kind: string, details: unknown): boolean {
+async function defaultPermissionPrompt(kind: string, details: unknown): Promise<boolean> {
   if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
 
   const request = (details as any)?.request;
   if (kind === "http:request") {
     const url = typeof request?.url === "string" ? request.url : "an external URL";
-    return window.confirm(`Allow this query to make a network request to ${url}?`);
+    return nativeDialogs.confirm(`Allow this query to make a network request to ${url}?`);
   }
   if (kind === "file:read") {
     const path = typeof request?.path === "string" ? request.path : "a local file";
-    return window.confirm(`Allow this query to read ${path}?`);
+    return nativeDialogs.confirm(`Allow this query to read ${path}?`);
   }
   if (kind === "database:query") {
-    return window.confirm("Allow this query to run a database query?");
+    return nativeDialogs.confirm("Allow this query to run a database query?");
   }
-  return window.confirm(`Allow this query to access: ${kind}?`);
+  return nativeDialogs.confirm(`Allow this query to access: ${kind}?`);
 }
 
 type PrivacyLevel = "public" | "organizational" | "private" | "unknown";

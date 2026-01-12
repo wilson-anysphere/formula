@@ -11,6 +11,7 @@ import {
   getDesktopPowerQueryService,
   onDesktopPowerQueryServiceChanged,
 } from "../../power-query/service.js";
+import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 
 import { PanelIds } from "../panelRegistry.js";
 
@@ -418,16 +419,21 @@ export function DataQueriesPanelContainer(props: Props) {
   );
 
   const deleteQuery = useCallback(
-    (queryId: string) => {
-      if (!service) {
-        setGlobalError("Power Query service not available.");
-        return;
+    async (queryId: string) => {
+      try {
+        if (!service) {
+          setGlobalError("Power Query service not available.");
+          return;
+        }
+        if (typeof window !== "undefined" && typeof window.confirm === "function") {
+          const ok = await nativeDialogs.confirm("Delete this query?");
+          if (!ok) return;
+        }
+        setGlobalError(null);
+        service.unregisterQuery(queryId);
+      } catch (err: any) {
+        setGlobalError(err?.message ?? String(err));
       }
-      if (typeof window !== "undefined" && typeof window.confirm === "function") {
-        if (!window.confirm("Delete this query?")) return;
-      }
-      setGlobalError(null);
-      service.unregisterQuery(queryId);
     },
     [service],
   );

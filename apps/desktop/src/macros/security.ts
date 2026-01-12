@@ -1,4 +1,5 @@
 import type { MacroPermission, MacroPermissionRequest, MacroSecurityStatus, MacroTrustDecision } from "./types";
+import * as nativeDialogs from "../tauri/nativeDialogs.js";
 
 export interface MacroTrustDecisionPrompt {
   workbookId: string;
@@ -95,7 +96,7 @@ export class DefaultMacroSecurityController implements MacroSecurityController {
 
     const alreadyGranted = prompt.alreadyGranted.length ? `\nAlready granted: ${prompt.alreadyGranted.join(", ")}` : "";
 
-    const ok = window.confirm(
+    const ok = await nativeDialogs.confirm(
       `Macro permission request\n\n` +
         `Workbook: ${workbook}\n` +
         `Macro: ${req.macroId}\n` +

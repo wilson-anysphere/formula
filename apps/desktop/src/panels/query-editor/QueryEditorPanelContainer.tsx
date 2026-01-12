@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { parseCronExpression, type Query } from "@formula/power-query";
 
 import { parseA1 } from "../../document/coords.js";
+import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 
 import type { QuerySheetDestination } from "../../power-query/applyToDocument.js";
 import { getContextForDocument } from "../../power-query/engine.js";
@@ -435,10 +436,15 @@ export function QueryEditorPanelContainer(props: Props) {
       return;
     }
 
-    const includeHeader = typeof window !== "undefined" && typeof window.confirm === "function" ? window.confirm("Include header row?") : true;
+    const includeHeader =
+      typeof window !== "undefined" && typeof window.confirm === "function"
+        ? await nativeDialogs.confirm("Include header row?")
+        : true;
 
     const clearExisting =
-      typeof window !== "undefined" && typeof window.confirm === "function" ? window.confirm("Clear previous output range (if known)?") : true;
+      typeof window !== "undefined" && typeof window.confirm === "function"
+        ? await nativeDialogs.confirm("Clear previous output range (if known)?")
+        : true;
 
     const destination: QuerySheetDestination = {
       sheetId,

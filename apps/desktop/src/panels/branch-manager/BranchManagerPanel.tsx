@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 import { t, tWithVars } from "../../i18n/index.js";
+import * as nativeDialogs from "../../tauri/nativeDialogs.js";
 
 /**
  * The desktop app wires this panel to the real document controller + branch
@@ -146,7 +147,8 @@ export function BranchManagerPanel({
               <button
                 disabled={!canManage || b.name === "main"}
                 onClick={async () => {
-                  if (!window.confirm(tWithVars("branchManager.confirm.delete", { name: b.name }))) return;
+                  const ok = await nativeDialogs.confirm(tWithVars("branchManager.confirm.delete", { name: b.name }));
+                  if (!ok) return;
                   try {
                     await branchService.deleteBranch(actor, { name: b.name });
                     await reload();

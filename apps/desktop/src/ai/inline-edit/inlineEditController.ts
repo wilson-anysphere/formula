@@ -329,7 +329,6 @@ function createSessionId(): string {
   }
   return `inline-edit-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
-
 function createAbortError(): Error {
   const error = new Error("Inline edit was cancelled.");
   error.name = "AbortError";
