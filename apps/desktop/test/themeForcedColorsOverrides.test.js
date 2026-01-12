@@ -19,5 +19,12 @@ test("tokens.css forced-colors overrides apply even when data-theme is set", () 
   // the forced-colors overrides match the specificity of `:root[data-theme=\"dark\"]`
   // so they win even when a concrete theme is set.
   assert.match(afterMedia, /:root,\s*\n\s*:root\[data-theme\]\s*\{/);
-});
 
+  // Guardrails: forced-colors should also neutralize common overlay tokens that
+  // otherwise inherit from light/dark themes (shadows, tooltip colors, etc).
+  assert.match(afterMedia, /--panel-shadow\s*:/);
+  assert.match(afterMedia, /--tooltip-bg\s*:/);
+  assert.match(afterMedia, /--tooltip-text\s*:/);
+  assert.match(afterMedia, /--dialog-shadow\s*:/);
+  assert.match(afterMedia, /--dialog-backdrop\s*:/);
+});
