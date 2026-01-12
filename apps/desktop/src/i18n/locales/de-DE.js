@@ -34,6 +34,7 @@ export const deDE = {
   "commandPalette.placeholder": "Befehle und Funktionen suchen…",
   "commandPalette.aria.label": "Befehlspalette",
   "commandPalette.aria.commandsList": "Ergebnisse",
+  "statusBar.sheetPosition": "Blatt {position} von {total}",
   "commandPalette.extensions.loading": "Erweiterungen werden geladen…",
   "commandPalette.extensions.failedToLoad": "Erweiterungen konnten nicht geladen werden: {message}",
   "updater.alreadyChecking": "Es wird bereits nach Updates gesucht…",

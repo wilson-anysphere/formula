@@ -34,6 +34,7 @@ export const ar = {
   "commandPalette.placeholder": "ابحث عن الأوامر والدوال…",
   "commandPalette.aria.label": "لوحة الأوامر",
   "commandPalette.aria.commandsList": "النتائج",
+  "statusBar.sheetPosition": "ورقة {position} من {total}",
   "commandPalette.extensions.loading": "جارٍ تحميل الإضافات…",
   "commandPalette.extensions.failedToLoad": "فشل تحميل الإضافات: {message}",
   "updater.alreadyChecking": "يتم بالفعل التحقق من التحديثات…",
