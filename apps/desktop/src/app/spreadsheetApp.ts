@@ -596,46 +596,24 @@ export class SpreadsheetApp {
     this.vScrollbarTrack = document.createElement("div");
     this.vScrollbarTrack.setAttribute("aria-hidden", "true");
     this.vScrollbarTrack.setAttribute("data-testid", "scrollbar-track-y");
-    this.vScrollbarTrack.style.position = "absolute";
-    this.vScrollbarTrack.style.background = "var(--bg-tertiary)";
-    this.vScrollbarTrack.style.borderRadius = "6px";
-    this.vScrollbarTrack.style.zIndex = "5";
-    this.vScrollbarTrack.style.opacity = "0.9";
+    this.vScrollbarTrack.className = "grid-scrollbar-track grid-scrollbar-track--vertical";
 
     this.vScrollbarThumb = document.createElement("div");
     this.vScrollbarThumb.setAttribute("aria-hidden", "true");
     this.vScrollbarThumb.setAttribute("data-testid", "scrollbar-thumb-y");
-    this.vScrollbarThumb.style.position = "absolute";
-    this.vScrollbarThumb.style.left = "1px";
-    this.vScrollbarThumb.style.right = "1px";
-    this.vScrollbarThumb.style.top = "0";
-    this.vScrollbarThumb.style.height = "40px";
-    this.vScrollbarThumb.style.background = "var(--text-secondary)";
-    this.vScrollbarThumb.style.borderRadius = "6px";
-    this.vScrollbarThumb.style.cursor = "pointer";
+    this.vScrollbarThumb.className = "grid-scrollbar-thumb";
     this.vScrollbarTrack.appendChild(this.vScrollbarThumb);
     this.root.appendChild(this.vScrollbarTrack);
 
     this.hScrollbarTrack = document.createElement("div");
     this.hScrollbarTrack.setAttribute("aria-hidden", "true");
     this.hScrollbarTrack.setAttribute("data-testid", "scrollbar-track-x");
-    this.hScrollbarTrack.style.position = "absolute";
-    this.hScrollbarTrack.style.background = "var(--bg-tertiary)";
-    this.hScrollbarTrack.style.borderRadius = "6px";
-    this.hScrollbarTrack.style.zIndex = "5";
-    this.hScrollbarTrack.style.opacity = "0.9";
+    this.hScrollbarTrack.className = "grid-scrollbar-track grid-scrollbar-track--horizontal";
 
     this.hScrollbarThumb = document.createElement("div");
     this.hScrollbarThumb.setAttribute("aria-hidden", "true");
     this.hScrollbarThumb.setAttribute("data-testid", "scrollbar-thumb-x");
-    this.hScrollbarThumb.style.position = "absolute";
-    this.hScrollbarThumb.style.top = "1px";
-    this.hScrollbarThumb.style.bottom = "1px";
-    this.hScrollbarThumb.style.left = "0";
-    this.hScrollbarThumb.style.width = "40px";
-    this.hScrollbarThumb.style.background = "var(--text-secondary)";
-    this.hScrollbarThumb.style.borderRadius = "6px";
-    this.hScrollbarThumb.style.cursor = "pointer";
+    this.hScrollbarThumb.className = "grid-scrollbar-thumb";
     this.hScrollbarTrack.appendChild(this.hScrollbarThumb);
     this.root.appendChild(this.hScrollbarTrack);
 

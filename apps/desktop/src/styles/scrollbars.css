@@ -1,0 +1,51 @@
+/*
+  Grid scrollbars (track + thumb) used by both the legacy SpreadsheetApp renderer
+  and the shared CanvasGridRenderer wrapper.
+
+  This file intentionally uses only design tokens from `tokens.css` and does not
+  hardcode colors (enforced by `noHardcodedColors.test.js`).
+*/
+
+.grid-scrollbar-track {
+  position: absolute;
+  z-index: 5;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  opacity: 0.9;
+  user-select: none;
+}
+
+.grid-scrollbar-thumb {
+  position: absolute;
+  background: var(--text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    box-shadow var(--motion-duration-fast) var(--motion-ease);
+}
+
+.grid-scrollbar-thumb:hover,
+.grid-scrollbar-thumb:active {
+  background: var(--text-primary);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.grid-scrollbar-thumb:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 1px;
+}
+
+.grid-scrollbar-track--vertical > .grid-scrollbar-thumb {
+  left: 1px;
+  right: 1px;
+  top: 0;
+}
+
+.grid-scrollbar-track--horizontal > .grid-scrollbar-thumb {
+  top: 1px;
+  bottom: 1px;
+  left: 0;
+}
+

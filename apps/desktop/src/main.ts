@@ -3,6 +3,7 @@ import "./styles/tokens.css";
 import "./styles/ui.css";
 import "./styles/command-palette.css";
 import "./styles/workspace.css";
+import "./styles/scrollbars.css";
 import "./styles/comments.css";
 import "./styles/shell.css";
 import "./styles/auditing.css";
