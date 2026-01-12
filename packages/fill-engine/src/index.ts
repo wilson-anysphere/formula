@@ -164,7 +164,9 @@ function shiftCellRef(ref: ParsedRef, deltaRow: number, deltaCol: number): strin
   const nextRow1 = ref.rowAbs ? ref.row : ref.row + deltaRow;
 
   if (nextCol0 < 0 || nextRow1 <= 0) {
-    return `${ref.sheetPrefix ?? ""}#REF!`;
+    // The engine formula grammar does not accept sheet-qualified error literals like `Sheet1!#REF!`.
+    // Drop any sheet prefix when the rewritten reference becomes invalid.
+    return "#REF!";
   }
 
   const col = indexToColName(nextCol0);

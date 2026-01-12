@@ -83,7 +83,9 @@ function shiftSegment(segment: string, deltaRows: number, deltaCols: number): st
   ) => {
     const nextStart = shiftCol(startCol, Boolean(startAbs));
     const nextEnd = shiftCol(endCol, Boolean(endAbs));
-    if (nextStart < 0 || nextEnd < 0) return `${prefix}${sheetPrefix}#REF!`;
+    // The engine formula grammar does not accept sheet-qualified error literals like `Sheet1!#REF!`.
+    // Drop the sheet prefix when the rewritten reference becomes invalid.
+    if (nextStart < 0 || nextEnd < 0) return `${prefix}#REF!`;
     return `${prefix}${sheetPrefix}${startAbs}${colToName(nextStart)}:${endAbs}${colToName(nextEnd)}`;
   };
 
@@ -100,7 +102,7 @@ function shiftSegment(segment: string, deltaRows: number, deltaCols: number): st
     const endRow0 = Number.parseInt(endRow, 10) - 1;
     const nextStart = shiftRow(startRow0, Boolean(startAbs));
     const nextEnd = shiftRow(endRow0, Boolean(endAbs));
-    if (nextStart < 0 || nextEnd < 0) return `${prefix}${sheetPrefix}#REF!`;
+    if (nextStart < 0 || nextEnd < 0) return `${prefix}#REF!`;
     return `${prefix}${sheetPrefix}${startAbs}${nextStart + 1}:${endAbs}${nextEnd + 1}`;
   };
 
@@ -144,7 +146,7 @@ function shiftSegment(segment: string, deltaRows: number, deltaCols: number): st
     const nextRow0 = rowAbs ? row0 : row0 + deltaRows;
 
     if (nextCol0 < 0 || nextRow0 < 0) {
-      return `${prefix}${sheetPrefix}#REF!`;
+      return `${prefix}#REF!`;
     }
 
     const next = `${sheetPrefix}${colAbs}${colToName(nextCol0)}${rowAbs}${nextRow0 + 1}`;

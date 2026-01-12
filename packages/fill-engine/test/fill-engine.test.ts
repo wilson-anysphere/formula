@@ -10,6 +10,11 @@ describe("shiftFormulaA1", () => {
   it("drops the spill-range postfix when shifting creates a #REF!", () => {
     expect(shiftFormulaA1("=A1#", 0, -1)).toBe("=#REF!");
   });
+
+  it("drops sheet prefixes when shifting creates a #REF! (engine grammar does not accept Sheet1!#REF!)", () => {
+    expect(shiftFormulaA1("=Sheet1!A1", 0, -1)).toBe("=#REF!");
+    expect(shiftFormulaA1("='Sheet Name'!A1", 0, -1)).toBe("=#REF!");
+  });
 });
 
 describe("computeFillEdits", () => {
