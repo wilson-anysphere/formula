@@ -3220,6 +3220,68 @@ fn bytecode_backend_matches_ast_for_xlookup_and_xmatch() {
 }
 
 #[test]
+fn bytecode_backend_xlookup_xmatch_accept_spill_ranges_and_let_range_locals() {
+    let mut engine = Engine::new();
+
+    // Create spilled lookup/return arrays from literals so `A1#` / `B1#` are valid range arguments.
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"={"a";"b";"c";"b"}"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "={10;20;30;40}")
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "C1", r#"=XMATCH("b",A1#)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", r#"=XMATCH("b",A1#,0,-1)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D1", r#"=XLOOKUP("b",A1#,B1#)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D2", r#"=XLOOKUP("b",A1#,B1#,,0,-1)"#)
+        .unwrap();
+
+    // LET-bound range locals should be accepted for lookup_array / return_array arguments.
+    engine
+        .set_cell_formula("Sheet1", "E1", r#"=LET(arr,A1:A4,XMATCH("b",arr,0,-1))"#)
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "E2",
+            r#"=LET(ret,B1:B4,XLOOKUP("b",A1:A4,ret,,0,-1))"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "E3",
+            r#"=LET(arr,A1:A4,ret,B1:B4,XLOOKUP("b",arr,ret))"#,
+        )
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path for all of the above formulas.
+    assert_eq!(engine.bytecode_program_count(), 9);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        (r#"=XMATCH("b",A1#)"#, "C1"),
+        (r#"=XMATCH("b",A1#,0,-1)"#, "C2"),
+        (r#"=XLOOKUP("b",A1#,B1#)"#, "D1"),
+        (r#"=XLOOKUP("b",A1#,B1#,,0,-1)"#, "D2"),
+        (r#"=LET(arr,A1:A4,XMATCH("b",arr,0,-1))"#, "E1"),
+        (r#"=LET(ret,B1:B4,XLOOKUP("b",A1:A4,ret,,0,-1))"#, "E2"),
+        (r#"=LET(arr,A1:A4,ret,B1:B4,XLOOKUP("b",arr,ret))"#, "E3"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_common_logical_error_functions() {
     let mut engine = Engine::new();
 
