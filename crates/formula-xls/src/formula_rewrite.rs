@@ -131,7 +131,17 @@ pub(crate) fn rewrite_defined_name_formulas_for_sheet_renames(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use formula_engine::{parse_formula, ParseOptions};
     use formula_model::{CellRef, DefinedNameScope, Workbook};
+
+    fn assert_parseable(expr: &str) {
+        let expr = expr.trim();
+        assert!(!expr.is_empty(), "expected formula text to be non-empty");
+        // `formula-model` stores formulas without a leading '='. Add it for parsing.
+        parse_formula(&format!("={expr}"), ParseOptions::default()).unwrap_or_else(|err| {
+            panic!("expected formula to be parseable, expr={expr:?}, err={err:?}")
+        });
+    }
 
     #[test]
     fn rewrites_workbook_formulas_for_sheet_renames() {
@@ -185,11 +195,15 @@ mod tests {
             sheet.formula_a1("A1").unwrap(),
             Some("B!A1+'C'!A1+\"A!A1\"")
         );
+        assert_parseable(sheet.formula_a1("A1").unwrap().unwrap());
         assert_eq!(sheet.formula_a1("A2").unwrap(), Some("=B!A1"));
+        // `normalize_formula_text` strips only one leading '='; a formula that still starts with '='
+        // is an edge case and is not guaranteed to be accepted by the parser.
         assert_eq!(
             sheet.formula_a1("A3").unwrap(),
             Some("'My Sheet'!A1+\"bad/name!A1\"")
         );
+        assert_parseable(sheet.formula_a1("A3").unwrap().unwrap());
 
         let dn = workbook
             .defined_names
@@ -197,5 +211,6 @@ mod tests {
             .find(|n| n.name == "TestName")
             .expect("defined name missing");
         assert_eq!(dn.refers_to, "B!A1+'C'!A1+\"A!A1\"");
+        assert_parseable(&dn.refers_to);
     }
 }
