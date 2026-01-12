@@ -56,6 +56,7 @@ import { createSchemaProviderFromSearchWorkbook } from "../ai/context/searchWork
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
 import type { CellRange as GridCellRange, GridAxisSizeChange, GridViewportState } from "@formula/grid";
+import type { GridPresence } from "@formula/grid";
 import { resolveDesktopGridMode, type DesktopGridMode } from "../grid/shared/desktopGridMode.js";
 import { DocumentCellProvider } from "../grid/shared/documentCellProvider.js";
 import { DesktopSharedGrid } from "../grid/shared/desktopSharedGrid.js";
@@ -66,8 +67,12 @@ import type { CellRange as FillEngineRange, FillMode as FillHandleMode } from "@
 import { dateToExcelSerial } from "../shared/valueParsing.js";
 
 import * as Y from "yjs";
-import { CommentManager, bindDocToStorage } from "@formula/collab-comments";
+import { CommentManager, bindDocToStorage, getCommentsRoot } from "@formula/collab-comments";
 import type { Comment, CommentAuthor } from "@formula/collab-comments";
+import { bindCollabSessionToDocumentController, createCollabSession, type CollabSession } from "@formula/collab-session";
+
+import { PresenceRenderer } from "../grid/presence-renderer/presenceRenderer.js";
+import { ConflictUiController } from "../collab/conflicts-ui/conflict-ui-controller.js";
 
 type EngineCellRef = { sheetId?: string; sheet?: string; row?: number; col?: number; address?: string; value?: unknown };
 type AuditingCacheEntry = {
@@ -322,6 +327,43 @@ export interface SpreadsheetSelectionSummary {
   countNonEmpty: number;
 }
 
+export type SpreadsheetAppCollabOptions = {
+  wsUrl: string;
+  docId: string;
+  token?: string;
+  user: { id: string; name: string; color: string };
+};
+
+function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const enabled = params.get("collab");
+    if (enabled !== "1" && enabled !== "true") return null;
+
+    const docId = params.get("docId") ?? "";
+    const wsUrl = params.get("wsUrl") ?? "";
+    if (!docId || !wsUrl) return null;
+
+    const token = params.get("token") ?? undefined;
+    const userId = params.get("userId") ?? `user_${Math.random().toString(16).slice(2)}`;
+    const userName = params.get("userName") ?? t("presence.anonymous");
+    const userColor = params.get("userColor") ?? "#4c8bf5";
+    return {
+      wsUrl,
+      docId,
+      token,
+      user: {
+        id: userId,
+        name: userName,
+        color: userColor,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 export class SpreadsheetApp {
   private sheetId = "Sheet1";
   private readonly idle = new IdleTracker();
@@ -379,11 +421,15 @@ export class SpreadsheetApp {
   private sharedChartPaneLayoutSyncCount = 0;
   private referenceCanvas: HTMLCanvasElement;
   private auditingCanvas: HTMLCanvasElement;
+  private presenceCanvas: HTMLCanvasElement | null = null;
   private selectionCanvas: HTMLCanvasElement;
   private gridCtx: CanvasRenderingContext2D;
   private referenceCtx: CanvasRenderingContext2D;
   private auditingCtx: CanvasRenderingContext2D;
+  private presenceCtx: CanvasRenderingContext2D | null = null;
   private selectionCtx: CanvasRenderingContext2D;
+  private presenceRenderer: PresenceRenderer | null = null;
+  private remotePresences: GridPresence[] = [];
 
   private auditingRenderer = new AuditingOverlayRenderer();
   private auditingMode: "off" | AuditingMode = "off";
@@ -501,15 +547,23 @@ export class SpreadsheetApp {
   private disposed = false;
   private readonly domAbort = new AbortController();
   private commentsDocUpdateListener: (() => void) | null = null;
+  private stopCommentsRootObserver: (() => void) | null = null;
 
   private readonly inlineEditController: InlineEditController;
 
   private readonly currentUser: CommentAuthor;
-  private readonly commentsDoc = new Y.Doc();
-  private readonly commentManager = new CommentManager(this.commentsDoc);
+  private readonly commentsDoc: Y.Doc;
+  private readonly commentManager: CommentManager;
   private commentCells = new Set<string>();
   private commentsPanelVisible = false;
   private stopCommentPersistence: (() => void) | null = null;
+
+  private collabSession: CollabSession | null = null;
+  private collabBinder: { destroy: () => void } | null = null;
+  private collabSelectionUnsubscribe: (() => void) | null = null;
+  private collabPresenceUnsubscribe: (() => void) | null = null;
+  private conflictUi: ConflictUiController | null = null;
+  private conflictUiContainer: HTMLDivElement | null = null;
 
   private readonly chartStore: ChartStore;
   private chartTheme: ChartTheme = FALLBACK_CHART_THEME;
@@ -542,6 +596,7 @@ export class SpreadsheetApp {
       workbookId?: string;
       limits?: GridLimits;
       formulaBar?: HTMLElement;
+      collab?: SpreadsheetAppCollabOptions;
       inlineEdit?: {
         llmClient?: InlineEditLLMClient;
         model?: string;
@@ -562,7 +617,60 @@ export class SpreadsheetApp {
             maxCols: 200
           });
     this.selection = createSelection({ row: 0, col: 0 }, this.limits);
-    this.currentUser = { id: "local", name: t("chat.role.user") };
+    const collab = opts.collab ?? resolveCollabOptionsFromUrl();
+    const collabEnabled = Boolean(collab);
+    this.currentUser = collab ? { id: collab.user.id, name: collab.user.name } : { id: "local", name: t("chat.role.user") };
+
+    if (collab) {
+      // Binder writes (DocumentController -> Yjs) must use an origin that is *distinct* from
+      // `session.origin` so Yjs writes performed directly through the session (e.g. versioning
+      // operations) still propagate back into the DocumentController.
+      const binderOrigin = { type: "desktop-document-controller:binder" };
+
+      this.collabSession = createCollabSession({
+        connection: { wsUrl: collab.wsUrl, docId: collab.docId, token: collab.token },
+        presence: { user: collab.user, activeSheet: this.sheetId },
+        formulaConflicts: {
+          localUserId: collab.user.id,
+          mode: "formula+value",
+          onConflict: (conflict) => {
+            // Note: conflicts are surfaced via a minimal DOM UI (ConflictUiController).
+            // To exercise manually, edit the same formula concurrently in two clients.
+            this.conflictUi?.addConflict(conflict);
+          },
+        },
+      });
+
+      // Treat DocumentController-driven edits as "local" for conflict monitors.
+      this.collabSession.localOrigins.add(binderOrigin);
+
+      // Comments sync through the shared collaborative Y.Doc when collab is enabled.
+      this.commentsDoc = this.collabSession.doc;
+      // Avoid eagerly instantiating the `comments` root type before the provider has
+      // hydrated the document; older docs may still use a legacy Array-backed schema.
+      this.commentManager = new CommentManager(this.commentsDoc, { transact: (fn) => this.collabSession!.transactLocal(fn) });
+
+      void bindCollabSessionToDocumentController({
+        session: this.collabSession,
+        documentController: this.document,
+        undoService: { origin: binderOrigin },
+        defaultSheetId: this.sheetId,
+        userId: collab.user.id,
+      })
+        .then((binder) => {
+          if (this.disposed) {
+            binder.destroy();
+            return;
+          }
+          this.collabBinder = binder;
+        })
+        .catch((err) => {
+          console.error("Failed to bind collab session to DocumentController", err);
+        });
+    } else {
+      this.commentsDoc = new Y.Doc();
+      this.commentManager = new CommentManager(this.commentsDoc);
+    }
 
     // Prevent DOM overlays (charts, scrollbars, outline buttons) from spilling
     // outside the grid viewport while we virtualize with negative coordinates.
@@ -575,26 +683,28 @@ export class SpreadsheetApp {
     this.outline.groupCols(2, 4);
     this.outline.recomputeOutlineHiddenCols();
 
-    // Seed data for navigation tests (used range ends at D5).
-    this.document.setCellValue(this.sheetId, { row: 0, col: 0 }, "Seed");
-    this.document.setCellValue(this.sheetId, { row: 0, col: 1 }, {
-      text: "Rich Bold",
-      runs: [
-        { start: 0, end: 5, style: {} },
-        { start: 5, end: 9, style: { bold: true } }
-      ]
-    });
-    this.document.setCellValue(this.sheetId, { row: 4, col: 3 }, "BottomRight");
+    if (!collabEnabled) {
+      // Seed data for navigation tests (used range ends at D5).
+      this.document.setCellValue(this.sheetId, { row: 0, col: 0 }, "Seed");
+      this.document.setCellValue(this.sheetId, { row: 0, col: 1 }, {
+        text: "Rich Bold",
+        runs: [
+          { start: 0, end: 5, style: {} },
+          { start: 5, end: 9, style: { bold: true } }
+        ]
+      });
+      this.document.setCellValue(this.sheetId, { row: 4, col: 3 }, "BottomRight");
 
-    // Seed a small data range for the demo chart without expanding the used range past D5.
-    this.document.setCellValue(this.sheetId, { row: 1, col: 0 }, "A");
-    this.document.setCellValue(this.sheetId, { row: 1, col: 1 }, 2);
-    this.document.setCellValue(this.sheetId, { row: 2, col: 0 }, "B");
-    this.document.setCellValue(this.sheetId, { row: 2, col: 1 }, 4);
-    this.document.setCellValue(this.sheetId, { row: 3, col: 0 }, "C");
-    this.document.setCellValue(this.sheetId, { row: 3, col: 1 }, 3);
-    this.document.setCellValue(this.sheetId, { row: 4, col: 0 }, "D");
-    this.document.setCellValue(this.sheetId, { row: 4, col: 1 }, 5);
+      // Seed a small data range for the demo chart without expanding the used range past D5.
+      this.document.setCellValue(this.sheetId, { row: 1, col: 0 }, "A");
+      this.document.setCellValue(this.sheetId, { row: 1, col: 1 }, 2);
+      this.document.setCellValue(this.sheetId, { row: 2, col: 0 }, "B");
+      this.document.setCellValue(this.sheetId, { row: 2, col: 1 }, 4);
+      this.document.setCellValue(this.sheetId, { row: 3, col: 0 }, "C");
+      this.document.setCellValue(this.sheetId, { row: 3, col: 1 }, 3);
+      this.document.setCellValue(this.sheetId, { row: 4, col: 0 }, "D");
+      this.document.setCellValue(this.sheetId, { row: 4, col: 1 }, 5);
+    }
 
     // Best-effort: keep the WASM engine worker hydrated from the DocumentController.
     // When the WASM module isn't available (e.g. local dev without building it),
@@ -615,6 +725,13 @@ export class SpreadsheetApp {
     this.auditingCanvas = document.createElement("canvas");
     this.auditingCanvas.className = "grid-canvas";
     this.auditingCanvas.setAttribute("aria-hidden", "true");
+    if (collabEnabled && this.gridMode !== "shared") {
+      // Remote presence overlays should render above auditing highlights but below
+      // the local selection layer.
+      this.presenceCanvas = document.createElement("canvas");
+      this.presenceCanvas.className = "grid-canvas";
+      this.presenceCanvas.setAttribute("aria-hidden", "true");
+    }
     this.selectionCanvas = document.createElement("canvas");
     this.selectionCanvas.className = "grid-canvas";
     this.selectionCanvas.setAttribute("aria-hidden", "true");
@@ -623,6 +740,7 @@ export class SpreadsheetApp {
     this.root.appendChild(this.chartLayer);
     this.root.appendChild(this.referenceCanvas);
     this.root.appendChild(this.auditingCanvas);
+    if (this.presenceCanvas) this.root.appendChild(this.presenceCanvas);
     this.root.appendChild(this.selectionCanvas);
 
     this.chartStore = new ChartStore({
@@ -679,14 +797,19 @@ export class SpreadsheetApp {
     const gridCtx = this.gridCanvas.getContext("2d");
     const referenceCtx = this.referenceCanvas.getContext("2d");
     const auditingCtx = this.auditingCanvas.getContext("2d");
+    const presenceCtx = this.presenceCanvas ? this.presenceCanvas.getContext("2d") : null;
     const selectionCtx = this.selectionCanvas.getContext("2d");
-    if (!gridCtx || !referenceCtx || !auditingCtx || !selectionCtx) {
+    if (!gridCtx || !referenceCtx || !auditingCtx || (this.presenceCanvas && !presenceCtx) || !selectionCtx) {
       throw new Error("Canvas 2D context not available");
     }
     this.gridCtx = gridCtx;
     this.referenceCtx = referenceCtx;
     this.auditingCtx = auditingCtx;
+    this.presenceCtx = presenceCtx;
     this.selectionCtx = selectionCtx;
+    if (this.presenceCanvas) {
+      this.presenceRenderer = new PresenceRenderer();
+    }
 
     this.editor = new CellEditorOverlay(this.root, {
       onCommit: (commit) => {
@@ -937,12 +1060,62 @@ export class SpreadsheetApp {
     this.resizeObserver = new ResizeObserver(() => this.onResize());
     this.resizeObserver.observe(this.root);
 
-    // Save so we can detach cleanly in `destroy()`.
-    this.commentsDocUpdateListener = () => {
-      this.reindexCommentCells();
-      this.refresh();
-    };
-    this.commentsDoc.on("update", this.commentsDocUpdateListener);
+    if (!collabEnabled) {
+      // Save so we can detach cleanly in `destroy()`.
+      this.commentsDocUpdateListener = () => {
+        this.reindexCommentCells();
+        this.refresh();
+      };
+      this.commentsDoc.on("update", this.commentsDocUpdateListener);
+    } else {
+      // Collab mode: comments live inside the shared workbook Y.Doc. Avoid listening to
+      // `doc.on("update")` (which would fire for every cell edit); instead, observe just
+      // the comments root once the provider has hydrated the doc.
+      const session = this.collabSession;
+      if (session) {
+        const provider = session.provider;
+        const attach = () => {
+          if (this.disposed) return;
+          if (this.stopCommentsRootObserver) return;
+          let root: ReturnType<typeof getCommentsRoot> | null = null;
+          try {
+            root = getCommentsRoot(this.commentsDoc);
+          } catch {
+            // Best-effort; never block app startup on comment schema issues.
+          }
+          if (!root) return;
+
+          const handler = () => {
+            this.reindexCommentCells();
+            this.refresh();
+          };
+
+          if (root.kind === "map") {
+            root.map.observeDeep(handler);
+            this.stopCommentsRootObserver = () => root?.kind === "map" && root.map.unobserveDeep(handler);
+          } else {
+            root.array.observeDeep(handler);
+            this.stopCommentsRootObserver = () => root?.kind === "array" && root.array.unobserveDeep(handler);
+          }
+
+          // Initial index after hydration.
+          this.reindexCommentCells();
+          this.refresh();
+        };
+
+        if (provider && typeof provider.on === "function") {
+          const onSync = (isSynced: boolean) => {
+            if (!isSynced) return;
+            provider.off?.("sync", onSync);
+            attach();
+          };
+          provider.on("sync", onSync);
+          if ((provider as any).synced) onSync(true);
+        } else {
+          attach();
+        }
+      }
+    }
 
     this.auditingUnsubscribe = this.document.on("change", (payload: any) => {
       this.auditingCache.clear();
@@ -962,7 +1135,7 @@ export class SpreadsheetApp {
       }
     });
 
-    if (typeof window !== "undefined") {
+    if (!collabEnabled && typeof window !== "undefined") {
       try {
         this.stopCommentPersistence = bindDocToStorage(this.commentsDoc, window.localStorage, "formula:comments");
       } catch {
@@ -1062,13 +1235,15 @@ export class SpreadsheetApp {
       this.rebuildAxisVisibilityCache();
     }
 
-    // Seed a demo chart using the chart store helpers so it matches the logic
-    // used by AI chart creation.
-    this.chartStore.createChart({
-      chart_type: "bar",
-      data_range: "Sheet1!A2:B5",
-      title: "Example Chart"
-    });
+    if (!collabEnabled) {
+      // Seed a demo chart using the chart store helpers so it matches the logic
+      // used by AI chart creation.
+      this.chartStore.createChart({
+        chart_type: "bar",
+        data_range: "Sheet1!A2:B5",
+        title: "Example Chart"
+      });
+    }
 
     const workbookId = opts.workbookId ?? "local-workbook";
     const dlp = createDesktopDlpContext({ documentId: workbookId });
@@ -1085,6 +1260,115 @@ export class SpreadsheetApp {
       // Ensure the shared renderer selection layer matches the app selection model.
       this.syncSharedGridSelectionFromState();
     }
+
+    if (collabEnabled && this.collabSession) {
+      // Conflicts UI (mounted once; new conflicts stream in via the session callback).
+      this.conflictUiContainer = document.createElement("div");
+      this.conflictUiContainer.style.position = "absolute";
+      this.conflictUiContainer.style.inset = "0";
+      this.conflictUiContainer.style.zIndex = "50";
+      // Avoid blocking grid interactions unless the user is interacting with the conflict UI itself.
+      this.conflictUiContainer.style.pointerEvents = "none";
+      this.root.appendChild(this.conflictUiContainer);
+
+      this.conflictUi = new ConflictUiController({
+        container: this.conflictUiContainer,
+        monitor: {
+          resolveConflict: (id: string, chosen: unknown) => {
+            const monitor = this.collabSession?.formulaConflictMonitor;
+            return monitor ? monitor.resolveConflict(id, chosen) : false;
+          },
+        },
+      });
+
+      // Re-enable pointer events for the conflict UX primitives.
+      const toastRoot = this.conflictUiContainer.querySelector<HTMLElement>('[data-testid="conflict-toast-root"]');
+      if (toastRoot) {
+        toastRoot.style.pointerEvents = "auto";
+        toastRoot.style.position = "absolute";
+        toastRoot.style.left = "16px";
+        toastRoot.style.bottom = "16px";
+      }
+      const dialogRoot = this.conflictUiContainer.querySelector<HTMLElement>('[data-testid="conflict-dialog-root"]');
+      if (dialogRoot) {
+        dialogRoot.style.pointerEvents = "auto";
+        dialogRoot.style.position = "absolute";
+        dialogRoot.style.left = "16px";
+        dialogRoot.style.top = "16px";
+        dialogRoot.style.maxWidth = "min(720px, 92vw)";
+        dialogRoot.style.maxHeight = "min(560px, 92vh)";
+        dialogRoot.style.overflow = "auto";
+        dialogRoot.style.background = "var(--dialog-bg)";
+        dialogRoot.style.border = "1px solid var(--dialog-border)";
+        dialogRoot.style.borderRadius = "10px";
+        dialogRoot.style.padding = "12px";
+        dialogRoot.style.boxShadow = "0 6px 24px rgba(0,0,0,0.18)";
+      }
+
+      const presence = this.collabSession.presence;
+      if (presence) {
+        // Publish local selection state.
+        this.collabSelectionUnsubscribe = this.subscribeSelection((selection) => {
+          presence.setCursor({ row: selection.active.row, col: selection.active.col });
+          presence.setSelections(selection.ranges);
+        });
+
+        // Render remote presences.
+        this.collabPresenceUnsubscribe = presence.subscribe((presences: any[]) => {
+          this.remotePresences = (Array.isArray(presences) ? presences : []).map((p) => {
+            const cursor =
+              p?.cursor && typeof p.cursor.row === "number" && typeof p.cursor.col === "number"
+                ? { row: Math.trunc(p.cursor.row), col: Math.trunc(p.cursor.col) }
+                : null;
+            const selections = Array.isArray(p?.selections)
+              ? p.selections
+                  .map((r: any) =>
+                    r &&
+                    typeof r.startRow === "number" &&
+                    typeof r.startCol === "number" &&
+                    typeof r.endRow === "number" &&
+                    typeof r.endCol === "number"
+                      ? {
+                          startRow: Math.trunc(r.startRow),
+                          startCol: Math.trunc(r.startCol),
+                          endRow: Math.trunc(r.endRow),
+                          endCol: Math.trunc(r.endCol),
+                        }
+                      : null
+                  )
+                  .filter((r: any) => r != null)
+              : [];
+
+            return {
+              id: String(p?.id ?? ""),
+              name: String(p?.name ?? t("presence.anonymous")),
+              color: String(p?.color ?? "#4c8bf5"),
+              cursor,
+              selections,
+            } satisfies GridPresence;
+          });
+
+          if (this.sharedGrid) {
+            const headerRows = this.sharedHeaderRows();
+            const headerCols = this.sharedHeaderCols();
+            const mapped: GridPresence[] = this.remotePresences.map((p) => ({
+              ...p,
+              cursor: p.cursor ? { row: p.cursor.row + headerRows, col: p.cursor.col + headerCols } : null,
+              selections: p.selections.map((r) => ({
+                startRow: r.startRow + headerRows,
+                startCol: r.startCol + headerCols,
+                endRow: r.endRow + headerRows,
+                endCol: r.endCol + headerCols,
+              })),
+            }));
+            this.sharedGrid.renderer.setRemotePresences(mapped);
+          } else {
+            this.renderPresence();
+          }
+        });
+      }
+    }
+
     this.uiReady = true;
     this.editState = this.isEditing();
   }
@@ -1104,6 +1388,17 @@ export class SpreadsheetApp {
   destroy(): void {
     this.disposed = true;
     this.domAbort.abort();
+    this.collabSelectionUnsubscribe?.();
+    this.collabSelectionUnsubscribe = null;
+    this.collabPresenceUnsubscribe?.();
+    this.collabPresenceUnsubscribe = null;
+    this.collabBinder?.destroy();
+    this.collabBinder = null;
+    this.collabSession?.disconnect();
+    this.collabSession?.destroy();
+    this.collabSession = null;
+    this.stopCommentsRootObserver?.();
+    this.stopCommentsRootObserver = null;
     if (this.commentsDocUpdateListener) {
       this.commentsDoc.off("update", this.commentsDocUpdateListener);
       this.commentsDocUpdateListener = null;
@@ -1119,6 +1414,7 @@ export class SpreadsheetApp {
     this.wasmEngine?.terminate();
     this.wasmEngine = null;
     this.stopCommentPersistence?.();
+    this.stopCommentPersistence = null;
     this.resizeObserver.disconnect();
     if (this.dragAutoScrollRaf != null) {
       if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.dragAutoScrollRaf);
@@ -1131,6 +1427,8 @@ export class SpreadsheetApp {
     }
     this.outlineButtons.clear();
     this.chartElements.clear();
+    this.conflictUi = null;
+    this.conflictUiContainer = null;
     this.root.replaceChildren();
   }
 
@@ -1166,6 +1464,7 @@ export class SpreadsheetApp {
       this.renderCharts(renderMode === "full");
       this.renderReferencePreview();
       this.renderAuditing();
+      this.renderPresence();
       this.renderSelection();
       if (renderMode === "full") this.updateStatus();
     });
@@ -1433,6 +1732,10 @@ export class SpreadsheetApp {
 
   toggleShowFormulas(): void {
     this.setShowFormulas(!this.showFormulas);
+  }
+
+  getCollabSession(): CollabSession | null {
+    return this.collabSession;
   }
 
   /**
@@ -1763,6 +2066,7 @@ export class SpreadsheetApp {
     if (!sheetId) return;
     if (sheetId === this.sheetId) return;
     this.sheetId = sheetId;
+    this.collabSession?.presence?.setActiveSheet(this.sheetId);
     this.chartStore.setDefaultSheet(sheetId);
     this.referencePreview = null;
     this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
@@ -1802,6 +2106,7 @@ export class SpreadsheetApp {
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
+      this.collabSession?.presence?.setActiveSheet(this.sheetId);
       this.chartStore.setDefaultSheet(target.sheetId);
       this.referencePreview = null;
       this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
@@ -1850,6 +2155,7 @@ export class SpreadsheetApp {
     let sheetChanged = false;
     if (target.sheetId && target.sheetId !== this.sheetId) {
       this.sheetId = target.sheetId;
+      this.collabSession?.presence?.setActiveSheet(this.sheetId);
       this.chartStore.setDefaultSheet(target.sheetId);
       this.referencePreview = null;
       this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
@@ -2815,7 +3121,14 @@ export class SpreadsheetApp {
       return;
     }
 
-    for (const canvas of [this.gridCanvas, this.referenceCanvas, this.auditingCanvas, this.selectionCanvas]) {
+    const legacyCanvases: HTMLCanvasElement[] = [
+      this.gridCanvas,
+      this.referenceCanvas,
+      this.auditingCanvas,
+      ...(this.presenceCanvas ? [this.presenceCanvas] : []),
+      this.selectionCanvas,
+    ];
+    for (const canvas of legacyCanvases) {
       canvas.width = Math.floor(this.width * this.dpr);
       canvas.height = Math.floor(this.height * this.dpr);
       canvas.style.width = `${this.width}px`;
@@ -2823,7 +3136,14 @@ export class SpreadsheetApp {
     }
 
     // Reset transforms and apply DPR scaling so drawing code uses CSS pixels.
-    for (const ctx of [this.gridCtx, this.referenceCtx, this.auditingCtx, this.selectionCtx]) {
+    const legacyContexts: CanvasRenderingContext2D[] = [
+      this.gridCtx,
+      this.referenceCtx,
+      this.auditingCtx,
+      ...(this.presenceCtx ? [this.presenceCtx] : []),
+      this.selectionCtx,
+    ];
+    for (const ctx of legacyContexts) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(this.dpr, this.dpr);
     }
@@ -2843,6 +3163,7 @@ export class SpreadsheetApp {
     this.renderCharts(true);
     this.renderReferencePreview();
     this.renderAuditing();
+    this.renderPresence();
     this.renderSelection();
     this.updateStatus();
   }
@@ -3531,6 +3852,35 @@ export class SpreadsheetApp {
 
     this.auditingCtx.restore();
     this.auditingWasRendered = true;
+  }
+
+  private renderPresence(): void {
+    if (this.sharedGrid) return;
+    const ctx = this.presenceCtx;
+    const renderer = this.presenceRenderer;
+    if (!ctx || !renderer) return;
+
+    renderer.clear(ctx);
+    if (this.remotePresences.length === 0) return;
+
+    this.ensureViewportMappingCurrent();
+    const clipRect = {
+      x: this.rowHeaderWidth,
+      y: this.colHeaderHeight,
+      width: this.viewportWidth(),
+      height: this.viewportHeight(),
+    };
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
+    ctx.clip();
+
+    renderer.render(ctx, this.remotePresences, {
+      getCellRect: (row: number, col: number) => this.getCellRect({ row, col }),
+    });
+
+    ctx.restore();
   }
 
   private renderSelection(): void {
