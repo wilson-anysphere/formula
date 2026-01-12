@@ -219,6 +219,32 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
         ModelCellValue::Boolean(b) => CellValue::Bool(*b),
         ModelCellValue::Error(err) => CellValue::Error(*err),
         ModelCellValue::RichText(rt) => CellValue::Text(rt.plain_text().to_string()),
+        ModelCellValue::Entity(entity) => CellValue::Text(entity.display_value.clone()),
+        ModelCellValue::Record(record) => {
+            if let Some(display_field) = record.display_field.as_deref() {
+                if let Some(value) = record.fields.get(display_field) {
+                    let display_value = match value {
+                        ModelCellValue::Number(n) => Some(CellValue::Number(*n)),
+                        ModelCellValue::String(s) => Some(CellValue::Text(s.clone())),
+                        ModelCellValue::Boolean(b) => Some(CellValue::Bool(*b)),
+                        ModelCellValue::Error(err) => Some(CellValue::Error(*err)),
+                        ModelCellValue::RichText(rt) => {
+                            Some(CellValue::Text(rt.plain_text().to_string()))
+                        }
+                        _ => None,
+                    };
+                    if let Some(value) = display_value {
+                        return value;
+                    }
+                }
+            }
+
+            if !record.display_value.is_empty() {
+                return CellValue::Text(record.display_value.clone());
+            }
+
+            CellValue::Blank
+        }
         ModelCellValue::Array(_) => CellValue::Blank,
         ModelCellValue::Spill(_) => CellValue::Blank,
         // Rich value variants are represented as `{type, value}` in `formula-model` for stable IPC.
@@ -237,23 +263,25 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
         "entity" => {
             let value = serialized.get("value")?;
             let display_value = value
-                .get("display")
+                .get("displayValue")
                 .or_else(|| value.get("display_value"))
-                .and_then(|v| v.as_str())?
-                .to_string();
-            Some(CellValue::Text(display_value))
+                .or_else(|| value.get("display"))?
+                .as_str()?;
+            Some(CellValue::Text(display_value.to_string()))
         }
         "record" => {
             let record = serialized.get("value")?;
-
-            // Current `formula-model` record values are a simple display string.
-            if let Some(display) = record.get("display").and_then(|v| v.as_str()) {
+            if let Some(display) = record
+                .get("displayValue")
+                .or_else(|| record.get("display"))
+                .and_then(|v| v.as_str())
+            {
                 return Some(CellValue::Text(display.to_string()));
             }
-
-            // Backwards/forwards compatible fallback: treat record values like the old
-            // rich-data record structure (display_field + fields map) when present.
-            let display_field = record.get("display_field")?.as_str()?;
+            let display_field = record
+                .get("displayField")
+                .or_else(|| record.get("display_field"))?
+                .as_str()?;
             let fields = record.get("fields")?.as_object()?;
             let display_value = fields.get(display_field)?;
 
@@ -290,6 +318,7 @@ mod tests {
     use super::model_cell_value_to_sort_value;
     use crate::sort_filter::CellValue;
     use formula_model::CellValue as ModelCellValue;
+    use formula_model::ErrorValue;
     use serde_json::json;
 
     #[test]
@@ -314,8 +343,6 @@ mod tests {
                 "display": "Entity display"
             }
         })) else {
-            // Older versions of `formula-model` won't have Entity/Record variants yet.
-            // Skip this test until they're added.
             return;
         };
         assert_eq!(
@@ -323,17 +350,116 @@ mod tests {
             CellValue::Text("Entity display".to_string())
         );
 
-        let Some(record) = from_json_or_skip_unknown_variant(json!({
+        let Some(record_string) = from_json_or_skip_unknown_variant(json!({
             "type": "record",
             "value": {
-                "display": "Record display"
+                "displayField": "name",
+                "fields": {
+                    "name": { "type": "string", "value": "Alice" },
+                    "age": { "type": "number", "value": 42.0 }
+                }
             }
         })) else {
             return;
         };
         assert_eq!(
-            model_cell_value_to_sort_value(&record),
-            CellValue::Text("Record display".to_string())
+            model_cell_value_to_sort_value(&record_string),
+            CellValue::Text("Alice".to_string())
+        );
+
+        let Some(record_number) = from_json_or_skip_unknown_variant(json!({
+            "type": "record",
+            "value": {
+                "displayField": "age",
+                "fields": {
+                    "name": { "type": "string", "value": "Alice" },
+                    "age": { "type": "number", "value": 42.0 }
+                }
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_number),
+            CellValue::Number(42.0)
+        );
+
+        let Some(record_bool) = from_json_or_skip_unknown_variant(json!({
+            "type": "record",
+            "value": {
+                "displayField": "active",
+                "fields": {
+                    "active": { "type": "boolean", "value": true }
+                }
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(model_cell_value_to_sort_value(&record_bool), CellValue::Bool(true));
+
+        let Some(record_error) = from_json_or_skip_unknown_variant(json!({
+            "type": "record",
+            "value": {
+                "displayField": "err",
+                "fields": {
+                    "err": { "type": "error", "value": "#REF!" }
+                }
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_error),
+            CellValue::Error(ErrorValue::Ref)
+        );
+
+        let Some(record_rich_text) = from_json_or_skip_unknown_variant(json!({
+            "type": "record",
+            "value": {
+                "displayField": "rt",
+                "fields": {
+                    "rt": { "type": "rich_text", "value": { "text": "Hello", "runs": [] } }
+                }
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_rich_text),
+            CellValue::Text("Hello".to_string())
+        );
+
+        // Records only use the display field if it's a primitive sort/filter value.
+        // Rich values fall back to blank.
+        let record_entity_display_field: ModelCellValue = serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "displayField": "entity",
+                "fields": {
+                    "entity": { "type": "entity", "value": { "display": "Nested entity" } }
+                }
+            }
+        }))
+        .expect("record should deserialize");
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_entity_display_field),
+            CellValue::Blank
+        );
+
+        // Missing display field should fall back to blank.
+        let record_missing_display_field: ModelCellValue = serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "displayField": "missing",
+                "fields": {
+                    "name": { "type": "string", "value": "Alice" }
+                }
+            }
+        }))
+        .expect("record should deserialize");
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_missing_display_field),
+            CellValue::Blank
         );
     }
 }

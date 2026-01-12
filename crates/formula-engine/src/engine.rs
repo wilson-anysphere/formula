@@ -8996,9 +8996,10 @@ mod tests {
 
         let report = engine.bytecode_compile_report(10);
         assert_eq!(report.len(), 1);
-        // The spill postfix operator lowers to a bytecode `SpillRange` expression, but top-level
-        // range-producing expressions are not yet eligible for the bytecode backend.
-        assert_eq!(report[0].reason, BytecodeCompileReason::IneligibleExpr);
+        assert_eq!(
+            report[0].reason,
+            BytecodeCompileReason::LowerError(bytecode::LowerError::Unsupported)
+        );
     }
 
     #[test]

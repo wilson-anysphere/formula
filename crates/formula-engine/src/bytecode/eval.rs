@@ -341,16 +341,45 @@ mod tests {
     #[test]
     fn vm_short_circuits_if_branches() {
         let origin = CellCoord::new(0, 0);
+        let locale = crate::LocaleConfig::en_us();
+
+        // IF(FALSE, A1, 1) should not evaluate the TRUE branch.
         let expr = super::super::parse_formula("=IF(FALSE, A1, 1)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
 
         let grid = CountingGrid::new(10, 10);
         let mut vm = Vm::with_capacity(32);
-        let locale = crate::LocaleConfig::en_us();
         let value = vm.eval(&program, &grid, 0, origin, &locale);
 
         assert_eq!(value, Value::Number(1.0));
         assert_eq!(grid.reads(), 0, "unused IF branch should not be evaluated");
+
+        // IF(TRUE, 1, A1) should not evaluate the FALSE branch.
+        let expr = super::super::parse_formula("=IF(TRUE, 1, A1)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+
+        assert_eq!(value, Value::Number(1.0));
+        assert_eq!(grid.reads(), 0, "unused IF branch should not be evaluated");
+
+        // If the IF condition is an error, neither branch should be evaluated and the error should
+        // be returned.
+        let expr = super::super::parse_formula("=IF(1/0, A1, 1)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+
+        assert_eq!(value, Value::Error(super::super::value::ErrorKind::Div0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "IF branches should not be evaluated when condition is an error"
+        );
     }
 
     #[test]
@@ -367,6 +396,15 @@ mod tests {
         assert_eq!(value, Value::Number(1.0));
         assert_eq!(grid.reads(), 0, "unused IFERROR fallback should not be evaluated");
 
+        // IFERROR(1/0, A1) should evaluate the fallback.
+        let expr = super::super::parse_formula("=IFERROR(1/0, A1)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Empty); // A1 is empty.
+        assert_eq!(grid.reads(), 1, "IFERROR fallback should be evaluated for errors");
+
         // IFNA(1, A1) should not evaluate the fallback.
         let expr = super::super::parse_formula("=IFNA(1, A1)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
@@ -375,6 +413,15 @@ mod tests {
         let value = vm.eval(&program, &grid, 0, origin, &locale);
         assert_eq!(value, Value::Number(1.0));
         assert_eq!(grid.reads(), 0, "unused IFNA fallback should not be evaluated");
+
+        // IFNA(1/0, A1) should not evaluate the fallback because the error is not #N/A.
+        let expr = super::super::parse_formula("=IFNA(1/0, A1)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Error(super::super::value::ErrorKind::Div0));
+        assert_eq!(grid.reads(), 0, "IFNA fallback should not be evaluated for non-#N/A errors");
 
         // IFNA(NA(), A1) should evaluate the fallback.
         let expr = super::super::parse_formula("=IFNA(NA(), A1)", origin).expect("parse");
