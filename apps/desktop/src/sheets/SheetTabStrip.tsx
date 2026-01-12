@@ -156,6 +156,7 @@ export function SheetTabStrip({
   const renameCommitRef = useRef<Promise<boolean> | null>(null);
   const [canScroll, setCanScroll] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
   const tabColorPickerRef = useRef<HTMLInputElement | null>(null);
+  const tabColorPickerDefaultValueRef = useRef<string | null>(null);
 
   const lastContextMenuFocusRef = useRef<HTMLElement | null>(null);
   const tabContextMenu = useMemo(
@@ -188,8 +189,13 @@ export function SheetTabStrip({
     input.className = "hidden-color-input shell-hidden-input";
     document.body.appendChild(input);
     tabColorPickerRef.current = input;
+    // Capture the default value assigned by the browser for <input type="color"> so we can
+    // reset the picker even when a sheet has no existing tab color. (Avoid hard-coding a
+    // hex literal here; the token policy test enforces that UI colors live in CSS.)
+    tabColorPickerDefaultValueRef.current = input.value;
     return () => {
       tabColorPickerRef.current = null;
+      tabColorPickerDefaultValueRef.current = null;
       input.remove();
     };
   }, []);
@@ -582,14 +588,15 @@ export function SheetTabStrip({
               // Best-effort: use current color as the initial value when it's a #RRGGBB hex string.
               // Otherwise, keep the existing <input type="color"> value (browser default or last selection).
               const currentCss = normalizeExcelColorToCss(sheet.tabColor?.rgb);
+              const defaultValue = tabColorPickerDefaultValueRef.current ?? input.value;
               const initialValue = (() => {
                 const normalized = String(currentCss ?? "").trim();
                 if (/^#[0-9a-fA-F]{6}$/.test(normalized)) return normalized.toLowerCase();
-                const tokenFallback = resolveCssVar("--sheet-tab-gray", { fallback: "" }).trim();
+                const tokenFallback = resolveCssVar("--sheet-tab-gray", { fallback: defaultValue }).trim();
                 if (/^#[0-9a-fA-F]{6}$/.test(tokenFallback)) return tokenFallback.toLowerCase();
-                return null;
+                return defaultValue;
               })();
-              if (initialValue) input.value = initialValue;
+              input.value = initialValue;
 
               // Preserve the current focus target so keyboard users return where they started.
               const restore = document.activeElement instanceof HTMLElement ? document.activeElement : null;
