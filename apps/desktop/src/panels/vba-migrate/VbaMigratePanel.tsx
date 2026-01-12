@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
-import { createLLMClient } from "../../../../../packages/llm/src/createLLMClient.js";
 import { analyzeVbaModule } from "../../../../../packages/vba-migrate/src/analyzer.js";
 import { VbaMigrator } from "../../../../../packages/vba-migrate/src/converter.js";
 
 import { getVbaProject, type VbaModuleSummary, type VbaProjectSummary } from "../../macros/vba_project.js";
-import { loadDesktopLLMConfig, saveDesktopLLMConfig, type DesktopLLMConfig } from "../../ai/llm/settings.js";
+import { getDesktopLLMClient } from "../../ai/llm/desktopLLMClient.js";
 
 type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
 
@@ -235,7 +234,7 @@ function AggregateAnalysisView(props: { report: AnalysisViewModel | null }) {
 export interface VbaMigratePanelProps {
   workbookId?: string;
   /**
-   * Optional test hook to inject a migrator without requiring an API key.
+   * Optional test hook to inject a migrator (e.g. deterministic unit tests).
    */
   createMigrator?: () => VbaMigrator;
   /**
@@ -263,9 +262,6 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
   const [selectedModuleName, setSelectedModuleName] = useState<string | null>(null);
   const [analysisScope, setAnalysisScope] = useState<"module" | "project">("module");
 
-  const [llmConfig, setLlmConfig] = useState<DesktopLLMConfig | null>(() => loadDesktopLLMConfig());
-  const [draftKey, setDraftKey] = useState("");
-
   const [entryPoint, setEntryPoint] = useState("Main");
 
   const [conversionTarget, setConversionTarget] = useState<"python" | "typescript" | null>(null);
@@ -280,17 +276,12 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
 
   const migrator = useMemo(() => {
     if (props.createMigrator) return props.createMigrator();
-    if (!llmConfig) return null;
     try {
-      return new VbaMigrator({ llm: createLLMClient(llmConfig as any) });
+      return new VbaMigrator({ llm: getDesktopLLMClient() as any });
     } catch {
       return null;
     }
-  }, [llmConfig, props.createMigrator]);
-
-  const reloadLlmConfig = useCallback(() => {
-    setLlmConfig(loadDesktopLLMConfig());
-  }, []);
+  }, [props.createMigrator]);
 
   const refreshProject = useCallback(async () => {
     setLoadingProject(true);
@@ -709,12 +700,9 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 600 }}>Conversion</div>
               <div style={{ fontSize: 11, opacity: 0.8 }}>
-                AI provider: <span style={{ fontFamily: "monospace" }}>{llmConfig ? llmConfig.provider : "not configured"}</span>
+                AI backend: <span style={{ fontFamily: "monospace" }}>Cursor</span>
               </div>
             </div>
-            <button type="button" onClick={reloadLlmConfig} data-testid="vba-reload-llm-settings">
-              Reload AI settings
-            </button>
             <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
               Macro:
               {availableMacros.length > 0 ? (
@@ -773,31 +761,6 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
               Copy
             </button>
           </div>
-
-          {!props.createMigrator && !llmConfig ? (
-            <div style={{ padding: 10, borderBottom: "1px solid var(--panel-border)", display: "flex", gap: 8 }}>
-              <input
-                value={draftKey}
-                placeholder="Enter OpenAI API key to enable conversion"
-                onChange={(e) => setDraftKey(e.target.value)}
-                style={{ ...monospace, flex: 1, padding: 8 }}
-                data-testid="vba-openai-key"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const next = draftKey.trim();
-                  if (!next) return;
-                  saveDesktopLLMConfig({ provider: "openai", apiKey: next });
-                  setDraftKey("");
-                  setLlmConfig(loadDesktopLLMConfig());
-                }}
-                data-testid="vba-save-openai-key"
-              >
-                Save
-              </button>
-            </div>
-          ) : null}
 
           {conversionStatus === "working" ? (
             <div style={{ padding: 10, borderBottom: "1px solid var(--panel-border)", fontSize: 12, opacity: 0.8 }}>

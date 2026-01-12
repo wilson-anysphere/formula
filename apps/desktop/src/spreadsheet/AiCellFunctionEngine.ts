@@ -1,5 +1,4 @@
 import type { LLMClient, LLMMessage } from "../../../../packages/llm/src/types.js";
-import { createLLMClient } from "../../../../packages/llm/src/createLLMClient.js";
 
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
 import { AIAuditRecorder } from "../../../../packages/ai-audit/src/recorder.js";
@@ -22,7 +21,7 @@ import {
 
 import { getDesktopAIAuditStore } from "../ai/audit/auditStore.js";
 import { getAiCloudDlpOptions } from "../ai/dlp/aiDlp.js";
-import { loadDesktopLLMConfig } from "../ai/llm/settings.js";
+import { getDesktopLLMClient, getDesktopModel } from "../ai/llm/desktopLLMClient.js";
 
 export const AI_CELL_PLACEHOLDER = "#GETTING_DATA";
 export const AI_CELL_DLP_ERROR = "#DLP!";
@@ -110,8 +109,8 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
   private readonly pendingAudits = new Set<Promise<void>>();
 
   constructor(options: AiCellFunctionEngineOptions = {}) {
-    this.llmClient = options.llmClient ?? createDefaultClient();
-    this.model = options.model ?? (this.llmClient as any)?.model ?? "gpt-4o-mini";
+    this.llmClient = options.llmClient ?? getDesktopLLMClient();
+    this.model = options.model ?? (this.llmClient as any)?.model ?? getDesktopModel();
     this.auditStore = options.auditStore ?? getDesktopAIAuditStore();
     this.workbookId = options.workbookId ?? "local-workbook";
     this.sessionId = options.sessionId ?? createSessionId(this.workbookId);
@@ -1323,23 +1322,6 @@ function hashText(text: string): string {
     hash = Math.imul(hash, 0x01000193);
   }
   return (hash >>> 0).toString(16).padStart(8, "0");
-}
-
-function createDefaultClient(): LLMClient {
-  try {
-    const config = loadDesktopLLMConfig();
-    if (config) return createLLMClient(config as any) as any;
-  } catch {
-    // fall through to stub
-  }
-  return {
-    async chat() {
-      return {
-        message: { role: "assistant", content: "AI is not configured." },
-        usage: { promptTokens: 0, completionTokens: 0 },
-      } as any;
-    },
-  };
 }
 
 function createSessionId(prefix: string): string {
