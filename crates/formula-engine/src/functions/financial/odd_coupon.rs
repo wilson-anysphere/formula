@@ -413,7 +413,10 @@ fn oddf_equation(
     let e = coupon_period_e(prev_coupon, first_coupon, basis, freq, system)?;
 
     // Regular coupon payment per period.
-    let c = redemption * rate / freq;
+    //
+    // Excel's ODDFPRICE/ODDFYIELD return a price per $100 face value, so the coupon payment is
+    // based on the $100 face value (and does not scale with the redemption amount).
+    let c = 100.0 * rate / freq;
     validate_finite(c)?;
 
     let accrued_interest = c * (a / e);
@@ -508,7 +511,10 @@ fn oddl_equation(
     let e_last = coupon_period_e(prev_coupon, last_interest, basis, freq, system)?;
 
     // Regular coupon payment.
-    let c = redemption * rate / freq;
+    //
+    // Excel's ODDLPRICE/ODDLYIELD return a price per $100 face value, so the coupon payment is
+    // based on the $100 face value (and does not scale with the redemption amount).
+    let c = 100.0 * rate / freq;
     validate_finite(c)?;
 
     // Odd last coupon at maturity, prorated by DLM/E.

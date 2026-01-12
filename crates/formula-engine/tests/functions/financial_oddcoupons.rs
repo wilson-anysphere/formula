@@ -124,7 +124,7 @@ fn odd_coupon_settlement_boundary_behavior() {
     //   constraints `issue < first_coupon` and `settlement < maturity`.
     //
     // ODDF* rejects settlement > first_coupon, issue > settlement, issue == first_coupon, and
-    // settlement >= maturity (see `crates/formula-engine/tests/odd_coupon_date_boundaries.rs` for
+    // settlement == maturity (see `crates/formula-engine/tests/odd_coupon_date_boundaries.rs` for
     // pinned boundary behavior).
 
     // ODDL*: settlement == last_interest should be accepted.
@@ -190,7 +190,8 @@ fn odd_coupon_settlement_boundary_behavior() {
     .expect("ODDLYIELD should converge when settlement < last_interest");
     assert_close(yld_out, yld_in, 1e-6);
 
-    // ODDF*: settlement == first_coupon is allowed (settlement on the first coupon date).
+    // ODDF*: settlement == first_coupon is allowed (settlement on the first coupon date; see
+    // `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`).
     let issue = ymd_to_serial(ExcelDate::new(2022, 12, 15), system).unwrap();
     let first_coupon = ymd_to_serial(ExcelDate::new(2023, 1, 31), system).unwrap();
     let maturity2 = ymd_to_serial(ExcelDate::new(2024, 7, 31), system).unwrap();
@@ -208,6 +209,10 @@ fn odd_coupon_settlement_boundary_behavior() {
         system,
     )
     .expect("ODDFPRICE should accept settlement == first_coupon");
+    assert!(
+        pr_oddf_eq_first.is_finite() && pr_oddf_eq_first > 0.0,
+        "expected positive finite price, got {pr_oddf_eq_first}"
+    );
     let yld_out = oddfyield(
         settlement_eq_first,
         maturity2,
@@ -288,7 +293,7 @@ fn odd_coupon_settlement_boundary_behavior() {
     }
     let v = sheet.eval("=ODDFYIELD(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,ODDFPRICE(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0),100,2,0)");
     assert!(
-        matches!(v, Value::Number(n) if (n - yld_in).abs() <= 1e-6),
+        matches!(v, Value::Number(n) if (n - 0.06).abs() <= 1e-6),
         "expected yield ~0.06 for worksheet ODDFYIELD when settlement == first_coupon, got {v:?}"
     );
     let v = sheet.eval("=ODDFPRICE(DATE(2023,2,1),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)");

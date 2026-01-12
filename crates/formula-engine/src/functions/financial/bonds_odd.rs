@@ -81,7 +81,7 @@
 //! Let:
 //!
 //! - `R` = `redemption` (typically 100)
-//! - `C` = regular coupon payment = `R * rate / frequency`
+//! - `C` = regular coupon payment per 100 face value = `100 * rate / frequency`
 //! - `y` = yield per period = `yld / frequency`
 //!
 //! In odd periods, Excel prorates coupon cashflows linearly with `E`:

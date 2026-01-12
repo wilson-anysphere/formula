@@ -190,7 +190,7 @@ The “long” cases are important because they stress:
 
 Our implementation follows the standard Excel-style model:
 
-- Regular coupon payment per period: `C = redemption * rate / frequency`
+- Regular coupon payment per period (per $100 face value): `C = 100 * rate / frequency`
 - ODDF\*:
   - `A = days(issue, settlement)`
   - `DFC = days(issue, first_coupon)`
