@@ -334,7 +334,9 @@ fn oddf_equation(
         return Err(ExcelError::Num);
     }
 
-    // Excel-style chronology constraints.
+    // Excel-oracle parity (see `tools/excel-oracle/odd_coupon_boundary_cases.json`) indicates
+    // ODDF* accepts the boundary equalities `issue == settlement` and `settlement == first_coupon`
+    // (both yield finite results), while still rejecting `issue == first_coupon`.
     //
     // Excel's published docs describe strict inequalities for ODDF* inputs, but parity testing
     // against the curated excel-oracle corpus shows that the boundary equalities are accepted:
