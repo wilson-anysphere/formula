@@ -8,7 +8,7 @@ test.describe("sheet tab context menu", () => {
 
     // Lazily create Sheet2 by writing a value into it.
     await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
     });
 
@@ -17,10 +17,10 @@ test.describe("sheet tab context menu", () => {
 
     // Reset dirty state so we can assert metadata operations mark the workbook dirty.
     await page.evaluate(() => {
-      const doc = (window as any).__formulaApp.getDocument();
+      const doc = (window.__formulaApp as any).getDocument();
       doc.markSaved();
     });
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(false);
 
     // Hide Sheet2.
     await sheet2Tab.click({ button: "right", position: { x: 10, y: 10 } });
@@ -29,15 +29,15 @@ test.describe("sheet tab context menu", () => {
     await menu.getByRole("button", { name: "Hide", exact: true }).click();
 
     await expect(sheet2Tab).toHaveCount(0);
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getCurrentSheetId())).toBe("Sheet1");
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(true);
 
     // Unhide Sheet2.
     await page.evaluate(() => {
-      const doc = (window as any).__formulaApp.getDocument();
+      const doc = (window.__formulaApp as any).getDocument();
       doc.markSaved();
     });
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(false);
 
     await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
     await expect(menu).toBeVisible();
@@ -45,14 +45,14 @@ test.describe("sheet tab context menu", () => {
     await menu.getByRole("button", { name: "Sheet2" }).click();
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(true);
 
     // Set a tab color on Sheet2.
     await page.evaluate(() => {
-      const doc = (window as any).__formulaApp.getDocument();
+      const doc = (window.__formulaApp as any).getDocument();
       doc.markSaved();
     });
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(false);
 
     const sheet2TabVisible = page.getByTestId("sheet-tab-Sheet2");
     await sheet2TabVisible.click({ button: "right", position: { x: 10, y: 10 } });
@@ -61,6 +61,6 @@ test.describe("sheet tab context menu", () => {
     await menu.getByRole("button", { name: "Red" }).click();
 
     await expect(sheet2TabVisible).toHaveAttribute("data-tab-color", "#ff0000");
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(true);
   });
 });

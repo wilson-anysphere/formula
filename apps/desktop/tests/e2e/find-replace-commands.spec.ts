@@ -37,7 +37,7 @@ test.describe("command palette: find/replace/go to", () => {
     await gotoDesktop(page);
 
     // Ensure key events go to the spreadsheet shell.
-    await page.evaluate(() => (window as any).__formulaApp.focus());
+    await page.evaluate(() => (window.__formulaApp as any).focus());
 
     // Avoid using Playwright's `keyboard.press()` here since Ctrl+H / Cmd+Option+F may be
     // intercepted by the browser shell (History, toolbar focus, etc.) in some environments.

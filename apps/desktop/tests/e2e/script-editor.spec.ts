@@ -31,7 +31,7 @@ await ctx.activeSheet.getRange("C1").setValue(99);
         await expect(runButton).toBeEnabled({ timeout: 30_000 });
         await expect
           .poll(
-            async () => page.evaluate(() => (window as any).__formulaApp?.getCellValueA1?.("C1") ?? ""),
+            async () => page.evaluate(() => (window.__formulaApp as any)?.getCellValueA1?.("C1") ?? ""),
             { timeout: 20_000 },
           )
           .toBe("99");

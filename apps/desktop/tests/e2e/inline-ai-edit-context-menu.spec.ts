@@ -34,7 +34,7 @@ test.describe("AI inline edit (context menu)", () => {
     await gotoDesktop(page);
 
     const grid = page.locator("#grid");
-    const a1Rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"));
+    const a1Rect = await page.evaluate(() => (window.__formulaApp as any).getCellRectA1("A1"));
 
     // Select A1 before opening the context menu.
     await grid.click({ position: { x: a1Rect.x + a1Rect.width / 2, y: a1Rect.y + a1Rect.height / 2 } });

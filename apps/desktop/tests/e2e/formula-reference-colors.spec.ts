@@ -42,6 +42,6 @@ test.describe("formula reference colors", () => {
     await expect(input).toHaveJSProperty("selectionStart", 2);
     await expect(input).toHaveJSProperty("selectionEnd", 2);
 
-    await page.waitForFunction(() => (window as any).__formulaApp.getReferenceHighlightCount() === 2);
+    await page.waitForFunction(() => (window.__formulaApp as any).getReferenceHighlightCount() === 2);
   });
 });
