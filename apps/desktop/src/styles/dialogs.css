@@ -66,3 +66,42 @@
   font-size: 12px;
 }
 
+/* --- Extension permission prompt ----------------------------------------- */
+
+.permission-prompt__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.permission-prompt__name {
+  font-weight: 700;
+}
+
+.permission-prompt__id {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.permission-prompt__detail {
+  margin-bottom: 8px;
+}
+
+.permission-prompt__list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.permission-prompt__note {
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.permission-prompt__controls {
+  margin-top: 14px;
+}

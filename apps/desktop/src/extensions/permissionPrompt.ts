@@ -73,18 +73,14 @@ async function promptOnce(req: ExtensionPermissionPromptRequest): Promise<boolea
   title.textContent = "Extension Permission Request";
 
   const extensionMeta = document.createElement("div");
-  extensionMeta.style.display = "flex";
-  extensionMeta.style.flexDirection = "column";
-  extensionMeta.style.gap = "2px";
-  extensionMeta.style.marginBottom = "10px";
+  extensionMeta.className = "permission-prompt__meta";
 
   const extensionName = document.createElement("div");
-  extensionName.style.fontWeight = "700";
+  extensionName.className = "permission-prompt__name";
   extensionName.textContent = req.displayName ? String(req.displayName) : String(req.extensionId);
 
   const extensionId = document.createElement("div");
-  extensionId.style.color = "var(--text-secondary)";
-  extensionId.style.fontSize = "12px";
+  extensionId.className = "permission-prompt__id";
   extensionId.textContent = String(req.extensionId);
 
   extensionMeta.appendChild(extensionName);
@@ -94,14 +90,10 @@ async function promptOnce(req: ExtensionPermissionPromptRequest): Promise<boolea
 
   const detail = document.createElement("div");
   detail.textContent = "This extension is requesting access to:";
-  detail.style.marginBottom = "8px";
+  detail.className = "permission-prompt__detail";
 
   const list = document.createElement("ul");
-  list.style.margin = "0";
-  list.style.paddingLeft = "18px";
-  list.style.display = "flex";
-  list.style.flexDirection = "column";
-  list.style.gap = "4px";
+  list.className = "permission-prompt__list";
 
   for (const perm of permissions) {
     const li = document.createElement("li");
@@ -111,16 +103,11 @@ async function promptOnce(req: ExtensionPermissionPromptRequest): Promise<boolea
   }
 
   const note = document.createElement("div");
-  note.style.marginTop = "10px";
-  note.style.color = "var(--text-secondary)";
-  note.style.fontSize = "12px";
+  note.className = "permission-prompt__note";
   note.textContent = "Your choice will be saved for this extension.";
 
   const controls = document.createElement("div");
-  controls.style.display = "flex";
-  controls.style.justifyContent = "flex-end";
-  controls.style.gap = "8px";
-  controls.style.marginTop = "14px";
+  controls.className = "dialog__controls permission-prompt__controls";
 
   const denyBtn = document.createElement("button");
   denyBtn.type = "button";
