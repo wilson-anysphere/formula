@@ -50,7 +50,7 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("edit.replace", macIndex)).toBe("⌥⌘F");
     expect(getPrimaryCommandKeybindingDisplay("audit.tracePrecedents", macIndex)).toBe("⌘[");
     expect(getPrimaryCommandKeybindingDisplay("audit.traceDependents", macIndex)).toBe("⌘]");
-    expect(getPrimaryCommandKeybindingDisplay("view.togglePanel.aiChat", macIndex)).toBe("⇧⌘A");
+    expect(getPrimaryCommandKeybindingDisplay("view.togglePanel.aiChat", macIndex)).toBe("⌘I");
     expect(getPrimaryCommandKeybindingDisplay("ai.inlineEdit", macIndex)).toBe("⌘K");
     expect(getPrimaryCommandKeybindingDisplay("format.toggleItalic", macIndex)).toBe("⌃I");
   });

@@ -36,7 +36,7 @@ test.describe("formatting shortcuts", () => {
     expect(await getA1FontProp(page, "bold")).toBe(true);
   });
 
-  test("Ctrl/Cmd+I toggles italic; Ctrl/Cmd+Shift+A opens AI panel without changing formatting", async ({ page }) => {
+  test("Ctrl+I toggles italic; Cmd+I opens AI panel without changing formatting", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
     await page.reload();
@@ -51,18 +51,18 @@ test.describe("formatting shortcuts", () => {
 
     expect(await getA1FontProp(page, "italic")).toBe(false);
 
-    await page.keyboard.press("ControlOrMeta+I");
+    await page.keyboard.press("Control+I");
     await waitForIdle(page);
     expect(await getA1FontProp(page, "italic")).toBe(true);
 
-    await page.keyboard.press("ControlOrMeta+I");
+    await page.keyboard.press("Control+I");
     await waitForIdle(page);
     const italicOff = await getA1FontProp(page, "italic");
     expect(italicOff).toBe(false);
 
     await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
 
-    await page.keyboard.press("ControlOrMeta+Shift+A");
+    await page.keyboard.press("Meta+I");
     await expect(page.getByTestId("panel-aiChat")).toBeVisible();
 
     expect(await getA1FontProp(page, "italic")).toBe(italicOff);

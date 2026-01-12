@@ -120,6 +120,13 @@ export class KeybindingService {
         candidates.add(kb.key);
       }
 
+      // On non-mac platforms, also accept the macOS binding as an alternate (typically `Meta+...`
+      // in the browser). This keeps Cmd-only shortcuts testable in Playwright on Linux/Windows,
+      // while still keeping the UI/display binding platform-specific.
+      if (this.platform === "other" && kb.mac && kb.mac !== primary) {
+        candidates.add(kb.mac);
+      }
+
       for (const raw of candidates) {
         const parsed = parseKeybinding(kb.command, raw, kb.when ?? null);
         if (!parsed) continue;

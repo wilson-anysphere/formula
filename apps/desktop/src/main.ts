@@ -4274,7 +4274,7 @@ if (
             type: "item",
             label: t("command.format.toggleItalic"),
             shortcut:
-              getPrimaryCommandKeybindingDisplay("format.toggleItalic", commandKeybindingDisplayIndex) ?? primaryShortcut("I"),
+              getPrimaryCommandKeybindingDisplay("format.toggleItalic", commandKeybindingDisplayIndex) ?? (isMac ? "⌃I" : "Ctrl+I"),
             onSelect: () => executeBuiltinCommand("format.toggleItalic"),
           },
           {

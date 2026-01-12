@@ -64,7 +64,7 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
   {
     command: "view.togglePanel.aiChat",
     key: "ctrl+shift+a",
-    mac: "cmd+shift+a",
+    mac: "cmd+i",
     when: null,
   },
   {
