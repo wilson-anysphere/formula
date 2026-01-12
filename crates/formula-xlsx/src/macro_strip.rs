@@ -881,8 +881,7 @@ impl RelationshipGraph {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn validate_opc_relationships(
+pub fn validate_opc_relationships(
     parts: &BTreeMap<String, Vec<u8>>,
 ) -> Result<(), XlsxError> {
     for rels_part in parts.keys().filter(|name| name.ends_with(".rels")) {
@@ -930,7 +929,6 @@ pub(crate) fn validate_opc_relationships(
     Ok(())
 }
 
-#[cfg(test)]
 fn parse_relationship_ids(xml: &[u8]) -> Result<BTreeSet<String>, XlsxError> {
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);
@@ -959,7 +957,6 @@ fn parse_relationship_ids(xml: &[u8]) -> Result<BTreeSet<String>, XlsxError> {
     Ok(out)
 }
 
-#[cfg(test)]
 fn parse_relationship_id_references(xml: &[u8]) -> Result<BTreeSet<String>, XlsxError> {
     let mut reader = XmlReader::from_reader(xml);
     reader.config_mut().trim_text(false);

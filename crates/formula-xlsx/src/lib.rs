@@ -60,6 +60,8 @@ pub mod write;
 #[cfg(not(target_arch = "wasm32"))]
 mod writer;
 
+pub use crate::macro_strip::validate_opc_relationships;
+
 use std::collections::{BTreeMap, HashMap};
 
 pub use crate::minimal::write_minimal_xlsx;
