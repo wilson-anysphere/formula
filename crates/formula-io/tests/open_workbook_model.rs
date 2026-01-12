@@ -273,3 +273,14 @@ fn open_workbook_model_csv_strips_utf8_bom() {
     let table = sheet.columnar_table().expect("expected columnar table");
     assert_eq!(table.schema()[0].name, "id");
 }
+
+#[test]
+fn open_workbook_model_csv_invalid_sheet_name_falls_back_to_sheet1() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let path = tmp.path().join("bad[name].csv");
+    std::fs::write(&path, "col1\n1\n").expect("write csv");
+
+    let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "Sheet1");
+}

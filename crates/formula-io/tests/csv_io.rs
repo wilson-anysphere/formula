@@ -59,3 +59,21 @@ fn opens_windows1252_csv_and_saves_as_xlsx() {
         CellValue::String("café".to_string())
     );
 }
+
+#[test]
+fn opens_utf8_bom_csv_schema_names_are_clean() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let csv_path = dir.path().join("bom.csv");
+
+    std::fs::write(&csv_path, b"\xEF\xBB\xBFid,text\n1,hello\n").expect("write csv");
+
+    let wb = open_workbook(&csv_path).expect("open csv workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    let sheet = model.sheet_by_name("bom").expect("sheet missing");
+    let table = sheet.columnar_table().expect("expected columnar table");
+    assert_eq!(table.schema()[0].name, "id");
+}
