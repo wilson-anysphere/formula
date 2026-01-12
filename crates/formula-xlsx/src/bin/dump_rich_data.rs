@@ -106,7 +106,9 @@ fn print_interesting_parts(pkg: &XlsxPackage) {
             let lower = normalized.to_ascii_lowercase();
             lower.starts_with("xl/richdata/")
                 || lower.starts_with("xl/metadata.xml")
+                || lower == "xl/_rels/metadata.xml.rels"
                 || lower.starts_with("xl/cellimages")
+                || (lower.starts_with("xl/_rels/cellimages") && lower.ends_with(".rels"))
         })
         .collect();
     parts.sort();
