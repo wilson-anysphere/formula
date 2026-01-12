@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 // `pnpm -C apps/desktop vitest …` runs from within `apps/desktop/`, but some
 // callsites pass file paths rooted at the repo (e.g. `apps/desktop/src/...`).
 // Normalize those to paths relative to the desktop package so Vitest can find them.
-const PREFIX = "apps/desktop/";
+const PREFIX_POSIX = "apps/desktop/";
+const PREFIX_WIN = "apps\\desktop\\";
 let args = process.argv.slice(2);
 // pnpm forwards a literal `--` delimiter into scripts. Strip the first occurrence so:
 // - `pnpm -C apps/desktop vitest -- run <file>` behaves as expected
@@ -21,7 +22,8 @@ const normalizedArgs = args.map((arg) => {
   // Vitest treats `--silent <pattern>` as "silent has value <pattern>". Normalize to the
   // explicit boolean form so `pnpm -C apps/desktop vitest --silent <file>` works.
   if (arg === "--silent") return "--silent=true";
-  if (arg.startsWith(PREFIX)) return arg.slice(PREFIX.length);
+  if (arg.startsWith(PREFIX_POSIX)) return arg.slice(PREFIX_POSIX.length);
+  if (arg.startsWith(PREFIX_WIN)) return arg.slice(PREFIX_WIN.length);
   return arg;
 });
 

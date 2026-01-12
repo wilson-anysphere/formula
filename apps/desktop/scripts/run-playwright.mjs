@@ -15,10 +15,12 @@ if (delimiterIdx >= 0) {
 
 // Some callsites pass file paths rooted at the repo (e.g. `apps/desktop/tests/e2e/...`).
 // Normalize those to paths relative to the desktop package so Playwright can find them.
-const PREFIX = "apps/desktop/";
+const PREFIX_POSIX = "apps/desktop/";
+const PREFIX_WIN = "apps\\desktop\\";
 const normalizedArgs = args.map((arg) => {
   if (typeof arg !== "string") return arg;
-  if (arg.startsWith(PREFIX)) return arg.slice(PREFIX.length);
+  if (arg.startsWith(PREFIX_POSIX)) return arg.slice(PREFIX_POSIX.length);
+  if (arg.startsWith(PREFIX_WIN)) return arg.slice(PREFIX_WIN.length);
   return arg;
 });
 
