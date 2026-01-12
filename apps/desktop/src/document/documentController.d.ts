@@ -11,6 +11,8 @@ export class DocumentController {
   readonly isDirty: boolean;
 
   getSheetIds(): string[];
+  getSheetView(sheetId: string): { frozenRows: number; frozenCols: number };
+  setFrozen(sheetId: string, frozenRows: number, frozenCols: number, options?: unknown): void;
 
   getCell(sheetId: string, coord: unknown): any;
 
