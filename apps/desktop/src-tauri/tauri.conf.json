@@ -24,7 +24,8 @@
         "title": "Formula",
         "width": 1280,
         "height": 800,
-        "dragDropEnabled": true
+        "dragDropEnabled": true,
+        "capabilities": ["main"]
       }
     ]
   },

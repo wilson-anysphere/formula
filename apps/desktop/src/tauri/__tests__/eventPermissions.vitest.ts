@@ -16,7 +16,7 @@ describe("tauri capability event permissions", () => {
   const allowListenIdentifiers = ["core:event:allow-listen"] as const;
   const allowEmitIdentifiers = ["core:event:allow-emit"] as const;
 
-  it("is scoped to the main window label via the capability file", () => {
+  it("maps the main window label to the main capability", () => {
     const tauriConfUrl = new URL("../../../src-tauri/tauri.conf.json", import.meta.url);
     const tauriConf = JSON.parse(readFileSync(tauriConfUrl, "utf8")) as any;
 
@@ -26,6 +26,10 @@ describe("tauri capability event permissions", () => {
 
     const mainWindowLabel = String(mainWindow?.label ?? "");
     expect(mainWindowLabel).toBe("main");
+
+    // Window-level capability mapping (tauri.conf.json)
+    expect(Array.isArray(mainWindow?.capabilities)).toBe(true);
+    expect(mainWindow.capabilities).toContain("main");
 
     const capabilityUrl = new URL("../../../src-tauri/capabilities/main.json", import.meta.url);
     const capability = JSON.parse(readFileSync(capabilityUrl, "utf8")) as any;
