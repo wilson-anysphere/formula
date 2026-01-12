@@ -437,7 +437,7 @@ export function getCellGridFromRange(doc, sheetId, range) {
     }
 
     // DocumentController internal model shape (layered formatting).
-    // - Sheet style layer: `sheet.defaultStyleId` (legacy: `sheet.sheetStyleId`)
+    // - Sheet default style layer: `sheet.defaultStyleId` (legacy: `sheet.sheetStyleId` / `sheet.sheetDefaultStyleId`)
     // - Column style layer: `sheet.colStyleIds` (legacy: `sheet.colStyles`)
     // - Row style layer: `sheet.rowStyleIds` (legacy: `sheet.rowStyles`)
     //
