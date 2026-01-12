@@ -26,7 +26,7 @@ This document captures the part relationships and (most importantly) the **index
 > fully specified in the public ECMA-376 base schema. This doc focuses on the *stable wiring* (OPC parts
 > + index indirections) that we must preserve.
 >
-> One concrete schema is now confirmed for “Place in Cell” images produced by `rust_xlsxwriter`:
+> One concrete schema is now confirmed for “Place in Cell” images produced by modern Excel and by `rust_xlsxwriter`:
 > worksheet cell `t="e"`/`#VALUE!` + `metadata.xml` + `xl/richData/rdrichvalue*.xml` + `richValueRel` →
 > `xl/media/*`. See [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md).
 
@@ -43,7 +43,7 @@ xl/
     ├── richValue.xml / richValue1.xml        # Rich value instances (<rv>), indexed by metadata (schema varies)
     ├── richValueTypes.xml                    # Optional: type table (type id -> structure id)
     ├── richValueStructure.xml                # Optional: structure table (field layout)
-    ├── rdrichvalue.xml                       # Alternate naming (observed in rust_xlsxwriter output)
+    ├── rdrichvalue.xml                       # Alternate naming (observed in real Excel fixtures and rust_xlsxwriter output)
     ├── rdrichvaluestructure.xml              # Alternate naming
     ├── rdRichValueTypes.xml                  # Alternate naming (note casing)
     ├── richValueRel.xml                      # Ordered <rel r:id="…"> list (relationship slots)
