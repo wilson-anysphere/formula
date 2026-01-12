@@ -563,8 +563,10 @@ export function extractPlainTextFromRtf(rtf) {
 
     const param = numStr ? sign * Number.parseInt(numStr, 10) : null;
 
-    // A space following a control word is a delimiter and should be consumed.
-    if (rtf[j] === " ") j += 1;
+    // A whitespace sequence following a control word is a delimiter and should be consumed.
+    // RTF payloads often include newlines/indentation for readability; treat these as syntax,
+    // not literal text.
+    while (j < len && (rtf[j] === " " || rtf[j] === "\r" || rtf[j] === "\n")) j += 1;
 
     // Some destinations should be skipped entirely (font tables, embedded images, etc).
     if (atStart) {
@@ -590,6 +592,13 @@ export function extractPlainTextFromRtf(rtf) {
           if (out.endsWith("\t")) out = out.slice(0, -1);
           inTable = false;
         }
+        out += "\n";
+      } else if (word === "cell") {
+        out += "\t";
+      } else if (word === "row") {
+        // RTF tables usually emit a trailing `\cell` for the last column and then `\row`.
+        // Drop the trailing tab so TSV parsing doesn't add a spurious empty column.
+        if (out.endsWith("\t")) out = out.slice(0, -1);
         out += "\n";
       } else if (word === "u" && typeof param === "number") {
         // `\uN` is a signed 16-bit integer; map negatives back into [0, 65535].
