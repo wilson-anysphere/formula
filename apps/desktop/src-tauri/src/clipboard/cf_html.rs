@@ -161,35 +161,45 @@ pub(crate) fn decode_cf_html_bytes(payload: &[u8]) -> Option<String> {
     }
 
     let bytes = payload;
+    let header_end = bytes.iter().position(|&b| b == b'<').unwrap_or(bytes.len());
+    let header = &bytes[..header_end];
 
     // 1) Prefer explicit fragment offsets.
     if let (Some(start), Some(end)) = (
-        parse_offset(bytes, b"StartFragment:"),
-        parse_offset(bytes, b"EndFragment:"),
+        parse_offset(header, b"StartFragment:"),
+        parse_offset(header, b"EndFragment:"),
     ) {
-        if start < end && end <= bytes.len() {
-            let fragment_bytes = &bytes[start..end];
-            // Some producers incorrectly include the fragment markers in the Start/EndFragment
-            // span; strip them if present.
-            if let Some(fragment) = extract_fragment_markers_bytes(fragment_bytes) {
-                return Some(fragment);
+        if start < bytes.len() {
+            let end = end.min(bytes.len());
+            if end > start {
+                let fragment_bytes = &bytes[start..end];
+
+                // Some producers incorrectly include the fragment markers in the Start/EndFragment
+                // span; strip them if present.
+                if let Some(fragment) = extract_fragment_markers_bytes(fragment_bytes) {
+                    return Some(fragment);
+                }
+
+                return Some(String::from_utf8_lossy(fragment_bytes).into_owned());
             }
-            return Some(String::from_utf8_lossy(fragment_bytes).into_owned());
         }
     }
 
     // 2) Fall back to StartHTML/EndHTML and extract markers if present.
     if let (Some(start), Some(end)) = (
-        parse_offset(bytes, b"StartHTML:"),
-        parse_offset(bytes, b"EndHTML:"),
+        parse_offset(header, b"StartHTML:"),
+        parse_offset(header, b"EndHTML:"),
     ) {
-        if start < end && end <= bytes.len() {
-            let html_doc = &bytes[start..end];
-            if let Some(fragment) = extract_fragment_markers_bytes(html_doc) {
-                return Some(fragment);
-            }
-            if !html_doc.is_empty() {
-                return Some(String::from_utf8_lossy(html_doc).into_owned());
+        if start < bytes.len() {
+            let end = end.min(bytes.len());
+            if end > start {
+                let html_doc = &bytes[start..end];
+                if let Some(fragment) = extract_fragment_markers_bytes(html_doc) {
+                    return Some(fragment);
+                }
+                if !html_doc.is_empty() {
+                    return Some(String::from_utf8_lossy(html_doc).into_owned());
+                }
             }
         }
     }
@@ -346,5 +356,38 @@ mod tests {
         let payload = build_cf_html_payload(fragment).expect("payload");
         let extracted = extract_cf_html_fragment_best_effort(&payload);
         assert_eq!(extracted, fragment);
+    }
+
+    #[test]
+    fn decode_cf_html_bytes_ignores_offset_keys_inside_html() {
+        // This looks like a CF_HTML header field, but it's actually inside the HTML body. We should
+        // not treat it as an offset directive.
+        let html = "<html><body>StartFragment:0000000010</body></html>";
+        let decoded = decode_cf_html_bytes(html.as_bytes()).expect("decoded");
+        assert_eq!(decoded, html);
+    }
+
+    #[test]
+    fn decode_cf_html_bytes_clamps_out_of_range_end_html() {
+        // Some producers include trailing NUL padding in their EndHTML calculations.
+        // Ensure we clamp offsets so we can still extract the HTML.
+        let html = "<html><body><p>Hi</p></body></html>";
+
+        // Build a minimal header with fixed-width offsets.
+        let header_placeholder =
+            format!("Version:0.9\r\nStartHTML:{:010}\r\nEndHTML:{:010}\r\n", 0, 0);
+        let start_html = header_placeholder.len();
+        let extra_nuls = 2usize;
+        let end_html = start_html + html.as_bytes().len() + extra_nuls;
+        let header = format!(
+            "Version:0.9\r\nStartHTML:{start_html:010}\r\nEndHTML:{end_html:010}\r\n"
+        );
+
+        let mut payload = header.into_bytes();
+        payload.extend_from_slice(html.as_bytes());
+        payload.extend_from_slice(&[0u8; 2]);
+
+        let decoded = decode_cf_html_bytes(&payload).expect("decoded");
+        assert_eq!(decoded, html);
     }
 }
