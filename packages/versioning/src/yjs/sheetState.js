@@ -110,6 +110,89 @@ function extractStyleObject(value) {
 }
 
 /**
+ * Normalize sparse per-column row interval format runs into a `Map<col, runs[]>`.
+ *
+ * The collab binder stores range-run formatting on sheet metadata as:
+ *   formatRunsByCol: { "0": [{ startRow, endRowExclusive, format }, ...], ... }
+ *
+ * This mirrors `DocumentController`'s internal `sheet.formatRunsByCol` data, but runs
+ * store style objects (not style ids) because style ids are per-client.
+ *
+ * @param {any} raw
+ * @returns {Map<number, Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }>>}
+ */
+function parseFormatRunsByCol(raw) {
+  /** @type {Map<number, Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }>>} */
+  const out = new Map();
+  const json = yjsValueToJson(raw);
+  if (!json) return out;
+
+  /**
+   * @param {any} colKey
+   * @param {any} rawRuns
+   */
+  const addRunsForCol = (colKey, rawRuns) => {
+    const col = Number(colKey);
+    if (!Number.isInteger(col) || col < 0) return;
+
+    const list = Array.isArray(rawRuns)
+      ? rawRuns
+      : isPlainObject(rawRuns)
+        ? rawRuns.runs ?? rawRuns.formatRuns ?? rawRuns.segments ?? rawRuns.items ?? []
+        : [];
+    if (!Array.isArray(list) || list.length === 0) return;
+
+    /** @type {Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }>} */
+    const runs = [];
+    for (const entry of list) {
+      if (!entry || typeof entry !== "object") continue;
+      const startRow = Number(entry.startRow ?? entry.start?.row ?? entry.sr ?? entry.r0);
+      const endRowExclusiveNum = Number(entry.endRowExclusive ?? entry.endRowExcl ?? entry.erx ?? entry.r1x);
+      const endRowNum = Number(entry.endRow ?? entry.end?.row ?? entry.er ?? entry.r1);
+      const endRowExclusive = Number.isInteger(endRowExclusiveNum)
+        ? endRowExclusiveNum
+        : Number.isInteger(endRowNum)
+          ? endRowNum + 1
+          : NaN;
+      if (!Number.isInteger(startRow) || startRow < 0) continue;
+      if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) continue;
+
+      const format = extractStyleObject(yjsValueToJson(entry.format ?? entry.style ?? entry.value));
+      if (!format) continue;
+      runs.push({ startRow, endRowExclusive, format });
+    }
+
+    runs.sort((a, b) => a.startRow - b.startRow);
+    if (runs.length > 0) out.set(col, runs);
+  };
+
+  // Preferred encoding: object keyed by column index.
+  if (typeof json === "object" && !Array.isArray(json)) {
+    for (const [key, value] of Object.entries(json)) {
+      addRunsForCol(key, value);
+    }
+    return out;
+  }
+
+  // Also accept array encodings: [{ col, runs }, ...] or [[col, runs], ...].
+  if (Array.isArray(json)) {
+    for (const entry of json) {
+      if (Array.isArray(entry)) {
+        addRunsForCol(entry[0], entry[1]);
+        continue;
+      }
+      if (entry && typeof entry === "object") {
+        const col = entry.col ?? entry.index ?? entry.column;
+        const runs = entry.runs ?? entry.formatRuns ?? entry.segments ?? entry.items;
+        addRunsForCol(col, runs);
+      }
+    }
+  }
+
+  return out;
+}
+
+/**
  * Normalize sparse row/col formats into a `Map<index, styleObject>`.
  *
  * Supported encodings:
@@ -313,12 +396,16 @@ export function sheetStateFromYjsDoc(doc, opts = {}) {
     sheetEntry != null ? readSheetEntryField(sheetEntry, "defaultFormat") : undefined;
   const rawRowFormats = sheetEntry != null ? readSheetEntryField(sheetEntry, "rowFormats") : undefined;
   const rawColFormats = sheetEntry != null ? readSheetEntryField(sheetEntry, "colFormats") : undefined;
+  const rawFormatRunsByCol = sheetEntry != null ? readSheetEntryField(sheetEntry, "formatRunsByCol") : undefined;
 
   const sheetDefaultFormat =
     extractStyleObject(yjsValueToJson(rawDefaultFormat !== undefined ? rawDefaultFormat : viewJson?.defaultFormat)) ??
     null;
   const rowFormats = parseIndexedFormats(rawRowFormats !== undefined ? rawRowFormats : viewJson?.rowFormats, "row");
   const colFormats = parseIndexedFormats(rawColFormats !== undefined ? rawColFormats : viewJson?.colFormats, "col");
+  const formatRunsByCol = parseFormatRunsByCol(
+    rawFormatRunsByCol !== undefined ? rawFormatRunsByCol : viewJson?.formatRunsByCol,
+  );
 
   /** @type {Map<string, any>} */
   const cells = new Map();
@@ -369,7 +456,36 @@ export function sheetStateFromYjsDoc(doc, opts = {}) {
     cells.set(key, cell);
   });
 
-  if (targetSheetId != null && (sheetDefaultFormat || rowFormats.size > 0 || colFormats.size > 0)) {
+  if (
+    targetSheetId != null &&
+    (sheetDefaultFormat || rowFormats.size > 0 || colFormats.size > 0 || formatRunsByCol.size > 0)
+  ) {
+    /**
+     * Find the run containing `row` (half-open interval `[startRow, endRowExclusive)`).
+     *
+     * DocumentController guarantees these runs are sorted + non-overlapping, which lets us
+     * do a binary search.
+     *
+     * @param {Array<{ startRow: number, endRowExclusive: number, format: Record<string, any> }>} runs
+     * @param {number} row
+     */
+    const findRunForRow = (runs, row) => {
+      let lo = 0;
+      let hi = runs.length - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const run = runs[mid];
+        if (row < run.startRow) {
+          hi = mid - 1;
+        } else if (row >= run.endRowExclusive) {
+          lo = mid + 1;
+        } else {
+          return run;
+        }
+      }
+      return null;
+    };
+
     for (const [key, cell] of cells.entries()) {
       const m = String(key).match(/^r(\d+)c(\d+)$/);
       if (!m) continue;
@@ -379,6 +495,11 @@ export function sheetStateFromYjsDoc(doc, opts = {}) {
 
       const cellFormat = extractStyleObject(yjsValueToJson(cell?.format ?? cell?.style));
       let merged = deepMerge(deepMerge(sheetDefaultFormat ?? {}, colFormats.get(col) ?? null), rowFormats.get(row) ?? null);
+      const runs = formatRunsByCol.get(col);
+      if (runs && runs.length > 0) {
+        const run = findRunForRow(runs, row);
+        if (run) merged = deepMerge(merged, run.format);
+      }
       merged = deepMerge(merged, cellFormat);
       cell.format = normalizeFormat(merged);
     }

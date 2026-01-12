@@ -223,6 +223,40 @@ test("diffYjsWorkbookSnapshots reports formatOnly edits when sheet default forma
   assert.deepEqual(sheet1Diff.formatOnly[0].cell, { row: 0, col: 0 });
 });
 
+test("diffYjsWorkbookSnapshots reports formatOnly edits when range-run formats change (formatRunsByCol)", () => {
+  const doc = new Y.Doc();
+  const sheets = doc.getArray("sheets");
+  const cells = doc.getMap("cells");
+
+  const sheet1 = new Y.Map();
+  sheet1.set("id", "sheet1");
+  sheet1.set("name", "Sheet1");
+  sheets.push([sheet1]);
+
+  doc.transact(() => {
+    const cell = new Y.Map();
+    cell.set("value", "x");
+    cells.set("sheet1:0:0", cell);
+  });
+
+  const beforeSnapshot = Y.encodeStateAsUpdate(doc);
+
+  doc.transact(() => {
+    // Apply a compressed format run (Column A, row 0 only).
+    const runsByCol = new Y.Map();
+    runsByCol.set("0", [{ startRow: 0, endRowExclusive: 1, format: { font: { bold: true } } }]);
+    sheet1.set("formatRunsByCol", runsByCol);
+  });
+
+  const afterSnapshot = Y.encodeStateAsUpdate(doc);
+
+  const diff = diffYjsWorkbookSnapshots({ beforeSnapshot, afterSnapshot });
+  const sheet1Diff = diff.cellsBySheet.find((entry) => entry.sheetId === "sheet1")?.diff;
+  assert.ok(sheet1Diff);
+  assert.equal(sheet1Diff.formatOnly.length, 1);
+  assert.deepEqual(sheet1Diff.formatOnly[0].cell, { row: 0, col: 0 });
+});
+
 test("diffYjsWorkbookSnapshots supports comments stored as a Y.Array", () => {
   const doc = new Y.Doc();
   const sheets = doc.getArray("sheets");
