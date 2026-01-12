@@ -17,7 +17,8 @@ vi.mock("../updater", () => ({
 describe("updater restart", () => {
   afterEach(() => {
     registerAppQuitHandlers(null);
-    mocks.installUpdateAndRestart.mockClear();
+    mocks.installUpdateAndRestart.mockReset();
+    mocks.installUpdateAndRestart.mockResolvedValue(undefined);
     vi.restoreAllMocks();
     document.body.innerHTML = "";
   });
@@ -53,5 +54,59 @@ describe("updater restart", () => {
 
     expect(mocks.installUpdateAndRestart).toHaveBeenCalledTimes(1);
   });
-});
 
+  it("drains backend sync before installing and quitting", async () => {
+    document.body.innerHTML = `<div id="toast-root"></div>`;
+
+    const calls: string[] = [];
+    const drainBackendSync = vi.fn(async () => {
+      calls.push("drain");
+    });
+    const quitApp = vi.fn(async () => {
+      calls.push("quit");
+    });
+
+    registerAppQuitHandlers({
+      isDirty: () => true,
+      drainBackendSync,
+      quitApp,
+    });
+
+    mocks.installUpdateAndRestart.mockImplementation(async () => {
+      calls.push("install");
+    });
+
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const { restartToInstallUpdate } = await import("../updaterUi");
+    await restartToInstallUpdate();
+
+    expect(calls).toEqual(["drain", "install", "quit"]);
+  });
+
+  it("aborts restart and shows an error toast if install fails", async () => {
+    document.body.innerHTML = `<div id="toast-root"></div>`;
+
+    const quitApp = vi.fn().mockResolvedValue(undefined);
+
+    registerAppQuitHandlers({
+      isDirty: () => true,
+      drainBackendSync: vi.fn().mockResolvedValue(undefined),
+      quitApp,
+    });
+
+    mocks.installUpdateAndRestart.mockRejectedValue(new Error("boom"));
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const { restartToInstallUpdate } = await import("../updaterUi");
+    const ok = await restartToInstallUpdate();
+
+    expect(ok).toBe(false);
+    expect(quitApp).not.toHaveBeenCalled();
+
+    const toast = document.querySelector<HTMLElement>('[data-testid="toast"]');
+    expect(toast).not.toBeNull();
+    expect(toast?.dataset.type).toBe("error");
+    expect(toast?.textContent).toBe("Failed to restart to install the update.");
+  });
+});
