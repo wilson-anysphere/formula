@@ -161,7 +161,8 @@ is generally:
 5. **Relationship table** (`xl/richData/richValueRel.xml`)
    - Relationship table entry #0 contains `r:id="rId7"`.
 6. **OPC resolution** (`xl/richData/_rels/richValueRel.xml.rels`)
-   - Relationship `Id="rId7"` resolves to `Target="../media/image1.png"`.
+   - Relationship `Id="rId7"` resolves to an OPC `Target` (often a media part like `../media/image1.png`,
+     but treat this as opaque; other targets/types may appear depending on Excel build).
 
 So: **cell → vm (1-based) → metadata.xml → rvb@i (0-based) → richValue.xml → relIndex (0-based) →
 richValueRel.xml → rId → .rels target → image bytes**.
@@ -244,6 +245,7 @@ And the corresponding OPC relationships part:
     Id="rId1"
     Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
     Target="../media/image1.png"/>
+  <!-- Other relationship types/targets may also occur (unverified); preserve unknown entries. -->
   <!-- ... -->
 </Relationships>
 ```
