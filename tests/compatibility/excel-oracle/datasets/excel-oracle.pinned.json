@@ -15549,20 +15549,20 @@
       "outputCell": "C1",
       "result": {
         "t": "n",
-        "v": 100.75597490147861
+        "v": 100.75627837079071
       },
       "address": "C1",
-      "displayText": "100.75597490147861"
+      "displayText": "100.75627837079071"
     },
     {
       "caseId": "oddfyield_basis4_b8c7df4a447f",
       "outputCell": "C1",
       "result": {
         "t": "n",
-        "v": 0.0937828362065177
+        "v": 0.09377829305965153
       },
       "address": "C1",
-      "displayText": "0.0937828362065177"
+      "displayText": "0.09377829305965153"
     },
     {
       "caseId": "oddlprice_basis4_546c496042bd",
