@@ -825,7 +825,7 @@ class BrowserExtensionHost {
     const fn = api.clearExtensionStore;
     if (typeof fn !== "function") return;
     try {
-      fn.call(api, id);
+      await fn.call(api, id);
     } catch {
       // ignore
     }
