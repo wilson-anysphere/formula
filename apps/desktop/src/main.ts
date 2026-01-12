@@ -4422,7 +4422,7 @@ if (
         tab.title = tab.textContent ?? "";
         tab.setAttribute("role", "tab");
         tab.setAttribute("aria-selected", panelId === active ? "true" : "false");
-        if (panelId === active) tab.setAttribute("aria-controls", dockTabPanelDomId(panelId));
+        tab.setAttribute("aria-controls", dockTabPanelDomId(panelId));
         tab.tabIndex = panelId === active ? 0 : -1;
         tab.addEventListener("click", (e) => {
           e.preventDefault();
