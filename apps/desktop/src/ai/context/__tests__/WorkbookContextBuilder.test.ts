@@ -613,7 +613,7 @@ describe("WorkbookContextBuilder", () => {
     expect(second.promptContextTokens).toBe(ctx2.payload.budget.usedPromptContextTokens);
   });
 
-  it("builds a deterministic, human-readable promptContext", async () => {
+  it("builds a deterministic promptContext with compact stable JSON", async () => {
     const documentController = new DocumentController();
     const header = Array.from({ length: 8 }, (_v, idx) => `Col${idx + 1}`);
     const rows = Array.from({ length: 14 }, (_v, rIdx) =>
@@ -644,11 +644,11 @@ describe("WorkbookContextBuilder", () => {
     // Deterministic output is critical for caching and for stable prompt packing decisions.
     expect(ctx1.promptContext).toEqual(ctx2.promptContext);
 
-    // Prompt context should contain stable, pretty-printed JSON (human-readable).
-    expect(ctx1.promptContext).toContain('\n  "');
-    expect(ctx1.promptContext).toContain('"kind": "selection"');
-    // Ensure we don't regress to minified JSON for core fields.
-    expect(ctx1.promptContext).not.toContain('"kind":"selection"');
+    // Prompt context should contain stable, compact JSON (token-efficient + machine-readable).
+    expect(ctx1.promptContext).not.toContain('\n  "');
+    expect(ctx1.promptContext).toContain('"kind":"selection"');
+    // Ensure we don't regress to pretty JSON for core fields.
+    expect(ctx1.promptContext).not.toContain('"kind": "selection"');
   });
 
   it("respects a custom tokenEstimator when packing promptContext sections", async () => {
