@@ -40,7 +40,7 @@ test.describe("ribbon view toggles", () => {
     await expect(viewTab).toBeFocused();
     await waitForIdle(page);
 
-    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("hello");
+    expect(await page.evaluate(() => (window.__formulaApp as any).getCellValueA1("A1"))).toBe("hello");
     await expect(editor).toBeHidden();
     await expect(viewTab).toBeFocused();
   });
