@@ -25,6 +25,16 @@ const HARDEN_TAURI_GLOBALS_SOURCE = `(() => {
   "use strict";
   const keys = ["__TAURI__", "__TAURI_IPC__", "__TAURI_INTERNALS__", "__TAURI_METADATA__"];
   let tauriGlobalsPresent = false;
+  const areTauriGlobalsScrubbed = () => {
+    for (const key of keys) {
+      try {
+        if (typeof window[key] !== "undefined") return false;
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  };
 
   const scrubTauriGlobals = () => {
     for (const key of keys) {
@@ -140,6 +150,14 @@ const HARDEN_TAURI_GLOBALS_SOURCE = `(() => {
       });
     } catch {
       marker.tauriGlobalsPresent = tauriGlobalsPresent;
+    }
+    try {
+      Object.defineProperty(marker, "tauriGlobalsScrubbed", {
+        enumerable: true,
+        get: () => areTauriGlobalsScrubbed(),
+      });
+    } catch {
+      marker.tauriGlobalsScrubbed = areTauriGlobalsScrubbed();
     }
     try {
       Object.freeze(marker);

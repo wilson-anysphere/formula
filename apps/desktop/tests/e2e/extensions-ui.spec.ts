@@ -207,6 +207,7 @@ test.describe("Extensions UI integration", () => {
     expect(sandboxInfo, "webview should inject a sandbox hardening script").toBeTruthy();
     expect(typeof sandboxInfo.tauriGlobalsPresent).toBe("boolean");
     expect(sandboxInfo.tauriGlobalsPresent, "webview should detect injected Tauri globals").toBe(true);
+    expect(sandboxInfo.tauriGlobalsScrubbed, "webview should scrub injected Tauri globals").toBe(true);
 
     const sandboxDescriptor = await webviewFrame!.evaluate(() => {
       const desc = Object.getOwnPropertyDescriptor(window, "__formulaWebviewSandbox") as any;

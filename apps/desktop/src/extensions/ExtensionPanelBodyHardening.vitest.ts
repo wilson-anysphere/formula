@@ -54,6 +54,7 @@ describe("ExtensionPanelBody hardening script", () => {
 
     expect(fakeWindow.__formulaWebviewSandbox).toBeDefined();
     expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsPresent).toBe(true);
+    expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsScrubbed).toBe(true);
 
     expect(typeof fakeWindow.__TAURI__).toBe("undefined");
     const desc = Object.getOwnPropertyDescriptor(fakeWindow, "__TAURI__") as any;
@@ -97,6 +98,7 @@ describe("ExtensionPanelBody hardening script", () => {
 
     expect(fakeWindow.__formulaWebviewSandbox).toBeDefined();
     expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsPresent).toBe(false);
+    expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsScrubbed).toBe(true);
 
     // Run early timeouts (0ms / 50ms / 250ms) before injecting globals, simulating a runtime that
     // injects Tauri globals after initial load.
@@ -117,7 +119,7 @@ describe("ExtensionPanelBody hardening script", () => {
     await Promise.resolve();
 
     expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsPresent).toBe(true);
+    expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsScrubbed).toBe(true);
     expect(typeof fakeWindow.__TAURI__).toBe("undefined");
   });
 });
-
