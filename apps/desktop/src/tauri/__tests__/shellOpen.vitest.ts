@@ -27,6 +27,16 @@ describe("shellOpen", () => {
     expect(winOpen).not.toHaveBeenCalled();
   });
 
+  it("allows mailto: URLs in Tauri builds", async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    await shellOpen("mailto:test@example.com");
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("open_external_url", { url: "mailto:test@example.com" });
+  });
+
   it("falls back to window.open in web builds", async () => {
     (globalThis as any).__TAURI__ = undefined;
     const winOpen = vi.fn();

@@ -145,6 +145,38 @@ test.describe("external hyperlink opening", () => {
     expect(invokeCalls[0][1]?.url).toMatch(/^https:\/\/example\.com\/?$/);
   });
 
+  test("clicking a mailto: <a href> opens via the desktop Rust shell command", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+
+    await page.evaluate(() => {
+      (window as any).__invokeCalls = [];
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: (cmd: string, args: any) => {
+            (window as any).__invokeCalls.push([cmd, args]);
+            return Promise.resolve();
+          },
+        },
+      };
+
+      const a = document.createElement("a");
+      a.id = "e2e-external-anchor-mailto";
+      a.href = "mailto:test@example.com";
+      a.textContent = "mailto link";
+      document.body.appendChild(a);
+    });
+
+    const urlBefore = page.url();
+    await page.click("#e2e-external-anchor-mailto");
+    await page.waitForFunction(() => (window as any).__invokeCalls?.length === 1);
+
+    const [invokeCalls, urlAfter] = await Promise.all([page.evaluate(() => (window as any).__invokeCalls), page.url()]);
+
+    expect(invokeCalls).toEqual([["open_external_url", { url: "mailto:test@example.com" }]]);
+    expect(urlAfter).toBe(urlBefore);
+  });
+
   test("blocked protocols (javascript:) are never opened", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
@@ -210,6 +242,37 @@ test.describe("external hyperlink opening", () => {
     ]);
 
     expect(shellCalls).toEqual([]);
+    expect(urlAfter).toBe(urlBefore);
+  });
+
+  test("blocked protocols (file:) are never opened", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+
+    await page.evaluate(() => {
+      (window as any).__invokeCalls = [];
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: (cmd: string, args: any) => {
+            (window as any).__invokeCalls.push([cmd, args]);
+            return Promise.resolve();
+          },
+        },
+      };
+
+      const a = document.createElement("a");
+      a.id = "e2e-external-anchor-file";
+      a.href = "file:///etc/passwd";
+      a.textContent = "bad link";
+      document.body.appendChild(a);
+    });
+
+    const urlBefore = page.url();
+    await page.click("#e2e-external-anchor-file");
+    await page.waitForTimeout(50);
+
+    const [invokeCalls, urlAfter] = await Promise.all([page.evaluate(() => (window as any).__invokeCalls), page.url()]);
+    expect(invokeCalls).toEqual([]);
     expect(urlAfter).toBe(urlBefore);
   });
 
