@@ -3,7 +3,10 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use formula_vba::{extract_vba_signature_signed_digest, list_vba_digital_signatures};
+use formula_vba::{
+    extract_signer_certificate_info, extract_vba_signature_signed_digest,
+    list_vba_digital_signatures, verify_vba_digital_signature,
+};
 
 fn main() -> ExitCode {
     match run() {
@@ -40,63 +43,91 @@ fn run() -> Result<(), String> {
 
     if signatures.is_empty() {
         println!("signature streams: none");
-        return Ok(());
-    }
+    } else {
+        println!("signature streams: {}", signatures.len());
+        for (idx, sig) in signatures.iter().enumerate() {
+            println!();
+            println!("[{}] stream_path: {}", idx + 1, escape_ole_path(&sig.stream_path));
+            println!("    stream_len: {} bytes", sig.signature.len());
+            println!("    pkcs7_verification: {:?}", sig.verification);
+            println!(
+                "    signer_subject: {}",
+                sig.signer_subject
+                    .as_deref()
+                    .unwrap_or("<not found>")
+            );
 
-    println!("signature streams: {}", signatures.len());
-    let mut had_errors = false;
-    for (idx, sig) in signatures.iter().enumerate() {
-        println!();
-        println!("[{}] stream_path: {}", idx + 1, escape_ole_path(&sig.stream_path));
-        println!("    stream_len: {} bytes", sig.signature.len());
-        println!("    pkcs7_verification: {:?}", sig.verification);
-        if matches!(
-            sig.verification,
-            formula_vba::VbaSignatureVerification::SignedInvalid
-                | formula_vba::VbaSignatureVerification::SignedParseError
-        ) {
-            had_errors = true;
-        }
-        println!(
-            "    signer_subject: {}",
-            sig.signer_subject
-                .as_deref()
-                .unwrap_or("<not found>")
-        );
-
-        match (sig.pkcs7_offset, sig.pkcs7_len) {
-            (Some(offset), Some(len)) => {
-                println!("    pkcs7_location: offset={offset} len={len} (DigSigInfoSerialized)");
+            match extract_signer_certificate_info(&sig.signature) {
+                Some(info) => {
+                    println!("    signer_cert_subject: {}", info.subject);
+                    println!("    signer_cert_issuer: {}", info.issuer);
+                    println!("    signer_cert_serial: {}", info.serial_hex);
+                    println!(
+                        "    signer_cert_sha256_fingerprint: {}",
+                        info.sha256_fingerprint_hex
+                    );
+                }
+                None => {
+                    println!("    signer_cert_subject: <not found>");
+                    println!("    signer_cert_issuer: <not found>");
+                    println!("    signer_cert_sha256_fingerprint: <not found>");
+                }
             }
-            _ => {
-                println!("    pkcs7_location: <unknown> (DigSigInfoSerialized not detected)");
-            }
-        }
-        if let Some(version) = sig.digsig_info_version {
-            println!("    digsig_info_version: {version}");
-        }
 
-        match extract_vba_signature_signed_digest(&sig.signature) {
-            Ok(Some(digest)) => {
+            match (sig.pkcs7_offset, sig.pkcs7_len) {
+                (Some(offset), Some(len)) => {
+                    println!(
+                        "    pkcs7_location: offset={offset} len={len} (DigSigInfoSerialized)"
+                    );
+                }
+                _ => {
+                    println!("    pkcs7_location: <unknown> (DigSigInfoSerialized not detected)");
+                }
+            }
+            if let Some(version) = sig.digsig_info_version {
+                println!("    digsig_info_version: {version}");
+            }
+
+            if let (Some(oid), Some(digest)) = (
+                sig.signed_digest_algorithm_oid.as_deref(),
+                sig.signed_digest.as_deref(),
+            ) {
                 println!(
-                    "    signed_digest: alg_oid={} digest={}",
-                    digest.digest_algorithm_oid,
-                    bytes_to_lower_hex(&digest.digest)
+                    "    signed_digest: alg_oid={oid} digest={}",
+                    bytes_to_lower_hex(digest)
                 );
-            }
-            Ok(None) => {
-                println!("    signed_digest: <not found>");
-            }
-            Err(err) => {
-                // Keep going: this tool is intended for debugging partially malformed inputs.
-                println!("    signed_digest: <error: {err}>");
-                had_errors = true;
+            } else {
+                match extract_vba_signature_signed_digest(&sig.signature) {
+                    Ok(Some(digest)) => {
+                        println!(
+                            "    signed_digest: alg_oid={} digest={}",
+                            digest.digest_algorithm_oid,
+                            bytes_to_lower_hex(&digest.digest)
+                        );
+                    }
+                    Ok(None) => {
+                        println!("    signed_digest: <not found>");
+                    }
+                    Err(err) => {
+                        // Keep going: this tool is intended for debugging partially malformed inputs.
+                        println!("    signed_digest: <error: {err}>");
+                    }
+                }
             }
         }
     }
 
-    if had_errors {
-        return Err("one or more signature streams had errors (see stdout)".to_owned());
+    println!();
+    println!("verify_vba_digital_signature:");
+    match verify_vba_digital_signature(&vba_project_bin)
+        .map_err(|e| format!("failed to verify VBA digital signature: {e}"))?
+    {
+        None => println!("    signature: none"),
+        Some(sig) => {
+            println!("    chosen_stream: {}", escape_ole_path(&sig.stream_path));
+            println!("    pkcs7_verification: {:?}", sig.verification);
+            println!("    binding: {:?}", sig.binding);
+        }
     }
 
     Ok(())
@@ -104,28 +135,33 @@ fn run() -> Result<(), String> {
 
 fn usage(program: &OsString) -> String {
     format!(
-        "usage: {} <vbaProject.bin|workbook.xlsm|workbook.xlsx|workbook.xlsb>",
+        "usage: {} <vbaProject.bin|workbook.xlsm|workbook.xlsx>",
         program.to_string_lossy()
     )
 }
 
 fn load_vba_project_bin(path: &Path) -> Result<(Vec<u8>, String), String> {
-    match try_extract_vba_project_bin_from_zip(path) {
-        Ok(Some(bytes)) => Ok((
+    let ext = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if ext == "xlsm" || ext == "xlsx" {
+        let bytes = extract_vba_project_bin_from_zip(path)?;
+        return Ok((
             bytes,
             format!("{} (zip entry xl/vbaProject.bin)", path.display()),
-        )),
-        Ok(None) => {
-            // Not a zip workbook; treat as a raw vbaProject.bin OLE file.
-            let bytes = std::fs::read(path)
-                .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-            Ok((bytes, path.display().to_string()))
-        }
-        Err(err) => Err(err),
+        ));
     }
+
+    // Treat as a raw vbaProject.bin OLE file.
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    Ok((bytes, path.display().to_string()))
 }
 
-fn try_extract_vba_project_bin_from_zip(path: &Path) -> Result<Option<Vec<u8>>, String> {
+fn extract_vba_project_bin_from_zip(path: &Path) -> Result<Vec<u8>, String> {
     let file = match std::fs::File::open(path) {
         Ok(f) => f,
         Err(e) => return Err(format!("failed to open {}: {e}", path.display())),
@@ -133,7 +169,7 @@ fn try_extract_vba_project_bin_from_zip(path: &Path) -> Result<Option<Vec<u8>>, 
 
     let mut archive = match zip::ZipArchive::new(file) {
         Ok(a) => a,
-        Err(_) => return Ok(None),
+        Err(e) => return Err(format!("failed to open zip {}: {e}", path.display())),
     };
 
     let mut entry = match archive.by_name("xl/vbaProject.bin") {
@@ -151,7 +187,7 @@ fn try_extract_vba_project_bin_from_zip(path: &Path) -> Result<Option<Vec<u8>>, 
     entry
         .read_to_end(&mut buf)
         .map_err(|e| format!("failed to read xl/vbaProject.bin from {}: {e}", path.display()))?;
-    Ok(Some(buf))
+    Ok(buf)
 }
 
 fn escape_ole_path(path: &str) -> String {
@@ -161,10 +197,11 @@ fn escape_ole_path(path: &str) -> String {
 }
 
 fn bytes_to_lower_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        use std::fmt::Write;
-        write!(&mut out, "{:02x}", b).expect("writing to String cannot fail");
+    for &b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
     }
     out
 }
