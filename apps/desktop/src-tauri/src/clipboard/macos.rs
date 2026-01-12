@@ -148,6 +148,7 @@ unsafe fn pasteboard_data_for_type(
 }
 
 unsafe fn tiff_to_png_bytes(tiff: &[u8]) -> Result<Vec<u8>, ClipboardError> {
+    ensure_main_thread()?;
     if tiff.is_empty() {
         return Err(ClipboardError::OperationFailed(
             "TIFF payload was empty".to_string(),
@@ -205,6 +206,7 @@ unsafe fn tiff_to_png_bytes(tiff: &[u8]) -> Result<Vec<u8>, ClipboardError> {
 }
 
 unsafe fn png_to_tiff_bytes(png: &[u8]) -> Result<Vec<u8>, ClipboardError> {
+    ensure_main_thread()?;
     if png.is_empty() {
         return Err(ClipboardError::OperationFailed(
             "PNG payload was empty".to_string(),
@@ -427,14 +429,13 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
             if bytes.len() <= MAX_PNG_BYTES {
                 if let Ok(tiff) = png_to_tiff_bytes(bytes) {
                     if !tiff.is_empty() && tiff.len() <= MAX_PNG_BYTES {
-                        let ty_tiff = nsstring_from_str(TYPE_TIFF)?;
-                        let tiff_data = nsdata_from_bytes(&tiff)?;
-                        let ok: bool =
-                            objc2::msg_send![&*item, setData: &*tiff_data forType: &*ty_tiff];
-                        if !ok {
-                            return Err(ClipboardError::OperationFailed(
-                                "failed to set NSPasteboardTypeTIFF".to_string(),
-                            ));
+                        // Best-effort: if the TIFF representation fails to attach, still keep the
+                        // PNG/text representations so the clipboard isn't left empty.
+                        if let (Ok(ty_tiff), Ok(tiff_data)) =
+                            (nsstring_from_str(TYPE_TIFF), nsdata_from_bytes(&tiff))
+                        {
+                            let _: bool =
+                                objc2::msg_send![&*item, setData: &*tiff_data forType: &*ty_tiff];
                         }
                     }
                 }
@@ -485,8 +486,6 @@ mod tests {
     fn png_tiff_png_roundtrip_preserves_dimensions() {
         // AppKit is not thread-safe. The Rust test harness may execute unit tests on worker
         // threads, so avoid calling into AppKit unless we're already on the process main thread.
-        //
-        // To force this test to run on macOS, use `cargo test -- --test-threads=1`.
         let is_main: bool = unsafe { objc2::msg_send![objc2::class!(NSThread), isMainThread] };
         if !is_main {
             return;
