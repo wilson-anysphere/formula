@@ -181,3 +181,99 @@ test("ExtensionHost: invalid workbook.saveAs path does not prompt for permission
   assert.equal(messages[0]?.type, "api_error");
   assert.equal(messages[0]?.error?.message, "Workbook path must be a non-empty string");
 });
+
+test("ExtensionHost: workbook.openWorkbook missing path argument does not prompt for permissions", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-host-workbook-open-missing-no-prompt-"));
+
+  let promptCalls = 0;
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => {
+      promptCalls += 1;
+      return true;
+    },
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  /** @type {any[]} */
+  const messages = [];
+
+  const extension = {
+    id: "test.no-prompt-open-missing",
+    manifest: {
+      name: "no-prompt-open-missing",
+      permissions: ["workbook.manage"],
+    },
+    worker: {
+      postMessage(msg) {
+        messages.push(msg);
+      },
+    },
+  };
+
+  await host._handleApiCall(extension, {
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "openWorkbook",
+    args: [],
+  });
+
+  assert.equal(promptCalls, 0);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0]?.type, "api_error");
+  assert.equal(messages[0]?.error?.message, "Workbook path must be a non-empty string");
+});
+
+test("ExtensionHost: workbook.saveAs missing path argument does not prompt for permissions", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-host-workbook-saveas-missing-no-prompt-"));
+
+  let promptCalls = 0;
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => {
+      promptCalls += 1;
+      return true;
+    },
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  /** @type {any[]} */
+  const messages = [];
+
+  const extension = {
+    id: "test.no-prompt-saveas-missing",
+    manifest: {
+      name: "no-prompt-saveas-missing",
+      permissions: ["workbook.manage"],
+    },
+    worker: {
+      postMessage(msg) {
+        messages.push(msg);
+      },
+    },
+  };
+
+  await host._handleApiCall(extension, {
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "saveAs",
+    args: [],
+  });
+
+  assert.equal(promptCalls, 0);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0]?.type, "api_error");
+  assert.equal(messages[0]?.error?.message, "Workbook path must be a non-empty string");
+});
