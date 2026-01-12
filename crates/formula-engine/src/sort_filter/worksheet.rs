@@ -311,6 +311,7 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
                             display_value.get("type").and_then(|v| v.as_str())
                         {
                             let parsed = match display_value_type {
+                                "empty" => Some(CellValue::Blank),
                                 "number" => display_value
                                     .get("value")
                                     .and_then(|v| v.as_f64())
@@ -551,6 +552,24 @@ mod tests {
         assert_eq!(
             model_cell_value_to_sort_value(&record_invalid_display_field_with_display),
             CellValue::Text("Fallback display".to_string())
+        );
+
+        // When the display field resolves to an explicit blank/empty cell value, it should take
+        // precedence over any legacy display string.
+        let record_empty_display_field_value: ModelCellValue = serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "displayField": "name",
+                "displayValue": "Fallback display",
+                "fields": {
+                    "name": { "type": "empty" }
+                }
+            }
+        }))
+        .expect("record should deserialize");
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_empty_display_field_value),
+            CellValue::Blank
         );
 
         // Records degrade nested records/entities to their display strings.
