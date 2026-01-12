@@ -80,9 +80,11 @@ fn build_minimal_xlsx() -> Vec<u8> {
 }
 
 fn build_minimal_xlsx_without_content_types() -> Vec<u8> {
-    // The streaming patcher decides whether to drop `vm` on patched cells by checking for
-    // `xl/workbook.xml` (not `[Content_Types].xml`). This helper intentionally omits
-    // `[Content_Types].xml` to ensure we still drop `vm` whenever workbook.xml is present.
+    // Regression fixture: some callers patch XLSX-like ZIPs that include workbook.xml but omit
+    // `[Content_Types].xml` (for example when operating on partially-extracted packages).
+    //
+    // Even in this incomplete package shape, the streaming patcher should preserve `vm`/`cm`
+    // attributes on patched cells (unless the patch explicitly overrides them).
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -174,7 +176,7 @@ fn patch_xlsx_streaming_preserves_vm_and_cm_on_existing_cells(
 }
 
 #[test]
-fn patch_xlsx_streaming_drops_vm_without_content_types_when_workbook_present(
+fn patch_xlsx_streaming_preserves_vm_without_content_types_when_workbook_present(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let bytes = build_minimal_xlsx_without_content_types();
 
@@ -200,7 +202,7 @@ fn patch_xlsx_streaming_drops_vm_without_content_types_when_workbook_present(
         .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
         .ok_or("expected A1 cell")?;
 
-    assert_eq!(cell.attribute("vm"), None);
+    assert_eq!(cell.attribute("vm"), Some("1"));
     assert_eq!(cell.attribute("cm"), Some("2"));
     let v = cell
         .children()
