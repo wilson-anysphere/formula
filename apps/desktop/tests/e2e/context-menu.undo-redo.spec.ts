@@ -30,6 +30,13 @@ test.describe("grid context menu (Undo/Redo)", () => {
 
     const undo = menu.getByRole("button", { name: "Undo Set A1" });
     await expect(undo).toBeEnabled();
+    const expectedUndoShortcut = process.platform === "darwin" ? "⌘Z" : "Ctrl+Z";
+    await expect(undo.locator('span[aria-hidden="true"]')).toHaveText(expectedUndoShortcut);
+
+    const redo = menu.getByRole("button", { name: "Redo" });
+    await expect(redo).toBeDisabled();
+    const expectedRedoShortcut = process.platform === "darwin" ? "⇧⌘Z" : "Ctrl+Y";
+    await expect(redo.locator('span[aria-hidden="true"]')).toHaveText(expectedRedoShortcut);
 
     await undo.click();
     await waitForIdle(page);
@@ -38,4 +45,3 @@ test.describe("grid context menu (Undo/Redo)", () => {
     expect(after).toBe(before);
   });
 });
-
