@@ -673,6 +673,8 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     return unsupported(ptg, warnings);
                 }
 
+                let is_value_class = (ptg & 0x60) == 0x40;
+
                 let name_id = u32::from_le_bytes([input[0], input[1], input[2], input[3]]);
                 // Skip reserved bytes.
                 input = &input[6..];
@@ -727,7 +729,19 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     },
                 };
 
-                stack.push(ExprFragment::new(text));
+                if is_value_class {
+                    // Like value-class range tokens, a value-class name can require legacy implicit
+                    // intersection (e.g. when the name refers to a multi-cell range). Emit an
+                    // explicit `@` so the decoded text preserves scalar semantics.
+                    stack.push(ExprFragment {
+                        text: format!("@{text}"),
+                        precedence: 70,
+                        contains_union: false,
+                        is_missing: false,
+                    });
+                } else {
+                    stack.push(ExprFragment::new(text));
+                }
             }
             // PtgNameX (external name reference).
             //
@@ -781,8 +795,36 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let col1 = u16::from_le_bytes([input[4], input[5]]);
                 let col2 = u16::from_le_bytes([input[6], input[7]]);
                 input = &input[8..];
-                let area = format_area_ref_ptg_area(row1, col1, row2, col2, &mut warnings);
-                stack.push(ExprFragment::new(area));
+                let is_single_cell =
+                    row1 == row2 && (col1 & COL_INDEX_MASK) == (col2 & COL_INDEX_MASK);
+                let is_value_class = (ptg & 0x60) == 0x40;
+
+                // Prefer formatting explicit single-cell areas as cell refs. This matches Excel's
+                // canonical printing and avoids emitting degenerate `A1:A1` ranges when the
+                // relative flags differ between endpoints.
+                let area = if is_single_cell {
+                    if (col1 & RELATIVE_MASK) != (col2 & RELATIVE_MASK) {
+                        warnings.push(format!(
+                            "BIFF8 single-cell area has mismatched relative flags (colFirst=0x{col1:04X}, colLast=0x{col2:04X}); using first"
+                        ));
+                    }
+                    format_cell_ref(row1, col1)
+                } else {
+                    format_area_ref_ptg_area(row1, col1, row2, col2, &mut warnings)
+                };
+
+                if is_value_class && !is_single_cell {
+                    // Legacy implicit intersection: Excel encodes this by using a value-class range
+                    // token; modern formula text uses an explicit `@` operator.
+                    stack.push(ExprFragment {
+                        text: format!("@{area}"),
+                        precedence: 70,
+                        contains_union: false,
+                        is_missing: false,
+                    });
+                } else {
+                    stack.push(ExprFragment::new(area));
+                }
             }
             // PtgMem* tokens: no-op for printing, but consume payload to keep offsets aligned.
             //
@@ -855,6 +897,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     warnings.push("unexpected end of rgce stream".to_string());
                     return unsupported(ptg, warnings);
                 }
+                let is_value_class = (ptg & 0x60) == 0x40;
                 let row_first_raw = u16::from_le_bytes([input[0], input[1]]);
                 let row_last_raw = u16::from_le_bytes([input[2], input[3]]);
                 let col_first_field = u16::from_le_bytes([input[4], input[5]]);
@@ -871,7 +914,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     );
                     warned_default_base_for_relative = true;
                 }
-                stack.push(ExprFragment::new(decode_area_n(
+                let area = decode_area_n(
                     row_first_raw,
                     col_first_field,
                     row_last_raw,
@@ -879,7 +922,23 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     base,
                     &mut warnings,
                     "PtgAreaN",
-                )));
+                );
+                if area == "#REF!" {
+                    stack.push(ExprFragment::new(area));
+                    continue;
+                }
+
+                let is_single_cell = !area.contains(':');
+                if is_value_class && !is_single_cell {
+                    stack.push(ExprFragment {
+                        text: format!("@{area}"),
+                        precedence: 70,
+                        contains_union: false,
+                        is_missing: false,
+                    });
+                } else {
+                    stack.push(ExprFragment::new(area));
+                }
             }
             // PtgRef3d
             0x3A | 0x5A | 0x7A => {
@@ -909,6 +968,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     warnings.push("unexpected end of rgce stream".to_string());
                     return unsupported(ptg, warnings);
                 }
+                let is_value_class = (ptg & 0x60) == 0x40;
                 let ixti = u16::from_le_bytes([input[0], input[1]]);
                 let row1 = u16::from_le_bytes([input[2], input[3]]);
                 let row2 = u16::from_le_bytes([input[4], input[5]]);
@@ -924,8 +984,30 @@ pub(crate) fn decode_biff8_rgce_with_base(
                         continue;
                     }
                 };
-                let area = format_area_ref_ptg_area(row1, col1, row2, col2, &mut warnings);
-                stack.push(ExprFragment::new(format!("{sheet_prefix}{area}")));
+
+                let is_single_cell =
+                    row1 == row2 && (col1 & COL_INDEX_MASK) == (col2 & COL_INDEX_MASK);
+                let area = if is_single_cell {
+                    if (col1 & RELATIVE_MASK) != (col2 & RELATIVE_MASK) {
+                        warnings.push(format!(
+                            "BIFF8 3D single-cell area has mismatched relative flags (colFirst=0x{col1:04X}, colLast=0x{col2:04X}); using first"
+                        ));
+                    }
+                    format_cell_ref(row1, col1)
+                } else {
+                    format_area_ref_ptg_area(row1, col1, row2, col2, &mut warnings)
+                };
+
+                if is_value_class && !is_single_cell {
+                    stack.push(ExprFragment {
+                        text: format!("@{sheet_prefix}{area}"),
+                        precedence: 70,
+                        contains_union: false,
+                        is_missing: false,
+                    });
+                } else {
+                    stack.push(ExprFragment::new(format!("{sheet_prefix}{area}")));
+                }
             }
             // PtgRefErr3d: consume payload and emit `#REF!`.
             //
@@ -994,6 +1076,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     warnings.push("unexpected end of rgce stream".to_string());
                     return unsupported(ptg, warnings);
                 }
+                let is_value_class = (ptg & 0x60) == 0x40;
                 let ixti = u16::from_le_bytes([input[0], input[1]]);
                 let row_first_raw = u16::from_le_bytes([input[2], input[3]]);
                 let row_last_raw = u16::from_le_bytes([input[4], input[5]]);
@@ -1035,7 +1118,17 @@ pub(crate) fn decode_biff8_rgce_with_base(
                         continue;
                     }
                 };
-                stack.push(ExprFragment::new(format!("{sheet_prefix}{area}")));
+                let is_single_cell = !area.contains(':');
+                if is_value_class && !is_single_cell {
+                    stack.push(ExprFragment {
+                        text: format!("@{sheet_prefix}{area}"),
+                        precedence: 70,
+                        contains_union: false,
+                        is_missing: false,
+                    });
+                } else {
+                    stack.push(ExprFragment::new(format!("{sheet_prefix}{area}")));
+                }
             }
             other => {
                 warnings.push(format!("unsupported rgce token 0x{other:02X}"));
@@ -2214,6 +2307,24 @@ mod tests {
     }
 
     #[test]
+    fn decodes_value_class_ptgname_with_explicit_implicit_intersection() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = vec![DefinedNameMeta {
+            name: "MyName".to_string(),
+            scope_sheet: None,
+        }];
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgNameV (value class): name_id=1, reserved bytes=0.
+        let rgce = [0x43, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "@MyName");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn renders_unknown_ptgfuncvar_ids_as_parseable_function_calls() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = Vec::new();
@@ -2229,6 +2340,72 @@ mod tests {
             "warnings={:?}",
             decoded.warnings
         );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_value_class_ptgarea_with_explicit_implicit_intersection() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgAreaV A1:B2 (all components relative).
+        let row1 = 0u16;
+        let row2 = 1u16;
+        let col1 = encode_col_field(0, true, true);
+        let col2 = encode_col_field(1, true, true);
+        let rgce = [
+            0x45, // PtgAreaV
+            row1.to_le_bytes()[0],
+            row1.to_le_bytes()[1],
+            row2.to_le_bytes()[0],
+            row2.to_le_bytes()[1],
+            col1.to_le_bytes()[0],
+            col1.to_le_bytes()[1],
+            col2.to_le_bytes()[0],
+            col2.to_le_bytes()[1],
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "@A1:B2");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_value_class_ptgarea3d_with_explicit_implicit_intersection() {
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgArea3dV ixti=0 A1:B2.
+        let ixti = 0u16;
+        let row1 = 0u16;
+        let row2 = 1u16;
+        let col1 = encode_col_field(0, true, true);
+        let col2 = encode_col_field(1, true, true);
+        let rgce = [
+            0x5B, // PtgArea3dV
+            ixti.to_le_bytes()[0],
+            ixti.to_le_bytes()[1],
+            row1.to_le_bytes()[0],
+            row1.to_le_bytes()[1],
+            row2.to_le_bytes()[0],
+            row2.to_le_bytes()[1],
+            col1.to_le_bytes()[0],
+            col1.to_le_bytes()[1],
+            col2.to_le_bytes()[0],
+            col2.to_le_bytes()[1],
+        ];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "@Sheet1!A1:B2");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
         assert_parseable(&decoded.text);
     }
 
@@ -2529,6 +2706,43 @@ mod tests {
     }
 
     #[test]
+    fn decodes_value_class_ptg_area_n_with_explicit_implicit_intersection() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgAreaNV (value class): (0,0)-(1,1) with all components relative => @A1:B2.
+        let row_first = 0u16;
+        let row_last = 1u16;
+        let col_first = encode_col_field(0, true, true);
+        let col_last = encode_col_field(1, true, true);
+        let rgce = [
+            0x4D, // PtgAreaNV
+            row_first.to_le_bytes()[0],
+            row_first.to_le_bytes()[1],
+            row_last.to_le_bytes()[0],
+            row_last.to_le_bytes()[1],
+            col_first.to_le_bytes()[0],
+            col_first.to_le_bytes()[1],
+            col_last.to_le_bytes()[0],
+            col_last.to_le_bytes()[1],
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "@A1:B2");
+        assert!(
+            decoded
+                .warnings
+                .iter()
+                .any(|w| w.contains("interpreted relative to A1")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn decodes_ptg_area_n_with_base() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = Vec::new();
@@ -2562,6 +2776,44 @@ mod tests {
             "warnings={:?}",
             decoded.warnings
         );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_value_class_ptg_area_n3d_with_explicit_implicit_intersection() {
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 0,
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgAreaN3dV ixti=0 with all components relative => @Sheet1!A1:B2 (base cell A1).
+        let base = CellCoord::new(0, 0);
+        let ixti = 0u16;
+        let row_first = 0u16;
+        let row_last = 1u16;
+        let col_first = encode_col_field(0, true, true);
+        let col_last = encode_col_field(1, true, true);
+        let rgce = [
+            0x5F, // PtgAreaN3dV
+            ixti.to_le_bytes()[0],
+            ixti.to_le_bytes()[1],
+            row_first.to_le_bytes()[0],
+            row_first.to_le_bytes()[1],
+            row_last.to_le_bytes()[0],
+            row_last.to_le_bytes()[1],
+            col_first.to_le_bytes()[0],
+            col_first.to_le_bytes()[1],
+            col_last.to_le_bytes()[0],
+            col_last.to_le_bytes()[1],
+        ];
+
+        let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
+        assert_eq!(decoded.text, "@Sheet1!A1:B2");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
         assert_parseable(&decoded.text);
     }
 
