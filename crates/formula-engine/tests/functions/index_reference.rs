@@ -1,4 +1,5 @@
-use formula_engine::{ErrorKind, Value};
+use formula_engine::eval::parse_a1;
+use formula_engine::{Engine, ErrorKind, Value};
 
 use super::harness::{assert_number, TestSheet};
 
@@ -109,4 +110,65 @@ fn index_area_num_defaults_and_bounds() {
         sheet.eval("=INDEX(A1:A3,2,1,2)"),
         Value::Error(ErrorKind::Ref)
     );
+}
+
+#[test]
+fn index_reference_slices_spill_when_used_as_formula_result() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "C1", 3.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "A2", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "C2", 30.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "A3", 100.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 200.0).unwrap();
+    engine.set_cell_value("Sheet1", "C3", 300.0).unwrap();
+
+    // Column slice spills vertically.
+    engine
+        .set_cell_formula("Sheet1", "E1", "=INDEX(A1:C3,0,2)")
+        .unwrap();
+    // Row slice spills horizontally.
+    engine
+        .set_cell_formula("Sheet1", "G1", "=INDEX(A1:C3,2,0)")
+        .unwrap();
+    // Full range spills as a 2D array.
+    engine
+        .set_cell_formula("Sheet1", "K1", "=INDEX(A1:C3,0,0)")
+        .unwrap();
+
+    engine.recalculate();
+
+    // Column slice (B1:B3) -> {2;20;200}
+    let (start, end) = engine.spill_range("Sheet1", "E1").expect("E1 spill range");
+    assert_eq!(start, parse_a1("E1").unwrap());
+    assert_eq!(end, parse_a1("E3").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E3"), Value::Number(200.0));
+
+    // Row slice (A2:C2) -> {10,20,30}
+    let (start, end) = engine.spill_range("Sheet1", "G1").expect("G1 spill range");
+    assert_eq!(start, parse_a1("G1").unwrap());
+    assert_eq!(end, parse_a1("I1").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "G1"), Value::Number(10.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H1"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "I1"), Value::Number(30.0));
+
+    // Full range -> 3x3 spill.
+    let (start, end) = engine.spill_range("Sheet1", "K1").expect("K1 spill range");
+    assert_eq!(start, parse_a1("K1").unwrap());
+    assert_eq!(end, parse_a1("M3").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "K1"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "L1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "M1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "K2"), Value::Number(10.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "L2"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "M2"), Value::Number(30.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "K3"), Value::Number(100.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "L3"), Value::Number(200.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "M3"), Value::Number(300.0));
 }
