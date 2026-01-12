@@ -2287,6 +2287,13 @@ function renderSheetTabs(): void {
 
 function renderSheetPosition(sheets: SheetUiInfo[], activeId: string): void {
   const total = sheets.length;
+  if (total === 0) {
+    // This should not normally happen (Excel disallows hiding the last visible sheet),
+    // but guard so the UI doesn't render an impossible "Sheet 1 of 0" state if the
+    // workbook metadata becomes inconsistent (e.g. corrupt/remote data).
+    sheetPositionEl.textContent = "Sheet 0 of 0";
+    return;
+  }
   const index = sheets.findIndex((sheet) => sheet.id === activeId);
   const position = index >= 0 ? index + 1 : 1;
   sheetPositionEl.textContent = `Sheet ${position} of ${total}`;
