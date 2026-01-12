@@ -1443,6 +1443,7 @@ pub fn lex_formula(formula: String, opts: Option<JsValue>) -> Result<JsValue, Js
                 formula_engine::TokenKind::RBracket => ("rBracket".to_string(), None),
                 formula_engine::TokenKind::Bang => ("bang".to_string(), None),
                 formula_engine::TokenKind::Colon => ("colon".to_string(), None),
+                formula_engine::TokenKind::Dot => ("dot".to_string(), None),
                 formula_engine::TokenKind::ArgSep => ("argSep".to_string(), None),
                 formula_engine::TokenKind::Union => ("union".to_string(), None),
                 formula_engine::TokenKind::ArrayRowSep => ("arrayRowSep".to_string(), None),
