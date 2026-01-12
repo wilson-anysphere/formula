@@ -604,7 +604,8 @@ describe("WorkbookContextBuilder", () => {
       ragService: null,
       mode: "chat",
       model: "unit-test-model",
-      maxPromptContextTokens: 500,
+      // Large enough to be resilient to future schema/payload expansions.
+      maxPromptContextTokens: 2_000,
     });
     const ctxDefault = await builderDefault.build(input);
     expect(ctxDefault.promptContext).not.toContain("trimmed to fit token budget");
@@ -622,7 +623,7 @@ describe("WorkbookContextBuilder", () => {
       ragService: null,
       mode: "chat",
       model: "unit-test-model",
-      maxPromptContextTokens: 500,
+      maxPromptContextTokens: 2_000,
       tokenEstimator: strictEstimator as any,
     });
     const ctxStrict = await builderStrict.build(input);
