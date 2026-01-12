@@ -32,7 +32,9 @@ export function formatCellAddress(row: number, col: number): CellAddress {
   return toA1(row, col);
 }
 
-export function expandRange(range: string): CellAddress[] {
+export const DEFAULT_MAX_EXPAND_RANGE_CELLS = 200_000;
+
+export function expandRange(range: string, options: { maxCells?: number } = {}): CellAddress[] {
   const noSheet = range.includes("!") ? range.split("!").slice(-1)[0] : range;
   const parts = noSheet.split(":");
   if (parts.length === 1) return [noSheet];
@@ -44,6 +46,17 @@ export function expandRange(range: string): CellAddress[] {
   const maxRow = Math.max(start.row, end.row);
   const minCol = Math.min(start.col, end.col);
   const maxCol = Math.max(start.col, end.col);
+  const rows = maxRow - minRow + 1;
+  const cols = maxCol - minCol + 1;
+  const cellCount = rows * cols;
+  const maxCells = options.maxCells ?? DEFAULT_MAX_EXPAND_RANGE_CELLS;
+  if (cellCount > maxCells) {
+    // The auditing/formula-debugger UI cannot meaningfully highlight hundreds of thousands
+    // of individual cells; returning a tiny set avoids catastrophic allocations.
+    const startAddr = formatCellAddress(minRow, minCol);
+    const endAddr = formatCellAddress(maxRow, maxCol);
+    return startAddr === endAddr ? [startAddr] : [startAddr, endAddr];
+  }
   const out: CellAddress[] = [];
   for (let r = minRow; r <= maxRow; r++) {
     for (let c = minCol; c <= maxCol; c++) {

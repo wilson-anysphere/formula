@@ -68,6 +68,11 @@ describe("auditing overlay address helpers", () => {
     expect(expandRange("A1:A3")).toEqual(["A1", "A2", "A3"]);
     expect(expandRange("Sheet1!A1:B2")).toEqual(["A1", "B1", "A2", "B2"]);
   });
+
+  it("caps very large range expansions to avoid huge allocations", () => {
+    // 26 * 8000 = 208_000 cells (exceeds the default cap of 200_000).
+    expect(expandRange("A1:Z8000")).toEqual(["A1", "Z8000"]);
+  });
 });
 
 describe("AuditingOverlayRenderer", () => {
@@ -102,4 +107,3 @@ describe("AuditingOverlayRenderer", () => {
     expect(calls.map((c) => c[0])).toEqual(["save", "setTransform", "clearRect", "restore"]);
   });
 });
-
