@@ -65,7 +65,8 @@ def _step_skipped(reason: str) -> StepResult:
 
 
 def _scan_features(zip_names: list[str]) -> dict[str, Any]:
-    zip_names_casefold = [n.casefold() for n in zip_names]
+    import posixpath
+    import re
 
     prefixes = {
         "charts": "xl/charts/",
@@ -88,11 +89,11 @@ def _scan_features(zip_names: list[str]) -> dict[str, Any]:
     features["has_connections"] = "xl/connections.xml" in zip_names
     features["has_shared_strings"] = "xl/sharedStrings.xml" in zip_names
     # Excel's "Images in Cell" feature (aka `cellImages`).
+    cellimages_part_re = re.compile(r"(?i)^cellimages\d*\.xml$")
     features["has_cell_images"] = any(
-        n == "xl/cellimages.xml"
-        or n.endswith("/cellimages.xml")
-        or n.startswith("xl/cellimages/")
-        for n in zip_names_casefold
+        (normalized := n.replace("\\", "/")).casefold().startswith("xl/")
+        and cellimages_part_re.match(posixpath.basename(normalized))
+        for n in zip_names
     )
     features["sheet_xml_count"] = len([n for n in zip_names if n.startswith("xl/worksheets/sheet")])
     return features
@@ -114,18 +115,41 @@ def _split_etree_tag(tag: str) -> tuple[str, str | None]:
 
 
 def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, Any] | None:
+    import posixpath
+    import re
+
+    cellimages_part_re = re.compile(r"(?i)^cellimages(\d*)\.xml$")
+
+    def _is_cellimages_part(n: str) -> bool:
+        normalized = n.replace("\\", "/")
+        if not normalized.casefold().startswith("xl/"):
+            return False
+        return bool(cellimages_part_re.match(posixpath.basename(normalized)))
+
+    candidates = [n for n in zip_names if _is_cellimages_part(n)]
+    if not candidates:
+        return None
+
     part_name: str | None = None
-    for n in zip_names:
-        if n.lower() == "xl/cellimages.xml":
+    for n in candidates:
+        if n.casefold() == "xl/cellimages.xml":
             part_name = n
             break
+
     if part_name is None:
-        for n in zip_names:
-            if n.lower().endswith("/cellimages.xml"):
-                part_name = n
-                break
-    if part_name is None:
-        return None
+        # Prefer the smallest numeric suffix (treat empty suffix as 0), with a stable tie-breaker.
+        scored: list[tuple[int, str, str]] = []
+        for n in candidates:
+            m = cellimages_part_re.match(posixpath.basename(n.replace("\\", "/")))
+            if not m:
+                continue
+            suffix_str = m.group(1) or ""
+            suffix_num = int(suffix_str) if suffix_str else 0
+            scored.append((suffix_num, n.casefold(), n))
+        if not scored:
+            return None
+        scored.sort()
+        part_name = scored[0][2]
 
     content_type: str | None = None
     content_types_name = _find_zip_entry_case_insensitive(zip_names, "[Content_Types].xml")
@@ -138,7 +162,8 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
                 if el.tag.split("}")[-1] != "Override":
                     continue
                 part = el.attrib.get("PartName") or ""
-                if part.lower().endswith("/cellimages.xml"):
+                normalized_part = part.lstrip("/").replace("\\", "/")
+                if normalized_part.casefold() == part_name.casefold():
                     content_type = el.attrib.get("ContentType")
                     break
         except Exception:
@@ -150,12 +175,18 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
         try:
             from xml.etree import ElementTree as ET
 
+            def _resolve_workbook_target(target: str) -> str:
+                target = (target or "").replace("\\", "/")
+                if target.startswith("/"):
+                    return target.lstrip("/")
+                return posixpath.normpath(posixpath.join("xl", target))
+
             rels_root = ET.fromstring(z.read(workbook_rels_name))
             for el in rels_root.iter():
                 if el.tag.split("}")[-1] != "Relationship":
                     continue
                 target = el.attrib.get("Target") or ""
-                if target.lower().endswith("cellimages.xml"):
+                if _resolve_workbook_target(target).casefold() == part_name.casefold():
                     workbook_rel_type = el.attrib.get("Type")
                     break
         except Exception:
@@ -166,8 +197,6 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
     embed_rids_count: int | None = None
     try:
         from xml.etree import ElementTree as ET
-
-        import re
 
         REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
         rid_re = re.compile(r"^rId\d+$")
@@ -202,7 +231,10 @@ def _extract_cell_images(z: zipfile.ZipFile, zip_names: list[str]) -> dict[str, 
         embed_rids_count = None
 
     rels_types: list[str] = []
-    cellimages_rels_name = _find_zip_entry_case_insensitive(zip_names, "xl/_rels/cellimages.xml.rels")
+    part_dir = posixpath.dirname(part_name.replace("\\", "/"))
+    part_base = posixpath.basename(part_name.replace("\\", "/"))
+    cellimages_rels_path = posixpath.join(part_dir, "_rels", f"{part_base}.rels")
+    cellimages_rels_name = _find_zip_entry_case_insensitive(zip_names, cellimages_rels_path)
     if cellimages_rels_name:
         try:
             from xml.etree import ElementTree as ET
