@@ -144,6 +144,8 @@ pub struct LambdaTemplate {
     pub params: Arc<[Arc<str>]>,
     pub body: Arc<Program>,
     pub param_locals: Arc<[u32]>,
+    /// Per-parameter `ISOMITTED` flags aligned with `params` / `param_locals`.
+    pub omitted_param_locals: Arc<[u32]>,
     pub captures: Arc<[Capture]>,
     pub self_local: Option<u32>,
 }

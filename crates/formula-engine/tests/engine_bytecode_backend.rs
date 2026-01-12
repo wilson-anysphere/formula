@@ -787,6 +787,57 @@ fn bytecode_backend_enforces_lambda_recursion_limit() {
 }
 
 #[test]
+fn bytecode_backend_supports_isomitted_inside_lambdas() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            "=LET(f,LAMBDA(x,y,IF(ISOMITTED(y),x,x+y)),f(2))",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A2",
+            "=LET(f,LAMBDA(x,y,IF(ISOMITTED(y),x,x+y)),f(2,3))",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=LET(f,LAMBDA(x,y,ISOMITTED(y)),f(1))")
+        .unwrap();
+    // A blank placeholder is not the same as an omitted argument.
+    engine
+        .set_cell_formula("Sheet1", "A4", "=LET(f,LAMBDA(x,y,ISOMITTED(y)),f(1,))")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 4);
+    assert_eq!(
+        stats.compiled, 4,
+        "expected ISOMITTED lambda formulas to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(32)
+    );
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=LET(f,LAMBDA(x,y,IF(ISOMITTED(y),x,x+y)),f(2))", "A1"),
+        ("=LET(f,LAMBDA(x,y,IF(ISOMITTED(y),x,x+y)),f(2,3))", "A2"),
+        ("=LET(f,LAMBDA(x,y,ISOMITTED(y)),f(1))", "A3"),
+        ("=LET(f,LAMBDA(x,y,ISOMITTED(y)),f(1,))", "A4"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Bool(true));
+    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Bool(false));
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_sum_and_countif() {
     let mut engine = Engine::new();
 

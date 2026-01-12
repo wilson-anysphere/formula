@@ -1716,6 +1716,9 @@ pub fn call_function(
         // LET is lowered to bytecode locals by the compiler; it should not be invoked via the
         // generic function-call path (its "name" arguments are not evaluated values).
         Function::Let => Value::Error(ErrorKind::Value),
+        // ISOMITTED requires access to the lambda invocation frame, so it is compiled into direct
+        // local loads by the bytecode compiler. It should never be invoked via `CallFunc`.
+        Function::IsOmitted => Value::Error(ErrorKind::Value),
         Function::True => fn_true(args),
         Function::False => fn_false(args),
         Function::If => fn_if(args),

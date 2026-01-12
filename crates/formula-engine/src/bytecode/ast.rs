@@ -30,6 +30,7 @@ pub enum BinaryOp {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Function {
     Let,
+    IsOmitted,
     True,
     False,
     If,
@@ -136,6 +137,7 @@ impl Function {
         let base = upper.strip_prefix("_XLFN.").unwrap_or(upper.as_str());
         match base {
             "LET" => Function::Let,
+            "ISOMITTED" => Function::IsOmitted,
             "TRUE" => Function::True,
             "FALSE" => Function::False,
             "IF" => Function::If,
@@ -234,6 +236,7 @@ impl Function {
     pub fn name(&self) -> &str {
         match self {
             Function::Let => "LET",
+            Function::IsOmitted => "ISOMITTED",
             Function::True => "TRUE",
             Function::False => "FALSE",
             Function::If => "IF",

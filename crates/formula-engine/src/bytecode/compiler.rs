@@ -33,6 +33,7 @@ struct CompileCtx<'a> {
     program: &'a mut Program,
     lexical_scopes: Vec<HashMap<Arc<str>, LocalInfo>>,
     lambda_self_name: Option<Arc<str>>,
+    omitted_param_locals: Option<HashMap<Arc<str>, u32>>,
     closure: Option<ClosureCtx>,
 }
 
@@ -47,6 +48,7 @@ impl<'a> CompileCtx<'a> {
             program,
             lexical_scopes: Vec::new(),
             lambda_self_name: None,
+            omitted_param_locals: None,
             closure: None,
         }
     }
@@ -241,6 +243,7 @@ impl<'a> CompileCtx<'a> {
             }
             Expr::FuncCall { func, args } => match func {
                 Function::Let => self.compile_let(args, allow_range),
+                Function::IsOmitted => self.compile_isomitted(args),
                 // Certain logical/error functions are lazy in Excel: they should only evaluate
                 // the branch argument that is selected at runtime (e.g. `IF(FALSE, <expensive>, 0)`).
                 //
@@ -359,6 +362,8 @@ impl<'a> CompileCtx<'a> {
         }
 
         let mut param_locals: Vec<u32> = Vec::with_capacity(params.len());
+        let mut omitted_param_locals: Vec<u32> = Vec::with_capacity(params.len());
+        let mut omitted_param_map: HashMap<Arc<str>, u32> = HashMap::new();
         for p in params.iter() {
             let idx = body_ctx.alloc_local(p.clone());
             body_ctx.lexical_scopes[0].insert(
@@ -369,7 +374,17 @@ impl<'a> CompileCtx<'a> {
                 },
             );
             param_locals.push(idx);
+
+            // Track omitted parameters for `ISOMITTED(...)` by allocating a hidden local per param.
+            // The VM sets these locals to TRUE/FALSE at call time based on the number of supplied
+            // arguments.
+            let omitted_name: Arc<str> = Arc::from(format!("\0LAMBDA_OMITTED:{p}"));
+            let omitted_local = body_ctx.alloc_local(omitted_name);
+            omitted_param_locals.push(omitted_local);
+            omitted_param_map.insert(p.clone(), omitted_local);
         }
+
+        body_ctx.omitted_param_locals = Some(omitted_param_map);
 
         body_ctx.compile_expr(body);
 
@@ -382,6 +397,7 @@ impl<'a> CompileCtx<'a> {
             params: params.clone(),
             body: Arc::new(body_program),
             param_locals: Arc::from(param_locals.into_boxed_slice()),
+            omitted_param_locals: Arc::from(omitted_param_locals.into_boxed_slice()),
             captures: Arc::from(closure.captures.into_boxed_slice()),
             self_local,
         });
@@ -556,6 +572,43 @@ impl<'a> CompileCtx<'a> {
 
         self.compile_expr_inner(&args[last], allow_range);
         self.lexical_scopes.pop();
+    }
+
+    fn compile_isomitted(&mut self, args: &[Expr]) {
+        if args.len() != 1 {
+            self.push_error_const(ErrorKind::Value);
+            return;
+        }
+
+        let Expr::NameRef(name) = &args[0] else {
+            self.push_error_const(ErrorKind::Value);
+            return;
+        };
+
+        // `ISOMITTED` only reports omission for parameters of the *current* lambda invocation.
+        // Outside of a lambda (or when referring to a non-parameter identifier), it returns FALSE.
+        let omitted_local = self
+            .omitted_param_locals
+            .as_ref()
+            .and_then(|map| map.get(name))
+            .copied();
+
+        match omitted_local {
+            Some(idx) => {
+                self.program
+                    .instrs
+                    .push(Instruction::new(OpCode::LoadLocal, idx, 0));
+            }
+            None => {
+                let idx = self.program.consts.len() as u32;
+                self.program
+                    .consts
+                    .push(ConstValue::Value(Value::Bool(false)));
+                self.program
+                    .instrs
+                    .push(Instruction::new(OpCode::PushConst, idx, 0));
+            }
+        }
     }
 
     fn alloc_temp_local(&mut self, label: &'static str) -> u32 {

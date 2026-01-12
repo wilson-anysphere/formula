@@ -8266,6 +8266,15 @@ fn bytecode_expr_is_eligible_inner(
                 lexical_scopes.pop();
                 ok
             }
+            bytecode::ast::Function::IsOmitted => {
+                if args.len() != 1 {
+                    return false;
+                }
+                // ISOMITTED is a special form: it requires a bare identifier argument, and should
+                // not evaluate it as a value. It returns TRUE when the corresponding LAMBDA
+                // parameter was omitted at the call site.
+                matches!(args[0], bytecode::Expr::NameRef(_))
+            }
             bytecode::ast::Function::Sum
             | bytecode::ast::Function::Average
             | bytecode::ast::Function::Min

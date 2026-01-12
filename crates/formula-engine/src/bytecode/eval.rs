@@ -311,6 +311,23 @@ impl Vm {
                 *slot = args.get(idx).cloned().unwrap_or(Value::Empty);
             }
         }
+
+        // Track omitted parameters for `ISOMITTED(...)`.
+        debug_assert_eq!(
+            lambda.template.params.len(),
+            lambda.template.omitted_param_locals.len()
+        );
+        for (idx, local_idx) in lambda
+            .template
+            .omitted_param_locals
+            .iter()
+            .copied()
+            .enumerate()
+        {
+            if let Some(slot) = locals.get_mut(local_idx as usize) {
+                *slot = Value::Bool(idx >= args.len());
+            }
+        }
  
         // Evaluate the lambda body with a fresh stack + locals.
         let saved_stack = std::mem::take(&mut self.stack);
