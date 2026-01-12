@@ -1,4 +1,6 @@
+use formula_engine::value::RecordValue;
 use formula_engine::{eval::parse_a1, locale, Engine, ErrorKind, ReferenceStyle, Value};
+use std::collections::HashMap;
 
 #[test]
 fn canonicalize_and_localize_round_trip_for_de_de() {
@@ -642,6 +644,41 @@ fn engine_accepts_localized_r1c1_formulas_and_persists_canonical_a1() {
     assert_eq!(engine.get_cell_value("Sheet1", "C5"), Value::Number(3.0));
     assert_eq!(engine.get_cell_formula("Sheet1", "C5"), Some("=SUM(A1,B1)"));
 }
+
+#[test]
+fn engine_accepts_localized_r1c1_formulas_with_field_access() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Record(RecordValue::with_fields(
+                "Record",
+                HashMap::from([("Price".to_string(), Value::Number(10.0))]),
+            )),
+        )
+        .unwrap();
+
+    // This exercises the full pipeline:
+    // - localized separators + function name translation (de-DE: `SUMME`, `;`, `1,5`)
+    // - R1C1 reference rewriting (`RC[-1]` in B1 -> `A1`)
+    // - field access parsing after an R1C1 reference (`RC[-1].Price`)
+    engine
+        .set_cell_formula_localized_r1c1(
+            "Sheet1",
+            "B1",
+            "=SUMME(RC[-1].Price;1,5)",
+            &locale::DE_DE,
+        )
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(11.5));
+    assert_eq!(
+        engine.get_cell_formula("Sheet1", "B1"),
+        Some("=SUM(A1.Price,1.5)")
+    );
+ }
 
 #[test]
 fn engine_accepts_localized_spilling_formulas() {
