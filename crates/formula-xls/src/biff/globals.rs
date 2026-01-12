@@ -11,24 +11,11 @@ pub(crate) struct BoundSheetInfo {
 }
 
 fn biff_codepage(workbook_stream: &[u8]) -> u16 {
-    let mut iter = match records::BiffRecordIter::from_offset(workbook_stream, 0) {
-        Ok(iter) => iter,
-        Err(_) => return 1252,
+    let Ok(iter) = records::BestEffortSubstreamIter::from_offset(workbook_stream, 0) else {
+        return 1252;
     };
 
-    while let Some(record) = iter.next() {
-        let record = match record {
-            Ok(record) => record,
-            Err(_) => break,
-        };
-
-        // BOF indicates the start of a new substream; the workbook globals
-        // contain a single BOF at offset 0, so a second BOF means we're past
-        // the globals section.
-        if record.offset != 0 && records::is_bof_record(record.record_id) {
-            break;
-        }
-
+    for record in iter {
         match record.record_id {
             // CODEPAGE [MS-XLS 2.4.52]
             0x0042 => {
@@ -53,20 +40,7 @@ pub(crate) fn parse_biff_bound_sheets(
     let codepage = biff_codepage(workbook_stream);
     let mut out = Vec::new();
 
-    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, 0)?;
-    while let Some(record) = iter.next() {
-        let record = match record {
-            Ok(record) => record,
-            // Best-effort: treat malformed/truncated BIFF records as end-of-stream.
-            Err(_) => break,
-        };
-
-        // Same rationale as `parse_biff_workbook_globals`: stop once we reach the
-        // BOF record for the next substream.
-        if record.offset != 0 && records::is_bof_record(record.record_id) {
-            break;
-        }
-
+    for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, 0)? {
         match record.record_id {
             // BoundSheet8 [MS-XLS 2.4.28]
             0x0085 => {
@@ -74,9 +48,12 @@ pub(crate) fn parse_biff_bound_sheets(
                     continue;
                 }
 
-                let sheet_offset =
-                    u32::from_le_bytes([record.data[0], record.data[1], record.data[2], record.data[3]])
-                        as usize;
+                let sheet_offset = u32::from_le_bytes([
+                    record.data[0],
+                    record.data[1],
+                    record.data[2],
+                    record.data[3],
+                ]) as usize;
                 let Ok((name, _)) =
                     strings::parse_biff_short_string(&record.data[6..], biff, codepage)
                 else {
@@ -587,7 +564,10 @@ mod tests {
 
         let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8).expect("parse");
         assert_eq!(globals.date_system, DateSystem::Excel1904);
-        assert_eq!(globals.resolve_number_format_code(0).as_deref(), Some("0.00"));
+        assert_eq!(
+            globals.resolve_number_format_code(0).as_deref(),
+            Some("0.00")
+        );
     }
 
     #[test]
@@ -639,6 +619,9 @@ mod tests {
         let stream = [r_fmt, record(0x00E0, &xf_payload), record(0x000A, &[])].concat();
 
         let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff5).expect("parse");
-        assert_eq!(globals.resolve_number_format_code(0).as_deref(), Some("0.00"));
+        assert_eq!(
+            globals.resolve_number_format_code(0).as_deref(),
+            Some("0.00")
+        );
     }
 }

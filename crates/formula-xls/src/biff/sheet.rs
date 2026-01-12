@@ -16,21 +16,7 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
 ) -> Result<SheetRowColProperties, String> {
     let mut props = SheetRowColProperties::default();
 
-    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
-    while let Some(record) = iter.next() {
-        let record = match record {
-            Ok(record) => record,
-            // Best-effort: treat malformed/truncated BIFF records as end-of-stream.
-            Err(_) => break,
-        };
-
-        // Stop once we reach the BOF record for the next substream. This allows
-        // us to recover row/col metadata even if the worksheet EOF record is
-        // missing/corrupt.
-        if record.offset != start && records::is_bof_record(record.record_id) {
-            break;
-        }
-
+    for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, start)? {
         match record.record_id {
             // ROW [MS-XLS 2.4.184]
             0x0208 => {
@@ -45,8 +31,8 @@ pub(crate) fn parse_biff_sheet_row_col_properties(
                 let options = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
                 let hidden = (options & 0x0000_0020) != 0;
 
-                let height = (!default_height && height_twips > 0)
-                    .then_some(height_twips as f32 / 20.0);
+                let height =
+                    (!default_height && height_twips > 0).then_some(height_twips as f32 / 20.0);
 
                 if hidden || height.is_some() {
                     let entry = props.rows.entry(row).or_default();
@@ -118,21 +104,7 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
         out.insert(CellRef::new(row, col), xf);
     };
 
-    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
-    while let Some(record) = iter.next() {
-        let record = match record {
-            Ok(record) => record,
-            // Best-effort: treat malformed/truncated BIFF records as end-of-stream.
-            Err(_) => break,
-        };
-
-        // Stop once we reach the BOF record for the next substream. This allows
-        // us to recover XF indices even if the worksheet EOF record is
-        // missing/corrupt.
-        if record.offset != start && records::is_bof_record(record.record_id) {
-            break;
-        }
-
+    for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, start)? {
         let data = record.data;
         match record.record_id {
             // Cell records with a `Cell` header (rw, col, ixfe) [MS-XLS 2.5.14].
@@ -261,7 +233,7 @@ mod tests {
         let mut mulrk_payload = Vec::new();
         mulrk_payload.extend_from_slice(&2u16.to_le_bytes()); // row
         mulrk_payload.extend_from_slice(&1u16.to_le_bytes()); // colFirst
-        // cell 1: xf=20 + dummy rk value
+                                                              // cell 1: xf=20 + dummy rk value
         mulrk_payload.extend_from_slice(&20u16.to_le_bytes());
         mulrk_payload.extend_from_slice(&0u32.to_le_bytes());
         // cell 2: xf=21 + dummy rk value

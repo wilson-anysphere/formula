@@ -109,6 +109,55 @@ impl<'a> Iterator for BiffRecordIter<'a> {
     }
 }
 
+/// Best-effort iterator over a BIFF substream.
+///
+/// This is a convenience wrapper around [`BiffRecordIter`] for BIFF sections where we want to
+/// recover as much metadata as possible (e.g. BoundSheet, ROW/COLINFO, cell XF indices).
+///
+/// - Stops before yielding a *subsequent* `BOF` record (since that indicates the start of the next
+///   substream; truncated streams sometimes omit the expected `EOF`).
+/// - Stops on a malformed/truncated physical record instead of returning an error.
+pub(crate) struct BestEffortSubstreamIter<'a> {
+    iter: BiffRecordIter<'a>,
+    start_offset: usize,
+    finished: bool,
+}
+
+impl<'a> BestEffortSubstreamIter<'a> {
+    pub(crate) fn from_offset(stream: &'a [u8], start_offset: usize) -> Result<Self, String> {
+        Ok(Self {
+            iter: BiffRecordIter::from_offset(stream, start_offset)?,
+            start_offset,
+            finished: false,
+        })
+    }
+}
+
+impl<'a> Iterator for BestEffortSubstreamIter<'a> {
+    type Item = BiffRecord<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+
+        let record = match self.iter.next()? {
+            Ok(record) => record,
+            Err(_) => {
+                self.finished = true;
+                return None;
+            }
+        };
+
+        if record.offset != self.start_offset && is_bof_record(record.record_id) {
+            self.finished = true;
+            return None;
+        }
+
+        Some(record)
+    }
+}
+
 /// A logical BIFF record. Some BIFF record types may be split across one or more
 /// physical `CONTINUE` records; those fragments are concatenated into `data`.
 ///
