@@ -15,7 +15,7 @@ type TombstonesFileV1 = {
 
 async function atomicWriteFile(filePath: string, contents: string): Promise<void> {
   const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(tmpPath, contents, "utf8");
+  await fs.writeFile(tmpPath, contents, { encoding: "utf8", mode: 0o600 });
   try {
     await fs.rename(tmpPath, filePath);
   } catch (err) {
@@ -151,4 +151,3 @@ export class TombstoneStore {
     await atomicWriteFile(this.filePath, `${JSON.stringify(json)}\n`);
   }
 }
-

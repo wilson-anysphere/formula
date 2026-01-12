@@ -72,7 +72,7 @@ export async function acquireDataDirLock(dataDir: string): Promise<DataDirLockHa
   };
 
   const createLockFile = async (): Promise<FileHandle> => {
-    const fd = await fs.open(lockPath, "wx");
+    const fd = await fs.open(lockPath, "wx", 0o600);
     try {
       await fd.writeFile(`${JSON.stringify(metadata)}\n`, "utf8");
       return fd;

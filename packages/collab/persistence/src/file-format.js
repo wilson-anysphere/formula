@@ -141,7 +141,9 @@ export function decodeEncryptedRecords(data, opts, offset = FILE_HEADER_BYTES) {
 
 export async function atomicWriteFile(filePath, contents) {
   const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(tmpPath, contents);
+  // Persisted Yjs documents can contain sensitive user data. Ensure files are not
+  // world-readable by default even when process umask is permissive (e.g. 022).
+  await fs.writeFile(tmpPath, contents, { mode: 0o600 });
   try {
     await fs.rename(tmpPath, filePath);
   } catch (err) {

@@ -187,9 +187,9 @@ export class FilePersistence {
               keyRing: this.encryption.keyRing,
               aadContext,
             });
-            await fs.appendFile(filePath, record);
+            await fs.appendFile(filePath, record, { mode: 0o600 });
           } else {
-            await fs.appendFile(filePath, encodeLegacyRecord(update));
+            await fs.appendFile(filePath, encodeLegacyRecord(update), { mode: 0o600 });
           }
 
           const count = (this.updateCounts.get(docName) ?? 0) + 1;
@@ -287,7 +287,9 @@ export class FilePersistence {
 
         if (!data) {
           if (this.encryption.mode === "keyring") {
-            await fs.writeFile(filePath, encodeFileHeader(FILE_FLAG_ENCRYPTED));
+            await fs.writeFile(filePath, encodeFileHeader(FILE_FLAG_ENCRYPTED), {
+              mode: 0o600,
+            });
           }
           return;
         }

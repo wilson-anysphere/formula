@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
-import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -250,6 +250,10 @@ test("purge creates tombstone and prevents doc resurrection", async (t) => {
 
   await waitForCondition(() => fileExists(persistedPath), 10_000);
   assert.equal(await fileExists(persistedPath), true);
+  if (process.platform !== "win32") {
+    const st = await stat(persistedPath);
+    assert.equal(st.mode & 0o777, 0o600);
+  }
 
   const purgeRes = await fetch(
     `${server.httpUrl}/internal/docs/${encodeURIComponent(docName)}`,
@@ -402,6 +406,10 @@ test("purge handles dot-segment doc ids without URL normalization", async (t) =>
   await waitForCondition(async () => !(await fileExists(persistedPath)), 10_000);
 
   const tombstonesRaw = await readFile(path.join(dataDir, "tombstones.json"), "utf8");
+  if (process.platform !== "win32") {
+    const st = await stat(path.join(dataDir, "tombstones.json"));
+    assert.equal(st.mode & 0o777, 0o600);
+  }
   const tombstones = JSON.parse(tombstonesRaw) as any;
   assert.equal(tombstones.schemaVersion, 1);
   assert.ok(typeof tombstones.tombstones === "object" && tombstones.tombstones !== null);

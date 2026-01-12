@@ -140,12 +140,14 @@ export class FileCollabPersistence implements CollabPersistence {
         data = null;
       }
 
-      if (!data) {
-        if (this.encryption.mode === "keyring") {
-          await fs.writeFile(filePath, encodeFileHeader(FILE_FLAG_ENCRYPTED));
+        if (!data) {
+          if (this.encryption.mode === "keyring") {
+            await fs.writeFile(filePath, encodeFileHeader(FILE_FLAG_ENCRYPTED), {
+              mode: 0o600,
+            });
+          }
+          return;
         }
-        return;
-      }
 
       if (hasFileHeader(data)) {
         const { flags } = parseFileHeader(data);
@@ -228,14 +230,18 @@ export class FileCollabPersistence implements CollabPersistence {
         // New file: create an encrypted header when encryption is enabled.
         if (!st) {
           if (this.encryption.mode === "keyring") {
-            await fs.writeFile(filePath, encodeFileHeader(FILE_FLAG_ENCRYPTED));
+            await fs.writeFile(filePath, encodeFileHeader(FILE_FLAG_ENCRYPTED), {
+              mode: 0o600,
+            });
           }
           return;
         }
 
         if (st.size === 0) {
           if (this.encryption.mode === "keyring") {
-            await fs.writeFile(filePath, encodeFileHeader(FILE_FLAG_ENCRYPTED));
+            await fs.writeFile(filePath, encodeFileHeader(FILE_FLAG_ENCRYPTED), {
+              mode: 0o600,
+            });
           }
           return;
         }
@@ -280,18 +286,18 @@ export class FileCollabPersistence implements CollabPersistence {
       if (origin === persistenceOrigin) return;
 
       void this.enqueue(docId, async () => {
-        if (!persistenceEnabled) return;
-        await fs.mkdir(this.dir, { recursive: true });
+          if (!persistenceEnabled) return;
+          await fs.mkdir(this.dir, { recursive: true });
 
-        if (this.encryption.mode === "keyring") {
-          const record = encodeEncryptedRecord(update, {
-            keyRing: this.encryption.keyRing,
-            aadContext,
-          });
-          await fs.appendFile(filePath, record);
-        } else {
-          await fs.appendFile(filePath, encodeLegacyRecord(update));
-        }
+          if (this.encryption.mode === "keyring") {
+            const record = encodeEncryptedRecord(update, {
+              keyRing: this.encryption.keyRing,
+              aadContext,
+            });
+            await fs.appendFile(filePath, record, { mode: 0o600 });
+          } else {
+            await fs.appendFile(filePath, encodeLegacyRecord(update), { mode: 0o600 });
+          }
 
         const count = (this.updateCounts.get(docId) ?? 0) + 1;
         this.updateCounts.set(docId, count);
