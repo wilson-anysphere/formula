@@ -94,8 +94,6 @@ let progressDownloaded = 0;
 let progressTotal: number | null = null;
 let progressPercent: number | null = null;
 
-let updateDialogShownForVersion: string | null = null;
-
 function getLocalStorageOrNull(): StorageLike | null {
   try {
     // Prefer `window.localStorage` when available (jsdom/webview), but fall back to
@@ -764,7 +762,7 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
 
   // Tray-triggered manual checks can happen while the app is hidden to tray. Ensure the
   // window is visible before rendering any toast/dialog feedback.
-  if (source === "manual") {
+  if (rawSource === "manual") {
     await showMainWindowBestEffort();
   }
 
@@ -807,7 +805,6 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
       break;
     }
     case "update-available": {
-      const manualFollowUp = manualUpdateCheckFollowUp;
       setManualUpdateCheckFollowUp(false);
       const isManualRequest = source === "manual" || manualFollowUp;
       // Only show the in-app update dialog for manual checks. Startup checks should be silent
@@ -831,20 +828,6 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
         }
       }
 
-      // Suppress repeat startup prompts for the same version if the user recently
-      // clicked "Later" (persisted across launches). Manual checks always surface the update.
-      //
-      // Note: a manual check can occur while a background startup check is in-flight. In that
-      // case the backend emits `update-check-already-running` (source: manual) and then later
-      // delivers the update result from the startup check (source: startup). Treat that as a
-      // manual request (no suppression).
-      if (source === "startup" && !manualFollowUp && shouldSuppressStartupUpdatePrompt(version)) {
-        break;
-      }
-
-      // Avoid repeatedly showing the startup prompt for the same version.
-      if (source !== "manual" && updateDialogShownForVersion === version) break;
-      updateDialogShownForVersion = version;
       openUpdateAvailableDialog({ ...payload, version, body });
       break;
     }
