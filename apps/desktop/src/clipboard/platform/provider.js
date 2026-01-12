@@ -366,8 +366,9 @@ function createTauriClipboardProvider() {
       // The Web Clipboard API write can replace the entire clipboard item, dropping formats like
       // RTF/image that were written natively.
       //
-      // Some platforms reject unknown/unsupported clipboard types (especially `text/rtf`). When
-      // that happens, retry with just HTML/plain so we don't regress HTML clipboard writes.
+      // ClipboardItem writes are best-effort and intentionally omit RTF so we don't regress HTML
+      // clipboard writes on platforms that reject unsupported types. When rich writes fail, retry
+      // with just HTML/plain.
       const clipboard = globalThis.navigator?.clipboard;
       if (!wrote && (html || rtf) && typeof ClipboardItem !== "undefined" && clipboard?.write) {
         try {
@@ -376,12 +377,10 @@ function createTauriClipboardProvider() {
             "text/plain": new Blob([payload.text], { type: "text/plain" }),
           };
           if (html) itemPayload["text/html"] = new Blob([html], { type: "text/html" });
-          if (rtf) itemPayload["text/rtf"] = new Blob([rtf], { type: "text/rtf" });
 
           await clipboard.write([new ClipboardItem(itemPayload)]);
         } catch {
-          // Some WebViews reject `text/rtf` (or other rich types). Retry with
-          // the simplest HTML+plain path.
+          // Some WebViews reject rich clipboard writes. Retry with the simplest HTML+plain path.
           if (html) {
             try {
               await clipboard.write([

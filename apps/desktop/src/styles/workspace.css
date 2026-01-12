@@ -246,7 +246,8 @@
   overflow: auto;
 }
 
-.dock-panel__mount {
+.dock-panel__mount,
+.panel-mount--fill-column {
   height: 100%;
   display: flex;
   flex-direction: column;

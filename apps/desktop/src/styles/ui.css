@@ -556,14 +556,6 @@
   opacity: 0.8;
 }
 
-/* Hidden <input type="color"> elements mounted by main.ts for formatting pickers. */
-.hidden-color-input {
-  position: fixed;
-  left: -1000px;
-  top: -1000px;
-  opacity: 0;
-}
-
 /* --- Sheet tabs ---------------------------------------------------------- */
 
 #sheet-tabs.sheet-bar {

@@ -32,8 +32,8 @@ test("desktop main.ts avoids static inline style assignments", () => {
   );
   assert.match(
     hiddenColorInputSection,
-    /(?:classList\.add\(|className\s*=)\s*"hidden-color-input"/,
-    "createHiddenColorInput should apply the hidden-color-input CSS class",
+    /shell-hidden-input/,
+    "createHiddenColorInput should apply the shell-hidden-input CSS class",
   );
 
   const scriptEditorMountSection = extractSection(
@@ -48,8 +48,8 @@ test("desktop main.ts avoids static inline style assignments", () => {
   );
   assert.match(
     scriptEditorMountSection,
-    /(?:classList\.add\(|className\s*=)\s*"dock-panel__mount"/,
-    "Script Editor panel mount container should apply the dock-panel__mount CSS class",
+    /panel-mount--fill-column/,
+    "Script Editor panel mount container should apply the panel-mount--fill-column CSS class",
   );
 
   const pythonMountSection = extractSection(
@@ -64,7 +64,7 @@ test("desktop main.ts avoids static inline style assignments", () => {
   );
   assert.match(
     pythonMountSection,
-    /(?:classList\.add\(|className\s*=)\s*"dock-panel__mount"/,
-    "Python panel mount container should apply the dock-panel__mount CSS class",
+    /panel-mount--fill-column/,
+    "Python panel mount container should apply the panel-mount--fill-column CSS class",
   );
 });

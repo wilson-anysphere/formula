@@ -32,6 +32,17 @@ body {
   min-height: 0;
 }
 
+/* Utilities */
+
+/* Hidden <input type="color"> elements mounted by main.ts for formatting pickers. */
+.shell-hidden-input,
+.hidden-color-input {
+  position: fixed;
+  left: -1000px;
+  top: -1000px;
+  opacity: 0;
+}
+
 /* Grid/flex children can overflow horizontally unless they're allowed to shrink. */
 #app > * {
   min-width: 0;

@@ -806,7 +806,7 @@ function createHiddenColorInput(): HTMLInputElement {
   const input = document.createElement("input");
   input.type = "color";
   input.tabIndex = -1;
-  input.className = "hidden-color-input";
+  input.className = "hidden-color-input shell-hidden-input";
   document.body.appendChild(input);
   return input;
 }
@@ -4353,7 +4353,7 @@ if (
       let mount = panelMounts.get(panelId);
       if (!mount) {
         const container = document.createElement("div");
-        container.className = "dock-panel__mount";
+        container.className = "dock-panel__mount panel-mount--fill-column";
         const mounted = mountScriptEditorPanel({ workbook: scriptingWorkbook, container });
         mount = { container, dispose: mounted.dispose };
         panelMounts.set(panelId, mount);
@@ -4368,7 +4368,7 @@ if (
       let mount = panelMounts.get(panelId);
       if (!mount) {
         const container = document.createElement("div");
-        container.className = "dock-panel__mount";
+        container.className = "dock-panel__mount panel-mount--fill-column";
         container.textContent = "Loading Python runtime…";
 
         let disposed = false;
