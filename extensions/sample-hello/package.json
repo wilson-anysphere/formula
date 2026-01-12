@@ -13,6 +13,8 @@
   },
   "activationEvents": [
     "onCommand:sampleHello.sumSelection",
+    "onCommand:sampleHello.workbookOpenDemo",
+    "onCommand:sampleHello.workbookSaveAsDemo",
     "onCommand:sampleHello.openPanel",
     "onCommand:sampleHello.fetchText",
     "onCommand:sampleHello.copySumToClipboard",
@@ -26,6 +28,16 @@
       {
         "command": "sampleHello.sumSelection",
         "title": "Sum Selection",
+        "category": "Sample Hello"
+      },
+      {
+        "command": "sampleHello.workbookOpenDemo",
+        "title": "Open Workbook (Workbook API Demo)",
+        "category": "Sample Hello"
+      },
+      {
+        "command": "sampleHello.workbookSaveAsDemo",
+        "title": "Save Workbook As… (Workbook API Demo)",
         "category": "Sample Hello"
       },
       {
@@ -117,6 +129,7 @@
   "permissions": [
     "cells.read",
     "cells.write",
+    "workbook.manage",
     "ui.commands",
     "ui.panels",
     "network",

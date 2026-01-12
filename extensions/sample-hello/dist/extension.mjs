@@ -113,6 +113,58 @@ var require_extension = __commonJS({
         })
       );
       context.subscriptions.push(
+        await formula.commands.registerCommand("sampleHello.workbookOpenDemo", async () => {
+          const workbookPath = await formula.ui.showInputBox({
+            prompt: "Workbook path to open",
+            value: "",
+            placeHolder: "/path/to/workbook.xlsx"
+          });
+          if (!workbookPath) return null;
+          const eventPromise = new Promise((resolve) => {
+            const disp = formula.events.onWorkbookOpened((e) => {
+              disp.dispose();
+              resolve(e);
+            });
+          });
+          await formula.workbook.openWorkbook(workbookPath);
+          const evt = await Promise.race([
+            eventPromise,
+            new Promise((resolve) => setTimeout(() => resolve(null), 5000))
+          ]);
+          const workbook = await formula.workbook.getActiveWorkbook();
+          await formula.ui.showMessage(
+            `Workbook opened: ${workbook.name} (${workbook.path ?? "unsaved"}) (event: ${evt?.workbook?.path ?? "unknown"})`
+          );
+          return { evt, workbook };
+        })
+      );
+      context.subscriptions.push(
+        await formula.commands.registerCommand("sampleHello.workbookSaveAsDemo", async () => {
+          const workbookPath = await formula.ui.showInputBox({
+            prompt: "Save workbook as",
+            value: "",
+            placeHolder: "/path/to/workbook.xlsx"
+          });
+          if (!workbookPath) return null;
+          const eventPromise = new Promise((resolve) => {
+            const disp = formula.events.onBeforeSave((e) => {
+              disp.dispose();
+              resolve(e);
+            });
+          });
+          await formula.workbook.saveAs(workbookPath);
+          const evt = await Promise.race([
+            eventPromise,
+            new Promise((resolve) => setTimeout(() => resolve(null), 5000))
+          ]);
+          const workbook = await formula.workbook.getActiveWorkbook();
+          await formula.ui.showMessage(
+            `Workbook beforeSave: ${evt?.workbook?.path ?? "unknown"} (active: ${workbook.name} ${workbook.path ?? "unsaved"})`
+          );
+          return { evt, workbook };
+        })
+      );
+      context.subscriptions.push(
         await formula.commands.registerCommand("sampleHello.openPanel", async () => {
           const created = await ensurePanel(context);
           return created.id;

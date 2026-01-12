@@ -356,6 +356,8 @@ class BrowserExtensionHost {
     this._spreadsheet.onSelectionChanged?.((e) => this._broadcastEvent("selectionChanged", e));
     this._spreadsheet.onCellChanged?.((e) => this._broadcastEvent("cellChanged", e));
     this._spreadsheet.onSheetActivated?.((e) => this._broadcastEvent("sheetActivated", e));
+    this._spreadsheet.onWorkbookOpened?.((e) => this._broadcastEvent("workbookOpened", e));
+    this._spreadsheet.onBeforeSave?.((e) => this._broadcastEvent("beforeSave", e));
   }
 
   get engineVersion() {
