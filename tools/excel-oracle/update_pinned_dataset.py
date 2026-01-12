@@ -484,6 +484,11 @@ def main() -> int:
             "use target/debug/formula-excel-oracle when present, else fall back to `cargo run`."
         ),
     )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print what would change (missing cases, whether the engine would run, etc) without writing files or invoking cargo.",
+    )
     args = p.parse_args()
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -500,6 +505,99 @@ def main() -> int:
         candidate = repo_root / "target" / "debug" / "formula-excel-oracle"
         if candidate.is_file() and os.access(candidate, os.X_OK):
             engine_bin = candidate
+
+    if args.dry_run:
+        cases_payload = _load_json(cases_path)
+        pinned_payload = _load_json(pinned_path)
+
+        cases_list = cases_payload.get("cases", [])
+        if not isinstance(cases_list, list):
+            raise SystemExit(f"{cases_path}: expected top-level 'cases' array")
+
+        case_ids: set[str] = set()
+        for c in cases_list:
+            if isinstance(c, dict) and isinstance(c.get("id"), str):
+                case_ids.add(c["id"])
+        if not case_ids:
+            raise SystemExit(f"{cases_path}: no case IDs found")
+
+        pinned_source = pinned_payload.get("source", {})
+        is_synthetic_baseline = isinstance(pinned_source, dict) and isinstance(
+            pinned_source.get("syntheticSource"), dict
+        )
+
+        # Mirror the updater's duplicate/removal filtering when counting coverage.
+        seen: set[str] = set()
+        for r in _iter_result_entries(pinned_payload):
+            cid = r.get("caseId")
+            if not isinstance(cid, str):
+                continue
+            if cid not in case_ids:
+                continue
+            if cid in seen:
+                continue
+            seen.add(cid)
+
+        missing = set(case_ids.difference(seen))
+        missing_before = len(missing)
+
+        merged = 0
+        overwritten = 0
+        for path in merge_results_paths:
+            payload = _load_json(path)
+            for r in _iter_result_entries(payload):
+                cid = r.get("caseId")
+                if not isinstance(cid, str):
+                    continue
+                if cid not in case_ids:
+                    continue
+                if cid in missing:
+                    missing.remove(cid)
+                    merged += 1
+                    continue
+                if args.overwrite_existing and cid in seen:
+                    overwritten += 1
+
+        missing_after_merges = len(missing)
+        would_run_engine = missing_after_merges > 0 and not args.no_engine
+
+        cases_sha8 = _sha256_file(cases_path)[:8]
+        print("Dry run: update_pinned_dataset")
+        print(f"cases:  {cases_path} ({len(case_ids)} cases, sha256={cases_sha8}...)")
+        print(f"pinned: {pinned_path}")
+        print(f"missing before merges: {missing_before}")
+        if merge_results_paths:
+            print(f"merge-results: {len(merge_results_paths)} file(s) (filled {merged} missing)")
+            if args.overwrite_existing:
+                print(f"overwrite-existing: true (would overwrite {overwritten} existing case(s))")
+        else:
+            print("merge-results: <none>")
+        print(f"missing after merges: {missing_after_merges}")
+        if would_run_engine:
+            if not is_synthetic_baseline and not args.force_engine:
+                print(
+                    "engine: would refuse to fill missing cases because the pinned dataset appears to be real Excel "
+                    "(source.syntheticSource missing). Pass --force-engine or provide --merge-results."
+                )
+                return 1
+            engine_desc = str(engine_bin) if engine_bin is not None else "<cargo run -p formula-excel-oracle>"
+            print(f"engine: would run for {missing_after_merges} missing case(s) via {engine_desc}")
+        else:
+            print("engine: <skipped>")
+            if missing_after_merges:
+                print("note: update would fail because cases are still missing and --no-engine was set")
+                return 1
+
+        if not args.no_versioned:
+            raw = str(args.versioned_dir or "").strip()
+            if raw:
+                versioned_dir = (repo_root / raw).resolve() if not os.path.isabs(raw) else Path(raw).resolve()
+                print(f"versioned copy: would write/update under {versioned_dir.as_posix()}")
+        else:
+            print("versioned copy: <skipped>")
+
+        print("pinned dataset: would be updated in-place")
+        return 0
 
     missing_before, missing_after = update_pinned_dataset(
         cases_path=cases_path,

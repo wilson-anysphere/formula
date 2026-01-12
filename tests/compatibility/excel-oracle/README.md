@@ -232,6 +232,12 @@ You can instead fill in only the missing case results:
 python tools/excel-oracle/update_pinned_dataset.py
 ```
 
+To preview what would change (and whether the updater would run the engine) without writing files, use:
+
+```bash
+python tools/excel-oracle/update_pinned_dataset.py --dry-run
+```
+
 Note: `compat_gate.py` prefers the matching dataset under `datasets/versioned/` (by `cases.json` hash)
 when present. `update_pinned_dataset.py` updates `excel-oracle.pinned.json` **and** refreshes the
 matching versioned copy by default; pass `--no-versioned` to disable.

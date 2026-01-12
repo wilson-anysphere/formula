@@ -10,6 +10,7 @@ import unittest
 import io
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 
 class UpdatePinnedDatasetTests(unittest.TestCase):
@@ -330,6 +331,61 @@ class UpdatePinnedDatasetTests(unittest.TestCase):
                     engine_bin=None,
                     run_engine_for_missing=True,
                 )
+
+    def test_cli_dry_run_does_not_write_or_run_engine(self) -> None:
+        update = self._load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+
+            cases_path = tmp / "cases.json"
+            cases_payload = {
+                "schemaVersion": 1,
+                "caseSet": "test",
+                "defaultSheet": "Sheet1",
+                "cases": [{"id": "case1", "formula": "=1+1", "outputCell": "C1", "inputs": [], "tags": []}],
+            }
+            cases_path.write_text(json.dumps(cases_payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+            pinned_path = tmp / "pinned.json"
+            pinned_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "2026-01-01T00:00:00Z",
+                # Mark as a synthetic baseline so the updater would normally be willing to run the engine.
+                "source": {
+                    "kind": "excel",
+                    "version": "unknown",
+                    "build": "unknown",
+                    "operatingSystem": "unknown",
+                    "syntheticSource": {"kind": "formula-engine"},
+                },
+                "caseSet": {"path": "cases.json", "sha256": "old", "count": 0},
+                "results": [],
+            }
+            pinned_path.write_text(json.dumps(pinned_payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+            pinned_before = pinned_path.read_text(encoding="utf-8")
+
+            versioned_dir = tmp / "versioned"
+            argv = [
+                str(Path(update.__file__)),
+                "--cases",
+                str(cases_path),
+                "--pinned",
+                str(pinned_path),
+                "--versioned-dir",
+                str(versioned_dir),
+                "--dry-run",
+            ]
+            with self._patched_argv(argv):
+                buf = io.StringIO()
+                with mock.patch.object(update.subprocess, "run") as run_mock, redirect_stdout(buf), redirect_stderr(buf):
+                    rc = update.main()
+            self.assertEqual(rc, 0)
+            run_mock.assert_not_called()
+
+            # Dry-run should not modify the pinned dataset file or write versioned copies.
+            self.assertEqual(pinned_path.read_text(encoding="utf-8"), pinned_before)
+            self.assertFalse(versioned_dir.exists())
 
 
 if __name__ == "__main__":

@@ -233,6 +233,13 @@ You can instead update the pinned dataset incrementally to fill in only the miss
 python tools/excel-oracle/update_pinned_dataset.py
 ```
 
+To preview what would happen (missing cases, whether the engine would run, etc.) without writing
+files or running Cargo, use:
+
+```bash
+python tools/excel-oracle/update_pinned_dataset.py --dry-run
+```
+
 By default this also refreshes the matching **versioned** dataset copy under:
 
 * `tests/compatibility/excel-oracle/datasets/versioned/`
