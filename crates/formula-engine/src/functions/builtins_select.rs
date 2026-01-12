@@ -334,6 +334,11 @@ fn switch_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let expr_val = array_lift::eval_arg(ctx, &args[0]);
+    if let Value::Error(e) = expr_val {
+        // Match Excel/IF-like semantics: if the discriminant is an error, return it without
+        // forcing evaluation of any case expressions or the default branch.
+        return Value::Error(e);
+    }
     let (pairs, default) = if (args.len() - 1) % 2 == 0 {
         (&args[1..], None)
     } else {
