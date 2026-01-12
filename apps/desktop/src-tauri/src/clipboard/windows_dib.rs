@@ -516,6 +516,51 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
                 & !3;
             (row, stride)
         }
+        8 => {
+            if compression != BI_RGB {
+                return Err(format!(
+                    "unsupported DIB compression for 8bpp: {compression}"
+                ));
+            }
+            let row = width_usize;
+            let stride = row
+                .checked_add(3)
+                .ok_or_else(|| "dib stride overflow".to_string())?
+                & !3;
+            (row, stride)
+        }
+        4 => {
+            if compression != BI_RGB {
+                return Err(format!(
+                    "unsupported DIB compression for 4bpp: {compression}"
+                ));
+            }
+            let row = width_usize
+                .checked_add(1)
+                .ok_or_else(|| "dib row size overflow".to_string())?
+                / 2;
+            let stride = row
+                .checked_add(3)
+                .ok_or_else(|| "dib stride overflow".to_string())?
+                & !3;
+            (row, stride)
+        }
+        1 => {
+            if compression != BI_RGB {
+                return Err(format!(
+                    "unsupported DIB compression for 1bpp: {compression}"
+                ));
+            }
+            let row = width_usize
+                .checked_add(7)
+                .ok_or_else(|| "dib row size overflow".to_string())?
+                / 8;
+            let stride = row
+                .checked_add(3)
+                .ok_or_else(|| "dib stride overflow".to_string())?
+                & !3;
+            (row, stride)
+        }
         other => return Err(format!("unsupported DIB bit depth: {other}")),
     };
 
@@ -531,6 +576,41 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
         pixel_offset = header_size
             .checked_add(16)
             .ok_or_else(|| "dib pixel offset overflow".to_string())?;
+    }
+
+    // Palette-based formats (1/4/8bpp) store a color table between the header and pixel data.
+    // This is part of the CF_DIB payload (not the `BITMAPV5HEADER` itself).
+    let mut palette: Option<Vec<[u8; 4]>> = None;
+    if matches!(bit_count, 1 | 4 | 8) {
+        let clr_used = read_u32_le(dib_bytes, 32).unwrap_or(0) as usize;
+        let max_colors = 1usize << bit_count;
+        let colors = if clr_used == 0 {
+            max_colors
+        } else {
+            clr_used.min(max_colors)
+        };
+        let table_bytes = colors
+            .checked_mul(4)
+            .ok_or_else(|| "dib color table size overflow".to_string())?;
+        let table_end = pixel_offset
+            .checked_add(table_bytes)
+            .ok_or_else(|| "dib color table offset overflow".to_string())?;
+        if table_end > dib_bytes.len() {
+            return Err("dib does not contain full color table".to_string());
+        }
+
+        let mut table = Vec::with_capacity(colors);
+        for i in 0..colors {
+            let off = pixel_offset + i * 4;
+            let entry = &dib_bytes[off..off + 4];
+            let b = entry[0];
+            let g = entry[1];
+            let r = entry[2];
+            // The 4th byte is reserved; treat as padding and force opaque.
+            table.push([r, g, b, 255]);
+        }
+        palette = Some(table);
+        pixel_offset = table_end;
     }
 
     // For BI_BITFIELDS / BI_ALPHABITFIELDS we may have explicit channel masks. When present, use
@@ -718,6 +798,48 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
                         255
                     };
                     rgba.extend_from_slice(&[r, g, b, a]);
+                }
+            }
+            8 => {
+                let table = palette
+                    .as_deref()
+                    .ok_or_else(|| "dib palette is missing".to_string())?;
+                for &idx in row.iter().take(width_usize) {
+                    let color = table
+                        .get(idx as usize)
+                        .ok_or_else(|| format!("dib palette index out of range: {idx}"))?;
+                    rgba.extend_from_slice(color);
+                }
+            }
+            4 => {
+                let table = palette
+                    .as_deref()
+                    .ok_or_else(|| "dib palette is missing".to_string())?;
+                for x in 0..width_usize {
+                    let b = row
+                        .get(x / 2)
+                        .ok_or_else(|| "dib row is too short for 4bpp".to_string())?;
+                    let idx = if x % 2 == 0 { b >> 4 } else { b & 0x0F };
+                    let color = table
+                        .get(idx as usize)
+                        .ok_or_else(|| format!("dib palette index out of range: {idx}"))?;
+                    rgba.extend_from_slice(color);
+                }
+            }
+            1 => {
+                let table = palette
+                    .as_deref()
+                    .ok_or_else(|| "dib palette is missing".to_string())?;
+                for x in 0..width_usize {
+                    let b = row
+                        .get(x / 8)
+                        .ok_or_else(|| "dib row is too short for 1bpp".to_string())?;
+                    let shift = 7 - (x % 8);
+                    let idx = (b >> shift) & 1;
+                    let color = table
+                        .get(idx as usize)
+                        .ok_or_else(|| format!("dib palette index out of range: {idx}"))?;
+                    rgba.extend_from_slice(color);
                 }
             }
             _ => unreachable!("validated above"),
@@ -1100,6 +1222,100 @@ mod tests {
         let png = dibv5_to_png(&dib).expect("dibv5_to_png failed");
         let (_w, _h, px) = decode_png(&png);
         assert_eq!(px, vec![0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn dib8_bi_rgb_palette_decodes_correctly() {
+        // BITMAPINFOHEADER (40 bytes) + palette + 2 pixels (bottom-up).
+        let mut dib = Vec::new();
+        push_u32_le(&mut dib, BITMAPINFOHEADER_SIZE as u32); // biSize
+        push_i32_le(&mut dib, 2); // biWidth
+        push_i32_le(&mut dib, 1); // biHeight (bottom-up)
+        push_u16_le(&mut dib, 1); // biPlanes
+        push_u16_le(&mut dib, 8); // biBitCount
+        push_u32_le(&mut dib, BI_RGB); // biCompression
+        push_u32_le(&mut dib, 0); // biSizeImage
+        push_i32_le(&mut dib, 0); // biXPelsPerMeter
+        push_i32_le(&mut dib, 0); // biYPelsPerMeter
+        push_u32_le(&mut dib, 2); // biClrUsed
+        push_u32_le(&mut dib, 0); // biClrImportant
+
+        debug_assert_eq!(dib.len(), BITMAPINFOHEADER_SIZE);
+
+        // Palette (RGBQUAD): [B, G, R, 0]
+        // 0 => red
+        dib.extend_from_slice(&[0, 0, 255, 0]);
+        // 1 => green
+        dib.extend_from_slice(&[0, 255, 0, 0]);
+
+        // Pixel indices + row padding to 4 bytes.
+        dib.extend_from_slice(&[0, 1, 0, 0]);
+
+        let png = dibv5_to_png(&dib).expect("dibv5_to_png failed");
+        let (_w, _h, px) = decode_png(&png);
+        assert_eq!(px, vec![255, 0, 0, 255, 0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn dib4_bi_rgb_palette_decodes_correctly() {
+        // BITMAPINFOHEADER (40 bytes) + palette + 2 pixels packed into 1 byte (bottom-up).
+        let mut dib = Vec::new();
+        push_u32_le(&mut dib, BITMAPINFOHEADER_SIZE as u32); // biSize
+        push_i32_le(&mut dib, 2); // biWidth
+        push_i32_le(&mut dib, 1); // biHeight (bottom-up)
+        push_u16_le(&mut dib, 1); // biPlanes
+        push_u16_le(&mut dib, 4); // biBitCount
+        push_u32_le(&mut dib, BI_RGB); // biCompression
+        push_u32_le(&mut dib, 0); // biSizeImage
+        push_i32_le(&mut dib, 0); // biXPelsPerMeter
+        push_i32_le(&mut dib, 0); // biYPelsPerMeter
+        push_u32_le(&mut dib, 2); // biClrUsed
+        push_u32_le(&mut dib, 0); // biClrImportant
+
+        debug_assert_eq!(dib.len(), BITMAPINFOHEADER_SIZE);
+
+        // Palette: 0 => blue, 1 => yellow
+        dib.extend_from_slice(&[255, 0, 0, 0]); // blue
+        dib.extend_from_slice(&[0, 255, 255, 0]); // yellow
+
+        // Two pixels: index 0 then 1 => 0x01 (high nibble first)
+        // Row padded to 4 bytes.
+        dib.extend_from_slice(&[0x01, 0, 0, 0]);
+
+        let png = dibv5_to_png(&dib).expect("dibv5_to_png failed");
+        let (_w, _h, px) = decode_png(&png);
+        assert_eq!(px, vec![0, 0, 255, 255, 255, 255, 0, 255]);
+    }
+
+    #[test]
+    fn dib1_bi_rgb_palette_decodes_correctly() {
+        // BITMAPINFOHEADER (40 bytes) + palette + 2 pixels packed into 1 byte (bottom-up).
+        let mut dib = Vec::new();
+        push_u32_le(&mut dib, BITMAPINFOHEADER_SIZE as u32); // biSize
+        push_i32_le(&mut dib, 2); // biWidth
+        push_i32_le(&mut dib, 1); // biHeight (bottom-up)
+        push_u16_le(&mut dib, 1); // biPlanes
+        push_u16_le(&mut dib, 1); // biBitCount
+        push_u32_le(&mut dib, BI_RGB); // biCompression
+        push_u32_le(&mut dib, 0); // biSizeImage
+        push_i32_le(&mut dib, 0); // biXPelsPerMeter
+        push_i32_le(&mut dib, 0); // biYPelsPerMeter
+        push_u32_le(&mut dib, 2); // biClrUsed
+        push_u32_le(&mut dib, 0); // biClrImportant
+
+        debug_assert_eq!(dib.len(), BITMAPINFOHEADER_SIZE);
+
+        // Palette: 0 => black, 1 => white
+        dib.extend_from_slice(&[0, 0, 0, 0]); // black
+        dib.extend_from_slice(&[255, 255, 255, 0]); // white
+
+        // Two pixels: 0 then 1 => bits 7..6 = 0b01 => 0x40.
+        // Row padded to 4 bytes.
+        dib.extend_from_slice(&[0x40, 0, 0, 0]);
+
+        let png = dibv5_to_png(&dib).expect("dibv5_to_png failed");
+        let (_w, _h, px) = decode_png(&png);
+        assert_eq!(px, vec![0, 0, 0, 255, 255, 255, 255, 255]);
     }
 
     #[test]
