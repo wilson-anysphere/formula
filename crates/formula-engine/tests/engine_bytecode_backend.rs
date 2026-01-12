@@ -3951,6 +3951,33 @@ fn bytecode_compile_diagnostics_reports_dynamic_dependency_reason() {
 }
 
 #[test]
+fn bytecode_compile_diagnostics_reports_dynamic_dependency_reason_for_offset() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=OFFSET(A2,0,0)")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 0);
+    assert_eq!(stats.fallback, 1);
+    assert_eq!(
+        stats
+            .fallback_reasons
+            .get(&BytecodeCompileReason::DynamicDependencies)
+            .copied()
+            .unwrap_or(0),
+        1
+    );
+
+    let report = engine.bytecode_compile_report(10);
+    assert_eq!(report.len(), 1);
+    assert_eq!(report[0].sheet, "Sheet1");
+    assert_eq!(report[0].addr, parse_a1("A1").unwrap());
+    assert_eq!(report[0].reason, BytecodeCompileReason::DynamicDependencies);
+}
+
+#[test]
 fn bytecode_compile_diagnostics_reports_disabled_reason() {
     let mut engine = Engine::new();
     engine.set_bytecode_enabled(false);
