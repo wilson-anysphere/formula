@@ -12,7 +12,14 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 mod fixture_builder;
 use fixture_builder::XlsbFixtureBuilder;
 
-fn build_nonstandard_shared_strings_fixture() -> Vec<u8> {
+const DEFAULT_SHARED_STRINGS_PART: &str = "xl/sharedStrings.bin";
+
+fn build_shared_strings_fixture_variant(
+    shared_strings_part: &str,
+    workbook_rels_target: &str,
+    content_types_part_name: &str,
+    move_shared_strings_part: bool,
+) -> Vec<u8> {
     let mut builder = XlsbFixtureBuilder::new();
     builder.add_shared_string("Hello");
     builder.set_cell_sst(0, 0, 0);
@@ -30,16 +37,18 @@ fn build_nonstandard_shared_strings_fixture() -> Vec<u8> {
         parts.insert(file.name().to_string(), buf);
     }
 
-    let shared_strings = parts
-        .remove("xl/sharedStrings.bin")
-        .expect("base fixture has sharedStrings.bin");
-    parts.insert("xl/strings/sharedStrings.bin".to_string(), shared_strings);
+    if move_shared_strings_part {
+        let shared_strings = parts
+            .remove("xl/sharedStrings.bin")
+            .expect("base fixture has sharedStrings.bin");
+        parts.insert(shared_strings_part.to_string(), shared_strings);
+    }
 
     let workbook_rels_xml =
         String::from_utf8(parts["xl/_rels/workbook.bin.rels"].clone()).expect("utf8 workbook rels");
     let workbook_rels_xml = workbook_rels_xml.replace(
         "Target=\"sharedStrings.bin\"",
-        "Target=\"strings/sharedStrings.bin\"",
+        &format!("Target=\"{workbook_rels_target}\""),
     );
     parts.insert(
         "xl/_rels/workbook.bin.rels".to_string(),
@@ -50,7 +59,7 @@ fn build_nonstandard_shared_strings_fixture() -> Vec<u8> {
         String::from_utf8(parts["[Content_Types].xml"].clone()).expect("utf8 content types");
     let content_types_xml = content_types_xml.replace(
         "PartName=\"/xl/sharedStrings.bin\"",
-        "PartName=\"/xl/strings/sharedStrings.bin\"",
+        &format!("PartName=\"{content_types_part_name}\""),
     );
     parts.insert(
         "[Content_Types].xml".to_string(),
@@ -65,6 +74,15 @@ fn build_nonstandard_shared_strings_fixture() -> Vec<u8> {
     }
 
     zip_out.finish().expect("finish zip").into_inner()
+}
+
+fn build_nonstandard_shared_strings_fixture() -> Vec<u8> {
+    build_shared_strings_fixture_variant(
+        "xl/strings/sharedStrings.bin",
+        "strings/sharedStrings.bin",
+        "/xl/strings/sharedStrings.bin",
+        true,
+    )
 }
 
 fn read_zip_part(path: &Path, part_path: &str) -> Vec<u8> {
@@ -156,6 +174,52 @@ fn open_resolves_shared_strings_part_from_workbook_rels() {
 }
 
 #[test]
+fn open_resolves_shared_strings_part_with_backslashes_and_case_insensitive_entry_names() {
+    let bytes = build_shared_strings_fixture_variant(
+        "xl/Strings/SharedStrings.bin",
+        r#"Strings\SharedStrings.bin"#,
+        "/xl/Strings/SharedStrings.bin",
+        true,
+    );
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+    let a1 = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("A1 exists");
+    assert_eq!(a1.value, CellValue::Text("Hello".to_string()));
+}
+
+#[test]
+fn open_falls_back_to_default_shared_strings_part_when_relationship_points_to_missing_entry() {
+    let bytes = build_shared_strings_fixture_variant(
+        DEFAULT_SHARED_STRINGS_PART,
+        "strings/sharedStrings.bin",
+        "/xl/strings/sharedStrings.bin",
+        false,
+    );
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open xlsb");
+    let sheet = wb.read_sheet(0).expect("read sheet");
+    let a1 = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("A1 exists");
+    assert_eq!(a1.value, CellValue::Text("Hello".to_string()));
+}
+
+#[test]
 fn save_as_roundtrips_nonstandard_shared_strings_part_losslessly() {
     let bytes = build_nonstandard_shared_strings_fixture();
 
@@ -198,6 +262,47 @@ fn save_with_cell_edits_shared_strings_updates_nonstandard_shared_strings_part()
         }],
     )
     .expect("save_with_cell_edits_shared_strings");
+
+    let wb2 = XlsbWorkbook::open(&output_path).expect("open output workbook");
+    let sheet = wb2.read_sheet(0).expect("read sheet");
+    let a1 = sheet
+        .cells
+        .iter()
+        .find(|c| c.row == 0 && c.col == 0)
+        .expect("A1 exists");
+    assert_eq!(a1.value, CellValue::Text("New".to_string()));
+
+    let shared_strings_bin = read_zip_part(&output_path, "xl/strings/sharedStrings.bin");
+    let info = read_shared_strings_info(&shared_strings_bin);
+    assert_eq!(info.total_count, Some(1));
+    assert_eq!(info.unique_count, Some(2));
+    assert_eq!(info.strings.len(), 2);
+    assert_eq!(info.strings[1], "New");
+}
+
+#[test]
+fn save_with_cell_edits_streaming_shared_strings_updates_nonstandard_shared_strings_part() {
+    let bytes = build_nonstandard_shared_strings_fixture();
+
+    let tmpdir = tempdir().expect("create temp dir");
+    let input_path = tmpdir.path().join("input.xlsb");
+    let output_path = tmpdir.path().join("output.xlsb");
+    std::fs::write(&input_path, bytes).expect("write input workbook");
+
+    let wb = XlsbWorkbook::open(&input_path).expect("open xlsb");
+    wb.save_with_cell_edits_streaming_shared_strings(
+        &output_path,
+        0,
+        &[CellEdit {
+            row: 0,
+            col: 0,
+            new_value: CellValue::Text("New".to_string()),
+            new_formula: None,
+            new_rgcb: None,
+            shared_string_index: None,
+        }],
+    )
+    .expect("save_with_cell_edits_streaming_shared_strings");
 
     let wb2 = XlsbWorkbook::open(&output_path).expect("open output workbook");
     let sheet = wb2.read_sheet(0).expect("read sheet");
