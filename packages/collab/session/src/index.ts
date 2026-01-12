@@ -448,6 +448,9 @@ export interface CollabSessionOptions {
    * Note: if you enable `formulaConflicts` with `mode: "formula+value"`, value
    * conflicts are already covered there (and it can also surface formula-vs-value
    * "content" conflicts). Prefer one monitor to avoid redundant conflict UX.
+   *
+   * Note: `remoteUserId` in emitted conflicts is best-effort and may be an empty
+   * string when the writer does not update `modifiedBy` (legacy/edge clients).
    */
   cellValueConflicts?: {
     localUserId: string;
