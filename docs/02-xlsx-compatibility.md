@@ -942,3 +942,4 @@ const sheets = await Promise.all(
 3. **Numbers compatibility**: Apple's format for Mac users
 4. **OpenDocument (ODS)**: LibreOffice compatibility
 5. **New Excel features**: Monitor Excel updates for new XML schemas
+6. **Images in Cell** (Place in Cell / `IMAGE()`): packaging + schema notes in [20-images-in-cells.md](./20-images-in-cells.md)

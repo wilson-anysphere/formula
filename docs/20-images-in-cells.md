@@ -29,13 +29,13 @@ Workbooks using images-in-cells are expected to include some/all of the followin
 
 ```
 xl/
-├── cellimages.xml
-├── cellimages1.xml (optional; Excel appears to use `cellimages.xml` today, but allow suffixes)
+├── cellImages.xml
+├── cellImages1.xml (optional; allow numeric suffixes like other indexed XLSX parts)
 ├── media/
 │   └── image*.{png,jpg,gif,...}
 ├── metadata.xml
 ├── _rels/
-│   ├── cellimages.xml.rels
+│   ├── cellImages.xml.rels
 │   └── metadata.xml.rels (commonly present when `metadata.xml` references `xl/richData/*`)
 └── richData/
     ├── richValue.xml
@@ -48,6 +48,10 @@ xl/
 
 Notes:
 
+- **Part-name casing:** Some producers (and our current fixtures/tests) use `xl/cellimages.xml` (all
+  lowercase) instead of `xl/cellImages.xml`. OPC part names are case-sensitive inside the ZIP, so:
+  - readers should handle both variants, and
+  - writers should preserve the original casing when round-tripping an existing file.
 - `xl/media/*` contains the actual image bytes (usually `.png`, but Excel may use other formats).
 - The exact `xl/richData/*` file set can vary across Excel builds; the `richValue*` names shown above are
   common, but Formula should preserve the entire `xl/richData/` directory byte-for-byte unless we
@@ -159,13 +163,13 @@ Representative snippet (from the unit tests in `crates/formula-xlsx/src/rich_dat
 </metadata>
 ```
 
-## `xl/cellimages.xml`
+## `xl/cellImages.xml` (a.k.a. `xl/cellimages.xml`)
 
-`xl/cellimages.xml` is the workbook-level “cell image store” part. It is expected to contain a list of
+`xl/cellImages.xml` is the workbook-level “cell image store” part. It is expected to contain a list of
 image entries that can be referenced (directly or indirectly) by rich values.
 
 The part embeds **SpreadsheetDrawing / DrawingML** `<xdr:pic>` payloads and uses
-`<a:blip r:embed="rId…">` to reference an image relationship in `xl/_rels/cellimages.xml.rels`.
+`<a:blip r:embed="rId…">` to reference an image relationship in `xl/_rels/cellImages.xml.rels`.
 
 Observed root namespaces (from in-repo tests; Excel versions may vary):
 
@@ -217,9 +221,9 @@ has explicit support for `r:id` on `<cellImage>`:
 </etc:cellImages>
 ```
 
-### `xl/_rels/cellimages.xml.rels`
+### `xl/_rels/cellImages.xml.rels` (a.k.a. `xl/_rels/cellimages.xml.rels`)
 
-`xl/_rels/cellimages.xml.rels` contains OPC relationships from `cellimages.xml` to the binary image parts
+`xl/_rels/cellImages.xml.rels` contains OPC relationships from `cellImages.xml` to the binary image parts
 under `xl/media/*`.
 
 This relationships file is standard OPC, and the **image relationship type URI is known**:
@@ -288,7 +292,7 @@ See also:
 Because the exact file set and schemas vary across Excel builds, Formula’s short-term strategy is:
 
 - **preserve all `xl/richData/*` parts and their `*.rels`**, and
-- treat them as an **atomic bundle** with `xl/metadata.xml` + `xl/cellimages.xml` during round-trip.
+- treat them as an **atomic bundle** with `xl/metadata.xml` + `xl/cellImages.xml` during round-trip.
 
 Common file names (Excel version-dependent; treat as “expected shape”, not a strict schema):
 
@@ -301,10 +305,11 @@ Common file names (Excel version-dependent; treat as “expected shape”, not a
 
 Workbooks that include these parts must also declare content types in `[Content_Types].xml`:
 
-- **Override** entries for XML parts like `/xl/cellimages.xml`, `/xl/metadata.xml`, and `xl/richData/*.xml`
+- **Override** entries for XML parts like `/xl/cellImages.xml` (or `/xl/cellimages.xml`), `/xl/metadata.xml`,
+  and `xl/richData/*.xml`
 - **Default** entries for image extensions used under `/xl/media/*` (`png`, `jpg`, `gif`, etc.)
 
-### `xl/cellimages.xml` content type override
+### `xl/cellImages.xml` content type override
 
 Observed values (from in-repo tests; preserve whatever is in the source workbook):
 
@@ -316,8 +321,12 @@ Observed values (from in-repo tests; preserve whatever is in the source workbook
 Excel uses Microsoft-specific content type strings for this part, and the exact string may vary across
 versions/builds.
 
-**Round-trip rule:** treat any `<Override PartName="/xl/cellimages.xml" .../>` as authoritative and
-preserve its `ContentType` value byte-for-byte (do not hardcode a single MIME type in the writer).
+**Round-trip rule:** treat any `<Override PartName="/xl/cellImages.xml" .../>` (or the lowercase variant) as
+authoritative and preserve its `ContentType` value byte-for-byte.
+
+If we ever need to synthesize this part from scratch, `application/vnd.ms-excel.cellimages+xml` is a
+reasonable default (it matches Excel’s vendor-specific pattern like `...threadedcomments+xml` / `...person+xml`),
+but we should still prefer the original file’s value when round-tripping.
 
 ### Other content types (TODO: fixture-driven)
 
@@ -338,8 +347,8 @@ Likely patterns seen in the ecosystem (unverified; do not hardcode without a rea
   <Default Extension="png" ContentType="image/png"/>
   <!-- ... -->
 
-  <Override PartName="/xl/cellimages.xml"
-            ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml"/>
+  <Override PartName="/xl/cellImages.xml"
+             ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml"/>
 
   <!-- TODO: confirm these from an Excel fixture -->
   <Override PartName="/xl/metadata.xml" ContentType="TODO"/>
@@ -357,16 +366,16 @@ section with the exact `ContentType="..."` strings for `metadata.xml` and `richD
 
 Known (stable, used across OOXML):
 
-- Image relationships (used by DrawingML and expected to be used by `cellimages.xml`):
+- Image relationships (used by DrawingML and expected to be used by `cellImages.xml`):
   - `http://schemas.openxmlformats.org/officeDocument/2006/relationships/image`
 
 Partially known (fixture-driven details still recommended):
 
-- Workbook → `xl/cellimages.xml` relationship:
+- Workbook → `xl/cellImages.xml` relationship:
   - Lives in `xl/_rels/workbook.xml.rels`.
   - Excel uses a Microsoft-extension relationship `Type` URI that has been observed to vary.
-  - **Round-trip / detection rule:** identify the relationship by resolved `Target` (`/xl/cellimages.xml`)
-    rather than hardcoding a single `Type`.
+  - **Round-trip / detection rule:** identify the relationship by resolved `Target`
+    (`/xl/cellImages.xml` or `/xl/cellimages.xml`) rather than hardcoding a single `Type`.
 - RichData relationship indirection (images referenced via `richValueRel.xml`):
   - `xl/richData/_rels/richValueRel.xml.rels` is expected to contain standard image relationships:
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
@@ -377,7 +386,7 @@ TODO (confirm via real Excel fixture, then harden parsers/writers):
 - Relationship type(s) connecting `xl/workbook.xml` (or other workbook-level parts) to:
   - `xl/metadata.xml`
   - `xl/richData/*`
-  - `xl/cellimages.xml`
+  - `xl/cellImages.xml`
 
 Until confirmed, Formula must preserve any such relationships byte-for-byte rather than regenerating.
 
@@ -386,8 +395,8 @@ Until confirmed, Formula must preserve any such relationships byte-for-byte rath
 Until Formula implements a full semantic model for images-in-cells, the compatibility requirement is:
 
 1. **Preserve the parts**:
-   - `xl/cellimages.xml`
-   - `xl/_rels/cellimages.xml.rels`
+   - `xl/cellImages.xml` (or `xl/cellimages.xml`)
+   - `xl/_rels/cellImages.xml.rels` (or `xl/_rels/cellimages.xml.rels`)
    - `xl/media/*` images referenced by those relationships
    - `xl/metadata.xml`
    - `xl/richData/*` (and `xl/richData/_rels/*`)
