@@ -120,6 +120,17 @@ test.describe("collaboration: sheet metadata", () => {
         timeout: 30_000,
       });
 
+      // Rename Sheet2 via the UI on client A and ensure it propagates to client B.
+      const sheet2TabA = pageA.getByTestId("sheet-tab-Sheet2");
+      await sheet2TabA.dblclick();
+      const renameInputA = sheet2TabA.locator("input");
+      await expect(renameInputA).toBeVisible();
+      await renameInputA.fill("Expenses");
+      await renameInputA.press("Enter");
+
+      await expect(sheet2TabA.locator(".sheet-tab__name")).toHaveText("Expenses");
+      await expect(pageB.getByTestId("sheet-tab-Sheet2").locator(".sheet-tab__name")).toHaveText("Expenses", { timeout: 30_000 });
+
       // 2) Rename Sheet1 by updating Yjs metadata (remote-driven rename).
       await pageA.evaluate(() => {
         const app = (window as any).__formulaApp;
@@ -166,45 +177,27 @@ test.describe("collaboration: sheet metadata", () => {
         timeout: 30_000,
       });
 
-      // 3) Reorder Sheet2 before Sheet1 in Yjs (remote-driven reorder).
+      // 3) Reorder Sheet2 before Sheet1 via the UI on client A.
+      //
+      // Avoid Playwright's `dragTo` in the desktop shell (can hang); dispatch a synthetic drop event instead.
       await pageA.evaluate(() => {
-        const app = (window as any).__formulaApp;
-        const session = app?.getCollabSession?.() ?? null;
-        if (!session) throw new Error("Missing collab session");
+        const fromId = "Sheet2";
+        const target = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+        if (!target) throw new Error("Missing Sheet1 tab");
+        const rect = target.getBoundingClientRect();
 
-        session.transactLocal(() => {
-          let fromIndex = -1;
-          for (let i = 0; i < session.sheets.length; i += 1) {
-            const entry: any = session.sheets.get(i);
-            const id = String(entry?.get?.("id") ?? entry?.id ?? "").trim();
-            if (id === "Sheet2") {
-              fromIndex = i;
-              break;
-            }
-          }
-          if (fromIndex < 0) throw new Error("Sheet2 not found");
-          if (fromIndex === 0) return;
+        const dt = new DataTransfer();
+        dt.setData("text/sheet-id", fromId);
+        dt.setData("text/plain", fromId);
 
-          const entry: any = session.sheets.get(fromIndex);
-          const MapCtor = entry?.constructor ?? session.cells?.constructor ?? null;
-          if (typeof MapCtor !== "function") throw new Error("Missing Y.Map constructor");
-          const clone = new MapCtor();
-          // Only copy stable sheet-list metadata fields. Sheet entries can contain nested
-          // Yjs types (e.g. `view`), and reusing those objects during a move can violate
-          // Yjs' parentage rules. (The production code uses a deep clone for this.)
-          const id = String(entry?.get?.("id") ?? entry?.id ?? "").trim();
-          if (!id) throw new Error("Sheet entry missing id");
-          clone.set("id", id);
-          const name = entry?.get?.("name") ?? entry?.name;
-          if (name != null) clone.set("name", name);
-          const visibility = entry?.get?.("visibility") ?? entry?.visibility;
-          if (visibility != null) clone.set("visibility", visibility);
-          const tabColor = entry?.get?.("tabColor") ?? entry?.tabColor;
-          if (tabColor != null) clone.set("tabColor", tabColor);
-
-          session.sheets.delete(fromIndex, 1);
-          session.sheets.insert(0, [clone]);
+        const drop = new DragEvent("drop", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 1,
+          clientY: rect.top + rect.height / 2,
         });
+        Object.defineProperty(drop, "dataTransfer", { value: dt });
+        target.dispatchEvent(drop);
       });
 
       await expect
