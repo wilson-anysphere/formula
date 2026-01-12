@@ -10,6 +10,8 @@ export class DocumentController {
   markSaved(): void;
   markDirty(): void;
   readonly isDirty: boolean;
+  readonly updateVersion: number;
+  readonly contentVersion: number;
 
   getSheetIds(): string[];
   getSheetView(sheetId: string): {
