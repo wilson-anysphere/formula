@@ -2283,6 +2283,33 @@ mod tests {
     }
 
     #[test]
+    fn decodes_truncated_ptg_payload_to_unknown_error_literal_with_ptg_warning() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgInt expects 2 bytes of payload; provide only 1 to trigger unexpected EOF.
+        let rgce = [0x1E, 0x01];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#UNKNOWN!");
+        assert!(
+            decoded
+                .warnings
+                .iter()
+                .any(|w| w.contains("unexpected end of rgce stream")),
+            "expected unexpected EOF warning, warnings={:?}",
+            decoded.warnings
+        );
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("0x1E")),
+            "expected ptg id in warnings, warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn decodes_ptg_namex_to_ref_placeholder() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetRef> = Vec::new();
