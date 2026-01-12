@@ -5,7 +5,7 @@ import { PanelIds } from "./panelRegistry.js";
 import { AIChatPanelContainer } from "./ai-chat/AIChatPanelContainer.js";
 import { DataQueriesPanelContainer } from "./data-queries/DataQueriesPanelContainer.js";
 import { QueryEditorPanelContainer } from "./query-editor/QueryEditorPanelContainer.js";
-import { createCollabVersioning, type CollabVersioning, type VersionRecord } from "@formula/collab-versioning";
+import type { CollabVersioning, VersionRecord } from "@formula/collab-versioning";
 import { createAIAuditPanel } from "./ai-audit/index.js";
 import { mountPythonPanel } from "./python/index.js";
 import { VbaMigratePanel } from "./vba-migrate/index.js";
@@ -36,7 +36,12 @@ function formatVersionTimestamp(timestampMs: number): string {
 }
 
 function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
-  const collabVersioning = useMemo<CollabVersioning>(() => createCollabVersioning({ session }), [session]);
+  // `@formula/collab-versioning` depends on the core versioning subsystem, which can pull in
+  // Node-only modules (e.g. `node:events`). Avoid importing it at desktop shell startup so
+  // split-view/grid e2e can boot without requiring those polyfills; load it lazily when the
+  // panel is actually opened.
+  const [collabVersioning, setCollabVersioning] = useState<CollabVersioning | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [versions, setVersions] = useState<VersionRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -44,15 +49,35 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    let disposed = false;
+    let instance: CollabVersioning | null = null;
+
+    void (async () => {
+      try {
+        setLoadError(null);
+        setCollabVersioning(null);
+        const mod = await import("@formula/collab-versioning");
+        if (disposed) return;
+        instance = mod.createCollabVersioning({ session });
+        setCollabVersioning(instance);
+      } catch (e) {
+        if (disposed) return;
+        setLoadError((e as Error).message);
+      }
+    })();
+
     return () => {
-      collabVersioning.destroy();
+      disposed = true;
+      instance?.destroy();
     };
-  }, [collabVersioning]);
+  }, [session]);
 
   const refresh = async () => {
     try {
       setError(null);
-      const next = await collabVersioning.listVersions();
+      const manager = collabVersioning;
+      if (!manager) return;
+      const next = await manager.listVersions();
       setVersions(next);
       if (selectedId && !next.some((v) => v.id === selectedId)) setSelectedId(null);
     } catch (e) {
@@ -61,11 +86,24 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
   };
 
   useEffect(() => {
+    if (!collabVersioning) return;
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collabVersioning]);
 
   const items = useMemo(() => buildVersionHistoryItems(versions as any), [versions]);
+
+  if (loadError) {
+    return (
+      <div style={{ padding: 12, fontFamily: "system-ui, sans-serif", color: "var(--error)" }}>
+        Version history is unavailable: {loadError}
+      </div>
+    );
+  }
+
+  if (!collabVersioning) {
+    return <div style={{ padding: 12, fontFamily: "system-ui, sans-serif" }}>Loading version history…</div>;
+  }
 
   return (
     <div style={{ padding: 12, fontFamily: "system-ui, sans-serif", overflow: "auto" }}>

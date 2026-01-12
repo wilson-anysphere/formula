@@ -2718,6 +2718,7 @@ export class SpreadsheetApp {
     if (!bounds) return;
     const initialValue = this.getCellInputText(cell);
     this.editor.open(cell, bounds, initialValue, { cursor: "end" });
+    this.updateEditState();
   }
 
   subscribeSelection(listener: (selection: SelectionState) => void): () => void {

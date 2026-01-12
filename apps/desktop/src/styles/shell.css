@@ -30,17 +30,9 @@ body {
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
-  min-width: 0;
 }
 
 /* Grid/flex children can overflow horizontally unless they're allowed to shrink. */
-#app > * {
-  min-width: 0;
-}
-
-/* Grid items default `min-width: auto`, which can cause horizontal overflow when
-   child content (e.g. ribbon controls) has a large min-content size. Allow app
-   rows to shrink to the viewport width. */
 #app > * {
   min-width: 0;
 }
