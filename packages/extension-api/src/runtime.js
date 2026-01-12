@@ -82,6 +82,46 @@ function notifyError(err) {
   }
 }
 
+function serializeErrorForTransport(error) {
+  const payload = { message: "Unknown error" };
+
+  try {
+    if (error && typeof error === "object" && "message" in error) {
+      payload.message = String(error.message);
+    } else {
+      payload.message = String(error);
+    }
+  } catch {
+    payload.message = "Unknown error";
+  }
+
+  try {
+    if (error && typeof error === "object" && "stack" in error && error.stack != null) {
+      payload.stack = String(error.stack);
+    }
+  } catch {
+    // ignore stack serialization failures
+  }
+
+  try {
+    if (error && typeof error === "object") {
+      if (typeof error.name === "string" && error.name.trim().length > 0) {
+        payload.name = String(error.name);
+      }
+      if (Object.prototype.hasOwnProperty.call(error, "code")) {
+        const code = error.code;
+        const primitive =
+          code == null || typeof code === "string" || typeof code === "number" || typeof code === "boolean";
+        payload.code = primitive ? code : String(code);
+      }
+    }
+  } catch {
+    // ignore metadata serialization failures
+  }
+
+  return payload;
+}
+
 function __handleMessage(message) {
   if (!message || typeof message !== "object") return;
 
@@ -133,7 +173,7 @@ function __handleMessage(message) {
             getTransportOrThrow().postMessage({
               type: "command_error",
               id,
-              error: { message: String(error?.message ?? error), stack: error?.stack }
+              error: serializeErrorForTransport(error)
             });
           }
         );
@@ -161,7 +201,7 @@ function __handleMessage(message) {
             getTransportOrThrow().postMessage({
               type: "custom_function_error",
               id,
-              error: { message: String(error?.message ?? error), stack: error?.stack }
+              error: serializeErrorForTransport(error)
             });
           }
         );
@@ -200,7 +240,7 @@ function __handleMessage(message) {
             getTransportOrThrow().postMessage({
               type: "data_connector_error",
               id,
-              error: { message: String(error?.message ?? error), stack: error?.stack }
+              error: serializeErrorForTransport(error)
             });
           }
         );

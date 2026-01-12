@@ -796,6 +796,105 @@ test("api errors: extension sees PermissionError name when workbook.manage is de
   });
 });
 
+test("api errors: host preserves extension error name/code for command/custom function/data connector failures", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-error-name-propagation-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "errorExt.throw";
+  const functionName = "TEST_THROW_ERROR";
+  const connectorId = "test-error-connector";
+
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "error-name-propagation-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [
+        `onCommand:${commandId}`,
+        `onCustomFunction:${functionName}`,
+        `onDataConnector:${connectorId}`
+      ],
+      contributes: {
+        commands: [{ command: commandId, title: "Throw error" }],
+        customFunctions: [
+          {
+            name: functionName,
+            description: "Throws an error",
+            parameters: [],
+            result: { type: "number" }
+          }
+        ],
+        dataConnectors: [{ id: connectorId, name: "Test error connector" }]
+      },
+      permissions: ["ui.commands"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+
+      function makeError() {
+        const err = new Error("boom");
+        err.name = "BoomError";
+        err.code = "BOOM";
+        return err;
+      }
+
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          throw makeError();
+        }));
+
+        context.subscriptions.push(await formula.functions.register(${JSON.stringify(functionName)}, {
+          handler: async () => {
+            throw makeError();
+          }
+        }));
+
+        context.subscriptions.push(await formula.dataConnectors.register(${JSON.stringify(connectorId)}, {
+          browse: async () => {
+            throw makeError();
+          },
+          query: async () => {
+            throw makeError();
+          }
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const assertBoomError = async (fn) => {
+    await assert.rejects(fn, (err) => {
+      assert.equal(err?.name, "BoomError");
+      assert.equal(err?.code, "BOOM");
+      assert.equal(err?.message, "boom");
+      return true;
+    });
+  };
+
+  await assertBoomError(() => host.executeCommand(commandId));
+  await assertBoomError(() => host.invokeCustomFunction(functionName));
+  await assertBoomError(() => host.invokeDataConnector(connectorId, "browse"));
+});
+
 test("permissions: workbook.saveAs requires workbook.manage and denial prevents updating workbook path", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-saveas-deny-"));
   const extDir = path.join(dir, "ext");
