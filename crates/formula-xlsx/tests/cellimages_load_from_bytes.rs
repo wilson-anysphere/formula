@@ -1,6 +1,7 @@
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Read, Write};
 
 use formula_model::drawings::ImageId;
+use zip::ZipArchive;
 
 fn build_minimal_cellimages_xlsx(
     cellimages_rel_target: &str,
@@ -112,5 +113,34 @@ fn cellimages_missing_media_is_best_effort() -> Result<(), Box<dyn std::error::E
     let doc = formula_xlsx::load_from_bytes(&bytes)?;
 
     assert!(doc.workbook.images.get(&ImageId::new("image1.png")).is_none());
+    Ok(())
+}
+
+#[test]
+fn load_from_bytes_extracts_images_from_fixture_cellimages_blip_schema(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // `fixtures/xlsx/basic/cellimages.xlsx` uses the newer 2022 cellImages schema:
+    // `<cellImage><a:blip r:embed="rId1"/></cellImage>` (no `<xdr:pic>` and no `r:id` on
+    // `<cellImage>`). Ensure we can still discover and load the referenced image into
+    // `Workbook.images`.
+    let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/xlsx/basic/cellimages.xlsx");
+    let bytes = std::fs::read(&fixture_path)
+        .unwrap_or_else(|e| panic!("read fixture {}: {e}", fixture_path.display()));
+
+    let doc = formula_xlsx::load_from_bytes(&bytes)?;
+
+    // Read the expected bytes from the fixture's media part.
+    let mut archive = ZipArchive::new(Cursor::new(&bytes))?;
+    let mut file = archive.by_name("xl/media/image1.png")?;
+    let mut expected = Vec::new();
+    file.read_to_end(&mut expected)?;
+
+    let image = doc
+        .workbook
+        .images
+        .get(&ImageId::new("image1.png"))
+        .expect("expected Workbook.images to contain image1.png");
+    assert_eq!(image.bytes.as_slice(), expected.as_slice());
     Ok(())
 }

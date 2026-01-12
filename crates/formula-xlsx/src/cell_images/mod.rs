@@ -227,7 +227,6 @@ fn parse_cell_images_part(
                 target,
                 raw_xml: slice_node_xml(&node, xml).unwrap_or_default(),
             });
-            continue;
         }
         if name.eq_ignore_ascii_case("cellImage") {
             // If this `<cellImage>` includes a full `<pic>` payload, we'll pick it up when we hit

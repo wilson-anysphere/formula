@@ -4,6 +4,7 @@ use crate::{
     authenticode::extract_vba_signature_signed_digest,
     compute_vba_project_digest_v3,
     contents_hash::content_normalized_data,
+    DigestAlg,
     normalized_data::forms_normalized_data,
     OleError,
     OleFile,
@@ -929,6 +930,7 @@ fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
         crate::DigestAlg::Sha256 => "SHA-256",
     })
 }
+
 fn signature_kind_rank(kind: VbaSignatureStreamKind) -> u8 {
     match kind {
         VbaSignatureStreamKind::DigitalSignatureExt => 0,
