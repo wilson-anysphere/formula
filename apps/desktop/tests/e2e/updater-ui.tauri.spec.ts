@@ -44,9 +44,12 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     await page.addInitScript(() => {
       const listeners: Record<string, Array<(event: any) => void>> = {};
       const emitted: Array<{ event: string; payload: any }> = [];
+      const callOrder: Array<{ kind: "listen" | "listen-registered" | "emit"; name: string; seq: number }> = [];
+      let seq = 0;
 
       (window as any).__tauriListeners = listeners;
       (window as any).__tauriEmittedEvents = emitted;
+      (window as any).__tauriCallOrder = callOrder;
       (window as any).__tauriShowCalls = 0;
       (window as any).__tauriFocusCalls = 0;
 
@@ -69,10 +72,15 @@ test.describe("desktop updater UI wiring (tauri)", () => {
         },
         event: {
           listen: async (name: string, handler: any) => {
+            callOrder.push({ kind: "listen", name, seq: ++seq });
+            // Simulate async backend confirmation for handler registration so we can
+            // assert `updater-ui-ready` is emitted only after all listeners are installed.
+            await Promise.resolve();
             if (!Array.isArray(listeners[name])) {
               listeners[name] = [];
             }
             listeners[name].push(handler);
+            callOrder.push({ kind: "listen-registered", name, seq: ++seq });
             return () => {
               const arr = listeners[name];
               if (!Array.isArray(arr)) return;
@@ -81,6 +89,7 @@ test.describe("desktop updater UI wiring (tauri)", () => {
             };
           },
           emit: async (event: string, payload?: any) => {
+            callOrder.push({ kind: "emit", name: event, seq: ++seq });
             emitted.push({ event, payload: payload ?? null });
           },
         },
@@ -104,6 +113,31 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     await page.waitForFunction(() =>
       Boolean((window as any).__tauriEmittedEvents?.some((entry: any) => entry?.event === "updater-ui-ready")),
     );
+    const readyOrdering = await page.evaluate(() => {
+      const calls = (window as any).__tauriCallOrder as Array<{ kind: string; name: string; seq: number }> | undefined;
+      if (!Array.isArray(calls)) return null;
+      const readySeq = calls.find((c) => c.kind === "emit" && c.name === "updater-ui-ready")?.seq ?? null;
+      const required = [
+        "update-check-already-running",
+        "update-check-started",
+        "update-not-available",
+        "update-check-error",
+        "update-available",
+      ];
+      const registered = Object.fromEntries(
+        required.map((event) => [
+          event,
+          calls.find((c) => c.kind === "listen-registered" && c.name === event)?.seq ?? null,
+        ]),
+      );
+      return { readySeq, registered };
+    });
+    expect(readyOrdering).not.toBeNull();
+    expect(readyOrdering!.readySeq).not.toBeNull();
+    for (const seqValue of Object.values(readyOrdering!.registered as Record<string, number | null>)) {
+      expect(seqValue).not.toBeNull();
+      expect(seqValue!).toBeLessThan(readyOrdering!.readySeq!);
+    }
 
     await waitForTauriListeners(page, "update-check-started");
     await dispatchTauriEvent(page, "update-check-started", { source: "manual" });
