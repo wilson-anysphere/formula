@@ -271,6 +271,10 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
 
 /// Open a spreadsheet workbook based on file extension.
 ///
+/// If you only need a [`formula_model::Workbook`] (data + formulas) and do not need full-fidelity
+/// round-trip preservation, prefer [`open_workbook_model`] which uses streaming readers and avoids
+/// inflating every package part into memory.
+///
 /// Currently supports:
 /// - `.xls` (via `formula-xls`)
 /// - `.xlsb` (via `formula-xlsb`)
