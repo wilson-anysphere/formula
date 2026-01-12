@@ -496,5 +496,128 @@ class CompareArrayMismatchDetailTests(unittest.TestCase):
             )
 
 
+class CompareArrayShapeMismatchDetailTests(unittest.TestCase):
+    def test_array_row_count_mismatch_includes_shape(self) -> None:
+        compare_py = Path(__file__).resolve().parents[1] / "compare.py"
+        self.assertTrue(compare_py.is_file(), f"compare.py not found at {compare_py}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            cases_path = tmp_path / "cases.json"
+            expected_path = tmp_path / "expected.json"
+            actual_path = tmp_path / "actual.json"
+            report_path = tmp_path / "report.json"
+
+            cases_payload = {
+                "schemaVersion": 1,
+                "cases": [
+                    {
+                        "id": "case-a",
+                        "formula": "=SEQUENCE(2,2)",
+                        "outputCell": "C1",
+                        "inputs": [],
+                        "tags": ["arr"],
+                    }
+                ],
+            }
+            cases_path.write_text(
+                json.dumps(cases_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            expected_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "excel", "note": "synthetic test fixture"},
+                "caseSet": {"path": str(cases_path), "count": 1},
+                "results": [
+                    {
+                        "caseId": "case-a",
+                        "address": "C1:D2",
+                        "displayText": "1",
+                        "result": {
+                            "t": "arr",
+                            "rows": [
+                                [
+                                    {"t": "n", "v": 1},
+                                    {"t": "n", "v": 2},
+                                ],
+                                [
+                                    {"t": "n", "v": 3},
+                                    {"t": "n", "v": 4},
+                                ],
+                            ],
+                        },
+                    }
+                ],
+            }
+            expected_path.write_text(
+                json.dumps(expected_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            actual_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "unit-test",
+                "source": {"kind": "engine", "note": "synthetic test fixture"},
+                "caseSet": {"path": str(cases_path), "count": 1},
+                "results": [
+                    {
+                        "caseId": "case-a",
+                        "address": "C1:D1",
+                        "displayText": "1",
+                        "result": {
+                            "t": "arr",
+                            "rows": [
+                                [
+                                    {"t": "n", "v": 1},
+                                    {"t": "n", "v": 2},
+                                ]
+                            ],
+                        },
+                    }
+                ],
+            }
+            actual_path.write_text(
+                json.dumps(actual_payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(compare_py),
+                    "--cases",
+                    str(cases_path),
+                    "--expected",
+                    str(expected_path),
+                    "--actual",
+                    str(actual_path),
+                    "--report",
+                    str(report_path),
+                    "--max-mismatch-rate",
+                    "1.0",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if proc.returncode != 0:
+                self.fail(
+                    f"compare.py exited {proc.returncode}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+                )
+
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            mismatches = report.get("mismatches", [])
+            self.assertIsInstance(mismatches, list)
+            self.assertEqual(len(mismatches), 1)
+            m = mismatches[0]
+            self.assertEqual(m.get("reason"), "array-shape-mismatch")
+            self.assertEqual(m.get("tags"), ["arr"])
+            self.assertEqual(m.get("mismatchDetail"), {"expectedRows": 2, "actualRows": 1})
+
+
 if __name__ == "__main__":
     unittest.main()
