@@ -2,6 +2,57 @@ import { expect, test } from "@playwright/test";
 
 import { gotoDesktop } from "./helpers";
 
+function installTauriStubForSheetTabDelete() {
+  const listeners: Record<string, any> = {};
+  (window as any).__tauriListeners = listeners;
+  (window as any).__tauriInvokeCalls = [];
+
+  // Auto-confirm destructive actions (sheet delete confirmation).
+  (window as any).confirm = () => true;
+  (window as any).alert = () => {};
+
+  const pushCall = (cmd: string, args: any) => {
+    (window as any).__tauriInvokeCalls.push({ cmd, args });
+  };
+
+  (window as any).__TAURI__ = {
+    core: {
+      invoke: async (cmd: string, args: any) => {
+        pushCall(cmd, args);
+        switch (cmd) {
+          case "delete_sheet":
+          case "set_cell":
+          case "set_range":
+          case "mark_saved":
+          case "save_workbook":
+          case "set_macro_ui_context":
+          case "fire_workbook_open":
+            return null;
+          default:
+            // Be permissive: many desktop features are best-effort and should not
+            // fail the UI in this test harness.
+            return null;
+        }
+      },
+    },
+    event: {
+      listen: async (name: string, handler: any) => {
+        listeners[name] = handler;
+        return () => {
+          delete listeners[name];
+        };
+      },
+      emit: async () => {},
+    },
+    window: {
+      getCurrentWebviewWindow: () => ({
+        hide: async () => {},
+        close: async () => {},
+      }),
+    },
+  };
+}
+
 test.describe("sheet tabs", () => {
   test("switching sheets updates the visible cell values", async ({ page }) => {
     await gotoDesktop(page);
@@ -1356,60 +1407,45 @@ test.describe("sheet tabs", () => {
     await expect(sheet2Tab.locator(".sheet-tab__color")).toBeVisible();
   });
 
-  test("deleting a sheet via the tab context menu removes it (but cannot delete last sheet)", async ({ page }) => {
-    await page.addInitScript(() => {
-      window.confirm = () => true;
-    });
-
+  test("delete sheet via tab context menu (tauri) removes tab and disables delete on last sheet", async ({ page }) => {
+    await page.addInitScript(installTauriStubForSheetTabDelete);
     await gotoDesktop(page);
 
-    // Create Sheet2 by writing a value into it (DocumentController creates sheets lazily).
+    // Create Sheet2 (DocumentController creates sheets lazily).
     await page.evaluate(() => {
       const app = (window as any).__formulaApp;
       app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+      app.activateCell({ row: 0, col: 0 });
     });
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    await page.getByTestId("sheet-tab-Sheet2").click();
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
 
-    // Delete Sheet2 via context menu.
-    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet2 tab");
-      const rect = tab.getBoundingClientRect();
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: rect.left + 10,
-          clientY: rect.top + 10,
-        }),
-      );
-    });
-    await page.getByTestId("sheet-tab-context-menu").getByRole("button", { name: "Delete" }).click();
+    const tabMenu = page.getByTestId("sheet-tab-context-menu");
+
+    // Open context menu on Sheet2 and delete it.
+    await page.getByTestId("sheet-tab-Sheet2").focus();
+    await page.keyboard.press("Shift+F10");
+    await expect(tabMenu).toBeVisible();
+    await tabMenu.getByRole("button", { name: "Delete", exact: true }).click();
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
-    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 1");
 
-    // App remains usable (can still read values on the remaining sheet).
-    await page.getByTestId("sheet-tab-Sheet1").click();
-    await expect(page.getByTestId("active-value")).toHaveText("Seed");
-
-    // Deleting the last remaining sheet is blocked.
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet1 tab");
-      const rect = tab.getBoundingClientRect();
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: rect.left + 10,
-          clientY: rect.top + 10,
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const ids = (window as any).__formulaApp.getDocument().getSheetIds();
+          return Array.isArray(ids) && ids.includes("Sheet2");
         }),
-      );
-    });
-    const deleteBtn = page.getByTestId("sheet-tab-context-menu").getByRole("button", { name: "Delete" });
-    await expect(deleteBtn).toBeDisabled();
+      )
+      .toBe(false);
+
+    // With only one sheet remaining, Delete should be disabled.
+    await page.getByTestId("sheet-tab-Sheet1").focus();
+    await page.keyboard.press("Shift+F10");
+    await expect(tabMenu).toBeVisible();
+    await expect(tabMenu.getByRole("button", { name: "Delete", exact: true })).toBeDisabled();
   });
 });

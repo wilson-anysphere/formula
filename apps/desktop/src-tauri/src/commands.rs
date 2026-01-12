@@ -629,11 +629,7 @@ pub async fn add_sheet(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn rename_sheet(
-    sheet_id: String,
-    name: String,
-    state: State<'_, SharedAppState>,
-) -> Result<(), String> {
+pub async fn rename_sheet(sheet_id: String, name: String, state: State<'_, SharedAppState>) -> Result<(), String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();

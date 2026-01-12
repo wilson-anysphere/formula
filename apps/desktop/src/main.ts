@@ -4570,10 +4570,11 @@ if (
       }
       return await renameSheetById(sheetId, String(_newName ?? ""), { source: "extension" });
     },
-    async deleteSheet(name: string) {
+    async deleteSheet(_name: string) {
+      const name = String(_name ?? "");
       const sheetId = findSheetIdByName(name);
       if (!sheetId) {
-        throw new Error(`Unknown sheet: ${String(name)}`);
+        throw new Error(`Unknown sheet: ${name}`);
       }
 
       const doc = app.getDocument();
@@ -4614,9 +4615,6 @@ if (
       } catch {
         // ignore
       }
-
-      syncSheetUi();
-      updateContextKeys();
     },
     async getSelection() {
       const sheetId = app.getCurrentSheetId();

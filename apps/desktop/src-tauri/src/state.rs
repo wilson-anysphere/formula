@@ -688,35 +688,34 @@ impl AppState {
     }
 
     pub fn delete_sheet(&mut self, sheet_id: &str) -> Result<(), AppStateError> {
-        let (deleted_name, sheet_order, deleted_index) = {
+        let (deleted_id, deleted_name, deleted_index, sheet_order) = {
             let workbook = self.get_workbook()?;
             if workbook.sheets.len() <= 1 {
                 return Err(AppStateError::CannotDeleteLastSheet);
             }
 
-            let index = workbook
+            let idx = workbook
                 .sheets
                 .iter()
                 .position(|s| s.id == sheet_id)
                 .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
-            let deleted_name = workbook
-                .sheets
-                .get(index)
-                .map(|s| s.name.clone())
-                .unwrap_or_default();
-            let sheet_order: Vec<String> = workbook.sheets.iter().map(|s| s.name.clone()).collect();
-            (deleted_name, sheet_order, index)
+            let sheet = &workbook.sheets[idx];
+            let order = workbook.sheets.iter().map(|s| s.name.clone()).collect::<Vec<_>>();
+            (sheet.id.clone(), sheet.name.clone(), idx, order)
         };
 
+        // When the workbook is backed by SQLite persistence, delete the sheet in storage first so
+        // a failure doesn't leave the in-memory workbook in a partially updated state. The storage
+        // layer also rewrites cross-sheet references to Excel-like `#REF!` semantics.
         if let Some(persistent) = self.persistent.as_mut() {
             persistent
                 .memory
                 .flush_dirty_pages()
                 .map_err(|e| AppStateError::Persistence(e.to_string()))?;
 
-            let sheet_uuid = persistent.sheet_uuid(sheet_id).ok_or_else(|| {
+            let sheet_uuid = persistent.sheet_uuid(&deleted_id).ok_or_else(|| {
                 AppStateError::Persistence(format!(
-                    "missing persistence mapping for sheet id {sheet_id}"
+                    "missing persistence mapping for sheet id {deleted_id}"
                 ))
             })?;
             persistent
@@ -726,17 +725,19 @@ impl AppState {
 
             // Deleting a sheet triggers workbook-wide reference rewrites in storage. Clear the
             // paging cache so subsequent viewport reads see the updated formulas/values.
+            persistent.sheet_map.remove(&deleted_id);
             persistent.memory.clear_cache();
-            persistent.sheet_map.remove(sheet_id);
         }
 
-        {
+        let remaining_sheet_count = {
             let workbook = self.get_workbook_mut()?;
             if workbook.sheets.len() <= 1 {
                 return Err(AppStateError::CannotDeleteLastSheet);
             }
 
-            workbook.sheets.remove(deleted_index);
+            workbook
+                .remove_sheet(&deleted_id)
+                .ok_or_else(|| AppStateError::UnknownSheet(sheet_id.to_string()))?;
 
             // Drop print settings for the deleted worksheet.
             workbook
@@ -752,26 +753,21 @@ impl AppState {
             workbook.defined_names.retain(|name| match name.sheet_id.as_deref() {
                 None => true,
                 Some(scope) => {
-                    !scope.eq_ignore_ascii_case(sheet_id)
+                    !scope.eq_ignore_ascii_case(&deleted_id)
                         && !scope.eq_ignore_ascii_case(&deleted_name)
                 }
             });
 
             // Drop sheet-scoped tables that no longer have a home.
             workbook.tables.retain(|table| {
-                !table.sheet_id.eq_ignore_ascii_case(sheet_id)
-                    && !sheet_name_eq_case_insensitive(&table.sheet_id, &deleted_name)
+                !table.sheet_id.eq_ignore_ascii_case(&deleted_id)
+                    && !table.sheet_id.eq_ignore_ascii_case(&deleted_name)
             });
 
-            // Clear patch-save bookkeeping for deleted sheet cells.
-            workbook
-                .cell_input_baseline
-                .retain(|(id, _, _), _| id != sheet_id);
-
-            // Rewrite formulas that reference the deleted sheet to Excel-style `#REF!`.
+            // Rewrite formulas that referenced the deleted sheet.
             for sheet in &mut workbook.sheets {
-                for cell in sheet.cells.values_mut() {
-                    let Some(formula) = cell.formula.as_deref() else {
+                for ((row, col), cell) in sheet.cells.iter_mut() {
+                    let Some(formula) = cell.formula.as_mut() else {
                         continue;
                     };
                     let rewritten = formula_model::rewrite_deleted_sheet_references_in_formula(
@@ -779,49 +775,88 @@ impl AppState {
                         &deleted_name,
                         &sheet_order,
                     );
-                    if rewritten != formula {
-                        cell.formula = Some(rewritten);
+                    if rewritten != *formula {
+                        *formula = rewritten;
+                        sheet.dirty_cells.insert((*row, *col));
                     }
                 }
             }
 
-            // Rewrite workbook-level defined names that reference the deleted sheet.
-            for defined in &mut workbook.defined_names {
-                let rewritten = formula_model::rewrite_deleted_sheet_references_in_formula(
-                    &defined.refers_to,
+            for name in &mut workbook.defined_names {
+                name.refers_to = formula_model::rewrite_deleted_sheet_references_in_formula(
+                    &name.refers_to,
                     &deleted_name,
                     &sheet_order,
                 );
-                if rewritten != defined.refers_to {
-                    defined.refers_to = rewritten;
+            }
+
+            // Deleting sheets is a structural XLSX edit. The patch-based save path cannot rewrite
+            // workbook.xml sheet order/relationships, so drop origin bytes to force regeneration
+            // from storage on the next save.
+            workbook.origin_xlsx_bytes = None;
+            workbook.origin_xlsb_path = None;
+
+            workbook.sheets.len()
+        };
+
+        // Adjust macro runtime context if it points at (or after) the deleted sheet.
+        if remaining_sheet_count > 0 {
+            let ctx = self.macro_host.runtime_context();
+            let mut next_ctx = ctx;
+
+            let fallback_index = if deleted_index < remaining_sheet_count {
+                deleted_index
+            } else {
+                remaining_sheet_count.saturating_sub(1)
+            };
+
+            if ctx.active_sheet == deleted_index {
+                next_ctx.active_sheet = fallback_index;
+                next_ctx.selection = None;
+            } else if ctx.active_sheet > deleted_index {
+                next_ctx.active_sheet = ctx.active_sheet.saturating_sub(1);
+            }
+
+            if let Some(sel) = ctx.selection {
+                if sel.sheet == deleted_index {
+                    next_ctx.selection = None;
+                } else if sel.sheet > deleted_index {
+                    let mut next_sel = sel;
+                    next_sel.sheet = sel.sheet.saturating_sub(1);
+                    next_ctx.selection = Some(next_sel);
                 }
             }
 
-            // Deleting sheets is a structural XLSX edit. The patch-based save path does not
-            // support removing worksheet parts, so force future saves through the regeneration path.
-            workbook.origin_xlsx_bytes = None;
-            workbook.origin_xlsb_path = None;
+            self.macro_host.set_runtime_context(next_ctx);
         }
 
         // Drop any pivot registrations that referenced the deleted sheet.
         self.pivots.pivots.retain(|pivot| {
-            pivot.source_sheet_id != sheet_id && pivot.destination.sheet_id != sheet_id
+            !(pivot.source_sheet_id.eq_ignore_ascii_case(&deleted_id)
+                || pivot.destination.sheet_id.eq_ignore_ascii_case(&deleted_id))
         });
 
-        // Sheet deletion invalidates undo entries that referenced the deleted sheet.
+        // Purge undo entries that touch the deleted sheet so undo/redo cannot reference a sheet
+        // that no longer exists.
         self.undo_stack.retain(|entry| {
-            entry.before.iter().all(|snap| snap.sheet_id != sheet_id)
-                && entry.after.iter().all(|snap| snap.sheet_id != sheet_id)
+            !entry
+                .before
+                .iter()
+                .any(|snap| snap.sheet_id.eq_ignore_ascii_case(&deleted_id))
+                && !entry
+                    .after
+                    .iter()
+                    .any(|snap| snap.sheet_id.eq_ignore_ascii_case(&deleted_id))
         });
 
-        // The formula engine indexes sheets by name and does not support deletes in-place.
-        // Rebuild to ensure subsequent evaluations resolve the updated sheet set.
+        self.redo_stack.clear();
+
+        // Rebuild after deletion so the formula engine drops the removed sheet.
         self.rebuild_engine_from_workbook()?;
         let recalc_changes = self.engine.recalculate_with_value_changes_multi_threaded();
         let _ = self.refresh_computed_values_from_recalc_changes(&recalc_changes)?;
 
         self.dirty = true;
-        self.redo_stack.clear();
         Ok(())
     }
 
@@ -5508,6 +5543,93 @@ mod tests {
 
         let b1 = state.get_cell(&sheet2_id, 0, 1).unwrap();
         assert_eq!(b1.value, CellScalar::Number(2.0));
+    }
+
+    #[test]
+    fn delete_sheet_rejects_last_sheet() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let err = state.delete_sheet(&sheet_id).expect_err("expected last-sheet guard");
+        assert!(matches!(err, AppStateError::CannotDeleteLastSheet));
+    }
+
+    #[test]
+    fn delete_sheet_rewrites_formulas_to_ref_error() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        let sheet1_id = workbook.sheets[0].id.clone();
+        let sheet2_id = workbook.sheets[1].id.clone();
+
+        workbook
+            .sheet_mut(&sheet1_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_formula("=Sheet2!A1".to_string()));
+        workbook
+            .sheet_mut(&sheet2_id)
+            .unwrap()
+            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(10.0))));
+
+        // Seed print settings + defined names that reference the deleted sheet.
+        workbook
+            .print_settings
+            .sheets
+            .push(default_sheet_print_settings("Sheet2".to_string()));
+        workbook.defined_names.push(crate::file_io::DefinedName {
+            name: "GlobalName".to_string(),
+            refers_to: "Sheet2!$A$1".to_string(),
+            sheet_id: None,
+            hidden: false,
+        });
+        workbook.defined_names.push(crate::file_io::DefinedName {
+            name: "LocalName".to_string(),
+            refers_to: "$A$1".to_string(),
+            sheet_id: Some(sheet2_id.clone()),
+            hidden: false,
+        });
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        state.delete_sheet(&sheet2_id).expect("delete sheet");
+
+        let wb = state.get_workbook().expect("workbook exists");
+        assert_eq!(wb.sheets.len(), 1);
+
+        let sheet1 = wb.sheet(&sheet1_id).expect("Sheet1 exists");
+        let a1 = sheet1.cells.get(&(0, 0)).expect("A1 exists");
+        assert_eq!(a1.formula.as_deref(), Some("=#REF!"));
+
+        let cell = state.get_cell(&sheet1_id, 0, 0).unwrap();
+        assert_eq!(cell.value, CellScalar::Error("#REF!".to_string()));
+
+        // Print settings for the deleted sheet should be removed.
+        assert!(
+            !wb.print_settings
+                .sheets
+                .iter()
+                .any(|s| s.sheet_name.eq_ignore_ascii_case("Sheet2")),
+            "expected print settings for deleted sheet to be removed"
+        );
+
+        // Defined name scoped to the deleted sheet should be removed; the workbook-scoped name
+        // should be rewritten to #REF!.
+        assert!(
+            !wb.defined_names
+                .iter()
+                .any(|n| n.name.eq_ignore_ascii_case("LocalName")),
+            "expected sheet-scoped name to be removed"
+        );
+        let global = wb
+            .defined_names
+            .iter()
+            .find(|n| n.name.eq_ignore_ascii_case("GlobalName"))
+            .expect("GlobalName exists");
+        assert_eq!(global.refers_to, "#REF!");
     }
 
     #[test]

@@ -16,6 +16,7 @@ export class DocumentController {
   getSheetIds(): string[];
   getVisibleSheetIds(): string[];
   getSheetContentVersion(sheetId: string): number;
+  deleteSheet(sheetId: string): void;
   getSheetView(sheetId: string): {
     frozenRows: number;
     frozenCols: number;

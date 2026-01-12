@@ -359,6 +359,21 @@ impl Workbook {
         self.sheets.iter_mut().find(|s| s.id == sheet_id)
     }
 
+    /// Remove a sheet from the workbook by id (case-insensitive), returning the removed sheet.
+    ///
+    /// This also clears any per-cell input baselines tracked for the removed sheet so future
+    /// patch-based saves don't retain stale edit history.
+    pub fn remove_sheet(&mut self, sheet_id: &str) -> Option<Sheet> {
+        let idx = self
+            .sheets
+            .iter()
+            .position(|s| s.id.eq_ignore_ascii_case(sheet_id) || s.name.eq_ignore_ascii_case(sheet_id))?;
+        let removed = self.sheets.remove(idx);
+        self.cell_input_baseline
+            .retain(|(id, _, _), _| id != &removed.id);
+        Some(removed)
+    }
+
     pub fn cell_has_formula(&self, sheet_id: &str, row: usize, col: usize) -> bool {
         self.sheet(sheet_id)
             .and_then(|sheet| sheet.cells.get(&(row, col)))
