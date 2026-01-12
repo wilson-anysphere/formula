@@ -347,7 +347,7 @@ fn oddf_equation(
     // - `first_coupon == maturity` is allowed (single odd stub period).
     // - `issue <= settlement <= first_coupon <= maturity`
     // - `issue < first_coupon` (reject `issue == first_coupon`)
-    // - `settlement < maturity` (reject `settlement == maturity`)
+    // - `settlement < maturity` (reject settlement on/after maturity)
     //
     // See:
     // - `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`

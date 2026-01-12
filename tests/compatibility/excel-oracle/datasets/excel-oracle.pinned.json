@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T19:35:52.243848636Z",
+  "generatedAt": "2026-01-12T19:57:11.032476048Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "846ce6e39710aaa1cc713b338d9ee9ce8b87a2f7fcfa3e03236cd37a1899c6c3",
-    "count": 1829
+    "sha256": "c1629030daffa6335b67ad0656103f5e14a8d38be0f44f29b729ed110f6ea209",
+    "count": 1833
   },
   "results": [
     {
@@ -15753,6 +15753,36 @@
       "displayText": "181"
     },
     {
+      "caseId": "coupdaybs_b4_eom_feb28_baf6f7ea73cf",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 75.0
+      },
+      "address": "C1",
+      "displayText": "75"
+    },
+    {
+      "caseId": "coupdays_b4_eom_feb28_aa1d1a6a6133",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 180.0
+      },
+      "address": "C1",
+      "displayText": "180"
+    },
+    {
+      "caseId": "coupdaysnc_b4_eom_feb28_d49eb1080971",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 105.0
+      },
+      "address": "C1",
+      "displayText": "105"
+    },
+    {
       "caseId": "disc_816f7b8fb795",
       "outputCell": "C1",
       "result": {
@@ -16311,6 +16341,46 @@
       },
       "address": "C1",
       "displayText": "5"
+    },
+    {
+      "caseId": "oddfprice_basis_omitted_yld0_03dad81a6f57",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 196.59861111111107
+      },
+      "address": "C1",
+      "displayText": "196.59861111111107"
+    },
+    {
+      "caseId": "oddfyield_basis_omitted_from_yld0_price_76cfab9b4bd7",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": -1.6554281206748928e-14
+      },
+      "address": "C1",
+      "displayText": "-0.000000000000016554281206748928"
+    },
+    {
+      "caseId": "oddlprice_basis_omitted_yld0_917699f349fc",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 102.39861111111111
+      },
+      "address": "C1",
+      "displayText": "102.39861111111111"
+    },
+    {
+      "caseId": "oddlyield_basis_omitted_from_yld0_price_1eb28bd4feca",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": -3.9476664800510696e-16
+      },
+      "address": "C1",
+      "displayText": "-0.00000000000000039476664800510696"
     },
     {
       "caseId": "oddfprice_basis0_da0074a10837",
@@ -19000,36 +19070,6 @@
       },
       "address": "A1",
       "displayText": "31"
-    },
-    {
-      "caseId": "coupdaybs_b4_eom_feb28_baf6f7ea73cf",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 75.0
-      },
-      "address": "C1",
-      "displayText": "75"
-    },
-    {
-      "caseId": "coupdays_b4_eom_feb28_aa1d1a6a6133",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 178.0
-      },
-      "address": "C1",
-      "displayText": "178"
-    },
-    {
-      "caseId": "coupdaysnc_b4_eom_feb28_d49eb1080971",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 103.0
-      },
-      "address": "C1",
-      "displayText": "103"
     }
   ]
 }

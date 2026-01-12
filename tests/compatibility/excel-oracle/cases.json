@@ -33419,6 +33419,76 @@
       "id": "accrint_eom_first_interest_calc_method_true_3c78f42e9f56"
     },
     {
+      "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0,100,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFPRICE",
+        "basis_omitted",
+        "basis0",
+        "yld0"
+      ],
+      "description": "ODDFPRICE with yld=0 and basis omitted (defaults to 0)",
+      "id": "oddfprice_basis_omitted_yld0_03dad81a6f57"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,A1,100,2)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "formula": "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0,100,2)"
+        }
+      ],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDFYIELD",
+        "basis_omitted",
+        "basis0",
+        "yld0"
+      ],
+      "description": "ODDFYIELD with basis omitted, using a price computed by ODDFPRICE with yld=0 (yield should roundtrip to 0)",
+      "id": "oddfyield_basis_omitted_from_yld0_price_76cfab9b4bd7"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0,100,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLPRICE",
+        "basis_omitted",
+        "basis0",
+        "yld0"
+      ],
+      "description": "ODDLPRICE with yld=0 and basis omitted (defaults to 0)",
+      "id": "oddlprice_basis_omitted_yld0_917699f349fc"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,A1,100,2)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "formula": "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0,100,2)"
+        }
+      ],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "ODDLYIELD",
+        "basis_omitted",
+        "basis0",
+        "yld0"
+      ],
+      "description": "ODDLYIELD with basis omitted, using a price computed by ODDLPRICE with yld=0 (yield should roundtrip to 0)",
+      "id": "oddlyield_basis_omitted_from_yld0_price_1eb28bd4feca"
+    },
+    {
       "formula": "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,29),0.08,0.075,100,2,0)",
       "outputCell": "C1",
       "inputs": [],

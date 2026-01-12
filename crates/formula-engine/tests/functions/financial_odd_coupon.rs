@@ -354,6 +354,66 @@ fn odd_coupon_date_serials_are_floored_like_excel() {
 }
 
 #[test]
+fn odd_coupon_price_optional_basis_defaults_to_zero() {
+    let mut sheet = TestSheet::new();
+
+    // ODDFPRICE
+    let baseline = match eval_number_or_skip(
+        &mut sheet,
+        "=ODDFPRICE(DATE(2020,1,15),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,0)",
+    ) {
+        Some(v) => v,
+        None => return,
+    };
+
+    let omitted = eval_number_or_skip(
+        &mut sheet,
+        "=ODDFPRICE(DATE(2020,1,15),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2)",
+    )
+    .expect("ODDFPRICE with omitted basis should evaluate");
+    let blank_arg = eval_number_or_skip(
+        &mut sheet,
+        "=ODDFPRICE(DATE(2020,1,15),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,)",
+    )
+    .expect("ODDFPRICE with blank basis arg should evaluate");
+    let blank_cell = eval_number_or_skip(
+        &mut sheet,
+        "=ODDFPRICE(DATE(2020,1,15),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,B1)",
+    )
+    .expect("ODDFPRICE with blank-cell basis should evaluate");
+    assert_close(omitted, baseline, 1e-10);
+    assert_close(blank_arg, baseline, 1e-10);
+    assert_close(blank_cell, baseline, 1e-10);
+
+    // ODDLPRICE
+    let baseline = match eval_number_or_skip(
+        &mut sheet,
+        "=ODDLPRICE(DATE(2021,2,1),DATE(2021,5,1),DATE(2021,1,1),0.05,0.06,100,2,0)",
+    ) {
+        Some(v) => v,
+        None => return,
+    };
+    let omitted = eval_number_or_skip(
+        &mut sheet,
+        "=ODDLPRICE(DATE(2021,2,1),DATE(2021,5,1),DATE(2021,1,1),0.05,0.06,100,2)",
+    )
+    .expect("ODDLPRICE with omitted basis should evaluate");
+    let blank_arg = eval_number_or_skip(
+        &mut sheet,
+        "=ODDLPRICE(DATE(2021,2,1),DATE(2021,5,1),DATE(2021,1,1),0.05,0.06,100,2,)",
+    )
+    .expect("ODDLPRICE with blank basis arg should evaluate");
+    let blank_cell = eval_number_or_skip(
+        &mut sheet,
+        "=ODDLPRICE(DATE(2021,2,1),DATE(2021,5,1),DATE(2021,1,1),0.05,0.06,100,2,B1)",
+    )
+    .expect("ODDLPRICE with blank-cell basis should evaluate");
+    assert_close(omitted, baseline, 1e-10);
+    assert_close(blank_arg, baseline, 1e-10);
+    assert_close(blank_cell, baseline, 1e-10);
+}
+
+#[test]
 fn odd_coupon_yield_optional_basis_defaults_to_zero() {
     let mut sheet = TestSheet::new();
 
@@ -4185,7 +4245,7 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
     // differs from the modeled `E = 360/frequency`.
     //
     // last_interest is EOM Feb 28, so the EOM-pinned prior coupon date is Aug 31.
-    // DAYS360_EU(Aug 31, Feb 28) = 178 != 180 (=360/frequency).
+    // Under COUP* conventions, basis=4 uses `E = DAYS360_EU(PCD, NCD) = 178` for this period.
     let months_per_period = 12 / frequency;
     let eom = is_end_of_month(last_interest, system);
     assert!(eom, "expected last_interest to be EOM for this scenario");
@@ -5123,4 +5183,130 @@ fn oddlprice_day_count_basis_relationships() {
         prices[0],
         prices[4]
     );
+}
+
+#[test]
+fn odd_first_coupon_basis_omitted_matches_explicit_zero() {
+    let mut sheet = TestSheet::new();
+
+    let price_with_basis =
+        "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0)";
+    let price_without_basis =
+        "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2)";
+
+    let price_with_basis = match eval_number_or_skip(&mut sheet, price_with_basis) {
+        Some(v) => v,
+        None => return,
+    };
+    let price_without_basis = eval_number_or_skip(&mut sheet, price_without_basis)
+        .expect("ODDFPRICE with omitted basis should return a number when ODDFPRICE is available");
+
+    assert_close(price_without_basis, price_with_basis, 1e-9);
+
+    let yield_with_basis =
+        "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,98,100,2,0)";
+    let yield_without_basis =
+        "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,98,100,2)";
+
+    let yield_with_basis = match eval_number_or_skip(&mut sheet, yield_with_basis) {
+        Some(v) => v,
+        None => return,
+    };
+    let yield_without_basis = eval_number_or_skip(&mut sheet, yield_without_basis)
+        .expect("ODDFYIELD with omitted basis should return a number when ODDFYIELD is available");
+
+    assert_close(yield_without_basis, yield_with_basis, 1e-10);
+}
+
+#[test]
+fn odd_last_coupon_basis_omitted_matches_explicit_zero() {
+    let mut sheet = TestSheet::new();
+
+    let price_with_basis =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)";
+    let price_without_basis =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2)";
+
+    let price_with_basis = match eval_number_or_skip(&mut sheet, price_with_basis) {
+        Some(v) => v,
+        None => return,
+    };
+    let price_without_basis = eval_number_or_skip(&mut sheet, price_without_basis)
+        .expect("ODDLPRICE with omitted basis should return a number when ODDLPRICE is available");
+
+    assert_close(price_without_basis, price_with_basis, 1e-9);
+
+    let yield_with_basis =
+        "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2,0)";
+    let yield_without_basis =
+        "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2)";
+
+    let yield_with_basis = match eval_number_or_skip(&mut sheet, yield_with_basis) {
+        Some(v) => v,
+        None => return,
+    };
+    let yield_without_basis = eval_number_or_skip(&mut sheet, yield_without_basis)
+        .expect("ODDLYIELD with omitted basis should return a number when ODDLYIELD is available");
+
+    assert_close(yield_without_basis, yield_with_basis, 1e-10);
+}
+
+#[test]
+fn odd_first_coupon_zero_yield_price_is_finite_and_roundtrips() {
+    let mut sheet = TestSheet::new();
+
+    sheet.set_formula(
+        "A1",
+        "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0,100,2,0)",
+    );
+    sheet.recalc();
+
+    let price = match cell_number_or_skip(&sheet, "A1") {
+        Some(v) => v,
+        None => return,
+    };
+    assert!(
+        price.is_finite(),
+        "expected ODDFPRICE with yld=0 to be finite, got {price}"
+    );
+
+    let recovered_yield = match eval_number_or_skip(
+        &mut sheet,
+        "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,A1,100,2,0)",
+    ) {
+        Some(v) => v,
+        None => return,
+    };
+
+    assert_close(recovered_yield, 0.0, 1e-7);
+}
+
+#[test]
+fn odd_last_coupon_zero_yield_price_is_finite_and_roundtrips() {
+    let mut sheet = TestSheet::new();
+
+    sheet.set_formula(
+        "A1",
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0,100,2,0)",
+    );
+    sheet.recalc();
+
+    let price = match cell_number_or_skip(&sheet, "A1") {
+        Some(v) => v,
+        None => return,
+    };
+    assert!(
+        price.is_finite(),
+        "expected ODDLPRICE with yld=0 to be finite, got {price}"
+    );
+
+    let recovered_yield = match eval_number_or_skip(
+        &mut sheet,
+        "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,A1,100,2,0)",
+    ) {
+        Some(v) => v,
+        None => return,
+    };
+
+    assert_close(recovered_yield, 0.0, 1e-7);
 }

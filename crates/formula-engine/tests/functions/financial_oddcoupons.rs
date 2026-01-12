@@ -189,6 +189,7 @@ fn odd_coupon_settlement_boundary_behavior() {
     )
     .expect("ODDLYIELD should converge when settlement < last_interest");
     assert_close(yld_out, yld_in, 1e-6);
+
     // ODDF*: settlement == first_coupon is allowed (settlement on the first coupon date).
     let issue = ymd_to_serial(ExcelDate::new(2022, 12, 15), system).unwrap();
     let first_coupon = ymd_to_serial(ExcelDate::new(2023, 1, 31), system).unwrap();
@@ -219,7 +220,7 @@ fn odd_coupon_settlement_boundary_behavior() {
         0,
         system,
     )
-    .expect("ODDFYIELD should allow settlement == first_coupon");
+    .expect("ODDFYIELD should converge when settlement == first_coupon");
     assert_close(yld_out, yld_in, 1e-6);
 
     // ODDF*: settlement > first_coupon => #NUM! (excel-oracle case id prefix:

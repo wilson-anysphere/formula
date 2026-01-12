@@ -179,10 +179,13 @@ fn coup_functions_apply_end_of_month_schedule_when_maturity_is_month_end_basis_1
 fn coupdays_basis_4_uses_fixed_360_over_frequency_and_preserves_additivity() {
     let system = ExcelDateSystem::EXCEL_1900;
 
-    // For basis=4 (European 30E/360), the day-count method is European DAYS360, but Excel models
-    // the coupon period length `E` returned by COUPDAYS as `360/frequency` (constant). This means
-    // it can differ from European `DAYS360(PCD, NCD, TRUE)` for end-of-month schedules involving
-    // February.
+    // For basis=4 (European 30E/360):
+    // - COUPDAYBS uses `DAYS360(PCD, settlement, TRUE)` for the day count A.
+    // - COUPDAYS returns the modeled coupon period length E, which Excel treats as a fixed
+    //   `360/frequency` (not `DAYS360(PCD, NCD, TRUE)`).
+    // - COUPDAYSNC is computed as the remainder `E - A` to preserve the additivity invariant
+    //   `COUPDAYBS + COUPDAYSNC == COUPDAYS` even though DAYS360 is not additive for some
+    //   month-end schedules involving February.
     //
     // Semiannual schedule, maturity=2021-02-28 => PCD=2020-08-31, NCD=2021-02-28.
     // European `DAYS360(2020-08-31, 2021-02-28, TRUE) = 178` (not 180 = 360/frequency).
@@ -191,8 +194,8 @@ fn coupdays_basis_4_uses_fixed_360_over_frequency_and_preserves_additivity() {
     let expected_pcd = ymd_to_serial(ExcelDate::new(2020, 8, 31), system).unwrap();
     let expected_ncd = maturity;
 
-    let days360 = date_time::days360(expected_pcd, expected_ncd, true, system).unwrap();
-    assert_eq!(days360, 178);
+    let days360_coupon = date_time::days360(expected_pcd, expected_ncd, true, system).unwrap() as f64;
+    assert_eq!(days360_coupon, 178.0);
 
     assert_eq!(
         couppcd(settlement, maturity, 2, 4, system).unwrap(),
@@ -204,16 +207,12 @@ fn coupdays_basis_4_uses_fixed_360_over_frequency_and_preserves_additivity() {
     );
     assert_eq!(coupnum(settlement, maturity, 2, 4, system).unwrap(), 1.0);
 
-    assert_eq!(
-        date_time::days360(expected_pcd, expected_ncd, true, system).unwrap() as f64,
-        178.0
-    );
-
-    let expected_days = 360.0 / 2.0;
     let expected_daybs =
         date_time::days360(expected_pcd, settlement, true, system).unwrap() as f64;
     assert_eq!(expected_daybs, 75.0);
 
+    let expected_days = 360.0 / 2.0;
+    assert_eq!(expected_days, 180.0);
     let expected_daysnc = expected_days - expected_daybs;
     assert_eq!(expected_daysnc, 105.0);
 
