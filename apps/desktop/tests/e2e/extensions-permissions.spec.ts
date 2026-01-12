@@ -22,27 +22,14 @@ test.describe("Extensions permissions UI", () => {
     const extensionId = "formula.sample-hello";
 
     try {
-      await page.addInitScript(({ extensionId }) => {
-        // Seed granted permissions so the extension can activate without prompts.
-        const key = "formula.extensionHost.permissions";
-        const existing = (() => {
-          try {
-            const raw = localStorage.getItem(key);
-            return raw ? JSON.parse(raw) : {};
-          } catch {
-            return {};
-          }
-        })();
-        existing[extensionId] = {
-          ...(existing[extensionId] ?? {}),
-          "ui.commands": true,
-          "ui.panels": true,
-          "cells.read": true,
-          "cells.write": true,
-          network: { mode: "full" },
-        };
-        localStorage.setItem(key, JSON.stringify(existing));
-      }, { extensionId });
+      await page.addInitScript(() => {
+        // Start with a clean permission store so this test exercises the allow/deny UI prompt flow.
+        try {
+          localStorage.removeItem("formula.extensionHost.permissions");
+        } catch {
+          // ignore
+        }
+      });
 
       await gotoDesktop(page);
 
@@ -50,14 +37,28 @@ test.describe("Extensions permissions UI", () => {
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
       await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible();
-      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("mode: full");
+      await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
 
       page.once("dialog", async (dialog) => {
         expect(dialog.type()).toBe("prompt");
         await dialog.accept(JSON.stringify([url]));
       });
       await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await expect(page.getByTestId("extension-permission-ui.commands")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+      await expect(page.getByTestId("extension-permission-ui.commands")).toHaveCount(0);
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await expect(page.getByTestId("extension-permission-network")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+      await expect(page.getByTestId("extension-permission-network")).toHaveCount(0);
+
       await expect(page.getByTestId("toast-root")).toContainText("Fetched: hello");
+      await expect(page.getByTestId(`permission-${extensionId}-ui.commands`)).toBeVisible();
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("mode: allowlist");
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("127.0.0.1");
 
       await page.getByTestId(`revoke-all-permissions-${extensionId}`).click();
       await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
@@ -70,7 +71,9 @@ test.describe("Extensions permissions UI", () => {
       await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
       await expect(page.getByTestId("extension-permission-network")).toBeVisible();
       await page.getByTestId("extension-permission-deny").click();
+      await expect(page.getByTestId("extension-permission-network")).toHaveCount(0);
       await expect(page.getByTestId("toast-root")).toContainText("Permission denied");
+      await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
