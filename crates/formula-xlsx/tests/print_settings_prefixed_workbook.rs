@@ -5,13 +5,8 @@ use formula_xlsx::print::{
     RowRange,
 };
 
-fn build_prefixed_workbook_xlsx(workbook_xml: &str) -> Vec<u8> {
+fn build_prefixed_workbook_xlsx_with_rels(workbook_xml: &str, workbook_rels: &str) -> Vec<u8> {
     // Prefixed `<Relationship>` elements.
-    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships">
-  <pr:Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-</pr:Relationships>"#;
-
     let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -34,6 +29,14 @@ fn build_prefixed_workbook_xlsx(workbook_xml: &str) -> Vec<u8> {
     zip.write_all(sheet_xml.as_bytes()).unwrap();
 
     zip.finish().unwrap().into_inner()
+}
+
+fn build_prefixed_workbook_xlsx(workbook_xml: &str) -> Vec<u8> {
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships">
+  <pr:Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</pr:Relationships>"#;
+    build_prefixed_workbook_xlsx_with_rels(workbook_xml, workbook_rels)
 }
 
 fn build_minimal_prefixed_workbook_xlsx() -> Vec<u8> {
@@ -263,6 +266,53 @@ fn print_settings_inserts_into_self_closing_defined_names() -> Result<(), Box<dy
         !rewritten_workbook_xml.contains("<definedNames")
             && !rewritten_workbook_xml.contains("<definedName"),
         "should not introduce unprefixed definedNames/definedName, got:\n{rewritten_workbook_xml}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn print_settings_handles_absolute_relationship_targets() -> Result<(), Box<dyn std::error::Error>>
+{
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheets>
+    <x:sheet name="Sheet1" sheetId="1" rel:id="rId1"/>
+  </x:sheets>
+</x:workbook>"#;
+
+    // Targets in `.rels` can be absolute (rooted at the package root).
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships">
+  <pr:Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="/xl/worksheets/sheet1.xml"/>
+</pr:Relationships>"#;
+
+    let original = build_prefixed_workbook_xlsx_with_rels(workbook_xml, workbook_rels);
+    let settings = read_workbook_print_settings(&original)?;
+    assert_eq!(settings.sheets.len(), 1);
+    assert_eq!(settings.sheets[0].sheet_name, "Sheet1");
+
+    let mut updated = settings.clone();
+    updated.sheets[0].print_area = Some(vec![CellRange {
+        start_row: 1,
+        end_row: 1,
+        start_col: 1,
+        end_col: 1,
+    }]);
+
+    let rewritten = write_workbook_print_settings(&original, &updated)?;
+    let reread = read_workbook_print_settings(&rewritten)?;
+    assert_eq!(
+        reread.sheets[0].print_area.as_deref(),
+        Some(
+            &[CellRange {
+                start_row: 1,
+                end_row: 1,
+                start_col: 1,
+                end_col: 1
+            }][..]
+        )
     );
 
     Ok(())

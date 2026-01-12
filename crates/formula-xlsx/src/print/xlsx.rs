@@ -32,7 +32,10 @@ pub fn read_workbook_print_settings(
         let sheet_target = rels
             .get(&sheet.r_id)
             .ok_or(PrintError::MissingPart("worksheet relationship"))?;
-        let sheet_path = format!("xl/{sheet_target}");
+        // Relationship targets can be relative to the workbook part's folder (e.g.
+        // `worksheets/sheet1.xml`) or absolute (e.g. `/xl/worksheets/sheet1.xml`). Use the shared
+        // OpenXML resolver to handle both.
+        let sheet_path = crate::openxml::resolve_target("xl/workbook.xml", sheet_target);
         let sheet_xml = read_zip_bytes(&mut zip, &sheet_path)?;
 
         let (page_setup, manual_page_breaks) = parse_worksheet_print_settings(&sheet_xml)?;
@@ -125,7 +128,7 @@ pub fn write_workbook_print_settings(
         let Some(sheet_target) = rels.get(&sheet.r_id) else {
             continue;
         };
-        let sheet_path = format!("xl/{sheet_target}");
+        let sheet_path = crate::openxml::resolve_target("xl/workbook.xml", sheet_target);
         let sheet_xml = read_zip_bytes(&mut zip, &sheet_path)?;
         let updated_xml = update_worksheet_xml(&sheet_xml, sheet_settings)?;
         updated_sheets.insert(sheet_path, updated_xml);
