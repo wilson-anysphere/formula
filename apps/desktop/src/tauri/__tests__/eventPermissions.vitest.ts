@@ -60,6 +60,10 @@ describe("tauri capability event permissions", () => {
       const allow = (entry as any).allow;
       expect(Array.isArray(allow)).toBe(true);
       expect((allow as unknown[]).length).toBeGreaterThan(0);
+
+      const rawEvents = (allow as any[]).map((scope) => scope?.event).filter((name) => typeof name === "string");
+      expect(new Set(rawEvents).size).toBe(rawEvents.length);
+
       for (const scope of allow as any[]) {
         expect(scope).toBeTruthy();
         expect(typeof scope.event).toBe("string");
@@ -68,6 +72,26 @@ describe("tauri capability event permissions", () => {
         expect(scope.event).not.toContain("*");
       }
     }
+  });
+
+  it("does not include duplicate allow-invoke command names", () => {
+    const capabilityUrl = new URL("../../../src-tauri/capabilities/main.json", import.meta.url);
+    const capability = JSON.parse(readFileSync(capabilityUrl, "utf8")) as {
+      permissions?: CapabilityPermission[];
+    };
+
+    const permissions = Array.isArray(capability.permissions) ? capability.permissions : [];
+
+    const allowInvoke = permissions.find(
+      (p): p is Exclude<CapabilityPermission, string> =>
+        typeof p === "object" && p != null && (p as any).identifier === "core:allow-invoke",
+    ) as any;
+
+    expect(allowInvoke).toBeTruthy();
+    expect(Array.isArray(allowInvoke.allow)).toBe(true);
+
+    const rawCommands = (allowInvoke.allow as any[]).filter((cmd) => typeof cmd === "string");
+    expect(new Set(rawCommands).size).toBe(rawCommands.length);
   });
 
   it("includes the desktop shell event names used by the frontend", () => {
