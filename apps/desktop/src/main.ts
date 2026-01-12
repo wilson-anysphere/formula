@@ -2844,26 +2844,26 @@ if (
   // Range selection insertion updates the formula bar draft + reference highlights via
   // `FormulaBarView.begin/updateRangeSelection()`, which are programmatic (no textarea `input`
   // events). When split view is active, mirror those changing highlights onto the secondary pane
-  // so the visual outline stays live during drags initiated from *either* pane.
-  //
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const anyApp = app as any;
-  if (!anyApp.__formulaSplitViewRangeSelectionHighlightSyncPatched) {
-    anyApp.__formulaSplitViewRangeSelectionHighlightSyncPatched = true;
+  // so the visual outline stays live during drags initiated from *either* pane (legacy or shared).
+  if (formulaBar && !(formulaBar as any).__formulaSplitViewRangeSelectionHighlightSyncPatched) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (formulaBar as any).__formulaSplitViewRangeSelectionHighlightSyncPatched = true;
 
-    const wrap = (methodName: "onSharedRangeSelectionStart" | "onSharedRangeSelectionChange" | "onSharedRangeSelectionEnd") => {
-      const original = anyApp[methodName];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const anyBar = formulaBar as any;
+    const wrap = (methodName: "beginRangeSelection" | "updateRangeSelection" | "endRangeSelection") => {
+      const original = anyBar?.[methodName];
       if (typeof original !== "function") return;
-      anyApp[methodName] = (...args: any[]) => {
-        const result = original.apply(anyApp, args);
+      anyBar[methodName] = (...args: any[]) => {
+        const result = original.apply(anyBar, args);
         syncSecondaryGridReferenceHighlights();
         return result;
       };
     };
 
-    wrap("onSharedRangeSelectionStart");
-    wrap("onSharedRangeSelectionChange");
-    wrap("onSharedRangeSelectionEnd");
+    wrap("beginRangeSelection");
+    wrap("updateRangeSelection");
+    wrap("endRangeSelection");
   }
 
   // High-frequency split-pane interactions (scroll/zoom) update the in-memory layout

@@ -721,6 +721,49 @@ test.describe("split view", () => {
       await expect(input).toHaveValue("=SUM(Sheet2!A1:A2");
     });
 
+    test(`dragging a range in the primary pane updates secondary reference highlights (${mode})`, async ({ page }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
+
+      // Seed numeric inputs in A1 and A2 (so SUM has a visible result).
+      await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const sheetId = app.getCurrentSheetId();
+        const doc = app.getDocument();
+        doc.setCellValue(sheetId, "A1", 1);
+        doc.setCellValue(sheetId, "A2", 2);
+      });
+      await waitForIdle(page);
+
+      await page.getByTestId("split-vertical").click();
+      await expect(page.getByTestId("grid-secondary")).toBeVisible();
+      await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+      await waitForGridCanvasesToBeSized(page, "#grid");
+
+      // Select C1 in the primary pane.
+      await page.click("#grid", { position: { x: 260, y: 40 } });
+      await expect(page.getByTestId("active-cell")).toHaveText("C1");
+
+      // Start editing in the formula bar.
+      await page.getByTestId("formula-highlight").click();
+      const input = page.getByTestId("formula-input");
+      await expect(input).toBeVisible();
+      await input.fill("=SUM(");
+
+      // Drag select A1:A2 in the *primary* pane.
+      const gridBox = await page.locator("#grid").boundingBox();
+      if (!gridBox) throw new Error("Missing #grid bounding box");
+      await page.mouse.move(gridBox.x + 60, gridBox.y + 40);
+      await page.mouse.down();
+      await page.mouse.move(gridBox.x + 60, gridBox.y + 64);
+      await page.mouse.up();
+
+      await expect(input).toHaveValue("=SUM(A1:A2");
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__formulaSecondaryGrid?.renderer?.referenceHighlights?.length ?? 0))
+        .toBeGreaterThan(0);
+    });
+
     test(`secondary-pane in-place edits apply to the active sheet after switching sheets (${mode})`, async ({ page }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
 
