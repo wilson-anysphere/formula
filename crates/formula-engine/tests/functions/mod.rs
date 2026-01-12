@@ -29,4 +29,5 @@ mod math_random;
 mod math_rounding;
 mod reference;
 mod statistical;
+mod criteria_locale;
 mod text;
