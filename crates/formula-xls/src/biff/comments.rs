@@ -916,4 +916,36 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "ABCDE");
     }
+
+    #[test]
+    fn parses_biff5_txo_text_split_across_multiple_continue_records_without_flags_using_codepage() {
+        // Split the BIFF5 text across two CONTINUE records to validate concatenation across record
+        // boundaries. Include a non-ASCII byte so Windows-1251 decoding is exercised (0xC0 => 'А').
+        let part1 = [b'H', b'i', b' '];
+        let part2 = [0xC0];
+        let cch_text = (part1.len() + part2.len()) as u16;
+
+        let stream = [
+            bof_biff5(),
+            note_biff5(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text(cch_text),
+            continue_text_biff5(&part1),
+            continue_text_biff5(&part2),
+            // Formatting CONTINUE payload (dummy bytes).
+            continue_text_biff5(&[0u8; 4]),
+            eof(),
+        ]
+        .concat();
+
+        let (notes, warnings) =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1251).expect("parse");
+        assert!(
+            warnings.is_empty(),
+            "unexpected warnings: {warnings:?}"
+        );
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].author, "Alice");
+        assert_eq!(notes[0].text, "Hi А");
+    }
 }
