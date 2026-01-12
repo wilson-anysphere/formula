@@ -453,6 +453,108 @@ test.describe("BrowserExtensionHost", () => {
     expect(result.clipboardText).toBe("10");
   });
 
+  test("clipboard.writeText enforces DLP clipboard.copy policy (desktop runtime adapter)", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoDesktop(page);
+
+    const clipboardSupport = await page.evaluate(async () => {
+      if (!globalThis.isSecureContext) return { supported: false, reason: "not a secure context" };
+      if (!navigator.clipboard?.readText || !navigator.clipboard?.writeText) {
+        return { supported: false, reason: "navigator.clipboard.readText/writeText not available" };
+      }
+
+      try {
+        const marker = `__formula_clipboard_probe__${Math.random().toString(16).slice(2)}`;
+        await navigator.clipboard.writeText(marker);
+        const echoed = await navigator.clipboard.readText();
+        return { supported: echoed === marker, reason: echoed === marker ? null : `mismatch: ${echoed}` };
+      } catch (err: any) {
+        return { supported: false, reason: String(err?.message ?? err) };
+      }
+    });
+
+    test.skip(!clipboardSupport.supported, `Clipboard APIs are blocked: ${clipboardSupport.reason ?? ""}`);
+
+    const marker = `__formula_clipboard_marker__${Math.random().toString(16).slice(2)}`;
+
+    const result = await page.evaluate(
+      async ({ marker }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const app: any = (window as any).__formulaApp;
+        if (!app) throw new Error("Missing window.__formulaApp (desktop e2e harness)");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const hostManager: any = (window as any).__formulaExtensionHostManager;
+        if (!hostManager) throw new Error("Missing window.__formulaExtensionHostManager (desktop runtime)");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const host: any = (window as any).__formulaExtensionHost;
+        if (!host) throw new Error("Missing window.__formulaExtensionHost (desktop runtime)");
+
+        // Ensure extension permission prompts are non-interactive in e2e.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (globalThis as any).__formulaPermissionPrompt = async () => true;
+
+        const doc = app.getDocument();
+        const sheetId = app.getCurrentSheetId();
+
+        doc.setCellValue(sheetId, { row: 0, col: 0 }, 1);
+        doc.setCellValue(sheetId, { row: 0, col: 1 }, 2);
+        doc.setCellValue(sheetId, { row: 1, col: 0 }, 3);
+        doc.setCellValue(sheetId, { row: 1, col: 1 }, 4);
+
+        app.selectRange({
+          sheetId,
+          range: { startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+        });
+
+        const docIdParam = new URL(window.location.href).searchParams.get("docId");
+        const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam : null;
+        const workbookId = docId ?? "local-workbook";
+
+        // Mark the active selection as Restricted so DLP blocks clipboard.copy (and now
+        // extension clipboard.writeText).
+        try {
+          const key = `dlp:classifications:${workbookId}`;
+          localStorage.setItem(
+            key,
+            JSON.stringify([
+              {
+                selector: {
+                  scope: "range",
+                  documentId: workbookId,
+                  sheetId,
+                  range: { start: { row: 0, col: 0 }, end: { row: 1, col: 1 } },
+                },
+                classification: { level: "Restricted", labels: [] },
+                updatedAt: new Date().toISOString(),
+              },
+            ]),
+          );
+        } catch {
+          // ignore localStorage failures; test will fail if DLP isn't applied.
+        }
+
+        await navigator.clipboard.writeText(marker);
+
+        // Built-in extensions load lazily; load them so the Sample Hello command exists.
+        await hostManager.loadBuiltInExtensions();
+
+        let errorMessage = "";
+        try {
+          await host.executeCommand("sampleHello.copySumToClipboard");
+        } catch (err: any) {
+          errorMessage = String(err?.message ?? err);
+        }
+
+        const clipboardText = await navigator.clipboard.readText();
+        return { errorMessage, clipboardText };
+      },
+      { marker },
+    );
+
+    expect(result.errorMessage).toContain("Clipboard copy is blocked");
+    expect(result.clipboardText).toBe(marker);
+  });
+
   test("denied network permission blocks fetch in the browser host", async ({ page }) => {
     await gotoDesktop(page);
 

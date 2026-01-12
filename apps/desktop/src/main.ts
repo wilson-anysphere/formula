@@ -3461,48 +3461,36 @@ if (
         return text ?? "";
       },
       writeText: async (text: string) => {
-        const taintedRanges = extensionReadTaint.list();
-        if (taintedRanges.length > 0) {
-          const records = extensionClipboardDlp.classificationStore.list(extensionClipboardDlp.documentId);
-          let classification = { ...DEFAULT_CLASSIFICATION };
-          for (const range of taintedRanges) {
-            const next = effectiveRangeClassification(
-              {
-                documentId: extensionClipboardDlp.documentId,
-                sheetId: range.sheetId,
-                range: {
-                  start: { row: range.startRow, col: range.startCol },
-                  end: { row: range.endRow, col: range.endCol },
-                },
-              },
-              records,
-            );
-            classification = maxClassification(classification, next);
-            if (classification.level === "Restricted") break;
-          }
+        const sheetId = app.getCurrentSheetId();
+        const selection = app.getSelectionRanges()[0];
+        const active = app.getActiveCell();
+        const range: Range =
+          selection ?? { startRow: active.row, endRow: active.row, startCol: active.col, endCol: active.col };
 
-          const decision = evaluatePolicy({
-            action: DLP_ACTION.CLIPBOARD_COPY,
-            classification,
+        const dlpRange = {
+          start: { row: range.startRow, col: range.startCol },
+          end: { row: range.endRow, col: range.endCol },
+        };
+
+        try {
+          enforceClipboardCopy({
+            documentId: extensionClipboardDlp.documentId,
+            sheetId,
+            range: dlpRange,
+            classificationStore: extensionClipboardDlp.classificationStore,
             policy: extensionClipboardDlp.policy,
           });
-          if (decision.decision === DLP_DECISION.BLOCK) {
-            throw new DlpViolationError(decision);
+        } catch (err: any) {
+          if (err?.name === "DlpViolationError") {
+            const message = String(err?.message ?? err);
+            try {
+              showToast(message, "error");
+            } catch {
+              // ignore
+            }
+            throw new Error(message);
           }
-        } else {
-          const selection = lastExtensionSelection;
-          if (selection && Date.now() - selection.timestampMs <= 2000) {
-            enforceClipboardCopy({
-              documentId: extensionClipboardDlp.documentId,
-              sheetId: selection.sheetId,
-              range: {
-                start: { row: selection.startRow, col: selection.startCol },
-                end: { row: selection.endRow, col: selection.endCol },
-              },
-              classificationStore: extensionClipboardDlp.classificationStore,
-              policy: extensionClipboardDlp.policy,
-            });
-          }
+          throw err;
         }
 
         const provider = await clipboardProviderPromise;
