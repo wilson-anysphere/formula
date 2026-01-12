@@ -205,6 +205,7 @@ let queuedInvoke: TauriInvoke | null = null;
 let workbookSync: ReturnType<typeof startWorkbookSync> | null = null;
 let rerenderLayout: (() => void) | null = null;
 let vbaEventMacros: ReturnType<typeof installVbaEventMacros> | null = null;
+let ribbonLayoutController: LayoutController | null = null;
 
 const gridRoot = document.getElementById("grid");
 if (!gridRoot) {
@@ -841,6 +842,7 @@ if (
     primarySheetId: "Sheet1",
     workspaceId: "default",
   });
+  ribbonLayoutController = layoutController;
 
   const panelMounts = new Map<string, { container: HTMLElement; dispose: () => void }>();
 
@@ -2742,6 +2744,11 @@ mountRibbon(ribbonRoot, {
   },
   onCommand: (commandId) => {
     switch (commandId) {
+      case "insert.tables.pivotTable":
+        ribbonLayoutController?.openPanel(PanelIds.PIVOT_BUILDER);
+        window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
+        return;
+
       case "home.font.borders":
         applyToSelection("Borders", (sheetId, ranges) => applyAllBorders(app.getDocument(), sheetId, ranges));
         return;

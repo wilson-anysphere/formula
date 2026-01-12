@@ -535,7 +535,15 @@ export const defaultRibbonSchema: RibbonSchema = {
           id: "insert.tables",
           label: "Tables",
           buttons: [
-            { id: "insert.tables.pivotTable", label: "PivotTable", ariaLabel: "PivotTable", icon: "📊", kind: "dropdown", size: "large" },
+            {
+              id: "insert.tables.pivotTable",
+              label: "PivotTable",
+              ariaLabel: "PivotTable",
+              icon: "📊",
+              kind: "dropdown",
+              size: "large",
+              testId: "ribbon-insert-pivot-table",
+            },
             { id: "insert.tables.recommendedPivotTables", label: "Recommended PivotTables", ariaLabel: "Recommended PivotTables", icon: "✨", kind: "dropdown" },
             { id: "insert.tables.table", label: "Table", ariaLabel: "Table", icon: "▦", size: "large" },
           ],
