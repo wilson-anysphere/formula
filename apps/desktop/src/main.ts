@@ -4029,15 +4029,31 @@ if (
 
           const copyText = async (text: string) => {
             try {
-              await navigator.clipboard.writeText(text);
+              const provider = await clipboardProviderPromise;
+              await provider.write({ text });
             } catch {
-              const textarea = document.createElement("textarea");
+              // Fall back to execCommand in case Clipboard API permissions are unavailable.
+              // This is best-effort; ignore failures.
+            }
+
+            // Clipboard provider writes are best-effort, and in web contexts clipboard access
+            // can still be permission-gated. Keep an execCommand fallback when not running
+            // under Tauri to preserve "Copy" behavior in dev/preview browsers.
+            const isTauri = typeof (globalThis as any).__TAURI__ !== "undefined";
+            if (isTauri) return;
+
+            let textarea: HTMLTextAreaElement | null = null;
+            try {
+              textarea = document.createElement("textarea");
               textarea.value = text;
               textarea.className = "macros-panel__clipboard-textarea";
               document.body.appendChild(textarea);
               textarea.select();
               document.execCommand("copy");
-              textarea.remove();
+            } catch {
+              // ignore
+            } finally {
+              textarea?.remove();
             }
           };
 

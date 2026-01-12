@@ -5,6 +5,7 @@ import { VbaMigrator } from "../../../../../packages/vba-migrate/src/converter.j
 
 import { getVbaProject, type VbaModuleSummary, type VbaProjectSummary } from "../../macros/vba_project.js";
 import { getDesktopLLMClient, purgeLegacyDesktopLLMSettings } from "../../ai/llm/desktopLLMClient.js";
+import { createClipboardProvider } from "../../clipboard/platform/provider.js";
 
 type TauriInvoke = (cmd: string, args?: any) => Promise<any>;
 
@@ -525,10 +526,9 @@ export function VbaMigratePanel(props: VbaMigratePanelProps) {
   ]);
 
   async function copyToClipboard(text: string) {
-    const clipboard = (globalThis.navigator as any)?.clipboard;
-    if (!clipboard || typeof clipboard.writeText !== "function") return;
     try {
-      await clipboard.writeText(text);
+      const provider = await createClipboardProvider();
+      await provider.write({ text });
     } catch {
       // ignore
     }
