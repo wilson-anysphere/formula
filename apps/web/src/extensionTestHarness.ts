@@ -6,9 +6,12 @@ type CellValue = string | number | boolean | null;
 class TestSpreadsheetApi {
   private readonly _cells = new Map<string, CellValue>();
   private _selection = { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+  private readonly _sheetId = "sheet1";
 
-  private readonly _selectionListeners = new Set<(e: { selection: ReturnType<TestSpreadsheetApi["getSelection"]> }) => void>();
-  private readonly _cellListeners = new Set<(e: { row: number; col: number; value: CellValue }) => void>();
+  private readonly _selectionListeners = new Set<
+    (e: { sheetId: string; selection: ReturnType<TestSpreadsheetApi["getSelection"]> }) => void
+  >();
+  private readonly _cellListeners = new Set<(e: { sheetId: string; row: number; col: number; value: CellValue }) => void>();
 
   private _key(row: number, col: number): string {
     return `${row},${col}`;
@@ -21,7 +24,7 @@ class TestSpreadsheetApi {
 
   async setCell(row: number, col: number, value: CellValue): Promise<void> {
     this._cells.set(this._key(row, col), value);
-    const evt = { row, col, value };
+    const evt = { sheetId: this._sheetId, row, col, value };
     for (const listener of [...this._cellListeners]) {
       try {
         listener(evt);
@@ -33,7 +36,7 @@ class TestSpreadsheetApi {
 
   setSelection(range: { startRow: number; startCol: number; endRow: number; endCol: number }): void {
     this._selection = { ...range };
-    const evt = { selection: this.getSelection() };
+    const evt = { sheetId: this._sheetId, selection: this.getSelection() };
     for (const listener of [...this._selectionListeners]) {
       try {
         listener(evt);
@@ -56,12 +59,12 @@ class TestSpreadsheetApi {
     return { startRow, startCol, endRow, endCol, values };
   }
 
-  onSelectionChanged(callback: (e: { selection: ReturnType<TestSpreadsheetApi["getSelection"]> }) => void) {
+  onSelectionChanged(callback: (e: { sheetId: string; selection: ReturnType<TestSpreadsheetApi["getSelection"]> }) => void) {
     this._selectionListeners.add(callback);
     return { dispose: () => this._selectionListeners.delete(callback) };
   }
 
-  onCellChanged(callback: (e: { row: number; col: number; value: CellValue }) => void) {
+  onCellChanged(callback: (e: { sheetId: string; row: number; col: number; value: CellValue }) => void) {
     this._cellListeners.add(callback);
     return { dispose: () => this._cellListeners.delete(callback) };
   }
