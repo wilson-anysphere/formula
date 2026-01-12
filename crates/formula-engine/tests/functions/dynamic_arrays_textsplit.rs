@@ -79,6 +79,61 @@ fn textsplit_row_delimiters_can_be_array_literals() {
 }
 
 #[test]
+fn textsplit_blank_row_delimiter_is_no_row_split() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=TEXTSPLIT(\"a;b\",\",\",\"\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("A1").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::from("a;b"));
+}
+
+#[test]
+fn textsplit_row_delimiter_array_literal_rejects_empty_elements() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=TEXTSPLIT(\"a;b\",\",\",{\";\",\"\"})")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(formula_engine::ErrorKind::Value)
+    );
+}
+
+#[test]
+fn textsplit_delimiter_array_literals_propagate_errors() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=TEXTSPLIT(\"a,b\",{\",\",#DIV/0!})")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(formula_engine::ErrorKind::Div0)
+    );
+}
+
+#[test]
+fn textsplit_ignore_empty_applies_to_row_splitting() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=TEXTSPLIT(\"a;;b\",\",\",\";\",TRUE)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("A2").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::from("a"));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::from("b"));
+}
+
+#[test]
 fn textsplit_ignore_empty() {
     let mut engine = Engine::new();
     engine

@@ -55,7 +55,7 @@ fn textsplit_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let ignore_empty = if args.len() >= 4 {
-        match eval_scalar_arg(ctx, &args[3]).coerce_to_bool() {
+        match eval_scalar_arg(ctx, &args[3]).coerce_to_bool_with_ctx(ctx) {
             Ok(v) => v,
             Err(e) => return Value::Error(e),
         }
@@ -64,7 +64,7 @@ fn textsplit_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let match_mode = if args.len() >= 5 {
-        match eval_scalar_arg(ctx, &args[4]).coerce_to_i64() {
+        match eval_scalar_arg(ctx, &args[4]).coerce_to_i64_with_ctx(ctx) {
             Ok(0) => MatchMode::CaseSensitive,
             Ok(1) => MatchMode::CaseInsensitiveAscii,
             Ok(_) => return Value::Error(ErrorKind::Value),
