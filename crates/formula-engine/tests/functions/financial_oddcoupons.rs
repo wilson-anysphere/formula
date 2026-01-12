@@ -631,6 +631,146 @@ fn odd_coupon_invalid_schedule_inputs_return_num_errors() {
     );
 
     // ---------------------------------------------------------------------
+    // ODDF*: EOM schedule mismatch (maturity EOM vs first_coupon not EOM, and vice versa).
+    // ---------------------------------------------------------------------
+    let settlement = ymd_to_serial(ExcelDate::new(2022, 12, 20), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2024, 7, 31), system).unwrap(); // EOM
+    let issue = ymd_to_serial(ExcelDate::new(2022, 12, 15), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2023, 1, 30), system).unwrap(); // not EOM
+
+    assert_eq!(
+        oddfprice(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            0.05,
+            0.06,
+            100.0,
+            2,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    assert_eq!(
+        oddfyield(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            0.05,
+            98.0,
+            100.0,
+            2,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    let v = sheet.eval("=ODDFPRICE(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,30),0.05,0.06,100,2,0)");
+    assert!(
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDFPRICE invalid schedule (maturity EOM, first_coupon not), got {v:?}"
+    );
+    let v = sheet.eval("=ODDFYIELD(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,30),0.05,98,100,2,0)");
+    assert!(
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDFYIELD invalid schedule (maturity EOM, first_coupon not), got {v:?}"
+    );
+
+    let maturity = ymd_to_serial(ExcelDate::new(2024, 7, 30), system).unwrap(); // not EOM
+    let first_coupon = ymd_to_serial(ExcelDate::new(2023, 1, 31), system).unwrap(); // EOM
+    assert_eq!(
+        oddfprice(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            0.05,
+            0.06,
+            100.0,
+            2,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    assert_eq!(
+        oddfyield(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            0.05,
+            98.0,
+            100.0,
+            2,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    let v = sheet.eval("=ODDFPRICE(DATE(2022,12,20),DATE(2024,7,30),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)");
+    assert!(
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDFPRICE invalid schedule (maturity not EOM, first_coupon EOM), got {v:?}"
+    );
+    let v = sheet.eval("=ODDFYIELD(DATE(2022,12,20),DATE(2024,7,30),DATE(2022,12,15),DATE(2023,1,31),0.05,98,100,2,0)");
+    assert!(
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDFYIELD invalid schedule (maturity not EOM, first_coupon EOM), got {v:?}"
+    );
+
+    // ---------------------------------------------------------------------
+    // ODDF*: minimal schedule ordering invalidity: settlement after first_coupon.
+    // ---------------------------------------------------------------------
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 8, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2025, 1, 1), system).unwrap();
+    let issue = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+    assert_eq!(
+        oddfprice(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            0.05,
+            0.04,
+            100.0,
+            2,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    assert_eq!(
+        oddfyield(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            0.05,
+            98.0,
+            100.0,
+            2,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    let v = sheet.eval("=ODDFPRICE(DATE(2020,8,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)");
+    assert!(
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDFPRICE when settlement > first_coupon, got {v:?}"
+    );
+    let v = sheet.eval("=ODDFYIELD(DATE(2020,8,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,98,100,2,0)");
+    assert!(
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDFYIELD when settlement > first_coupon, got {v:?}"
+    );
+
+    // ---------------------------------------------------------------------
     // ODDL*: last_interest must be strictly before maturity.
     // ---------------------------------------------------------------------
     let settlement = ymd_to_serial(ExcelDate::new(2024, 7, 1), system).unwrap();
