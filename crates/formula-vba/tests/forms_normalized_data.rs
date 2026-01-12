@@ -286,6 +286,75 @@ fn forms_normalized_data_uses_modulestreamnameunicode_to_find_designer_storage()
 }
 
 #[test]
+fn forms_normalized_data_uses_modulestreamname_unicode_tail_for_designer_storage_lookup() {
+    // Regression: MODULESTREAMNAME (0x001A) can be stored in the MS-OVBA spec layout where a
+    // Reserved=0x0032 marker and a UTF-16LE StreamNameUnicode field follow the MBCS bytes. In that
+    // encoding, the u32 after the Id is SizeOfStreamName (MBCS), not the total record length.
+    //
+    // FormsNormalizedData must still be able to locate the designer storage using the Unicode tail.
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
+
+    let storage_name = "Форма1";
+    ole.create_storage(storage_name)
+        .expect("create designer storage");
+    {
+        let mut s = ole
+            .create_stream(format!("{storage_name}/Payload"))
+            .expect("create stream");
+        s.write_all(b"ABC").expect("write stream bytes");
+    }
+
+    {
+        // BaseClass uses the module identifier (MODULENAME), not the storage/stream name.
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"BaseClass=NiceName\r\n")
+            .expect("write PROJECT");
+    }
+
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut dir_decompressed = Vec::new();
+        push_record(&mut dir_decompressed, 0x0003, &1252u16.to_le_bytes());
+        push_record(&mut dir_decompressed, 0x0019, b"NiceName");
+
+        // MODULESTREAMNAME in spec layout:
+        //   Id(u16)=0x001A
+        //   SizeOfStreamName(u32)
+        //   StreamName (MBCS bytes) -- deliberately wrong
+        //   Reserved(u16)=0x0032
+        //   SizeOfStreamNameUnicode(u32)
+        //   StreamNameUnicode(UTF-16LE bytes)
+        let stream_name_mbcs = b"Wrong";
+        let stream_name_unicode = utf16le_bytes(storage_name);
+        dir_decompressed.extend_from_slice(&0x001Au16.to_le_bytes());
+        dir_decompressed.extend_from_slice(&(stream_name_mbcs.len() as u32).to_le_bytes());
+        dir_decompressed.extend_from_slice(stream_name_mbcs);
+        dir_decompressed.extend_from_slice(&0x0032u16.to_le_bytes());
+        dir_decompressed.extend_from_slice(&(stream_name_unicode.len() as u32).to_le_bytes());
+        dir_decompressed.extend_from_slice(&stream_name_unicode);
+
+        // MODULETYPE + MODULETEXTOFFSET.
+        push_record(&mut dir_decompressed, 0x0021, &3u16.to_le_bytes());
+        push_record(&mut dir_decompressed, 0x0031, &0u32.to_le_bytes());
+
+        let dir_container = compress_container(&dir_decompressed);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = forms_normalized_data(&vba_project_bin).expect("compute FormsNormalizedData");
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(b"ABC");
+    expected.extend(std::iter::repeat_n(0u8, 1020));
+
+    assert_eq!(normalized.len(), 1023);
+    assert_eq!(normalized, expected);
+}
+
+#[test]
 fn forms_normalized_data_handles_modulestreamnameunicode_len_prefix_excluding_nul() {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
