@@ -323,6 +323,51 @@ test("clearRange preserves style-only cells for includeFormat used range", () =>
   assert.equal(sheet.__formatBoundsRecomputeCount, 0);
 });
 
+test("getUsedRange(includeFormat) rescans stored-cell format bounds only when clearing a boundary format-only cell", () => {
+  const doc = new DocumentController();
+
+  doc.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
+  doc.setRangeFormat("Sheet1", "B2", { font: { bold: true } });
+  doc.setRangeFormat("Sheet1", "C3", { font: { bold: true } });
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.__formatBoundsRecomputeCount, 0);
+
+  // Initial reads are served from the incremental bounds (no recompute).
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 0,
+    endRow: 2,
+    startCol: 0,
+    endCol: 2,
+  });
+  assert.equal(sheet.__formatBoundsRecomputeCount, 0);
+
+  // Clearing an interior format-only cell should not invalidate bounds.
+  doc.setRangeFormat("Sheet1", "B2", null);
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 0,
+    endRow: 2,
+    startCol: 0,
+    endCol: 2,
+  });
+  assert.equal(sheet.__formatBoundsRecomputeCount, 0);
+
+  // Clearing a boundary cell requires a rescan to shrink the bounds.
+  doc.setRangeFormat("Sheet1", "C3", null);
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 0,
+    endRow: 0,
+    startCol: 0,
+    endCol: 0,
+  });
+  assert.equal(sheet.__formatBoundsRecomputeCount, 1);
+
+  // Subsequent reads reuse the cached recomputed bounds.
+  doc.getUsedRange("Sheet1", { includeFormat: true });
+  assert.equal(sheet.__formatBoundsRecomputeCount, 1);
+});
+
 test("getCellFormatStyleIds exposes layered style id tuple (sheet/row/col/cell)", () => {
   const doc = new DocumentController();
 
