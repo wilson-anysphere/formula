@@ -156,14 +156,21 @@ describe("command palette performance safeguards", () => {
 
     palette.open();
 
-    // Flush the queued microtask that keeps the selected row in view after rendering.
-    await Promise.resolve();
-
     const input = document.querySelector<HTMLInputElement>('[data-testid="command-palette-input"]')!;
     const list = document.querySelector<HTMLElement>('[data-testid="command-palette-list"]')!;
 
     const selectedBefore = list.querySelector<HTMLElement>('.command-palette__item[aria-selected="true"]');
     expect(selectedBefore?.id).toBe("command-palette-option-0");
+
+    // Ensure the test stays valid even if jsdom implements scrollIntoView in the future:
+    // explicitly override the per-element property to a non-function value so a direct call
+    // would throw, and only the guard keeps this safe.
+    (selectedBefore as any).scrollIntoView = undefined;
+    const nextBefore = list.querySelector<HTMLElement>("#command-palette-option-1");
+    (nextBefore as any).scrollIntoView = undefined;
+
+    // Flush the queued microtask that keeps the selected row in view after rendering.
+    await Promise.resolve();
 
     // Arrow navigation triggers `updateSelection`, which should also guard `scrollIntoView`.
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
