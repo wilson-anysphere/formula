@@ -732,6 +732,14 @@ Supported MIME types (read + write, best-effort):
 - `text/rtf`
 - `image/png`
 
+Size limits (defense-in-depth):
+
+- Native clipboard reads/writes may encounter extremely large payloads (notably screenshots). To keep paste responsive and avoid huge IPC/base64 transfers, the desktop app applies best-effort size caps:
+  - `image/png`: **5 MiB** (raw PNG bytes; base64 over IPC is larger)
+  - `text/plain`, `text/html`, `text/rtf`: **2 MiB** (UTF-8 bytes)
+- Oversized formats are **omitted** on read (no error).
+- Clipboard writes validate payload sizes and may omit/cap rich formats (or fail validation) depending on the code path.
+
 JS provider contract (normalized API):
 
 - Read: `provider.read()` → `{ text?: string, html?: string, rtf?: string, imagePng?: Uint8Array, pngBase64?: string }`
