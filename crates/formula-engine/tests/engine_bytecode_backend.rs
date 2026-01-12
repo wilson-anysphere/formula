@@ -403,6 +403,76 @@ fn bytecode_backend_matches_ast_for_let_shadowing() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_let_rebinding_same_name() {
+    let mut engine = Engine::new();
+
+    // Rebinding `x` in the same LET should see the previous `x` value in the RHS and then shadow it.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, 1, x, x+1, x)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=LET(x, 1, x, x+1, x)", "A1");
+    assert_eq!(engine.bytecode_program_count(), 1);
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_let_shadowing_uses_outer_binding_in_inner_rhs() {
+    let mut engine = Engine::new();
+
+    // The inner binding RHS should resolve `x` from the outer LET because the inner `x` is not
+    // visible until after its value expression has been evaluated.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, 1, LET(x, x+1, x))")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=LET(x, 1, LET(x, x+1, x))", "A1");
+    assert_eq!(engine.bytecode_program_count(), 1);
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_let_error_propagation() {
+    let mut engine = Engine::new();
+
+    // Errors inside binding expressions should propagate like the AST evaluator.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, 1/0, x+1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=LET(x, 1/0, x+1)", "A1");
+    assert_eq!(engine.bytecode_program_count(), 1);
+}
+
+#[test]
+fn bytecode_backend_reuses_program_for_filled_let_patterns() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 30.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=LET(x, A1, x+1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=LET(x, A2, x+1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=LET(x, A3, x+1)")
+        .unwrap();
+
+    // Filled LET formulas should share a single normalized bytecode program.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=LET(x, A1, x+1)", "B1");
+    assert_engine_matches_ast(&engine, "=LET(x, A2, x+1)", "B2");
+    assert_engine_matches_ast(&engine, "=LET(x, A3, x+1)", "B3");
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_sum_and_countif() {
     let mut engine = Engine::new();
 
