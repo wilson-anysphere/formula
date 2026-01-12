@@ -228,7 +228,7 @@ fn detect_header_row(
         let v0 = cell_at(0, key.column);
         let v1 = cell_at(1, key.column);
 
-        let is_text0 = matches!(v0, CellValue::Text(_));
+        let is_text0 = matches!(v0, CellValue::Text(s) if !s.trim().is_empty());
         let is_number_or_date1 = matches!(v1, CellValue::Number(_) | CellValue::DateTime(_))
             || matches!(v1, CellValue::Text(s) if parse_number(&s).is_some() || parse_datetime(&s).is_some());
 
@@ -243,6 +243,9 @@ fn detect_header_row(
 fn detect_key_value(cell: &CellValue, key: &SortKey) -> SortKeyValue {
     match cell {
         CellValue::Blank => return SortKeyValue::Blank,
+        // Treat empty/whitespace-only text as blank, matching Excel AutoFilter "Blanks" semantics.
+        // (See `sort_filter::filter::is_blank`.)
+        CellValue::Text(s) if s.trim().is_empty() => return SortKeyValue::Blank,
         CellValue::Error(err) => return SortKeyValue::Error(*err),
         _ => {}
     }
@@ -510,6 +513,30 @@ mod tests {
         sort_range(&mut data, &spec);
 
         assert_eq!(data.rows[3][0], CellValue::Blank);
+    }
+
+    #[test]
+    fn empty_text_is_sorted_like_blank() {
+        let mut data = range(vec![
+            vec![CellValue::Text("Val".into())],
+            vec![CellValue::Text("".into())],
+            vec![CellValue::Number(1.0)],
+            vec![CellValue::Number(2.0)],
+        ]);
+
+        let spec = SortSpec {
+            header: HeaderOption::HasHeader,
+            keys: vec![SortKey {
+                column: 0,
+                order: SortOrder::Descending,
+                value_type: SortValueType::Auto,
+                case_sensitive: false,
+            }],
+        };
+
+        sort_range(&mut data, &spec);
+
+        assert_eq!(data.rows[3][0], CellValue::Text("".into()));
     }
 
     #[test]
