@@ -1223,6 +1223,15 @@ export class SpreadsheetApp {
         passive: true,
         signal: this.domAbort.signal,
       });
+      this.root.addEventListener(
+        "pointerenter",
+        () => {
+          const rect = this.root.getBoundingClientRect();
+          this.rootLeft = rect.left;
+          this.rootTop = rect.top;
+        },
+        { passive: true, signal: this.domAbort.signal }
+      );
       this.root.addEventListener("pointerleave", () => this.hideCommentTooltip(), { signal: this.domAbort.signal });
       this.root.addEventListener("keydown", (e) => this.onKeyDown(e), { signal: this.domAbort.signal });
     } else {
@@ -1236,6 +1245,15 @@ export class SpreadsheetApp {
         passive: true,
         signal: this.domAbort.signal,
       });
+      this.root.addEventListener(
+        "pointerenter",
+        () => {
+          const rect = this.root.getBoundingClientRect();
+          this.rootLeft = rect.left;
+          this.rootTop = rect.top;
+        },
+        { passive: true, signal: this.domAbort.signal }
+      );
       this.root.addEventListener(
         "pointerleave",
         () => {
