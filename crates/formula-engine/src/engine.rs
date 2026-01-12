@@ -3407,14 +3407,6 @@ impl Engine {
                     lexical_scopes,
                 )),
             }),
-            crate::Expr::FieldAccess(access) => crate::Expr::FieldAccess(crate::FieldAccessExpr {
-                base: Box::new(self.inline_static_defined_names_for_bytecode_inner(
-                    access.base.as_ref(),
-                    current_sheet,
-                    visiting,
-                )),
-                field: access.field.clone(),
-            }),
             crate::Expr::Binary(b) => crate::Expr::Binary(crate::BinaryExpr {
                 op: b.op,
                 left: Box::new(self.inline_static_defined_names_for_bytecode_inner(
