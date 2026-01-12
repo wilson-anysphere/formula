@@ -205,6 +205,19 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
         }),
       );
     }
+    if (installed?.incompatible) {
+      const reason =
+        installed.incompatibleReason && typeof installed.incompatibleReason === "string"
+          ? installed.incompatibleReason
+          : "Unknown reason";
+      const at = installed.incompatibleAt && typeof installed.incompatibleAt === "string" ? installed.incompatibleAt : null;
+      badges.append(
+        badge("incompatible", {
+          tone: "warn",
+          title: at ? `Marked incompatible at ${at}: ${reason}` : `Marked incompatible: ${reason}`,
+        }),
+      );
+    }
     if (latestScanStatusRaw) {
       const normalized = String(latestScanStatusRaw).trim().toLowerCase();
       const tone =
@@ -289,7 +302,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
         actions.append(el("div", { className: "installed-meta" }, [document.createTextNode(metaParts.join(" · "))]));
       }
 
-      if (installed.corrupted) {
+      if (installed.corrupted || installed.incompatible) {
         actions.append(
           el(
             "button",
