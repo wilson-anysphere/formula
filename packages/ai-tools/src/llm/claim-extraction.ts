@@ -1,4 +1,4 @@
-export type SpreadsheetClaimMeasure = "mean" | "sum" | "min" | "max";
+export type SpreadsheetClaimMeasure = "mean" | "sum" | "median" | "stdev" | "variance" | "count" | "min" | "max";
 
 export type ExtractedSpreadsheetClaim =
   | {
@@ -40,8 +40,14 @@ const KEYWORD_TO_MEASURE: Record<string, SpreadsheetClaimMeasure> = {
   average: "mean",
   avg: "mean",
   mean: "mean",
+  median: "median",
   sum: "sum",
   total: "sum",
+  stdev: "stdev",
+  "std dev": "stdev",
+  "standard deviation": "stdev",
+  variance: "variance",
+  count: "count",
   min: "min",
   minimum: "min",
   max: "max",

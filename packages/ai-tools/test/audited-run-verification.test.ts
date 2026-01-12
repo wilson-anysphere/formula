@@ -161,6 +161,66 @@ describe("runChatWithToolsAuditedVerified", () => {
     expect(evidence?.result?.data?.statistics?.mean).toBe(2);
   });
 
+  it("flags incorrect median claims with computed actuals + tool evidence", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet1"]);
+    workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });
+    workbook.setCell(parseA1Cell("Sheet1!A2"), { value: 2 });
+    workbook.setCell(parseA1Cell("Sheet1!A3"), { value: 3 });
+    workbook.setCell(parseA1Cell("Sheet1!A4"), { value: 100 });
+
+    const toolExecutor = new SpreadsheetLLMToolExecutor(workbook);
+
+    let callCount = 0;
+    const client = {
+      async chat() {
+        callCount++;
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call-1", name: "read_range", arguments: { range: "Sheet1!A1:A4" } }]
+            },
+            usage: { promptTokens: 10, completionTokens: 5 }
+          };
+        }
+
+        return {
+          message: { role: "assistant", content: "The median of Sheet1!A1:A4 is 10." },
+          usage: { promptTokens: 2, completionTokens: 3 }
+        };
+      }
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+
+    const result = await runChatWithToolsAuditedVerified({
+      client,
+      tool_executor: toolExecutor as any,
+      messages: [{ role: "user", content: "What is the median of Sheet1!A1:A4?" }],
+      verify_claims: true,
+      audit: {
+        audit_store: auditStore,
+        session_id: "session-verification-median-1",
+        mode: "chat",
+        input: { prompt: "What is the median of Sheet1!A1:A4?" },
+        model: "unit-test-model"
+      }
+    });
+
+    expect(result.verification.verified).toBe(false);
+    expect(result.verification.claims).toHaveLength(1);
+    expect(result.verification.claims?.[0]).toMatchObject({
+      verified: false,
+      expected: 10,
+      actual: 2.5
+    });
+
+    const evidence = (result.verification.claims?.[0] as any)?.toolEvidence;
+    expect(evidence?.call?.name).toBe("compute_statistics");
+    expect(evidence?.result?.data?.statistics?.median).toBe(2.5);
+  });
+
   it("retries once with a strict system message when strict_tool_verification is enabled", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: 1 });

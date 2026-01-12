@@ -896,6 +896,9 @@ export class ToolExecutor {
         case "sum":
           stats.sum = values.length ? values.reduce((sum, v) => sum + v, 0) : null;
           break;
+        case "count":
+          stats.count = values.length;
+          break;
         case "median":
           stats.median = values.length ? median(values) : null;
           break;

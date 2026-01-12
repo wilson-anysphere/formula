@@ -69,5 +69,21 @@ describe("extractVerifiableClaims", () => {
       }
     ]);
   });
-});
 
+  it("extracts stdev claims (std dev phrasing)", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "Std dev for Sheet1!B2:B100 = 12.3.",
+      userText: ""
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "stdev",
+        reference: "Sheet1!B2:B100",
+        expected: 12.3,
+        source: "Std dev for Sheet1!B2:B100 = 12.3"
+      }
+    ]);
+  });
+});

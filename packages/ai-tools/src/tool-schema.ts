@@ -393,7 +393,7 @@ export type DetectAnomaliesParams = z.infer<typeof DetectAnomaliesParamsSchema>;
 export const ComputeStatisticsParamsSchema = z.object({
   range: A1RangeSchema,
   measures: z
-    .array(z.enum(["mean", "sum", "median", "mode", "stdev", "variance", "min", "max", "quartiles", "correlation"]))
+    .array(z.enum(["mean", "sum", "count", "median", "mode", "stdev", "variance", "min", "max", "quartiles", "correlation"]))
     .optional()
     .default(["mean", "median", "stdev", "min", "max"])
 });
@@ -662,7 +662,7 @@ export const TOOL_REGISTRY: { [K in ToolName]: ToolRegistryEntry<K> } = {
           type: "array",
           items: {
             type: "string",
-            enum: ["mean", "sum", "median", "mode", "stdev", "variance", "min", "max", "quartiles", "correlation"]
+            enum: ["mean", "sum", "count", "median", "mode", "stdev", "variance", "min", "max", "quartiles", "correlation"]
           }
         }
       },
