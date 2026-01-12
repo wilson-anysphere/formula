@@ -12,7 +12,11 @@ const BLOCKED_PROTOCOLS = new Set(["javascript", "data", "file"]);
  */
 
 /**
- * Open an external hyperlink via the host OS (e.g. Tauri's `shell.open`).
+ * Open an external hyperlink via the host OS.
+ *
+ * In the desktop/Tauri shell, callers should pass the `shellOpen` helper from
+ * `apps/desktop/src/tauri/shellOpen.ts`, which routes through the Rust `open_external_url`
+ * command (strict scheme allowlist enforced in Rust).
  *
  * Security:
  * - http/https/mailto allowed by default

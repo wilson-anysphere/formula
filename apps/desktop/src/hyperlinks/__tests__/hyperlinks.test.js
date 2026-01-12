@@ -33,7 +33,7 @@ test("internal hyperlink navigates to sheet + cell on Ctrl/Cmd+click", async () 
   assert.deepEqual(calls, ["sheet:Sheet2", "cell:B2"]);
 });
 
-test("external hyperlink opens via shell.open with allowlisted protocol", async () => {
+test("external hyperlink opens via shellOpen with allowlisted protocol", async () => {
   /** @type {string[]} */
   const calls = [];
   const deps = {
@@ -118,4 +118,3 @@ test("blocked protocols never open", async () => {
   assert.equal(activated, false);
   assert.deepEqual(calls, []);
 });
-
