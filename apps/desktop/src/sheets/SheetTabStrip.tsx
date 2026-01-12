@@ -141,7 +141,20 @@ export function SheetTabStrip({
     });
   }, [store]);
 
-  const visibleSheets = useMemo(() => sheets.filter((s) => s.visibility === "visible"), [sheets]);
+  const visibleSheets = useMemo(() => {
+    const visible = sheets.filter((s) => s.visibility === "visible");
+    if (visible.length > 0) return visible;
+    if (sheets.length === 0) return [];
+
+    // Defensive: if workbook metadata is invalid (all sheets hidden/veryHidden), fall back
+    // to showing exactly one sheet so the tab strip remains usable (and the user can unhide
+    // sheets via the context menu). Prefer the active sheet when possible.
+    const active = sheets.find((s) => s.id === activeSheetId) ?? null;
+    const nonVeryHiddenActive = active && active.visibility !== "veryHidden" ? active : null;
+    const firstNonVeryHidden = sheets.find((s) => s.visibility !== "veryHidden") ?? null;
+    const fallback = nonVeryHiddenActive ?? firstNonVeryHidden ?? active ?? sheets[0]!;
+    return fallback ? [fallback] : [];
+  }, [activeSheetId, sheets]);
   const [draggingSheetId, setDraggingSheetId] = useState<string | null>(null);
   const [dropIndicator, setDropIndicator] = useState<{ targetSheetId: string; position: "before" | "after" } | null>(null);
 

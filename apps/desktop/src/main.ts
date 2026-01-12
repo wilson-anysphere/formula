@@ -2180,7 +2180,24 @@ function listSheetsForUi(): SheetUiInfo[] {
   const visible = workbookSheetStore.listVisible();
   // Only expose visible sheets to UI affordances like the sheet switcher. Hidden/veryHidden
   // sheets should not be directly activatable via dropdowns.
-  return visible.map((s) => ({ id: s.id, name: s.name }));
+  //
+  // Defensive: if the workbook metadata is invalid (all sheets hidden/veryHidden), fall back
+  // to exposing exactly one sheet so the UI remains functional and the user can unhide sheets
+  // via the context menu. Prefer the current active sheet when possible.
+  if (visible.length > 0) return visible.map((s) => ({ id: s.id, name: s.name }));
+
+  const all = workbookSheetStore.listAll();
+  if (all.length === 0) return [];
+
+  const activeId = app.getCurrentSheetId();
+  const active = all.find((s) => s.id === activeId) ?? null;
+
+  // Avoid exposing `veryHidden` sheets when possible (Excel doesn't show them in the UI).
+  const nonVeryHiddenActive = active && active.visibility !== "veryHidden" ? active : null;
+  const firstNonVeryHidden = all.find((s) => s.visibility !== "veryHidden") ?? null;
+
+  const fallback = nonVeryHiddenActive ?? firstNonVeryHidden ?? active ?? all[0]!;
+  return [{ id: fallback.id, name: fallback.name }];
 }
 
 async function handleAddSheet(): Promise<void> {
@@ -2745,7 +2762,10 @@ window.addEventListener(
     // or split view secondary editing). Let the focused editor/input surface handle the event.
     if (isSpreadsheetEditing()) return;
 
-    const ordered = workbookSheetStore.listVisible().map((sheet) => sheet.id);
+    // Use the sheet UI's visible list ordering so the shortcut matches the tab strip.
+    // (In invalid workbooks where no sheets are visible, `listSheetsForUi()` falls back to
+    // exposing a single sheet so keyboard navigation remains deterministic.)
+    const ordered = listSheetsForUi().map((sheet) => sheet.id);
     if (ordered.length === 0) return;
 
     const current = app.getCurrentSheetId();
@@ -4308,7 +4328,7 @@ if (
     app,
     layoutController,
     focusAfterSheetNavigation: restoreFocusAfterSheetNavigation,
-    getVisibleSheetIds: () => workbookSheetStore.listVisible().map((sheet) => sheet.id),
+    getVisibleSheetIds: () => listSheetsForUi().map((sheet) => sheet.id),
     ensureExtensionsLoaded: () => ensureExtensionsLoadedRef?.() ?? Promise.resolve(),
     onExtensionsLoaded: () => {
       updateKeybindingsRef?.();
