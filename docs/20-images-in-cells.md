@@ -163,6 +163,7 @@ Confirmed values from this fixture:
 ### Fixture: `fixtures/xlsx/images-in-cells/image-in-cell.xlsx` (real Excel; Place in Cell + `IMAGE()`)
 
 Fixture workbook: [`fixtures/xlsx/images-in-cells/image-in-cell.xlsx`](../fixtures/xlsx/images-in-cells/image-in-cell.xlsx).
+Notes: [`fixtures/xlsx/images-in-cells/image-in-cell.md`](../fixtures/xlsx/images-in-cells/image-in-cell.md).
 
 This fixture is intended as a ground-truth-ish Excel workbook that contains **both**:
 

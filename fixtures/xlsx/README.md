@@ -14,6 +14,7 @@ fixtures/xlsx/
   metadata/
   rich-data/
   richdata/
+  images-in-cells/
   formulas/
   styles/
   conditional-formatting/
@@ -63,6 +64,9 @@ tests (see `rich-data/README.md` and check `docProps/app.xml` for provenance).
   - `richdata-minimal.xlsx` - **synthetic** richData + metadata fixture used by tests (see `rich-data/README.md`).
   - See `rich-data/README.md` for how to generate additional ground-truth Excel fixtures that include
     `xl/metadata.xml`, `xl/richData/*`, and in-sheet `vm`/`cm` cell attributes.
+- `images-in-cells/`:
+  - `image-in-cell.xlsx` - **Excel** images-in-cells fixture containing both a “Place in Cell” value and an `_xlfn.IMAGE(...)` formula cell.
+    Includes `xl/cellimages.xml`, `xl/metadata.xml`, unprefixed `xl/richData/richValue*.xml`, and `xl/media/*` (see `images-in-cells/image-in-cell.md`).
 - `richdata/`:
   - `linked-data-types.xlsx` - **synthetic** minimal workbook exercising `xl/metadata.xml` + `xl/richData/*`
     parts and `vm`/`cm` cell attributes (used by `crates/formula-xlsx/tests/linked_data_types_fixture.rs`).

@@ -209,6 +209,9 @@ observed variants, the image binding comes from metadata pointers (`vm`, sometim
 
 <!-- Variant B: placeholder numeric cached value (observed in fixtures/xlsx/rich-data/images-in-cell.xlsx) -->
 <c vm="N" cm="M"><v>0</v></c>
+
+<!-- Variant C: normal formula cell with vm metadata (observed in fixtures/xlsx/images-in-cells/image-in-cell.xlsx) -->
+<c vm="N"><f>_xlfn.IMAGE("...")</f><v>0</v></c>
 ```
 
 Indexing note:
@@ -219,6 +222,7 @@ Note on `IMAGE()` vs “Place in Cell”:
 - “Place in Cell” pictures have been observed to use multiple encodings (including both variants shown
   above), depending on Excel build / producer.
 - `IMAGE()` function results may instead be stored as a normal formula cell (e.g. `<f>_xlfn.IMAGE(...)</f>`) with `vm` metadata attached; preserve `vm`/`cm` and rich-data parts the same way.
+  - Observed in: `fixtures/xlsx/images-in-cells/image-in-cell.xlsx`
 
 ##### Mapping chain (high-level)
 
