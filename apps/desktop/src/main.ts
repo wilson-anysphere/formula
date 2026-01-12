@@ -1497,8 +1497,11 @@ function shouldRestoreFocusAfterSheetNavigation(): boolean {
 
   // If a context menu is open, let it manage focus and restore it when the menu closes.
   // (Some menus intentionally trap focus while open for accessibility.)
-  const contextMenu = document.querySelector<HTMLElement>('[data-testid="context-menu"]');
-  if (contextMenu && contextMenu.style.display !== "none") {
+  //
+  // Note: the desktop has multiple context menu surfaces (grid, sheet tabs, etc). Prefer
+  // checking for any visible ContextMenu overlay instead of special-casing a specific test id.
+  const openContextMenu = document.querySelector<HTMLElement>(".context-menu-overlay:not([hidden])");
+  if (openContextMenu) {
     return false;
   }
 
