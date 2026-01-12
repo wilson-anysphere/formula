@@ -91,6 +91,40 @@ function parseA1RangeRef(ref) {
   };
 }
 
+function normalizeSheetNameForCaseInsensitiveCompare(name) {
+  // Excel compares sheet names case-insensitively across Unicode. Approximate via
+  // NFKC normalization + Unicode uppercasing (matches the desktop/backend logic).
+  try {
+    return String(name ?? "").normalize("NFKC").toUpperCase();
+  } catch {
+    return String(name ?? "").toUpperCase();
+  }
+}
+
+const EXCEL_MAX_SHEET_NAME_LEN = 31;
+const INVALID_SHEET_NAME_CHAR_SET = new Set([":", "\\", "/", "?", "*", "[", "]"]);
+
+function validateSheetName(rawName) {
+  const name = String(rawName ?? "").trim();
+  if (name.length === 0) {
+    throw new Error("sheet name cannot be blank");
+  }
+  // Excel's 31-character sheet name limit is measured in UTF-16 code units. JS
+  // `string.length` matches the UTF-16 count.
+  if (name.length > EXCEL_MAX_SHEET_NAME_LEN) {
+    throw new Error(`sheet name cannot exceed ${EXCEL_MAX_SHEET_NAME_LEN} characters`);
+  }
+  for (const ch of name) {
+    if (INVALID_SHEET_NAME_CHAR_SET.has(ch)) {
+      throw new Error(`sheet name contains invalid character \`${ch}\``);
+    }
+  }
+  if (name.startsWith("'") || name.endsWith("'")) {
+    throw new Error("sheet name cannot begin or end with an apostrophe");
+  }
+  return name;
+}
+
 class InMemorySpreadsheet {
   constructor() {
     this._sheets = [
@@ -128,22 +162,34 @@ class InMemorySpreadsheet {
 
   _getSheetRecordByName(name) {
     const sheetName = String(name);
-    const sheet = this._sheets.find((s) => s.name === sheetName);
+    const query = sheetName.trim();
+    if (!query) throw new Error(`Unknown sheet: ${sheetName}`);
+
+    // Back-compat: allow passing a sheet id directly.
+    let sheet = this._sheets.find((s) => s.id === query) ?? null;
+    if (!sheet) {
+      const queryCi = normalizeSheetNameForCaseInsensitiveCompare(query);
+      sheet =
+        this._sheets.find((s) => normalizeSheetNameForCaseInsensitiveCompare(s.name) === queryCi) ?? null;
+    }
     if (!sheet) throw new Error(`Unknown sheet: ${sheetName}`);
     return sheet;
   }
 
   getSheet(name) {
-    const sheet = this._sheets.find((s) => s.name === String(name));
-    if (!sheet) return undefined;
-    return { id: sheet.id, name: sheet.name };
+    try {
+      const sheet = this._getSheetRecordByName(name);
+      return { id: sheet.id, name: sheet.name };
+    } catch {
+      return undefined;
+    }
   }
 
   createSheet(name) {
-    const sheetName = String(name);
-    if (sheetName.trim().length === 0) throw new Error("Sheet name must be a non-empty string");
-    if (this._sheets.some((s) => s.name === sheetName)) {
-      throw new Error(`Sheet already exists: ${sheetName}`);
+    const sheetName = validateSheetName(name);
+    const target = normalizeSheetNameForCaseInsensitiveCompare(sheetName);
+    if (this._sheets.some((s) => normalizeSheetNameForCaseInsensitiveCompare(s.name) === target)) {
+      throw new Error("sheet name already exists");
     }
 
     const sheet = {
@@ -152,7 +198,10 @@ class InMemorySpreadsheet {
       cells: new Map(),
       selection: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 }
     };
-    this._sheets.push(sheet);
+    // Insert after the active sheet by default (Excel-like behavior).
+    const activeIdx = this._sheets.findIndex((s) => s.id === this._activeSheetId);
+    const insertIndex = activeIdx >= 0 ? activeIdx + 1 : this._sheets.length;
+    this._sheets.splice(insertIndex, 0, sheet);
     this._activeSheetId = sheet.id;
 
     const payload = { sheet: this.getActiveSheet() };
@@ -163,28 +212,27 @@ class InMemorySpreadsheet {
 
   renameSheet(oldName, newName) {
     const from = String(oldName);
-    const to = String(newName);
-    if (to.trim().length === 0) throw new Error("New sheet name must be a non-empty string");
-    if (this._sheets.some((s) => s.name === to)) {
-      throw new Error(`Sheet already exists: ${to}`);
-    }
+    const to = validateSheetName(newName);
+    const target = normalizeSheetNameForCaseInsensitiveCompare(to);
 
-    const sheet = this._sheets.find((s) => s.name === from);
-    if (!sheet) throw new Error(`Unknown sheet: ${from}`);
+    const sheet = this._getSheetRecordByName(from);
+    if (this._sheets.some((s) => s.id !== sheet.id && normalizeSheetNameForCaseInsensitiveCompare(s.name) === target)) {
+      throw new Error("sheet name already exists");
+    }
     sheet.name = to;
     return { id: sheet.id, name: sheet.name };
   }
 
   deleteSheet(name) {
     const sheetName = String(name);
-    const idx = this._sheets.findIndex((s) => s.name === sheetName);
+    const record = this._getSheetRecordByName(sheetName);
+    const idx = this._sheets.indexOf(record);
     if (idx === -1) throw new Error(`Unknown sheet: ${sheetName}`);
     if (this._sheets.length === 1) {
       throw new Error("Cannot delete the last remaining sheet");
     }
 
-    const sheet = this._sheets[idx];
-    const wasActive = sheet.id === this._activeSheetId;
+    const wasActive = record.id === this._activeSheetId;
     this._sheets.splice(idx, 1);
 
     if (wasActive) {
@@ -197,8 +245,7 @@ class InMemorySpreadsheet {
 
   activateSheet(name) {
     const sheetName = String(name);
-    const sheet = this._sheets.find((s) => s.name === sheetName);
-    if (!sheet) throw new Error(`Unknown sheet: ${sheetName}`);
+    const sheet = this._getSheetRecordByName(sheetName);
     if (sheet.id === this._activeSheetId) return this.getActiveSheet();
 
     this._activeSheetId = sheet.id;
