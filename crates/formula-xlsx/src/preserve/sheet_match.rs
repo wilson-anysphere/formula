@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use roxmltree::Document;
 
+use formula_model::sheet_name_eq_case_insensitive;
+
 use crate::path::resolve_target;
 use crate::relationships::parse_relationships;
 use crate::workbook::ChartExtractionError;
@@ -154,6 +156,19 @@ mod tests {
         assert_eq!(sheets[0].sheet_id, Some(1));
         assert_eq!(sheets[0].part_name, "xl/worksheets/sheet1.xml");
     }
+
+    #[test]
+    fn match_sheet_by_name_or_index_is_case_insensitive_like_excel() {
+        let sheets = vec![WorkbookSheetPart {
+            name: "Résumé".to_string(),
+            index: 0,
+            sheet_id: Some(1),
+            part_name: "xl/worksheets/sheet1.xml".to_string(),
+        }];
+
+        let matched = match_sheet_by_name_or_index(&sheets, "résumé", 123).expect("name match");
+        assert_eq!(matched.index, 0);
+    }
 }
 
 pub(crate) fn match_sheet_by_name_or_index<'a>(
@@ -163,6 +178,6 @@ pub(crate) fn match_sheet_by_name_or_index<'a>(
 ) -> Option<&'a WorkbookSheetPart> {
     sheets
         .iter()
-        .find(|sheet| sheet.name == preserved_name)
+        .find(|sheet| sheet_name_eq_case_insensitive(&sheet.name, preserved_name))
         .or_else(|| sheets.iter().find(|sheet| sheet.index == preserved_index))
 }

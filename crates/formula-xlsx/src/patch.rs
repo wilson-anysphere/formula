@@ -594,7 +594,7 @@ fn resolve_worksheet_part_for_selector(
     // Sheet name selector (case-insensitive, matching Excel).
     if let Some(sheet) = workbook_sheets
         .iter()
-        .find(|s| s.name.eq_ignore_ascii_case(selector))
+        .find(|s| formula_model::sheet_name_eq_case_insensitive(&s.name, selector))
     {
         return resolve_worksheet_part(pkg, sheet);
     }

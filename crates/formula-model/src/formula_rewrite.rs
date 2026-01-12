@@ -1,14 +1,11 @@
 use unicode_normalization::UnicodeNormalization;
 
-/// Excel compares sheet names case-insensitively.
+/// Excel compares sheet names case-insensitively across Unicode.
 ///
-/// We approximate Excel's behavior by:
-/// - normalizing with Unicode NFKC (compatibility normalization)
-/// - applying Unicode uppercasing
-///
-/// This is deterministic and locale-independent. It is not a byte-level ASCII-only compare,
-/// and it handles common Unicode edge cases (e.g. compatibility characters).
-pub(crate) fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
+/// We approximate Excel's behavior by normalizing both names with Unicode NFKC
+/// (compatibility normalization) and then applying Unicode uppercasing. This is
+/// deterministic and locale-independent.
+pub fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
     a.nfkc()
         .flat_map(|c| c.to_uppercase())
         .eq(b.nfkc().flat_map(|c| c.to_uppercase()))
