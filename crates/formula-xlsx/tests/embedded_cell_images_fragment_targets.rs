@@ -1,75 +1,85 @@
-use std::io::{Cursor, Write};
-
-use formula_model::CellRef;
-use formula_xlsx::XlsxPackage;
-use zip::write::FileOptions;
-use zip::ZipWriter;
-
-fn build_package(entries: &[(&str, &[u8])]) -> Vec<u8> {
-    let cursor = Cursor::new(Vec::new());
-    let mut zip = ZipWriter::new(cursor);
-    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
-
-    for (name, bytes) in entries {
-        zip.start_file(*name, options).unwrap();
-        zip.write_all(bytes).unwrap();
-    }
-
-    zip.finish().unwrap().into_inner()
-}
+use base64::Engine as _;
 
 #[test]
 fn embedded_cell_images_strip_uri_fragments_in_relationship_targets() {
-    let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
- xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets>
-    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
-  </sheets>
-</workbook>"#;
+    // Use rust_xlsxwriter to generate a real embedded-image-in-cell workbook, then mutate the
+    // richValueRel relationships to include a URI fragment in the image Target. The extractor must
+    // strip the fragment when resolving OPC part names.
+    let png_bytes = base64::engine::general_purpose::STANDARD
+        .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/58HAQUBAO3+2NoAAAAASUVORK5CYII=")
+        .expect("valid base64 png");
 
-    let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-</Relationships>"#;
+    let mut workbook = rust_xlsxwriter::Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    let image = rust_xlsxwriter::Image::new_from_buffer(&png_bytes).expect("image from buffer");
+    worksheet
+        .embed_image(0, 0, &image)
+        .expect("embed image into A1");
 
-    let sheet1_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <sheetData>
-    <row r="1">
-      <c r="A1" vm="1"/>
-    </row>
-  </sheetData>
-</worksheet>"#;
+    let bytes = workbook.save_to_buffer().expect("save workbook");
+    let bytes = rewrite_zip_part(&bytes, "xl/richData/_rels/richValueRel.xml.rels", |rels| {
+        let xml = std::str::from_utf8(rels).expect("rels xml utf-8");
+        // Append a fragment to the first PNG target.
+        let patched = xml.replacen(".png\"", ".png#fragment\"", 1);
+        assert!(
+            patched.contains("#fragment"),
+            "expected patched rels xml to contain #fragment, got: {patched}"
+        );
+        patched.into_bytes()
+    });
 
-    let rich_value_rel_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<richValueRel xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
- xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <rel r:id="rId1"/>
-</richValueRel>"#;
-
-    let rich_value_rel_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png#fragment"/>
-</Relationships>"#;
-
-    let bytes = build_package(&[
-        ("xl/workbook.xml", workbook_xml),
-        ("xl/_rels/workbook.xml.rels", workbook_rels),
-        ("xl/worksheets/sheet1.xml", sheet1_xml),
-        ("xl/richData/richValueRel.xml", rich_value_rel_xml),
-        ("xl/richData/_rels/richValueRel.xml.rels", rich_value_rel_rels),
-        ("xl/media/image1.png", b"png-bytes"),
-    ]);
-
-    let pkg = XlsxPackage::from_bytes(&bytes).expect("read package");
+    let pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes).expect("read package");
     let images = pkg
         .extract_embedded_cell_images()
         .expect("extract embedded cell images");
 
-    let key = ("xl/worksheets/sheet1.xml".to_string(), CellRef::from_a1("A1").unwrap());
+    let key = (
+        "xl/worksheets/sheet1.xml".to_string(),
+        formula_model::CellRef::from_a1("A1").unwrap(),
+    );
     let image = images.get(&key).expect("expected embedded image at A1");
     assert_eq!(image.image_part, "xl/media/image1.png");
-    assert_eq!(image.image_bytes, b"png-bytes");
+    assert_eq!(image.image_bytes, png_bytes);
 }
 
+fn rewrite_zip_part(
+    bytes: &[u8],
+    part_name: &str,
+    rewrite: impl FnOnce(&[u8]) -> Vec<u8>,
+) -> Vec<u8> {
+    use std::io::{Cursor, Read, Write};
+
+    use zip::write::FileOptions;
+    use zip::{ZipArchive, ZipWriter};
+
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).expect("open zip");
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+
+    let mut rewrite = Some(rewrite);
+    let mut rewritten = false;
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).expect("zip entry");
+        let name = file.name().to_string();
+        let options = FileOptions::<()>::default().compression_method(file.compression());
+
+        if file.is_dir() {
+            zip.add_directory(name, options).expect("add dir");
+            continue;
+        }
+
+        let mut data = Vec::new();
+        file.read_to_end(&mut data).expect("read zip entry");
+        if name == part_name {
+            let f = rewrite.take().expect("rewrite function already used");
+            data = f(&data);
+            rewritten = true;
+        }
+
+        zip.start_file(name, options).expect("start file");
+        zip.write_all(&data).expect("write zip entry");
+    }
+
+    assert!(rewritten, "expected to rewrite zip part {part_name}");
+    zip.finish().expect("finish zip").into_inner()
+}
