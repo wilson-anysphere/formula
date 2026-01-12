@@ -648,7 +648,7 @@ High-level contents (see the file for the exhaustive list):
   - `close-prep-done`, `close-handled`, `open-file-ready`, `oauth-redirect-ready`
   - `updater-ui-ready`
   - `coi-check-result` (used by `pnpm -C apps/desktop check:coi`)
-- Updater UI requires `updater:allow-check` and `updater:allow-download-and-install` to call the updater plugin from JS.
+- Updater UI requires `updater:allow-check`, `updater:allow-download`, and `updater:allow-install` to call the updater plugin from JS.
 
 We intentionally keep capabilities narrow and rely on explicit Rust commands + higher-level app permission gates (macro trust, DLP, extension permissions) for privileged operations.
 
