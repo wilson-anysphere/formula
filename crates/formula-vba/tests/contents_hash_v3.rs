@@ -451,7 +451,19 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
     expected.extend_from_slice(designer_bytes);
     expected.extend(std::iter::repeat(0u8).take(1023 - designer_bytes.len()));
 
+    let actual_project_normalized =
+        project_normalized_data_v3(&vba_project_bin).expect("ProjectNormalizedData v3");
+    assert_eq!(
+        actual_project_normalized, expected,
+        "expected ProjectNormalizedData v3 transcript bytes to match MS-OVBA §2.4.2"
+    );
+
     let actual_digest = contents_hash_v3(&vba_project_bin).expect("ContentsHashV3");
+    let expected_digest_from_transcript = Sha256::digest(&expected).to_vec();
+    assert_eq!(
+        actual_digest, expected_digest_from_transcript,
+        "expected ContentsHashV3 to equal SHA-256(ProjectNormalizedData v3)"
+    );
     // Hard-coded expected digest bytes to keep this test deterministic and to catch
     // accidental transcript changes.
     let expected_digest: [u8; 32] = [
@@ -459,7 +471,11 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
         0x14, 0x9b, 0x87, 0x58, 0xb2, 0xd0, 0xda, 0x28, 0xe7, 0x9b, 0x71, 0xb8, 0x8d, 0x75,
         0x8c, 0x76, 0xc1, 0xb5,
     ];
-    assert_eq!(Sha256::digest(&expected).as_slice(), expected_digest.as_ref());
+    assert_eq!(
+        expected_digest_from_transcript.as_slice(),
+        expected_digest.as_ref(),
+        "digest constant should match the digest of the explicit transcript above"
+    );
     assert_eq!(actual_digest.as_slice(), expected_digest.as_ref());
 }
 
