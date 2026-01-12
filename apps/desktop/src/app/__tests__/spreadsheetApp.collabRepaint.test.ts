@@ -150,7 +150,7 @@ describe("SpreadsheetApp collab repaint", () => {
     root.remove();
   });
 
-  it("upgrades to a full refresh when a remote edit touches the active cell (keeps status in sync)", () => {
+  it("keeps the status bar in sync when a remote edit changes an active cell dependency", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -165,22 +165,28 @@ describe("SpreadsheetApp collab repaint", () => {
 
     const doc = app.getDocument();
     const sheetId = app.getCurrentSheetId();
-    const before = doc.getCell(sheetId, { row: 0, col: 0 }) as any;
+    // Make the active cell depend on B2.
+    doc.setCellFormula(sheetId, { row: 0, col: 0 }, "=B2");
+    app.refresh();
+    expect(status.activeValue.textContent).toBe("2");
+
+    const before = doc.getCell(sheetId, { row: 1, col: 1 }) as any;
 
     doc.applyExternalDeltas(
       [
         {
           sheetId,
-          row: 0,
-          col: 0,
+          row: 1,
+          col: 1,
           before,
-          after: { value: "Remote Active", formula: null, styleId: before?.styleId ?? 0 },
+          after: { value: 99, formula: null, styleId: before?.styleId ?? 0 },
         },
       ],
       { source: "collab" },
     );
 
-    expect(refreshSpy).toHaveBeenCalledWith("full");
+    expect(refreshSpy).toHaveBeenCalledWith("scroll");
+    expect(status.activeValue.textContent).toBe("99");
 
     app.destroy();
     root.remove();

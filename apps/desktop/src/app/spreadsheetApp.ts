@@ -624,6 +624,7 @@ export class SpreadsheetApp {
 
   private renderScheduled = false;
   private pendingRenderMode: "full" | "scroll" = "full";
+  private statusUpdateScheduled = false;
   private windowKeyDownListener: ((e: KeyboardEvent) => void) | null = null;
   private clipboardProviderPromise: ReturnType<typeof createClipboardProvider> | null = null;
   private clipboardCopyContext:
@@ -1290,23 +1291,11 @@ export class SpreadsheetApp {
       const source = typeof payload?.source === "string" ? payload.source : "";
       const isExternalSource = source === "collab" || source === "backend" || source === "python" || source === "macro";
       if (!isExternalSource) return;
-
-      // Most external changes only need a scroll-mode refresh (grid repaint + overlay positioning).
-      // However, if a remote edit touches the active cell, we also need to update the status bar /
-      // formula bar value. Use a full refresh in that case (still debounced via rAF).
-      const active = this.selection?.active;
-      const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
-      const touchesActiveCell =
-        active != null &&
-        deltas.some(
-          (d: any) =>
-            d &&
-            String(d.sheetId ?? "") === this.sheetId &&
-            Number(d.row) === active.row &&
-            Number(d.col) === active.col
-        );
-
-      this.refresh(touchesActiveCell ? "full" : "scroll");
+      this.refresh("scroll");
+      // External edits can affect the active cell's computed value even when the active cell itself
+      // wasn't directly edited (e.g. a dependency cell changes). Ensure the status bar + formula bar
+      // stay in sync without forcing a full re-render.
+      this.scheduleStatusUpdate();
     });
 
     if (!collabEnabled && typeof window !== "undefined") {
@@ -1715,6 +1704,28 @@ export class SpreadsheetApp {
       this.renderPresence();
       this.renderSelection();
       if (renderMode === "full") this.updateStatus();
+    });
+  }
+
+  private scheduleStatusUpdate(): void {
+    if (this.disposed) return;
+    if (!this.uiReady) return;
+    // A pending full refresh will update status anyway.
+    if (this.renderScheduled && this.pendingRenderMode === "full") return;
+    if (this.statusUpdateScheduled) return;
+    this.statusUpdateScheduled = true;
+
+    const schedule =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (cb: FrameRequestCallback) =>
+            globalThis.setTimeout(() => cb(typeof performance !== "undefined" ? performance.now() : Date.now()), 0);
+
+    schedule(() => {
+      this.statusUpdateScheduled = false;
+      if (this.disposed) return;
+      if (!this.uiReady) return;
+      this.updateStatus();
     });
   }
 
