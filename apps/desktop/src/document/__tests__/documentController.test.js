@@ -559,6 +559,18 @@ test("sheet view updates increment updateVersion but not contentVersion", () => 
   assert.equal(doc.contentVersion, 1);
 });
 
+test("format-only cell edits increment updateVersion but not contentVersion", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  assert.equal(doc.updateVersion, 1);
+  assert.equal(doc.contentVersion, 1);
+
+  doc.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
+  assert.equal(doc.updateVersion, 2);
+  // Formatting does not affect workbook schema/data sampling for AI context; ignore it for contentVersion.
+  assert.equal(doc.contentVersion, 1);
+});
+
 test("setColWidth/setRowHeight are undoable", () => {
   const doc = new DocumentController();
 
