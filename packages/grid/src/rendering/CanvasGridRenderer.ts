@@ -87,6 +87,14 @@ function crispLine(pos: number): number {
   return Math.round(pos) + 0.5;
 }
 
+function crispStrokePosition(pos: number, lineWidth: number): number {
+  const roundedPos = Math.round(pos);
+  const roundedWidth = Math.round(lineWidth);
+  // For odd integer line widths, offset by 0.5 to land on pixel boundaries.
+  if (roundedWidth % 2 === 1) return roundedPos + 0.5;
+  return roundedPos;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -2397,10 +2405,11 @@ export class CanvasGridRenderer {
     const zoom = this.zoom;
     const paddingX = 4 * zoom;
     const paddingY = 2 * zoom;
+    const decorationLineWidth = Math.max(1, zoom);
 
     // Font specs are part of the text-layout cache key and are returned in layout runs.
     // Avoid mutating a shared object after passing it to the layout engine.
-    let fontSpec = { family: "system-ui", sizePx: 12 * zoom, weight: "400", style: "normal" };
+    let fontSpec = { family: "system-ui", sizePx: 12 * zoom, weight: "400", style: "normal" } satisfies FontSpec;
     let currentFontFamily = "";
     let currentFontSize = -1;
     let currentFontWeight = "";
@@ -2827,7 +2836,6 @@ export class CanvasGridRenderer {
           const direction = style?.direction ?? "auto";
           const verticalAlign = style?.verticalAlign ?? "middle";
           const rotationDeg = style?.rotationDeg ?? 0;
-
           const underline = style?.underline === true;
           const strike = style?.strike === true;
           const hasTextDecorations = underline || strike;
@@ -3254,104 +3262,252 @@ export class CanvasGridRenderer {
     (gridCtx as any).setLineDash?.([]);
 
     const drawCellBorders = () => {
-      // Border rendering is intentionally conservative: draw explicit per-cell borders
-      // (Excel-like styling) on top of gridlines.
+      // Custom per-cell borders (Excel-like), drawn on top of gridlines.
       //
-      // Note: This currently ignores merged-cell border collapsing rules. Merged regions
-      // are rendered separately above and their constituent cells are skipped below.
-      let currentStrokeStyle = "";
-      let currentLineWidth = -1;
-      let currentDashKey = "";
-
-      const applyBorderStroke = (spec: any, scale: number) => {
-        const color = typeof spec?.color === "string" ? spec.color : "#000000";
-        const width = typeof spec?.width === "number" && Number.isFinite(spec.width) ? spec.width * scale : 1 * scale;
-        const style = typeof spec?.style === "string" ? spec.style : "solid";
-
-        if (color !== currentStrokeStyle) {
-          gridCtx.strokeStyle = color;
-          currentStrokeStyle = color;
-        }
-        if (width !== currentLineWidth) {
-          gridCtx.lineWidth = width;
-          currentLineWidth = width;
-        }
-
-        let dash: number[] = [];
-        if (style === "dashed") dash = [4 * scale, 4 * scale];
-        else if (style === "dotted") dash = [1 * scale, 2 * scale];
-
-        const dashKey = dash.length === 0 ? "" : dash.join(",");
-        if (dashKey !== currentDashKey) {
-          currentDashKey = dashKey;
-          (gridCtx as any).setLineDash?.(dash);
-        }
+      // Shared-edge conflict resolution:
+      // - larger effective width (border.width * zoom) wins
+      // - ties prefer the "right/bottom" side for deterministic output.
+      //
+      // Merged cells: we skip border segments that land on interior merged gridlines.
+      // Cells inside a merged region use the anchor cell's style for boundary borders.
+      type BorderBucket = {
+        style: CellBorderSpec["style"];
+        color: string;
+        lineWidth: number;
+        dash: number[];
+        segments: number[];
+        doubleOffset?: number;
+        doubleOrientation?: "vertical" | "horizontal";
       };
 
-      const alignPos = (pos: number, width: number) => {
-        if (Math.abs(width - 1) < 0.001) return crispLine(pos);
-        return pos;
+      const borderBuckets: BorderBucket[] = [];
+      const bucketsByStyle = new Map<string, Map<string, Map<number, BorderBucket>>>();
+
+      const setLineDashSafe = (dash: number[]) => {
+        const fn = (gridCtx as unknown as { setLineDash?: (segments: number[]) => void }).setLineDash;
+        if (typeof fn === "function") fn.call(gridCtx, dash);
       };
 
-      const drawLine = (x1: number, y1: number, x2: number, y2: number) => {
-        gridCtx.beginPath();
-        gridCtx.moveTo(x1, y1);
-        gridCtx.lineTo(x2, y2);
-        gridCtx.stroke();
+      const dashForStyle = (style: CellBorderSpec["style"], lineWidth: number): number[] => {
+        if (style === "dashed") {
+          const unit = Math.max(1, lineWidth);
+          return [4 * unit, 3 * unit];
+        }
+        if (style === "dotted") {
+          const unit = Math.max(1, lineWidth);
+          return [unit, 2 * unit];
+        }
+        return [];
       };
 
-      const zoomScale = zoom;
+      const getBucket = (styleKey: string, color: string, lineWidth: number): BorderBucket => {
+        let byColor = bucketsByStyle.get(styleKey);
+        if (!byColor) {
+          byColor = new Map();
+          bucketsByStyle.set(styleKey, byColor);
+        }
+        let byWidth = byColor.get(color);
+        if (!byWidth) {
+          byWidth = new Map();
+          byColor.set(color, byWidth);
+        }
+        let bucket = byWidth.get(lineWidth);
+        if (bucket) return bucket;
 
-      let borderRowYSheet = startRowYSheet;
-      for (let row = startRow; row < endRow; row++) {
-        const rowHeight = rowAxis.getSize(row);
-        const y = borderRowYSheet - quadrant.scrollBaseY + quadrant.originY;
+        const isDouble = styleKey.startsWith("double");
+        const orientation = styleKey === "double-v" ? "vertical" : styleKey === "double-h" ? "horizontal" : undefined;
+        const style: BorderBucket["style"] = isDouble ? "double" : (styleKey as BorderBucket["style"]);
+        const dash = isDouble ? [] : dashForStyle(style, lineWidth);
 
-        let borderColXSheet = startColXSheet;
-        for (let col = startCol; col < endCol; col++) {
-          const colWidth = colAxis.getSize(col);
-          const x = borderColXSheet - quadrant.scrollBaseX + quadrant.originX;
+        bucket = {
+          style,
+          color,
+          lineWidth,
+          dash,
+          segments: [],
+          doubleOffset: isDouble ? lineWidth : undefined,
+          doubleOrientation: orientation
+        };
+        byWidth.set(lineWidth, bucket);
+        borderBuckets.push(bucket);
+        return bucket;
+      };
 
-          if (hasMerges && mergedIndex.rangeAt({ row, col })) {
-            borderColXSheet += colWidth;
-            continue;
+      const effectiveWidth = (border: { width: number } | null | undefined): number => {
+        if (!border) return 0;
+        const w = border.width;
+        if (!Number.isFinite(w) || w <= 0) return 0;
+        return w * zoom;
+      };
+
+      const cellRef = { row: 0, col: 0 };
+      const getCellForBorders = (row: number, col: number): CellData | null => {
+        // Avoid fetching outside of the already-rendered cell window: border conflict resolution
+        // for offscreen neighbors is intentionally skipped for performance.
+        if (row < startRow || row >= endRow || col < startCol || col >= endCol) return null;
+        if (row < 0 || col < 0 || row >= rowCount || col >= colCount) return null;
+        if (hasMerges) {
+          cellRef.row = row;
+          cellRef.col = col;
+          const range = mergedIndex.rangeAt(cellRef);
+          if (range) return getCellCached(range.startRow, range.startCol);
+        }
+        return getCellCached(row, col);
+      };
+
+      // Vertical border segments (between columns) per row.
+      {
+        let ySheet = startRowYSheet;
+        for (let row = startRow; row < endRow; row++) {
+          const rowHeight = rowAxis.getSize(row);
+          const y = ySheet - quadrant.scrollBaseY + quadrant.originY;
+          const yNext = y + rowHeight;
+
+          let xSheet = startColXSheet;
+          for (let colBoundary = startCol - 1; colBoundary < endCol; colBoundary++) {
+            if (!hasMerges || !isInteriorVerticalGridline(mergedIndex, row, colBoundary)) {
+              const leftCol = colBoundary;
+              const rightCol = colBoundary + 1;
+
+              const leftCell = getCellForBorders(row, leftCol);
+              const rightCell = getCellForBorders(row, rightCol);
+
+              const leftBorder = leftCell?.style?.borders?.right;
+              const rightBorder = rightCell?.style?.borders?.left;
+
+              const leftEff = effectiveWidth(leftBorder);
+              const rightEff = effectiveWidth(rightBorder);
+
+              // Prefer right-side borders on ties for deterministic results.
+              let chosen = leftBorder;
+              let chosenEff = leftEff;
+              if (rightEff > chosenEff || (rightEff === chosenEff && rightEff > 0)) {
+                chosen = rightBorder;
+                chosenEff = rightEff;
+              }
+
+              if (chosen && chosenEff > 0) {
+                const isDouble = chosen.style === "double";
+                const strokeWidth = isDouble ? chosenEff / 3 : chosenEff;
+                if (strokeWidth > 0) {
+                  const styleKey = isDouble ? "double-v" : chosen.style;
+                  const bucket = getBucket(styleKey, chosen.color, strokeWidth);
+                  const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
+                  const cx = crispStrokePosition(x, strokeWidth);
+                  bucket.segments.push(cx, y, cx, yNext);
+                }
+              }
+            }
+
+            const nextCol = colBoundary + 1;
+            if (nextCol < endCol) {
+              xSheet += colAxis.getSize(nextCol);
+            }
           }
 
-          const cell = getCellCached(row, col);
-          const borders = cell?.style?.borders as any;
-          if (borders) {
-            const top = borders.top;
-            const right = borders.right;
-            const bottom = borders.bottom;
-            const left = borders.left;
-
-            if (top) {
-              applyBorderStroke(top, zoomScale);
-              const y1 = alignPos(y, currentLineWidth);
-              drawLine(x, y1, x + colWidth, y1);
-            }
-            if (right) {
-              applyBorderStroke(right, zoomScale);
-              const x1 = alignPos(x + colWidth, currentLineWidth);
-              drawLine(x1, y, x1, y + rowHeight);
-            }
-            if (bottom) {
-              applyBorderStroke(bottom, zoomScale);
-              const y1 = alignPos(y + rowHeight, currentLineWidth);
-              drawLine(x, y1, x + colWidth, y1);
-            }
-            if (left) {
-              applyBorderStroke(left, zoomScale);
-              const x1 = alignPos(x, currentLineWidth);
-              drawLine(x1, y, x1, y + rowHeight);
-            }
-          }
-
-          borderColXSheet += colWidth;
+          ySheet += rowHeight;
         }
-
-        borderRowYSheet += rowHeight;
       }
+
+      // Horizontal border segments (between rows) per column.
+      {
+        let ySheet = startRowYSheet;
+        for (let rowBoundary = startRow - 1; rowBoundary < endRow; rowBoundary++) {
+          const y = ySheet - quadrant.scrollBaseY + quadrant.originY;
+
+          let xSheet = startColXSheet;
+          for (let col = startCol; col < endCol; col++) {
+            const colWidth = colAxis.getSize(col);
+            const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
+            const xNext = x + colWidth;
+
+            if (!hasMerges || !isInteriorHorizontalGridline(mergedIndex, rowBoundary, col)) {
+              const topRow = rowBoundary;
+              const bottomRow = rowBoundary + 1;
+
+              const topCell = getCellForBorders(topRow, col);
+              const bottomCell = getCellForBorders(bottomRow, col);
+
+              const topSideBorder = topCell?.style?.borders?.bottom;
+              const bottomSideBorder = bottomCell?.style?.borders?.top;
+
+              const topEff = effectiveWidth(topSideBorder);
+              const bottomEff = effectiveWidth(bottomSideBorder);
+
+              // Prefer bottom-side borders on ties for deterministic results.
+              let chosen = topSideBorder;
+              let chosenEff = topEff;
+              if (bottomEff > chosenEff || (bottomEff === chosenEff && bottomEff > 0)) {
+                chosen = bottomSideBorder;
+                chosenEff = bottomEff;
+              }
+
+              if (chosen && chosenEff > 0) {
+                const isDouble = chosen.style === "double";
+                const strokeWidth = isDouble ? chosenEff / 3 : chosenEff;
+                if (strokeWidth > 0) {
+                  const styleKey = isDouble ? "double-h" : chosen.style;
+                  const bucket = getBucket(styleKey, chosen.color, strokeWidth);
+                  const cy = crispStrokePosition(y, strokeWidth);
+                  bucket.segments.push(x, cy, xNext, cy);
+                }
+              }
+            }
+
+            xSheet += colWidth;
+          }
+
+          const nextRow = rowBoundary + 1;
+          if (nextRow < endRow) {
+            ySheet += rowAxis.getSize(nextRow);
+          }
+        }
+      }
+
+      for (const bucket of borderBuckets) {
+        if (bucket.segments.length === 0) continue;
+        gridCtx.strokeStyle = bucket.color;
+        gridCtx.lineWidth = bucket.lineWidth;
+        setLineDashSafe(bucket.dash);
+        gridCtx.beginPath();
+
+        if (bucket.style === "double" && bucket.doubleOffset && bucket.doubleOrientation) {
+          const offset = bucket.doubleOffset;
+          const segments = bucket.segments;
+          if (bucket.doubleOrientation === "vertical") {
+            for (let i = 0; i < segments.length; i += 4) {
+              const x = segments[i]!;
+              const y1 = segments[i + 1]!;
+              const y2 = segments[i + 3]!;
+              gridCtx.moveTo(x - offset, y1);
+              gridCtx.lineTo(x - offset, y2);
+              gridCtx.moveTo(x + offset, y1);
+              gridCtx.lineTo(x + offset, y2);
+            }
+          } else {
+            for (let i = 0; i < segments.length; i += 4) {
+              const x1 = segments[i]!;
+              const y1 = segments[i + 1]!;
+              const x2 = segments[i + 2]!;
+              gridCtx.moveTo(x1, y1 - offset);
+              gridCtx.lineTo(x2, y1 - offset);
+              gridCtx.moveTo(x1, y1 + offset);
+              gridCtx.lineTo(x2, y1 + offset);
+            }
+          }
+        } else {
+          const segments = bucket.segments;
+          for (let i = 0; i < segments.length; i += 4) {
+            gridCtx.moveTo(segments[i]!, segments[i + 1]!);
+            gridCtx.lineTo(segments[i + 2]!, segments[i + 3]!);
+          }
+        }
+
+        gridCtx.stroke();
+      }
+
+      // Ensure diagonal border rendering starts from a clean dash pattern.
+      setLineDashSafe([]);
     };
 
     if (!hasMerges) {
@@ -3803,7 +3959,7 @@ export class CanvasGridRenderer {
           const fontFamily = style?.fontFamily ?? "system-ui";
           const fontWeight = style?.fontWeight ?? "400";
           const fontStyle = style?.fontStyle ?? "normal";
-          const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight, style: fontStyle };
+          const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight, style: fontStyle } satisfies FontSpec;
           const font = toCanvasFontString(fontSpec);
 
           if (font !== currentFont) {
