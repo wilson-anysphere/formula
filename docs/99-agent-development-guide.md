@@ -65,7 +65,7 @@ cargo test
 The wrapper script:
 1. Enforces a **14GB address space limit** via `RLIMIT_AS`
 2. Limits parallelism to **-j4** by default
-3. Caps **RUST_TEST_THREADS** to avoid spawning hundreds of threads
+3. Caps **RUST_TEST_THREADS** to avoid spawning hundreds of threads (default: `min(nproc, 16, jobs * 4)`)
 4. Caps **RAYON_NUM_THREADS** (defaults to `FORMULA_CARGO_JOBS`) to avoid huge per-process Rayon thread pools on high-core agent hosts
 5. Defaults `MAKEFLAGS=-j<jobs>` and `CARGO_PROFILE_*_CODEGEN_UNITS=<jobs>` to keep non-Rust build steps + rustc/LLVM parallelism aligned
 6. Uses a **repo-local CARGO_HOME** to avoid lock contention
@@ -116,7 +116,7 @@ Environment variables to tune behavior:
 - `FORMULA_CARGO_JOBS` - parallelism (default: 4)
 - `FORMULA_CARGO_TEST_JOBS` - `cargo test` parallelism (default: 1)
 - `FORMULA_CARGO_LIMIT_AS` - address space limit (default: 14G)
-- `FORMULA_RUST_TEST_THREADS` - test parallelism (default: min(nproc, 16))
+- `FORMULA_RUST_TEST_THREADS` - test parallelism (default: min(nproc, 16, jobs * 4))
 - `FORMULA_RAYON_NUM_THREADS` - Rayon thread pool size (`RAYON_NUM_THREADS`) (default: `FORMULA_CARGO_JOBS`)
 - `FORMULA_OPENSSL_VENDOR=1` - disable the wrapper's auto-setting of `OPENSSL_NO_VENDOR` (useful if you need vendored OpenSSL)
 - `FORMULA_CARGO_RETRY_ATTEMPTS` - retry count for transient OS resource exhaustion (default: 5)
