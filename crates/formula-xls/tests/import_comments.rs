@@ -166,3 +166,21 @@ fn imports_note_comment_text_split_across_continue_records_using_multibyte_codep
     assert_eq!(comments[0].content, "あ");
     assert_eq!(comments[0].id, "xls-note:A1:1");
 }
+
+#[test]
+fn imports_note_comment_text_split_across_continue_records_using_utf8_codepage() {
+    let bytes =
+        xls_fixture_builder::build_note_comment_split_across_continues_codepage_65001_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("NotesSplitUtf8")
+        .expect("NotesSplitUtf8 missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let comments = sheet.comments_for_cell(a1);
+    assert_eq!(comments.len(), 1, "expected 1 comment on A1");
+    assert_eq!(comments[0].content, "€");
+    assert_eq!(comments[0].id, "xls-note:A1:1");
+}

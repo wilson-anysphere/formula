@@ -581,6 +581,25 @@ pub fn build_note_comment_split_across_continues_codepage_932_fixture_xls() -> V
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment, where the
+/// TXO text is split across multiple `CONTINUE` records and uses `CODEPAGE=65001` (UTF-8).
+///
+/// The fixture splits a 3-byte UTF-8 character (`"€"` = `0xE2 0x82 0xAC`) across separate CONTINUE
+/// fragments to ensure we buffer/decode compressed bytes across record boundaries.
+pub fn build_note_comment_split_across_continues_codepage_65001_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_split_across_continues_codepage_65001_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a NOTE/OBJ pair but **missing** the associated TXO text
 /// payload.
 ///
@@ -1080,6 +1099,14 @@ fn build_note_comment_split_across_continues_codepage_932_workbook_stream() -> V
     )
 }
 
+fn build_note_comment_split_across_continues_codepage_65001_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "NotesSplitUtf8",
+        &build_note_comment_split_across_continues_codepage_65001_sheet_stream(),
+        65001,
+    )
+}
+
 fn build_note_comment_missing_txo_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream(
         "NotesMissingTxo",
@@ -1212,6 +1239,19 @@ fn build_note_comment_split_across_continues_codepage_932_sheet_stream() -> Vec<
     let part1 = [0x82u8];
     let part2 = [0xA0u8];
     let segments: [&[u8]; 2] = [&part1, &part2];
+
+    build_note_comment_sheet_stream_with_compressed_txo(false, OBJECT_ID, AUTHOR, &segments)
+}
+
+fn build_note_comment_split_across_continues_codepage_65001_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const AUTHOR: &str = "Alice";
+
+    // "€" is 0xE2 0x82 0xAC in UTF-8. Split across three `CONTINUE` records.
+    let part1 = [0xE2u8];
+    let part2 = [0x82u8];
+    let part3 = [0xACu8];
+    let segments: [&[u8]; 3] = [&part1, &part2, &part3];
 
     build_note_comment_sheet_stream_with_compressed_txo(false, OBJECT_ID, AUTHOR, &segments)
 }
