@@ -32,7 +32,9 @@ function resolveNodeLoaderArgs(loaderUrl: string): string[] {
 
 describe("@formula/ai-audit browser entrypoint", () => {
   it("imports without Node-only globals (process.versions.node, Buffer)", () => {
-    const loaderUrl = new URL("./resolve-ts-loader.mjs", import.meta.url);
+    // Use the repo's shared TS loader (used by the node:test runner) so this suite
+    // stays in sync with how we execute workspace TS sources under Node.
+    const loaderUrl = new URL("../../../scripts/resolve-ts-loader.mjs", import.meta.url);
 
     const result = spawnSync(
       process.execPath,
