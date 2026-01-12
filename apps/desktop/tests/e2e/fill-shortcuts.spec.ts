@@ -89,7 +89,7 @@ test.describe("fill shortcuts (Ctrl/Cmd+D, Ctrl/Cmd+R)", () => {
         page.evaluate(() => (window as any).__formulaApp.getDocument().undoLabel),
       ]);
       expect(undoDepthAfterFill - beforeUndoDepth).toBe(1);
-      expect(undoLabel).toBe("Fill");
+      expect(undoLabel).toBe("Fill Down");
 
       await page.evaluate(() => (window as any).__formulaApp.undo());
       await waitForIdle(page);
@@ -195,7 +195,7 @@ test.describe("fill shortcuts (Ctrl/Cmd+D, Ctrl/Cmd+R)", () => {
         page.evaluate(() => (window as any).__formulaApp.getDocument().undoLabel),
       ]);
       expect(undoDepthAfterFill - beforeUndoDepth).toBe(1);
-      expect(undoLabel).toBe("Fill");
+      expect(undoLabel).toBe("Fill Right");
 
       await page.evaluate(() => (window as any).__formulaApp.undo());
       await waitForIdle(page);

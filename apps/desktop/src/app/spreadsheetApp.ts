@@ -42,6 +42,7 @@ import { MockEngine } from "../document/engine.js";
 import { isRedoKeyboardEvent, isUndoKeyboardEvent } from "../document/shortcuts.js";
 import { showToast } from "../extensions/ui.js";
 import { applyNumberFormatPreset, toggleBold, toggleItalic, toggleUnderline } from "../formatting/toolbar.js";
+import { formatValueWithNumberFormat } from "../formatting/numberFormat.ts";
 import { createDesktopDlpContext } from "../dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
 import { DlpViolationError } from "../../../../packages/security/dlp/src/errors.js";
@@ -3243,11 +3244,11 @@ export class SpreadsheetApp {
     if (state.formula != null) {
       if (this.showFormulas) return state.formula;
       const computed = this.getCellComputedValue(cell);
-      return computed == null ? "" : String(computed);
+      return computed == null ? "" : this.formatCellValueForDisplay(cell, computed);
     }
 
     if (isRichTextValue(state.value)) return state.value.text;
-    if (state.value != null) return String(state.value);
+    if (state.value != null) return this.formatCellValueForDisplay(cell, state.value as any);
     return "";
   }
 
@@ -3919,7 +3920,7 @@ export class SpreadsheetApp {
             } else {
               const computed = this.getCellComputedValue({ row, col });
               if (computed != null) {
-                rich = { text: String(computed), runs: [] };
+                rich = { text: this.formatCellValueForDisplay({ row, col }, computed), runs: [] };
                 if (typeof computed === "string" && computed.startsWith("#")) {
                   color = errorTextColor;
                 }
@@ -3928,7 +3929,7 @@ export class SpreadsheetApp {
           } else if (isRichTextValue(state.value)) {
             rich = state.value;
           } else if (state.value != null) {
-            rich = { text: String(state.value), runs: [] };
+            rich = { text: this.formatCellValueForDisplay({ row, col }, state.value as any), runs: [] };
           }
 
           if (!rich || rich.text === "") continue;
@@ -7479,6 +7480,17 @@ export class SpreadsheetApp {
   private getCellDisplayValue(cell: CellCoord): string {
     const value = this.getCellComputedValue(cell);
     if (value == null) return "";
+    return this.formatCellValueForDisplay(cell, value);
+  }
+
+  private formatCellValueForDisplay(cell: CellCoord, value: SpreadsheetValue): string {
+    if (value == null) return "";
+    if (typeof value === "number" && Number.isFinite(value)) {
+      const docStyle: any = this.document.getCellFormat(this.sheetId, cell);
+      const rawNumberFormat = docStyle?.numberFormat ?? docStyle?.number_format;
+      const numberFormat = typeof rawNumberFormat === "string" && rawNumberFormat.trim() !== "" ? rawNumberFormat : null;
+      if (numberFormat) return formatValueWithNumberFormat(value, numberFormat);
+    }
     return String(value);
   }
 

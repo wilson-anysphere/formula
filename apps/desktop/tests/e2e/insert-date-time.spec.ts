@@ -68,10 +68,10 @@ test.describe("insert date/time shortcuts (Ctrl/Cmd+;)", () => {
         page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A2")),
         page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B2")),
       ]);
-      expect(a1).toBe("1/2/2020");
-      expect(b1).toBe("1/2/2020");
-      expect(a2).toBe("1/2/2020");
-      expect(b2).toBe("1/2/2020");
+      expect(a1).toBe("2020-01-02");
+      expect(b1).toBe("2020-01-02");
+      expect(a2).toBe("2020-01-02");
+      expect(b2).toBe("2020-01-02");
     });
 
     test(`Ctrl+Shift+; inserts the current time (${mode})`, async ({ page }) => {
@@ -108,11 +108,10 @@ test.describe("insert date/time shortcuts (Ctrl/Cmd+;)", () => {
         page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A2")),
         page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B2")),
       ]);
-      expect(a1).toBe("3:04");
-      expect(b1).toBe("3:04");
-      expect(a2).toBe("3:04");
-      expect(b2).toBe("3:04");
+      expect(a1).toBe("03:04:05");
+      expect(b1).toBe("03:04:05");
+      expect(a2).toBe("03:04:05");
+      expect(b2).toBe("03:04:05");
     });
   }
 });
-
