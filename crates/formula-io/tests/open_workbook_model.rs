@@ -51,6 +51,24 @@ fn open_workbook_model_xlsx_reads_formulas() {
 }
 
 #[test]
+fn open_workbook_model_xlsm() {
+    let path = fixture_path("xlsx/macros/basic.xlsm");
+    let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
+
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "Sheet1");
+}
+
+#[test]
+fn open_workbook_model_xlsx_ignores_chart_parts() {
+    let path = fixture_path("charts/xlsx/basic-chart.xlsx");
+    let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
+
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "Sheet1");
+}
+
+#[test]
 fn open_workbook_model_sniffs_extensionless_xlsx() {
     let path = fixture_path("xlsx/basic/basic.xlsx");
     let bytes = std::fs::read(&path).expect("read fixture");
