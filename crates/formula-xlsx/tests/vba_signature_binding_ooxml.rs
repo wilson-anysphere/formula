@@ -7,7 +7,6 @@ use formula_vba::{
     VbaProjectBindingVerification, VbaSignatureVerification,
 };
 use formula_xlsx::XlsxPackage;
-use openssl::hash::{hash, MessageDigest};
 use zip::write::FileOptions;
 
 const TEST_KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
@@ -225,6 +224,8 @@ fn build_xlsm_with_external_signature(project_ole: &[u8], signature_ole: &[u8]) 
 
 #[test]
 fn verifies_project_digest_binding_with_external_signature_part() {
+    use openssl::hash::{hash, MessageDigest};
+
     let project_ole = build_vba_project_bin(b'A');
     // Per MS-OSHARED §4.3, VBA signature DigestInfo digest bytes are MD5 (16 bytes) even when the
     // DigestInfo algorithm OID indicates SHA-1/SHA-256.
@@ -240,7 +241,7 @@ fn verifies_project_digest_binding_with_external_signature_part() {
     // VBA signatures sign an Authenticode `SpcIndirectDataContent` whose DigestInfo is the
     // project digest. We store it as:
     //   signed_content || pkcs7_detached_signature(signed_content)
-    let signed_content = build_spc_indirect_data_content_sha1(&digest);
+    let signed_content = build_spc_indirect_data_content_sha1(digest.as_ref());
     let pkcs7 = make_pkcs7_detached_signature(&signed_content);
     let mut signature_stream_payload = signed_content.clone();
     signature_stream_payload.extend_from_slice(&pkcs7);
