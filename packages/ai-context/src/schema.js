@@ -113,19 +113,24 @@ export function detectDataRegions(values) {
    * Use an index-based queue + typed visited grid to keep flood-fill linear in the number of
    * visited cells.
    *
-   * @type {Uint8Array[]}
+   * Flattened indexing: `idx = row * colCount + col`.
+   *
+   * @type {Uint8Array}
    */
-  const visited = Array.from({ length: rowCount }, () => new Uint8Array(colCount));
+  const visited = new Uint8Array(rowCount * colCount);
 
   /** @type {{ startRow: number, startCol: number, endRow: number, endCol: number }[]} */
   const regions = [];
 
   for (let r = 0; r < rowCount; r++) {
+    const row = values[r];
+    const rowOffset = r * colCount;
     for (let c = 0; c < colCount; c++) {
-      if (visited[r][c]) continue;
-      visited[r][c] = 1;
+      const startIdx = rowOffset + c;
+      if (visited[startIdx]) continue;
+      visited[startIdx] = 1;
 
-      if (isCellEmpty(values[r]?.[c])) continue;
+      if (isCellEmpty(row?.[c])) continue;
 
       let minRow = r;
       let maxRow = r;
@@ -145,26 +150,40 @@ export function detectDataRegions(values) {
         if (qc < minCol) minCol = qc;
         if (qc > maxCol) maxCol = qc;
 
+        const qRowOffset = qr * colCount;
+
         // Inline neighbor exploration to avoid per-cell allocations.
         // Up
-        if (qr > 0 && !visited[qr - 1][qc]) {
-          visited[qr - 1][qc] = 1;
+        if (qr > 0) {
+          const idx = qRowOffset - colCount + qc;
+          if (!visited[idx]) {
+            visited[idx] = 1;
           if (!isCellEmpty(values[qr - 1]?.[qc])) queue.push(qr - 1, qc);
+          }
         }
         // Down
-        if (qr + 1 < rowCount && !visited[qr + 1][qc]) {
-          visited[qr + 1][qc] = 1;
-          if (!isCellEmpty(values[qr + 1]?.[qc])) queue.push(qr + 1, qc);
+        if (qr + 1 < rowCount) {
+          const idx = qRowOffset + colCount + qc;
+          if (!visited[idx]) {
+            visited[idx] = 1;
+            if (!isCellEmpty(values[qr + 1]?.[qc])) queue.push(qr + 1, qc);
+          }
         }
         // Left
-        if (qc > 0 && !visited[qr][qc - 1]) {
-          visited[qr][qc - 1] = 1;
-          if (!isCellEmpty(values[qr]?.[qc - 1])) queue.push(qr, qc - 1);
+        if (qc > 0) {
+          const idx = qRowOffset + qc - 1;
+          if (!visited[idx]) {
+            visited[idx] = 1;
+            if (!isCellEmpty(values[qr]?.[qc - 1])) queue.push(qr, qc - 1);
+          }
         }
         // Right
-        if (qc + 1 < colCount && !visited[qr][qc + 1]) {
-          visited[qr][qc + 1] = 1;
-          if (!isCellEmpty(values[qr]?.[qc + 1])) queue.push(qr, qc + 1);
+        if (qc + 1 < colCount) {
+          const idx = qRowOffset + qc + 1;
+          if (!visited[idx]) {
+            visited[idx] = 1;
+            if (!isCellEmpty(values[qr]?.[qc + 1])) queue.push(qr, qc + 1);
+          }
         }
       }
 
