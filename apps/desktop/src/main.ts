@@ -3816,7 +3816,14 @@ if (
     };
 
     extensionSpreadsheetApi.closeWorkbook = async () => {
-      await handleNewWorkbook({ notifyExtensions: false, throwOnCancel: true });
+      // Model closing the current workbook (Excel-like) as swapping to a fresh blank workbook.
+      // Use a close-specific prompt/cancel message to keep UX consistent for extensions.
+      await handleNewWorkbook({
+        notifyExtensions: false,
+        throwOnCancel: true,
+        actionLabel: "close this workbook",
+        cancelMessage: "Close workbook cancelled",
+      });
     };
   }
 
@@ -8295,12 +8302,29 @@ async function handleSaveAsPath(
   rerenderLayout?.();
 }
 
-async function handleNewWorkbook(options: { notifyExtensions?: boolean; throwOnCancel?: boolean } = {}): Promise<void> {
+async function handleNewWorkbook(
+  options: {
+    notifyExtensions?: boolean;
+    throwOnCancel?: boolean;
+    /**
+     * Human-readable action label used in the discard-unsaved-changes prompt.
+     * Defaults to "create a new workbook".
+     */
+    actionLabel?: string;
+    /**
+     * Error message used when `throwOnCancel` is true and the user cancels the discard prompt.
+     * Defaults to "Create workbook cancelled".
+     */
+    cancelMessage?: string;
+  } = {},
+): Promise<void> {
   if (!tauriBackend) return;
-  const ok = await confirmDiscardDirtyState("create a new workbook");
+  const actionLabel = options.actionLabel ?? "create a new workbook";
+  const cancelMessage = options.cancelMessage ?? "Create workbook cancelled";
+  const ok = await confirmDiscardDirtyState(actionLabel);
   if (!ok) {
     if (options.throwOnCancel) {
-      throw new Error("Create workbook cancelled");
+      throw new Error(cancelMessage);
     }
     return;
   }
