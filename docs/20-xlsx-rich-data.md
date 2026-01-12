@@ -39,9 +39,13 @@ xl/
 │   └── sheetN.xml                      # Cell has vm="…"
 ├── metadata.xml                        # Value metadata indexed by vm
 └── richData/
-    ├── richValue.xml / richValue1.xml  # Rich values (<rv>), indexed by metadata (schema varies)
-    ├── rdrichvalue.xml                 # Alternate naming (observed in rust_xlsxwriter output)
-    ├── richValueRel.xml                # Ordered <rel r:id="…"> list (relationship slots)
+    ├── richValue.xml / richValue1.xml        # Rich value instances (<rv>), indexed by metadata (schema varies)
+    ├── richValueTypes.xml                    # Optional: type table (type id -> structure id)
+    ├── richValueStructure.xml                # Optional: structure table (field layout)
+    ├── rdrichvalue.xml                       # Alternate naming (observed in rust_xlsxwriter output)
+    ├── rdrichvaluestructure.xml              # Alternate naming
+    ├── rdRichValueTypes.xml                  # Alternate naming (note casing)
+    ├── richValueRel.xml                      # Ordered <rel r:id="…"> list (relationship slots)
     └── _rels/
         └── richValueRel.xml.rels       # OPC relationships: rId -> ../media/image*.png
 xl/media/
