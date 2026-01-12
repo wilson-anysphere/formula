@@ -26,11 +26,28 @@ test("CellEditorOverlay avoids inline display/z-index style assignments", () => 
     /\bstyle\.setProperty\(\s*["']display["']\s*,/,
     /\.style\.setProperty\(\s*["']z-index["']\s*,/,
     /\bstyle\.setProperty\(\s*["']z-index["']\s*,/,
+    /\.style\.setProperty\(\s*["']zIndex["']\s*,/,
+    /\bstyle\.setProperty\(\s*["']zIndex["']\s*,/,
+    // removeProperty (also mutates inline styles).
+    /\.style\.removeProperty\(\s*["']display["']\s*\)/,
+    /\bstyle\.removeProperty\(\s*["']display["']\s*\)/,
+    /\.style\.removeProperty\(\s*["']z-index["']\s*\)/,
+    /\bstyle\.removeProperty\(\s*["']z-index["']\s*\)/,
+    /\.style\.removeProperty\(\s*["']zIndex["']\s*\)/,
+    /\bstyle\.removeProperty\(\s*["']zIndex["']\s*\)/,
     // Object.assign(...style, { display/zIndex: ... })
     /Object\.assign\(\s*[^,]+\.style\s*,[\s\S]*?\bdisplay\s*:/,
     /Object\.assign\(\s*[^,]+\.style\s*,[\s\S]*?\bzIndex\s*:/,
     /Object\.assign\(\s*style\s*,[\s\S]*?\bdisplay\s*:/,
     /Object\.assign\(\s*style\s*,[\s\S]*?\bzIndex\s*:/,
+    // cssText assignments that include forbidden properties.
+    /\.style\.cssText\s*=[\s\S]{0,200}\bdisplay\s*:/,
+    /\.style\.cssText\s*=[\s\S]{0,200}\bz-index\s*:/,
+    /\bstyle\s*\.cssText\s*=[\s\S]{0,200}\bdisplay\s*:/,
+    /\bstyle\s*\.cssText\s*=[\s\S]{0,200}\bz-index\s*:/,
+    // setAttribute("style", "...display..." / "...z-index...")
+    /setAttribute\(\s*["']style["']\s*,[\s\S]{0,200}\bdisplay\s*:/,
+    /setAttribute\(\s*["']style["']\s*,[\s\S]{0,200}\bz-index\s*:/,
   ];
 
   for (const pattern of forbiddenAssignments) {
