@@ -89,6 +89,28 @@ describe("clipboard/platform/provider (desktop Tauri multi-format path)", () => 
     expect(readText).toHaveBeenCalledTimes(1);
   });
 
+  it("read() falls back to navigator.clipboard.readText when invoke rejects (e.g. unknown command)", async () => {
+    const invoke = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("unknown command: clipboard_read"))
+      .mockRejectedValueOnce(new Error("unknown command: read_clipboard"));
+    const legacyReadText = vi.fn().mockResolvedValue("legacy-clipboard");
+    (globalThis as any).__TAURI__ = { core: { invoke }, clipboard: { readText: legacyReadText } };
+
+    const readText = vi.fn().mockResolvedValue("web-clipboard");
+    setMockNavigatorClipboard({ readText });
+
+    const provider = await createClipboardProvider();
+    await expect(provider.read()).resolves.toEqual({ text: "web-clipboard" });
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls[0]?.[0]).toBe("clipboard_read");
+    expect(invoke.mock.calls[1]?.[0]).toBe("read_clipboard");
+
+    expect(readText).toHaveBeenCalledTimes(1);
+    expect(legacyReadText).not.toHaveBeenCalled();
+  });
+
   it("read() falls back to legacy __TAURI__.clipboard.readText when invoke rejects and web clipboard is unavailable", async () => {
     const invoke = vi
       .fn()
@@ -133,5 +155,29 @@ describe("clipboard/platform/provider (desktop Tauri multi-format path)", () => 
     expect(legacyWriteText).toHaveBeenCalledTimes(1);
     expect(legacyWriteText).toHaveBeenCalledWith("fallback");
     expect(webWriteText).not.toHaveBeenCalled();
+  });
+
+  it("write() falls back to navigator.clipboard.writeText when invoke rejects and legacy clipboard API is unavailable", async () => {
+    const invoke = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("unknown command: clipboard_write"))
+      .mockRejectedValueOnce(new Error("unknown command: write_clipboard"));
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const webWriteText = vi.fn().mockResolvedValue(undefined);
+    setMockNavigatorClipboard({ writeText: webWriteText });
+
+    const provider = await createClipboardProvider();
+    await expect(provider.write({ text: "fallback", html: "<p>fallback</p>" })).resolves.toBeUndefined();
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke.mock.calls[0]?.[0]).toBe("clipboard_write");
+    expect(invoke.mock.calls[0]?.[1]).toMatchObject({
+      payload: { text: "fallback", html: "<p>fallback</p>" },
+    });
+    expect(invoke.mock.calls[1]?.[0]).toBe("write_clipboard");
+
+    expect(webWriteText).toHaveBeenCalledTimes(1);
+    expect(webWriteText).toHaveBeenCalledWith("fallback");
   });
 });
