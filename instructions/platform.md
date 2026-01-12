@@ -77,14 +77,14 @@ Key config fields you'll touch most often:
 
 - `build.devUrl`: URL the desktop WebView loads in dev (Vite server)
 - `build.frontendDist`: path to built frontend assets for production builds
+- `app.security.headers`: COOP/COEP headers (required for `crossOriginIsolated` / `SharedArrayBuffer`)
 - `app.security.csp`: Content Security Policy for the desktop WebView
-- `app.windows[].capabilities`: which capabilities apply to each window
 - `plugins.*`: plugin configuration (e.g. updater)
 
 Tauri v2 permissions are granted via **capabilities**:
 
 - `apps/desktop/src-tauri/capabilities/*.json`
-- referenced from `apps/desktop/src-tauri/tauri.conf.json` via `app.windows[].capabilities`
+- associated to windows by label via the capability file’s `"windows": [...]` list (matches `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`)
 
 Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the full allowlists):
 

@@ -88,45 +88,60 @@ else:
         problems.append(f"{csp_key} should include `default-src 'self'` (or equivalent restriction)")
 
 # Capabilities checks (Tauri v2).
-capabilities = set()
+#
+# Capabilities live under `src-tauri/capabilities/*.json` and are associated to windows by
+# window label using the capability file's `"windows": [...]` list.
+window_labels = set()
 windows = jget(data, "app", "windows", default=[])
 if isinstance(windows, list):
     for w in windows:
-        if isinstance(w, dict) and isinstance(w.get("capabilities"), list):
-            for cap in w["capabilities"]:
-                if isinstance(cap, str) and cap.strip():
-                    capabilities.add(cap.strip())
+        if isinstance(w, dict):
+            label = w.get("label")
+            if isinstance(label, str) and label.strip():
+                window_labels.add(label.strip())
 
-if capabilities:
-    cap_dir = path.parent / "capabilities"
-    if not cap_dir.is_dir():
-        problems.append(f"Missing capabilities directory: {cap_dir} (referenced by app.windows[].capabilities)")
-    else:
-        cap_files = list(cap_dir.glob("*.json"))
-        parsed_caps = {}
-        for cap_file in cap_files:
-            try:
-                parsed = json.loads(cap_file.read_text(encoding="utf-8"))
-            except Exception as e:
-                problems.append(f"Invalid JSON in capability file {cap_file}: {e}")
-                continue
-            identifier = parsed.get("identifier")
-            if isinstance(identifier, str) and identifier.strip():
-                parsed_caps[identifier.strip()] = (cap_file, parsed)
+cap_dir = path.parent / "capabilities"
+if cap_dir.is_dir():
+    cap_files = list(cap_dir.glob("*.json"))
+    for cap_file in cap_files:
+        try:
+            cap_data = json.loads(cap_file.read_text(encoding="utf-8"))
+        except Exception as e:
+            problems.append(f"Invalid JSON in capability file {cap_file}: {e}")
+            continue
 
-        for cap in sorted(capabilities):
-            if cap not in parsed_caps:
-                problems.append(f"Capability '{cap}' is referenced but no matching JSON file was found under {cap_dir}/*.json")
-                continue
-            cap_file, cap_data = parsed_caps[cap]
-            perms = cap_data.get("permissions")
-            if not isinstance(perms, list) or not perms:
-                problems.append(f"{cap_file}: permissions must be a non-empty array")
-                continue
+        identifier = cap_data.get("identifier")
+        if not isinstance(identifier, str) or not identifier.strip():
+            problems.append(f"{cap_file}: missing/invalid 'identifier' (expected non-empty string)")
+
+        cap_windows = cap_data.get("windows")
+        if not isinstance(cap_windows, list) or not cap_windows:
+            problems.append(f"{cap_file}: windows must be a non-empty array of window labels")
+        else:
+            for win in cap_windows:
+                if not isinstance(win, str) or not win.strip():
+                    problems.append(f"{cap_file}: windows entries must be non-empty strings (got {win!r})")
+                    continue
+                if window_labels and win.strip() not in window_labels:
+                    problems.append(
+                        f"{cap_file}: references window label '{win}', but it was not found under app.windows[].label in {path}"
+                    )
+
+        perms = cap_data.get("permissions")
+        if not isinstance(perms, list) or not perms:
+            problems.append(f"{cap_file}: permissions must be a non-empty array")
+        else:
             # Best-effort guardrail: avoid obviously over-broad permissions.
             for p in perms:
                 if isinstance(p, str) and "allow-all" in p:
                     problems.append(f"{cap_file}: permission '{p}' looks overly broad (avoid *:allow-all)")
+                elif isinstance(p, dict):
+                    pid = p.get("identifier")
+                    if isinstance(pid, str) and "allow-all" in pid:
+                        problems.append(f"{cap_file}: permission '{pid}' looks overly broad (avoid *:allow-all)")
+elif window_labels:
+    # If we have a desktop app config but no capabilities directory, call it out explicitly.
+    problems.append(f"Missing capabilities directory: {cap_dir} (expected Tauri v2 capability files under src-tauri/capabilities/)")
 
 if problems:
     print("    ❌ FAIL")
