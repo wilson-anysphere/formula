@@ -287,8 +287,9 @@ export async function openSheetTabContextMenu(page: Page, sheetId: string): Prom
         cancelable: true,
         // Explicitly mark this as a right-click.
         button: 2,
-        clientX: rect.left + 10,
-        clientY: rect.top + 10,
+        // Use the center of the tab so narrow tabs still receive the event.
+        clientX: rect.left + rect.width / 2,
+        clientY: rect.top + rect.height / 2,
       }),
     );
   }, sheetId);
