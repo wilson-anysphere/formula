@@ -3,6 +3,8 @@
 {"name":"quoted_sheet_name_with_apostrophe","rgce_hex":"3A 00 00 00 00 00 00 00 C0","expected":"'O''Reilly'!A1","ctx":{"extern_sheets":[{"first":"O'Reilly","last":"O'Reilly","ixti":0}]}}
 {"name":"quoted_sheet_range_prefix","rgce_hex":"3A 00 00 00 00 00 00 00 C0","expected":"'Sheet 1:Sheet 2'!A1","ctx":{"extern_sheets":[{"first":"Sheet 1","last":"Sheet 2","ixti":0}]}}
 {"name":"union_inside_function_arg","rgce_hex":"24 00 00 00 00 00 C0 24 00 00 00 00 01 C0 10 22 01 04 00","expected":"SUM((A1,B1))"}
+{"name":"ptg_refn_uses_base_cell","rgce_hex":"2C FF FF FF FF 02 00","expected":"F9","base":{"row":9,"col":3}}
+{"name":"ptg_areanv_uses_base_cell_and_emits_at","rgce_hex":"4D 00 00 00 00 01 00 00 00 00 00 01 00","expected":"@D10:E11","base":{"row":9,"col":3}}
 {"name":"ptg_memfunc_skips_payload","rgce_hex":"1E 01 00 29 03 00 1E 02 00","expected":"1"}
 {"name":"ptg_memfunc_value_class_skips_payload","rgce_hex":"1E 01 00 49 03 00 1E 02 00","expected":"1"}
 {"name":"ptg_memarea_skips_payload","rgce_hex":"1E 01 00 26 03 00 1E 02 00","expected":"1"}
