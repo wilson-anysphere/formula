@@ -564,6 +564,39 @@ fn yearfrac_basis1_respects_lotus_compat_flag_for_1900() {
 }
 
 #[test]
+fn yearfrac_basis1_uses_correct_year_length_within_year() {
+    let mut sheet = TestSheet::new();
+
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2019,1,1),DATE(2019,12,31),1)"),
+        364.0 / 365.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2019,2,28),DATE(2019,12,31),1)"),
+        306.0 / 365.0,
+    );
+
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,1,1),DATE(2020,12,31),1)"),
+        365.0 / 366.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,2,28),DATE(2020,12,31),1)"),
+        307.0 / 366.0,
+    );
+
+    // Sign handling should remain consistent for within-year spans.
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2019,12,31),DATE(2019,1,1),1)"),
+        -(364.0 / 365.0),
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,12,31),DATE(2020,1,1),1)"),
+        -(365.0 / 366.0),
+    );
+}
+
+#[test]
 fn yearfrac_spills_over_array_inputs() {
     let mut sheet = TestSheet::new();
     let expected1 = sheet.eval("=YEARFRAC(DATE(2020,1,1),DATE(2021,1,1))");

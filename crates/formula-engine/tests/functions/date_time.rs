@@ -352,6 +352,37 @@ fn yearfrac_basis1_respects_lotus_compat_flag_for_1900() {
 }
 
 #[test]
+fn yearfrac_basis1_uses_correct_year_length_within_year() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Non-leap year: denom = 365.
+    let start = ymd_to_serial(ExcelDate::new(2019, 1, 1), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2019, 12, 31), system).unwrap();
+    let expected = 364.0 / 365.0;
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
+
+    let start = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2019, 12, 31), system).unwrap();
+    let expected = 306.0 / 365.0;
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
+
+    // Leap year: denom = 366 (unless the anniversary is Feb 29 clamped, which is covered elsewhere).
+    let start = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 12, 31), system).unwrap();
+    let expected = 365.0 / 366.0;
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
+
+    let start = ymd_to_serial(ExcelDate::new(2020, 2, 28), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2020, 12, 31), system).unwrap();
+    let expected = 307.0 / 366.0;
+    assert!((date_time::yearfrac(start, end, 1, system).unwrap() - expected).abs() < 1e-12);
+    assert!((date_time::yearfrac(end, start, 1, system).unwrap() + expected).abs() < 1e-12);
+}
+
+#[test]
 fn datedif_matches_excel_units() {
     let system = ExcelDateSystem::EXCEL_1900;
     let start = ymd_to_serial(ExcelDate::new(2011, 1, 15), system).unwrap();
