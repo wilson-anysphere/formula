@@ -66,6 +66,11 @@ To validate parity against real Excel results, use the Excel oracle harness:
 - case corpus: `tests/compatibility/excel-oracle/cases.json`
 - pinned dataset: `tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json`
 
+Note: the pinned dataset in CI is currently a **synthetic baseline** generated from the engine
+(see the dataset `source.note`). Treat it as a regression test for current engine behavior.
+To validate against *real* Excel, regenerate the dataset with
+`tools/excel-oracle/run-excel-oracle.ps1` on Windows + Excel (Task 393).
+
 When adding odd-coupon coverage to the oracle corpus, prefer:
 
 - fixed calendar dates (avoid `TODAY()`, `NOW()`, volatile functions)
@@ -74,8 +79,9 @@ When adding odd-coupon coverage to the oracle corpus, prefer:
 
 The generator includes a small set of boundary-date equality cases (e.g. `issue == settlement`,
 `settlement == first_coupon`, `settlement == last_interest`). In Excel these are expected to return
-`#NUM!`, and we keep them in the pinned oracle dataset to catch regressions in date validation rules
-over time.
+`#NUM!`, but this has not yet been validated against a real Excel oracle dataset. Today, these cases
+are pinned in the synthetic CI dataset to catch regressions in engine date validation rules over
+time; once a real Excel dataset is pinned, they should serve as true parity checks.
 
 ## High-risk compatibility areas
 
