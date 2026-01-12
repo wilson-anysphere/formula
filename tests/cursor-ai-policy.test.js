@@ -399,6 +399,123 @@ test("cursor AI policy guard scans .crt files for provider strings", async () =>
   }
 });
 
+test("cursor AI policy guard scans ini files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-ini-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "services/example/config.ini", "OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans conf files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-conf-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "services/example/config.conf", "OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans properties files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-properties-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "services/example/config.properties", "OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans Kotlin script files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-kts-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "services/example/build.gradle.kts", "// OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans gradle files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-gradle-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "services/example/build.gradle", "// OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans Windows batch scripts for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-bat-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "scripts/run.bat", "rem OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans Windows cmd scripts for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-cmd-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "scripts/run.cmd", "rem OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans PowerShell module files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-psm1-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "scripts/example.psm1", "# OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans PowerShell module manifest files for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-psd1-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "scripts/example.psd1", "# OpenAI\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard scans extensionless config files named `config`", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-config-basename-fail-"));
   try {

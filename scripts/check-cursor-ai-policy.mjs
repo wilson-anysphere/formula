@@ -135,6 +135,15 @@ const SCANNED_FILE_EXTENSIONS = new Set([
   ".pem",
   ".key",
   ".crt",
+  ".ini",
+  ".conf",
+  ".properties",
+  ".kts",
+  ".gradle",
+  ".bat",
+  ".cmd",
+  ".psm1",
+  ".psd1",
   ".sh",
 ]);
 
@@ -142,7 +151,16 @@ const MAX_BYTES_TO_SCAN = 2 * 1024 * 1024; // 2 MiB guard against generated/bina
 
 // Config formats where any mention of provider identifiers is almost certainly a
 // direct dependency/config regression (not an incidental string in code/comments).
-const CONFIG_FILE_EXTENSIONS = new Set([".json", ".toml", ".yaml", ".yml", ".lock"]);
+const CONFIG_FILE_EXTENSIONS = new Set([
+  ".json",
+  ".toml",
+  ".yaml",
+  ".yml",
+  ".lock",
+  ".ini",
+  ".conf",
+  ".properties",
+]);
 
 // Some important config/build files have no extension. Scan these by basename so
 // they can't be used to smuggle provider integrations into the repo.
