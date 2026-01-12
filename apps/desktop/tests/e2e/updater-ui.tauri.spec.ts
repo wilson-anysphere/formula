@@ -321,6 +321,122 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     expect(installIdx).toBeLessThan(restartIdx);
   });
 
+  test("updater dialog cannot be dismissed while a download is in flight", async ({ page }) => {
+    await page.addInitScript(() => {
+      const listeners: Record<string, Array<(event: any) => void>> = {};
+      const emitted: Array<{ event: string; payload: any }> = [];
+      const invokes: Array<{ cmd: string; args: any }> = [];
+
+      (window as any).__tauriListeners = listeners;
+      (window as any).__tauriEmittedEvents = emitted;
+      (window as any).__tauriInvokes = invokes;
+      (window as any).__tauriUpdateDownloadCalls = 0;
+
+      // Avoid any prompts blocking the flow.
+      window.confirm = () => true;
+
+      const windowHandle = { show: async () => {}, setFocus: async () => {} };
+
+      let resolveDownload: (() => void) | null = null;
+      const downloadGate = new Promise<void>((resolve) => {
+        resolveDownload = resolve;
+      });
+      (window as any).__tauriResolveDownload = () => resolveDownload?.();
+
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async (cmd: string, args: any) => {
+            invokes.push({ cmd, args });
+            return null;
+          },
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            if (!Array.isArray(listeners[name])) listeners[name] = [];
+            listeners[name].push(handler);
+            return () => {
+              const arr = listeners[name];
+              if (!Array.isArray(arr)) return;
+              const idx = arr.indexOf(handler);
+              if (idx >= 0) arr.splice(idx, 1);
+            };
+          },
+          emit: async (event: string, payload?: any) => {
+            emitted.push({ event, payload: payload ?? null });
+          },
+        },
+        window: {
+          getCurrentWebviewWindow: () => windowHandle,
+          getCurrentWindow: () => windowHandle,
+          getCurrent: () => windowHandle,
+          appWindow: windowHandle,
+        },
+        updater: {
+          check: async () => ({
+            version: "9.9.9",
+            body: "Notes",
+            download: async (onProgress?: any) => {
+              (window as any).__tauriUpdateDownloadCalls += 1;
+              onProgress?.({ downloaded: 10, total: 100 });
+              await downloadGate;
+              onProgress?.({ downloaded: 100, total: 100 });
+            },
+            install: async () => {},
+          }),
+        },
+      };
+    });
+
+    await gotoDesktop(page);
+    await page.waitForFunction(() =>
+      Boolean((window as any).__tauriEmittedEvents?.some((entry: any) => entry?.event === "updater-ui-ready")),
+    );
+
+    await waitForTauriListeners(page, "update-available");
+    await dispatchTauriEvent(page, "update-available", { source: "manual", version: "9.9.9", body: "Notes" });
+
+    const dialog = page.getByTestId("updater-dialog");
+    await expect(dialog).toBeVisible();
+
+    await page.getByTestId("updater-download").click();
+    await expect(page.getByTestId("updater-progress-wrap")).toBeVisible();
+    await page.waitForFunction(() => (window as any).__tauriUpdateDownloadCalls >= 1);
+
+    // Cancel (Escape) should be ignored while download is in progress.
+    await page.evaluate(() => {
+      const dialogEl = document.querySelector("dialog[data-testid=\"updater-dialog\"]") as HTMLDialogElement | null;
+      dialogEl?.dispatchEvent(new Event("cancel", { cancelable: true }));
+    });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveJSProperty("open", true);
+
+    // View versions should still open an external URL but should not close the dialog during download.
+    const openExternalBefore = await page.evaluate(() => {
+      const invokes = (window as any).__tauriInvokes ?? [];
+      if (!Array.isArray(invokes)) return 0;
+      return invokes.filter((entry: any) => entry?.cmd === "open_external_url").length;
+    });
+    await page.getByTestId("updater-view-versions").click();
+    await page.waitForFunction(
+      (expectedCount) => {
+        const invokes = (window as any).__tauriInvokes ?? [];
+        if (!Array.isArray(invokes)) return false;
+        const count = invokes.filter((entry: any) => entry?.cmd === "open_external_url").length;
+        return count >= expectedCount;
+      },
+      openExternalBefore + 1,
+    );
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveJSProperty("open", true);
+
+    // Finish the download.
+    await page.evaluate(() => {
+      (window as any).__tauriResolveDownload?.();
+    });
+    await expect(page.getByTestId("updater-progress-wrap")).toBeHidden();
+    await expect(page.getByTestId("updater-restart")).toBeVisible();
+  });
+
   test("startup update completion is treated as manual when a manual check was queued behind an in-flight startup check", async ({
     page,
   }) => {
