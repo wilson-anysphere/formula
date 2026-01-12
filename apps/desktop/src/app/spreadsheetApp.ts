@@ -3742,13 +3742,28 @@ export class SpreadsheetApp {
     this.commentMetaByCoord.clear();
     this.commentPreviewByCoord.clear();
     this.commentThreadsByCellRef.clear();
+
+    // Back-compat: older collaboration docs stored comments under unqualified A1 refs
+    // (e.g. "A1"). In collab mode we now require sheet-qualified refs ("sheetId!A1").
+    //
+    // We cannot infer the original sheet for legacy comments once multiple sheets exist, so
+    // we conservatively attach them to the default sheet id to keep them visible without
+    // reintroducing cross-sheet collisions.
+    const legacyUnqualifiedSheetId = (() => {
+      if (!this.collabMode) return null;
+      const ids = this.document.getSheetIds?.() ?? [];
+      if (ids.includes("Sheet1")) return "Sheet1";
+      return ids[0] ?? this.sheetId;
+    })();
+
     for (const comment of this.commentManager.listAll()) {
       const rawCellRef = comment.cellRef;
       const bang = rawCellRef.indexOf("!");
-      const sheetId = bang >= 0 ? rawCellRef.slice(0, bang) : null;
+      const sheetIdFromRef = bang >= 0 ? rawCellRef.slice(0, bang) : null;
       const a1Raw = bang >= 0 ? rawCellRef.slice(bang + 1) : rawCellRef;
       const a1IsPlain = A1_CELL_REF_RE.test(a1Raw);
       const normalizedA1 = a1IsPlain ? a1Raw.replaceAll("$", "").toUpperCase() : a1Raw;
+      const sheetId = sheetIdFromRef ?? (a1IsPlain ? legacyUnqualifiedSheetId : null);
 
       // Normalize A1 refs so `$A$1`, `a1`, etc map to the same cell key.
       // For collab-mode sheet-qualified refs, normalize only the A1 portion.
