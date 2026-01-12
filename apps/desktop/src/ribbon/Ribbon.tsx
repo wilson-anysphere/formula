@@ -110,7 +110,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
 
   return (
     <div className="ribbon" data-testid="ribbon-root">
-      <div className="ribbon__tabs" role="tablist" aria-label="Ribbon tabs">
+      <div className="ribbon__tabs" role="tablist" aria-label="Ribbon tabs" aria-orientation="horizontal">
         {tabs.map((tab, index) => {
           const isActive = tab.id === activeTabId;
           const isFile = Boolean(tab.isFile);

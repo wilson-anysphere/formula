@@ -11,7 +11,7 @@ export interface RibbonGroupProps {
 
 export function RibbonGroup({ group, pressedById, onActivateButton }: RibbonGroupProps) {
   return (
-    <section className="ribbon-group" aria-label={group.label}>
+    <section className="ribbon-group" role="group" aria-label={group.label}>
       <div className="ribbon-group__content">
         {group.buttons.map((button) => (
           <RibbonButton key={button.id} button={button} pressed={pressedById[button.id]} onActivate={onActivateButton} />
@@ -21,4 +21,3 @@ export function RibbonGroup({ group, pressedById, onActivateButton }: RibbonGrou
     </section>
   );
 }
-
