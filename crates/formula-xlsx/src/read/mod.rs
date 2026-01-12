@@ -10,7 +10,7 @@ use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::rich_text::RichText;
 use formula_model::{
     normalize_formula_text, Cell, CellRef, CellValue, DefinedNameScope, ErrorValue, Range,
-    SheetVisibility, Workbook,
+    SheetProtection, SheetVisibility, Workbook, WorkbookProtection,
 };
 use formula_model::drawings::{ImageData, ImageId};
 use quick_xml::events::attributes::AttrError;
@@ -121,7 +121,7 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
     let workbook_rels = read_zip_part_required(archive, WORKBOOK_RELS_PART)?;
 
     let rels_info = parse_relationships(&workbook_rels)?;
-    let (date_system, _calc_pr, sheets, defined_names) =
+    let (date_system, _calc_pr, sheets, defined_names, workbook_protection) =
         parse_workbook_metadata(&workbook_xml, &rels_info.id_to_target)?;
     let calc_settings = read_calc_settings_from_workbook_xml(&workbook_xml)?;
 
@@ -131,6 +131,7 @@ fn read_workbook_model_from_zip<R: Read + Seek>(
         DateSystem::V1900 => formula_model::DateSystem::Excel1900,
         DateSystem::V1904 => formula_model::DateSystem::Excel1904,
     };
+    workbook.workbook_protection = workbook_protection;
     let mut worksheet_ids_by_index: Vec<formula_model::WorksheetId> =
         Vec::with_capacity(sheets.len());
 
@@ -402,7 +403,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         .ok_or(ReadError::MissingPart(WORKBOOK_RELS_PART))?;
 
     let rels_info = parse_relationships(workbook_rels)?;
-    let (date_system, calc_pr, sheets, defined_names) =
+    let (date_system, calc_pr, sheets, defined_names, workbook_protection) =
         parse_workbook_metadata(workbook_xml, &rels_info.id_to_target)?;
     let calc_settings = read_calc_settings_from_workbook_xml(workbook_xml)?;
 
@@ -412,6 +413,7 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         DateSystem::V1900 => formula_model::DateSystem::Excel1900,
         DateSystem::V1904 => formula_model::DateSystem::Excel1904,
     };
+    workbook.workbook_protection = workbook_protection;
     let styles_part_name = rels_info
         .styles_target
         .as_deref()
@@ -1261,13 +1263,15 @@ struct ParsedDefinedName {
 fn parse_workbook_metadata(
     workbook_xml: &[u8],
     rels: &BTreeMap<String, String>,
-) -> Result<(DateSystem, CalcPr, Vec<ParsedSheet>, Vec<ParsedDefinedName>), ReadError> {
+) -> Result<(DateSystem, CalcPr, Vec<ParsedSheet>, Vec<ParsedDefinedName>, WorkbookProtection), ReadError>
+{
     let mut reader = Reader::from_reader(workbook_xml);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
 
     let mut date_system = DateSystem::V1900;
     let mut calc_pr = CalcPr::default();
+    let mut workbook_protection = WorkbookProtection::default();
     let mut sheets = Vec::new();
     let mut defined_names = Vec::new();
     let mut current_defined: Option<ParsedDefinedName> = None;
@@ -1297,6 +1301,23 @@ fn parse_workbook_metadata(
                             let v = attr.unescape_value()?.into_owned();
                             calc_pr.full_calc_on_load =
                                 Some(v == "1" || v.eq_ignore_ascii_case("true"))
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Event::Start(e) | Event::Empty(e)
+                if e.local_name().as_ref() == b"workbookProtection" =>
+            {
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    let value = attr.unescape_value()?.into_owned();
+                    match attr.key.as_ref() {
+                        b"lockStructure" => workbook_protection.lock_structure = parse_xml_bool(&value),
+                        b"lockWindows" => workbook_protection.lock_windows = parse_xml_bool(&value),
+                        b"workbookPassword" => {
+                            workbook_protection.password_hash =
+                                parse_xml_u16_hex(&value).filter(|hash| *hash != 0);
                         }
                         _ => {}
                     }
@@ -1425,7 +1446,7 @@ fn parse_workbook_metadata(
         buf.clear();
     }
 
-    Ok((date_system, calc_pr, sheets, defined_names))
+    Ok((date_system, calc_pr, sheets, defined_names, workbook_protection))
 }
 
 fn parse_worksheet_into_model(
@@ -1592,6 +1613,46 @@ fn parse_worksheet_into_model(
                     worksheet.frozen_cols = x_split.unwrap_or(0);
                     worksheet.frozen_rows = y_split.unwrap_or(0);
                 }
+            }
+
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"sheetProtection" => {
+                // Parse a subset of the legacy `sheetProtection` element into the model's
+                // allow-list booleans. This is best-effort; unsupported attributes are ignored.
+                //
+                // Note: SpreadsheetML uses `objects`/`scenarios` as "protected" flags, while the
+                // model stores `edit_objects` / `edit_scenarios` as "allowed" flags.
+                let mut protection = SheetProtection::default();
+                protection.enabled = true;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    let val = attr.unescape_value()?.into_owned();
+                    match attr.key.as_ref() {
+                        b"sheet" => protection.enabled = parse_xml_bool(&val),
+                        b"selectLockedCells" => protection.select_locked_cells = parse_xml_bool(&val),
+                        b"selectUnlockedCells" => {
+                            protection.select_unlocked_cells = parse_xml_bool(&val)
+                        }
+                        b"formatCells" => protection.format_cells = parse_xml_bool(&val),
+                        b"formatColumns" => protection.format_columns = parse_xml_bool(&val),
+                        b"formatRows" => protection.format_rows = parse_xml_bool(&val),
+                        b"insertColumns" => protection.insert_columns = parse_xml_bool(&val),
+                        b"insertRows" => protection.insert_rows = parse_xml_bool(&val),
+                        b"insertHyperlinks" => protection.insert_hyperlinks = parse_xml_bool(&val),
+                        b"deleteColumns" => protection.delete_columns = parse_xml_bool(&val),
+                        b"deleteRows" => protection.delete_rows = parse_xml_bool(&val),
+                        b"sort" => protection.sort = parse_xml_bool(&val),
+                        b"autoFilter" => protection.auto_filter = parse_xml_bool(&val),
+                        b"pivotTables" => protection.pivot_tables = parse_xml_bool(&val),
+                        b"objects" => protection.edit_objects = !parse_xml_bool(&val),
+                        b"scenarios" => protection.edit_scenarios = !parse_xml_bool(&val),
+                        b"password" => {
+                            protection.password_hash =
+                                parse_xml_u16_hex(&val).filter(|hash| *hash != 0);
+                        }
+                        _ => {}
+                    }
+                }
+                worksheet.sheet_protection = protection;
             }
 
             Event::Start(e) | Event::Empty(e)
@@ -2031,6 +2092,14 @@ fn expand_shared_formulas(
 
 fn parse_xml_bool(val: &str) -> bool {
     val == "1" || val.eq_ignore_ascii_case("true")
+}
+
+fn parse_xml_u16_hex(val: &str) -> Option<u16> {
+    let trimmed = val.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    u16::from_str_radix(trimmed, 16).ok()
 }
 
 fn parse_table_part_ids(xml: &[u8]) -> Result<Vec<String>, ReadError> {

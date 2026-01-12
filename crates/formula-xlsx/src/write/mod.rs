@@ -6,7 +6,7 @@ use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::rich_text::{RichText, Underline};
 use formula_model::{
     CellRef, CellValue, ErrorValue, Hyperlink, HyperlinkTarget, Outline, OutlineEntry, Range,
-    SheetVisibility, Worksheet, WorksheetId,
+    SheetProtection, SheetVisibility, WorkbookProtection, Worksheet, WorksheetId,
 };
 use quick_xml::events::attributes::AttrError;
 use quick_xml::events::Event;
@@ -1713,6 +1713,22 @@ fn write_workbook_xml(
         xml.push_str(r#" date1904="1""#);
     }
     xml.push_str("/>");
+
+    if !WorkbookProtection::is_default(&doc.workbook.workbook_protection) {
+        let protection = &doc.workbook.workbook_protection;
+        xml.push_str("<workbookProtection");
+        if protection.lock_structure {
+            xml.push_str(r#" lockStructure="1""#);
+        }
+        if protection.lock_windows {
+            xml.push_str(r#" lockWindows="1""#);
+        }
+        if let Some(hash) = protection.password_hash {
+            xml.push_str(&format!(r#" workbookPassword="{:04X}""#, hash));
+        }
+        xml.push_str("/>");
+    }
+
     xml.push_str("<sheets>");
     for sheet_meta in sheets {
         let sheet = doc.workbook.sheet(sheet_meta.worksheet_id);
@@ -2229,6 +2245,7 @@ fn write_worksheet_xml(
 
     let dimension = dimension::worksheet_dimension_range(sheet).to_string();
     let cols_xml = render_cols(sheet, None);
+    let sheet_protection_xml = render_sheet_protection(&sheet.sheet_protection, None);
     let sheet_data_xml = render_sheet_data(
         doc,
         sheet_meta,
@@ -2250,8 +2267,98 @@ fn write_worksheet_xml(
         xml.push_str(&cols_xml);
     }
     xml.push_str(&sheet_data_xml);
+    if !sheet_protection_xml.is_empty() {
+        xml.push_str(&sheet_protection_xml);
+    }
     xml.push_str("</worksheet>");
     Ok(xml.into_bytes())
+}
+
+fn render_sheet_protection(protection: &SheetProtection, prefix: Option<&str>) -> String {
+    if !protection.enabled {
+        return String::new();
+    }
+
+    // SpreadsheetML models most flags as allow-list booleans. `objects` and `scenarios` are
+    // inverted "is protected" flags.
+    let tag = crate::xml::prefixed_tag(prefix, "sheetProtection");
+    let mut out = String::new();
+    out.push('<');
+    out.push_str(&tag);
+
+    // Enable worksheet protection.
+    out.push_str(r#" sheet="1""#);
+
+    if let Some(hash) = protection.password_hash {
+        out.push_str(&format!(r#" password="{:04X}""#, hash));
+    }
+
+    // Emit explicit values for all modeled attributes so round-tripping through our own reader is
+    // unambiguous (especially for `objects`/`scenarios`, whose defaults vary across producers).
+    out.push_str(&format!(
+        r#" selectLockedCells="{}""#,
+        if protection.select_locked_cells { "1" } else { "0" }
+    ));
+    out.push_str(&format!(
+        r#" selectUnlockedCells="{}""#,
+        if protection.select_unlocked_cells { "1" } else { "0" }
+    ));
+    out.push_str(&format!(
+        r#" formatCells="{}""#,
+        if protection.format_cells { "1" } else { "0" }
+    ));
+    out.push_str(&format!(
+        r#" formatColumns="{}""#,
+        if protection.format_columns { "1" } else { "0" }
+    ));
+    out.push_str(&format!(
+        r#" formatRows="{}""#,
+        if protection.format_rows { "1" } else { "0" }
+    ));
+    out.push_str(&format!(
+        r#" insertColumns="{}""#,
+        if protection.insert_columns { "1" } else { "0" }
+    ));
+    out.push_str(&format!(
+        r#" insertRows="{}""#,
+        if protection.insert_rows { "1" } else { "0" }
+    ));
+    out.push_str(&format!(
+        r#" insertHyperlinks="{}""#,
+        if protection.insert_hyperlinks { "1" } else { "0" }
+    ));
+    out.push_str(&format!(
+        r#" deleteColumns="{}""#,
+        if protection.delete_columns { "1" } else { "0" }
+    ));
+    out.push_str(&format!(
+        r#" deleteRows="{}""#,
+        if protection.delete_rows { "1" } else { "0" }
+    ));
+    out.push_str(&format!(
+        r#" sort="{}""#,
+        if protection.sort { "1" } else { "0" }
+    ));
+    out.push_str(&format!(
+        r#" autoFilter="{}""#,
+        if protection.auto_filter { "1" } else { "0" }
+    ));
+    out.push_str(&format!(
+        r#" pivotTables="{}""#,
+        if protection.pivot_tables { "1" } else { "0" }
+    ));
+    // Inverted "protected" flags.
+    out.push_str(&format!(
+        r#" objects="{}""#,
+        if protection.edit_objects { "0" } else { "1" }
+    ));
+    out.push_str(&format!(
+        r#" scenarios="{}""#,
+        if protection.edit_scenarios { "0" } else { "1" }
+    ));
+
+    out.push_str("/>");
+    out
 }
 
 fn patch_worksheet_xml(
