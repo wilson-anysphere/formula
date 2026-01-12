@@ -4,8 +4,6 @@ use formula_vba::{
     compress_container, contents_hash_v3, forms_normalized_data, project_normalized_data_v3,
     v3_content_normalized_data,
 };
-use sha2::Digest as _;
-use sha2::Sha256;
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
     out.extend_from_slice(&id.to_le_bytes());
@@ -349,9 +347,15 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
     expected.extend_from_slice(designer_bytes);
     expected.extend(std::iter::repeat(0u8).take(1023 - designer_bytes.len()));
 
-    let expected_digest = Sha256::digest(&expected).to_vec();
     let actual_digest = contents_hash_v3(&vba_project_bin).expect("ContentsHashV3");
-    assert_eq!(actual_digest, expected_digest);
+    // Hard-coded expected digest bytes to keep this test deterministic and to catch
+    // accidental transcript changes.
+    let expected_digest: [u8; 32] = [
+        0xf9, 0xaf, 0x17, 0x00, 0x3a, 0xda, 0x85, 0x09, 0x29, 0x76, 0x17, 0x08, 0xff, 0x30,
+        0xf1, 0xf8, 0xd8, 0xac, 0xa8, 0xf3, 0x3f, 0x20, 0x7d, 0xb1, 0xf6, 0x3e, 0x4f, 0xb9,
+        0x71, 0x06, 0x81, 0xf3,
+    ];
+    assert_eq!(actual_digest.as_slice(), expected_digest.as_ref());
 }
 
 #[test]
