@@ -493,6 +493,10 @@ fn oddl_equation(
     // - settlement < maturity
     // - last_interest < maturity
     //
+    // See:
+    // - `tools/excel-oracle/odd_coupon_boundary_cases.json`
+    // - `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`
+    //
     // Settlement may be before, on, or after `last_interest` (see `bonds_odd.rs`). If it's before,
     // we PV the remaining regular coupons through `last_interest` plus the final odd stub cashflow
     // at maturity.
