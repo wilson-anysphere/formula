@@ -8,6 +8,8 @@
 //! This module exposes best-effort parsing helpers without integrating into `formula-model` yet.
 
 pub mod metadata;
+pub mod rich_value_structure;
+pub mod rich_value_types;
 mod media_parts;
 mod rich_value_images;
 
