@@ -9,6 +9,7 @@ const extensionApiEntry = fileURLToPath(new URL("../../packages/extension-api/in
 const extensionMarketplaceEntry = fileURLToPath(
   new URL("../../packages/extension-marketplace/src/index.ts", import.meta.url),
 );
+const marketplaceSharedEntry = fileURLToPath(new URL("../../shared", import.meta.url));
 const collabUndoEntry = fileURLToPath(new URL("../../packages/collab/undo/index.js", import.meta.url));
 const collabSessionEntry = fileURLToPath(new URL("../../packages/collab/session/src/index.ts", import.meta.url));
 const collabVersioningEntry = fileURLToPath(new URL("../../packages/collab/versioning/src/index.ts", import.meta.url));
@@ -80,6 +81,10 @@ export default defineConfig({
     alias: [
       { find: "@formula/extension-api", replacement: extensionApiEntry },
       { find: "@formula/extension-marketplace", replacement: extensionMarketplaceEntry },
+      // `@formula/marketplace-shared` lives under the repo `shared/` directory. Some CI/dev environments
+      // can have stale node_modules (cached installs) that miss the pnpm workspace link, so keep an
+      // explicit alias to ensure Vite can resolve browser-only marketplace helpers during e2e runs.
+      { find: /^@formula\/marketplace-shared/, replacement: marketplaceSharedEntry },
       { find: "@formula/collab-undo", replacement: collabUndoEntry },
       { find: "@formula/collab-session", replacement: collabSessionEntry },
       { find: "@formula/collab-versioning", replacement: collabVersioningEntry },
