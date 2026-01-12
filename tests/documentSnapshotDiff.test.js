@@ -5,6 +5,7 @@ import { DocumentController } from "../apps/desktop/src/document/documentControl
 import { cellKey } from "../packages/versioning/src/diff/semanticDiff.js";
 import { diffDocumentSnapshots } from "../packages/versioning/src/document/diffSnapshots.js";
 import { sheetStateFromDocumentSnapshot } from "../packages/versioning/src/document/sheetState.js";
+import { diffDocumentVersionAgainstCurrent } from "../packages/versioning/src/document/versionHistory.js";
 
 test("sheetStateFromDocumentSnapshot extracts a sheet into SheetState", () => {
   const doc = new DocumentController();
@@ -86,4 +87,39 @@ test("exportSheetForSemanticDiff exports effective formats from sheet defaults",
 
   const exported = doc.exportSheetForSemanticDiff("Sheet1");
   assert.deepEqual(exported.cells.get(cellKey(0, 0))?.format, { font: { bold: true } });
+});
+
+test("diffDocumentVersionAgainstCurrent uses exportSheetForSemanticDiff (and includes layered formats)", async () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  const beforeSnapshot = doc.encodeState();
+
+  // Apply a layered format (column default) that won't materialize per-cell styleIds.
+  doc.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } });
+
+  let exportCalls = 0;
+  const originalExport = doc.exportSheetForSemanticDiff.bind(doc);
+  doc.exportSheetForSemanticDiff = (sheetId) => {
+    exportCalls += 1;
+    return originalExport(sheetId);
+  };
+
+  const diff = await diffDocumentVersionAgainstCurrent({
+    versionManager: {
+      doc,
+      async getVersion(versionId) {
+        if (versionId !== "v1") return null;
+        return { snapshot: beforeSnapshot };
+      },
+    },
+    versionId: "v1",
+    sheetId: "Sheet1",
+  });
+
+  assert.equal(exportCalls, 1);
+  assert.equal(diff.formatOnly.length, 1);
+  assert.deepEqual(diff.formatOnly[0].cell, { row: 0, col: 0 });
+  assert.equal(diff.modified.length, 0);
+  assert.equal(diff.added.length, 0);
+  assert.equal(diff.removed.length, 0);
 });
