@@ -3659,6 +3659,21 @@ fn append_cell_xml(
     }
     let value_kind = effective_value_kind(meta, cell);
 
+    // SpreadsheetML cell metadata pointers.
+    //
+    // Excel emits `vm`/`cm` attributes on `<c>` elements to reference value metadata and cell
+    // metadata records (used for modern features like linked data types / rich values).
+    //
+    // When we are rendering `<sheetData>` from the in-memory model (rather than patching an
+    // existing sheet), emit these attributes directly from `CellMeta` so callers can round-trip or
+    // synthesize rich-data workbooks.
+    if let Some(vm) = meta.and_then(|m| m.vm.as_deref()).filter(|s| !s.is_empty()) {
+        out.push_str(&format!(r#" vm="{}""#, escape_attr(vm)));
+    }
+    if let Some(cm) = meta.and_then(|m| m.cm.as_deref()).filter(|s| !s.is_empty()) {
+        out.push_str(&format!(r#" cm="{}""#, escape_attr(cm)));
+    }
+
     let meta_sheet_id = cell_meta_sheet_ids
         .get(&sheet_meta.worksheet_id)
         .copied()
