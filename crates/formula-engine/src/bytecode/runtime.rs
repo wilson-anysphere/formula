@@ -702,6 +702,7 @@ fn coerce_to_number(v: &Value) -> Result<f64, ErrorKind> {
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
         Value::Empty | Value::Missing => Ok(0.0),
         Value::Text(s) => parse_value_from_text(s),
+        Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
         Value::Error(e) => Err(*e),
         // Dynamic arrays / range-as-scalar: treat as a spill attempt (engine semantics).
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Spill),
@@ -729,6 +730,7 @@ pub(crate) fn coerce_to_bool(v: &Value) -> Result<bool, ErrorKind> {
             let n = parse_value_from_text(trimmed)?;
             Ok(n != 0.0)
         }
+        Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
         Value::Error(e) => Err(*e),
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Spill),
     }
@@ -856,6 +858,8 @@ fn coerce_countif_value_to_number(v: &Value) -> Option<f64> {
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Empty | Value::Missing => Some(0.0),
         Value::Text(s) => parse_number(s, thread_number_locale()).ok(),
+        Value::Entity(v) => parse_number(v.display.as_str(), thread_number_locale()).ok(),
+        Value::Record(v) => parse_number(v.display.as_str(), thread_number_locale()).ok(),
         Value::Error(_) | Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => None,
     }
 }
@@ -1280,16 +1284,25 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         return Err(ErrorKind::Value);
     }
 
+    fn text_like_str(value: &Value) -> Option<&str> {
+        match value {
+            Value::Text(s) => Some(s.as_ref()),
+            Value::Entity(v) => Some(v.display.as_str()),
+            Value::Record(v) => Some(v.display.as_str()),
+            _ => None,
+        }
+    }
+
     // Blank coerces to the other type for comparisons.
     let (l, r) = match (left, right) {
         (Value::Empty | Value::Missing, Value::Number(_)) => (Value::Number(0.0), right.clone()),
         (Value::Number(_), Value::Empty | Value::Missing) => (left.clone(), Value::Number(0.0)),
         (Value::Empty | Value::Missing, Value::Bool(_)) => (Value::Bool(false), right.clone()),
         (Value::Bool(_), Value::Empty | Value::Missing) => (left.clone(), Value::Bool(false)),
-        (Value::Empty | Value::Missing, Value::Text(_)) => {
+        (Value::Empty | Value::Missing, other) if text_like_str(other).is_some() => {
             (Value::Text(Arc::from("")), right.clone())
         }
-        (Value::Text(_), Value::Empty | Value::Missing) => {
+        (other, Value::Empty | Value::Missing) if text_like_str(other).is_some() => {
             (left.clone(), Value::Text(Arc::from("")))
         }
         _ => (left.clone(), right.clone()),
@@ -1297,13 +1310,19 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
 
     Ok(match (l, r) {
         (Value::Number(a), Value::Number(b)) => a.partial_cmp(&b).unwrap_or(Ordering::Equal),
-        (Value::Text(a), Value::Text(b)) => cmp_case_insensitive(&a, &b),
+        (a, b) if text_like_str(&a).is_some() && text_like_str(&b).is_some() => {
+            cmp_case_insensitive(text_like_str(&a).unwrap(), text_like_str(&b).unwrap())
+        }
         (Value::Bool(a), Value::Bool(b)) => a.cmp(&b),
         // Type precedence (approximate Excel): numbers < text < booleans.
-        (Value::Number(_), Value::Text(_) | Value::Bool(_)) => Ordering::Less,
-        (Value::Text(_), Value::Bool(_)) => Ordering::Less,
-        (Value::Text(_), Value::Number(_)) => Ordering::Greater,
-        (Value::Bool(_), Value::Number(_) | Value::Text(_)) => Ordering::Greater,
+        (Value::Number(_), b) if text_like_str(&b).is_some() || matches!(b, Value::Bool(_)) => {
+            Ordering::Less
+        }
+        (a, Value::Bool(_)) if text_like_str(&a).is_some() => Ordering::Less,
+        (a, Value::Number(_)) if text_like_str(&a).is_some() => Ordering::Greater,
+        (Value::Bool(_), b) if matches!(b, Value::Number(_)) || text_like_str(&b).is_some() => {
+            Ordering::Greater
+        }
         // Blank should have been coerced above.
         (Value::Empty | Value::Missing, Value::Empty | Value::Missing) => Ordering::Equal,
         (Value::Empty | Value::Missing, _) => Ordering::Less,
@@ -1317,6 +1336,7 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
         | (_, Value::Range(_))
         | (Value::MultiRange(_), _)
         | (_, Value::MultiRange(_)) => Ordering::Equal,
+        _ => Ordering::Equal,
     })
 }
 
@@ -3057,7 +3077,7 @@ fn and_scalar(v: &Value, all_true: &mut bool, any: &mut bool) -> Option<ErrorKin
             None
         }
         Value::Empty | Value::Missing => None,
-        Value::Text(_) => Some(ErrorKind::Value),
+        Value::Text(_) | Value::Entity(_) | Value::Record(_) => Some(ErrorKind::Value),
         // Ranges/arrays are handled by the caller.
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Some(ErrorKind::Spill),
     }
@@ -3076,7 +3096,7 @@ fn xor_scalar(v: &Value, acc: &mut bool) -> Option<ErrorKind> {
         }
         Value::Empty | Value::Missing => None,
         // Scalar text arguments coerce like NOT().
-        Value::Text(_) => match coerce_to_bool(v) {
+        Value::Text(_) | Value::Entity(_) | Value::Record(_) => match coerce_to_bool(v) {
             Ok(b) => {
                 *acc ^= b;
                 None
@@ -3106,7 +3126,7 @@ fn or_scalar(v: &Value, any_true: &mut bool, any: &mut bool) -> Option<ErrorKind
             None
         }
         Value::Empty | Value::Missing => None,
-        Value::Text(_) => Some(ErrorKind::Value),
+        Value::Text(_) | Value::Entity(_) | Value::Record(_) => Some(ErrorKind::Value),
         // Ranges/arrays are handled by the caller.
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Some(ErrorKind::Spill),
     }
@@ -3129,7 +3149,7 @@ fn and_array(a: &ArrayValue, all_true: &mut bool, any: &mut bool) -> Option<Erro
                 }
             }
             // Text and blanks in arrays are ignored (same as references).
-            Value::Text(_) | Value::Empty | Value::Missing => {}
+            Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Empty | Value::Missing => {}
             // Arrays should be scalar values; ignore any nested arrays/references rather than
             // treating them as implicit spills.
             Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {}
@@ -3155,7 +3175,7 @@ fn or_array(a: &ArrayValue, any_true: &mut bool, any: &mut bool) -> Option<Error
                 }
             }
             // Text and blanks in arrays are ignored (same as references).
-            Value::Text(_) | Value::Empty | Value::Missing => {}
+            Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Empty | Value::Missing => {}
             // Arrays should be scalar values; ignore any nested arrays/references rather than
             // treating them as implicit spills.
             Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {}
@@ -3175,7 +3195,7 @@ fn xor_array(a: &ArrayValue, acc: &mut bool) -> Option<ErrorKind> {
             }
             Value::Bool(b) => *acc ^= *b,
             // Text and blanks in arrays are ignored (same as references).
-            Value::Text(_) | Value::Empty | Value::Missing => {}
+            Value::Text(_) | Value::Entity(_) | Value::Record(_) | Value::Empty | Value::Missing => {}
             // Arrays should be scalar values; ignore any nested arrays/references rather than
             // treating them as implicit spills.
             Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => {}
@@ -3217,6 +3237,8 @@ fn and_range(
                     }
                     // Text/blanks in references are ignored.
                     Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -3249,6 +3271,8 @@ fn and_range(
                 }
                 // Text/blanks in references are ignored.
                 Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -3293,6 +3317,8 @@ fn or_range(
                     }
                     // Text/blanks in references are ignored.
                     Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -3325,6 +3351,8 @@ fn or_range(
                 }
                 // Text/blanks in references are ignored.
                 Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -3387,6 +3415,8 @@ fn and_range_on_sheet(
                     }
                     // Text/blanks in references are ignored.
                     Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -3419,6 +3449,8 @@ fn and_range_on_sheet(
                 }
                 // Text/blanks in references are ignored.
                 Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -3481,6 +3513,8 @@ fn or_range_on_sheet(
                     }
                     // Text/blanks in references are ignored.
                     Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -3513,6 +3547,8 @@ fn or_range_on_sheet(
                 }
                 // Text/blanks in references are ignored.
                 Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -3669,7 +3705,7 @@ fn fn_istext(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Value);
     }
     map_arg(&args[0], grid, base, |v| {
-        Value::Bool(matches!(v, Value::Text(_)))
+        Value::Bool(matches!(v, Value::Text(_) | Value::Entity(_) | Value::Record(_)))
     })
 }
 
@@ -3694,7 +3730,7 @@ fn fn_iserr(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 fn type_code_for_scalar(value: &Value) -> i32 {
     match value {
         Value::Number(_) | Value::Empty | Value::Missing => 1,
-        Value::Text(_) => 2,
+        Value::Text(_) | Value::Entity(_) | Value::Record(_) => 2,
         Value::Bool(_) => 4,
         Value::Error(_) => 16,
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => 64,
@@ -3752,7 +3788,9 @@ fn fn_n(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         Value::Error(e) => Value::Error(*e),
         Value::Number(n) => Value::Number(*n),
         Value::Bool(b) => Value::Number(if *b { 1.0 } else { 0.0 }),
-        Value::Empty | Value::Missing | Value::Text(_) => Value::Number(0.0),
+        Value::Empty | Value::Missing | Value::Text(_) | Value::Entity(_) | Value::Record(_) => {
+            Value::Number(0.0)
+        }
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Value::Error(ErrorKind::Value),
     })
 }
@@ -3764,7 +3802,12 @@ fn fn_t(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     map_arg(&args[0], grid, base, |v| match v {
         Value::Error(e) => Value::Error(*e),
         Value::Text(s) => Value::Text(s.clone()),
-        Value::Number(_) | Value::Bool(_) | Value::Empty | Value::Missing => {
+        Value::Entity(ent) => Value::Text(Arc::from(ent.display.as_str())),
+        Value::Record(rec) => Value::Text(Arc::from(rec.display.as_str())),
+        Value::Number(_)
+        | Value::Bool(_)
+        | Value::Empty
+        | Value::Missing => {
             Value::Text(Arc::from(""))
         }
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Value::Error(ErrorKind::Value),
@@ -4078,6 +4121,8 @@ fn xor_range(grid: &dyn Grid, range: ResolvedRange, acc: &mut bool) -> Option<Er
                 Value::Bool(b) => *acc ^= b,
                 // Text/blanks in references are ignored.
                 Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -4117,6 +4162,8 @@ fn xor_range_on_sheet(
                 Value::Bool(b) => *acc ^= b,
                 // Text/blanks in references are ignored.
                 Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -4150,6 +4197,8 @@ fn format_number_general(n: f64) -> String {
 fn coerce_to_string(v: Value) -> Result<String, ErrorKind> {
     match v {
         Value::Text(s) => Ok(s.to_string()),
+        Value::Entity(v) => Ok(v.display.clone()),
+        Value::Record(v) => Ok(v.display.clone()),
         Value::Number(n) => Ok(format_number_general(n)),
         Value::Bool(b) => Ok(if b { "TRUE" } else { "FALSE" }.to_string()),
         Value::Empty | Value::Missing => Ok(String::new()),
@@ -4202,6 +4251,8 @@ fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                             }
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Empty
                             | Value::Missing
                             | Value::Array(_)
@@ -4225,6 +4276,8 @@ fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                             Value::Error(e) => return Value::Error(*e),
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Empty
                             | Value::Missing
                             | Value::Array(_)
@@ -4252,6 +4305,7 @@ fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 Ok(v) => sum += v,
                 Err(e) => return Value::Error(e),
             },
+            Value::Entity(_) | Value::Record(_) => return Value::Error(ErrorKind::Value),
         }
     }
     Value::Number(sum)
@@ -4304,15 +4358,17 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                                     }
                                 }
                             }
-                             Value::Bool(_)
-                             | Value::Text(_)
-                             | Value::Empty
-                             | Value::Missing
-                             | Value::Array(_)
-                             | Value::Range(_)
-                             | Value::MultiRange(_) => {}
-                         }
-                     }
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
+                            | Value::Empty
+                            | Value::Missing
+                            | Value::Array(_)
+                            | Value::Range(_)
+                            | Value::MultiRange(_) => {}
+                        }
+                    }
 
                     if !saw_nan {
                         if len > 0 {
@@ -4335,6 +4391,8 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                             Value::Error(e) => return Value::Error(*e),
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Empty
                             | Value::Missing
                             | Value::Array(_)
@@ -4380,6 +4438,7 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 }
                 Err(e) => return Value::Error(e),
             },
+            Value::Entity(_) | Value::Record(_) => return Value::Error(ErrorKind::Value),
         }
     }
     if count == 0 {
@@ -4435,15 +4494,17 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                                     len = 0;
                                 }
                             }
-                             Value::Bool(_)
-                             | Value::Text(_)
-                             | Value::Empty
-                             | Value::Missing
-                             | Value::Array(_)
-                             | Value::Range(_)
-                             | Value::MultiRange(_) => {}
-                         }
-                     }
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
+                            | Value::Empty
+                            | Value::Missing
+                            | Value::Array(_)
+                            | Value::Range(_)
+                            | Value::MultiRange(_) => {}
+                        }
+                    }
 
                     if len > 0 {
                         if let Some(m) = simd::min_ignore_nan_f64(&buf[..len]) {
@@ -4464,17 +4525,19 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                                 }
                             }
                             Value::Error(e) => return Value::Error(*e),
-                             Value::Bool(_)
-                             | Value::Text(_)
-                             | Value::Empty
-                             | Value::Missing
-                             | Value::Array(_)
-                             | Value::Range(_)
-                             | Value::MultiRange(_) => {}
-                         }
-                     }
-                 }
-             }
+                            Value::Bool(_)
+                            | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
+                            | Value::Empty
+                            | Value::Missing
+                            | Value::Array(_)
+                            | Value::Range(_)
+                            | Value::MultiRange(_) => {}
+                        }
+                    }
+                }
+            }
             Value::Range(r) => match min_range(grid, r.resolve(base)) {
                 Ok(Some(m)) => out = Some(out.map_or(m, |prev| prev.min(m))),
                 Ok(None) => {}
@@ -4501,6 +4564,7 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 }
                 Err(e) => return Value::Error(e),
             },
+            Value::Entity(_) | Value::Record(_) => return Value::Error(ErrorKind::Value),
         }
     }
     Value::Number(match out {
@@ -4555,6 +4619,8 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                             }
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Empty
                             | Value::Missing
                             | Value::Array(_)
@@ -4584,6 +4650,8 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                             Value::Error(e) => return Value::Error(*e),
                             Value::Bool(_)
                             | Value::Text(_)
+                            | Value::Entity(_)
+                            | Value::Record(_)
                             | Value::Empty
                             | Value::Missing
                             | Value::Array(_)
@@ -4619,6 +4687,7 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 }
                 Err(e) => return Value::Error(e),
             },
+            Value::Entity(_) | Value::Record(_) => return Value::Error(ErrorKind::Value),
         }
     }
     Value::Number(match out {
@@ -4671,7 +4740,13 @@ fn fn_count(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                     }
                 }
             }
-            Value::Bool(_) | Value::Empty | Value::Missing | Value::Error(_) | Value::Text(_) => {}
+            Value::Bool(_)
+            | Value::Empty
+            | Value::Missing
+            | Value::Error(_)
+            | Value::Text(_)
+            | Value::Entity(_)
+            | Value::Record(_) => {}
         }
     }
     Value::Number(count as f64)
@@ -4683,7 +4758,12 @@ fn fn_counta(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         match arg {
             // Scalars.
             Value::Empty | Value::Missing => {}
-            Value::Number(_) | Value::Bool(_) | Value::Text(_) | Value::Error(_) => total += 1,
+            Value::Number(_)
+            | Value::Bool(_)
+            | Value::Text(_)
+            | Value::Entity(_)
+            | Value::Record(_)
+            | Value::Error(_) => total += 1,
             Value::Array(a) => {
                 total += a
                     .iter()
@@ -4717,12 +4797,16 @@ fn fn_countblank(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         match arg {
             Value::Empty | Value::Missing => total += 1,
             Value::Text(s) if s.is_empty() => total += 1,
+            Value::Entity(v) if v.display.is_empty() => total += 1,
+            Value::Record(v) if v.display.is_empty() => total += 1,
             Value::Array(a) => {
                 total += a
                     .iter()
                     .filter(|v| {
                         matches!(v, Value::Empty | Value::Missing)
                             || matches!(v, Value::Text(s) if s.is_empty())
+                            || matches!(v, Value::Entity(ent) if ent.display.is_empty())
+                            || matches!(v, Value::Record(rec) if rec.display.is_empty())
                     })
                     .count();
             }
@@ -4738,7 +4822,12 @@ fn fn_countblank(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                     }
                 }
             }
-            Value::Number(_) | Value::Bool(_) | Value::Text(_) | Value::Error(_) => {}
+            Value::Number(_)
+            | Value::Bool(_)
+            | Value::Text(_)
+            | Value::Entity(_)
+            | Value::Record(_)
+            | Value::Error(_) => {}
         }
     }
     Value::Number(total as f64)
@@ -4908,6 +4997,8 @@ fn fn_sumif(
                 Value::Error(e) => return Value::Error(e),
                 Value::Bool(_)
                 | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -5103,6 +5194,8 @@ fn fn_sumifs(
                 Value::Error(e) => return Value::Error(e),
                 Value::Bool(_)
                 | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -5360,6 +5453,8 @@ fn fn_averageif(
                 Value::Error(e) => return Value::Error(e),
                 Value::Bool(_)
                 | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -5570,6 +5665,8 @@ fn fn_averageifs(
                 Value::Error(e) => return Value::Error(e),
                 Value::Bool(_)
                 | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -5741,6 +5838,8 @@ fn fn_minifs(
                 },
                 Value::Bool(_)
                 | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -5912,6 +6011,8 @@ fn fn_maxifs(
                 },
                 Value::Bool(_)
                 | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
                 | Value::Empty
                 | Value::Missing
                 | Value::Array(_)
@@ -6388,8 +6489,11 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
 }
 
 fn wildcard_pattern_for_lookup(lookup: &Value) -> Option<WildcardPattern> {
-    let Value::Text(pattern) = lookup else {
-        return None;
+    let pattern = match lookup {
+        Value::Text(pattern) => pattern.as_ref(),
+        Value::Entity(v) => v.display.as_str(),
+        Value::Record(v) => v.display.as_str(),
+        _ => return None,
     };
     if !pattern.contains('*') && !pattern.contains('?') && !pattern.contains('~') {
         return None;
@@ -6398,14 +6502,26 @@ fn wildcard_pattern_for_lookup(lookup: &Value) -> Option<WildcardPattern> {
 }
 
 fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
+    fn text_like_str(v: &Value) -> Option<&str> {
+        match v {
+            Value::Text(s) => Some(s.as_ref()),
+            Value::Entity(v) => Some(v.display.as_str()),
+            Value::Record(v) => Some(v.display.as_str()),
+            _ => None,
+        }
+    }
+
     match (lookup_value, candidate) {
         (Value::Number(a), Value::Number(b)) => a == b,
-        (Value::Text(a), Value::Text(b)) => cmp_case_insensitive(a, b) == Ordering::Equal,
+        (a, b) if text_like_str(a).is_some() && text_like_str(b).is_some() => {
+            cmp_case_insensitive(text_like_str(a).unwrap(), text_like_str(b).unwrap())
+                == Ordering::Equal
+        }
         (Value::Bool(a), Value::Bool(b)) => a == b,
         (Value::Error(a), Value::Error(b)) => a == b,
         (Value::Empty | Value::Missing, Value::Empty | Value::Missing) => true,
-        (Value::Number(a), Value::Text(b)) | (Value::Text(b), Value::Number(a)) => {
-            let trimmed = b.trim();
+        (Value::Number(a), b) if text_like_str(b).is_some() => {
+            let trimmed = text_like_str(b).unwrap().trim();
             if trimmed.is_empty() {
                 false
             } else {
@@ -6416,6 +6532,20 @@ fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
                     thread_date_system(),
                 )
                 .is_ok_and(|parsed| parsed == *a)
+            }
+        }
+        (a, Value::Number(b)) if text_like_str(a).is_some() => {
+            let trimmed = text_like_str(a).unwrap().trim();
+            if trimmed.is_empty() {
+                false
+            } else {
+                crate::coercion::datetime::parse_value_text(
+                    trimmed,
+                    thread_value_locale(),
+                    thread_now_utc(),
+                    thread_date_system(),
+                )
+                .is_ok_and(|parsed| parsed == *b)
             }
         }
         (Value::Bool(a), Value::Number(b)) | (Value::Number(b), Value::Bool(a)) => {
@@ -6446,10 +6576,19 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
         }
     }
 
+    fn text_like_str(v: &Value) -> Option<&str> {
+        match v {
+            Value::Text(s) => Some(s.as_ref()),
+            Value::Entity(v) => Some(v.display.as_str()),
+            Value::Record(v) => Some(v.display.as_str()),
+            _ => None,
+        }
+    }
+
     fn type_rank(v: &Value) -> Option<u8> {
         match v {
             Value::Number(_) => Some(0),
-            Value::Text(_) => Some(1),
+            Value::Text(_) | Value::Entity(_) | Value::Record(_) => Some(1),
             Value::Bool(_) => Some(2),
             Value::Empty | Value::Missing => Some(3),
             Value::Error(_) => Some(4),
@@ -6465,12 +6604,12 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
         (Value::Number(x), Value::Empty | Value::Missing) => {
             Some(ordering_to_i32(x.partial_cmp(&0.0_f64)?))
         }
-        (Value::Empty | Value::Missing, Value::Text(y)) => {
-            Some(ordering_to_i32(cmp_case_insensitive("", y)))
-        }
-        (Value::Text(x), Value::Empty | Value::Missing) => {
-            Some(ordering_to_i32(cmp_case_insensitive(x, "")))
-        }
+        (Value::Empty | Value::Missing, other) if text_like_str(other).is_some() => Some(
+            ordering_to_i32(cmp_case_insensitive("", text_like_str(other).unwrap())),
+        ),
+        (other, Value::Empty | Value::Missing) if text_like_str(other).is_some() => Some(
+            ordering_to_i32(cmp_case_insensitive(text_like_str(other).unwrap(), "")),
+        ),
         (Value::Empty | Value::Missing, Value::Bool(y)) => Some(ordering_to_i32(false.cmp(y))),
         (Value::Bool(x), Value::Empty | Value::Missing) => Some(ordering_to_i32(x.cmp(&false))),
         _ => {
@@ -6482,9 +6621,10 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
 
             match (a, b) {
                 (Value::Number(x), Value::Number(y)) => Some(ordering_to_i32(x.partial_cmp(y)?)),
-                (Value::Text(x), Value::Text(y)) => {
-                    Some(ordering_to_i32(cmp_case_insensitive(x, y)))
-                }
+                (a, b) if type_rank(a) == Some(1) => Some(ordering_to_i32(cmp_case_insensitive(
+                    text_like_str(a)?,
+                    text_like_str(b)?,
+                ))),
                 (Value::Bool(x), Value::Bool(y)) => Some(ordering_to_i32(x.cmp(y))),
                 (Value::Empty | Value::Missing, Value::Empty | Value::Missing) => Some(0),
                 (Value::Error(x), Value::Error(y)) => {
@@ -6700,6 +6840,8 @@ fn bytecode_value_to_engine(value: Value) -> EngineValue {
         Value::Number(n) => EngineValue::Number(n),
         Value::Bool(b) => EngineValue::Bool(b),
         Value::Text(s) => EngineValue::Text(s.to_string()),
+        Value::Entity(v) => EngineValue::Entity(v.as_ref().clone()),
+        Value::Record(v) => EngineValue::Record(v.as_ref().clone()),
         Value::Empty | Value::Missing => EngineValue::Blank,
         Value::Error(e) => EngineValue::Error(e.into()),
         // Array/range values are not valid scalar values, but the bytecode runtime uses `#SPILL!`
@@ -6720,9 +6862,13 @@ fn parse_countif_criteria(
     }
 
     let criteria_value = match criteria {
-        Value::Number(_) | Value::Bool(_) | Value::Text(_) | Value::Empty | Value::Missing => {
-            bytecode_value_to_engine(criteria.clone())
-        }
+        Value::Number(_)
+        | Value::Bool(_)
+        | Value::Text(_)
+        | Value::Entity(_)
+        | Value::Record(_)
+        | Value::Empty
+        | Value::Missing => bytecode_value_to_engine(criteria.clone()),
         Value::Error(_) => unreachable!("handled above"),
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => return Err(ErrorKind::Value),
     };
@@ -6971,6 +7117,8 @@ fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
                     // SUM ignores text/logicals/blanks in references.
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -6997,6 +7145,8 @@ fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
                     // SUM ignores text/logicals/blanks in references.
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7032,6 +7182,8 @@ fn sum_range_on_sheet(
                     // SUM ignores text/logicals/blanks in references.
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7059,6 +7211,8 @@ fn sum_range_on_sheet(
                     // SUM ignores text/logicals/blanks in references.
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7094,6 +7248,8 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize)
                     // Ignore non-numeric values in references.
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7126,6 +7282,8 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize)
                     // Ignore non-numeric values in references.
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7165,6 +7323,8 @@ fn sum_count_range_on_sheet(
                     // Ignore non-numeric values in references.
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7198,6 +7358,8 @@ fn sum_count_range_on_sheet(
                     // Ignore non-numeric values in references.
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7390,6 +7552,8 @@ fn countblank_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, Erro
                 }
                 if !matches!(v, Value::Empty | Value::Missing)
                     && !matches!(v, Value::Text(ref s) if s.is_empty())
+                    && !matches!(v, Value::Entity(ref ent) if ent.display.is_empty())
+                    && !matches!(v, Value::Record(ref rec) if rec.display.is_empty())
                 {
                     non_blank += 1;
                 }
@@ -7407,6 +7571,8 @@ fn countblank_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, Erro
                 let v = grid.get_value(CellCoord { row, col });
                 if !matches!(v, Value::Empty | Value::Missing)
                     && !matches!(v, Value::Text(ref s) if s.is_empty())
+                    && !matches!(v, Value::Entity(ref ent) if ent.display.is_empty())
+                    && !matches!(v, Value::Record(ref rec) if rec.display.is_empty())
                 {
                     non_blank += 1;
                 }
@@ -7437,6 +7603,8 @@ fn countblank_range_on_sheet(
                 }
                 if !matches!(v, Value::Empty | Value::Missing)
                     && !matches!(v, Value::Text(ref s) if s.is_empty())
+                    && !matches!(v, Value::Entity(ref ent) if ent.display.is_empty())
+                    && !matches!(v, Value::Record(ref rec) if rec.display.is_empty())
                 {
                     non_blank += 1;
                 }
@@ -7456,6 +7624,8 @@ fn countblank_range_on_sheet(
                 let v = grid.get_value_on_sheet(sheet, CellCoord { row, col });
                 if !matches!(v, Value::Empty | Value::Missing)
                     && !matches!(v, Value::Text(ref s) if s.is_empty())
+                    && !matches!(v, Value::Entity(ref ent) if ent.display.is_empty())
+                    && !matches!(v, Value::Record(ref rec) if rec.display.is_empty())
                 {
                     non_blank += 1;
                 }
@@ -7484,6 +7654,8 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
                     Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7510,6 +7682,8 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
                     Value::Error(e) => return Err(e),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7548,6 +7722,8 @@ fn min_range_on_sheet(
                     Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7576,6 +7752,8 @@ fn min_range_on_sheet(
                     Value::Error(e) => return Err(e),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7610,6 +7788,8 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
                     Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7636,6 +7816,8 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
                     Value::Error(e) => return Err(e),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7674,6 +7856,8 @@ fn max_range_on_sheet(
                     Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7702,6 +7886,8 @@ fn max_range_on_sheet(
                     Value::Error(e) => return Err(e),
                     Value::Bool(_)
                     | Value::Text(_)
+                    | Value::Entity(_)
+                    | Value::Record(_)
                     | Value::Empty
                     | Value::Missing
                     | Value::Array(_)
@@ -7841,6 +8027,7 @@ fn coerce_sumproduct_number(v: &Value) -> Result<f64, ErrorKind> {
             Err(ExcelError::Div0) => Err(ErrorKind::Div0),
             Err(ExcelError::Num) => Err(ErrorKind::Num),
         },
+        Value::Entity(_) | Value::Record(_) => Err(ErrorKind::Value),
         Value::Empty | Value::Missing => Ok(0.0),
         Value::Error(e) => Err(*e),
         Value::Array(_) | Value::Range(_) | Value::MultiRange(_) => Err(ErrorKind::Value),

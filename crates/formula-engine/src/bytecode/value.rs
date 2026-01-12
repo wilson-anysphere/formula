@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::fmt;
 
+use crate::value::{EntityValue, RecordValue};
+
 /// Engine sheet id (0-indexed).
 pub type SheetId = usize;
 
@@ -255,6 +257,8 @@ pub enum Value {
     Number(f64),
     Bool(bool),
     Text(Arc<str>),
+    Entity(Arc<EntityValue>),
+    Record(Arc<RecordValue>),
     Array(Array),
     Range(RangeRef),
     MultiRange(MultiRangeRef),
@@ -286,6 +290,8 @@ impl PartialEq for Value {
             (Number(a), Number(b)) => a.to_bits() == b.to_bits(),
             (Bool(a), Bool(b)) => a == b,
             (Text(a), Text(b)) => a == b,
+            (Entity(a), Entity(b)) => a == b,
+            (Record(a), Record(b)) => a == b,
             (Empty, Empty) => true,
             (Missing, Missing) => true,
             (Error(a), Error(b)) => a == b,

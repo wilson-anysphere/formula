@@ -204,6 +204,8 @@ fn bytecode_value_to_engine(value: formula_engine::bytecode::Value) -> Value {
         ByteValue::Number(n) => Value::Number(n),
         ByteValue::Bool(b) => Value::Bool(b),
         ByteValue::Text(s) => Value::Text(s.to_string()),
+        ByteValue::Entity(v) => Value::Entity(v.as_ref().clone()),
+        ByteValue::Record(v) => Value::Record(v.as_ref().clone()),
         ByteValue::Empty => Value::Blank,
         ByteValue::Missing => Value::Blank,
         ByteValue::Error(e) => Value::Error(e.into()),

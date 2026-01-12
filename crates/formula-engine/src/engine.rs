@@ -6485,17 +6485,12 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
         Value::Number(n) => bytecode::Value::Number(*n),
         Value::Bool(b) => bytecode::Value::Bool(*b),
         Value::Text(s) => bytecode::Value::Text(Arc::from(s.as_str())),
-        // Rich values can exist in the engine grid but may not be represented natively in the
-        // bytecode runtime. Degrade them to their display string so they behave like text
-        // in bytecode evaluation (e.g. SUM ignores them).
-        Value::Entity(v) => bytecode::Value::Text(Arc::from(v.display.as_str())),
-        Value::Record(v) => bytecode::Value::Text(Arc::from(v.display.as_str())),
+        Value::Entity(v) => bytecode::Value::Entity(Arc::new(v.clone())),
+        Value::Record(v) => bytecode::Value::Record(Arc::new(v.clone())),
         Value::Blank => bytecode::Value::Empty,
         Value::Error(e) => bytecode::Value::Error(engine_error_to_bytecode(*e)),
         Value::Lambda(_) => bytecode::Value::Error(bytecode::ErrorKind::Calc),
-        Value::Reference(_) | Value::ReferenceUnion(_) => {
-            bytecode::Value::Error(bytecode::ErrorKind::Value)
-        }
+        Value::Reference(_) | Value::ReferenceUnion(_) => bytecode::Value::Error(bytecode::ErrorKind::Value),
         Value::Array(_) | Value::Spill { .. } => bytecode::Value::Error(bytecode::ErrorKind::Spill),
     }
 }
@@ -6505,6 +6500,8 @@ fn bytecode_value_to_engine(value: bytecode::Value) -> Value {
         bytecode::Value::Number(n) => Value::Number(n),
         bytecode::Value::Bool(b) => Value::Bool(b),
         bytecode::Value::Text(s) => Value::Text(s.to_string()),
+        bytecode::Value::Entity(v) => Value::Entity(v.as_ref().clone()),
+        bytecode::Value::Record(v) => Value::Record(v.as_ref().clone()),
         bytecode::Value::Empty => Value::Blank,
         bytecode::Value::Missing => Value::Blank,
         bytecode::Value::Error(e) => Value::Error(bytecode_error_to_engine(e)),
@@ -7447,6 +7444,7 @@ fn bytecode_expr_is_eligible_inner(
         bytecode::Expr::Literal(v) => match v {
             bytecode::Value::Number(_) | bytecode::Value::Bool(_) => true,
             bytecode::Value::Text(_) => true,
+            bytecode::Value::Entity(_) | bytecode::Value::Record(_) => true,
             bytecode::Value::Empty => true,
             bytecode::Value::Missing => true,
             bytecode::Value::Error(_) => true,
