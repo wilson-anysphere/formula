@@ -144,7 +144,10 @@ describe("DocumentControllerSpreadsheetApi", () => {
     try {
       const controller = new DocumentController();
       const api = new DocumentControllerSpreadsheetApi(controller);
-      const executor = new ToolExecutor(api, { default_sheet: "Sheet1" });
+      // Disable ToolExecutor's `max_tool_range_cells` guard so we exercise the
+      // DocumentController safety caps instead (the underlying controller should
+      // still refuse the oversized full-width selection quickly).
+      const executor = new ToolExecutor(api, { default_sheet: "Sheet1", max_tool_range_cells: Number.POSITIVE_INFINITY });
 
       // Full-width formatting over >50k rows is rejected by DocumentController's safety cap.
       const result = await executor.execute({
@@ -170,7 +173,9 @@ describe("DocumentControllerSpreadsheetApi", () => {
       const sheetNames = new Map<string, string>([["Sheet2", "Budget"]]);
       const sheetNameResolver = createSheetNameResolverFromIdToNameMap(sheetNames);
       const api = new DocumentControllerSpreadsheetApi(controller, { sheetNameResolver });
-      const executor = new ToolExecutor(api, { default_sheet: "Sheet2" });
+      // Disable ToolExecutor's `max_tool_range_cells` guard so the error message is produced by
+      // the DocumentController adapter (which should format ranges using the display sheet name).
+      const executor = new ToolExecutor(api, { default_sheet: "Sheet2", max_tool_range_cells: Number.POSITIVE_INFINITY });
 
       const result = await executor.execute({
         name: "apply_formatting",
@@ -658,7 +663,10 @@ describe("DocumentControllerSpreadsheetApi", () => {
         }
       ],
       api,
-      { default_sheet: "Sheet1" }
+      // Allow full-column formatting for this test so we can validate PreviewEngine approval
+      // gating even when the underlying spreadsheet stores formatting in layered defaults
+      // (no per-cell diffs).
+      { default_sheet: "Sheet1", max_tool_range_cells: Number.POSITIVE_INFINITY }
     );
 
     // The DocumentController formatting layer stores full-column formatting without creating per-cell entries,
