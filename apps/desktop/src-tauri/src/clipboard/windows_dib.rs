@@ -28,6 +28,7 @@ const BITMAPINFOHEADER_SIZE: usize = 40;
 const BITMAPV5HEADER_SIZE: usize = 124;
 const BI_RGB: u32 = 0;
 const BI_BITFIELDS: u32 = 3;
+const BI_PNG: u32 = 5;
 const BI_ALPHABITFIELDS: u32 = 6;
 
 // 'sRGB' as a u32 in little-endian.
@@ -343,6 +344,34 @@ pub fn dibv5_to_png(dib_bytes: &[u8]) -> Result<Vec<u8>, String> {
     let planes = read_u16_le(dib_bytes, 12).ok_or("failed to read bV5Planes")?;
     let bit_count = read_u16_le(dib_bytes, 14).ok_or("failed to read bV5BitCount")?;
     let compression = read_u32_le(dib_bytes, 16).ok_or("failed to read bV5Compression")?;
+
+    if compression == BI_PNG {
+        // BI_PNG: the DIB payload contains a full PNG stream instead of raw pixels.
+        //
+        // This is used in BMP files and occasionally shows up in clipboard DIB payloads produced by
+        // some apps. Treat it as a pass-through and return the embedded PNG bytes.
+        const PNG_SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        let size_image = read_u32_le(dib_bytes, 20).unwrap_or(0) as usize;
+        let start = header_size;
+        let end = if size_image == 0 {
+            dib_bytes.len()
+        } else {
+            start
+                .checked_add(size_image)
+                .ok_or_else(|| "dib embedded PNG size overflow".to_string())?
+        };
+        if end > dib_bytes.len() {
+            return Err("dib embedded PNG exceeds buffer length".to_string());
+        }
+        if end <= start {
+            return Err("dib embedded PNG is empty".to_string());
+        }
+        let png = &dib_bytes[start..end];
+        if !png.starts_with(&PNG_SIGNATURE) {
+            return Err("dib embedded BI_PNG data is not a PNG".to_string());
+        }
+        return Ok(png.to_vec());
+    }
 
     if width <= 0 {
         return Err(format!("unsupported DIB width: {width}"));
@@ -767,5 +796,31 @@ mod tests {
         let png = dibv5_to_png(&dib).expect("dibv5_to_png failed");
         let (_w, _h, px) = decode_png(&png);
         assert_eq!(px, vec![255, 0, 0, 128, 0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn dib_bi_png_is_passed_through() {
+        // Some producers embed a full PNG stream in a DIB header using BI_PNG compression.
+        // Ensure we can extract the PNG without attempting to interpret raw pixels.
+        let png = encode_test_png();
+
+        let mut dib = Vec::new();
+        push_u32_le(&mut dib, BITMAPINFOHEADER_SIZE as u32); // biSize
+        push_i32_le(&mut dib, 2); // biWidth
+        push_i32_le(&mut dib, 2); // biHeight (bottom-up)
+        push_u16_le(&mut dib, 1); // biPlanes
+        push_u16_le(&mut dib, 0); // biBitCount (ignored for BI_PNG)
+        push_u32_le(&mut dib, BI_PNG); // biCompression
+        push_u32_le(&mut dib, png.len() as u32); // biSizeImage
+        push_i32_le(&mut dib, 0); // biXPelsPerMeter
+        push_i32_le(&mut dib, 0); // biYPelsPerMeter
+        push_u32_le(&mut dib, 0); // biClrUsed
+        push_u32_le(&mut dib, 0); // biClrImportant
+
+        debug_assert_eq!(dib.len(), BITMAPINFOHEADER_SIZE);
+        dib.extend_from_slice(&png);
+
+        let out = dibv5_to_png(&dib).expect("dibv5_to_png failed");
+        assert_eq!(out, png);
     }
 }
