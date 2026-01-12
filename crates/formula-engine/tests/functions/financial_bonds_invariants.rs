@@ -67,7 +67,12 @@ fn coup_invariants_when_settlement_is_coupon_date() {
         return;
     }
 
-    let maturities = ["DATE(2030,12,31)", "DATE(2031,2,28)", "DATE(2030,7,15)"];
+    let maturities = [
+        "DATE(2030,12,31)",
+        "DATE(2031,2,28)",
+        "DATE(2030,8,30)",
+        "DATE(2030,7,15)",
+    ];
     let frequencies = [1, 2, 4];
     let bases = [0, 1, 2, 3, 4];
 
@@ -96,8 +101,23 @@ fn coup_invariants_when_settlement_is_coupon_date() {
                     // length E as a fixed fraction of a 360/365-day year, while DSC remains an
                     // actual day count. That means DSC is not necessarily equal to E even when
                     // settlement is a coupon date.
-                    if matches!(basis, 0 | 1 | 4) {
-                        assert_close(daysnc, days, 1e-12);
+                    match basis {
+                        0 | 1 | 4 => assert_close(daysnc, days, 1e-12),
+                        2 => {
+                            assert_close(days, 360.0 / (frequency as f64), 1e-12);
+                            let ncd = coupon_date_from_maturity(maturity, months_per_period, k - 1);
+                            let expected =
+                                eval_number(&mut sheet, &format!("=({ncd})-({settlement})"));
+                            assert_close(daysnc, expected, 1e-12);
+                        }
+                        3 => {
+                            assert_close(days, 365.0 / (frequency as f64), 1e-12);
+                            let ncd = coupon_date_from_maturity(maturity, months_per_period, k - 1);
+                            let expected =
+                                eval_number(&mut sheet, &format!("=({ncd})-({settlement})"));
+                            assert_close(daysnc, expected, 1e-12);
+                        }
+                        _ => unreachable!(),
                     }
 
                     if matches!(basis, 0 | 4) {
@@ -133,7 +153,12 @@ fn coup_days_additivity_for_30_360_bases() {
         return;
     }
 
-    let maturities = ["DATE(2030,12,31)", "DATE(2031,2,28)", "DATE(2030,7,15)"];
+    let maturities = [
+        "DATE(2030,12,31)",
+        "DATE(2031,2,28)",
+        "DATE(2030,8,30)",
+        "DATE(2030,7,15)",
+    ];
     let frequencies = [1, 2, 4];
     let bases = [0, 4];
     let deltas = [1, 15, 30];
@@ -194,7 +219,12 @@ fn coup_schedule_roundtrips_when_settlement_is_coupon_date() {
         return;
     }
 
-    let maturities = ["DATE(2030,12,31)", "DATE(2031,2,28)", "DATE(2030,7,15)"];
+    let maturities = [
+        "DATE(2030,12,31)",
+        "DATE(2031,2,28)",
+        "DATE(2030,8,30)",
+        "DATE(2030,7,15)",
+    ];
     let frequencies = [1, 2, 4];
     let bases = [0, 1, 2, 3, 4];
 
@@ -252,7 +282,12 @@ fn price_yield_roundtrip_consistency() {
         return;
     }
 
-    let maturities = ["DATE(2030,12,31)", "DATE(2030,7,15)"];
+    let maturities = [
+        "DATE(2030,12,31)",
+        "DATE(2031,2,28)",
+        "DATE(2030,8,30)",
+        "DATE(2030,7,15)",
+    ];
     let frequencies = [1, 2, 4];
     let bases = [0, 1, 2, 3, 4];
     let rates = [0.03, 0.065];
@@ -304,7 +339,12 @@ fn price_matches_pv_when_settlement_is_coupon_date() {
     //
     // This is a stronger cross-check than PRICE/YIELD roundtripping because it compares against
     // the independent `PV` implementation.
-    let maturities = ["DATE(2030,12,31)", "DATE(2031,2,28)", "DATE(2030,7,15)"];
+    let maturities = [
+        "DATE(2030,12,31)",
+        "DATE(2031,2,28)",
+        "DATE(2030,8,30)",
+        "DATE(2030,7,15)",
+    ];
     let frequencies = [1, 2, 4];
     // For bases 2 and 3, `PRICE` does not reduce to an integer-period `PV` when settlement is a
     // coupon date because the coupon-period length `E` is fixed (360/freq or 365/freq) while `DSC`
@@ -373,7 +413,12 @@ fn duration_n1_equals_time_to_maturity() {
     // maturity:
     //   DURATION = (DSC / E) / frequency
     // This should be independent of coupon and yield (there's a single cash flow).
-    let maturities = ["DATE(2030,12,31)", "DATE(2031,2,28)", "DATE(2030,7,15)"];
+    let maturities = [
+        "DATE(2030,12,31)",
+        "DATE(2031,2,28)",
+        "DATE(2030,8,30)",
+        "DATE(2030,7,15)",
+    ];
     let frequencies = [1, 2, 4];
     let bases = [0, 1, 2, 3, 4];
     let deltas = [1, 10, 30];
@@ -443,7 +488,11 @@ fn mduration_matches_duration_identity() {
         return;
     }
 
-    let maturities = ["DATE(2030,12,31)", "DATE(2031,2,28)"];
+    let maturities = [
+        "DATE(2030,12,31)",
+        "DATE(2031,2,28)",
+        "DATE(2030,8,30)",
+    ];
     let frequencies = [1, 2, 4];
     let bases = [0, 1, 2, 3, 4];
     let coupons = [0.025, 0.08];
