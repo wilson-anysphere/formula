@@ -86,7 +86,7 @@ At a high level:
   - Source: `packages/extension-host/src/browser/index.mjs`
   - Each extension runs in its own module `Worker` (`packages/extension-host/src/browser/extension-worker.mjs`).
 - **Installer + package store:** `WebExtensionManager` (IndexedDB-backed installer/loader)
-  - Source: `apps/web/src/marketplace/WebExtensionManager.ts`
+  - Source: `packages/extension-marketplace/src/WebExtensionManager.ts`
   - Downloads signed `.fextpkg` packages from the marketplace, verifies SHA-256 + Ed25519 signatures **in the
     WebView**, and persists verified bytes + metadata to IndexedDB.
 
