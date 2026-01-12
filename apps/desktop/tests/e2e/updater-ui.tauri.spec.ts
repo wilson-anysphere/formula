@@ -10,6 +10,10 @@ async function flushMicrotasks(page: Page, times = 6): Promise<void> {
   }, times);
 }
 
+function lastToast(page: Page) {
+  return page.locator('#toast-root [data-testid="toast"]').last();
+}
+
 async function waitForTauriListeners(page: Page, eventName: string): Promise<void> {
   await page.waitForFunction(
     (name) => {
@@ -269,6 +273,112 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     expect(counts.focus).toBe(1);
     expect(counts.notifications).toBe(0);
     expect(counts.notifiedViaInvoke).toBe(false);
+  });
+
+  test("startup completion toasts are surfaced after the user queues a manual check behind an in-flight startup check", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      const listeners: Record<string, Array<(event: any) => void>> = {};
+      const emitted: Array<{ event: string; payload: any }> = [];
+      const notifications: Array<{ title: string; body?: string }> = [];
+      const invokes: Array<{ cmd: string; args: any }> = [];
+
+      (window as any).__tauriListeners = listeners;
+      (window as any).__tauriEmittedEvents = emitted;
+      (window as any).__tauriNotifications = notifications;
+      (window as any).__tauriInvokes = invokes;
+      (window as any).__tauriShowCalls = 0;
+      (window as any).__tauriFocusCalls = 0;
+
+      const windowHandle = {
+        show: async () => {
+          (window as any).__tauriShowCalls += 1;
+        },
+        setFocus: async () => {
+          (window as any).__tauriFocusCalls += 1;
+        },
+      };
+
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async (cmd: string, args: any) => {
+            invokes.push({ cmd, args });
+            return null;
+          },
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            if (!Array.isArray(listeners[name])) listeners[name] = [];
+            listeners[name].push(handler);
+            return () => {
+              const arr = listeners[name];
+              if (!Array.isArray(arr)) return;
+              const idx = arr.indexOf(handler);
+              if (idx >= 0) arr.splice(idx, 1);
+            };
+          },
+          emit: async (event: string, payload?: any) => {
+            emitted.push({ event, payload: payload ?? null });
+          },
+        },
+        window: {
+          getCurrentWebviewWindow: () => windowHandle,
+          getCurrentWindow: () => windowHandle,
+          getCurrent: () => windowHandle,
+          appWindow: windowHandle,
+        },
+        notification: {
+          notify: async (payload: { title: string; body?: string }) => {
+            notifications.push({ title: payload.title, body: payload.body });
+          },
+        },
+      };
+    });
+
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() =>
+      Boolean((window as any).__tauriEmittedEvents?.some((entry: any) => entry?.event === "updater-ui-ready")),
+    );
+
+    await waitForTauriListeners(page, "update-check-already-running");
+    await dispatchTauriEvent(page, "update-check-already-running", { source: "manual" });
+    await expect(lastToast(page)).toHaveText("Already checking for updates…");
+    await page.waitForFunction(() => (window as any).__tauriShowCalls >= 1);
+    await page.waitForFunction(() => (window as any).__tauriFocusCalls >= 1);
+
+    // The backend reports completion as "startup", but because the user requested a manual check
+    // while the startup check was in flight, we should surface the result toast (without re-focusing).
+    await waitForTauriListeners(page, "update-not-available");
+    await dispatchTauriEvent(page, "update-not-available", { source: "startup" });
+    await expect(lastToast(page)).toHaveText("You're up to date.");
+
+    const afterUpToDate = await page.evaluate(() => ({
+      show: (window as any).__tauriShowCalls,
+      focus: (window as any).__tauriFocusCalls,
+      notifications: (window as any).__tauriNotifications?.length ?? 0,
+      notifiedViaInvoke: ((window as any).__tauriInvokes ?? []).some((entry: any) => entry?.cmd === "show_system_notification"),
+    }));
+    expect(afterUpToDate.show).toBe(1);
+    expect(afterUpToDate.focus).toBe(1);
+    expect(afterUpToDate.notifications).toBe(0);
+    expect(afterUpToDate.notifiedViaInvoke).toBe(false);
+
+    // Repeat for the error completion case.
+    await dispatchTauriEvent(page, "update-check-already-running", { source: "manual" });
+    await expect(lastToast(page)).toHaveText("Already checking for updates…");
+
+    await waitForTauriListeners(page, "update-check-error");
+    await dispatchTauriEvent(page, "update-check-error", { source: "startup", error: "network down" });
+    await expect(lastToast(page)).toHaveText("Error: network down");
+
+    const afterError = await page.evaluate(() => ({
+      show: (window as any).__tauriShowCalls,
+      focus: (window as any).__tauriFocusCalls,
+    }));
+    expect(afterError.show).toBe(2);
+    expect(afterError.focus).toBe(2);
   });
 
   test("startup update notifications are suppressed after the user dismisses the same version", async ({ page }) => {
