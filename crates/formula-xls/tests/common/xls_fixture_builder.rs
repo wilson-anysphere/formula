@@ -184,7 +184,10 @@ pub fn build_unknown_builtin_numfmtid_fixture_xls() -> Vec<u8> {
 ///
 /// This is used to ensure we preserve BIFF `HLINK` records when importing `.xls` workbooks.
 pub fn build_hyperlink_fixture_xls() -> Vec<u8> {
-    let workbook_stream = build_hyperlink_workbook_stream();
+    let workbook_stream = build_hyperlink_workbook_stream(
+        "Links",
+        hlink_external_url(0, 0, 0, 0, "https://example.com", "Example", "Example tooltip"),
+    );
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -566,7 +569,8 @@ fn build_unknown_builtin_numfmtid_workbook_stream() -> Vec<u8> {
     globals
 }
 
-fn build_hyperlink_workbook_stream() -> Vec<u8> {
+/// Build a BIFF8 workbook stream with a single worksheet containing a single HLINK record.
+fn build_hyperlink_workbook_stream(sheet_name: &str, hlink: Vec<u8>) -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
     push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
@@ -586,14 +590,14 @@ fn build_hyperlink_workbook_stream() -> Vec<u8> {
     let mut boundsheet = Vec::<u8>::new();
     boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
     boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
-    write_short_unicode_string(&mut boundsheet, "Links");
+    write_short_unicode_string(&mut boundsheet, sheet_name);
     push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
     let boundsheet_offset_pos = boundsheet_start + 4;
 
     push_record(&mut globals, RECORD_EOF, &[]);
 
     let sheet_offset = globals.len();
-    let sheet = build_hyperlink_sheet_stream(xf_cell);
+    let sheet = build_hyperlink_sheet_stream(xf_cell, hlink);
 
     globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
         .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
@@ -601,7 +605,7 @@ fn build_hyperlink_workbook_stream() -> Vec<u8> {
     globals
 }
 
-fn build_hyperlink_sheet_stream(xf_cell: u16) -> Vec<u8> {
+fn build_hyperlink_sheet_stream(xf_cell: u16, hlink: Vec<u8>) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 
     push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
@@ -620,15 +624,90 @@ fn build_hyperlink_sheet_stream(xf_cell: u16) -> Vec<u8> {
     // A1: NUMBER record so calamine reports at least one used cell.
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
 
-    // A1: HLINK record pointing to https://example.com.
-    push_record(
-        &mut sheet,
-        RECORD_HLINK,
-        &hlink_external_url(0, 0, 0, 0, "https://example.com", "Example", "Example tooltip"),
-    );
+    push_record(&mut sheet, RECORD_HLINK, &hlink);
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
+}
+
+/// Build a BIFF8 `.xls` fixture containing a single `mailto:` hyperlink on `A1`.
+pub fn build_mailto_hyperlink_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_hyperlink_workbook_stream(
+        "Mail",
+        hlink_external_url(
+            0,
+            0,
+            0,
+            0,
+            "mailto:test@example.com",
+            "Email",
+            "Email tooltip",
+        ),
+    );
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a single internal hyperlink on `A1`.
+pub fn build_internal_hyperlink_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_hyperlink_workbook_stream(
+        "Internal",
+        hlink_internal_location(0, 0, 0, 0, "Internal!B2", "Go to B2", "Internal tooltip"),
+    );
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+fn hlink_internal_location(
+    rw_first: u16,
+    rw_last: u16,
+    col_first: u16,
+    col_last: u16,
+    location: &str,
+    display: &str,
+    tooltip: &str,
+) -> Vec<u8> {
+    // HLINK record layout (BIFF8) [MS-XLS 2.4.110], matching the importer’s best-effort parser.
+    //
+    // ref8 (8) + guid (16) + streamVersion (4) + linkOpts (4) + variable data.
+    const STREAM_VERSION: u32 = 2;
+    const LINK_OPTS_HAS_LOCATION: u32 = 0x0000_0008;
+    const LINK_OPTS_HAS_DISPLAY: u32 = 0x0000_0014;
+    const LINK_OPTS_HAS_TOOLTIP: u32 = 0x0000_0020;
+
+    let link_opts = LINK_OPTS_HAS_LOCATION | LINK_OPTS_HAS_DISPLAY | LINK_OPTS_HAS_TOOLTIP;
+
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&rw_first.to_le_bytes());
+    out.extend_from_slice(&rw_last.to_le_bytes());
+    out.extend_from_slice(&col_first.to_le_bytes());
+    out.extend_from_slice(&col_last.to_le_bytes());
+
+    out.extend_from_slice(&[0u8; 16]); // hyperlink GUID (unused)
+    out.extend_from_slice(&STREAM_VERSION.to_le_bytes());
+    out.extend_from_slice(&link_opts.to_le_bytes());
+
+    write_hyperlink_string(&mut out, display);
+    write_hyperlink_string(&mut out, location);
+    write_hyperlink_string(&mut out, tooltip);
+
+    out
 }
 
 fn hlink_external_url(

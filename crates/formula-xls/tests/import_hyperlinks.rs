@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use formula_model::{HyperlinkTarget, Range};
+use formula_model::{CellRef, HyperlinkTarget, Range};
 
 mod common;
 
@@ -36,3 +36,46 @@ fn imports_biff_hyperlinks() {
     assert_eq!(link.tooltip.as_deref(), Some("Example tooltip"));
 }
 
+#[test]
+fn imports_biff_hyperlinks_internal() {
+    let bytes = xls_fixture_builder::build_internal_hyperlink_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("Internal")
+        .expect("Internal missing");
+
+    assert_eq!(sheet.hyperlinks.len(), 1);
+    let link = &sheet.hyperlinks[0];
+    assert_eq!(link.range, Range::from_a1("A1").unwrap());
+    assert_eq!(
+        link.target,
+        HyperlinkTarget::Internal {
+            sheet: "Internal".to_string(),
+            cell: CellRef::from_a1("B2").unwrap()
+        }
+    );
+    assert_eq!(link.display.as_deref(), Some("Go to B2"));
+    assert_eq!(link.tooltip.as_deref(), Some("Internal tooltip"));
+}
+
+#[test]
+fn imports_biff_hyperlinks_mailto() {
+    let bytes = xls_fixture_builder::build_mailto_hyperlink_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result.workbook.sheet_by_name("Mail").expect("Mail missing");
+    assert_eq!(sheet.hyperlinks.len(), 1);
+    let link = &sheet.hyperlinks[0];
+
+    assert_eq!(link.range, Range::from_a1("A1").unwrap());
+    assert_eq!(
+        link.target,
+        HyperlinkTarget::Email {
+            uri: "mailto:test@example.com".to_string()
+        }
+    );
+    assert_eq!(link.display.as_deref(), Some("Email"));
+    assert_eq!(link.tooltip.as_deref(), Some("Email tooltip"));
+}
