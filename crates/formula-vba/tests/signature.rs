@@ -439,6 +439,33 @@ fn prefers_digital_signature_ext_over_ex_when_both_verify() {
 }
 
 #[test]
+fn prefers_digital_signature_ex_over_invalid_ext_candidate() {
+    // `DigitalSignatureExt` sorts before `DigitalSignatureEx`, but if the Ext stream is present and
+    // parses yet fails verification, we should still select a later verified candidate.
+    let ex = make_pkcs7_signed_message(b"ex-signed");
+    let mut ext_invalid = make_pkcs7_signed_message(b"ext-signed");
+    let last = ext_invalid.len().saturating_sub(1);
+    ext_invalid[last] ^= 0xFF;
+
+    let vba = build_vba_project_bin_with_signature_streams(&[
+        ("\u{0005}DigitalSignatureExt", &ext_invalid),
+        ("\u{0005}DigitalSignatureEx", &ex),
+    ]);
+
+    let sig = verify_vba_digital_signature(&vba)
+        .expect("signature inspection should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert!(
+        sig.stream_path.contains("DigitalSignatureEx"),
+        "expected DigitalSignatureEx to be selected when DigitalSignatureExt is invalid, got {}",
+        sig.stream_path
+    );
+    assert_eq!(sig.signature, ex);
+}
+
+#[test]
 fn lists_signature_streams_in_ext_ex_legacy_order() {
     let legacy = make_pkcs7_signed_message(b"legacy-signed");
     let ex = make_pkcs7_signed_message(b"ex-signed");
