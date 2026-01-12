@@ -842,7 +842,7 @@ fn find_impl(needle: &str, haystack: &str, start: i64, case_insensitive: bool) -
         return Value::Error(ErrorKind::Value);
     }
     let needle_chars: Vec<char> = needle.chars().collect();
-    let mut hay_chars: Vec<char> = haystack.chars().collect();
+    let hay_chars: Vec<char> = haystack.chars().collect();
     let start_idx = (start - 1) as usize;
     if start_idx > hay_chars.len() {
         return Value::Error(ErrorKind::Value);
@@ -853,21 +853,42 @@ fn find_impl(needle: &str, haystack: &str, start: i64, case_insensitive: bool) -
     }
 
     if case_insensitive {
-        hay_chars = hay_chars.into_iter().map(fold_case).collect();
-    }
+        // Excel SEARCH is case-insensitive using Unicode-aware uppercasing (e.g. ß -> SS).
+        // Fold both pattern and haystack into a comparable char stream.
+        let needle_folded: Vec<char> = if needle.is_ascii() {
+            needle.chars().map(|c| c.to_ascii_uppercase()).collect()
+        } else {
+            needle.chars().flat_map(|c| c.to_uppercase()).collect()
+        };
+        let needle_tokens = parse_search_pattern(&needle_folded);
 
-    let needle_tokens = if case_insensitive {
-        parse_search_pattern(&needle_chars.into_iter().map(fold_case).collect::<Vec<_>>())
-    } else {
-        vec![PatternToken::LiteralSeq(needle_chars)]
-    };
-
-    for i in start_idx..hay_chars.len() {
-        if matches_pattern(&needle_tokens, &hay_chars, i) {
-            return Value::Number((i + 1) as f64);
+        let mut hay_folded = Vec::new();
+        let mut folded_starts = Vec::with_capacity(hay_chars.len());
+        for ch in &hay_chars {
+            folded_starts.push(hay_folded.len());
+            if ch.is_ascii() {
+                hay_folded.push(ch.to_ascii_uppercase());
+            } else {
+                hay_folded.extend(ch.to_uppercase());
+            }
         }
+
+        for orig_idx in start_idx..hay_chars.len() {
+            let folded_idx = folded_starts[orig_idx];
+            if matches_pattern(&needle_tokens, &hay_folded, folded_idx) {
+                return Value::Number((orig_idx + 1) as f64);
+            }
+        }
+        Value::Error(ErrorKind::Value)
+    } else {
+        let needle_tokens = vec![PatternToken::LiteralSeq(needle_chars)];
+        for i in start_idx..hay_chars.len() {
+            if matches_pattern(&needle_tokens, &hay_chars, i) {
+                return Value::Number((i + 1) as f64);
+            }
+        }
+        Value::Error(ErrorKind::Value)
     }
-    Value::Error(ErrorKind::Value)
 }
 
 #[derive(Debug, Clone)]
@@ -968,14 +989,6 @@ fn match_rec(
     };
     memo[tok_idx][hay_idx] = Some(result);
     result
-}
-
-fn fold_case(ch: char) -> char {
-    if ch.is_ascii() {
-        ch.to_ascii_lowercase()
-    } else {
-        ch
-    }
 }
 
 #[derive(Debug, Clone)]

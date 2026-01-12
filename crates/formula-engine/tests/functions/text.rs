@@ -188,7 +188,12 @@ fn find_and_search() {
         sheet.eval("=FIND(\"B\",\"abc\")"),
         Value::Error(ErrorKind::Value)
     );
+    assert_eq!(
+        sheet.eval("=FIND(\"Ö\",\"ö\")"),
+        Value::Error(ErrorKind::Value)
+    );
     assert_eq!(sheet.eval("=SEARCH(\"B\",\"abc\")"), Value::Number(2.0));
+    assert_eq!(sheet.eval("=SEARCH(\"Ö\",\"ö\")"), Value::Number(1.0));
 
     assert_eq!(sheet.eval("=SEARCH(\"a?c\",\"abc\")"), Value::Number(1.0));
     assert_eq!(
