@@ -186,6 +186,21 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
     assert.equal(cell?.encrypted, true);
   }
 
+  // --- Sheet view state propagates + persists (freeze panes, row/col sizes) ---
+  clientA.documentController.setFrozen("Sheet1", 2, 1);
+  clientA.documentController.setColWidth("Sheet1", 0, 120);
+  clientA.documentController.setRowHeight("Sheet1", 5, 40);
+
+  await waitForCondition(() => {
+    const view = clientB.documentController.getSheetView("Sheet1");
+    return (
+      view.frozenRows === 2 &&
+      view.frozenCols === 1 &&
+      view.colWidths?.["0"] === 120 &&
+      view.rowHeights?.["5"] === 40
+    );
+  }, 10_000);
+
   // Tear down clients and restart the server, keeping the same data directory.
   clientA.destroy();
   clientB.destroy();
@@ -219,6 +234,16 @@ test("sync-server + collab-session + Yjs↔DocumentController binder: sync, undo
   await waitForCell(clientC.documentController, "Sheet1", "C1", { value: 123, formula: null });
   await waitForCell(clientC.documentController, "Sheet1", "A1", { value: null, formula: null });
   await waitForCell(clientC.documentController, "Sheet1", "D1", { value: "###", formula: null });
+
+  await waitForCondition(() => {
+    const view = clientC.documentController.getSheetView("Sheet1");
+    return (
+      view.frozenRows === 2 &&
+      view.frozenCols === 1 &&
+      view.colWidths?.["0"] === 120 &&
+      view.rowHeights?.["5"] === 40
+    );
+  }, 10_000);
 
   {
     const cell = await clientC.session.getCell("Sheet1:0:3");
