@@ -1534,26 +1534,28 @@ if (
       {
         type: "item",
         label: t("clipboard.cut"),
-        shortcut: primaryShortcut("X"),
+        shortcut: getPrimaryCommandKeybindingDisplay("clipboard.cut", commandKeybindingDisplayIndex) ?? primaryShortcut("X"),
         onSelect: () => executeBuiltinCommand("clipboard.cut"),
       },
       {
         type: "item",
         label: t("clipboard.copy"),
-        shortcut: primaryShortcut("C"),
+        shortcut: getPrimaryCommandKeybindingDisplay("clipboard.copy", commandKeybindingDisplayIndex) ?? primaryShortcut("C"),
         onSelect: () => executeBuiltinCommand("clipboard.copy"),
       },
       {
         type: "item",
         label: t("clipboard.paste"),
-        shortcut: primaryShortcut("V"),
+        shortcut: getPrimaryCommandKeybindingDisplay("clipboard.paste", commandKeybindingDisplayIndex) ?? primaryShortcut("V"),
         onSelect: () => executeBuiltinCommand("clipboard.paste"),
       },
       { type: "separator" },
       {
         type: "submenu",
         label: "Paste Special",
-        shortcut: isMac ? "⌘⌥V" : "Ctrl+Alt+V",
+        shortcut:
+          getPrimaryCommandKeybindingDisplay("clipboard.pasteSpecial", commandKeybindingDisplayIndex) ??
+          (isMac ? "⌘⌥V" : "Ctrl+Alt+V"),
         items: getPasteSpecialMenuItems().map((item) => ({
           type: "item",
           label: item.label,
@@ -1564,7 +1566,8 @@ if (
       {
         type: "item",
         label: "Clear Contents",
-        shortcut: isMac ? "⌫" : "Del",
+        shortcut:
+          getPrimaryCommandKeybindingDisplay("edit.clearContents", commandKeybindingDisplayIndex) ?? (isMac ? "⌫" : "Del"),
         onSelect: () => executeBuiltinCommand("edit.clearContents"),
       },
     ];
