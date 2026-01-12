@@ -345,6 +345,7 @@ fn oddf_equation(
     // See:
     // - `tools/excel-oracle/odd_coupon_boundary_cases.json`
     // - `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`
+    // - `crates/formula-engine/tests/odd_coupon_oracle_regressions.rs`
     //
     // Allowed boundary equalities:
     // - `issue == settlement` (zero accrued interest)
