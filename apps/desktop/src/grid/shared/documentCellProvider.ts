@@ -319,7 +319,27 @@ export class DocumentCellProvider implements CellProvider {
       if (bottom) borders.bottom = bottom;
       if (Object.keys(borders).length > 0) out.borders = borders;
 
-      const diagonal = mapEdge(border.diagonal);
+      const normalizeDiagonalBorderColor = (color: string): string => {
+        const match = /^#([0-9a-f]{6})$/i.exec(color);
+        if (!match) return color;
+        const hex = match[1];
+        const r = Number.parseInt(hex.slice(0, 2), 16);
+        const g = Number.parseInt(hex.slice(2, 4), 16);
+        const b = Number.parseInt(hex.slice(4, 6), 16);
+        if (![r, g, b].every((n) => Number.isFinite(n))) return color;
+        return `rgba(${r},${g},${b},1)`;
+      };
+
+      const mapDiagonalEdge = (edge: any) => {
+        if (!isPlainObject(edge)) return undefined;
+        const mapped = mapExcelBorderStyle(edge.style);
+        if (!mapped) return undefined;
+        const normalized = normalizeCssColor(edge.color);
+        const color = normalized ? normalizeDiagonalBorderColor(normalized) : defaultBorderColor;
+        return { width: mapped.width, style: mapped.style, color };
+      };
+
+      const diagonal = mapDiagonalEdge(border.diagonal);
       const diagonalUp = (border as any).diagonalUp === true || (border as any).diagonal_up === true;
       const diagonalDown = (border as any).diagonalDown === true || (border as any).diagonal_down === true;
       if (diagonal && (diagonalUp || diagonalDown)) {
