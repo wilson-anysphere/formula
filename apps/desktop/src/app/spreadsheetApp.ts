@@ -653,6 +653,7 @@ export class SpreadsheetApp {
   private commentsPanelCell!: HTMLDivElement;
   private newCommentInput!: HTMLInputElement;
   private commentTooltip!: HTMLDivElement;
+  private commentTooltipVisible = false;
 
   private sheetViewBinder: SheetViewBinder | null = null;
 
@@ -3387,6 +3388,7 @@ export class SpreadsheetApp {
       this.commentTooltip.textContent = preview;
       this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
       this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
+      this.commentTooltipVisible = true;
       this.commentTooltip.classList.add("comment-tooltip--visible");
       return;
     }
@@ -3438,6 +3440,7 @@ export class SpreadsheetApp {
     this.commentTooltip.textContent = preview;
     this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
     this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
+    this.commentTooltipVisible = true;
     this.commentTooltip.classList.add("comment-tooltip--visible");
   }
 
@@ -3804,17 +3807,19 @@ export class SpreadsheetApp {
     if (!this.commentTooltip) {
       this.lastHoveredCommentCellKey = null;
       this.lastHoveredCommentIndexVersion = -1;
+      this.commentTooltipVisible = false;
       return;
     }
     if (
       this.lastHoveredCommentCellKey == null &&
-      !this.commentTooltip.classList.contains("comment-tooltip--visible")
+      !this.commentTooltipVisible
     ) {
       return;
     }
 
     this.lastHoveredCommentCellKey = null;
     this.lastHoveredCommentIndexVersion = -1;
+    this.commentTooltipVisible = false;
     this.commentTooltip.classList.remove("comment-tooltip--visible");
   }
 
@@ -6584,7 +6589,7 @@ export class SpreadsheetApp {
     if (
       this.lastHoveredCommentCellKey === metaKey &&
       this.lastHoveredCommentIndexVersion === this.commentIndexVersion &&
-      this.commentTooltip.classList.contains("comment-tooltip--visible")
+      this.commentTooltipVisible
     ) {
       // Keep tooltip pinned to the cursor without re-setting text content on every move.
       this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
@@ -6597,6 +6602,7 @@ export class SpreadsheetApp {
     this.commentTooltip.textContent = preview;
     this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
     this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
+    this.commentTooltipVisible = true;
     this.commentTooltip.classList.add("comment-tooltip--visible");
   }
 
