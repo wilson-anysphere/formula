@@ -11,26 +11,15 @@ function getTauriInvoke(): TauriInvoke | null {
   return typeof invoke === "function" ? invoke : null;
 }
 
-function getTauriNotify(): TauriNotify | null {
+function getTauriDirectNotify(): TauriNotify | null {
   const tauri = (globalThis as any).__TAURI__;
-
   const direct =
     (tauri?.notification?.notify as TauriNotify | undefined) ??
     (tauri?.notification?.sendNotification as TauriNotify | undefined) ??
     (tauri?.plugin?.notification?.notify as TauriNotify | undefined) ??
     (tauri?.plugin?.notification?.sendNotification as TauriNotify | undefined) ??
     null;
-
-  if (typeof direct === "function") return direct;
-
-  const invoke = getTauriInvoke();
-  if (!invoke) return null;
-
-  return (payload) =>
-    invoke("show_system_notification", {
-      title: payload.title,
-      body: payload.body ?? null,
-    }).then(() => undefined);
+  return typeof direct === "function" ? direct : null;
 }
 
 async function notifyWeb(payload: { title: string; body?: string }): Promise<void> {
@@ -48,12 +37,26 @@ export async function notify(payload: NotifyPayload): Promise<void> {
   if (!title) return;
   const body = typeof payload.body === "string" ? payload.body : undefined;
 
-  const native = getTauriNotify();
-  if (native) {
-    await native({ title, body });
-    return;
+  const directNotify = getTauriDirectNotify();
+  if (directNotify) {
+    try {
+      await directNotify({ title, body });
+      return;
+    } catch {
+      // Fall back to the invoke-based command below (useful if the direct API is
+      // present but blocked by permissions or differs across Tauri versions).
+    }
+  }
+
+  const invoke = getTauriInvoke();
+  if (invoke) {
+    try {
+      await invoke("show_system_notification", { title, body: body ?? null });
+      return;
+    } catch {
+      // Fall back to the web API below.
+    }
   }
 
   await notifyWeb({ title, body });
 }
-
