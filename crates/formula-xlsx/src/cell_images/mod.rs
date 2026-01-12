@@ -136,10 +136,7 @@ fn is_cell_images_part(path: &str) -> bool {
     suffix.is_empty() || suffix.chars().all(|c| c.is_ascii_digit())
 }
 
-fn parse_cell_images_part(
-    path: &str,
-    parts: &BTreeMap<String, Vec<u8>>,
-) -> Result<CellImagesPart> {
+fn parse_cell_images_part(path: &str, parts: &BTreeMap<String, Vec<u8>>) -> Result<CellImagesPart> {
     let rels_path = crate::openxml::rels_part_name(path);
 
     fn strip_fragment(target: &str) -> &str {
@@ -156,8 +153,7 @@ fn parse_cell_images_part(
             relationships
                 .into_iter()
                 .filter(|rel| {
-                    !rel
-                        .target_mode
+                    !rel.target_mode
                         .as_deref()
                         .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
                         && rel.type_uri == REL_TYPE_IMAGE
@@ -383,7 +379,6 @@ fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {
     let range = node.range();
     doc.get(range).map(|s| s.to_string())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,11 +422,17 @@ mod tests {
         assert_eq!(part.rels_path, "xl/_rels/cellImages.xml.rels");
         assert_eq!(part.images.len(), 2);
         assert_eq!(part.images[0].embed_rel_id, "rId1");
-        assert_eq!(part.images[0].target.as_deref(), Some("xl/media/image1.png"));
+        assert_eq!(
+            part.images[0].target.as_deref(),
+            Some("xl/media/image1.png")
+        );
         assert!(!part.images[0].raw_xml.is_empty());
 
         assert_eq!(part.images[1].embed_rel_id, "rId2");
-        assert_eq!(part.images[1].target.as_deref(), Some("xl/media/image2.png"));
+        assert_eq!(
+            part.images[1].target.as_deref(),
+            Some("xl/media/image2.png")
+        );
     }
 
     #[test]
@@ -470,5 +471,42 @@ mod tests {
         assert_eq!(part.images.len(), 2);
         assert_eq!(part.images[0].embed_rel_id, "rId1");
         assert_eq!(part.images[1].embed_rel_id, "rId2");
+    }
+
+    #[test]
+    fn cell_images_part_supports_nested_blip_embeds_without_pic_payload() {
+        // Some producers store the relationship ID on a nested `<a:blip r:embed="...">` directly
+        // under `<cellImage>`, without embedding a full DrawingML `<xdr:pic>` subtree.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cx:cellImages xmlns:cx="http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages"
+               xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cx:cellImage>
+    <a:blip r:embed="rId1"/>
+  </cx:cellImage>
+</cx:cellImages>"#;
+
+        let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>"#;
+
+        let parts: BTreeMap<String, Vec<u8>> = [
+            ("xl/cellImages.xml".to_string(), xml.to_vec()),
+            ("xl/_rels/cellImages.xml.rels".to_string(), rels.to_vec()),
+        ]
+        .into_iter()
+        .collect();
+
+        let part = CellImagesPart::from_parts(&parts)
+            .expect("parse")
+            .expect("expected part");
+        assert_eq!(part.images.len(), 1);
+        assert_eq!(part.images[0].embed_rel_id, "rId1");
+        assert_eq!(
+            part.images[0].target.as_deref(),
+            Some("xl/media/image1.png")
+        );
+        assert!(!part.images[0].raw_xml.is_empty());
     }
 }
