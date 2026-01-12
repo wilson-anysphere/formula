@@ -51,7 +51,14 @@ fn value_to_text(value: &Value, options: &FormatOptions) -> Result<String, Error
         Value::Text(s) => Ok(s.clone()),
         Value::Bool(b) => Ok(if *b { "TRUE".to_string() } else { "FALSE".to_string() }),
         Value::Entity(entity) => Ok(entity.display.clone()),
-        Value::Record(record) => Ok(record.display.clone()),
+        Value::Record(record) => {
+            if let Some(display_field) = record.display_field.as_deref() {
+                if let Some(value) = record.get_field_case_insensitive(display_field) {
+                    return value_to_text(&value, options);
+                }
+            }
+            Ok(record.display.clone())
+        }
         Value::Error(e) => Err(*e),
         other => {
             if matches!(other, Value::Spill { .. }) {
