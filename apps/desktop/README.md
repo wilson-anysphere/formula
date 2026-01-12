@@ -116,13 +116,14 @@ download the required Pyodide files into `apps/desktop/public/pyodide/` via
 
 The desktop app ships with a strict CSP in `apps/desktop/src-tauri/tauri.conf.json`.
 
-In packaged Tauri builds we keep `connect-src` locked down (`'self' blob: data:`) so the WebView cannot make arbitrary
-outbound `fetch()` / `WebSocket` requests directly. Outbound HTTP(S) needed by the extensions + marketplace runtime is
-performed by the Rust backend and exposed to the WebView via Tauri IPC commands (`network_fetch`, `marketplace_*`); see
-`docs/11-desktop-shell.md` (“Network strategy”).
+In packaged Tauri builds, `connect-src` allows TLS-only outbound network (`'self' https: wss: blob: data:`).
 
-If you need WebSocket connections from the WebView (e.g. `y-websocket` collaboration in a packaged app), you will need to
-loosen `connect-src` or add a Rust-backed bridge.
+The extensions + marketplace runtime prefer using Rust-backed Tauri IPC commands for outbound HTTP(S):
+
+- `network_fetch` — used by the browser extension host for `formula.network.fetch(...)`
+- `marketplace_*` — used by the marketplace client
+
+This avoids relying on browser CORS behavior and keeps network policy centralized (see `docs/11-desktop-shell.md` → “Network strategy”).
 
 To fetch the assets without starting Vite:
 

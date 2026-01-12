@@ -367,15 +367,16 @@ cannot reliably resolve relative imports, the browser entrypoint (`manifest.brow
   - override via `VITE_FORMULA_MARKETPLACE_BASE_URL`
   - origin-only values (e.g. `https://marketplace.formula.app`) are normalized to `.../api` for convenience
   - default: `"/api"` in dev/e2e, `https://marketplace.formula.app/api` in production builds
-- **Desktop/Tauri network strategy:** in packaged desktop builds we keep a strict WebView CSP (`connect-src 'self' blob: data:`),
-  so the WebView cannot make arbitrary outbound `fetch()` / `WebSocket` requests directly.
+- **Desktop/Tauri network behavior:** in packaged desktop builds, the app CSP is configured in
+  `apps/desktop/src-tauri/tauri.conf.json` and currently allows `connect-src 'self' https: wss: blob: data:` (TLS-only
+  outbound network from the WebView; no `http:` / `ws:`).
   - Marketplace HTTP requests are performed by the Rust backend via Tauri IPC commands
     (`marketplace_search`, `marketplace_get_extension`, `marketplace_download_package`).
   - Extension HTTP requests (`formula.network.fetch(...)`) are proxied by the browser extension host through the Rust backend
     via `network_fetch`.
   - See [`docs/11-desktop-shell.md`](./11-desktop-shell.md) (“Network strategy”) for details.
-  - Note: WebSocket connections are not currently proxied via Tauri IPC. Under the default desktop CSP, extension WebSockets
-    will be blocked unless you loosen `connect-src` or add a Rust-backed bridge.
+  - Note: WebSocket connections are not proxied via Tauri IPC. Extension WebSockets are permission-gated in the extension
+    worker and are subject to the app CSP (`connect-src`), so the URL must be allowed (notably `wss:` under the default CSP).
 
 In Desktop/Tauri, the CSP lives in `apps/desktop/src-tauri/tauri.conf.json` (`app.security.csp`).
 
@@ -1391,8 +1392,8 @@ const manager = new WebExtensionManager({ marketplaceClient: marketplace, host, 
 ```
 
 **Network strategy (Desktop/Tauri):** in packaged desktop builds, marketplace HTTP requests are made by the Rust backend
-via Tauri IPC so the WebView CSP can keep `connect-src` locked down. In pure web/in-browser dev, `MarketplaceClient` uses
-plain `fetch()` and is subject to normal browser CSP + CORS rules.
+via Tauri IPC (so they are not subject to browser CSP/CORS). In pure web/in-browser dev, `MarketplaceClient` uses plain
+`fetch()` and is subject to normal browser CSP + CORS rules.
 
 ### End-to-end: local marketplace → install in Desktop (dev)
 

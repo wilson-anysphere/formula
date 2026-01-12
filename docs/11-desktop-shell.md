@@ -113,9 +113,8 @@ Rationale:
 - Extension panels are rendered as sandboxed **`blob:` iframes**, so CSP must allow `child-src blob:` (or `frame-src blob:`)
   to avoid blocking the iframe load.
 - We also rely on `script-src 'unsafe-eval'` for the scripting sandbox (`new Function`-based evaluation in a Worker).
-- `connect-src` is intentionally restrictive (no `http:`/`ws:`), but allows `https:` + `wss:` so the extension host and
-  Marketplace client can make network requests in worker contexts where the Tauri invoke bridge may not be available.
-  Where possible, we still prefer routing Marketplace and `formula.network.fetch(...)` through Rust IPC (see “Network strategy” below).
+- `connect-src` is intentionally restrictive (no `http:`/`ws:`), but allows TLS-only outbound network (`https:` / `wss:`),
+  along with same-origin + `blob:`/`data:` URLs.
 
 ### Network strategy (extensions + marketplace)
 
@@ -134,8 +133,7 @@ Network access is mediated at two layers:
   - `formula.network.openWebSocket(...)` is a permission check; the actual socket is opened directly in the extension
     worker via `new WebSocket(...)` (hence `wss:` in `connect-src`).
 - **Marketplace:** `MarketplaceClient` prefers Rust IPC (`marketplace_search`, `marketplace_get_extension`,
-  `marketplace_download_package`) when running under Tauri with an absolute `http(s)` base URL, so the desktop UI does
-  not rely on the Marketplace service setting permissive CORS headers for the `tauri://…` origin. In other contexts it
+  `marketplace_download_package`) when running under Tauri with an absolute `http(s)` base URL. In other contexts it
   falls back to `fetch(...)`.
 
 Rust IPC implementations live in `apps/desktop/src-tauri/src/commands.rs`.
