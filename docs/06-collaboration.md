@@ -298,6 +298,19 @@ Practical rule of thumb:
 - When the binder is active, treat `DocumentController` as the “source of truth” for local edits.
 - If you also call `session.setCellValue` / `session.setCellFormula` directly, be careful when passing `undoService: session.undo`: those direct session writes use the same origin token and may be echo-suppressed from applying back into `DocumentController`. (This is why the helper `bindCollabSessionToDocumentController` does **not** default to `session.undo`.)
 
+### Undo/redo semantics in collaborative mode
+
+The desktop `DocumentController` maintains its own local history stack, but in collaborative mode it is **not** the canonical user-facing undo stack.
+
+In a shared Yjs session you generally want undo/redo to:
+
+- only revert the **local user’s** edits
+- never undo remote collaborators’ changes
+
+That behavior is provided by Yjs’ `UndoManager` (via `@formula/collab-undo`, exposed as `session.undo` when `createCollabSession({ undo: ... })` is enabled).
+
+See: [`docs/adr/ADR-0004-collab-sheet-view-and-undo.md`](./adr/ADR-0004-collab-sheet-view-and-undo.md)
+
 ---
 
 ## Sheet view state storage and syncing
@@ -323,6 +336,13 @@ Compatibility note:
 - BranchService’s Yjs adapter explicitly supports both shapes (see `branchStateFromYjsDoc` in [`packages/versioning/branches/src/yjs/branchStateAdapter.js`](../packages/versioning/branches/src/yjs/branchStateAdapter.js)), but **new writes should use `view`**.
 
 Because `sheets` is part of the shared Y.Doc, any edits to `view` will sync like any other Yjs update (subject to your provider/persistence).
+
+Semantics note:
+
+- `sheets[].view` is **shared workbook state** (similar to formatting), not per-user transient UI state.
+- Per-user ephemeral state (cursor/selection/active sheet/viewport) should use Awareness/presence.
+
+See: [`docs/adr/ADR-0004-collab-sheet-view-and-undo.md`](./adr/ADR-0004-collab-sheet-view-and-undo.md)
 
 ---
 
@@ -456,3 +476,4 @@ This is enforced by `CollabBranchingWorkflow` calling `applyDocumentStateToYjsDo
 ## Related docs
 
 - Workstream overview: [`instructions/collaboration.md`](../instructions/collaboration.md)
+- ADR (sheet view + undo semantics): [`docs/adr/ADR-0004-collab-sheet-view-and-undo.md`](./adr/ADR-0004-collab-sheet-view-and-undo.md)
