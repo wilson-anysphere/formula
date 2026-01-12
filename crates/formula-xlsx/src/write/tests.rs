@@ -121,6 +121,40 @@ fn ensure_content_types_default_idempotent() {
     assert_eq!(once, twice);
 }
 
+#[test]
+fn ensure_content_types_default_preserves_prefix_only_content_types() {
+    let ct_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
+  <ct:Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <ct:Default Extension="xml" ContentType="application/xml"/>
+</ct:Types>"#;
+
+    let mut parts = BTreeMap::new();
+    parts.insert("[Content_Types].xml".to_string(), ct_xml.as_bytes().to_vec());
+
+    ensure_content_types_default(&mut parts, "png", "image/png").expect("patch content types");
+
+    let updated = std::str::from_utf8(parts.get("[Content_Types].xml").expect("ct part"))
+        .expect("utf8 ct xml");
+
+    assert!(
+        updated.contains(r#"<ct:Default Extension="png" ContentType="image/png"/>"#),
+        "expected inserted ct:Default; got:\n{updated}"
+    );
+    assert!(
+        !updated.contains(r#"<Default Extension="png""#),
+        "must not introduce namespace-less <Default> elements; got:\n{updated}"
+    );
+
+    for name in default_element_names(updated) {
+        assert!(
+            name.starts_with(b"ct:"),
+            "expected only prefixed Default elements; saw {:?} in:\n{updated}",
+            String::from_utf8_lossy(&name)
+        );
+    }
+}
+
 fn override_element_names(xml: &str) -> Vec<Vec<u8>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
@@ -129,6 +163,24 @@ fn override_element_names(xml: &str) -> Vec<Vec<u8>> {
     loop {
         match reader.read_event_into(&mut buf).expect("xml parse") {
             Event::Start(e) | Event::Empty(e) if local_name(e.name().as_ref()) == b"Override" => {
+                out.push(e.name().as_ref().to_vec());
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    out
+}
+
+fn default_element_names(xml: &str) -> Vec<Vec<u8>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf).expect("xml parse") {
+            Event::Start(e) | Event::Empty(e) if local_name(e.name().as_ref()) == b"Default" => {
                 out.push(e.name().as_ref().to_vec());
             }
             Event::Eof => break,

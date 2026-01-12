@@ -3844,20 +3844,99 @@ fn ensure_content_types_default(
         // Avoid synthesizing a full file for existing packages.
         return Ok(());
     };
-    let mut xml = String::from_utf8(existing)
-        .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
 
-    // Match exact `Extension="{ext}"` occurrences to avoid false positives (e.g. `Extension="xpng"`).
+    // Fast path: if the extension already exists, avoid rewriting the file to keep roundtrip
+    // output stable.
+    //
+    // Match exact `Extension="{ext}"` occurrences to avoid false positives
+    // (e.g. `Extension="xpng"`).
+    let xml = std::str::from_utf8(&existing)
+        .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
     if xml.contains(&format!(r#"Extension="{ext}""#)) {
-        parts.insert("[Content_Types].xml".to_string(), xml.into_bytes());
         return Ok(());
     }
 
-    if let Some(idx) = xml.rfind("</Types>") {
-        let insert = format!(r#"<Default Extension="{ext}" ContentType="{content_type}"/>"#);
-        xml.insert_str(idx, &insert);
+    let mut reader = Reader::from_reader(existing.as_slice());
+    reader.config_mut().trim_text(false);
+    let mut writer = Writer::new(Vec::with_capacity(existing.len() + 128));
+    let mut buf = Vec::new();
+
+    let mut saw_ext = false;
+    let mut inserted = false;
+
+    let mut types_prefix: Option<String> = None;
+    let mut has_default_ns = false;
+    let mut default_prefix: Option<String> = None;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"Types" => {
+                if types_prefix.is_none() {
+                    types_prefix =
+                        element_prefix(e.name().as_ref()).map(|p| String::from_utf8_lossy(p).into_owned());
+                }
+                if !has_default_ns {
+                    has_default_ns = content_types_has_default_ns(e)?;
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Start(ref e) if local_name(e.name().as_ref()) == b"Default" => {
+                if default_prefix.is_none() {
+                    default_prefix =
+                        element_prefix(e.name().as_ref()).map(|p| String::from_utf8_lossy(p).into_owned());
+                }
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"Extension" && attr.unescape_value()?.as_ref() == ext {
+                        saw_ext = true;
+                        break;
+                    }
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"Default" => {
+                if default_prefix.is_none() {
+                    default_prefix =
+                        element_prefix(e.name().as_ref()).map(|p| String::from_utf8_lossy(p).into_owned());
+                }
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if attr.key.as_ref() == b"Extension" && attr.unescape_value()?.as_ref() == ext {
+                        saw_ext = true;
+                        break;
+                    }
+                }
+                writer.write_event(Event::Empty(e.to_owned()))?;
+            }
+            Event::End(ref e) if local_name(e.name().as_ref()) == b"Types" => {
+                if !saw_ext {
+                    let prefix = default_prefix.as_deref().or_else(|| {
+                        if !has_default_ns {
+                            types_prefix.as_deref()
+                        } else {
+                            None
+                        }
+                    });
+                    let tag = prefixed_tag(prefix, "Default");
+                    let mut default_el = quick_xml::events::BytesStart::new(tag.as_str());
+                    default_el.push_attribute(("Extension", ext));
+                    default_el.push_attribute(("ContentType", content_type));
+                    writer.write_event(Event::Empty(default_el))?;
+                    inserted = true;
+                }
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
+            Event::Eof => break,
+            ev => writer.write_event(ev.into_owned())?,
+        }
+        buf.clear();
     }
-    parts.insert("[Content_Types].xml".to_string(), xml.into_bytes());
+
+    if inserted {
+        parts.insert("[Content_Types].xml".to_string(), writer.into_inner());
+    }
+
     Ok(())
 }
 
