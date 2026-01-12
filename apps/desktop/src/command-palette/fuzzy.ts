@@ -9,6 +9,8 @@ export type CommandLike = {
   commandId: string;
   title: string;
   category: string | null;
+  description?: string | null;
+  keywords?: string[] | null;
 };
 
 export type CommandMatch = {
@@ -144,17 +146,23 @@ function splitQueryTokens(query: string): string[] {
     .filter((t) => t.length > 0);
 }
 
-type TokenMatch = { score: number; field: "title" | "category" | "id"; ranges: MatchRange[] };
+type TokenMatch = { score: number; field: "title" | "category" | "id" | "description" | "keywords"; ranges: MatchRange[] };
 
 function bestTokenMatch(token: string, command: CommandLike): TokenMatch | null {
   const titleMatch = fuzzyMatchToken(token, command.title);
   const categoryMatch = command.category ? fuzzyMatchToken(token, command.category) : null;
   const idMatch = fuzzyMatchToken(token, command.commandId);
+  const descriptionMatch = command.description ? fuzzyMatchToken(token, command.description) : null;
+  const keywordsMatch =
+    Array.isArray(command.keywords) && command.keywords.length > 0 ? fuzzyMatchToken(token, command.keywords.join(" ")) : null;
 
   const candidates: Array<TokenMatch | null> = [
     titleMatch ? { score: titleMatch.score * 3, field: "title", ranges: titleMatch.ranges } : null,
     categoryMatch ? { score: categoryMatch.score * 2, field: "category", ranges: categoryMatch.ranges } : null,
     idMatch ? { score: idMatch.score, field: "id", ranges: idMatch.ranges } : null,
+    // Allow searching by description and keywords (lower weight than title/category).
+    descriptionMatch ? { score: descriptionMatch.score, field: "description", ranges: descriptionMatch.ranges } : null,
+    keywordsMatch ? { score: keywordsMatch.score, field: "keywords", ranges: keywordsMatch.ranges } : null,
   ];
 
   let best: TokenMatch | null = null;
@@ -193,4 +201,3 @@ export function fuzzyMatchCommand(query: string, command: CommandLike): CommandM
 
   return { score, titleRanges: mergeRanges(titleRanges) };
 }
-

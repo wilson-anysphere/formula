@@ -227,7 +227,10 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   }
 
   function render(): void {
-    const allCommands = commandRegistry.listCommands();
+    const allCommands = commandRegistry
+      .listCommands()
+      // The command palette owns opening itself; avoid showing a no-op entry.
+      .filter((cmd) => cmd.commandId !== "workbench.showCommandPalette");
 
     const groups =
       query.trim() === ""
