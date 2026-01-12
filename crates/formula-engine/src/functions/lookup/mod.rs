@@ -895,33 +895,30 @@ pub fn lookup_array(lookup_value: &Value, array: &crate::value::Array) -> Result
     }
 
     let search_first_col = array.rows >= array.cols;
-    if search_first_col {
-        let mut lookup_vec = Vec::with_capacity(array.rows);
-        let mut result_vec = Vec::with_capacity(array.rows);
-        for r in 0..array.rows {
-            lookup_vec.push(array.get(r, 0).cloned().unwrap_or(Value::Blank));
-            result_vec.push(
-                array
-                    .get(r, array.cols.saturating_sub(1))
-                    .cloned()
-                    .unwrap_or(Value::Blank),
-            );
-        }
-        lookup_vector(lookup_value, &lookup_vec, Some(&result_vec))
+    let len = if search_first_col { array.rows } else { array.cols };
+    let last_row = array.rows.saturating_sub(1);
+    let last_col = array.cols.saturating_sub(1);
+
+    let pos = xmatch_with_modes_accessor(
+        lookup_value,
+        len,
+        |idx| {
+            if search_first_col {
+                array.get(idx, 0).cloned().unwrap_or(Value::Blank)
+            } else {
+                array.get(0, idx).cloned().unwrap_or(Value::Blank)
+            }
+        },
+        MatchMode::ExactOrNextSmaller,
+        SearchMode::BinaryAscending,
+    )?;
+    let idx = usize::try_from(pos - 1).map_err(|_| ErrorKind::Value)?;
+
+    Ok(if search_first_col {
+        array.get(idx, last_col).cloned().unwrap_or(Value::Blank)
     } else {
-        let mut lookup_vec = Vec::with_capacity(array.cols);
-        let mut result_vec = Vec::with_capacity(array.cols);
-        for c in 0..array.cols {
-            lookup_vec.push(array.get(0, c).cloned().unwrap_or(Value::Blank));
-            result_vec.push(
-                array
-                    .get(array.rows.saturating_sub(1), c)
-                    .cloned()
-                    .unwrap_or(Value::Blank),
-            );
-        }
-        lookup_vector(lookup_value, &lookup_vec, Some(&result_vec))
-    }
+        array.get(last_row, idx).cloned().unwrap_or(Value::Blank)
+    })
 }
 
 #[cfg(test)]

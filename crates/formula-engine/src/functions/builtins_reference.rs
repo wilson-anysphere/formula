@@ -238,12 +238,10 @@ fn column_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     if values.try_reserve_exact(total).is_err() {
         return Value::Error(ErrorKind::Num);
     }
-    let mut row_values = Vec::with_capacity(cols);
-    for col in reference.start.col..=reference.end.col {
-        row_values.push(Value::Number((u64::from(col) + 1) as f64));
-    }
     for _ in 0..rows {
-        values.extend(row_values.iter().cloned());
+        for col in reference.start.col..=reference.end.col {
+            values.push(Value::Number((u64::from(col) + 1) as f64));
+        }
     }
     Value::Array(Array::new(rows, cols, values))
 }

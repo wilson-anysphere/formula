@@ -3,6 +3,7 @@ use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::value::EntityValue;
 use formula_engine::Engine;
 use formula_engine::{ErrorKind, Value};
+use formula_model::EXCEL_MAX_COLS;
 
 use super::harness::TestSheet;
 
@@ -544,6 +545,32 @@ fn xlookup_spills_rows_and_columns_from_2d_return_arrays() {
     assert_eq!(engine.get_cell_value("Sheet1", "E6"), Value::Number(120.0));
     assert_eq!(engine.get_cell_value("Sheet1", "E7"), Value::Number(130.0));
     assert_eq!(engine.get_cell_value("Sheet1", "E8"), Value::Blank);
+}
+
+#[test]
+fn xlookup_returns_spill_for_huge_matched_column() {
+    // When sheet dimensions grow beyond the array materialization cap, XLOOKUP should fail fast
+    // with `#SPILL!` rather than attempting to allocate an enormous output vector.
+    let mut engine = Engine::new();
+    engine
+        .set_sheet_dimensions("Sheet1", 5_000_002, EXCEL_MAX_COLS)
+        .unwrap();
+
+    engine.set_cell_value("Sheet1", "A1", "A").unwrap();
+    engine.set_cell_value("Sheet1", "B1", "B").unwrap();
+
+    // Horizontal lookup array (A1:B1) with a very tall return array. Looking up "B" returns the
+    // matched column (rows x 1), which exceeds the cap.
+    engine
+        .set_cell_formula("Sheet1", "D1", "=XLOOKUP(\"B\", A1:B1, A2:B5000002)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D1"),
+        Value::Error(ErrorKind::Spill)
+    );
+    assert!(engine.spill_range("Sheet1", "D1").is_none());
 }
 
 #[test]

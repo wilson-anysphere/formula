@@ -110,7 +110,17 @@ fn textsplit_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let out_rows = rows.len();
-    let mut values = Vec::with_capacity(out_rows.saturating_mul(out_cols));
+    let total = match out_rows.checked_mul(out_cols) {
+        Some(v) => v,
+        None => return Value::Error(ErrorKind::Spill),
+    };
+    if total > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+        return Value::Error(ErrorKind::Spill);
+    }
+    let mut values = Vec::new();
+    if values.try_reserve_exact(total).is_err() {
+        return Value::Error(ErrorKind::Num);
+    }
     for row in rows {
         for col_idx in 0..out_cols {
             if let Some(cell) = row.get(col_idx) {
@@ -147,7 +157,10 @@ fn eval_delimiter_set(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<
     let v = eval_scalar_arg(ctx, expr);
     match v {
         Value::Array(arr) => {
-            let mut out = Vec::with_capacity(arr.values.len());
+            let mut out = Vec::new();
+            if out.try_reserve_exact(arr.values.len()).is_err() {
+                return Err(ErrorKind::Num);
+            }
             for v in arr.iter() {
                 out.push(v.coerce_to_string_with_ctx(ctx)?);
             }

@@ -215,71 +215,122 @@ inventory::submit! {
 }
 
 fn lookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    fn reference_to_1d_values(
-        ctx: &dyn FunctionContext,
-        reference: &Reference,
-    ) -> Result<Vec<Value>, ErrorKind> {
-        let reference = reference.normalized();
-        ctx.record_reference(&reference);
-
-        if reference.start.row == reference.end.row {
-            // Horizontal.
-            let len = (reference.end.col - reference.start.col + 1) as usize;
-            let mut out = Vec::with_capacity(len);
-            for col in reference.start.col..=reference.end.col {
-                out.push(ctx.get_cell_value(
-                    &reference.sheet_id,
-                    crate::eval::CellAddr {
-                        row: reference.start.row,
-                        col,
-                    },
-                ));
-            }
-            return Ok(out);
-        }
-
-        if reference.start.col == reference.end.col {
-            // Vertical.
-            let len = (reference.end.row - reference.start.row + 1) as usize;
-            let mut out = Vec::with_capacity(len);
-            for row in reference.start.row..=reference.end.row {
-                out.push(ctx.get_cell_value(
-                    &reference.sheet_id,
-                    crate::eval::CellAddr {
-                        row,
-                        col: reference.start.col,
-                    },
-                ));
-            }
-            return Ok(out);
-        }
-
-        Err(ErrorKind::Value)
+    #[derive(Debug, Clone)]
+    enum LookupVectorArg {
+        Values(Vec<Value>),
+        Reference {
+            shape: XlookupVectorShape,
+            reference: Reference,
+            len: usize,
+        },
     }
 
-    fn eval_vector_arg(
-        ctx: &dyn FunctionContext,
-        expr: &CompiledExpr,
-    ) -> Result<Vec<Value>, ErrorKind> {
+    impl LookupVectorArg {
+        fn len(&self) -> usize {
+            match self {
+                LookupVectorArg::Values(values) => values.len(),
+                LookupVectorArg::Reference { len, .. } => *len,
+            }
+        }
+
+        fn get(&self, ctx: &dyn FunctionContext, idx: usize) -> Value {
+            match self {
+                LookupVectorArg::Values(values) => values.get(idx).cloned().unwrap_or(Value::Blank),
+                LookupVectorArg::Reference {
+                    shape,
+                    reference,
+                    ..
+                } => {
+                    let start = reference.start;
+                    match *shape {
+                        XlookupVectorShape::Vertical => ctx.get_cell_value(
+                            &reference.sheet_id,
+                            crate::eval::CellAddr {
+                                row: start.row + idx as u32,
+                                col: start.col,
+                            },
+                        ),
+                        XlookupVectorShape::Horizontal => ctx.get_cell_value(
+                            &reference.sheet_id,
+                            crate::eval::CellAddr {
+                                row: start.row,
+                                col: start.col + idx as u32,
+                            },
+                        ),
+                    }
+                }
+            }
+        }
+
+        fn xmatch_approx(&self, ctx: &dyn FunctionContext, lookup_value: &Value) -> Result<i32, ErrorKind> {
+            match self {
+                LookupVectorArg::Values(values) => lookup::xmatch_with_modes(
+                    lookup_value,
+                    values,
+                    lookup::MatchMode::ExactOrNextSmaller,
+                    lookup::SearchMode::BinaryAscending,
+                ),
+                LookupVectorArg::Reference {
+                    shape,
+                    reference,
+                    len,
+                } => {
+                    let sheet_id = &reference.sheet_id;
+                    let start = reference.start;
+                    lookup::xmatch_with_modes_accessor(
+                        lookup_value,
+                        *len,
+                        |idx| match *shape {
+                            XlookupVectorShape::Vertical => ctx.get_cell_value(
+                                sheet_id,
+                                crate::eval::CellAddr {
+                                    row: start.row + idx as u32,
+                                    col: start.col,
+                                },
+                            ),
+                            XlookupVectorShape::Horizontal => ctx.get_cell_value(
+                                sheet_id,
+                                crate::eval::CellAddr {
+                                    row: start.row,
+                                    col: start.col + idx as u32,
+                                },
+                            ),
+                        },
+                        lookup::MatchMode::ExactOrNextSmaller,
+                        lookup::SearchMode::BinaryAscending,
+                    )
+                }
+            }
+        }
+    }
+
+    fn eval_vector_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<LookupVectorArg, ErrorKind> {
         match ctx.eval_arg(expr) {
-            ArgValue::Reference(r) => reference_to_1d_values(ctx, &r),
+            ArgValue::Reference(r) => {
+                let r = r.normalized();
+                let (shape, len) = reference_1d_shape_len(&r).ok_or(ErrorKind::Value)?;
+                // Record dereference for dynamic dependency tracing (e.g. LOOKUP with OFFSET vectors).
+                ctx.record_reference(&r);
+                Ok(LookupVectorArg::Reference {
+                    shape,
+                    reference: r,
+                    len,
+                })
+            }
             ArgValue::Scalar(Value::Array(arr)) => {
                 if arr.rows != 1 && arr.cols != 1 {
                     return Err(ErrorKind::Value);
                 }
-                Ok(arr.values)
+                Ok(LookupVectorArg::Values(arr.values))
             }
             ArgValue::Scalar(Value::Error(e)) => Err(e),
             ArgValue::ReferenceUnion(_) | ArgValue::Scalar(_) => Err(ErrorKind::Value),
         }
     }
 
-    fn lookup_array_ref(
-        ctx: &dyn FunctionContext,
-        lookup_value: &Value,
-        reference: &Reference,
-    ) -> Value {
+    fn lookup_array_ref(ctx: &dyn FunctionContext, lookup_value: &Value, reference: &Reference) -> Value {
         let r = reference.normalized();
+        // Record dereference for dynamic dependency tracing.
         ctx.record_reference(&r);
 
         let rows = (r.end.row - r.start.row + 1) as usize;
@@ -289,52 +340,61 @@ fn lookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
 
         let search_first_col = rows >= cols;
+        let len = if search_first_col { rows } else { cols };
+        let sheet_id = &r.sheet_id;
+        let start = r.start;
+        let end = r.end;
+        let pos = lookup::xmatch_with_modes_accessor(
+            lookup_value,
+            len,
+            |idx| {
+                if search_first_col {
+                    ctx.get_cell_value(
+                        sheet_id,
+                        crate::eval::CellAddr {
+                            row: start.row + idx as u32,
+                            col: start.col,
+                        },
+                    )
+                } else {
+                    ctx.get_cell_value(
+                        sheet_id,
+                        crate::eval::CellAddr {
+                            row: start.row,
+                            col: start.col + idx as u32,
+                        },
+                    )
+                }
+            },
+            lookup::MatchMode::ExactOrNextSmaller,
+            lookup::SearchMode::BinaryAscending,
+        );
+
+        let pos = match pos {
+            Ok(v) => v,
+            Err(e) => return Value::Error(e),
+        };
+        let idx = match usize::try_from(pos - 1) {
+            Ok(v) => v,
+            Err(_) => return Value::Error(ErrorKind::Value),
+        };
+
         if search_first_col {
-            let mut lookup_vec = Vec::with_capacity(rows);
-            let mut result_vec = Vec::with_capacity(rows);
-            for row in r.start.row..=r.end.row {
-                lookup_vec.push(ctx.get_cell_value(
-                    &r.sheet_id,
-                    crate::eval::CellAddr {
-                        row,
-                        col: r.start.col,
-                    },
-                ));
-                result_vec.push(ctx.get_cell_value(
-                    &r.sheet_id,
-                    crate::eval::CellAddr {
-                        row,
-                        col: r.end.col,
-                    },
-                ));
-            }
-            match lookup::lookup_vector(lookup_value, &lookup_vec, Some(&result_vec)) {
-                Ok(v) => v,
-                Err(e) => Value::Error(e),
-            }
+            ctx.get_cell_value(
+                sheet_id,
+                crate::eval::CellAddr {
+                    row: start.row + idx as u32,
+                    col: end.col,
+                },
+            )
         } else {
-            let mut lookup_vec = Vec::with_capacity(cols);
-            let mut result_vec = Vec::with_capacity(cols);
-            for col in r.start.col..=r.end.col {
-                lookup_vec.push(ctx.get_cell_value(
-                    &r.sheet_id,
-                    crate::eval::CellAddr {
-                        row: r.start.row,
-                        col,
-                    },
-                ));
-                result_vec.push(ctx.get_cell_value(
-                    &r.sheet_id,
-                    crate::eval::CellAddr {
-                        row: r.end.row,
-                        col,
-                    },
-                ));
-            }
-            match lookup::lookup_vector(lookup_value, &lookup_vec, Some(&result_vec)) {
-                Ok(v) => v,
-                Err(e) => Value::Error(e),
-            }
+            ctx.get_cell_value(
+                sheet_id,
+                crate::eval::CellAddr {
+                    row: end.row,
+                    col: start.col + idx as u32,
+                },
+            )
         }
     }
 
@@ -357,10 +417,19 @@ fn lookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Err(e) => return Value::Error(e),
         };
 
-        return match lookup::lookup_vector(&lookup_value, &lookup_vector, Some(&result_vector)) {
+        if lookup_vector.len() != result_vector.len() {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let pos = match lookup_vector.xmatch_approx(ctx, &lookup_value) {
             Ok(v) => v,
-            Err(e) => Value::Error(e),
+            Err(e) => return Value::Error(e),
         };
+        let idx = match usize::try_from(pos - 1) {
+            Ok(v) => v,
+            Err(_) => return Value::Error(ErrorKind::Value),
+        };
+        return result_vector.get(ctx, idx);
     }
 
     // 2-arg form: could be vector-form or array-form depending on the shape.
@@ -369,14 +438,26 @@ fn lookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             let r_norm = r.normalized();
             if r_norm.start.row == r_norm.end.row || r_norm.start.col == r_norm.end.col {
                 // 1D vector.
-                let values = match reference_to_1d_values(ctx, &r_norm) {
+                let (shape, len) = match reference_1d_shape_len(&r_norm) {
+                    Some(v) => v,
+                    None => return Value::Error(ErrorKind::Value),
+                };
+                // Record dereference for dynamic dependency tracing.
+                ctx.record_reference(&r_norm);
+                let vector = LookupVectorArg::Reference {
+                    shape,
+                    reference: r_norm,
+                    len,
+                };
+                let pos = match vector.xmatch_approx(ctx, &lookup_value) {
                     Ok(v) => v,
                     Err(e) => return Value::Error(e),
                 };
-                match lookup::lookup_vector(&lookup_value, &values, None) {
+                let idx = match usize::try_from(pos - 1) {
                     Ok(v) => v,
-                    Err(e) => Value::Error(e),
-                }
+                    Err(_) => return Value::Error(ErrorKind::Value),
+                };
+                vector.get(ctx, idx)
             } else {
                 // 2D array form.
                 lookup_array_ref(ctx, &lookup_value, &r_norm)
@@ -483,7 +564,13 @@ fn index_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     return Err(ErrorKind::Ref);
                 }
                 let c = (c - 1) as usize;
-                let mut values = Vec::with_capacity(arr.rows);
+                if arr.rows > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+                    return Err(ErrorKind::Spill);
+                }
+                let mut values = Vec::new();
+                if values.try_reserve_exact(arr.rows).is_err() {
+                    return Err(ErrorKind::Num);
+                }
                 for r in 0..arr.rows {
                     values.push(arr.get(r, c).cloned().unwrap_or(Value::Blank));
                 }
@@ -494,7 +581,13 @@ fn index_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                     return Err(ErrorKind::Ref);
                 }
                 let r = (r - 1) as usize;
-                let mut values = Vec::with_capacity(arr.cols);
+                if arr.cols > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+                    return Err(ErrorKind::Spill);
+                }
+                let mut values = Vec::new();
+                if values.try_reserve_exact(arr.cols).is_err() {
+                    return Err(ErrorKind::Num);
+                }
                 for c in 0..arr.cols {
                     values.push(arr.get(r, c).cloned().unwrap_or(Value::Blank));
                 }
@@ -622,16 +715,31 @@ fn match_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     let pos = match ctx.eval_arg(&args[1]) {
         ArgValue::Reference(r) => {
             let array = r.normalized();
-            let values = match flatten_1d(&array) {
+            let (shape, _) = match reference_1d_shape_len(&array) {
                 Some(v) => v,
                 None => return Value::Error(ErrorKind::NA),
             };
             // Record dereference for dynamic dependency tracing (e.g. MATCH(…, OFFSET(...), …)).
             ctx.record_reference(&array);
-            match match_type {
-                0 => exact_match_1d(ctx, &lookup, &array.sheet_id, &values),
-                1 => approximate_match_1d(ctx, &lookup, &array.sheet_id, &values, true),
-                -1 => approximate_match_1d(ctx, &lookup, &array.sheet_id, &values, false),
+            match (shape, match_type) {
+                (XlookupVectorShape::Vertical, 0) => {
+                    exact_match_in_first_col(ctx, &lookup, &array).map(|v| v as usize)
+                }
+                (XlookupVectorShape::Horizontal, 0) => {
+                    exact_match_in_first_row(ctx, &lookup, &array).map(|v| v as usize)
+                }
+                (XlookupVectorShape::Vertical, 1) => {
+                    approximate_match_in_first_col(ctx, &lookup, &array).map(|v| v as usize)
+                }
+                (XlookupVectorShape::Horizontal, 1) => {
+                    approximate_match_in_first_row(ctx, &lookup, &array).map(|v| v as usize)
+                }
+                (XlookupVectorShape::Vertical, -1) => {
+                    approximate_match_in_first_col_desc(ctx, &lookup, &array).map(|v| v as usize)
+                }
+                (XlookupVectorShape::Horizontal, -1) => {
+                    approximate_match_in_first_row_desc(ctx, &lookup, &array).map(|v| v as usize)
+                }
                 _ => return Value::Error(ErrorKind::NA),
             }
         }
@@ -1031,7 +1139,13 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             if cols == 1 {
                 return return_array.get(ctx, idx, 0);
             }
-            let mut values = Vec::with_capacity(cols);
+            if cols > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
+            let mut values = Vec::new();
+            if values.try_reserve_exact(cols).is_err() {
+                return Value::Error(ErrorKind::Num);
+            }
             for col in 0..cols {
                 values.push(return_array.get(ctx, idx, col));
             }
@@ -1043,7 +1157,13 @@ fn xlookup_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             if rows == 1 {
                 return return_array.get(ctx, 0, idx);
             }
-            let mut values = Vec::with_capacity(rows);
+            if rows > crate::eval::MAX_MATERIALIZED_ARRAY_CELLS {
+                return Value::Error(ErrorKind::Spill);
+            }
+            let mut values = Vec::new();
+            if values.try_reserve_exact(rows).is_err() {
+                return Value::Error(ErrorKind::Num);
+            }
             for row in 0..rows {
                 values.push(return_array.get(ctx, row, idx));
             }
@@ -1461,30 +1581,6 @@ fn pivot_item_matches(ctx: &dyn FunctionContext, cell: &Value, item: &Value) -> 
         _ => Ok(excel_eq(ctx, cell, item)),
     }
 }
-
-fn flatten_1d(r: &Reference) -> Option<Vec<crate::eval::CellAddr>> {
-    if r.start.row == r.end.row {
-        let cols = r.start.col..=r.end.col;
-        Some(
-            cols.map(|col| crate::eval::CellAddr {
-                row: r.start.row,
-                col,
-            })
-            .collect(),
-        )
-    } else if r.start.col == r.end.col {
-        let rows = r.start.row..=r.end.row;
-        Some(
-            rows.map(|row| crate::eval::CellAddr {
-                row,
-                col: r.start.col,
-            })
-            .collect(),
-        )
-    } else {
-        None
-    }
-}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XlookupVectorShape {
     Horizontal,
@@ -1725,6 +1821,36 @@ fn approximate_match_in_first_col(
     lo.checked_sub(1).map(|idx| idx as u32)
 }
 
+fn approximate_match_in_first_col_desc(
+    ctx: &dyn FunctionContext,
+    lookup: &Value,
+    table: &Reference,
+) -> Option<u32> {
+    let len = (table.end.row - table.start.row + 1) as usize;
+    if len == 0 {
+        return None;
+    }
+
+    // Descending approximate match: insertion point after the last key that is >= lookup.
+    let mut lo = 0usize;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let addr = crate::eval::CellAddr {
+            row: table.start.row + mid as u32,
+            col: table.start.col,
+        };
+        let key = ctx.get_cell_value(&table.sheet_id, addr);
+        if excel_ge(&key, lookup)? {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+
+    lo.checked_sub(1).map(|idx| idx as u32)
+}
+
 fn approximate_match_in_first_col_array(lookup: &Value, table: &Array) -> Option<u32> {
     if table.rows == 0 {
         return None;
@@ -1774,6 +1900,35 @@ fn approximate_match_in_first_row(
     lo.checked_sub(1).map(|idx| idx as u32)
 }
 
+fn approximate_match_in_first_row_desc(
+    ctx: &dyn FunctionContext,
+    lookup: &Value,
+    table: &Reference,
+) -> Option<u32> {
+    let len = (table.end.col - table.start.col + 1) as usize;
+    if len == 0 {
+        return None;
+    }
+
+    let mut lo = 0usize;
+    let mut hi = len;
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let addr = crate::eval::CellAddr {
+            row: table.start.row,
+            col: table.start.col + mid as u32,
+        };
+        let key = ctx.get_cell_value(&table.sheet_id, addr);
+        if excel_ge(&key, lookup)? {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+
+    lo.checked_sub(1).map(|idx| idx as u32)
+}
+
 fn approximate_match_in_first_row_array(lookup: &Value, table: &Array) -> Option<u32> {
     if table.cols == 0 {
         return None;
@@ -1792,65 +1947,6 @@ fn approximate_match_in_first_row_array(lookup: &Value, table: &Array) -> Option
     }
 
     lo.checked_sub(1).map(|idx| idx as u32)
-}
-
-fn exact_match_1d(
-    ctx: &dyn FunctionContext,
-    lookup: &Value,
-    sheet_id: &SheetId,
-    values: &[crate::eval::CellAddr],
-) -> Option<usize> {
-    let wildcard_pattern = wildcard_pattern_for_lookup(lookup);
-    for (idx, addr) in values.iter().enumerate() {
-        let v = ctx.get_cell_value(sheet_id, *addr);
-        if let Some(pattern) = &wildcard_pattern {
-            let text = match &v {
-                Value::Error(_) => continue,
-                Value::Text(s) => Cow::Borrowed(s.as_str()),
-                other => match other.coerce_to_string_with_ctx(ctx) {
-                    Ok(s) => Cow::Owned(s),
-                    Err(_) => continue,
-                },
-            };
-            if pattern.matches(text.as_ref()) {
-                return Some(idx);
-            }
-        } else if excel_eq(ctx, lookup, &v) {
-            return Some(idx);
-        }
-    }
-    None
-}
-
-fn approximate_match_1d(
-    ctx: &dyn FunctionContext,
-    lookup: &Value,
-    sheet_id: &SheetId,
-    values: &[crate::eval::CellAddr],
-    ascending: bool,
-) -> Option<usize> {
-    if values.is_empty() {
-        return None;
-    }
-
-    let mut lo = 0usize;
-    let mut hi = values.len();
-    while lo < hi {
-        let mid = lo + (hi - lo) / 2;
-        let v = ctx.get_cell_value(sheet_id, values[mid]);
-        let ok = if ascending {
-            excel_le(&v, lookup)?
-        } else {
-            excel_ge(&v, lookup)?
-        };
-        if ok {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-
-    lo.checked_sub(1)
 }
 
 fn text_eq_case_insensitive(a: &str, b: &str) -> bool {
