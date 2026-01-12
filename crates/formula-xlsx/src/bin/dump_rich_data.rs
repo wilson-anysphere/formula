@@ -340,7 +340,11 @@ fn dump_metadata(pkg: &XlsxPackage) -> Option<HashMap<u32, u32>> {
             // both the original key and its 0-based equivalent.
             let primary_len = primary.len();
             let mut map: HashMap<u32, u32> = HashMap::with_capacity(primary_len.saturating_mul(2));
-            for (vm, rv) in primary {
+            // `primary` is a HashMap so iteration order is non-deterministic. When inserting both
+            // `vm` and `vm-1` keys, collisions are possible. Sort so the smallest `vm` wins.
+            let mut entries: Vec<(u32, u32)> = primary.into_iter().collect();
+            entries.sort_by_key(|(vm, _)| *vm);
+            for (vm, rv) in entries {
                 map.entry(vm).or_insert(rv);
                 if vm > 0 {
                     map.entry(vm - 1).or_insert(rv);
