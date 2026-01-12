@@ -1102,8 +1102,8 @@ Binding (best-effort; see MS-OVBA):
 3. For the v3 `DigitalSignatureExt` stream, compute the MS-OVBA v3 digest (SHA-256 over v3 `ProjectNormalizedData`)
    and compare it to the signed digest bytes.
 4. `trusted_signed_only` is treated as satisfied only when:
-     - the PKCS#7/CMS signature verifies (`SignedVerified`), **and**
-     - the digest comparison matches (`VbaSignatureBinding::Bound`).
+   - the PKCS#7/CMS signature verifies (`SignedVerified`), **and**
+   - the digest comparison matches (`VbaSignatureBinding::Bound`).
 
 If the PKCS#7/CMS signature verifies but the digest comparison fails, the signature is treated as
 present-but-invalid for Trust Center purposes. If binding cannot be verified (`Unknown`), it is

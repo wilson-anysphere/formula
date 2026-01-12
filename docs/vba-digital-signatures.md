@@ -249,6 +249,11 @@ in `crates/formula-vba/src/signature.rs` describing legacy v1/v2 binding). This 
 should primarily trust the *digest length* and the stream variant, not the `DigestInfo` algorithm
 OID, when choosing how to compute the expected digest bytes.
 
+Evidence in this repo: the regression test
+[`crates/formula-vba/tests/signature_binding_md5_sha256.rs`](../crates/formula-vba/tests/signature_binding_md5_sha256.rs)
+constructs a signature where `DigestInfo.digestAlgorithm.algorithm` advertises SHA-256 but the digest
+bytes are MD5, and asserts that binding verification still succeeds.
+
 #### §2.4.2.1 ContentNormalizedData (v1)
 
 `ContentNormalizedData` is the v1 transcript for module source + some reference data.
@@ -418,8 +423,8 @@ Result interpretation (current behavior):
   predictable behavior), but may not match Excel's exact transcript for all real-world files. This
   can produce false negatives (a valid signature treated as not bound).
 - `DigitalSignatureExt` / v3 contents hashes are supported, but correctness depends on matching
-  MS-OVBA's v3 transcript details. The implementation is covered by unit tests, but should still be
-  validated against additional real-world Excel fixtures over time.
+  MS-OVBA's v3 transcript details. Future work: validate against additional real-world Excel fixtures
+  over time.
 - Callers should treat `VbaSignatureBinding::Unknown` as "could not verify binding", not as "bound".
 - Treat `binding == Bound` as a strong signal, but validate against Excel fixtures before relying on
   it as a hard security boundary.
@@ -458,8 +463,12 @@ and binding behavior:
 - `crates/formula-vba/tests/signed_digest.rs`
   - exercises `SpcIndirectDataContent` / `DigestInfo` extraction.
 - `crates/formula-vba/tests/signature_binding.rs`
-  - constructs an Authenticode-like `SpcIndirectDataContent` payload with an embedded digest, signs it,
-    and checks that tampering with non-signature streams flips `VbaSignatureBinding` to `NotBound`.
+  - constructs an Authenticode-like `SpcIndirectDataContent` payload with an embedded digest, signs
+    it, and checks that tampering with non-signature streams flips `VbaSignatureBinding` to
+    `NotBound`.
+- `crates/formula-vba/tests/signature_binding_md5_sha256.rs`
+  - regression: verifies MS-OSHARED §4.3 behavior where `DigestInfo.digest` is MD5 bytes even when
+    `DigestInfo.digestAlgorithm.algorithm` advertises SHA-256.
 - `crates/formula-vba/tests/contents_hash_v3.rs` and `crates/formula-vba/tests/signature_binding_v3.rs`
   - cover v3 transcript construction and `\x05DigitalSignatureExt` binding behavior.
 - `crates/formula-vba/tests/digsig_blob.rs`
