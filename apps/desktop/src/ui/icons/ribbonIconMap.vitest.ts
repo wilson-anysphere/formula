@@ -38,6 +38,7 @@ describe("ribbonIconMap", () => {
       "open-version-history-panel",
       "open-branch-manager-panel",
       "file.info.manageWorkbook.versions",
+      "file.info.manageWorkbook.branches",
     ] as const;
 
     for (const id of requiredCommandIds) {

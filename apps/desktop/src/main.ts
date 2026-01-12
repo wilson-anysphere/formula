@@ -6966,6 +6966,10 @@ mountRibbon(ribbonReactRoot, {
         toggleDockPanel(PanelIds.VERSION_HISTORY);
         return;
       }
+      case "file.info.manageWorkbook.branches": {
+        toggleDockPanel(PanelIds.BRANCH_MANAGER);
+        return;
+      }
 
       case "file.save.saveAs":
       case "file.save.saveAs.copy":

@@ -59,6 +59,10 @@ describe("defaultRibbonSchema", () => {
       manageWorkbook?.menuItems?.some((item) => item.id === "file.info.manageWorkbook.versions"),
       "Expected Manage Workbook dropdown to include file.info.manageWorkbook.versions",
     ).toBe(true);
+    expect(
+      manageWorkbook?.menuItems?.some((item) => item.id === "file.info.manageWorkbook.branches"),
+      "Expected Manage Workbook dropdown to include file.info.manageWorkbook.branches",
+    ).toBe(true);
   });
 
   it("ensures sibling ids are unique (tabs, groups, buttons, menu items)", () => {
