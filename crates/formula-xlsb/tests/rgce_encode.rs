@@ -39,3 +39,31 @@ fn rgce_roundtrip_intersection() {
     assert_eq!(normalize("A1:B2 C1:D4"), normalize(&decoded));
 }
 
+#[test]
+fn rgce_roundtrip_discount_securities_and_tbill_functions() {
+    // Keep parity with `formula-biff`'s roundtrip coverage for these functions. This exercises the
+    // XLSB decoder's `PtgFunc`/`PtgFuncVar` handling for both fixed and optional arity functions.
+    for formula in [
+        "DISC(DATE(2020,1,1),DATE(2021,1,1),97,100)",
+        "DISC(DATE(2020,1,1),DATE(2021,1,1),97,100,1)",
+        "PRICEDISC(DATE(2020,1,1),DATE(2021,1,1),0.05,100)",
+        "PRICEDISC(DATE(2020,1,1),DATE(2021,1,1),0.05,100,2)",
+        "YIELDDISC(DATE(2020,1,1),DATE(2021,1,1),97,100)",
+        "YIELDDISC(DATE(2020,1,1),DATE(2021,1,1),97,100,3)",
+        "INTRATE(DATE(2020,1,1),DATE(2021,1,1),97,100)",
+        "INTRATE(DATE(2020,1,1),DATE(2021,1,1),97,100,0)",
+        "RECEIVED(DATE(2020,1,1),DATE(2021,1,1),95,0.05)",
+        "RECEIVED(DATE(2020,1,1),DATE(2021,1,1),95,0.05,0)",
+        "PRICEMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,0.04)",
+        "PRICEMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,0.04,0)",
+        "YIELDMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,100.76923076923077)",
+        "YIELDMAT(DATE(2020,1,1),DATE(2021,1,1),DATE(2019,1,1),0.05,100.76923076923077,0)",
+        "TBILLPRICE(DATE(2020,1,1),DATE(2020,7,1),0.05)",
+        "TBILLYIELD(DATE(2020,1,1),DATE(2020,7,1),97.47222222222223)",
+        "TBILLEQ(DATE(2020,1,1),DATE(2020,12,31),0.05)",
+    ] {
+        let rgce = formula_biff::encode_rgce(formula).expect("encode");
+        let decoded = decode_rgce(&rgce).expect("decode");
+        assert_eq!(normalize(formula), normalize(&decoded));
+    }
+}
