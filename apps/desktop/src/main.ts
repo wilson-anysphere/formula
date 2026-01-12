@@ -1696,87 +1696,6 @@ if (
       if (sheets.length > 0) return sheets.map((sheet) => ({ id: sheet.id, name: sheet.name }));
       return [{ id: "Sheet1", name: "Sheet1" }];
     },
-    onSelectionChanged(callback: (payload: any) => void) {
-      // SpreadsheetApp selection listeners fire immediately (to seed UI state). Extensions expect
-      // events only on changes, so ignore the first callback and de-dupe subsequent emissions.
-      let initialized = false;
-      let lastKey = "";
-      let lastSheetId = app.getCurrentSheetId();
-
-      const unsubscribe = app.subscribeSelection((selection) => {
-        const sheetId = app.getCurrentSheetId();
-        const range = selection.ranges[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
-        const key = `${range.startRow},${range.startCol},${range.endRow},${range.endCol}`;
-
-        if (!initialized) {
-          initialized = true;
-          lastSheetId = sheetId;
-          lastKey = key;
-          return;
-        }
-
-        // Mirror the Node/InMemorySpreadsheet behavior: activating a sheet emits `sheetActivated`
-        // but does not implicitly emit `selectionChanged`.
-        if (sheetId !== lastSheetId) {
-          lastSheetId = sheetId;
-          lastKey = key;
-          return;
-        }
-
-        if (key === lastKey) return;
-        lastKey = key;
-
-        const values: Array<Array<string | number | boolean | null>> = [];
-        for (let r = range.startRow; r <= range.endRow; r++) {
-          const row: Array<string | number | boolean | null> = [];
-          for (let c = range.startCol; c <= range.endCol; c++) {
-            const cell = app.getDocument().getCell(sheetId, { row: r, col: c }) as any;
-            row.push(normalizeExtensionCellValue(cell?.value ?? null));
-          }
-          values.push(row);
-        }
-
-        callback?.({ selection: { ...range, values } });
-      });
-
-      return { dispose: unsubscribe };
-    },
-    onCellChanged(callback: (payload: any) => void) {
-      const unsubscribe = app.getDocument().on("change", (evt: any) => {
-        const deltas = Array.isArray(evt?.deltas) ? evt.deltas : [];
-        if (deltas.length === 0) return;
-        const activeSheetId = app.getCurrentSheetId();
-        for (const delta of deltas) {
-          if (!delta || typeof delta !== "object") continue;
-          if (delta.sheetId !== activeSheetId) continue;
-          const row = Number(delta.row);
-          const col = Number(delta.col);
-          if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) continue;
-          const value = normalizeExtensionCellValue(delta.after?.value ?? null);
-          callback?.({ row, col, value });
-        }
-      });
-      return { dispose: unsubscribe };
-    },
-    onSheetActivated(callback: (payload: any) => void) {
-      // Like `onSelectionChanged`, selection listeners fire immediately; ignore the initial call.
-      let initialized = false;
-      let lastSheetId = app.getCurrentSheetId();
-
-      const unsubscribe = app.subscribeSelection(() => {
-        const sheetId = app.getCurrentSheetId();
-        if (!initialized) {
-          initialized = true;
-          lastSheetId = sheetId;
-          return;
-        }
-        if (sheetId === lastSheetId) return;
-        lastSheetId = sheetId;
-        callback?.({ sheet: { id: sheetId, name: workbookSheetStore.getName(sheetId) ?? sheetId } });
-      });
-
-      return { dispose: unsubscribe };
-    },
     async getSheet(name: string) {
       const sheetId = findSheetIdByName(name);
       if (!sheetId) return undefined;
@@ -1791,8 +1710,47 @@ if (
       app.focus();
       return { id: sheetId, name: workbookSheetStore.getName(sheetId) ?? sheetId };
     },
-    async createSheet(_name: string) {
-      throw new Error("Not implemented");
+    async createSheet(name: string) {
+      const sheetName = String(name ?? "").trim();
+      if (!sheetName) {
+        throw new Error("Sheet name must be a non-empty string");
+      }
+
+      const activeId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+
+      const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+      if (typeof baseInvoke === "function") {
+        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
+        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
+
+        // Allow any microtask-batched workbook edits to enqueue before we request a new sheet id.
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+        const info = (await invoke("add_sheet", { name: sheetName })) as SheetUiInfo;
+        const id = String((info as any)?.id ?? "").trim();
+        const resolvedName = String((info as any)?.name ?? "").trim();
+        if (!id) throw new Error("Backend returned empty sheet id");
+
+        // Backend may adjust the name for uniqueness; trust it.
+        workbookSheetStore.addAfter(activeId, { id, name: resolvedName || sheetName });
+        // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
+        doc.getCell(id, { row: 0, col: 0 });
+        app.activateSheet(id);
+        app.focus();
+
+        return { id, name: workbookSheetStore.getName(id) ?? resolvedName || sheetName || id };
+      }
+
+      // Web-only behavior: create a local DocumentController sheet lazily.
+      // Until the DocumentController gains first-class sheet metadata, keep `id` and
+      // `name` in lockstep for newly-created sheets.
+      const newSheetId = sheetName;
+      workbookSheetStore.addAfter(activeId, { id: newSheetId, name: sheetName });
+      doc.getCell(newSheetId, { row: 0, col: 0 });
+      app.activateSheet(newSheetId);
+      app.focus();
+      return { id: newSheetId, name: workbookSheetStore.getName(newSheetId) ?? sheetName };
     },
     async renameSheet(_oldName: string, _newName: string) {
       throw new Error("Not implemented");
@@ -1873,6 +1831,7 @@ if (
       let disposed = false;
       let initialized = false;
       let lastKey = "";
+      let lastSheetId = app.getCurrentSheetId();
       const unsubscribe = app.subscribeSelection((selection: SelectionState) => {
         if (disposed) return;
         const sheetId = app.getCurrentSheetId();
@@ -1881,9 +1840,17 @@ if (
         const endRow = Math.max(range.startRow, range.endRow);
         const startCol = Math.min(range.startCol, range.endCol);
         const endCol = Math.max(range.startCol, range.endCol);
-        const key = `${sheetId}:${startRow},${startCol}:${endRow},${endCol}`;
+        const key = `${startRow},${startCol}:${endRow},${endCol}`;
         if (!initialized) {
           initialized = true;
+          lastSheetId = sheetId;
+          lastKey = key;
+          return;
+        }
+        // Mirror the Node/InMemorySpreadsheet behavior: sheet activation emits `sheetActivated`
+        // but does not implicitly emit `selectionChanged`.
+        if (sheetId !== lastSheetId) {
+          lastSheetId = sheetId;
           lastKey = key;
           return;
         }
