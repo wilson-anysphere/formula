@@ -339,9 +339,16 @@ Workbooks that include in-cell images typically include overrides like:
           ContentType="application/vnd.ms-excel.richValueRel+xml"/>
 ```
 
-##### Note: `xl/cellimages.xml` was not observed
+##### Note: `xl/cellImages.xml` is optional (and may not appear in “Place in Cell” files)
 
-Some online discussions reference `xl/cellimages.xml` for in-cell pictures. In the Excel fixtures we inspected for “Place in Cell”, in-cell images were represented using `xl/metadata.xml` + `xl/richData/*` + `xl/media/*`, and `xl/cellimages.xml` was not present.
+Some online discussions reference `xl/cellImages.xml` (or lowercase `xl/cellimages.xml`) for in-cell
+pictures.
+
+In the “Place in Cell” fixtures we inspected, in-cell images were represented using
+`xl/metadata.xml` + `xl/richData/*` + `xl/media/*` and **no `cellImages` part** was present.
+
+However, other producers (and some synthetic fixtures/tests in this repo) do include a `cellImages`
+part; for round-trip safety we should treat it as optional and preserve it if present.
 
 ### Linked data types / Rich values (Stocks, Geography, etc.)
 
@@ -550,7 +557,9 @@ Some producer tooling (and possibly some Excel builds) can store “images in ce
 - Part: `xl/cellImages.xml` (casing varies; `xl/cellimages.xml` is also seen in the wild)
 - Relationships: `xl/_rels/cellImages.xml.rels` (casing varies; `xl/_rels/cellimages.xml.rels` is also seen)
 
-However, in the Excel 365 “Place in Cell” fixtures we inspected, in-cell images were represented via `xl/metadata.xml` + `xl/richData/*` + `xl/media/*` and `xl/cellimages.xml` was not present. If we encounter `xl/cellimages.xml` in the wild, we should preserve it for round-trip safety.
+However, in the Excel 365 “Place in Cell” fixtures we inspected, in-cell images were represented via
+`xl/metadata.xml` + `xl/richData/*` + `xl/media/*` and no `xl/cellImages.xml` / `xl/cellimages.xml` part
+was present. If we encounter a `cellImages` part in the wild, we should preserve it for round-trip safety.
 
 From a **packaging / round-trip** perspective, the important thing is the relationship chain that connects this part to the actual image blobs under `xl/media/*`.
 
@@ -586,7 +595,7 @@ Observed in this repo (see `crates/formula-xlsx/tests/cell_images.rs` and
 
 #### Relationship type URIs
 
-- `xl/_rels/cellimages.xml.rels` → `xl/media/*`:
+- `xl/_rels/cellImages.xml.rels` (or `xl/_rels/cellimages.xml.rels`) → `xl/media/*`:
   - **High confidence**: `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
 - `xl/workbook.xml.rels` → `xl/cellImages.xml`:
   - **Microsoft extension** (variable). Prefer detection by `Target`/part name.
