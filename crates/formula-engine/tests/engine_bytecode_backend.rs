@@ -1657,6 +1657,122 @@ fn bytecode_backend_matches_ast_for_vlookup_and_hlookup() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_match() {
+    let mut engine = Engine::new();
+
+    // MATCH: ascending numeric values (match_type=1 default).
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 5.0).unwrap();
+
+    // MATCH: descending numeric values (match_type=-1).
+    engine.set_cell_value("Sheet1", "B1", 5.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 1.0).unwrap();
+
+    // MATCH: mixed numeric/text ascending order (numbers < text).
+    engine.set_cell_value("Sheet1", "C1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "C2", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "C3", "A").unwrap();
+
+    // MATCH: wildcard text matching.
+    engine.set_cell_value("Sheet1", "F1", "apple").unwrap();
+    engine.set_cell_value("Sheet1", "F2", "apricot").unwrap();
+    engine.set_cell_value("Sheet1", "F3", "banana").unwrap();
+
+    // Error propagation from lookup_value.
+    engine
+        .set_cell_value("Sheet1", "D1", Value::Error(ErrorKind::Div0))
+        .unwrap();
+
+    // MATCH: exact match.
+    engine
+        .set_cell_formula("Sheet1", "E1", "=MATCH(3, A1:A3, 0)")
+        .unwrap();
+    // MATCH: approximate match (match_type omitted => 1).
+    engine
+        .set_cell_formula("Sheet1", "E2", "=MATCH(4, A1:A3)")
+        .unwrap();
+    // MATCH: missing => #N/A.
+    engine
+        .set_cell_formula("Sheet1", "E3", "=MATCH(0, A1:A3, 0)")
+        .unwrap();
+    // MATCH: descending approximate match.
+    engine
+        .set_cell_formula("Sheet1", "E4", "=MATCH(2, B1:B3, -1)")
+        .unwrap();
+    // MATCH: approximate match with mixed-type array.
+    engine
+        .set_cell_formula("Sheet1", "E5", "=MATCH(4, C1:C3)")
+        .unwrap();
+    // MATCH: propagate lookup_value error.
+    engine
+        .set_cell_formula("Sheet1", "E6", "=MATCH(D1, A1:A3, 0)")
+        .unwrap();
+    // MATCH: 2D lookup array => #N/A.
+    engine
+        .set_cell_formula("Sheet1", "E7", "=MATCH(3, A1:B2, 0)")
+        .unwrap();
+    // MATCH: invalid match_type => #N/A.
+    engine
+        .set_cell_formula("Sheet1", "E8", "=MATCH(3, A1:A3, 2)")
+        .unwrap();
+    // MATCH: wildcard matching in exact mode.
+    engine
+        .set_cell_formula("Sheet1", "E9", r#"=MATCH("ap*", F1:F3, 0)"#)
+        .unwrap();
+
+    // Horizontal match range.
+    engine.set_cell_value("Sheet1", "A10", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B10", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "C10", 5.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "E10", "=MATCH(3, A10:C10, 0)")
+        .unwrap();
+
+    // Single-cell lookup array.
+    engine
+        .set_cell_formula("Sheet1", "E11", "=MATCH(3, A2, 0)")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 11);
+    assert_eq!(stats.compiled, 11, "expected MATCH formulas to compile to bytecode");
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+
+    // Explicit expectations for key MATCH behaviors.
+    assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E3"), Value::Error(ErrorKind::NA));
+    assert_eq!(engine.get_cell_value("Sheet1", "E4"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E5"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E6"), Value::Error(ErrorKind::Div0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E7"), Value::Error(ErrorKind::NA));
+    assert_eq!(engine.get_cell_value("Sheet1", "E8"), Value::Error(ErrorKind::NA));
+    assert_eq!(engine.get_cell_value("Sheet1", "E9"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E10"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "E11"), Value::Number(1.0));
+
+    for (formula, cell) in [
+        ("=MATCH(3, A1:A3, 0)", "E1"),
+        ("=MATCH(4, A1:A3)", "E2"),
+        ("=MATCH(0, A1:A3, 0)", "E3"),
+        ("=MATCH(2, B1:B3, -1)", "E4"),
+        ("=MATCH(4, C1:C3)", "E5"),
+        ("=MATCH(D1, A1:A3, 0)", "E6"),
+        ("=MATCH(3, A1:B2, 0)", "E7"),
+        ("=MATCH(3, A1:A3, 2)", "E8"),
+        (r#"=MATCH("ap*", F1:F3, 0)"#, "E9"),
+        ("=MATCH(3, A10:C10, 0)", "E10"),
+        ("=MATCH(3, A2, 0)", "E11"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_common_logical_error_functions() {
     let mut engine = Engine::new();
 
