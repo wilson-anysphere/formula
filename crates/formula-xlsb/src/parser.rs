@@ -380,6 +380,7 @@ pub(crate) fn parse_workbook<R: Read>(
 
     // NameX / external-name tables (used for add-ins and external defined names).
     let mut supbooks: Vec<SupBook> = Vec::new();
+    let mut supbook_sheets: Vec<Vec<String>> = Vec::new();
     let mut namex_extern_names: HashMap<(u16, u16), ExternName> = HashMap::new();
     let mut namex_ixti_supbooks: HashMap<u16, u16> = HashMap::new();
     let mut extern_sheet_entries: Option<Vec<ExternSheet>> = None;
@@ -440,8 +441,9 @@ pub(crate) fn parse_workbook<R: Read>(
             }
             // External references.
             id if is_supbook_record(id) => {
-                if let Some(supbook) = parse_supbook(rec.data) {
+                if let Some((supbook, sheets)) = parse_supbook(rec.data) {
                     supbooks.push(supbook);
+                    supbook_sheets.push(sheets);
                     current_supbook = Some((supbooks.len() - 1) as u16);
                     current_extern_name_idx = 0;
                 }
@@ -491,9 +493,10 @@ pub(crate) fn parse_workbook<R: Read>(
                 }
 
                 if current_supbook.is_none() {
-                    if let Some(supbook) = parse_supbook(rec.data) {
+                    if let Some((supbook, sheets)) = parse_supbook(rec.data) {
                         if supbook_is_plausible(&supbook) {
                             supbooks.push(supbook);
+                            supbook_sheets.push(sheets);
                             current_supbook = Some((supbooks.len() - 1) as u16);
                             current_extern_name_idx = 0;
                         }
@@ -538,7 +541,12 @@ pub(crate) fn parse_workbook<R: Read>(
         }
     }
 
-    ctx.set_namex_tables(supbooks, namex_extern_names, namex_ixti_supbooks);
+    ctx.set_namex_tables(
+        supbooks,
+        supbook_sheets,
+        namex_extern_names,
+        namex_ixti_supbooks,
+    );
 
     // Register defined names after we know the full sheet list so sheet-scoped names can be
     // displayed as `Sheet1!Name` in decoded formulas.
@@ -1474,21 +1482,20 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>
                                 }
                                 Err(e) => return Err(e),
                             }
- 
-                             let (flags, v, preserved) = if let Some((flags, parsed)) = parsed {
-                                 if preserve_parsed_parts
-                                     && (parsed.rich.is_some() || parsed.phonetic.is_some())
-                                 {
-                                     (flags, parsed.text.clone(), Some(parsed))
-                                 } else {
-                                     (flags, parsed.text, None)
-                                 }
-                             } else {
-                                 let cch = rr.read_u32()? as usize;
-                                 let flags = rr.read_u16()?;
-                                 (flags, rr.read_utf16_chars(cch)?, None)
-                             };
 
+                            let (flags, v, preserved) = if let Some((flags, parsed)) = parsed {
+                                if preserve_parsed_parts
+                                    && (parsed.rich.is_some() || parsed.phonetic.is_some())
+                                {
+                                    (flags, parsed.text.clone(), Some(parsed))
+                                } else {
+                                    (flags, parsed.text, None)
+                                }
+                            } else {
+                                let cch = rr.read_u32()? as usize;
+                                let flags = rr.read_u16()?;
+                                (flags, rr.read_utf16_chars(cch)?, None)
+                            };
                             let cce = rr.read_u32()? as usize;
                             let mut rgce = rr.read_slice(cce)?.to_vec();
                             let extra = rr.data[rr.offset..].to_vec();
@@ -2464,31 +2471,50 @@ fn is_extern_name_record(id: u32) -> bool {
     )
 }
 
-fn parse_supbook(data: &[u8]) -> Option<SupBook> {
+fn parse_supbook(data: &[u8]) -> Option<(SupBook, Vec<String>)> {
     // Try a few plausible layouts:
     // - u16 ctab + utf16string (BIFF8-like)
     // - u32 ctab + utf16string (BIFF12-like)
     {
         let mut rr = RecordReader::new(data);
-        if rr.read_u16().is_ok() {
+        if let Ok(ctab) = rr.read_u16() {
             if let Ok(raw_name) = rr.read_utf16_string() {
                 let kind = classify_supbook_name(&raw_name);
-                return Some(SupBook { raw_name, kind });
+                let sheet_names = read_supbook_sheet_names(&mut rr, ctab as usize);
+                return Some((SupBook { raw_name, kind }, sheet_names));
             }
         }
     }
 
     {
         let mut rr = RecordReader::new(data);
-        if rr.read_u32().is_ok() {
+        if let Ok(ctab) = rr.read_u32() {
             if let Ok(raw_name) = rr.read_utf16_string() {
                 let kind = classify_supbook_name(&raw_name);
-                return Some(SupBook { raw_name, kind });
+                let sheet_names = read_supbook_sheet_names(&mut rr, ctab as usize);
+                return Some((SupBook { raw_name, kind }, sheet_names));
             }
         }
     }
 
     None
+}
+
+fn read_supbook_sheet_names(rr: &mut RecordReader<'_>, ctab: usize) -> Vec<String> {
+    // The BIFF `SupBook` record for external workbooks commonly stores the sheet names for the
+    // referenced workbook after the workbook name/path. We parse them best-effort so we can
+    // render sheet-scoped `PtgNameX` tokens as `'[Book]Sheet'!Name` when possible.
+    let mut out = Vec::new();
+    for _ in 0..ctab {
+        if rr.offset >= rr.data.len() {
+            break;
+        }
+        match rr.read_utf16_string() {
+            Ok(name) => out.push(name),
+            Err(_) => break,
+        }
+    }
+    out
 }
 
 fn classify_supbook_name(raw_name: &str) -> SupBookKind {

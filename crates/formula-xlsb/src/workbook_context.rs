@@ -23,6 +23,10 @@ pub struct WorkbookContext {
 
     /// SupBook table backing `PtgNameX` references (external names / add-ins).
     namex_supbooks: Vec<SupBook>,
+    /// Sheet name tables for each SupBook, used for sheet-scoped `PtgNameX` external names.
+    ///
+    /// Indexed by `supbook_index` (parallel to [`Self::namex_supbooks`]), then by sheet index.
+    namex_supbook_sheets: Vec<Vec<String>>,
     /// ExternName table keyed by (supbook index, extern name index).
     namex_extern_names: HashMap<(u16, u16), ExternName>,
     /// Map `ixti` (ExternSheet index) -> supbook index for `PtgNameX`.
@@ -202,10 +206,12 @@ impl WorkbookContext {
     pub(crate) fn set_namex_tables(
         &mut self,
         supbooks: Vec<SupBook>,
+        supbook_sheets: Vec<Vec<String>>,
         extern_names: HashMap<(u16, u16), ExternName>,
         ixti_supbooks: HashMap<u16, u16>,
     ) {
         self.namex_supbooks = supbooks;
+        self.namex_supbook_sheets = supbook_sheets;
         self.namex_extern_names = extern_names;
         self.namex_ixti_supbooks = ixti_supbooks;
     }
@@ -213,28 +219,48 @@ impl WorkbookContext {
     pub(crate) fn format_namex(&self, ixti: u16, name_index: u16) -> Option<String> {
         // In BIFF, PtgNameX stores `ixti` (index into ExternSheet). Some writers appear to store a
         // SupBook index directly when the ExternSheet table is missing. Handle both.
-        let supbook_index = self
-            .namex_ixti_supbooks
-            .get(&ixti)
-            .copied()
-            .unwrap_or(ixti);
+        let supbook_index = self.namex_ixti_supbooks.get(&ixti).copied().unwrap_or(ixti);
 
-        let extern_name = self
-            .namex_extern_names
-            .get(&(supbook_index, name_index))?;
+        let extern_name = self.namex_extern_names.get(&(supbook_index, name_index))?;
 
         if extern_name.is_function {
             return Some(extern_name.name.clone());
         }
 
-        match self
-            .namex_supbooks
-            .get(supbook_index as usize)
-            .map(|s| &s.kind)
-        {
-            Some(SupBookKind::ExternalWorkbook) => {
-                let raw = &self.namex_supbooks.get(supbook_index as usize)?.raw_name;
-                Some(format!("[{}]{}", display_supbook_name(raw), extern_name.name))
+        let supbook = self.namex_supbooks.get(supbook_index as usize)?;
+        match supbook.kind {
+            SupBookKind::ExternalWorkbook => {
+                let book = display_supbook_name(&supbook.raw_name);
+
+                if let Some(scope_sheet) = extern_name.scope_sheet {
+                    let sheet_name = self
+                        .namex_supbook_sheets
+                        .get(supbook_index as usize)
+                        .and_then(|sheets| {
+                            // `scope_sheet` is commonly 0-based, but some producers may store
+                            // it as 1-based. Prefer the direct index and fall back to `-1`.
+                            sheets.get(scope_sheet as usize).or_else(|| {
+                                scope_sheet
+                                    .checked_sub(1)
+                                    .and_then(|i| sheets.get(i as usize))
+                            })
+                        });
+
+                    if let Some(sheet_name) = sheet_name {
+                        let sheet_token = format!("[{book}]{sheet_name}");
+                        return Some(format!(
+                            "{}!{}",
+                            quote_excel_quoted_ident(&sheet_token),
+                            extern_name.name
+                        ));
+                    }
+                }
+
+                // Workbook-scoped external names use the Excel form `[Book]Name`, but the
+                // formula-engine parser currently can't disambiguate `[Book]Name` from a
+                // structured reference. Quote the entire token so it becomes a `QuotedIdent`.
+                let token = format!("[{book}]{}", extern_name.name);
+                Some(quote_excel_quoted_ident(&token))
             }
             _ => Some(extern_name.name.clone()),
         }
@@ -287,9 +313,31 @@ fn display_supbook_name(raw: &str) -> String {
     raw.rsplit(['/', '\\']).next().unwrap_or(raw).to_string()
 }
 
+fn quote_excel_quoted_ident(raw: &str) -> String {
+    // Excel escapes embedded `'` by doubling them within a quoted identifier.
+    if !raw.contains('\'') {
+        return format!("'{raw}'");
+    }
+
+    let quote_count = raw.chars().filter(|&ch| ch == '\'').count();
+    let mut out = String::with_capacity(raw.len() + quote_count + 2);
+    out.push('\'');
+    for ch in raw.chars() {
+        if ch == '\'' {
+            out.push('\'');
+            out.push('\'');
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use formula_engine::parse_formula;
 
     #[test]
     fn format_namex_adds_external_workbook_prefix_for_names() {
@@ -309,9 +357,41 @@ mod tests {
         )]);
         let ixti_supbooks = HashMap::from([(0u16, 0u16)]);
 
-        ctx.set_namex_tables(supbooks, extern_names, ixti_supbooks);
+        ctx.set_namex_tables(supbooks, vec![vec![]], extern_names, ixti_supbooks);
 
-        assert_eq!(ctx.format_namex(0, 1).as_deref(), Some("[Book2.xlsb]MyName"));
+        let txt = ctx.format_namex(0, 1).expect("format");
+        assert_eq!(txt, "'[Book2.xlsb]MyName'");
+        parse_formula(&format!("={txt}"), Default::default()).expect("should parse");
+    }
+
+    #[test]
+    fn format_namex_prefers_sheet_scoped_external_names_when_available() {
+        let mut ctx = WorkbookContext::default();
+
+        let supbooks = vec![SupBook {
+            raw_name: r"C:\tmp\Book2.xlsb".to_string(),
+            kind: SupBookKind::ExternalWorkbook,
+        }];
+        let extern_names = HashMap::from([(
+            (0u16, 1u16),
+            ExternName {
+                name: "MyName".to_string(),
+                is_function: false,
+                scope_sheet: Some(0),
+            },
+        )]);
+        let ixti_supbooks = HashMap::from([(0u16, 0u16)]);
+
+        ctx.set_namex_tables(
+            supbooks,
+            vec![vec!["Sheet1".to_string()]],
+            extern_names,
+            ixti_supbooks,
+        );
+
+        let txt = ctx.format_namex(0, 1).expect("format");
+        assert_eq!(txt, "'[Book2.xlsb]Sheet1'!MyName");
+        parse_formula(&format!("={txt}"), Default::default()).expect("should parse");
     }
 
     #[test]
@@ -343,7 +423,7 @@ mod tests {
         ]);
         let ixti_supbooks = HashMap::from([(5u16, 0u16), (2u16, 0u16)]);
 
-        ctx.set_namex_tables(supbooks, extern_names, ixti_supbooks);
+        ctx.set_namex_tables(supbooks, vec![vec![]], extern_names, ixti_supbooks);
 
         // Chooses smallest (supbook, name_index) match and smallest ixti pointing at that supbook.
         assert_eq!(ctx.namex_function_ref("myfunc"), Some((2u16, 1u16)));
