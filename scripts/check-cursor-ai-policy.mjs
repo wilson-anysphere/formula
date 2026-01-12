@@ -42,6 +42,8 @@ const INCLUDED_DIRS = [
   "security",
   ".github",
   ".cargo",
+  ".vscode",
+  ".devcontainer",
   "scripts",
   "python",
   "test",

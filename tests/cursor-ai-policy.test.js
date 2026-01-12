@@ -555,6 +555,32 @@ test("cursor AI policy guard scans security/ directory by default", async () => 
   }
 });
 
+test("cursor AI policy guard scans .vscode/ directory by default", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-vscode-dir-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, ".vscode/settings.json", '{ "x": "OpenAI" }\n');
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans .devcontainer/ directory by default", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-devcontainer-dir-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, ".devcontainer/devcontainer.json", '{ "x": "OpenAI" }\n');
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard fails when forbidden strings appear in unrelated unit tests", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-test-fail-"));
   try {
