@@ -63,7 +63,21 @@ function injectWebviewCsp(html: string): string {
   }
   try {
     // Marker used by desktop e2e tests to verify the hardening script ran in the iframe.
-    window.__formulaWebviewSandbox = { tauriGlobalsPresent };
+    const marker = { tauriGlobalsPresent };
+    try {
+      Object.freeze(marker);
+    } catch {
+      // Ignore.
+    }
+    try {
+      Object.defineProperty(window, "__formulaWebviewSandbox", {
+        value: marker,
+        writable: false,
+        configurable: false,
+      });
+    } catch {
+      window.__formulaWebviewSandbox = marker;
+    }
   } catch {
     // Ignore.
   }
