@@ -346,6 +346,11 @@ async function renderSearchResults({
       if (installed.corrupted || installed.incompatible) {
         const installedVersion = installed?.version ? String(installed.version) : null;
         const shouldTryUpdate = Boolean(installed?.incompatible);
+        const incompatibleReason =
+          installed?.incompatibleReason && typeof installed.incompatibleReason === "string"
+            ? installed.incompatibleReason
+            : "";
+        const isEngineMismatch = incompatibleReason.toLowerCase().includes("engine mismatch");
         actions.append(
           el(
             "button",
@@ -373,7 +378,8 @@ async function renderSearchResults({
                       installedVersion &&
                       record &&
                       String(record.version ?? "") === installedVersion &&
-                      typeof extensionManager.repair === "function"
+                      typeof extensionManager.repair === "function" &&
+                      !isEngineMismatch
                     ) {
                       record = await extensionManager.repair(item.id);
                     }
@@ -392,13 +398,15 @@ async function renderSearchResults({
 
                    if (extensionHostManager?.syncInstalledExtensions) {
                      await extensionHostManager.syncInstalledExtensions();
-                    } else if (extensionHostManager) {
-                      await extensionHostManager.reloadExtension(item.id);
-                    }
-                    updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
-                    actions.textContent =
-                      installedVersion && record?.version && String(record.version) !== installedVersion ? "Updated" : "Repaired";
-                    tryNotifyExtensionsChanged();
+                     } else if (extensionHostManager) {
+                       await extensionHostManager.reloadExtension(item.id);
+                     }
+                     updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
+                     const recordVersion = record?.version != null ? String(record.version) : "";
+                     const didUpdate = Boolean(installedVersion && recordVersion && recordVersion !== installedVersion);
+                     const wasNoOpUpdate = Boolean(shouldTryUpdate && installedVersion && recordVersion === installedVersion);
+                     actions.textContent = isEngineMismatch && wasNoOpUpdate ? "No compatible update" : didUpdate ? "Updated" : "Repaired";
+                     tryNotifyExtensionsChanged();
                 } catch (error) {
                   // eslint-disable-next-line no-console
                   console.error(error);

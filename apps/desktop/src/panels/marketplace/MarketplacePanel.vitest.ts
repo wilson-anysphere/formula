@@ -348,4 +348,84 @@ describe("MarketplacePanel", () => {
 
     await waitFor(() => container.textContent?.includes("Updated") ?? false);
   });
+
+  it("does not fall back to repair() when update() is a no-op for an engine mismatch", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const marketplaceClient = {
+      search: vi.fn(async () => ({
+        total: 1,
+        results: [
+          {
+            id: "formula.sample-hello",
+            name: "sample-hello",
+            displayName: "Sample Hello",
+            publisher: "formula",
+            description: "hello",
+            latestVersion: "1.0.0",
+            verified: true,
+            featured: false,
+          },
+        ],
+        nextCursor: null,
+      })),
+      getExtension: vi.fn(async (id: string) => ({
+        id,
+        latestVersion: "1.0.0",
+        verified: true,
+        featured: false,
+        deprecated: false,
+        blocked: false,
+        malicious: false,
+        versions: [{ version: "1.0.0", scanStatus: "passed" }],
+      })),
+    };
+
+    const installedRecord: any = {
+      id: "formula.sample-hello",
+      version: "1.0.0",
+      installedAt: new Date().toISOString(),
+      incompatible: true,
+      incompatibleReason: "engine mismatch",
+    };
+
+    const extensionManager = {
+      getInstalled: vi.fn(async (id: string) => (installedRecord?.id === id ? installedRecord : null)),
+      install: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
+      uninstall: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
+      checkForUpdates: vi.fn(async () => []),
+      update: vi.fn(async (id: string) => ({ ...installedRecord, id })),
+      repair: vi.fn(async () => {
+        throw new Error("repair should not be used for engine mismatches");
+      }),
+    };
+
+    createMarketplacePanel({ container, marketplaceClient: marketplaceClient as any, extensionManager: extensionManager as any });
+
+    const searchInput = container.querySelector<HTMLInputElement>('input[type="search"]');
+    expect(searchInput).toBeInstanceOf(HTMLInputElement);
+    searchInput!.value = "sample";
+
+    const searchButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Search");
+    expect(searchButton).toBeInstanceOf(HTMLButtonElement);
+    searchButton!.click();
+
+    await waitFor(() => container.textContent?.includes("Installed") ?? false);
+    await waitFor(() => container.textContent?.toLowerCase().includes("incompatible") ?? false);
+
+    const repairButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Repair");
+    expect(repairButton).toBeInstanceOf(HTMLButtonElement);
+    repairButton!.click();
+
+    await waitFor(() => extensionManager.update.mock.calls.length > 0);
+    expect(extensionManager.update).toHaveBeenCalledWith("formula.sample-hello");
+    expect(extensionManager.repair).not.toHaveBeenCalled();
+
+    await waitFor(() => container.textContent?.includes("No compatible update") ?? false);
+  });
 });
