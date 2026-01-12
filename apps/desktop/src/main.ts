@@ -3159,6 +3159,8 @@ if (
       for (const tab of el.querySelectorAll<HTMLButtonElement>(".dock-panel__tab")) {
         if (tab.dataset.testid === testId) {
           tab.focus();
+          // Ensure the newly-focused tab is visible when the tab strip overflows.
+          tab.scrollIntoView({ block: "nearest", inline: "nearest" });
           return;
         }
       }
