@@ -102,7 +102,10 @@ function sanitizeForWorkbookPersistence<T>(value: T): T {
 
 function serializeFormulaPowerQueryXml(queries: Query[]): string {
   const sanitized = sanitizeForWorkbookPersistence({ queries });
-  return `<FormulaPowerQuery version="1"><![CDATA[${JSON.stringify(sanitized)}]]></FormulaPowerQuery>`;
+  // CDATA sections cannot contain the substring `]]>`. Encode any occurrences inside the JSON
+  // string using a JSON escape so the decoded payload remains unchanged after parsing.
+  const json = JSON.stringify(sanitized).split("]]>").join("]]\\u003e");
+  return `<FormulaPowerQuery version="1"><![CDATA[${json}]]></FormulaPowerQuery>`;
 }
 
 export function loadQueriesFromStorage(workbookId: string): Query[] {

@@ -331,3 +331,80 @@ test("DesktopPowerQueryService persists queries to the workbook part via Tauri",
     }
   }
 });
+
+test("DesktopPowerQueryService escapes CDATA terminators when persisting workbook XML", async () => {
+  const originalTauriDescriptor = Object.getOwnPropertyDescriptor(globalThis, "__TAURI__");
+
+  try {
+    let persistedXml = null;
+    Object.defineProperty(globalThis, "__TAURI__", {
+      configurable: true,
+      value: {
+        core: {
+          invoke: async (cmd, args) => {
+            if (cmd === "power_query_state_get") return persistedXml;
+            if (cmd === "power_query_state_set") {
+              persistedXml = args?.xml ?? null;
+              return null;
+            }
+            throw new Error(`Unexpected invoke(${cmd})`);
+          },
+        },
+      },
+    });
+
+    const queryWithCdataTerminator = {
+      id: "q_cdata",
+      name: "Weird]]>Name",
+      source: { type: "range", range: { values: [["A"], [1]], hasHeaders: true } },
+      steps: [],
+      refreshPolicy: { type: "manual" },
+    };
+
+    const doc1 = new DocumentController({ engine: new MockEngine() });
+    const first = new DesktopPowerQueryService({
+      workbookId: "wb_cdata",
+      document: doc1,
+      engine: {
+        async executeQueryWithMeta() {
+          return { table: DataTable.fromGrid([["A"], [1]], { hasHeaders: true, inferTypes: true }), meta: {} };
+        },
+      },
+      getContext: () => ({}),
+    });
+    await first.ready;
+    first.registerQuery(queryWithCdataTerminator);
+    await flushMicrotasks();
+
+    assert.ok(typeof persistedXml === "string" && persistedXml.includes("<![CDATA["), "expected a persisted XML payload");
+    assert.ok(
+      persistedXml.includes("Weird]]\\u003eName"),
+      "expected JSON to escape ']]>' as a unicode escape sequence inside CDATA",
+    );
+    assert.ok(!persistedXml.includes("Weird]]>Name"), "expected raw ']]>' substring to not appear inside CDATA content");
+    first.dispose();
+
+    const doc2 = new DocumentController({ engine: new MockEngine() });
+    const second = new DesktopPowerQueryService({
+      workbookId: "wb_cdata",
+      document: doc2,
+      engine: {
+        async executeQueryWithMeta() {
+          return { table: DataTable.fromGrid([["A"], [1]], { hasHeaders: true, inferTypes: true }), meta: {} };
+        },
+      },
+      getContext: () => ({}),
+    });
+    await second.ready;
+    const loaded = second.getQueries();
+    assert.equal(loaded.length, 1);
+    assert.equal(loaded[0].name, queryWithCdataTerminator.name);
+    second.dispose();
+  } finally {
+    if (originalTauriDescriptor) {
+      Object.defineProperty(globalThis, "__TAURI__", originalTauriDescriptor);
+    } else {
+      delete globalThis.__TAURI__;
+    }
+  }
+});
