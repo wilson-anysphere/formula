@@ -32,6 +32,13 @@ test("panelBodyRenderer.tsx avoids inline style assignments for dock panel mount
     );
   }
 
+  const versionHistorySection = extractSection(source, "function CollabVersionHistoryPanel", "function CollabBranchManagerPanel");
+  assert.equal(
+    /\bstyle=\{\{/.test(versionHistorySection),
+    false,
+    "CollabVersionHistoryPanel should not use React inline styles; use CSS classes in workspace.css instead",
+  );
+
   const reactMountSection = extractSection(source, "function renderReactPanel", "function renderDomPanel");
   assert.equal(
     /\.style\./.test(reactMountSection),
@@ -64,4 +71,3 @@ test("panelBodyRenderer.tsx avoids inline style assignments for dock panel mount
     "makeBodyFillAvailableHeight should apply the dock-panel__body--fill CSS class",
   );
 });
-

@@ -270,6 +270,67 @@
   color: var(--error);
 }
 
+.collab-version-history {
+  padding: 12px;
+  overflow: auto;
+  font-family:
+    system-ui,
+    sans-serif;
+}
+
+.collab-version-history__title {
+  margin-top: 0;
+}
+
+.collab-version-history__error {
+  color: var(--error);
+  margin-bottom: 8px;
+}
+
+.collab-version-history__actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.collab-version-history__empty {
+  color: var(--text-secondary);
+}
+
+.collab-version-history__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.collab-version-history__item {
+  display: flex;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  background: transparent;
+}
+
+.collab-version-history__item--selected {
+  /* Use theme tokens only (no hardcoded colors). */
+  background: var(--panel-highlight, var(--bg-hover));
+}
+
+.collab-version-history__item-content {
+  min-width: 0;
+}
+
+.collab-version-history__item-title {
+  font-weight: 600;
+}
+
+.collab-version-history__item-meta {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .macros-panel {
   display: flex;
   flex-direction: column;

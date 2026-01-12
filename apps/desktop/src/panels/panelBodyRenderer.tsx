@@ -118,12 +118,12 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
   }
 
   return (
-    <div style={{ padding: 12, fontFamily: "system-ui, sans-serif", overflow: "auto" }}>
-      <h3 style={{ marginTop: 0 }}>Version history</h3>
+    <div className="collab-version-history">
+      <h3 className="collab-version-history__title">Version history</h3>
 
-      {error ? <div style={{ color: "var(--error)", marginBottom: 8 }}>{error}</div> : null}
+      {error ? <div className="collab-version-history__error">{error}</div> : null}
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+      <div className="collab-version-history__actions">
         <button
           disabled={busy}
           onClick={async () => {
@@ -174,29 +174,25 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
       </div>
 
       {items.length === 0 ? (
-        <div style={{ color: "var(--text-secondary)" }}>No versions yet.</div>
+        <div className="collab-version-history__empty">No versions yet.</div>
       ) : (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+        <ul className="collab-version-history__list">
           {items.map((item) => {
             const selected = item.id === selectedId;
             return (
               <li
                 key={item.id}
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  padding: "6px 0",
-                  borderBottom: "1px solid var(--border)",
-                  cursor: "pointer",
-                  // Use theme tokens only (no hardcoded colors).
-                  background: selected ? "var(--panel-highlight, var(--bg-hover))" : "transparent",
-                }}
+                className={
+                  selected
+                    ? "collab-version-history__item collab-version-history__item--selected"
+                    : "collab-version-history__item"
+                }
                 onClick={() => setSelectedId(item.id)}
               >
                 <input type="radio" checked={selected} onChange={() => setSelectedId(item.id)} />
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontWeight: 600 }}>{item.title}</div>
-                  <div style={{ color: "var(--text-secondary)", fontSize: 12 }}>
+                <div className="collab-version-history__item-content">
+                  <div className="collab-version-history__item-title">{item.title}</div>
+                  <div className="collab-version-history__item-meta">
                     {formatVersionTimestamp(item.timestampMs)} • {item.kind}
                     {item.locked ? " • locked" : ""}
                   </div>
