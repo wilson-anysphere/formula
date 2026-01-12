@@ -43,8 +43,9 @@ impl VbaArray {
 pub type VbaArrayRef = Rc<RefCell<VbaArray>>;
 
 /// A minimal VBA Variant-like value.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum VbaValue {
+    #[default]
     Empty,
     Null,
     Boolean(bool),
@@ -53,12 +54,6 @@ pub enum VbaValue {
     String(String),
     Object(VbaObjectRef),
     Array(VbaArrayRef),
-}
-
-impl Default for VbaValue {
-    fn default() -> Self {
-        Self::Empty
-    }
 }
 
 impl fmt::Debug for VbaValue {

@@ -62,6 +62,12 @@ impl VbaProgram {
     }
 }
 
+impl Default for VbaProgram {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ProcedureDef {
     pub name: String,

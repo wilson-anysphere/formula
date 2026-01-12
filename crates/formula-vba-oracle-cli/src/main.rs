@@ -156,6 +156,80 @@ impl Default for CellState {
     }
 }
 
+#[cfg(test)]
+mod leading_slash_zip_entries_tests {
+    use super::{extract_from_xlsm, OracleWorkbook};
+    use std::io::{Cursor, Read, Write};
+
+    use zip::write::FileOptions;
+    use zip::{ZipArchive, ZipWriter};
+
+    fn rewrite_zip_with_leading_slash_entry_names(bytes: &[u8]) -> Vec<u8> {
+        let mut input = ZipArchive::new(Cursor::new(bytes)).expect("read input zip");
+
+        let mut output = ZipWriter::new(Cursor::new(Vec::<u8>::new()));
+        let base_options = FileOptions::<()>::default();
+
+        for i in 0..input.len() {
+            let mut entry = input.by_index(i).expect("open zip entry");
+            let name = entry.name().to_string();
+            let new_name = if name.starts_with('/') {
+                name
+            } else {
+                format!("/{name}")
+            };
+
+            let mut contents = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut contents).expect("read entry bytes");
+
+            let options = base_options.compression_method(entry.compression());
+
+            if entry.is_dir() {
+                output
+                    .add_directory(new_name, options)
+                    .expect("add directory");
+            } else {
+                output.start_file(new_name, options).expect("start file");
+                output.write_all(&contents).expect("write file");
+            }
+        }
+
+        output.finish().expect("finish zip").into_inner()
+    }
+
+    #[test]
+    fn extract_from_xlsm_tolerates_leading_slash_zip_entry_names() {
+        let fixture_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/xlsx/macros/basic.xlsm"
+        );
+        let base = std::fs::read(fixture_path).expect("read basic.xlsm fixture");
+        let bytes = rewrite_zip_with_leading_slash_entry_names(&base);
+
+        let (workbook, procedures) = extract_from_xlsm(&bytes).expect("extract");
+
+        assert_eq!(workbook.active_sheet.as_deref(), Some("Sheet1"));
+        assert_eq!(workbook.sheets.len(), 1);
+        assert_eq!(workbook.sheets[0].name, "Sheet1");
+        assert!(
+            !workbook.vba_modules.is_empty(),
+            "expected at least one VBA module"
+        );
+        assert!(
+            !procedures.is_empty(),
+            "expected at least one discovered procedure"
+        );
+
+        // Avoid unused warnings when this test is the only reference in this module.
+        let _ = OracleWorkbook {
+            schema_version: 0,
+            active_sheet: None,
+            sheets: Vec::new(),
+            vba_modules: Vec::new(),
+        };
+    }
+}
+
 #[derive(Debug, Clone)]
 struct SheetState {
     name: String,
@@ -532,7 +606,7 @@ fn extract_from_xlsm(bytes: &[u8]) -> Result<(OracleWorkbook, Vec<ProcedureSumma
 
     let workbook = OracleWorkbook {
         schema_version: 1,
-        active_sheet: sheet_names.get(0).cloned(),
+        active_sheet: sheet_names.first().cloned(),
         sheets: sheet_names
             .into_iter()
             .map(|name| OracleSheet {
@@ -645,80 +719,6 @@ fn read_sheet_names_from_workbook_xml(
     }
 
     if names.is_empty() { None } else { Some(names) }
-}
-
-#[cfg(test)]
-mod leading_slash_zip_entries_tests {
-    use super::{extract_from_xlsm, OracleWorkbook};
-    use std::io::{Cursor, Read, Write};
-
-    use zip::write::FileOptions;
-    use zip::{ZipArchive, ZipWriter};
-
-    fn rewrite_zip_with_leading_slash_entry_names(bytes: &[u8]) -> Vec<u8> {
-        let mut input = ZipArchive::new(Cursor::new(bytes)).expect("read input zip");
-
-        let mut output = ZipWriter::new(Cursor::new(Vec::<u8>::new()));
-        let base_options = FileOptions::<()>::default();
-
-        for i in 0..input.len() {
-            let mut entry = input.by_index(i).expect("open zip entry");
-            let name = entry.name().to_string();
-            let new_name = if name.starts_with('/') {
-                name
-            } else {
-                format!("/{name}")
-            };
-
-            let mut contents = Vec::with_capacity(entry.size() as usize);
-            entry.read_to_end(&mut contents).expect("read entry bytes");
-
-            let options = base_options.clone().compression_method(entry.compression());
-
-            if entry.is_dir() {
-                output
-                    .add_directory(new_name, options)
-                    .expect("add directory");
-            } else {
-                output.start_file(new_name, options).expect("start file");
-                output.write_all(&contents).expect("write file");
-            }
-        }
-
-        output.finish().expect("finish zip").into_inner()
-    }
-
-    #[test]
-    fn extract_from_xlsm_tolerates_leading_slash_zip_entry_names() {
-        let fixture_path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../fixtures/xlsx/macros/basic.xlsm"
-        );
-        let base = std::fs::read(fixture_path).expect("read basic.xlsm fixture");
-        let bytes = rewrite_zip_with_leading_slash_entry_names(&base);
-
-        let (workbook, procedures) = extract_from_xlsm(&bytes).expect("extract");
-
-        assert_eq!(workbook.active_sheet.as_deref(), Some("Sheet1"));
-        assert_eq!(workbook.sheets.len(), 1);
-        assert_eq!(workbook.sheets[0].name, "Sheet1");
-        assert!(
-            !workbook.vba_modules.is_empty(),
-            "expected at least one VBA module"
-        );
-        assert!(
-            !procedures.is_empty(),
-            "expected at least one discovered procedure"
-        );
-
-        // Avoid unused warnings when this test is the only reference in this module.
-        let _ = OracleWorkbook {
-            schema_version: 0,
-            active_sheet: None,
-            sheets: Vec::new(),
-            vba_modules: Vec::new(),
-        };
-    }
 }
 
 fn list_procedures(modules: &[VbaModule]) -> Result<Vec<ProcedureSummary>, String> {

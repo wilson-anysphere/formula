@@ -1231,8 +1231,8 @@ impl<'a> Executor<'a> {
             value
         };
 
-        if frame.locals.contains_key(&name_lc) {
-            frame.locals.insert(name_lc, value);
+        if let Some(slot) = frame.locals.get_mut(&name_lc) {
+            *slot = value;
             return Ok(());
         }
 
@@ -1534,8 +1534,7 @@ impl<'a> Executor<'a> {
         // - Otherwise fall back to case-insensitive string compare.
         let ln = l.to_f64();
         let rn = r.to_f64();
-        if ln.is_some() && rn.is_some() {
-            let (a, b) = (ln.unwrap(), rn.unwrap());
+        if let (Some(a), Some(b)) = (ln, rn) {
             let res = match op {
                 BinOp::Eq => a == b,
                 BinOp::Ne => a != b,
@@ -1660,7 +1659,7 @@ impl<'a> Executor<'a> {
                     .eval_expr(
                         frame,
                         &args
-                            .get(0)
+                            .first()
                             .ok_or_else(|| VbaError::Runtime("MsgBox() missing prompt".to_string()))?
                             .expr,
                     )?
@@ -1689,7 +1688,7 @@ impl<'a> Executor<'a> {
                 let arg = self.eval_expr(
                     frame,
                     &args
-                        .get(0)
+                        .first()
                         .ok_or_else(|| VbaError::Runtime("Worksheets() missing name".to_string()))?
                         .expr,
                 )?;
@@ -1723,7 +1722,7 @@ impl<'a> Executor<'a> {
                     .eval_expr(
                         frame,
                         &args
-                            .get(0)
+                            .first()
                             .ok_or_else(|| VbaError::Runtime("__new() missing class".to_string()))?
                             .expr,
                     )?
@@ -1742,7 +1741,7 @@ impl<'a> Executor<'a> {
                     .eval_expr(
                         frame,
                         &args
-                            .get(0)
+                            .first()
                             .ok_or_else(|| {
                                 VbaError::Runtime("CreateObject() missing ProgID".to_string())
                             })?
@@ -1918,8 +1917,8 @@ impl<'a> Executor<'a> {
             _ => {
                 // Procedure call.
                 if let Some(proc) = self.program.get(&name_lc) {
-                    let mut arg_vals = build_proc_args(frame, args, proc, self)?;
-                    let res = self.call_procedure(proc, &mut arg_vals)?;
+                    let arg_vals = build_proc_args(frame, args, proc, self)?;
+                    let res = self.call_procedure(proc, &arg_vals)?;
                     Ok(res.returned.unwrap_or(VbaValue::Empty))
                 } else {
                     Err(VbaError::Runtime(format!(
@@ -2186,7 +2185,7 @@ impl<'a> Executor<'a> {
                 }
                 "offset" => {
                     let row_off = args
-                        .get(0)
+                        .first()
                         .map(|a| self.eval_expr(frame, &a.expr))
                         .transpose()?
                         .unwrap_or(VbaValue::Double(0.0))
@@ -2205,7 +2204,7 @@ impl<'a> Executor<'a> {
                     ))))
                 }
                 "resize" => {
-                    let rows = match args.get(0) {
+                    let rows = match args.first() {
                         None => None,
                         Some(arg) if matches!(arg.expr, Expr::Missing) => None,
                         Some(arg) => self
