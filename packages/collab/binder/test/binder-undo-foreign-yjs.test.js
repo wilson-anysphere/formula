@@ -254,3 +254,64 @@ test("binder normalizes foreign nested cell maps when only legacy keys exist", a
   binder.destroy();
   doc.destroy();
 });
+
+test("binder normalizes foreign nested cell maps when only r{row}c{col} keys exist", async () => {
+  const Ycjs = requireYjsCjs();
+
+  const remote = new Ycjs.Doc();
+  const remoteCells = remote.getMap("cells");
+  remote.transact(() => {
+    const legacy = new Ycjs.Map();
+    legacy.set("value", "from-cjs");
+    legacy.set("formula", null);
+    legacy.set("modified", 1);
+    remoteCells.set("r0c0", legacy);
+  });
+  const update = Ycjs.encodeStateAsUpdate(remote);
+
+  const doc = new Y.Doc();
+  const cellsRoot = getWorkbookRoots(doc).cells;
+  Ycjs.applyUpdate(doc, update);
+
+  const beforeWriteLegacy = cellsRoot.get("r0c0");
+  assert.ok(beforeWriteLegacy);
+  assert.equal(beforeWriteLegacy instanceof Y.Map, false);
+  assert.equal(cellsRoot.get("Sheet1:0:0"), undefined);
+
+  const localOrigin = { type: "local:test" };
+  const undoService = createUndoService({ mode: "collab", doc, scope: [cellsRoot], origin: localOrigin });
+
+  const documentController = new TestDocumentController();
+  const binder = bindYjsToDocumentController({
+    ydoc: doc,
+    documentController,
+    undoService,
+    defaultSheetId: "Sheet1",
+  });
+
+  await flushAsync();
+
+  assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).value, "from-cjs");
+
+  documentController.setCellValue("Sheet1", { row: 0, col: 0 }, null);
+  await flushAsync();
+
+  const afterWriteLegacy = cellsRoot.get("r0c0");
+  assert.ok(afterWriteLegacy);
+  assert.ok(afterWriteLegacy instanceof Y.Map);
+  assert.equal(afterWriteLegacy.get("value"), null);
+
+  assert.equal(undoService.canUndo(), true);
+  undoService.undo();
+  await flushAsync();
+
+  const afterUndoLegacy = cellsRoot.get("r0c0");
+  assert.ok(afterUndoLegacy);
+  assert.ok(afterUndoLegacy instanceof Y.Map);
+  assert.equal(afterUndoLegacy.get("value"), "from-cjs");
+  assert.equal(undoService.canUndo(), false);
+  assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).value, "from-cjs");
+
+  binder.destroy();
+  doc.destroy();
+});
