@@ -454,6 +454,78 @@ fn project_normalized_data_v3_filters_project_stream_properties_and_includes_des
 }
 
 #[test]
+fn project_normalized_data_v3_ignores_workspace_section_and_excludes_additional_security_properties() {
+    // Regression: the `[Workspace]` section is machine/user-local and MUST NOT affect v3 signature
+    // binding. Also ensure we exclude additional protection-related properties commonly seen in the
+    // wild.
+    let project_stream = concat!(
+        "Name=\"VBAProject\"\r\n",
+        "Password=SHOULD_SKIP\r\n",
+        "VisibilityState=SHOULD_SKIP\r\n",
+        "DocModule=SHOULD_SKIP\r\n",
+        "ProtectionState=SHOULD_SKIP\r\n",
+        "[Host Extender Info]\r\n",
+        "HostExtenderRef=MyHostExtender\r\n",
+        "[Workspace]\r\n",
+        "ThisWorkbook=SHOULD_NOT_APPEAR_IN_HASH\r\n",
+    )
+    .as_bytes();
+
+    // Minimal `VBA/dir` stream: only the dir Terminator record.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0010, &[]);
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream).expect("write PROJECT");
+    }
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    let vba_bin = ole.into_inner().into_inner();
+    let normalized = project_normalized_data_v3(&vba_bin).expect("ProjectNormalizedData v3");
+
+    // Included properties should appear.
+    assert!(
+        find_subslice(&normalized, b"Name=\"VBAProject\"").is_some(),
+        "expected included Name property bytes to be present"
+    );
+    assert!(
+        find_subslice(&normalized, b"HostExtenderRef=MyHostExtender").is_some(),
+        "expected Host Extender Info line bytes to be present"
+    );
+
+    // Excluded properties should not appear anywhere in the transcript.
+    for needle in [
+        b"Password=" as &[u8],
+        b"VisibilityState=" as &[u8],
+        b"DocModule=" as &[u8],
+        b"ProtectionState=" as &[u8],
+    ] {
+        assert!(
+            find_subslice(&normalized, needle).is_none(),
+            "did not expect ProjectNormalizedData v3 to contain excluded property bytes: {:?}",
+            std::str::from_utf8(needle).unwrap_or("<non-utf8>"),
+        );
+    }
+
+    // Workspace section should be ignored entirely (including its distinctive key/value lines).
+    assert!(
+        find_subslice(&normalized, b"ThisWorkbook=SHOULD_NOT_APPEAR_IN_HASH").is_none(),
+        "expected [Workspace] section lines to be ignored for v3 ProjectNormalizedData"
+    );
+}
+
+#[test]
 fn project_normalized_data_v3_dir_truncated_record_header() {
     // One valid record followed by <6 leftover bytes so the next record header is truncated.
     let dir_decompressed = {

@@ -1590,6 +1590,10 @@ pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
     //
     // Some `PROJECT` properties MUST be excluded because they are either security-sensitive or
     // can change without affecting the macro semantics (e.g. CMG/DPB/GC protection fields).
+    //
+    // Additionally, the optional `[Workspace]` section is machine/user-local and MUST NOT influence
+    // signature binding, so we stop processing when a non-`[Host Extender Info]` section header is
+    // encountered.
     let mut ole = OleFile::open(vba_project_bin)?;
     let project_stream_bytes = ole
         .read_stream_opt("PROJECT")?
@@ -1605,116 +1609,87 @@ pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
 
 fn normalize_project_stream_properties_v3(project_stream_bytes: &[u8]) -> Vec<u8> {
     // The `PROJECT` stream is line-oriented ASCII/MBCS text. We normalize by:
-    // - splitting on CR, LF, or CRLF
-    // - filtering out excluded property keys (case-insensitive)
-    // - emitting each included line terminated with CRLF
-
-    fn trim_ascii_whitespace(mut bytes: &[u8]) -> &[u8] {
-        while let Some(b) = bytes.first() {
-            if b.is_ascii_whitespace() {
-                bytes = &bytes[1..];
-            } else {
-                break;
-            }
-        }
-        while let Some(b) = bytes.last() {
-            if b.is_ascii_whitespace() {
-                bytes = &bytes[..bytes.len() - 1];
-            } else {
-                break;
-            }
-        }
-        bytes
-    }
+    // - splitting on NWLN (CRLF or LFCR; with tolerance for lone CR/LF),
+    // - filtering out excluded property keys (case-insensitive),
+    // - ignoring the optional `[Workspace]` (and any later) section, and
+    // - emitting each included raw `key=value` line terminated with CRLF.
+    //
+    // Note: we intentionally operate on bytes rather than decoding to UTF-8 so that the
+    // transcript preserves MBCS bytes verbatim.
 
     fn is_excluded_key(key: &[u8]) -> bool {
         // MS-OVBA §2.4.2.6 exclusions (PROJECT stream properties that MUST NOT contribute).
         key.eq_ignore_ascii_case(b"ID")
             || key.eq_ignore_ascii_case(b"Document")
+            || key.eq_ignore_ascii_case(b"DocModule")
             || key.eq_ignore_ascii_case(b"CMG")
             || key.eq_ignore_ascii_case(b"DPB")
             || key.eq_ignore_ascii_case(b"GC")
+            || key.eq_ignore_ascii_case(b"ProtectionState")
+            || key.eq_ignore_ascii_case(b"Password")
+            || key.eq_ignore_ascii_case(b"VisibilityState")
     }
 
     let mut out = Vec::new();
+    let mut saw_host_extender_info = false;
 
-    let mut line_start = 0usize;
-    let mut i = 0usize;
-    while i < project_stream_bytes.len() {
-        match project_stream_bytes[i] {
-            b'\r' => {
-                append_project_line(
-                    &project_stream_bytes[line_start..i],
-                    &mut out,
-                    &trim_ascii_whitespace,
-                    &is_excluded_key,
-                );
-                i += 1;
-                if i < project_stream_bytes.len() && project_stream_bytes[i] == b'\n' {
-                    i += 1;
-                }
-                line_start = i;
-            }
-            b'\n' => {
-                append_project_line(
-                    &project_stream_bytes[line_start..i],
-                    &mut out,
-                    &trim_ascii_whitespace,
-                    &is_excluded_key,
-                );
-                i += 1;
-                line_start = i;
-            }
-            _ => i += 1,
+    for raw_line in split_nwln_lines(project_stream_bytes) {
+        let mut line = trim_ascii_whitespace(raw_line);
+        if line.is_empty() {
+            continue;
         }
-    }
-    if line_start < project_stream_bytes.len() {
-        append_project_line(
-            &project_stream_bytes[line_start..],
-            &mut out,
-            &trim_ascii_whitespace,
-            &is_excluded_key,
-        );
+
+        // Some writers may include a UTF-8 BOM at the start of the stream. Strip it for key
+        // matching and output stability.
+        if line.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            line = trim_ascii_whitespace(&line[3..]);
+            if line.is_empty() {
+                continue;
+            }
+        }
+
+        // Section headers are bracketed, e.g. `[Host Extender Info]` or `[Workspace]`.
+        if line.starts_with(b"[") && line.ends_with(b"]") {
+            if line.eq_ignore_ascii_case(b"[Host Extender Info]") {
+                saw_host_extender_info = true;
+                continue;
+            }
+            // Any other section (including `[Workspace]`) is ignored for signature binding.
+            break;
+        }
+
+        let Some(eq) = line.iter().position(|&b| b == b'=') else {
+            continue;
+        };
+
+        let key = trim_ascii_whitespace(&line[..eq]);
+        if key.is_empty() {
+            continue;
+        }
+        if is_excluded_key(key) {
+            continue;
+        }
+
+        // For `[Host Extender Info]` we currently preserve the raw `key=value` bytes as written (the
+        // same policy as the main ProjectProperties block). This is intentionally conservative: it
+        // matches the behavior of the rest of the v3 project transcript, which aims to avoid
+        // lossy decoding and avoids attempting to interpret unknown host-extender fields.
+        //
+        // If we haven't seen the Host Extender section, `saw_host_extender_info` is false, but the
+        // behavior is identical; the flag is kept for future-proofing and readability.
+        let _ = saw_host_extender_info;
+
+        out.extend_from_slice(line);
+        out.extend_from_slice(b"\r\n");
     }
 
     out
 }
 
-fn append_project_line(
-    line: &[u8],
-    out: &mut Vec<u8>,
-    trim_ascii_whitespace: &dyn Fn(&[u8]) -> &[u8],
-    is_excluded_key: &dyn Fn(&[u8]) -> bool,
-) {
-    let mut line = trim_ascii_whitespace(line);
-    if line.is_empty() {
-        return;
-    }
-
-    // Some writers may include a UTF-8 BOM at the start of the stream. Strip it for key matching
-    // and output stability.
-    if line.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        line = &line[3..];
-        line = trim_ascii_whitespace(line);
-    }
-
-    let Some(eq) = line.iter().position(|&b| b == b'=') else {
-        return;
-    };
-
-    let key = trim_ascii_whitespace(&line[..eq]);
-    if key.is_empty() {
-        return;
-    }
-    if is_excluded_key(key) {
-        return;
-    }
-
-    // Preserve the full key/value bytes as written, but normalize line endings to CRLF so that
-    // CR-only or LF-only `PROJECT` streams still hash consistently.
-    out.extend_from_slice(line);
-    out.extend_from_slice(b"\r\n");
-}
+// NOTE: `normalize_project_stream_properties_v3` intentionally does not share the legacy
+// `project_properties_normalized_bytes` / `host_extender_info_normalized_bytes` logic above. Those
+// helpers implement the legacy MS-OVBA `ProjectNormalizedData` transcript, whereas v3 signature
+// binding uses the raw, filtered `PROJECT` stream lines with CRLF-normalized endings.
 
 /// Compute the MS-OVBA §2.4.2.7 `ContentsHashV3` value (SHA-256) over v3 `ProjectNormalizedData`.
 ///

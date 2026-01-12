@@ -238,12 +238,16 @@ At a high level:
 
 Reference record normalization note:
 
-- Both `ContentNormalizedData` and `V3ContentNormalizedData` incorporate only a subset of
-  reference-related `VBA/dir` records.
+- `ContentNormalizedData` (v1/v2) and `V3ContentNormalizedData` (v3) each incorporate only a subset
+  of reference-related `VBA/dir` records, but the allowlist differs between versions.
+- v1/v2 (`ContentNormalizedData`) excludes `REFERENCENAME` (`0x0016`) and includes only the
+  reference-record allowlist in MS-OVBA §2.4.2.1.
+- v3 (`V3ContentNormalizedData`) includes `REFERENCENAME` (`0x0016`) and its optional UTF-16LE
+  `NameUnicode` record (`0x003E`) in record order.
 - `REFERENCECONTROL` (`0x002F`) and `REFERENCEORIGINAL` (`0x0033`) are **not** included verbatim; they
-  are normalized via MS-OVBA’s TempBuffer + “copy until first NUL byte” rule.
-- `REFERENCEEXTENDED` (`0x0030`) is included verbatim.
-- Other reference-related record types (for example `REFERENCENAME` (`0x0016`)) MUST NOT contribute.
+  follow MS-OVBA’s field-selection + TempBuffer / “copy until first NUL byte” behavior.
+- `REFERENCEEXTENDED` (`0x0030`) is included verbatim (record payload fields only; the outer record
+  length is excluded).
 
 V3 spec references:
 
@@ -262,7 +266,7 @@ For **v3 / `\x05DigitalSignatureExt`**, MS-OVBA defines the `ContentsHashV3` dig
 At a high level:
 
 ```text
-ProjectNormalizedData = (filtered PROJECT stream properties) || V3ContentNormalizedData || FormsNormalizedData
+ProjectNormalizedData = (filtered PROJECT stream properties; `[Workspace]` ignored) || V3ContentNormalizedData || FormsNormalizedData
 V3ContentHash         = SHA-256(ProjectNormalizedData)
 ```
 
