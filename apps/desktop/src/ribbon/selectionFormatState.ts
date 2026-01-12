@@ -193,24 +193,15 @@ export function computeSelectionFormatState(
     }
   }
 
-  // If we didn't inspect the full selection, treat "all cells match" properties as mixed.
-  const isCertain = state.exhaustive;
-
   return {
-    bold: isCertain ? state.bold : false,
-    italic: isCertain ? state.italic : false,
-    underline: isCertain ? state.underline : false,
-    wrapText: isCertain ? state.wrapText : false,
-    align: (() => {
-      if (state.align === "mixed") return "mixed";
-      if (!isCertain) return "mixed";
-      return state.align ?? "left";
-    })(),
-    numberFormat: (() => {
-      if (state.numberFormat === "mixed") return "mixed";
-      if (!isCertain) return "mixed";
-      return state.numberFormat ?? null;
-    })(),
+    // Note: When the selection is very large we sample rather than scan every cell.
+    // These values should be treated as "best effort" and may miss rare outliers,
+    // but should still be responsive for typical UI usage.
+    bold: state.bold,
+    italic: state.italic,
+    underline: state.underline,
+    wrapText: state.wrapText,
+    align: state.align ?? "left",
+    numberFormat: state.numberFormat === undefined ? null : state.numberFormat,
   };
 }
-

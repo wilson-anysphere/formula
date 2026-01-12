@@ -99,7 +99,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
           ? pressedOverrides[button.id]
           : pressedByIdRef.current[button.id];
         const nextPressed = !currentPressed;
-        setPressedById((prev) => ({ ...prev, [button.id]: !prev[button.id] }));
+        setPressedById((prev) => ({ ...prev, [button.id]: nextPressed }));
         actions.onToggle?.(button.id, nextPressed);
         actions.onCommand?.(button.id);
         return;
