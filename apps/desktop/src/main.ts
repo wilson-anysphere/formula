@@ -2037,6 +2037,47 @@ let lastSheetStoreSnapshot: SheetStoreSnapshot | null = null;
 
 type SheetUiInfo = { id: string; name: string; visibility?: SheetVisibility; tabColor?: TabColor };
 
+function detectSingleSheetMove(
+  prevOrder: readonly string[],
+  nextOrder: readonly string[],
+): { sheetId: string; toIndex: number } | null {
+  if (prevOrder.length !== nextOrder.length) return null;
+  if (prevOrder.length < 2) return null;
+
+  const prevSet = new Set(prevOrder);
+  if (prevSet.size !== prevOrder.length) return null;
+  for (const id of nextOrder) {
+    if (!prevSet.has(id)) return null;
+  }
+
+  // We treat the reorder as a single "remove + insert" move:
+  // - remove one sheet id from prev
+  // - insert it at a different index
+  // - all other sheet ids preserve their relative order
+  for (const sheetId of prevOrder) {
+    const fromIndex = prevOrder.indexOf(sheetId);
+    const toIndex = nextOrder.indexOf(sheetId);
+    if (toIndex === -1) continue;
+    if (fromIndex === toIndex) continue;
+
+    const prevWithout = prevOrder.filter((id) => id !== sheetId);
+    const nextWithout = nextOrder.filter((id) => id !== sheetId);
+    if (prevWithout.length !== nextWithout.length) continue;
+
+    let matches = true;
+    for (let i = 0; i < prevWithout.length; i += 1) {
+      if (prevWithout[i] !== nextWithout[i]) {
+        matches = false;
+        break;
+      }
+    }
+    if (!matches) continue;
+    return { sheetId, toIndex };
+  }
+
+  return null;
+}
+
 function emitSheetMetadataChanged(): void {
   if (typeof window === "undefined") return;
   try {
@@ -2892,6 +2933,65 @@ function installSheetStoreSubscription(): void {
   };
 
   lastSheetStoreSnapshot = captureSnapshot();
+  // Sheet reorders triggered by DocumentController undo/redo (doc -> store sync) should persist
+  // to the local workbook backend, but the doc->store sync can apply a single reorder as multiple
+  // `store.move(...)` calls. Coalesce those into one backend `move_sheet` call.
+  let pendingDocDrivenReorder: { before: string[]; after: string[] } | null = null;
+  let pendingDocDrivenReorderFlushScheduled = false;
+  const schedulePersistDocDrivenReorder = (before: string[], after: string[]): void => {
+    if (!pendingDocDrivenReorder) {
+      pendingDocDrivenReorder = { before: before.slice(), after: after.slice() };
+    } else {
+      pendingDocDrivenReorder.after = after.slice();
+    }
+
+    if (pendingDocDrivenReorderFlushScheduled) return;
+    pendingDocDrivenReorderFlushScheduled = true;
+
+    queueMicrotask(() => {
+      pendingDocDrivenReorderFlushScheduled = false;
+      const pending = pendingDocDrivenReorder;
+      pendingDocDrivenReorder = null;
+      if (!pending) return;
+
+      void (async () => {
+        const collabSession = app.getCollabSession?.() ?? null;
+        if (collabSession) return;
+
+        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+        if (typeof baseInvoke !== "function") return;
+
+        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
+        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
+
+        // Allow any microtask-batched workbook edits to enqueue before we move the sheet.
+        await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+        const beforeOrder = pending.before;
+        const afterOrder = pending.after;
+
+        // Prefer a single move when possible; full reorder can otherwise be extremely expensive
+        // because the backend `move_sheet` rebuilds the engine each time.
+        const singleMove = detectSingleSheetMove(beforeOrder, afterOrder);
+        if (singleMove) {
+          await invoke("move_sheet", { sheet_id: singleMove.sheetId, to_index: singleMove.toIndex });
+          return;
+        }
+
+        // Fall back to forcing the backend into the desired order. The algorithm is:
+        // for each desired index, move that sheet id to the target index. This converges on the
+        // target order regardless of the current backend order.
+        for (let targetIndex = 0; targetIndex < afterOrder.length; targetIndex += 1) {
+          const sheetId = afterOrder[targetIndex];
+          if (!sheetId) continue;
+          await invoke("move_sheet", { sheet_id: sheetId, to_index: targetIndex });
+        }
+      })().catch((err) => {
+        showToast(`Failed to persist sheet reorder: ${String((err as any)?.message ?? err)}`, "error");
+      });
+    });
+  };
+
   stopSheetStoreListener = workbookSheetStore.subscribe(() => {
     const prevSnapshot = lastSheetStoreSnapshot;
     const nextSnapshot = captureSnapshot();
@@ -2992,13 +3092,7 @@ function installSheetStoreSubscription(): void {
           const prevKey = prevOrder.join("|");
           const nextKey = nextOrder.join("|");
           if (prevKey && nextKey && prevKey !== nextKey) {
-            for (let targetIndex = 0; targetIndex < nextOrder.length; targetIndex += 1) {
-              const sheetId = nextOrder[targetIndex]!;
-              if (!nextById.has(sheetId)) continue;
-              void invoke("move_sheet", { sheet_id: sheetId, to_index: targetIndex }).catch(() => {
-                // ignore
-              });
-            }
+            schedulePersistDocDrivenReorder(prevOrder, nextOrder);
           }
         }
       }
