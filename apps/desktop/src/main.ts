@@ -1041,6 +1041,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.alignment.alignLeft": true,
             "home.alignment.center": true,
             "home.alignment.alignRight": true,
+            "home.alignment.orientation": true,
             "home.number.numberFormat": true,
             "home.number.percent": true,
             "home.number.accounting": true,
@@ -6132,6 +6133,45 @@ mountRibbon(ribbonRoot, {
         applyToSelection("Align right", (sheetId, ranges) =>
           setHorizontalAlign(app.getDocument(), sheetId, ranges, "right"),
         );
+        return;
+      case "home.alignment.orientation.angleCounterclockwise":
+        applyToSelection("Text orientation", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 45 } }, { label: "Text orientation" });
+          }
+        });
+        return;
+      case "home.alignment.orientation.angleClockwise":
+        applyToSelection("Text orientation", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { alignment: { textRotation: -45 } }, { label: "Text orientation" });
+          }
+        });
+        return;
+      case "home.alignment.orientation.verticalText":
+        applyToSelection("Text orientation", (sheetId, ranges) => {
+          for (const range of ranges) {
+            // Excel/OOXML uses 255 as a sentinel for vertical text (stacked).
+            doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 255 } }, { label: "Text orientation" });
+          }
+        });
+        return;
+      case "home.alignment.orientation.rotateUp":
+        applyToSelection("Text orientation", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { alignment: { textRotation: 90 } }, { label: "Text orientation" });
+          }
+        });
+        return;
+      case "home.alignment.orientation.rotateDown":
+        applyToSelection("Text orientation", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { alignment: { textRotation: -90 } }, { label: "Text orientation" });
+          }
+        });
+        return;
+      case "home.alignment.orientation.formatCellAlignment":
+        openFormatCells();
         return;
 
       case "home.number.percent":
