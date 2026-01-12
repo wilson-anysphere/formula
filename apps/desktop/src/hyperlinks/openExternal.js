@@ -45,12 +45,14 @@ export async function openExternalHyperlink(uri, deps) {
     return false;
   }
 
-  const allowlist = deps.allowedProtocols ?? DEFAULT_ALLOWED_PROTOCOLS;
+  // In the desktop shell, link opening is routed through a Rust command that enforces a strict
+  // scheme allowlist. Keep the JS allowlist in sync (do not allow overrides in Tauri builds).
+  const isTauri = typeof globalThis !== "undefined" && Boolean(globalThis.__TAURI__);
+  const allowlist = isTauri ? DEFAULT_ALLOWED_PROTOCOLS : deps.allowedProtocols ?? DEFAULT_ALLOWED_PROTOCOLS;
   const isTrusted = allowlist.has(protocol);
   if (!isTrusted) {
     // In the desktop shell, link opening is routed through a Rust command that enforces a strict
     // scheme allowlist. Avoid prompting for protocols that will be rejected anyway.
-    const isTauri = typeof globalThis !== "undefined" && Boolean(globalThis.__TAURI__);
     if (isTauri) return false;
 
     const confirm = deps.confirmUntrustedProtocol ?? (async () => false);

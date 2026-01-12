@@ -50,6 +50,21 @@ describe("openExternalHyperlink", () => {
     expect(shellOpen).not.toHaveBeenCalled();
   });
 
+  it("does not allow overriding the protocol allowlist in Tauri builds", async () => {
+    (globalThis as any).__TAURI__ = { core: { invoke: vi.fn() } };
+
+    const shellOpen = vi.fn().mockResolvedValue(undefined);
+    const confirmUntrustedProtocol = vi.fn().mockResolvedValue(true);
+    const allowedProtocols = new Set<string>(["ftp", "http", "https", "mailto"]);
+
+    await expect(
+      openExternalHyperlink("ftp://example.com", { shellOpen, confirmUntrustedProtocol, allowedProtocols }),
+    ).resolves.toBe(false);
+
+    expect(confirmUntrustedProtocol).not.toHaveBeenCalled();
+    expect(shellOpen).not.toHaveBeenCalled();
+  });
+
   it("prompts for non-allowlisted schemes in web builds", async () => {
     (globalThis as any).__TAURI__ = undefined;
 
@@ -63,4 +78,3 @@ describe("openExternalHyperlink", () => {
     expect(shellOpen).toHaveBeenCalledWith("ftp://example.com");
   });
 });
-
