@@ -129,6 +129,11 @@ sanity-checking:
 python tools/excel-oracle/compat_gate.py --tier full --max-cases 50
 ```
 
+`compare.py` also verifies that the expected/actual datasets embed a
+`caseSet.sha256` matching the current `cases.json`. If you regenerate or edit
+the corpus, you must also regenerate/pin a matching expected dataset (or add a
+new versioned dataset for the new corpus hash).
+
 ## Regenerate the case corpus
 
 From repo root:
