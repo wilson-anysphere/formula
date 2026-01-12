@@ -1370,6 +1370,9 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const ranges = app.getSelectionRanges();
     const formatState = computeSelectionFormatState(app.getDocument(), sheetId, ranges);
     const isEditing = app.isEditing();
+    const perfStats = app.getGridPerfStats() as any;
+    const perfStatsSupported = perfStats != null;
+    const perfStatsEnabled = Boolean(perfStats?.enabled);
 
     const pressedById = {
       "home.font.bold": formatState.bold,
@@ -1384,7 +1387,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "file.save.autoSave": false,
       "view.show.showFormulas": app.getShowFormulas(),
       "formulas.formulaAuditing.showFormulas": app.getShowFormulas(),
-      "view.show.performanceStats": Boolean((app.getGridPerfStats() as any)?.enabled),
+      "view.show.performanceStats": perfStatsEnabled,
       "view.window.split": ribbonLayoutController ? ribbonLayoutController.layout.splitView.direction !== "none" : false,
       "data.queriesConnections.queriesConnections":
         ribbonLayoutController != null &&
@@ -1491,6 +1494,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
           }
         : null),
       // View/zoom controls depend on the current runtime (e.g. shared-grid mode).
+      "view.show.performanceStats": !perfStatsSupported,
       "view.zoom.zoom": zoomDisabled,
       "view.zoom.zoom100": zoomDisabled,
       "view.zoom.zoomToSelection": zoomDisabled,
