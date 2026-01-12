@@ -367,11 +367,17 @@ cannot reliably resolve relative imports, the browser entrypoint (`manifest.brow
   - override via `VITE_FORMULA_MARKETPLACE_BASE_URL`
   - origin-only values (e.g. `https://marketplace.formula.app`) are normalized to `.../api` for convenience
   - default: `"/api"` in dev/e2e, `https://marketplace.formula.app/api` in production builds
-- The WebView CSP must allow outbound connections to:
-  - the marketplace origin (for installs/updates), and
-  - any origins extensions need for `formula.network.fetch` / WebSocket connections.
+- **Desktop/Tauri network strategy:** in packaged desktop builds we keep a strict WebView CSP (`connect-src 'self' blob: data:`),
+  so the WebView cannot make arbitrary outbound `fetch()` / `WebSocket` requests directly.
+  - Marketplace HTTP requests are performed by the Rust backend via Tauri IPC commands
+    (`marketplace_search`, `marketplace_get_extension`, `marketplace_download_package`).
+  - Extension HTTP requests (`formula.network.fetch(...)`) are proxied by the browser extension host through the Rust backend
+    via `network_fetch`.
+  - See [`docs/11-desktop-shell.md`](./11-desktop-shell.md) (“Network strategy”) for details.
+  - Note: WebSocket connections are not currently proxied via Tauri IPC. Under the default desktop CSP, extension WebSockets
+    will be blocked unless you loosen `connect-src` or add a Rust-backed bridge.
 
-In Tauri, the CSP lives in `apps/desktop/src-tauri/tauri.conf.json` (`app.security.csp`, notably `connect-src`).
+In Desktop/Tauri, the CSP lives in `apps/desktop/src-tauri/tauri.conf.json` (`app.security.csp`).
 
 The CSP must also allow the extension runtime mechanics:
 
@@ -380,8 +386,8 @@ The CSP must also allow the extension runtime mechanics:
 - `child-src blob:` (extension panels are sandboxed `blob:` iframes)
 
 Note: extension panels are additionally sandboxed with `connect-src 'none'`, so panels cannot make network requests
-directly. Any network access must happen in the extension worker (and will still be subject to both the permission
-system *and* the WebView CSP).
+directly. Any network access must happen in the extension worker (and will still be subject to the permission system; in
+Desktop/Tauri builds, outbound HTTP(S) is proxied through the Rust backend as described above).
 
 ### Legacy Node-based installer/runtime (deprecated)
 
@@ -1384,8 +1390,9 @@ const marketplace = new MarketplaceClient({ baseUrl: "https://marketplace.exampl
 const manager = new WebExtensionManager({ marketplaceClient: marketplace, host, engineVersion: "1.0.0" });
 ```
 
-**CSP constraint (Desktop):** marketplace installs are plain `fetch()` requests from the WebView, so they are subject
-to the app-level CSP (`apps/desktop/src-tauri/tauri.conf.json`, `connect-src`).
+**Network strategy (Desktop/Tauri):** in packaged desktop builds, marketplace HTTP requests are made by the Rust backend
+via Tauri IPC so the WebView CSP can keep `connect-src` locked down. In pure web/in-browser dev, `MarketplaceClient` uses
+plain `fetch()` and is subject to normal browser CSP + CORS rules.
 
 ### End-to-end: local marketplace → install in Desktop (dev)
 
