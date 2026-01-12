@@ -405,11 +405,17 @@ fn parse_metadata_vm_mapping_fallback(
     };
 
     let mut out: HashMap<u32, u32> = HashMap::new();
-    for (vm_idx, bk) in value_metadata
+    let mut vm_idx: u32 = 0;
+    for bk in value_metadata
         .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "bk")
-        .enumerate()
     {
+        let count = bk
+            .attribute("count")
+            .and_then(|c| c.trim().parse::<u32>().ok())
+            .filter(|c| *c >= 1)
+            .unwrap_or(1);
+
         for rc in bk
             .children()
             .filter(|n| n.is_element() && n.tag_name().name() == "rc")
@@ -423,11 +429,13 @@ fn parse_metadata_vm_mapping_fallback(
             let Some(&rich_value_idx) = rvb_rich_value_indices.get(v_idx) else {
                 continue;
             };
-            if let Ok(vm_idx) = u32::try_from(vm_idx) {
-                out.insert(vm_idx, rich_value_idx);
+            for offset in 0..count {
+                out.insert(vm_idx.saturating_add(offset), rich_value_idx);
             }
             break;
         }
+
+        vm_idx = vm_idx.saturating_add(count);
     }
 
     Ok(out)

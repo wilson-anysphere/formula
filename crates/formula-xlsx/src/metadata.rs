@@ -29,6 +29,17 @@ use quick_xml::Reader;
 use quick_xml::Writer;
 use thiserror::Error;
 
+/// A `<bk>` block that may be repeated via run-length encoding.
+///
+/// Excel sometimes compresses repeated metadata blocks by writing a single `<bk count="N">`
+/// entry. For index resolution, this block occupies `count` consecutive indices.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepeatedBlock<T> {
+    /// Number of consecutive indices occupied by this block.
+    pub count: u32,
+    pub block: T,
+}
+
 /// Parsed representation of `xl/metadata.xml`.
 ///
 /// The data model captures only the stable core (`<metadataTypes>` and `<rc>` records) while also
@@ -38,13 +49,20 @@ pub struct MetadataPart {
     /// `<metadataTypes>` entries (at least `name=` + all attributes).
     pub metadata_types: Vec<MetadataType>,
     /// Raw inner XML payloads from `<futureMetadata><bk>...</bk></futureMetadata>`.
-    pub future_metadata_blocks: Vec<MetadataBlockRaw>,
+    ///
+    /// Excel uses `futureMetadata` for forward-compatible extension blocks (often containing
+    /// `extLst` payloads in non-SpreadsheetML namespaces). We keep the inner XML so higher-level
+    /// tooling can inspect/debug it without needing to understand every schema.
+    pub future_metadata_blocks: Vec<RepeatedBlock<MetadataBlockRaw>>,
     /// `<cellMetadata>` blocks referenced via the `cm` index on worksheet `<c>` elements.
-    pub cell_metadata: Vec<MetadataBlock>,
+    pub cell_metadata: Vec<RepeatedBlock<MetadataBlock>>,
     /// `<valueMetadata>` blocks referenced via the `vm` index on worksheet `<c>` elements.
-    pub value_metadata: Vec<MetadataBlock>,
+    pub value_metadata: Vec<RepeatedBlock<MetadataBlock>>,
     /// `rvb/@i` values from `<futureMetadata name="XLRICHVALUE">`, indexed by `<bk>` position.
-    xlrichvalue_future_bks: Vec<Option<u32>>,
+    ///
+    /// This is stored separately from `future_metadata_blocks` so callers can resolve rich values
+    /// without parsing the extension XML. The entries may be run-length encoded via `bk/@count`.
+    xlrichvalue_future_bks: Vec<RepeatedBlock<Option<u32>>>,
 }
 
 /// Backwards-compatible name for the parsed `xl/metadata.xml` representation.
@@ -67,10 +85,32 @@ impl MetadataPart {
         self.block_by_index(&self.value_metadata, idx)
     }
 
-    fn block_by_index<'a>(&'a self, blocks: &'a [MetadataBlock], idx: u32) -> Option<&'a MetadataBlock> {
-        blocks
-            .get(idx as usize)
-            .or_else(|| idx.checked_sub(1).and_then(|i| blocks.get(i as usize)))
+    /// Lookup a future-metadata block by index (`<futureMetadata>` `<bk>`).
+    pub fn future_block_by_index(&self, idx: u32) -> Option<&MetadataBlockRaw> {
+        self.block_by_index(&self.future_metadata_blocks, idx)
+    }
+
+    fn block_by_index<'a, T>(&'a self, blocks: &'a [RepeatedBlock<T>], idx: u32) -> Option<&'a T> {
+        self.block_by_index_candidate(blocks, idx)
+            .or_else(|| idx.checked_sub(1).and_then(|i| self.block_by_index_candidate(blocks, i)))
+    }
+
+    fn block_by_index_candidate<'a, T>(
+        &'a self,
+        blocks: &'a [RepeatedBlock<T>],
+        idx: u32,
+    ) -> Option<&'a T> {
+        // Walk blocks cumulatively to support run-length encoding via `bk/@count`.
+        let mut cursor: u32 = 0;
+        for block in blocks {
+            let count = block.count.max(1);
+            let end = cursor.saturating_add(count);
+            if idx < end {
+                return Some(&block.block);
+            }
+            cursor = end;
+        }
+        None
     }
 
     /// Resolve a worksheet cell's `vm=` index to the rich value record index (`XLRICHVALUE`).
@@ -80,29 +120,25 @@ impl MetadataPart {
     /// - handles missing/invalid numeric attributes by skipping those entries
     /// - tries both 0-based and 1-based interpretations for `vm`, `rc/@t`, and `rc/@v`
     pub fn vm_to_rich_value_index(&self, vm_raw: u32) -> Option<u32> {
-        // `vm` chooses which `<valueMetadata><bk>` block applies to the cell.
-        for vm_idx in index_candidates(vm_raw, self.value_metadata.len()) {
-            let Some(vm_bk) = self.value_metadata.get(vm_idx) else {
-                continue;
-            };
+        let vm_bk = self.value_block_by_index(vm_raw)?;
 
-            // A `<bk>` may contain multiple `<rc>` records for different metadata types.
-            for rc in &vm_bk.records {
-                // `t` indexes into `<metadataTypes>`.
-                for t_idx in index_candidates(rc.t, self.metadata_types.len()) {
-                    let Some(metadata_type) = self.metadata_types.get(t_idx) else {
-                        continue;
-                    };
-                    if !metadata_type.name.eq_ignore_ascii_case("XLRICHVALUE") {
-                        continue;
-                    }
+        // A `<bk>` may contain multiple `<rc>` records for different metadata types.
+        for rc in &vm_bk.records {
+            // `t` indexes into `<metadataTypes>`.
+            for t_idx in index_candidates(rc.t, self.metadata_types.len()) {
+                let Some(metadata_type) = self.metadata_types.get(t_idx) else {
+                    continue;
+                };
+                if !metadata_type.name.eq_ignore_ascii_case("XLRICHVALUE") {
+                    continue;
+                }
 
-                    // `v` indexes into `<futureMetadata name="XLRICHVALUE"><bk>...</bk></futureMetadata>`.
-                    for v_idx in index_candidates(rc.v, self.xlrichvalue_future_bks.len()) {
-                        if let Some(Some(rich_idx)) = self.xlrichvalue_future_bks.get(v_idx).copied() {
-                            return Some(rich_idx);
-                        }
-                    }
+                // `v` indexes into `<futureMetadata name="XLRICHVALUE"><bk>...</bk></futureMetadata>`.
+                if let Some(Some(rich_idx)) = self
+                    .block_by_index(&self.xlrichvalue_future_bks, rc.v)
+                    .copied()
+                {
+                    return Some(rich_idx);
                 }
             }
         }
@@ -260,26 +296,43 @@ fn parse_metadata_types(reader: &mut Reader<&[u8]>) -> Result<Vec<MetadataType>,
 fn parse_future_metadata(
     reader: &mut Reader<&[u8]>,
     is_xlrichvalue: bool,
-) -> Result<(Vec<MetadataBlockRaw>, Vec<Option<u32>>), MetadataError> {
+) -> Result<
+    (
+        Vec<RepeatedBlock<MetadataBlockRaw>>,
+        Vec<RepeatedBlock<Option<u32>>>,
+    ),
+    MetadataError,
+> {
     let mut buf = Vec::new();
     let mut blocks = Vec::new();
-    let mut rvb_indices: Vec<Option<u32>> = Vec::new();
+    let mut rvb_indices: Vec<RepeatedBlock<Option<u32>>> = Vec::new();
 
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) if e.local_name().as_ref() == b"bk" => {
+                let count = parse_bk_count(&e)?;
                 let inner_xml = capture_inner_xml(reader, b"bk")?;
                 if is_xlrichvalue {
-                    rvb_indices.push(extract_rvb_i(&inner_xml));
+                    rvb_indices.push(RepeatedBlock {
+                        count,
+                        block: extract_rvb_i(&inner_xml),
+                    });
                 }
-                blocks.push(MetadataBlockRaw { inner_xml });
+                blocks.push(RepeatedBlock {
+                    count,
+                    block: MetadataBlockRaw { inner_xml },
+                });
             }
             Event::Empty(e) if e.local_name().as_ref() == b"bk" => {
+                let count = parse_bk_count(&e)?;
                 if is_xlrichvalue {
-                    rvb_indices.push(None);
+                    rvb_indices.push(RepeatedBlock { count, block: None });
                 }
-                blocks.push(MetadataBlockRaw {
-                    inner_xml: String::new(),
+                blocks.push(RepeatedBlock {
+                    count,
+                    block: MetadataBlockRaw {
+                        inner_xml: String::new(),
+                    },
                 });
             }
             Event::Start(e) => {
@@ -303,17 +356,25 @@ fn parse_future_metadata(
 fn parse_metadata_blocks(
     reader: &mut Reader<&[u8]>,
     end_tag: &'static [u8],
-) -> Result<Vec<MetadataBlock>, MetadataError> {
+) -> Result<Vec<RepeatedBlock<MetadataBlock>>, MetadataError> {
     let mut buf = Vec::new();
     let mut blocks = Vec::new();
 
     loop {
         match reader.read_event_into(&mut buf)? {
             Event::Start(e) if e.local_name().as_ref() == b"bk" => {
-                blocks.push(parse_metadata_block(reader)?);
+                let count = parse_bk_count(&e)?;
+                blocks.push(RepeatedBlock {
+                    count,
+                    block: parse_metadata_block(reader)?,
+                });
             }
             Event::Empty(e) if e.local_name().as_ref() == b"bk" => {
-                blocks.push(MetadataBlock::default());
+                let count = parse_bk_count(&e)?;
+                blocks.push(RepeatedBlock {
+                    count,
+                    block: MetadataBlock::default(),
+                });
             }
             Event::Start(e) => {
                 // Skip unknown subtree.
@@ -434,6 +495,23 @@ fn capture_inner_xml(
     Ok(std::str::from_utf8(&bytes)?.to_string())
 }
 
+fn parse_bk_count(e: &quick_xml::events::BytesStart<'_>) -> Result<u32, MetadataError> {
+    // `bk/@count` is optional run-length encoding. Default to 1 when missing/invalid.
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr.map_err(quick_xml::Error::from)?;
+        if crate::openxml::local_name(attr.key.as_ref()) == b"count" {
+            return Ok(attr
+                .unescape_value()?
+                .trim()
+                .parse::<u32>()
+                .ok()
+                .filter(|v| *v >= 1)
+                .unwrap_or(1));
+        }
+    }
+    Ok(1)
+}
+
 fn extract_rvb_i(inner_xml: &str) -> Option<u32> {
     // `bk` payloads are extension-heavy (often include non-SpreadsheetML prefixes). quick_xml is
     // intentionally namespace-agnostic so we can scan by local-name only.
@@ -545,13 +623,25 @@ mod tests {
 
         let doc = parse_metadata_xml(xml.as_bytes()).expect("parse metadata.xml");
         assert_eq!(doc.cell_metadata.len(), 2);
-        assert_eq!(doc.cell_metadata[0].records.len(), 2);
-        assert_eq!(doc.cell_metadata[0].records[0], MetadataRecord { t: 0, v: 1 });
-        assert_eq!(doc.cell_metadata[0].records[1], MetadataRecord { t: 1, v: 2 });
-        assert_eq!(doc.cell_metadata[1].records, vec![MetadataRecord { t: 2, v: 3 }]);
+        assert_eq!(doc.cell_metadata[0].block.records.len(), 2);
+        assert_eq!(
+            doc.cell_metadata[0].block.records[0],
+            MetadataRecord { t: 0, v: 1 }
+        );
+        assert_eq!(
+            doc.cell_metadata[0].block.records[1],
+            MetadataRecord { t: 1, v: 2 }
+        );
+        assert_eq!(
+            doc.cell_metadata[1].block.records,
+            vec![MetadataRecord { t: 2, v: 3 }]
+        );
 
         assert_eq!(doc.value_metadata.len(), 1);
-        assert_eq!(doc.value_metadata[0].records, vec![MetadataRecord { t: 5, v: 8 }]);
+        assert_eq!(
+            doc.value_metadata[0].block.records,
+            vec![MetadataRecord { t: 5, v: 8 }]
+        );
     }
 
     #[test]
@@ -571,11 +661,52 @@ mod tests {
         let doc = parse_metadata_xml(xml.as_bytes()).expect("parse metadata.xml");
         assert_eq!(doc.future_metadata_blocks.len(), 1);
         assert!(
-            doc.future_metadata_blocks[0].inner_xml.contains("foo:bar"),
+            doc.future_metadata_blocks[0]
+                .block
+                .inner_xml
+                .contains("foo:bar"),
             "inner_xml was: {}",
-            doc.future_metadata_blocks[0].inner_xml
+            doc.future_metadata_blocks[0].block.inner_xml
         );
-        assert!(doc.future_metadata_blocks[0].inner_xml.contains("payload"));
+        assert!(doc.future_metadata_blocks[0].block.inner_xml.contains("payload"));
+    }
+
+    #[test]
+    fn bk_count_is_respected_for_value_metadata_lookup() {
+        // One <bk count="3"> should occupy indices 0,1,2 for lookup purposes.
+        let xml = r#"<metadata>
+  <valueMetadata>
+    <bk count="3"><rc t="0" v="1"/></bk>
+    <bk><rc t="0" v="2"/></bk>
+  </valueMetadata>
+ </metadata>"#;
+
+        let doc = parse_metadata_xml(xml.as_bytes()).expect("parse metadata.xml");
+
+        // A cell with vm="2" should still resolve into the first <bk count="3"> block.
+        assert_eq!(
+            doc.value_block_by_index(2)
+                .and_then(|b| b.records.first().copied()),
+            Some(MetadataRecord { t: 0, v: 1 })
+        );
+    }
+
+    #[test]
+    fn bk_count_is_respected_for_future_metadata_lookup() {
+        // One <bk count="2"> should occupy indices 0,1 for lookup purposes.
+        let xml = r#"<metadata>
+  <futureMetadata name="XLDAPR">
+    <bk count="2"><foo/></bk>
+    <bk><bar/></bk>
+  </futureMetadata>
+ </metadata>"#;
+
+        let doc = parse_metadata_xml(xml.as_bytes()).expect("parse metadata.xml");
+        assert_eq!(doc.future_metadata_blocks.len(), 2);
+
+        // An rc with v="1" should resolve into the first block (<bk count="2">).
+        let block = doc.future_block_by_index(1).expect("future block resolves");
+        assert!(block.inner_xml.contains("foo"));
     }
 
     #[test]
@@ -688,4 +819,3 @@ mod tests {
         assert_eq!(metadata.vm_to_rich_value_index(1), Some(7));
     }
 }
-

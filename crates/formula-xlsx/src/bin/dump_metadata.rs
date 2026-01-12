@@ -95,7 +95,7 @@ fn dump_metadata_xml(pkg: &XlsxPackage) {
 
             let cell_metadata_blocks = doc.cell_metadata.len();
             let cell_metadata_rc_total: usize =
-                doc.cell_metadata.iter().map(|b| b.records.len()).sum();
+                doc.cell_metadata.iter().map(|b| b.block.records.len()).sum();
             println!(
                 "  cellMetadata: blocks={} rc_records={}",
                 cell_metadata_blocks, cell_metadata_rc_total
@@ -103,7 +103,7 @@ fn dump_metadata_xml(pkg: &XlsxPackage) {
 
             let value_metadata_blocks = doc.value_metadata.len();
             let value_metadata_rc_total: usize =
-                doc.value_metadata.iter().map(|b| b.records.len()).sum();
+                doc.value_metadata.iter().map(|b| b.block.records.len()).sum();
             println!(
                 "  valueMetadata: blocks={} rc_records={}",
                 value_metadata_blocks, value_metadata_rc_total
@@ -114,7 +114,11 @@ fn dump_metadata_xml(pkg: &XlsxPackage) {
                 doc.future_metadata_blocks.len()
             );
             for (idx, block) in doc.future_metadata_blocks.iter().enumerate() {
-                println!("    [{idx}] inner_xml_chars={}", block.inner_xml.len());
+                println!(
+                    "    [{idx}] count={} inner_xml_chars={}",
+                    block.count,
+                    block.block.inner_xml.len()
+                );
             }
         }
         Err(err) => {

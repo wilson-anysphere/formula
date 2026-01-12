@@ -682,9 +682,11 @@ struct MetadataPart {
     /// This is used to avoid misinterpreting `rc/@v` as a direct rich value index when we know
     /// there's an intermediate mapping layer.
     saw_future_rich_value_metadata: bool,
-    /// `valueMetadata` entries, indexed by `vm` (with potential 0/1-based ambiguity handled in
-    /// [`Self::vm_to_rich_value_index`]).
-    value_metadata: Vec<Vec<(u32, u32)>>,
+    /// `valueMetadata` `<bk>` blocks (potentially run-length encoded via `bk/@count`).
+    ///
+    /// These are referenced from worksheet cells via `c/@vm` (with potential 0/1-based ambiguity
+    /// handled in [`Self::vm_to_rich_value_index`]).
+    value_metadata: Vec<ValueMetadataBlock>,
     /// Best-effort inference of whether `rc/@t` values are 0-based or 1-based indices into
     /// `<metadataTypes>`.
     rc_t_base: RcIndexBase,
@@ -700,6 +702,21 @@ enum RcIndexBase {
 impl Default for RcIndexBase {
     fn default() -> Self {
         Self::Unknown
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ValueMetadataBlock {
+    count: u32,
+    rc_refs: Vec<(u32, u32)>,
+}
+
+impl Default for ValueMetadataBlock {
+    fn default() -> Self {
+        Self {
+            count: 1,
+            rc_refs: Vec::new(),
+        }
     }
 }
 
@@ -734,7 +751,7 @@ impl MetadataPart {
         let mut rich_value_by_record: HashMap<u32, u32> = HashMap::new();
         let mut future_rich_value_by_bk: Vec<Option<u32>> = Vec::new();
         let mut saw_future_rich_value_metadata = false;
-        let mut value_metadata: Vec<Vec<(u32, u32)>> = Vec::new();
+        let mut value_metadata: Vec<ValueMetadataBlock> = Vec::new();
 
         let mut in_metadata_types = false;
         let mut next_metadata_type_idx: u32 = 0;
@@ -751,6 +768,7 @@ impl MetadataPart {
 
         let mut in_value_metadata = false;
         let mut in_bk = false;
+        let mut current_bk_count: u32 = 1;
         let mut current_bk: Vec<(u32, u32)> = Vec::new();
 
         loop {
@@ -929,21 +947,56 @@ impl MetadataPart {
                 Event::End(e) if e.local_name().as_ref() == b"valueMetadata" => {
                     in_value_metadata = false;
                     in_bk = false;
+                    current_bk_count = 1;
+                    current_bk.clear();
                     drop(e);
                 }
 
                 Event::Start(e) if in_value_metadata && e.local_name().as_ref() == b"bk" => {
                     in_bk = true;
+                    current_bk_count = 1;
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if crate::openxml::local_name(attr.key.as_ref()) == b"count" {
+                            current_bk_count = attr
+                                .unescape_value()?
+                                .trim()
+                                .parse::<u32>()
+                                .ok()
+                                .filter(|v| *v >= 1)
+                                .unwrap_or(1);
+                        }
+                    }
                     current_bk.clear();
                     drop(e);
                 }
                 Event::Empty(e) if in_value_metadata && e.local_name().as_ref() == b"bk" => {
-                    value_metadata.push(Vec::new());
+                    let mut count: u32 = 1;
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if crate::openxml::local_name(attr.key.as_ref()) == b"count" {
+                            count = attr
+                                .unescape_value()?
+                                .trim()
+                                .parse::<u32>()
+                                .ok()
+                                .filter(|v| *v >= 1)
+                                .unwrap_or(1);
+                        }
+                    }
+                    value_metadata.push(ValueMetadataBlock {
+                        count,
+                        rc_refs: Vec::new(),
+                    });
                     drop(e);
                 }
                 Event::End(e) if in_bk && e.local_name().as_ref() == b"bk" => {
-                    value_metadata.push(std::mem::take(&mut current_bk));
+                    value_metadata.push(ValueMetadataBlock {
+                        count: current_bk_count,
+                        rc_refs: std::mem::take(&mut current_bk),
+                    });
                     in_bk = false;
+                    current_bk_count = 1;
                     drop(e);
                 }
                 Event::Start(e) | Event::Empty(e) if in_bk && e.local_name().as_ref() == b"rc" => {
@@ -978,7 +1031,7 @@ impl MetadataPart {
         let mut saw_t_eq_count = false;
         if metadata_type_count > 0 {
             for bk in &value_metadata {
-                for (t, _) in bk {
+                for (t, _) in &bk.rc_refs {
                     if *t == 0 {
                         saw_t_zero = true;
                     }
@@ -1068,7 +1121,7 @@ impl MetadataPart {
     }
 
     fn vm_to_rich_value_index_with_candidate(&self, vm_idx: u32) -> Option<u32> {
-        let rc_refs = self.value_metadata.get(vm_idx as usize)?;
+        let rc_refs = self.value_metadata_rc_refs(vm_idx)?;
 
         // Prefer record references whose metadata type looks like a rich value type, but fall back
         // to any record if we don't know the type.
@@ -1094,6 +1147,25 @@ impl MetadataPart {
             }
         }
 
+        None
+    }
+
+    fn value_metadata_rc_refs(&self, vm_idx: u32) -> Option<&[(u32, u32)]> {
+        self.value_metadata_block_by_vm_index(vm_idx)
+            .map(|block| block.rc_refs.as_slice())
+    }
+
+    fn value_metadata_block_by_vm_index(&self, vm_idx: u32) -> Option<&ValueMetadataBlock> {
+        // Walk blocks cumulatively to support run-length encoding via `bk/@count`.
+        let mut cursor: u32 = 0;
+        for block in &self.value_metadata {
+            let count = block.count.max(1);
+            let end = cursor.saturating_add(count);
+            if vm_idx < end {
+                return Some(block);
+            }
+            cursor = end;
+        }
         None
     }
 }

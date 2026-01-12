@@ -21,6 +21,12 @@ use roxmltree::Document;
 
 use crate::xml::XmlDomError;
 
+#[derive(Debug, Clone, Copy)]
+struct BkRun<T> {
+    count: u32,
+    value: T,
+}
+
 /// Parse `xl/metadata.xml` and return a mapping from worksheet `c/@vm` indices to rich-value
 /// indices (`xl/richData/richValue.xml` records).
 ///
@@ -84,7 +90,7 @@ fn find_metadata_type_index(doc: &Document<'_>, name: &str) -> Option<usize> {
     None
 }
 
-fn parse_future_rich_value_indices(doc: &Document<'_>, name: &str) -> Vec<Option<u32>> {
+fn parse_future_rich_value_indices(doc: &Document<'_>, name: &str) -> Vec<BkRun<Option<u32>>> {
     let future_metadata = doc.descendants().find(|n| {
         n.is_element()
             && n.tag_name().name() == "futureMetadata"
@@ -96,15 +102,26 @@ fn parse_future_rich_value_indices(doc: &Document<'_>, name: &str) -> Vec<Option
     };
 
     future_metadata
-        .descendants()
+        .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "bk")
         .map(|bk| {
+            let count = bk
+                .attribute("count")
+                .and_then(|c| c.trim().parse::<u32>().ok())
+                .filter(|c| *c >= 1)
+                .unwrap_or(1);
+
             // Prefix/namespace can vary (`xlrd:rvb`, `rvb`, etc.). Match on local-name only.
-            let rvb = bk
+            let value = bk
                 .descendants()
-                .find(|n| n.is_element() && n.tag_name().name() == "rvb")?;
-            let i = rvb.attribute("i")?;
-            i.parse::<u32>().ok()
+                .find(|n| n.is_element() && n.tag_name().name() == "rvb")
+                .and_then(|rvb| rvb.attribute("i"))
+                .and_then(|i| i.trim().parse::<u32>().ok());
+
+            BkRun {
+                count,
+                value,
+            }
         })
         .collect()
 }
@@ -113,7 +130,7 @@ fn parse_value_metadata_mappings(
     doc: &Document<'_>,
     xlrichvalue_t_zero_based: u32,
     xlrichvalue_t_one_based: u32,
-    future_bk_indices: &[Option<u32>],
+    future_bk_indices: &[BkRun<Option<u32>>],
 ) -> HashMap<u32, u32> {
     let Some(value_metadata) = doc
         .descendants()
@@ -124,12 +141,17 @@ fn parse_value_metadata_mappings(
 
     let mut out = HashMap::new();
 
-    for (bk_idx, bk) in value_metadata
-        .descendants()
+    let mut vm_start_1_based: u32 = 1;
+
+    for bk in value_metadata
+        .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "bk")
-        .enumerate()
     {
-        let vm = (bk_idx + 1) as u32;
+        let count = bk
+            .attribute("count")
+            .and_then(|c| c.trim().parse::<u32>().ok())
+            .filter(|c| *c >= 1)
+            .unwrap_or(1);
 
         let rc = bk.descendants().find(|n| {
             n.is_element()
@@ -140,22 +162,40 @@ fn parse_value_metadata_mappings(
         });
 
         let Some(rc) = rc else {
+            vm_start_1_based = vm_start_1_based.saturating_add(count);
             continue;
         };
 
         let Some(v) = rc
             .attribute("v")
-            .and_then(|v| v.parse::<usize>().ok())
-            .and_then(|idx| future_bk_indices.get(idx).copied())
+            .and_then(|v| v.parse::<u32>().ok())
+            .and_then(|idx| resolve_bk_run(future_bk_indices, idx))
             .flatten()
         else {
+            vm_start_1_based = vm_start_1_based.saturating_add(count);
             continue;
         };
 
-        out.insert(vm, v);
+        for offset in 0..count {
+            out.insert(vm_start_1_based.saturating_add(offset), v);
+        }
+        vm_start_1_based = vm_start_1_based.saturating_add(count);
     }
 
     out
+}
+
+fn resolve_bk_run<T: Copy>(runs: &[BkRun<T>], idx: u32) -> Option<T> {
+    let mut cursor: u32 = 0;
+    for run in runs {
+        let count = run.count.max(1);
+        let end = cursor.saturating_add(count);
+        if idx < end {
+            return Some(run.value);
+        }
+        cursor = end;
+    }
+    None
 }
 
 #[cfg(test)]
@@ -206,5 +246,39 @@ mod tests {
         assert_eq!(map.get(&1), Some(&5));
         assert_eq!(map.get(&2), Some(&42));
         assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn parses_bk_count_run_length_encoding() {
+        // valueMetadata uses bk/@count to compress repeated vm entries, and futureMetadata can do
+        // the same for `rc/@v` indices. Ensure we resolve both without assuming 1:1 bk->index.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <futureMetadata name="XLRICHVALUE" count="2">
+    <bk count="2">
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000000}">
+          <xlrd:rvb i="5"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+  <valueMetadata count="3">
+    <bk count="3"><rc t="1" v="1"/></bk>
+  </valueMetadata>
+</metadata>
+"#;
+
+        let map = parse_value_metadata_vm_to_rich_value_index_map(xml.as_bytes()).unwrap();
+        // vm=2 should map into the repeated <bk count="3"> block.
+        assert_eq!(map.get(&2), Some(&5));
+        // All three vm indices should map to the same rich value.
+        assert_eq!(map.get(&1), Some(&5));
+        assert_eq!(map.get(&3), Some(&5));
+        assert_eq!(map.len(), 3);
     }
 }
