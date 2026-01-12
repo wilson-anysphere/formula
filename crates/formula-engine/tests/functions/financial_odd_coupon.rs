@@ -206,41 +206,33 @@ fn assert_num_error_or_skip(sheet: &mut TestSheet, formula: &str) -> bool {
     }
 }
 
-fn assert_finite_number_or_skip(sheet: &mut TestSheet, formula: &str) -> bool {
-    match sheet.eval(formula) {
-        Value::Error(ErrorKind::Name) => false,
-        Value::Number(n) if n.is_finite() => true,
-        other => panic!("expected finite number from {formula}, got {other:?}"),
-    }
-}
-
 #[test]
 fn odd_coupon_boundary_date_validations_match_engine_behavior() {
     let mut sheet = TestSheet::new();
 
     // ODDF* boundaries
-    // issue == settlement is allowed (zero accrued interest).
-    if !assert_finite_number_or_skip(
+    // issue == settlement is rejected (#NUM!).
+    if !assert_num_error_or_skip(
         &mut sheet,
         "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.06,100,2,0)",
     ) {
         return;
     }
-    if !assert_finite_number_or_skip(
+    if !assert_num_error_or_skip(
         &mut sheet,
         "=ODDFYIELD(DATE(2020,1,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,99,100,2,0)",
     ) {
         return;
     }
 
-    // settlement == first_coupon is allowed (settlement is a coupon date).
-    if !assert_finite_number_or_skip(
+    // settlement == first_coupon is rejected (#NUM!).
+    if !assert_num_error_or_skip(
         &mut sheet,
         "=ODDFPRICE(DATE(2020,7,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,0.06,100,2,0)",
     ) {
         return;
     }
-    if !assert_finite_number_or_skip(
+    if !assert_num_error_or_skip(
         &mut sheet,
         "=ODDFYIELD(DATE(2020,7,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0.05,99,100,2,0)",
     ) {
