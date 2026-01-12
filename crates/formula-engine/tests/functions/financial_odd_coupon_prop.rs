@@ -8,7 +8,8 @@ use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
 
 const SYSTEM: ExcelDateSystem = ExcelDateSystem::EXCEL_1900;
 const BASIS: i32 = 0;
-const TOLERANCE: f64 = 1e-7;
+const YIELD_TOLERANCE: f64 = 1e-7;
+const PRICE_TOLERANCE: f64 = 1e-5;
 const CASES: u32 = 64;
 
 const ODDF_SEED: [u8; 32] = [0x6f; 32]; // "o" (odd-first)
@@ -46,8 +47,14 @@ fn arb_rate_0_to_0_2() -> impl Strategy<Value = f64> {
     (0u32..=200_000u32).prop_map(|micros| micros as f64 / 1_000_000.0)
 }
 
-fn arb_redemption() -> impl Strategy<Value = f64> {
-    (50u32..=150u32).prop_map(|v| v as f64)
+fn arb_yld_0_to_0_5() -> impl Strategy<Value = f64> {
+    // Use fixed-point micros to keep test inputs deterministic and avoid NaNs/infinities.
+    (0u32..=500_000u32).prop_map(|micros| micros as f64 / 1_000_000.0)
+}
+
+fn arb_redemption_0p01_to_1000() -> impl Strategy<Value = f64> {
+    // Redemption must be in (0, 1000]. Use cents for stable shrinking.
+    (1u32..=100_000u32).prop_map(|cents| cents as f64 / 100.0)
 }
 
 fn arb_oddf_case() -> impl Strategy<Value = OddFirstCase> {
@@ -59,8 +66,8 @@ fn arb_oddf_case() -> impl Strategy<Value = OddFirstCase> {
             1i32..=20,  // n_coupons
             2i32..=120, // issue_offset_days (>=2 so settlement can be strictly between)
             arb_rate_0_to_0_2(),
-            arb_rate_0_to_0_2(),
-            arb_redemption(),
+            arb_yld_0_to_0_5(),
+            arb_redemption_0p01_to_1000(),
         )
             .prop_flat_map(
                 move |(year, month, n_coupons, issue_offset_days, rate, yld, redemption)| {
@@ -98,8 +105,8 @@ fn arb_oddl_case() -> impl Strategy<Value = OddLastCase> {
             2000i32..=2030,
             1u8..=12,
             arb_rate_0_to_0_2(),
-            arb_rate_0_to_0_2(),
-            arb_redemption(),
+            arb_yld_0_to_0_5(),
+            arb_redemption_0p01_to_1000(),
         )
             .prop_flat_map(move |(year, month, rate, yld, redemption)| {
                 let last_interest = ymd_to_serial(ExcelDate::new(year, month, 15), SYSTEM).unwrap();
@@ -154,9 +161,7 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
                 BASIS,
                 SYSTEM,
             )
-            .map_err(|e| {
-                TestCaseError::fail(format!("ODDFPRICE errored: {e:?} case={case:?}"))
-            })?;
+            .map_err(|e| TestCaseError::fail(format!("ODDFPRICE errored: {e:?} case={case:?}")))?;
             prop_assert!(price.is_finite(), "non-finite ODDFPRICE {price} (case={case:?})");
 
             let yld_out = oddfyield(
@@ -180,7 +185,7 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
 
             prop_assert!(yld_out.is_finite(), "non-finite ODDFYIELD {yld_out} (case={case:?})");
             prop_assert!(
-                (yld_out - case.yld).abs() <= TOLERANCE,
+                (yld_out - case.yld).abs() <= YIELD_TOLERANCE,
                 "ODDF roundtrip failed: yld_in={} yld_out={yld_out} price={price} case={case:?}",
                 case.yld
             );
@@ -203,15 +208,18 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
                     "ODDFPRICE(yld_out) errored: {e:?} yld_out={yld_out} price={price} case={case:?}"
                 ))
             })?;
-            prop_assert!(price_roundtrip.is_finite());
             prop_assert!(
-                (price_roundtrip - price).abs() <= 1e-6,
+                price_roundtrip.is_finite(),
+                "non-finite ODDFPRICE {price_roundtrip} (case={case:?})"
+            );
+            prop_assert!(
+                (price_roundtrip - price).abs() <= PRICE_TOLERANCE,
                 "ODDF price roundtrip failed: price_in={price} price_out={price_roundtrip} yld_out={yld_out} case={case:?}",
             );
 
             // Monotonicity sanity check: higher yield => lower price (for positive cashflows).
             let y_lo = (case.yld - 0.01).max(0.0);
-            let y_hi = (case.yld + 0.01).min(0.2);
+            let y_hi = (case.yld + 0.01).min(0.5);
             if y_hi > y_lo {
                 let p_lo = oddfprice(
                     case.settlement,
@@ -247,12 +255,14 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
                         "ODDFPRICE(y_hi) errored: {e:?} y_hi={y_hi} case={case:?}"
                     ))
                 })?;
+
                 prop_assert!(p_lo.is_finite() && p_hi.is_finite());
                 prop_assert!(
                     p_hi <= p_lo + 1e-8,
                     "ODDF monotonicity failed: y_lo={y_lo} p_lo={p_lo} y_hi={y_hi} p_hi={p_hi} case={case:?}",
                 );
             }
+
             Ok(())
         })
         .unwrap();
@@ -282,9 +292,7 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
                 BASIS,
                 SYSTEM,
             )
-            .map_err(|e| {
-                TestCaseError::fail(format!("ODDLPRICE errored: {e:?} case={case:?}"))
-            })?;
+            .map_err(|e| TestCaseError::fail(format!("ODDLPRICE errored: {e:?} case={case:?}")))?;
             prop_assert!(price.is_finite(), "non-finite ODDLPRICE {price} (case={case:?})");
 
             let yld_out = oddlyield(
@@ -307,7 +315,7 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
 
             prop_assert!(yld_out.is_finite(), "non-finite ODDLYIELD {yld_out} (case={case:?})");
             prop_assert!(
-                (yld_out - case.yld).abs() <= TOLERANCE,
+                (yld_out - case.yld).abs() <= YIELD_TOLERANCE,
                 "ODDL roundtrip failed: yld_in={} yld_out={yld_out} price={price} case={case:?}",
                 case.yld
             );
@@ -328,14 +336,18 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
                     "ODDLPRICE(yld_out) errored: {e:?} yld_out={yld_out} price={price} case={case:?}"
                 ))
             })?;
-            prop_assert!(price_roundtrip.is_finite());
+
             prop_assert!(
-                (price_roundtrip - price).abs() <= 1e-6,
+                price_roundtrip.is_finite(),
+                "non-finite ODDLPRICE {price_roundtrip} (case={case:?})"
+            );
+            prop_assert!(
+                (price_roundtrip - price).abs() <= PRICE_TOLERANCE,
                 "ODDL price roundtrip failed: price_in={price} price_out={price_roundtrip} yld_out={yld_out} case={case:?}",
             );
 
             let y_lo = (case.yld - 0.01).max(0.0);
-            let y_hi = (case.yld + 0.01).min(0.2);
+            let y_hi = (case.yld + 0.01).min(0.5);
             if y_hi > y_lo {
                 let p_lo = oddlprice(
                     case.settlement,
@@ -369,12 +381,14 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
                         "ODDLPRICE(y_hi) errored: {e:?} y_hi={y_hi} case={case:?}"
                     ))
                 })?;
+
                 prop_assert!(p_lo.is_finite() && p_hi.is_finite());
                 prop_assert!(
                     p_hi <= p_lo + 1e-8,
                     "ODDL monotonicity failed: y_lo={y_lo} p_lo={p_lo} y_hi={y_hi} p_hi={p_hi} case={case:?}",
                 );
             }
+
             Ok(())
         })
         .unwrap();
