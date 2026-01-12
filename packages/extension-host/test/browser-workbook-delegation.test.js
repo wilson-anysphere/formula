@@ -778,3 +778,53 @@ test("BrowserExtensionHost: workbookOpened events update the fallback workbook s
   assert.equal(apiResult?.path, "/tmp/opened.xlsx");
   assert.equal(apiResult?.name, "opened.xlsx");
 });
+
+test("BrowserExtensionHost: dispose unsubscribes from spreadsheetApi event hooks", async () => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let selectionDisposed = false;
+  let cellDisposed = false;
+  let sheetDisposed = false;
+  let workbookDisposed = false;
+  let beforeSaveDisposed = false;
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      onSelectionChanged() {
+        return () => {
+          selectionDisposed = true;
+        };
+      },
+      onCellChanged() {
+        return { dispose: () => {
+          cellDisposed = true;
+        } };
+      },
+      onSheetActivated() {
+        return () => {
+          sheetDisposed = true;
+        };
+      },
+      onWorkbookOpened() {
+        return () => {
+          workbookDisposed = true;
+        };
+      },
+      onBeforeSave() {
+        return () => {
+          beforeSaveDisposed = true;
+        };
+      },
+    },
+    permissionPrompt: async () => true,
+  });
+
+  await host.dispose();
+
+  assert.equal(selectionDisposed, true);
+  assert.equal(cellDisposed, true);
+  assert.equal(sheetDisposed, true);
+  assert.equal(workbookDisposed, true);
+  assert.equal(beforeSaveDisposed, true);
+});

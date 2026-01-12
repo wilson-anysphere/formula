@@ -462,6 +462,7 @@ class BrowserExtensionHost {
     this._sheets = [{ id: "sheet1", name: "Sheet1" }];
     this._nextSheetId = 2;
     this._activeSheetId = "sheet1";
+    this._spreadsheetDisposables = [];
 
     this._clipboardText = "";
     this._clipboardApi = clipboardApi ?? {
@@ -485,11 +486,28 @@ class BrowserExtensionHost {
       storageKey: permissionStorageKey
     });
 
-    this._spreadsheet.onSelectionChanged?.((e) => this._broadcastEvent("selectionChanged", e));
-    this._spreadsheet.onCellChanged?.((e) => this._broadcastEvent("cellChanged", e));
-    this._spreadsheet.onSheetActivated?.((e) => this._broadcastEvent("sheetActivated", e));
-    this._spreadsheet.onWorkbookOpened?.((e) => this._broadcastEvent("workbookOpened", e));
-    this._spreadsheet.onBeforeSave?.((e) => this._broadcastEvent("beforeSave", e));
+    const trackSpreadsheetDisposable = (candidate) => {
+      if (!candidate) return;
+      if (typeof candidate === "function") {
+        this._spreadsheetDisposables.push(candidate);
+        return;
+      }
+      if (candidate && typeof candidate === "object" && typeof candidate.dispose === "function") {
+        this._spreadsheetDisposables.push(() => {
+          try {
+            candidate.dispose();
+          } catch {
+            // ignore
+          }
+        });
+      }
+    };
+
+    trackSpreadsheetDisposable(this._spreadsheet.onSelectionChanged?.((e) => this._broadcastEvent("selectionChanged", e)));
+    trackSpreadsheetDisposable(this._spreadsheet.onCellChanged?.((e) => this._broadcastEvent("cellChanged", e)));
+    trackSpreadsheetDisposable(this._spreadsheet.onSheetActivated?.((e) => this._broadcastEvent("sheetActivated", e)));
+    trackSpreadsheetDisposable(this._spreadsheet.onWorkbookOpened?.((e) => this._broadcastEvent("workbookOpened", e)));
+    trackSpreadsheetDisposable(this._spreadsheet.onBeforeSave?.((e) => this._broadcastEvent("beforeSave", e)));
   }
 
   get engineVersion() {
@@ -1204,6 +1222,22 @@ class BrowserExtensionHost {
   }
 
   async dispose() {
+    // Best-effort: ensure spreadsheetApi event subscriptions are cleaned up so callers that
+    // create/destroy multiple hosts (tests, hot reload) do not leak listeners.
+    try {
+      const disposables = Array.isArray(this._spreadsheetDisposables) ? this._spreadsheetDisposables : [];
+      this._spreadsheetDisposables = [];
+      for (const dispose of disposables) {
+        try {
+          if (typeof dispose === "function") dispose();
+        } catch {
+          // ignore
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     const extensions = [...this._extensions.values()];
     for (const ext of extensions) {
       this._terminateWorker(ext, { reason: "dispose", cause: new Error("BrowserExtensionHost disposed") });
