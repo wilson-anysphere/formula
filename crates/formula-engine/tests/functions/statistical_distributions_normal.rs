@@ -1,4 +1,5 @@
 use formula_engine::{ErrorKind, Value};
+use formula_engine::locale::ValueLocaleConfig;
 
 use super::harness::{assert_number, TestSheet};
 
@@ -90,6 +91,16 @@ fn normal_distribution_domain_errors_match_excel() {
 }
 
 #[test]
+fn normal_distribution_parses_numeric_text_using_value_locale() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+
+    // Numeric text should parse using the workbook/value locale (de-DE uses comma decimal sep).
+    assert_number(&sheet.eval("=NORM.S.DIST(\"1,0\",TRUE)"), 0.8413447460685429);
+    assert_number(&sheet.eval("=NORM.S.INV(\"0,975\")"), 1.959963984540054);
+}
+
+#[test]
 fn norm_s_dist_array_lift_spills() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("Z1", "=NORM.S.DIST({-1,0,1},TRUE)");
@@ -99,4 +110,3 @@ fn norm_s_dist_array_lift_spills() {
     assert_number(&sheet.get("AA1"), 0.5);
     assert_number(&sheet.get("AB1"), 0.8413447460685429);
 }
-
