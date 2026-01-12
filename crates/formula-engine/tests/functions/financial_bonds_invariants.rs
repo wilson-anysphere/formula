@@ -269,6 +269,72 @@ fn price_yield_roundtrip_consistency() {
 }
 
 #[test]
+fn price_matches_pv_when_settlement_is_coupon_date() {
+    let mut sheet = TestSheet::new();
+
+    // Skip if PRICE (or the COUP schedule helper used to derive N) isn't registered yet.
+    if eval_number_or_skip(
+        &mut sheet,
+        "=PRICE(DATE(2020,7,1),DATE(2021,1,1),0.05,0.04,100,2,0)",
+    )
+    .is_none()
+        || eval_number_or_skip(
+            &mut sheet,
+            "=COUPNUM(DATE(2020,7,1),DATE(2021,1,1),2,0)",
+        )
+        .is_none()
+    {
+        return;
+    }
+
+    // When `settlement` is exactly the previous coupon date (A=0), `PRICE` should reduce to the
+    // standard time-value PV of N periods of coupon payments + final redemption.
+    //
+    // This is a stronger cross-check than PRICE/YIELD roundtripping because it compares against
+    // the independent `PV` implementation.
+    let maturities = ["DATE(2030,12,31)", "DATE(2031,2,28)", "DATE(2030,7,15)"];
+    let frequencies = [1, 2, 4];
+    let bases = [0, 1, 2, 3, 4];
+    let rates = [0.0, 0.03, 0.065];
+    let yields = [0.01, 0.045, 0.11];
+    let redemptions = [100.0, 105.0];
+
+    for maturity in maturities {
+        for &frequency in &frequencies {
+            let months_per_period = 12 / frequency;
+            for k in 1..=5 {
+                let months_back = k * months_per_period;
+                let settlement = format!("EDATE({maturity},-{months_back})");
+
+                for &basis in &bases {
+                    for &rate in &rates {
+                        for &yld in &yields {
+                            for &redemption in &redemptions {
+                                let price = eval_number(
+                                    &mut sheet,
+                                    &format!(
+                                        "=PRICE({settlement},{maturity},{rate},{yld},{redemption},{frequency},{basis})"
+                                    ),
+                                );
+
+                                let pv = eval_number(
+                                    &mut sheet,
+                                    &format!(
+                                        "=LET(n,COUPNUM({settlement},{maturity},{frequency},{basis}),c,({rate})*({redemption})/{frequency},k,({yld})/{frequency},PV(k,n,-c,-{redemption}))"
+                                    ),
+                                );
+
+                                assert_close(price, pv, 1e-7);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn mduration_matches_duration_identity() {
     let mut sheet = TestSheet::new();
 
