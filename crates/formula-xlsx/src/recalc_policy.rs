@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::{Reader, Writer};
 
 use crate::xml::workbook_xml_namespaces_from_workbook_start;
@@ -104,6 +104,25 @@ pub(crate) fn workbook_xml_force_full_calc_on_load(
                 in_workbook = true;
                 workbook_ns.get_or_insert(workbook_xml_namespaces_from_workbook_start(e)?);
                 writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"workbook" => {
+                // Some producers emit an entirely empty workbook root (`<workbook/>`). Expand the
+                // element so we can safely insert `<calcPr fullCalcOnLoad="1"/>` while preserving
+                // the original workbook qualified name + attributes (including namespace decls).
+                workbook_ns.get_or_insert(workbook_xml_namespaces_from_workbook_start(e)?);
+
+                let tag = workbook_ns
+                    .as_ref()
+                    .map(|ns| crate::xml::prefixed_tag(ns.spreadsheetml_prefix.as_deref(), "calcPr"))
+                    .unwrap_or_else(|| "calcPr".to_string());
+                let mut calc_pr = BytesStart::new(tag.as_str());
+                calc_pr.push_attribute(("fullCalcOnLoad", "1"));
+
+                let workbook_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                writer.write_event(Event::Start(e.to_owned()))?;
+                writer.write_event(Event::Empty(calc_pr.into_owned()))?;
+                writer.write_event(Event::End(BytesEnd::new(workbook_tag.as_str())))?;
+                saw_calc_pr = true;
             }
             Event::Empty(ref e) if e.local_name().as_ref() == b"calcPr" => {
                 saw_calc_pr = true;
@@ -449,5 +468,59 @@ mod tests {
             updated.contains("<r:Relationships"),
             "expected root element prefix to be preserved, got: {updated}"
         );
+    }
+
+    #[test]
+    fn workbook_xml_force_full_calc_on_load_expands_prefixed_self_closing_workbook_root() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>
+"#;
+
+        let updated =
+            workbook_xml_force_full_calc_on_load(workbook_xml.as_bytes()).expect("patch workbook");
+        let updated = std::str::from_utf8(&updated).expect("utf8 workbook");
+
+        assert!(
+            updated.contains("<x:workbook"),
+            "expected workbook prefix to be preserved"
+        );
+        assert!(
+            updated.contains("</x:workbook>"),
+            "expected workbook root to be expanded (not self-closing)"
+        );
+        assert!(
+            updated.contains("<x:calcPr"),
+            "expected inserted calcPr to use workbook prefix"
+        );
+        assert!(
+            updated.contains(r#"fullCalcOnLoad="1""#),
+            "expected inserted calcPr fullCalcOnLoad=1"
+        );
+
+        roxmltree::Document::parse(updated).expect("updated workbook xml should parse");
+    }
+
+    #[test]
+    fn workbook_xml_force_full_calc_on_load_expands_default_ns_self_closing_workbook_root() {
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>
+"#;
+
+        let updated =
+            workbook_xml_force_full_calc_on_load(workbook_xml.as_bytes()).expect("patch workbook");
+        let updated = std::str::from_utf8(&updated).expect("utf8 workbook");
+
+        assert!(updated.contains("<workbook"));
+        assert!(
+            updated.contains("</workbook>"),
+            "expected workbook root to be expanded (not self-closing)"
+        );
+        assert!(
+            updated.contains("<calcPr"),
+            "expected inserted calcPr to be unprefixed in default-namespace workbooks"
+        );
+        assert!(updated.contains(r#"fullCalcOnLoad="1""#));
+
+        roxmltree::Document::parse(updated).expect("updated workbook xml should parse");
     }
 }
