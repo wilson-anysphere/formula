@@ -216,8 +216,12 @@ impl<'a> CompileCtx<'a> {
                 }
             }
             Expr::Binary { op, left, right } => {
-                self.compile_expr_inner(left, false);
-                self.compile_expr_inner(right, false);
+                // Reference algebra operators (`A1:A3,B1:B3` union; `A1:C3 B2:D4` intersection)
+                // evaluate their operands in "reference context" so bare cell refs behave like
+                // single-cell ranges and LET locals preserve reference semantics.
+                let allow_range = matches!(op, BinaryOp::Union | BinaryOp::Intersect);
+                self.compile_expr_inner(left, allow_range);
+                self.compile_expr_inner(right, allow_range);
                 let opcode = match op {
                     BinaryOp::Add => OpCode::Add,
                     BinaryOp::Sub => OpCode::Sub,

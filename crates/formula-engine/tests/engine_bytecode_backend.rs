@@ -5135,6 +5135,43 @@ fn bytecode_backend_matches_ast_for_reference_union_and_intersection() {
 }
 
 #[test]
+fn bytecode_backend_reference_algebra_accepts_let_single_cell_reference_locals() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 2.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "C1", "=LET(x,A1,SUM((x,B1)))")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", "=LET(x,A1,SUM((x A1:B1)))")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected LET + union/intersection formulas to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, 2);
+    assert_eq!(stats.compiled, 2);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=LET(x,A1,SUM((x,B1)))", "C1"),
+        ("=LET(x,A1,SUM((x A1:B1)))", "C2"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(1.0));
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_information_functions_scalar() {
     let mut engine = Engine::new();
 

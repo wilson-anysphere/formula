@@ -302,38 +302,6 @@ fn lower_range_ref(
     }
 }
 
-fn lower_reference_expr(
-    expr: &crate::Expr,
-    origin: crate::CellAddr,
-    current_sheet: usize,
-    resolve_sheet: &mut impl FnMut(&str) -> Option<usize>,
-) -> Result<BytecodeExpr, LowerError> {
-    match expr {
-        crate::Expr::CellRef(r) => match lower_cell_ref_expr(r, origin, current_sheet, resolve_sheet)? {
-            BytecodeExpr::CellRef(cell) => Ok(BytecodeExpr::RangeRef(RangeRef::new(cell, cell))),
-            BytecodeExpr::MultiRangeRef(multi) => Ok(BytecodeExpr::MultiRangeRef(multi)),
-            _ => Err(LowerError::Unsupported),
-        },
-        crate::Expr::Binary(b) => match b.op {
-            crate::BinaryOp::Range => lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet),
-            crate::BinaryOp::Union | crate::BinaryOp::Intersect => {
-                let op = match b.op {
-                    crate::BinaryOp::Union => BinaryOp::Union,
-                    crate::BinaryOp::Intersect => BinaryOp::Intersect,
-                    _ => unreachable!("guarded above"),
-                };
-                Ok(BytecodeExpr::Binary {
-                    op,
-                    left: Box::new(lower_reference_expr(&b.left, origin, current_sheet, resolve_sheet)?),
-                    right: Box::new(lower_reference_expr(&b.right, origin, current_sheet, resolve_sheet)?),
-                })
-            }
-            _ => Err(LowerError::Unsupported),
-        },
-        _ => Err(LowerError::Unsupported),
-    }
-}
-
 fn parse_number(raw: &str) -> Result<f64, LowerError> {
     match raw.parse::<f64>() {
         Ok(n) if n.is_finite() => Ok(n),
@@ -459,6 +427,34 @@ fn lower_canonical_reference_expr(
         }
         crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
             lower_range_ref(&b.left, &b.right, origin, current_sheet, resolve_sheet)
+        }
+        crate::Expr::Binary(b)
+            if matches!(b.op, crate::BinaryOp::Union | crate::BinaryOp::Intersect) =>
+        {
+            let op = match b.op {
+                crate::BinaryOp::Union => BinaryOp::Union,
+                crate::BinaryOp::Intersect => BinaryOp::Intersect,
+                _ => unreachable!("guarded above"),
+            };
+            Ok(BytecodeExpr::Binary {
+                op,
+                left: Box::new(lower_canonical_reference_expr(
+                    &b.left,
+                    origin,
+                    current_sheet,
+                    resolve_sheet,
+                    scopes,
+                    lambda_self_name,
+                )?),
+                right: Box::new(lower_canonical_reference_expr(
+                    &b.right,
+                    origin,
+                    current_sheet,
+                    resolve_sheet,
+                    scopes,
+                    lambda_self_name,
+                )?),
+            })
         }
         crate::Expr::Postfix(p) if p.op == crate::PostfixOp::SpillRange => Ok(
             BytecodeExpr::SpillRange(Box::new(lower_canonical_reference_expr(
@@ -602,7 +598,16 @@ fn lower_canonical_expr_inner(
                 })
              }
             crate::BinaryOp::Union | crate::BinaryOp::Intersect => {
-                lower_reference_expr(expr, origin, current_sheet, resolve_sheet)
+                // Reference algebra operators evaluate operands in "reference context" (e.g. `A1`
+                // behaves like a single-cell range).
+                lower_canonical_reference_expr(
+                    expr,
+                    origin,
+                    current_sheet,
+                    resolve_sheet,
+                    scopes,
+                    lambda_self_name,
+                )
             }
         },
         crate::Expr::Unary(u) => match u.op {
