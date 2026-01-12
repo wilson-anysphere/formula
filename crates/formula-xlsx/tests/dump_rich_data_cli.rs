@@ -412,7 +412,9 @@ fn dump_rich_data_cli_extracts_cell_images_and_writes_manifest(
     assert!(cols[2].parse::<usize>().is_ok(), "bytes column not numeric: {row}");
     assert_eq!(cols[3], "Sheet1_A1.png");
     assert_eq!(cols[4], "xl/media/image1.png");
-    assert_eq!(cols[5], "0");
+    // The workbook does not include `rdrichvalue.xml` local-image metadata, so the extractor falls
+    // back to a default CalcOrigin value (Excel commonly uses 5 for embedded images).
+    assert_eq!(cols[5], "5");
     assert_eq!(cols[6], "-");
     assert_eq!(cols[7], "-");
 
@@ -516,7 +518,7 @@ fn dump_rich_data_cli_extracts_cell_images_without_metadata(
     assert_eq!(cols[4], "xl/media/image1.png");
     // Metadata is missing, so the extractor falls back to relationship-slot indexing without
     // rdRichValue CalcOrigin/alt text data.
-    assert_eq!(cols[5], "0");
+    assert_eq!(cols[5], "5");
     assert_eq!(cols[6], "-");
     assert_eq!(cols[7], "-");
 
