@@ -363,16 +363,16 @@ This document tracks every Excel feature and our implementation status. Features
 
 | Function | Status | Notes |
 |----------|--------|-------|
-| ACCRINT | ⬜ | |
-| ACCRINTM | ⬜ | |
+| ACCRINT | ✅ | freq: 1/2/4; basis: 0..4 |
+| ACCRINTM | ✅ | basis: 0..4 |
 | AMORDEGRC | ⬜ | |
 | AMORLINC | ⬜ | |
-| COUPDAYBS | ⬜ | |
-| COUPDAYS | ⬜ | |
-| COUPDAYSNC | ⬜ | |
-| COUPNCD | ⬜ | |
-| COUPNUM | ⬜ | |
-| COUPPCD | ⬜ | |
+| COUPDAYBS | ✅ | freq: 1/2/4; basis: 0..4 |
+| COUPDAYS | ✅ | freq: 1/2/4; basis: 0..4 |
+| COUPDAYSNC | ✅ | freq: 1/2/4; basis: 0..4 |
+| COUPNCD | ✅ | freq: 1/2/4; basis: 0..4 |
+| COUPNUM | ✅ | freq: 1/2/4; basis: 0..4 |
+| COUPPCD | ✅ | freq: 1/2/4; basis: 0..4 |
 | CUMIPMT | ⬜ | |
 | CUMPRINC | ⬜ | |
 | DB | ⬜ | |
@@ -380,7 +380,7 @@ This document tracks every Excel feature and our implementation status. Features
 | DISC | ✅ | |
 | DOLLARDE | ⬜ | |
 | DOLLARFR | ⬜ | |
-| DURATION | ⬜ | |
+| DURATION | ✅ | freq: 1/2/4; basis: 0..4 |
 | EFFECT | ⬜ | |
 | FV | ✅ | P0 |
 | FVSCHEDULE | ⬜ | |
@@ -388,7 +388,7 @@ This document tracks every Excel feature and our implementation status. Features
 | IPMT | ✅ | |
 | IRR | ✅ | P0 |
 | ISPMT | ⬜ | |
-| MDURATION | ⬜ | |
+| MDURATION | ✅ | freq: 1/2/4; basis: 0..4 |
 | MIRR | ✅ | |
 | NOMINAL | ⬜ | |
 | NPER | ✅ | |
@@ -400,7 +400,7 @@ This document tracks every Excel feature and our implementation status. Features
 | PDURATION | ⬜ | |
 | PMT | ✅ | P0 |
 | PPMT | ✅ | |
-| PRICE | ⬜ | |
+| PRICE | ✅ | freq: 1/2/4; basis: 0..4 |
 | PRICEDISC | ✅ | |
 | PRICEMAT | ✅ | |
 | PV | ✅ | P0 |
@@ -415,7 +415,7 @@ This document tracks every Excel feature and our implementation status. Features
 | VDB | ⬜ | |
 | XIRR | ✅ | P0 |
 | XNPV | ✅ | P0 |
-| YIELD | ⬜ | |
+| YIELD | ✅ | freq: 1/2/4; basis: 0..4 |
 | YIELDDISC | ✅ | |
 | YIELDMAT | ✅ | |
 
