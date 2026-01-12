@@ -4,172 +4,164 @@
   "defaultSheet": "Sheet1",
   "cases": [
     {
-      "id": "oddfprice_issue_eq_settlement",
-      "description": "ODDFPRICE boundary: issue == settlement",
       "formula": "=ODDFPRICE(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
-      "outputCell": "A1",
+      "outputCell": "C1",
       "inputs": [],
       "tags": [
         "financial",
         "odd_coupon",
         "boundary",
-        "ODDFPRICE",
-        "issue==settlement"
-      ]
+        "ODDFPRICE"
+      ],
+      "description": "ODDFPRICE boundary: issue == settlement",
+      "id": "oddfprice_issue_eq_settlement_a2010fe89d14"
     },
     {
-      "id": "oddfprice_settlement_eq_first_coupon",
-      "description": "ODDFPRICE boundary: settlement == first_coupon",
-      "formula": "=ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "odd_coupon",
-        "boundary",
-        "ODDFPRICE",
-        "settlement==first_coupon"
-      ]
-    },
-    {
-      "id": "oddfprice_first_coupon_eq_maturity",
-      "description": "ODDFPRICE boundary: first_coupon == maturity",
-      "formula": "=ODDFPRICE(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "odd_coupon",
-        "boundary",
-        "ODDFPRICE",
-        "first_coupon==maturity"
-      ]
-    },
-    {
-      "id": "oddfprice_issue_eq_first_coupon",
-      "description": "ODDFPRICE boundary: issue == first_coupon",
-      "formula": "=ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,7,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "odd_coupon",
-        "boundary",
-        "ODDFPRICE",
-        "issue==first_coupon"
-      ]
-    },
-    {
-      "id": "oddfyield_issue_eq_settlement",
-      "description": "ODDFYIELD boundary: issue == settlement",
       "formula": "=ODDFYIELD(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,ODDFPRICE(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0),100,2,0)",
-      "outputCell": "A1",
+      "outputCell": "C1",
       "inputs": [],
       "tags": [
         "financial",
         "odd_coupon",
         "boundary",
-        "ODDFYIELD",
-        "issue==settlement"
-      ]
+        "ODDFYIELD"
+      ],
+      "description": "ODDFYIELD boundary: issue == settlement",
+      "id": "oddfyield_issue_eq_settlement_c09bb6a4ba69"
     },
     {
-      "id": "oddfyield_settlement_eq_first_coupon",
-      "description": "ODDFYIELD boundary: settlement == first_coupon",
+      "formula": "=ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "boundary",
+        "ODDFPRICE"
+      ],
+      "description": "ODDFPRICE boundary: settlement == first_coupon",
+      "id": "oddfprice_settlement_eq_first_coupon_1ea1c9b63a8c"
+    },
+    {
       "formula": "=ODDFYIELD(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0),100,2,0)",
-      "outputCell": "A1",
+      "outputCell": "C1",
       "inputs": [],
       "tags": [
         "financial",
         "odd_coupon",
         "boundary",
-        "ODDFYIELD",
-        "settlement==first_coupon"
-      ]
+        "ODDFYIELD"
+      ],
+      "description": "ODDFYIELD boundary: settlement == first_coupon",
+      "id": "oddfyield_settlement_eq_first_coupon_8d835f172837"
     },
     {
-      "id": "oddfyield_first_coupon_eq_maturity",
-      "description": "ODDFYIELD boundary: first_coupon == maturity",
+      "formula": "=ODDFPRICE(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "boundary",
+        "ODDFPRICE"
+      ],
+      "description": "ODDFPRICE boundary: first_coupon == maturity",
+      "id": "oddfprice_first_coupon_eq_maturity_9d33aace26e7"
+    },
+    {
       "formula": "=ODDFYIELD(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,ODDFPRICE(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0),100,2,0)",
-      "outputCell": "A1",
+      "outputCell": "C1",
       "inputs": [],
       "tags": [
         "financial",
         "odd_coupon",
         "boundary",
-        "ODDFYIELD",
-        "first_coupon==maturity"
-      ]
+        "ODDFYIELD"
+      ],
+      "description": "ODDFYIELD boundary: first_coupon == maturity",
+      "id": "oddfyield_first_coupon_eq_maturity_ded11f484474"
     },
     {
-      "id": "oddfyield_issue_eq_first_coupon",
-      "description": "ODDFYIELD boundary: issue == first_coupon",
+      "formula": "=ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,7,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "boundary",
+        "ODDFPRICE",
+        "error"
+      ],
+      "description": "ODDFPRICE boundary: issue == first_coupon (expected #NUM!)",
+      "id": "oddfprice_issue_eq_first_coupon_277cdeb14458"
+    },
+    {
       "formula": "=ODDFYIELD(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,7,1),DATE(2020,7,1),0.05,99,100,2,0)",
-      "outputCell": "A1",
+      "outputCell": "C1",
       "inputs": [],
       "tags": [
         "financial",
         "odd_coupon",
         "boundary",
         "ODDFYIELD",
-        "issue==first_coupon"
-      ]
+        "error"
+      ],
+      "description": "ODDFYIELD boundary: issue == first_coupon (expected #NUM!)",
+      "id": "oddfyield_issue_eq_first_coupon_8a5c8d669944"
     },
     {
-      "id": "oddlprice_settlement_eq_last_interest",
-      "description": "ODDLPRICE boundary: settlement == last_interest",
       "formula": "=ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,0.04,100,2,0)",
-      "outputCell": "A1",
+      "outputCell": "C1",
       "inputs": [],
       "tags": [
         "financial",
         "odd_coupon",
         "boundary",
-        "ODDLPRICE",
-        "settlement==last_interest"
-      ]
+        "ODDLPRICE"
+      ],
+      "description": "ODDLPRICE boundary: settlement == last_interest",
+      "id": "oddlprice_settlement_eq_last_interest_2aaeec2068c7"
     },
     {
-      "id": "oddlprice_last_interest_eq_maturity",
-      "description": "ODDLPRICE boundary: last_interest == maturity",
-      "formula": "=ODDLPRICE(DATE(2025,1,1),DATE(2025,1,1),DATE(2025,1,1),0.05,0.04,100,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "odd_coupon",
-        "boundary",
-        "ODDLPRICE",
-        "last_interest==maturity"
-      ]
-    },
-    {
-      "id": "oddlyield_settlement_eq_last_interest",
-      "description": "ODDLYIELD boundary: settlement == last_interest",
       "formula": "=ODDLYIELD(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,0.04,100,2,0),100,2,0)",
-      "outputCell": "A1",
+      "outputCell": "C1",
       "inputs": [],
       "tags": [
         "financial",
         "odd_coupon",
         "boundary",
-        "ODDLYIELD",
-        "settlement==last_interest"
-      ]
+        "ODDLYIELD"
+      ],
+      "description": "ODDLYIELD boundary: settlement == last_interest",
+      "id": "oddlyield_settlement_eq_last_interest_478517910c3d"
     },
     {
-      "id": "oddlyield_last_interest_eq_maturity",
-      "description": "ODDLYIELD boundary: last_interest == maturity",
+      "formula": "=ODDLPRICE(DATE(2025,1,1),DATE(2025,1,1),DATE(2025,1,1),0.05,0.04,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "boundary",
+        "ODDLPRICE",
+        "error"
+      ],
+      "description": "ODDLPRICE boundary: last_interest == maturity (expected #NUM!)",
+      "id": "oddlprice_last_interest_eq_maturity_6a12d560c779"
+    },
+    {
       "formula": "=ODDLYIELD(DATE(2025,1,1),DATE(2025,1,1),DATE(2025,1,1),0.05,99,100,2,0)",
-      "outputCell": "A1",
+      "outputCell": "C1",
       "inputs": [],
       "tags": [
         "financial",
         "odd_coupon",
         "boundary",
         "ODDLYIELD",
-        "last_interest==maturity"
-      ]
+        "error"
+      ],
+      "description": "ODDLYIELD boundary: last_interest == maturity (expected #NUM!)",
+      "id": "oddlyield_last_interest_eq_maturity_c75c41078dc0"
     }
   ]
 }

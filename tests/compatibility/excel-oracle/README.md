@@ -27,11 +27,12 @@ and exits non-zero if mismatches exceed the configured threshold.
 ## Repository layout
 
 - `cases.json` — curated (~2k) formula + input-grid cases (deterministic).
-- Supplemental small corpora for targeted Windows + Excel runs:
+  - Supplemental small corpora for targeted Windows + Excel runs:
   - `tools/excel-oracle/odd_coupon_long_stub_cases.json` — long odd-coupon (`ODDF*` / `ODDL*`) **long-stub**
     scenarios (DFC/E > 1 or DSM/E > 1). This subset reuses the canonical `caseId`s from `cases.json`.
   - `tools/excel-oracle/odd_coupon_boundary_cases.json` — boundary date-equality scenarios
-    (e.g. `issue == settlement`, `settlement == first_coupon`).
+    (e.g. `issue == settlement`, `settlement == first_coupon`). This subset reuses the canonical `caseId`s from
+    `cases.json` so results can be merged back into the pinned dataset.
   - `tools/excel-oracle/odd_coupon_validation_cases.json` — validation scenarios for **negative yields / negative coupon rates**
     and yield-domain boundaries (tagged `odd_coupon_validation` in the canonical corpus). This subset reuses the canonical
     `caseId`s from `cases.json` so results can be merged back into the pinned dataset.

@@ -19,6 +19,7 @@
 .PARAMETER SubsetCasesPath
   Path to a subset corpus (default: tools/excel-oracle/odd_coupon_long_stub_cases.json).
   Other useful subsets include:
+    - tools/excel-oracle/odd_coupon_boundary_cases.json (odd-coupon date boundary scenarios)
     - tools/excel-oracle/odd_coupon_validation_cases.json (negative yields / yield-domain edges / negative rate)
 
 .PARAMETER CasesPath
