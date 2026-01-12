@@ -75,6 +75,13 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
+    // Some keyboards (and remote desktop setups) can emit both ctrlKey+metaKey for
+    // chorded shortcuts. Add an explicit binding so the AI chat toggle remains reachable.
+    command: "view.togglePanel.aiChat",
+    key: "ctrl+cmd+shift+a",
+    when: null,
+  },
+  {
     command: "ai.inlineEdit",
     key: "ctrl+k",
     mac: "cmd+k",
