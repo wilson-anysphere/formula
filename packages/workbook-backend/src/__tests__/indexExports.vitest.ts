@@ -13,7 +13,7 @@ describe("@formula/workbook-backend index exports", () => {
     // Repo-wide `pnpm -w typecheck` uses a TS config that does not enable
     // `allowImportingTsExtensions`, so `.ts` specifiers in source imports/exports
     // break the build.
-    expect(src).not.toMatch(/from\s+['"]\.\/[^'"\n]+\.ts['"]/);
+    expect(src).not.toMatch(/from\s+['"]\.\.?\/[^'"\n]+\.ts['"]/);
 
     // Keep Node ESM runnable by ensuring any `.js` specifier we use is backed by
     // a real `.js` file on disk.
