@@ -1508,38 +1508,40 @@ fn elementwise_unary(value: &Value, f: impl Fn(&Value) -> Value) -> Value {
 fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) -> Value) -> Value {
     match (left, right) {
         (Value::Array(left_arr), Value::Array(right_arr)) => {
-            if left_arr.rows == right_arr.rows && left_arr.cols == right_arr.cols {
-                return Value::Array(Array::new(
-                    left_arr.rows,
-                    left_arr.cols,
-                    left_arr
-                        .values
-                        .iter()
-                        .zip(right_arr.values.iter())
-                        .map(|(a, b)| f(a, b))
-                        .collect(),
-                ));
+            let out_rows = if left_arr.rows == right_arr.rows {
+                left_arr.rows
+            } else if left_arr.rows == 1 {
+                right_arr.rows
+            } else if right_arr.rows == 1 {
+                left_arr.rows
+            } else {
+                return Value::Error(ErrorKind::Value);
+            };
+
+            let out_cols = if left_arr.cols == right_arr.cols {
+                left_arr.cols
+            } else if left_arr.cols == 1 {
+                right_arr.cols
+            } else if right_arr.cols == 1 {
+                left_arr.cols
+            } else {
+                return Value::Error(ErrorKind::Value);
+            };
+
+            let mut out = Vec::with_capacity(out_rows.saturating_mul(out_cols));
+            for row in 0..out_rows {
+                let l_row = if left_arr.rows == 1 { 0 } else { row };
+                let r_row = if right_arr.rows == 1 { 0 } else { row };
+                for col in 0..out_cols {
+                    let l_col = if left_arr.cols == 1 { 0 } else { col };
+                    let r_col = if right_arr.cols == 1 { 0 } else { col };
+                    let l = left_arr.get(l_row, l_col).unwrap_or(&Value::Blank);
+                    let r = right_arr.get(r_row, r_col).unwrap_or(&Value::Blank);
+                    out.push(f(l, r));
+                }
             }
 
-            if left_arr.rows == 1 && left_arr.cols == 1 {
-                let scalar = left_arr.values.get(0).unwrap_or(&Value::Blank);
-                return Value::Array(Array::new(
-                    right_arr.rows,
-                    right_arr.cols,
-                    right_arr.values.iter().map(|b| f(scalar, b)).collect(),
-                ));
-            }
-
-            if right_arr.rows == 1 && right_arr.cols == 1 {
-                let scalar = right_arr.values.get(0).unwrap_or(&Value::Blank);
-                return Value::Array(Array::new(
-                    left_arr.rows,
-                    left_arr.cols,
-                    left_arr.values.iter().map(|a| f(a, scalar)).collect(),
-                ));
-            }
-
-            Value::Error(ErrorKind::Value)
+            Value::Array(Array::new(out_rows, out_cols, out))
         }
         (Value::Array(left_arr), right_scalar) => Value::Array(Array::new(
             left_arr.rows,
