@@ -1915,7 +1915,7 @@ export class SpreadsheetApp {
   clearSelection(): void {
     if (this.inlineEditController.isOpen()) return;
     if (this.isEditing()) return;
-    this.clearSelectionContents();
+    this.clearSelectionContentsInternal();
     this.refresh();
   }
 
