@@ -23,6 +23,7 @@ desktop = [
     "dep:tauri-plugin-global-shortcut",
     "dep:tauri-plugin-single-instance",
     "dep:tauri-plugin-notification",
+    "dep:tauri-plugin-shell",
     "dep:tauri-plugin-updater",
     "dep:http-range",
     "dep:percent-encoding",
@@ -72,6 +73,7 @@ tauri = { version = "2.9", optional = true, features = ["tray-icon"] }
 tauri-plugin-global-shortcut = { version = "2.3", optional = true }
 tauri-plugin-single-instance = { version = "2.2", optional = true }
 tauri-plugin-notification = { version = "2", optional = true }
+tauri-plugin-shell = { version = "2", optional = true }
 tauri-plugin-updater = { version = "2.9", optional = true }
 thiserror = "1.0"
 http-range = { version = "0.1", optional = true }

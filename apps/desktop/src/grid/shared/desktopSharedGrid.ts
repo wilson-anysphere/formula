@@ -10,6 +10,9 @@ import type {
 } from "@formula/grid";
 import { CanvasGridRenderer, computeScrollbarThumb, resolveGridThemeFromCssVars } from "@formula/grid";
 
+import { openExternalHyperlink } from "../../hyperlinks/openExternal.js";
+import { shellOpen } from "../../tauri/shellOpen";
+
 export type DesktopGridInteractionMode = "default" | "rangeSelection";
 
 export interface DesktopSharedGridCallbacks {
@@ -72,6 +75,15 @@ function formatCellDisplayText(value: string | number | boolean | null): string 
   if (value === null) return "";
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
   return String(value);
+}
+
+function looksLikeExternalHyperlink(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  // Avoid interpreting arbitrary "foo:bar" values as URLs; require either a
+  // scheme separator (`://`) or a `mailto:` prefix.
+  if (/^mailto:/i.test(trimmed)) return true;
+  return /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed);
 }
 
 function describeCell(
@@ -1225,6 +1237,40 @@ export class DesktopSharedGrid {
 
       const prevSelection = renderer.getSelection();
       const prevRange = renderer.getSelectionRange();
+
+      // Ctrl/Cmd+click on a URL-like cell value should open it externally instead
+      // of being treated as an additive selection gesture.
+      if (this.interactionMode === "default" && (event.metaKey || event.ctrlKey) && event.button === 0) {
+        const cell = this.provider.getCell(picked.row, picked.col);
+        const raw = (cell as any)?.value;
+        if (typeof raw === "string" && looksLikeExternalHyperlink(raw)) {
+          const uri = raw.trim();
+
+          // Match normal click behavior (make the clicked cell active) while still
+          // allowing the OS browser open behavior behind Ctrl/Cmd.
+          this.selectionAnchor = picked;
+          renderer.setSelection(picked);
+
+          const nextSelection = renderer.getSelection();
+          const nextRange = renderer.getSelectionRange();
+          this.announceSelection(nextSelection, nextRange);
+          this.emitSelectionChange(prevSelection, nextSelection);
+          this.emitSelectionRangeChange(prevRange, nextRange);
+
+          void openExternalHyperlink(uri, {
+            shellOpen,
+            confirmUntrustedProtocol: async (message) => {
+              if (typeof window !== "undefined" && typeof window.confirm === "function") {
+                return window.confirm(message);
+              }
+              return false;
+            },
+          }).catch(() => {
+            // Best-effort: link opening should not crash grid interaction.
+          });
+          return;
+        }
+      }
 
       const isAdditive = event.metaKey || event.ctrlKey;
       const isExtend = event.shiftKey;
