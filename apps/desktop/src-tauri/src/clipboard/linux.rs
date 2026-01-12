@@ -57,6 +57,7 @@ mod gtk_backend {
     use super::{
         bytes_to_utf8, choose_best_target, ClipboardContent, ClipboardError, ClipboardWritePayload,
     };
+    use crate::clipboard_fallback;
 
     // GTK clipboard APIs must be called on the GTK main thread.
     //
@@ -129,35 +130,55 @@ mod gtk_backend {
         with_gtk_main_thread(|| {
             ensure_gtk()?;
 
+            let read_from_clipboard = |clipboard: &gtk::Clipboard| {
+                let targets = clipboard_target_names(clipboard);
+
+                let text = clipboard.wait_for_text().map(|s| s.to_string());
+                let html = match targets.as_deref() {
+                    Some(targets) => choose_best_target(targets, &["text/html"])
+                        .and_then(|t| wait_for_utf8_targets(clipboard, &[t])),
+                    // If target enumeration isn't available, fall back to the canonical target.
+                    None => wait_for_utf8_targets(clipboard, &["text/html"]),
+                };
+                let rtf = match targets.as_deref() {
+                    Some(targets) => choose_best_target(targets, &["text/rtf", "application/rtf"])
+                        .and_then(|t| wait_for_utf8_targets(clipboard, &[t])),
+                    None => wait_for_utf8_targets(clipboard, &["text/rtf", "application/rtf"]),
+                };
+                let png_base64 = wait_for_bytes_base64(clipboard, "image/png").or_else(|| {
+                    // Some applications expose images on the clipboard without an `image/png` target.
+                    // Fall back to GTK's pixbuf API and re-encode to PNG (requires image loaders).
+                    let pixbuf = clipboard.wait_for_image()?;
+                    let bytes = pixbuf.save_to_bufferv("png", &[]).ok()?;
+                    Some(STANDARD.encode(bytes))
+                });
+
+                ClipboardContent {
+                    text,
+                    html,
+                    rtf,
+                    png_base64,
+                }
+            };
+
             let clipboard = gtk::Clipboard::get(&gdk::SELECTION_CLIPBOARD);
-            let targets = clipboard_target_names(&clipboard);
+            let content = read_from_clipboard(&clipboard);
 
-            let text = clipboard.wait_for_text().map(|s| s.to_string());
-            let html = match targets.as_deref() {
-                Some(targets) => choose_best_target(targets, &["text/html"])
-                    .and_then(|t| wait_for_utf8_targets(&clipboard, &[t])),
-                // If target enumeration isn't available, fall back to the canonical target.
-                None => wait_for_utf8_targets(&clipboard, &["text/html"]),
-            };
-            let rtf = match targets.as_deref() {
-                Some(targets) => choose_best_target(targets, &["text/rtf", "application/rtf"])
-                    .and_then(|t| wait_for_utf8_targets(&clipboard, &[t])),
-                None => wait_for_utf8_targets(&clipboard, &["text/rtf", "application/rtf"]),
-            };
-            let png_base64 = wait_for_bytes_base64(&clipboard, "image/png").or_else(|| {
-                // Some applications expose images on the clipboard without an `image/png` target.
-                // Fall back to GTK's pixbuf API and re-encode to PNG (requires image loaders).
-                let pixbuf = clipboard.wait_for_image()?;
-                let bytes = pixbuf.save_to_bufferv("png", &[]).ok()?;
-                Some(STANDARD.encode(bytes))
-            });
+            // On X11, some apps only populate PRIMARY selection (middle-click paste).
+            // Only fall back to PRIMARY when CLIPBOARD has no usable content, and skip on Wayland to
+            // avoid changing semantics where PRIMARY may not exist or behave differently.
+            let has_usable_data = clipboard_fallback::has_usable_clipboard_data(
+                content.text.as_deref(),
+                content.html.as_deref(),
+                content.rtf.as_deref(),
+                content.png_base64.as_deref(),
+            );
+            if !has_usable_data && clipboard_fallback::should_attempt_primary_selection_from_env() {
+                let primary = gtk::Clipboard::get(&gdk::SELECTION_PRIMARY);
+                return Ok(read_from_clipboard(&primary));
+            }
 
-            Ok(ClipboardContent {
-                text,
-                html,
-                rtf,
-                png_base64,
-            })
+            Ok(content)
         })
     }
 

@@ -3,6 +3,8 @@ pub mod commands;
 mod fs_scope;
 #[cfg(any(feature = "desktop", test))]
 pub mod clipboard;
+#[cfg(target_os = "linux")]
+mod clipboard_fallback;
 pub mod file_io;
 #[cfg(any(feature = "desktop", test))]
 mod ipc_file_limits;
