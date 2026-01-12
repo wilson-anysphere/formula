@@ -57,6 +57,34 @@ const API_PERMISSIONS = {
 
 const MAX_TAINTED_RANGES_PER_EXTENSION = 50;
 
+// Extension APIs represent ranges as full 2D JS arrays. With Excel-scale sheets, unbounded
+// ranges can allocate millions of entries and OOM the host/worker. Keep reads/writes bounded
+// to match the desktop extension API guardrails.
+const DEFAULT_EXTENSION_RANGE_CELL_LIMIT = 200000;
+
+function getRangeSize(range) {
+  if (!range || typeof range !== "object") return null;
+  const startRow = Number(range.startRow);
+  const startCol = Number(range.startCol);
+  const endRow = Number(range.endRow);
+  const endCol = Number(range.endCol);
+  if (![startRow, startCol, endRow, endCol].every((v) => Number.isFinite(v))) return null;
+  const rows = Math.max(0, Math.max(startRow, endRow) - Math.min(startRow, endRow) + 1);
+  const cols = Math.max(0, Math.max(startCol, endCol) - Math.min(startCol, endCol) + 1);
+  return { rows, cols, cellCount: rows * cols };
+}
+
+function assertExtensionRangeWithinLimits(range, { label, maxCells } = {}) {
+  const size = getRangeSize(range);
+  if (!size) return null;
+  const limit = Number.isFinite(maxCells) ? maxCells : DEFAULT_EXTENSION_RANGE_CELL_LIMIT;
+  if (size.cellCount > limit) {
+    const name = String(label ?? "Range");
+    throw new Error(`${name} is too large (${size.rows}x${size.cols}=${size.cellCount} cells). Limit is ${limit} cells.`);
+  }
+  return size;
+}
+
 function normalizeNonNegativeInt(value, { label }) {
   const raw = value;
   if (typeof raw === "number") {
@@ -1695,6 +1723,36 @@ class BrowserExtensionHost {
       case "cells.getSelection": {
         const sheetId = await this._resolveActiveSheetId();
         const result = await this._spreadsheet.getSelection();
+        // Best-effort: keep selection reads consistent with the desktop extension API range cap.
+        // (We can't prevent the spreadsheet implementation from allocating `values`, but we can
+        // still fail fast before returning huge payloads to extension workers.)
+        try {
+          let coords = null;
+          if (result && typeof result === "object") {
+            coords = {
+              startRow: result.startRow,
+              startCol: result.startCol,
+              endRow: result.endRow,
+              endCol: result.endCol
+            };
+            const hasNumeric = Object.values(coords).every((v) => Number.isFinite(Number(v)));
+            if (!hasNumeric) {
+              coords = null;
+            }
+            if (!coords && typeof result?.address === "string" && result.address.trim()) {
+              try {
+                const { ref: addrRef } = this._splitSheetQualifier(result.address);
+                coords = this._parseA1RangeRef(addrRef);
+              } catch {
+                coords = null;
+              }
+            }
+          }
+          if (coords) assertExtensionRangeWithinLimits(coords, { label: "Selection" });
+        } catch (err) {
+          // Match desktop semantics: `cells.getSelection` throws if the selection is too large.
+          throw err;
+        }
         if (result && typeof result === "object") {
           const direct = normalizeTaintedRange({
             sheetId,
@@ -1726,6 +1784,19 @@ class BrowserExtensionHost {
       case "cells.getRange": {
         const ref = args[0];
         const { sheetName, ref: a1Ref } = this._splitSheetQualifier(ref);
+        // Fail fast on unbounded A1 ranges so we don't ask the spreadsheet implementation to
+        // materialize huge 2D arrays.
+        {
+          let coords = null;
+          try {
+            coords = this._parseA1RangeRef(a1Ref);
+          } catch {
+            coords = null;
+          }
+          if (coords) {
+            assertExtensionRangeWithinLimits(coords, { label: "Range" });
+          }
+        }
         const sheetId = await this._resolveSheetId(sheetName);
         const hasGetRange = typeof this._spreadsheet.getRange === "function";
         /** @type {any} */
@@ -1813,6 +1884,20 @@ class BrowserExtensionHost {
         await this._spreadsheet.setCell(args[0], args[1], args[2]);
         return null;
       case "cells.setRange":
+        // Fail fast on unbounded A1 ranges so we don't ask the spreadsheet implementation to
+        // apply multi-million-cell writes.
+        {
+          let coords = null;
+          try {
+            const { ref: a1Ref } = this._splitSheetQualifier(args[0]);
+            coords = this._parseA1RangeRef(a1Ref);
+          } catch {
+            coords = null;
+          }
+          if (coords) {
+            assertExtensionRangeWithinLimits(coords, { label: "Range" });
+          }
+        }
         if (typeof this._spreadsheet.setRange === "function") {
           await this._spreadsheet.setRange(args[0], args[1]);
           return null;
@@ -2308,6 +2393,7 @@ class BrowserExtensionHost {
 
   async _defaultGetRange(ref) {
     const { startRow, startCol, endRow, endCol } = this._parseA1RangeRef(ref);
+    assertExtensionRangeWithinLimits({ startRow, startCol, endRow, endCol }, { label: "Range" });
     const values = [];
     for (let r = startRow; r <= endRow; r++) {
       const row = [];
@@ -2322,6 +2408,7 @@ class BrowserExtensionHost {
 
   async _defaultSetRange(ref, values) {
     const { startRow, startCol, endRow, endCol } = this._parseA1RangeRef(ref);
+    assertExtensionRangeWithinLimits({ startRow, startCol, endRow, endCol }, { label: "Range" });
     const expectedRows = endRow - startRow + 1;
     const expectedCols = endCol - startCol + 1;
 
