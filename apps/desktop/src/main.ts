@@ -6795,8 +6795,12 @@ if (
         // Ignore capture release errors.
       }
 
-      latestClientX = up.clientX;
-      latestClientY = up.clientY;
+      // pointercancel events may not have meaningful coordinates; in that case, fall back
+      // to the last known pointermove position.
+      if (up.type !== "pointercancel") {
+        latestClientX = up.clientX;
+        latestClientY = up.clientY;
+      }
       if (!didMove) return;
 
       // Flush any pending silent updates so `lastRatio` reflects the final pointer position.
@@ -6805,7 +6809,9 @@ if (
       // Emit a final layout change (one-time) and persist it so split ratio restores after reload.
       // If the ratio never changed, avoid unnecessary layout normalization/persistence churn.
       if (lastRatio != null && Math.abs(lastRatio - initialRatio) > 1e-6) {
-        applyRatio(true);
+        // Only emit once at drag-end; the rAF-throttled drag updates above use `{ emit:false }`
+        // to avoid triggering full `renderLayout()` churn on every pointermove.
+        layoutController.setSplitRatio(lastRatio, { persist: false, emit: true });
         persistLayoutNow();
       }
     };
