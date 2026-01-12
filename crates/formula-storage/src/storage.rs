@@ -1410,6 +1410,56 @@ impl Storage {
         Ok(())
     }
 
+    /// Reorder all sheets in a workbook by setting their 0-based positions.
+    ///
+    /// This is a batch alternative to calling [`Self::reorder_sheet`] repeatedly. It updates all
+    /// sheet positions in a single transaction and renormalizes positions to be contiguous
+    /// starting at 0.
+    ///
+    /// `sheet_ids_in_order` is treated as a partial ordering: any workbook sheets not present in
+    /// the list are appended in their current order.
+    pub fn reorder_sheets(&self, workbook_id: Uuid, sheet_ids_in_order: &[Uuid]) -> Result<()> {
+        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let tx = conn.transaction()?;
+
+        let sheets = self.list_sheets_tx(&tx, workbook_id)?;
+        if sheets.len() <= 1 {
+            return Ok(());
+        }
+
+        let workbook_sheet_ids: HashSet<Uuid> = sheets.iter().map(|s| s.id).collect();
+        let mut seen: HashSet<Uuid> = HashSet::new();
+        let mut desired: Vec<Uuid> = Vec::with_capacity(sheets.len());
+
+        for id in sheet_ids_in_order {
+            if !workbook_sheet_ids.contains(id) {
+                continue;
+            }
+            if !seen.insert(*id) {
+                continue;
+            }
+            desired.push(*id);
+        }
+
+        // Append any remaining sheets in their current order (stable fallback).
+        for sheet in &sheets {
+            if seen.insert(sheet.id) {
+                desired.push(sheet.id);
+            }
+        }
+
+        for (idx, sheet_id) in desired.iter().enumerate() {
+            tx.execute(
+                "UPDATE sheets SET position = ?1 WHERE id = ?2",
+                params![idx as i64, sheet_id.to_string()],
+            )?;
+        }
+
+        touch_workbook_modified_at_by_workbook_id(&tx, workbook_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn delete_sheet(&self, sheet_id: Uuid) -> Result<()> {
         let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;

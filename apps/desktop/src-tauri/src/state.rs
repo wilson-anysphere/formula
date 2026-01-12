@@ -732,17 +732,20 @@ impl AppState {
 
         // Update persistent storage first so we can fail fast without mutating the in-memory workbook.
         if let Some(persistent) = self.persistent.as_ref() {
-            for (idx, sheet_id) in ordered_ids.iter().enumerate() {
+            let mut sheet_uuids = Vec::with_capacity(ordered_ids.len());
+            for sheet_id in &ordered_ids {
                 let sheet_uuid = persistent.sheet_uuid(sheet_id).ok_or_else(|| {
                     AppStateError::Persistence(format!(
                         "missing persistence mapping for sheet id {sheet_id}"
                     ))
                 })?;
-                persistent
-                    .storage
-                    .reorder_sheet(sheet_uuid, idx as i64)
-                    .map_err(|e| AppStateError::Persistence(e.to_string()))?;
+                sheet_uuids.push(sheet_uuid);
             }
+
+            persistent
+                .storage
+                .reorder_sheets(persistent.workbook_id, &sheet_uuids)
+                .map_err(|e| AppStateError::Persistence(e.to_string()))?;
         }
 
         {

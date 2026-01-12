@@ -676,6 +676,36 @@ fn sheet_reorder_and_delete_renormalize_positions() {
 }
 
 #[test]
+fn sheet_reorder_sheets_batch_updates_positions() {
+    let storage = Storage::open_in_memory().expect("open storage");
+    let workbook = storage
+        .create_workbook("Book", None)
+        .expect("create workbook");
+    let sheet_a = storage
+        .create_sheet(workbook.id, "SheetA", 0, None)
+        .expect("create sheet A");
+    let sheet_b = storage
+        .create_sheet(workbook.id, "SheetB", 1, None)
+        .expect("create sheet B");
+    let sheet_c = storage
+        .create_sheet(workbook.id, "SheetC", 2, None)
+        .expect("create sheet C");
+
+    storage
+        .reorder_sheets(workbook.id, &[sheet_c.id, sheet_a.id, sheet_b.id])
+        .expect("reorder");
+    let sheets = storage.list_sheets(workbook.id).expect("list sheets");
+    assert_eq!(
+        sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+        vec!["SheetC", "SheetA", "SheetB"]
+    );
+    assert_eq!(
+        sheets.iter().map(|s| s.position).collect::<Vec<_>>(),
+        vec![0, 1, 2]
+    );
+}
+
+#[test]
 fn create_sheet_inserts_at_position_and_renormalizes_positions() {
     let storage = Storage::open_in_memory().expect("open storage");
     let workbook = storage
