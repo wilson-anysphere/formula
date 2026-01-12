@@ -1678,6 +1678,9 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       labelById["home.font.fontSize"] = String(formatState.fontSize);
     }
 
+    const printExportAvailable =
+      typeof queuedInvoke === "function" || typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+
     const zoomDisabled = !app.supportsZoom();
     const disabledById = {
       ...(isEditing
@@ -1712,10 +1715,19 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.number.date": true,
             "home.number.comma": true,
             "home.number.increaseDecimal": true,
-            "home.number.decreaseDecimal": true,
-            "home.number.formatCells": true,
-          }
-        : null),
+             "home.number.decreaseDecimal": true,
+             "home.number.formatCells": true,
+           }
+         : null),
+      ...(printExportAvailable
+        ? null
+        : {
+            // In web/demo builds we do not have access to the desktop print/export backend.
+            "pageLayout.pageSetup.pageSetupDialog": true,
+            "pageLayout.printArea.setPrintArea": true,
+            "pageLayout.printArea.clearPrintArea": true,
+            "pageLayout.export.exportPdf": true,
+          }),
       // View/zoom controls depend on the current runtime (e.g. shared-grid mode).
       "view.show.performanceStats": !perfStatsSupported,
       "view.zoom.zoom": zoomDisabled,
@@ -7011,7 +7023,8 @@ async function handleRibbonExportPdf(): Promise<void> {
     });
 
     const bytes = decodeBase64ToBytes(String(b64));
-    downloadBytes(bytes, `${sheetId}.pdf`, "application/pdf");
+    const sheetName = workbookSheetStore.getName(sheetId) ?? sheetId;
+    downloadBytes(bytes, `${sanitizeFilename(sheetName)}.pdf`, "application/pdf");
     app.focus();
   } catch (err) {
     console.error("Failed to export PDF:", err);
