@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { FormulaBarModel } from "./FormulaBarModel.js";
 import { parseA1Range } from "../spreadsheet/a1.js";
+import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
 
 describe("FormulaBarModel", () => {
   it("inserts and updates range selections while editing", () => {
@@ -42,9 +43,11 @@ describe("FormulaBarModel", () => {
 
     model.beginRangeSelection(parseA1Range("B2")!, "Sheet 2");
     expect(model.draft).toBe("='Sheet 2'!B2");
+    expect(model.hoveredReference()).toEqual(parseA1Range("B2"));
 
     model.updateRangeSelection(parseA1Range("B2:C3")!, "O'Hare");
     expect(model.draft).toBe("='O''Hare'!B2:C3");
+    expect(model.hoveredReference()).toEqual(parseA1Range("B2:C3"));
   });
 
   it("accepts AI suggestions as an insertion at the caret", () => {
@@ -58,5 +61,11 @@ describe("FormulaBarModel", () => {
     expect(model.draft).toBe("=SUM");
     expect(model.cursorStart).toBe(4);
     expect(model.cursorEnd).toBe(4);
+  });
+
+  it("parses sheet-qualified references for hover previews", () => {
+    expect(parseSheetQualifiedA1Range("A1:B2")).toEqual(parseA1Range("A1:B2"));
+    expect(parseSheetQualifiedA1Range("Sheet2!A1:B2")).toEqual(parseA1Range("A1:B2"));
+    expect(parseSheetQualifiedA1Range("'My Sheet'!A1")).toEqual(parseA1Range("A1"));
   });
 });

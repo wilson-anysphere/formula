@@ -2,7 +2,8 @@ import { explainFormulaError, type ErrorExplanation } from "./errors.js";
 import { getFunctionHint, type FunctionHint } from "./highlight/functionContext.js";
 import { highlightFormula, type HighlightSpan } from "./highlight/highlightFormula.js";
 import { tokenizeFormula } from "./highlight/tokenizeFormula.js";
-import { parseA1Range, rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
+import { rangeToA1, type RangeAddress } from "../spreadsheet/a1.js";
+import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
 import {
   assignFormulaReferenceColors,
   extractFormulaReferences,
@@ -142,8 +143,7 @@ export class FormulaBarModel {
       this.#hoveredReference = null;
       return;
     }
-    const range = parseA1Range(referenceText);
-    this.#hoveredReference = range;
+    this.#hoveredReference = parseSheetQualifiedA1Range(referenceText);
   }
 
   hoveredReference(): RangeAddress | null {
@@ -314,7 +314,7 @@ export class FormulaBarModel {
       return;
     }
 
-    this.#hoveredReference = parseA1Range(token.text);
+    this.#hoveredReference = parseSheetQualifiedA1Range(token.text);
   }
 
   #updateReferenceHighlights(): void {

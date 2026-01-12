@@ -1,6 +1,7 @@
 import { FormulaBarModel, type FormulaBarAiSuggestion } from "./FormulaBarModel.js";
-import { parseA1Range, type RangeAddress } from "../spreadsheet/a1.js";
+import { type RangeAddress } from "../spreadsheet/a1.js";
 import { toggleA1AbsoluteAtCursor, type FormulaReferenceRange } from "@formula/spreadsheet-frontend";
+import { parseSheetQualifiedA1Range } from "./parseSheetQualifiedA1Range.js";
 
 export interface FormulaBarViewCallbacks {
   onBeginEdit?: (activeCellAddress: string) => void;
@@ -608,7 +609,7 @@ export class FormulaBarView {
     }
 
     const text = span.textContent ?? "";
-    this.#hoverOverride = text ? parseA1Range(text) : null;
+    this.#hoverOverride = text ? parseSheetQualifiedA1Range(text) : null;
     this.#callbacks.onHoverRange?.(this.#hoverOverride);
   }
 
