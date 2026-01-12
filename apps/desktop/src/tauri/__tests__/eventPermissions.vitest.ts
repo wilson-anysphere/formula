@@ -11,6 +11,25 @@ type CapabilityPermission =
     };
 
 describe("tauri capability event permissions", () => {
+  it("is wired to the main window via tauri.conf.json", () => {
+    const tauriConfUrl = new URL("../../../src-tauri/tauri.conf.json", import.meta.url);
+    const tauriConf = JSON.parse(readFileSync(tauriConfUrl, "utf8")) as any;
+
+    const windows = Array.isArray(tauriConf?.app?.windows) ? tauriConf.app.windows : [];
+    const mainWindow = windows.find((w: any) => w?.label === "main");
+    expect(mainWindow).toBeTruthy();
+
+    // Ensure the main window explicitly opts into the `main` capability so event scoping is enforced.
+    expect(Array.isArray(mainWindow?.capabilities)).toBe(true);
+    expect(mainWindow.capabilities).toContain("main");
+
+    const capabilityUrl = new URL("../../../src-tauri/capabilities/main.json", import.meta.url);
+    const capability = JSON.parse(readFileSync(capabilityUrl, "utf8")) as any;
+    expect(capability?.identifier).toBe("main");
+    expect(Array.isArray(capability?.windows)).toBe(true);
+    expect(capability.windows).toContain("main");
+  });
+
   it("scopes event.listen / event.emit (no allow-all event permissions)", () => {
     const capabilityUrl = new URL("../../../src-tauri/capabilities/main.json", import.meta.url);
     const capability = JSON.parse(readFileSync(capabilityUrl, "utf8")) as {
