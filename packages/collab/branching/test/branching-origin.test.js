@@ -33,6 +33,10 @@ test("CollabBranchingWorkflow: checkout/merge default origin is not undo-tracked
   assert.ok(session.undo, "expected undo to be enabled");
   assert.equal(session.undo.canUndo(), false);
 
+  /** @type {any[]} */
+  const origins = [];
+  doc.on("update", (_update, origin) => origins.push(origin));
+
   /** @type {any} */
   const branchService = {
     async checkoutBranch(_actor, _input) {
@@ -48,6 +52,8 @@ test("CollabBranchingWorkflow: checkout/merge default origin is not undo-tracked
   await workflow.checkoutBranch(actor, { name: "feature" });
   await workflow.merge(actor, { sourceBranch: "feature", resolutions: [] });
 
+  assert.ok(origins.includes("branching-apply"), "expected checkout/merge to apply with origin \"branching-apply\"");
+  assert.equal(origins.includes(session.origin), false, "expected checkout/merge not to apply with session.origin by default");
   assert.equal(session.undo.canUndo(), false);
 });
 
@@ -56,6 +62,10 @@ test("CollabBranchingWorkflow: checkout/merge can opt into session.origin for un
   const session = createCollabSession({ doc, undo: {} });
   assert.ok(session.undo, "expected undo to be enabled");
   assert.equal(session.undo.canUndo(), false);
+
+  /** @type {any[]} */
+  const origins = [];
+  doc.on("update", (_update, origin) => origins.push(origin));
 
   /** @type {any} */
   const branchService = {
@@ -72,6 +82,6 @@ test("CollabBranchingWorkflow: checkout/merge can opt into session.origin for un
   await workflow.checkoutBranch(actor, { name: "feature" });
   await workflow.merge(actor, { sourceBranch: "feature", resolutions: [] });
 
+  assert.ok(origins.includes(session.origin), "expected checkout/merge to apply with session.origin when opted in");
   assert.equal(session.undo.canUndo(), true);
 });
-
