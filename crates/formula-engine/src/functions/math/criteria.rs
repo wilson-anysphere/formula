@@ -437,6 +437,8 @@ fn is_blank_value(value: &Value) -> bool {
     match value {
         Value::Blank => true,
         Value::Text(s) if s.is_empty() => true,
+        Value::Entity(e) if e.display.is_empty() => true,
+        Value::Record(r) if r.display.is_empty() => true,
         _ => false,
     }
 }

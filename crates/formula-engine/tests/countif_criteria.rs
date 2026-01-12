@@ -1,5 +1,6 @@
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::locale::ValueLocaleConfig;
+use formula_engine::value::{EntityValue, RecordValue};
 use formula_engine::{Engine, ErrorKind, Value};
 
 fn eval(engine: &mut Engine, formula: &str) -> Value {
@@ -130,6 +131,79 @@ fn countif_error_literal_criteria_compiles_to_bytecode_and_propagates() {
         engine.get_cell_value("Sheet1", "Z1"),
         Value::Error(ErrorKind::Div0)
     );
+}
+
+#[test]
+fn countif_field_error_criteria_counts_field_errors() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_value("Sheet1", "A1", Value::Error(ErrorKind::Field))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A2", Value::Error(ErrorKind::Field))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A3", Value::Error(ErrorKind::Div0))
+        .unwrap();
+
+    assert_eq!(
+        eval(&mut engine, r##"=COUNTIF(A1:A3, "#FIELD!")"##),
+        Value::Number(2.0)
+    );
+}
+
+#[test]
+fn countif_text_wildcards_match_entity_and_record_display_strings() {
+    let mut engine = Engine::new();
+    // Force the AST evaluator so the criteria matcher sees Entity/Record values directly.
+    engine.set_bytecode_enabled(false);
+
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A1",
+            Value::Entity(EntityValue::new("Apple")),
+        )
+        .unwrap();
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "A2",
+            Value::Record(RecordValue::new("Apple")),
+        )
+        .unwrap();
+    engine.set_cell_value("Sheet1", "A3", "Banana").unwrap();
+
+    assert_eq!(eval(&mut engine, r#"=COUNTIF(A1:A3, "*pp*")"#), Value::Number(2.0));
+}
+
+#[test]
+fn countif_accepts_entity_record_criteria_argument_as_text() {
+    let mut engine = Engine::new();
+    // Force the AST evaluator so the criteria parser sees Entity/Record criteria inputs directly.
+    engine.set_bytecode_enabled(false);
+
+    engine.set_cell_value("Sheet1", "A1", "Apple").unwrap();
+    engine.set_cell_value("Sheet1", "A2", "Apple").unwrap();
+    engine.set_cell_value("Sheet1", "A3", "Banana").unwrap();
+
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "B1",
+            Value::Entity(EntityValue::new("Apple")),
+        )
+        .unwrap();
+    engine
+        .set_cell_value(
+            "Sheet1",
+            "C1",
+            Value::Record(RecordValue::new("Apple")),
+        )
+        .unwrap();
+
+    assert_eq!(eval(&mut engine, "=COUNTIF(A1:A3, B1)"), Value::Number(2.0));
+    assert_eq!(eval(&mut engine, "=COUNTIF(A1:A3, C1)"), Value::Number(2.0));
 }
 
 #[test]

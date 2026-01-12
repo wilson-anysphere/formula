@@ -1,4 +1,4 @@
-use formula_engine::value::ErrorKind;
+use formula_engine::value::{EntityValue, ErrorKind, RecordValue};
 use formula_engine::{Engine, PrecedentNode, Value};
 use formula_engine::eval::CellAddr;
 use formula_engine::locale::ValueLocaleConfig;
@@ -191,6 +191,23 @@ fn sumif_supports_wildcards_and_blank_criteria() {
     // Missing criteria argument is treated as blank criteria.
     assert_number(&sheet.eval(r#"=SUMIF(A4:A6,,B4:B6)"#), 9.0);
     assert_number(&sheet.eval(r#"=SUMIF(A4:A6,"<>",B4:B6)"#), 6.0);
+}
+
+#[test]
+fn sumif_wildcards_match_entity_and_record_display_strings() {
+    let mut sheet = TestSheet::new();
+    // Force the AST evaluator so the criteria matcher sees Entity/Record values directly.
+    sheet.engine.set_bytecode_enabled(false);
+
+    sheet.set("A1", Value::Entity(EntityValue::new("Apple")));
+    sheet.set("A2", Value::Record(RecordValue::new("Pineapple")));
+    sheet.set("A3", "Banana");
+
+    sheet.set("B1", 10);
+    sheet.set("B2", 30);
+    sheet.set("B3", 20);
+
+    assert_number(&sheet.eval(r#"=SUMIF(A1:A3,"*pp*",B1:B3)"#), 40.0);
 }
 
 #[test]
