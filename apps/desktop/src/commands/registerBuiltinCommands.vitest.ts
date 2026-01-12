@@ -64,7 +64,7 @@ describe("registerBuiltinCommands: panel toggles", () => {
     expect(getPanelPlacement(layoutController.layout, PanelIds.BRANCH_MANAGER).kind).toBe("closed");
 
     await commandRegistry.executeCommand("view.togglePanel.branchManager");
-    expect(getPanelPlacement(layoutController.layout, PanelIds.BRANCH_MANAGER)).toEqual({ kind: "docked", side: "left" });
+    expect(getPanelPlacement(layoutController.layout, PanelIds.BRANCH_MANAGER)).toEqual({ kind: "docked", side: "right" });
 
     await commandRegistry.executeCommand("view.togglePanel.branchManager");
     expect(getPanelPlacement(layoutController.layout, PanelIds.BRANCH_MANAGER).kind).toBe("closed");
