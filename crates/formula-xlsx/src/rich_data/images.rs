@@ -3,8 +3,14 @@
 //! The end-to-end wiring for images stored as rich values is:
 //! `richValue.xml` (rich values) -> relationship-index -> `richValueRel.xml` (index -> rId) ->
 //! `richValueRel.xml.rels` (rId -> Target) -> `xl/media/*`.
+//!
+//! Excel also emits an alternate rich value naming scheme for embedded images-in-cells:
+//! - `xl/richData/rdrichvalue.xml` (positional values)
+//! - `xl/richData/rdrichvaluestructure.xml` (key ordering; includes `_rvRel:LocalImageIdentifier`)
 
 use std::collections::{BTreeMap, HashMap};
+
+use roxmltree::Document;
 
 use crate::XlsxError;
 
@@ -12,6 +18,8 @@ use super::rich_value::parse_rich_value_relationship_indices;
 use super::rich_value_rel::parse_rich_value_rel_table;
 
 const RICH_VALUE_XML: &str = "xl/richData/richValue.xml";
+const RD_RICH_VALUE_XML: &str = "xl/richData/rdrichvalue.xml";
+const RD_RICH_VALUE_STRUCTURE_XML: &str = "xl/richData/rdrichvaluestructure.xml";
 const RICH_VALUE_REL_XML: &str = "xl/richData/richValueRel.xml";
 
 /// Resolve workbook rich value indices to image target part paths (`xl/media/*`) when possible.
@@ -29,11 +37,14 @@ const RICH_VALUE_REL_XML: &str = "xl/richData/richValueRel.xml";
 pub fn resolve_rich_value_image_targets(
     parts: &BTreeMap<String, Vec<u8>>,
 ) -> Result<Vec<Option<String>>, XlsxError> {
-    let Some(rich_value_xml) = parts.get(RICH_VALUE_XML) else {
+    let rel_indices = if let Some(rich_value_xml) = parts.get(RICH_VALUE_XML) {
+        parse_rich_value_relationship_indices(rich_value_xml)?
+    } else if let Some(rd_rich_value_xml) = parts.get(RD_RICH_VALUE_XML) {
+        let structure_xml = parts.get(RD_RICH_VALUE_STRUCTURE_XML).map(|b| b.as_slice());
+        parse_rdrichvalue_relationship_indices(rd_rich_value_xml, structure_xml)?
+    } else {
         return Ok(Vec::new());
     };
-
-    let rel_indices = parse_rich_value_relationship_indices(rich_value_xml)?;
     if rel_indices.is_empty() {
         return Ok(Vec::new());
     }
@@ -85,6 +96,83 @@ pub fn resolve_rich_value_image_targets(
     Ok(out)
 }
 
+fn parse_rdrichvalue_relationship_indices(
+    xml_bytes: &[u8],
+    structure_xml_bytes: Option<&[u8]>,
+) -> Result<Vec<Option<usize>>, XlsxError> {
+    let structure_rel_positions = structure_xml_bytes
+        .and_then(|bytes| parse_rdrichvaluestructure_local_image_positions(bytes).ok());
+
+    let xml = std::str::from_utf8(xml_bytes)
+        .map_err(|e| XlsxError::Invalid(format!("rdrichvalue.xml not utf-8: {e}")))?;
+    let doc = Document::parse(xml)?;
+
+    let mut out = Vec::new();
+    for rv in doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
+    {
+        // Prefer looking up the `_rvRel:LocalImageIdentifier` position via structure metadata.
+        let pos = rv
+            .attribute("s")
+            .and_then(|s| s.parse::<usize>().ok())
+            .and_then(|s_idx| {
+                structure_rel_positions
+                    .as_ref()
+                    .and_then(|v| v.get(s_idx).copied())
+                    .flatten()
+            });
+
+        let values: Vec<roxmltree::Node<'_, '_>> = rv
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("v"))
+            .collect();
+
+        if let Some(pos) = pos.and_then(|p| values.get(p).copied()) {
+            let idx = pos.text().and_then(|t| t.trim().parse::<usize>().ok());
+            out.push(idx);
+            continue;
+        }
+
+        // Fallback: assume the first integer payload corresponds to the relationship index.
+        let idx = values
+            .iter()
+            .find_map(|v| v.text().and_then(|t| t.trim().parse::<usize>().ok()));
+        out.push(idx);
+    }
+
+    Ok(out)
+}
+
+fn parse_rdrichvaluestructure_local_image_positions(
+    xml_bytes: &[u8],
+) -> Result<Vec<Option<usize>>, XlsxError> {
+    let xml = std::str::from_utf8(xml_bytes)
+        .map_err(|e| XlsxError::Invalid(format!("rdrichvaluestructure.xml not utf-8: {e}")))?;
+    let doc = Document::parse(xml)?;
+
+    let mut out = Vec::new();
+    for s in doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("s"))
+    {
+        let pos = s
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("k"))
+            .enumerate()
+            .find_map(|(idx, k)| {
+                let name = k.attribute("n")?;
+                // Excel uses `_rvRel:LocalImageIdentifier` for embedded local images.
+                // Be tolerant of namespace/prefix changes by matching on suffix.
+                name.ends_with("LocalImageIdentifier").then_some(idx)
+            });
+
+        out.push(pos);
+    }
+
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -126,7 +214,10 @@ mod tests {
 </Relationships>"#;
 
         let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-        parts.insert("xl/richData/richValue.xml".to_string(), rich_value_xml.to_vec());
+        parts.insert(
+            "xl/richData/richValue.xml".to_string(),
+            rich_value_xml.to_vec(),
+        );
         parts.insert(
             "xl/richData/richValueRel.xml".to_string(),
             rich_value_rel_xml.to_vec(),
@@ -157,10 +248,72 @@ mod tests {
 </rvData>"#;
 
         let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-        parts.insert("xl/richData/richValue.xml".to_string(), rich_value_xml.to_vec());
+        parts.insert(
+            "xl/richData/richValue.xml".to_string(),
+            rich_value_xml.to_vec(),
+        );
 
         let resolved = resolve_rich_value_image_targets(&parts).expect("resolve");
         assert_eq!(resolved, vec![None]);
     }
-}
 
+    #[test]
+    fn resolves_rdrichvalue_image_targets_end_to_end() {
+        // `rdrichvalue.xml` uses positional `<v>` values, with ordering described by
+        // `rdrichvaluestructure.xml`. For embedded images-in-cells, the key
+        // `_rvRel:LocalImageIdentifier` indexes into `richValueRel.xml`.
+        let rd_rich_value_structure = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvStructures xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata" count="1">
+  <s t="_localImage">
+    <k n="_rvRel:LocalImageIdentifier" t="i"/>
+    <k n="CalcOrigin" t="i"/>
+  </s>
+</rvStructures>"#;
+
+        let rd_rich_value_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata" count="2">
+  <rv s="0"><v>0</v><v>5</v></rv>
+  <rv s="0"><v>1</v><v>5</v></rv>
+</rvData>"#;
+
+        let rich_value_rel_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValueRels xmlns="http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rel r:id="rId1"/>
+  <rel r:id="rId2"/>
+</richValueRels>"#;
+
+        let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image2.png"/>
+</Relationships>"#;
+
+        let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        parts.insert(
+            "xl/richData/rdrichvaluestructure.xml".to_string(),
+            rd_rich_value_structure.to_vec(),
+        );
+        parts.insert(
+            "xl/richData/rdrichvalue.xml".to_string(),
+            rd_rich_value_xml.to_vec(),
+        );
+        parts.insert(
+            "xl/richData/richValueRel.xml".to_string(),
+            rich_value_rel_xml.to_vec(),
+        );
+        parts.insert(
+            "xl/richData/_rels/richValueRel.xml.rels".to_string(),
+            rels_xml.to_vec(),
+        );
+
+        let resolved = resolve_rich_value_image_targets(&parts).expect("resolve");
+        assert_eq!(
+            resolved,
+            vec![
+                Some("xl/media/image1.png".to_string()),
+                Some("xl/media/image2.png".to_string())
+            ]
+        );
+    }
+}
