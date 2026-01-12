@@ -5110,6 +5110,7 @@ if (
         {
           type: "item",
           label: t("menu.addComment"),
+          enabled: allowEditCommands,
           shortcut: getPrimaryCommandKeybindingDisplay("comments.addComment", commandKeybindingDisplayIndex) ?? undefined,
           onSelect: () => executeBuiltinCommand("comments.addComment"),
         },
