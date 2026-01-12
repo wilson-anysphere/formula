@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::io::{Cursor, Write};
 use std::process::Command;
 
@@ -318,6 +319,25 @@ fn ignore_glob_suppresses_calcchain_diffs() {
     let options = DiffOptions {
         ignore_parts: Default::default(),
         ignore_globs: vec!["xl/calcChain.*".to_string()],
+    };
+
+    let report = diff_archives_with_options(&expected, &actual, &options);
+    assert!(report.is_empty(), "expected no diffs, got {:#?}", report.differences);
+}
+
+#[test]
+fn ignore_rules_normalize_leading_slashes_and_backslashes() {
+    let expected_zip = zip_bytes(&[("xl/calcChain.xml", br#"<calcChain/>"#)]);
+    let actual_zip = zip_bytes(&[]);
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let mut ignore_parts = BTreeSet::new();
+    ignore_parts.insert(r"/xl\calcChain.xml".to_string());
+
+    let options = DiffOptions {
+        ignore_parts,
+        ignore_globs: vec![r"\xl\calcChain.*".to_string()],
     };
 
     let report = diff_archives_with_options(&expected, &actual, &options);

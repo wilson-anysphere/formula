@@ -401,29 +401,50 @@ fn is_calc_chain_part(part: &str) -> bool {
     part.eq_ignore_ascii_case("xl/calcChain.xml") || part.eq_ignore_ascii_case("xl/calcChain.bin")
 }
 
-struct IgnoreMatcher<'a> {
-    exact: &'a BTreeSet<String>,
+struct IgnoreMatcher {
+    exact: BTreeSet<String>,
     globs: GlobSet,
 }
 
-impl<'a> IgnoreMatcher<'a> {
-    fn new(options: &'a DiffOptions) -> Self {
+impl IgnoreMatcher {
+    fn new(options: &DiffOptions) -> Self {
+        let exact = options
+            .ignore_parts
+            .iter()
+            .map(|part| normalize_opc_part_name(part))
+            .collect();
+
         let mut builder = GlobSetBuilder::new();
         for pattern in &options.ignore_globs {
+            let pattern = pattern.trim();
+            if pattern.is_empty() {
+                continue;
+            }
+            let pattern = pattern.replace('\\', "/");
+            let pattern = pattern.trim_start_matches('/');
+            if pattern.is_empty() {
+                continue;
+            }
             if let Ok(glob) = Glob::new(pattern) {
                 builder.add(glob);
             }
         }
         let globs = builder.build().unwrap_or_else(|_| GlobSet::empty());
 
-        Self {
-            exact: &options.ignore_parts,
-            globs,
-        }
+        Self { exact, globs }
     }
 
     fn matches(&self, part: &str) -> bool {
-        self.exact.contains(part) || self.globs.is_match(part)
+        if self.exact.contains(part) || self.globs.is_match(part) {
+            return true;
+        }
+
+        if part.starts_with('/') || part.contains('\\') {
+            let normalized = normalize_opc_part_name(part);
+            return self.exact.contains(&normalized) || self.globs.is_match(&normalized);
+        }
+
+        false
     }
 }
 
@@ -431,7 +452,7 @@ fn should_ignore_xml_diff(
     part: &str,
     path: &str,
     ignored_rel_ids: &BTreeSet<String>,
-    ignore: &IgnoreMatcher<'_>,
+    ignore: &IgnoreMatcher,
 ) -> bool {
     if part == "[Content_Types].xml" {
         if let Some(part_name) = content_type_override_part_name_from_path(path) {
@@ -483,7 +504,7 @@ fn normalize_opc_path(path: &str) -> String {
 fn ignored_relationship_ids(
     rels_part: &str,
     bytes: &[u8],
-    ignore: &IgnoreMatcher<'_>,
+    ignore: &IgnoreMatcher,
 ) -> Result<BTreeSet<String>> {
     let text =
         std::str::from_utf8(bytes).with_context(|| format!("part {rels_part} is not valid UTF-8"))?;

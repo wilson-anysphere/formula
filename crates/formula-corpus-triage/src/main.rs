@@ -372,8 +372,9 @@ fn diff_workbooks(expected: &[u8], actual: &[u8], args: &Args) -> Result<DiffDet
         .ignore_parts
         .iter()
         .map(|s| s.trim())
+        .map(|s| s.replace('\\', "/"))
+        .map(|s| s.trim_start_matches('/').to_string())
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
         .collect();
     let mut ignore_sorted: Vec<String> = ignore.iter().cloned().collect();
     ignore_sorted.sort();

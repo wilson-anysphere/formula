@@ -34,16 +34,14 @@ fn main() -> Result<()> {
         ignore_parts: args
             .ignore_parts
             .iter()
-            .map(|s| s.trim())
+            .map(|s| normalize_ignore_pattern(s))
             .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
             .collect(),
         ignore_globs: args
             .ignore_globs
             .iter()
-            .map(|s| s.trim())
+            .map(|s| normalize_ignore_pattern(s))
             .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
             .collect(),
     };
 
@@ -111,4 +109,10 @@ fn parse_severity(input: &str) -> Result<xlsx_diff::Severity> {
         "info" => Ok(xlsx_diff::Severity::Info),
         _ => anyhow::bail!("unknown severity '{input}' (expected: critical|warning|info)"),
     }
+}
+
+fn normalize_ignore_pattern(input: &str) -> String {
+    let trimmed = input.trim();
+    let normalized = trimmed.replace('\\', "/");
+    normalized.trim_start_matches('/').to_string()
 }
