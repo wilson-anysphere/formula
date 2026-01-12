@@ -259,6 +259,22 @@ fn days360_matches_excel_examples() {
         &sheet.eval("=DAYS360(DATE(2019,2,15),DATE(2019,2,28),TRUE)"),
         13.0,
     );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2020,2,29),DATE(2021,2,28))"),
+        360.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2020,2,29),DATE(2021,2,28),TRUE)"),
+        359.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2020,2,28),DATE(2021,2,28))"),
+        363.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2020,2,28),DATE(2021,2,28),TRUE)"),
+        360.0,
+    );
     assert_eq!(
         sheet.eval("=DAYS360(\"nope\",DATE(2020,1,1))"),
         Value::Error(ErrorKind::Value)
@@ -366,6 +382,22 @@ fn yearfrac_matches_basis_conventions() {
     assert_number(
         &sheet.eval("=YEARFRAC(DATE(2020,2,29),DATE(2020,2,28),1)"),
         -(1.0 / 366.0),
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,2,28),DATE(2021,2,28),1)"),
+        1.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2021,2,28),DATE(2020,2,28),1)"),
+        -1.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,2,28),DATE(2021,2,27),1)"),
+        365.0 / 366.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2021,2,27),DATE(2020,2,28),1)"),
+        -(365.0 / 366.0),
     );
 
     // Excel-style integer coercion: basis is truncated toward zero before validation.

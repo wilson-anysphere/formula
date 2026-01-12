@@ -119,6 +119,18 @@ fn days360_matches_excel_examples() {
     let end = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
     assert_eq!(date_time::days360(start, end, false, system).unwrap(), 16);
     assert_eq!(date_time::days360(start, end, true, system).unwrap(), 13);
+
+    // Cross-year February month-end behavior.
+    let start = ymd_to_serial(ExcelDate::new(2020, 2, 29), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2021, 2, 28), system).unwrap();
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 360);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 359);
+
+    // Leap-year Feb 28 is not month-end, so US/NASD can roll the end-of-month forward.
+    let start = ymd_to_serial(ExcelDate::new(2020, 2, 28), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2021, 2, 28), system).unwrap();
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 363);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 360);
 }
 
 #[test]
@@ -220,6 +232,20 @@ fn yearfrac_respects_basis_conventions() {
     let expected_lm = 1.0 / 366.0;
     assert!((lm - expected_lm).abs() < 1e-12);
     assert!((lm + date_time::yearfrac(m, l, 1, system).unwrap()).abs() < 1e-12);
+
+    // Feb 28 is an anniversary boundary even when the interval crosses a leap day.
+    let n = ymd_to_serial(ExcelDate::new(2020, 2, 28), system).unwrap();
+    let o = ymd_to_serial(ExcelDate::new(2021, 2, 28), system).unwrap();
+    let no = date_time::yearfrac(n, o, 1, system).unwrap();
+    assert!((no - 1.0).abs() < 1e-12);
+    assert!((no + date_time::yearfrac(o, n, 1, system).unwrap()).abs() < 1e-12);
+
+    // One day short of the anniversary should use the 366-day denominator for this span.
+    let p = ymd_to_serial(ExcelDate::new(2021, 2, 27), system).unwrap();
+    let np = date_time::yearfrac(n, p, 1, system).unwrap();
+    let expected_np = 365.0 / 366.0;
+    assert!((np - expected_np).abs() < 1e-12);
+    assert!((np + date_time::yearfrac(p, n, 1, system).unwrap()).abs() < 1e-12);
 
     assert_eq!(date_time::yearfrac(start, end, 9, system).unwrap_err(), ExcelError::Num);
 }
