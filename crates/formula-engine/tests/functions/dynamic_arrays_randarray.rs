@@ -80,12 +80,8 @@ fn randarray_rejects_min_greater_than_max() {
         .set_cell_formula("Sheet1", "A1", "=RANDARRAY(1,1,5,4)")
         .unwrap();
     engine.recalculate_single_threaded();
-    let value = engine.get_cell_value("Sheet1", "A1");
-    assert!(
-        matches!(
-            value,
-            Value::Error(ErrorKind::Value) | Value::Error(ErrorKind::Num)
-        ),
-        "expected RANDARRAY to reject min > max with a numeric/value error, got {value:?}"
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Value)
     );
 }

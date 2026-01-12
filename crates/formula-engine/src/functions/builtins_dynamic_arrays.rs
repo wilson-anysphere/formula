@@ -999,7 +999,7 @@ fn randarray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         return Value::Error(ErrorKind::Num);
     }
     if min > max {
-        return Value::Error(ErrorKind::Num);
+        return Value::Error(ErrorKind::Value);
     }
 
     let rows_usize = match usize::try_from(rows) {
@@ -1045,6 +1045,13 @@ fn randarray_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
     } else {
         let span = max - min;
+        if !span.is_finite() {
+            return Value::Error(ErrorKind::Num);
+        }
+        if span == 0.0 {
+            values.resize(total, Value::Number(min));
+            return Value::Array(Array::new(rows_usize, cols_usize, values));
+        }
         for _ in 0..total {
             values.push(Value::Number(min + ctx.volatile_rand() * span));
         }
