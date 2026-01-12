@@ -19,6 +19,10 @@ export class FormulaBarView {
   readonly root: HTMLElement;
   readonly textarea: HTMLTextAreaElement;
 
+  #nameBoxDropdownEl: HTMLButtonElement;
+  #cancelButtonEl: HTMLButtonElement;
+  #commitButtonEl: HTMLButtonElement;
+  #fxButtonEl: HTMLButtonElement;
   #addressEl: HTMLInputElement;
   #highlightEl: HTMLElement;
   #hintEl: HTMLElement;
@@ -45,9 +49,46 @@ export class FormulaBarView {
     address.spellcheck = false;
     address.value = "A1";
 
-    const fx = document.createElement("div");
-    fx.className = "formula-bar-fx";
-    fx.textContent = "fx";
+    const nameBox = document.createElement("div");
+    nameBox.className = "formula-bar-name-box";
+
+    const nameBoxDropdown = document.createElement("button");
+    nameBoxDropdown.className = "formula-bar-name-box-dropdown";
+    nameBoxDropdown.type = "button";
+    nameBoxDropdown.textContent = "▾";
+    nameBoxDropdown.title = "Name box menu";
+    nameBoxDropdown.setAttribute("aria-label", "Open name box menu");
+
+    nameBox.appendChild(address);
+    nameBox.appendChild(nameBoxDropdown);
+
+    const actions = document.createElement("div");
+    actions.className = "formula-bar-actions";
+
+    const cancelButton = document.createElement("button");
+    cancelButton.className = "formula-bar-action-button formula-bar-action-button--cancel";
+    cancelButton.type = "button";
+    cancelButton.textContent = "✕";
+    cancelButton.title = "Cancel (Esc)";
+    cancelButton.setAttribute("aria-label", "Cancel edit");
+
+    const commitButton = document.createElement("button");
+    commitButton.className = "formula-bar-action-button formula-bar-action-button--commit";
+    commitButton.type = "button";
+    commitButton.textContent = "✓";
+    commitButton.title = "Enter (↵)";
+    commitButton.setAttribute("aria-label", "Commit edit");
+
+    const fxButton = document.createElement("button");
+    fxButton.className = "formula-bar-action-button formula-bar-action-button--fx";
+    fxButton.type = "button";
+    fxButton.textContent = "fx";
+    fxButton.title = "Insert function";
+    fxButton.setAttribute("aria-label", "Insert function");
+
+    actions.appendChild(cancelButton);
+    actions.appendChild(commitButton);
+    actions.appendChild(fxButton);
 
     const editor = document.createElement("div");
     editor.className = "formula-bar-editor";
@@ -83,8 +124,8 @@ export class FormulaBarView {
     errorPanel.dataset.testid = "formula-error-panel";
     errorPanel.style.display = "none";
 
-    row.appendChild(address);
-    row.appendChild(fx);
+    row.appendChild(nameBox);
+    row.appendChild(actions);
     row.appendChild(editor);
     row.appendChild(errorButton);
 
@@ -97,6 +138,10 @@ export class FormulaBarView {
     root.appendChild(errorPanel);
 
     this.textarea = textarea;
+    this.#nameBoxDropdownEl = nameBoxDropdown;
+    this.#cancelButtonEl = cancelButton;
+    this.#commitButtonEl = commitButton;
+    this.#fxButtonEl = fxButton;
     this.#addressEl = address;
     this.#highlightEl = highlight;
     this.#hintEl = hint;
@@ -105,6 +150,12 @@ export class FormulaBarView {
 
     address.addEventListener("focus", () => {
       address.select();
+    });
+
+    nameBoxDropdown.addEventListener("click", () => {
+      // Placeholder affordance only (Excel-style name box dropdown).
+      // Focus the address input so keyboard "Go To" still feels natural.
+      address.focus();
     });
 
     address.addEventListener("keydown", (e) => {
@@ -145,6 +196,10 @@ export class FormulaBarView {
       const isOpen = this.#errorPanel.style.display !== "none";
       this.#errorPanel.style.display = isOpen ? "none" : "block";
     });
+
+    cancelButton.addEventListener("click", () => this.#cancel());
+    commitButton.addEventListener("click", () => this.#commit());
+    fxButton.addEventListener("click", () => this.#focusFx());
 
     // Initial render.
     this.model.setActiveCell({ address: "A1", input: "", value: "" });
@@ -290,28 +345,53 @@ export class FormulaBarView {
 
     if (e.key === "Escape") {
       e.preventDefault();
-      this.textarea.blur();
-      this.model.cancel();
-      this.#hoverOverride = null;
-      this.#selectedReferenceIndex = null;
-      this.#render({ preserveTextareaValue: false });
-      this.#callbacks.onCancel?.();
-      this.#emitOverlays();
+      this.#cancel();
       return;
     }
 
     // Excel behavior: Enter commits, Alt+Enter inserts newline.
     if (e.key === "Enter" && !e.altKey) {
       e.preventDefault();
-      this.textarea.blur();
-      const committed = this.model.commit();
-      this.#hoverOverride = null;
-      this.#selectedReferenceIndex = null;
-      this.#render({ preserveTextareaValue: false });
-      this.#callbacks.onCommit(committed);
-      this.#emitOverlays();
+      this.#commit();
       return;
     }
+  }
+
+  #cancel(): void {
+    if (!this.model.isEditing) return;
+    this.textarea.blur();
+    this.model.cancel();
+    this.#hoverOverride = null;
+    this.#selectedReferenceIndex = null;
+    this.#render({ preserveTextareaValue: false });
+    this.#callbacks.onCancel?.();
+    this.#emitOverlays();
+  }
+
+  #commit(): void {
+    if (!this.model.isEditing) return;
+    this.textarea.blur();
+    const committed = this.model.commit();
+    this.#hoverOverride = null;
+    this.#selectedReferenceIndex = null;
+    this.#render({ preserveTextareaValue: false });
+    this.#callbacks.onCommit(committed);
+    this.#emitOverlays();
+  }
+
+  #focusFx(): void {
+    // Excel-style: clicking fx focuses the formula input and commonly starts a formula.
+    this.focus({ cursor: "end" });
+
+    if (!this.model.isEditing) return;
+    if (this.textarea.value.trim() !== "") return;
+
+    this.textarea.value = "=";
+    this.textarea.setSelectionRange(1, 1);
+    this.model.updateDraft(this.textarea.value, 1, 1);
+    this.#selectedReferenceIndex = null;
+    this.#render({ preserveTextareaValue: true });
+    this.#emitOverlays();
   }
 
   #render(opts: { preserveTextareaValue: boolean }): void {
@@ -326,6 +406,12 @@ export class FormulaBarView {
     if (!opts.preserveTextareaValue) {
       this.textarea.value = this.model.draft;
     }
+
+    const showEditingActions = this.model.isEditing;
+    this.#cancelButtonEl.hidden = !showEditingActions;
+    this.#cancelButtonEl.disabled = !showEditingActions;
+    this.#commitButtonEl.hidden = !showEditingActions;
+    this.#commitButtonEl.disabled = !showEditingActions;
 
     const cursor = this.model.cursorStart;
     const ghost = this.model.isEditing ? this.model.aiGhostText() : "";

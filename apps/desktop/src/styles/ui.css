@@ -80,7 +80,7 @@
   flex-direction: column;
   align-items: stretch;
   gap: 4px;
-  padding: 8px 12px;
+  padding: 6px 10px;
   background: var(--formula-bar-bg);
   border-bottom: 1px solid var(--formula-bar-border);
   transition:
@@ -112,6 +112,267 @@
 .formula-bar__input:focus {
   border-color: var(--selection-border);
   box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+/*
+  Spreadsheet formula bar (FormulaBarView.ts)
+*/
+
+.formula-bar-row {
+  display: grid;
+  grid-template-columns: 110px auto 1fr auto;
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.formula-bar-name-box {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease);
+}
+
+.formula-bar-address {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  padding: 4px 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 16px;
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+}
+
+.formula-bar-address:focus {
+  background: var(--bg-primary);
+}
+
+.formula-bar-name-box:focus-within {
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.formula-bar-name-box-dropdown {
+  width: 20px;
+  border: none;
+  border-inline-start: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+
+.formula-bar-name-box-dropdown:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.formula-bar-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+
+.formula-bar-action-button {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+
+.formula-bar-action-button:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.formula-bar-action-button:focus-visible {
+  outline: none;
+  border-color: var(--selection-border);
+  box-shadow: 0 0 0 2px var(--selection-bg);
+}
+
+.formula-bar-action-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.formula-bar-action-button--cancel:hover {
+  color: var(--error);
+}
+
+.formula-bar-action-button--commit:hover {
+  color: var(--success);
+}
+
+.formula-bar-action-button--fx {
+  font-style: italic;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.formula-bar-editor {
+  position: relative;
+  min-width: 0;
+}
+
+.formula-bar-highlight {
+  margin: 0;
+  box-sizing: border-box;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  overflow: auto;
+  font:
+    13px/20px ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace;
+  white-space: pre;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+
+.formula-bar-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 2px 6px;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--text-primary);
+  font: inherit;
+  line-height: 20px;
+  overflow: auto;
+}
+
+.formula-bar-input::selection {
+  background: var(--selection-bg);
+}
+
+.formula-bar-highlight span[data-kind="function"] {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.formula-bar-highlight span[data-kind="string"] {
+  color: var(--warning);
+}
+
+.formula-bar-highlight span[data-kind="number"] {
+  color: var(--success);
+}
+
+.formula-bar-highlight span[data-kind="operator"] {
+  color: var(--text-primary);
+}
+
+.formula-bar-highlight span[data-kind="punctuation"] {
+  color: var(--text-secondary);
+}
+
+.formula-bar-highlight span[data-kind="error"] {
+  color: var(--error);
+  font-weight: 700;
+}
+
+.formula-bar-highlight span.formula-bar-reference--active {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
+.formula-bar-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 16px;
+  min-height: 16px;
+}
+
+.formula-bar-error-button {
+  width: 24px;
+  height: 24px;
+  margin-top: 2px;
+  border: 1px solid var(--error);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--error);
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+
+.formula-bar-error-button:hover {
+  background: var(--bg-tertiary);
+}
+
+.formula-bar-error-panel {
+  padding: 8px 12px;
+  border: 1px solid var(--error);
+  border-radius: 10px;
+  background: var(--bg-primary);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.formula-bar-error-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.formula-bar-error-desc {
+  margin-bottom: 6px;
+}
+
+.formula-bar-error-suggestions {
+  margin: 0;
+  padding-left: 18px;
 }
 
 .formula-bar-highlight .formula-bar-ghost {
