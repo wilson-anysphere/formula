@@ -165,7 +165,7 @@ The user experience must honor Excel's familiar mental model while introducing m
 | Shortcut | Action |
 |----------|--------|
 | `Cmd/Ctrl+B` | Bold |
-| `Ctrl+I` | Italic |
+| `Cmd/Ctrl+I` | Italic |
 | `Cmd/Ctrl+U` | Underline |
 | `Cmd/Ctrl+1` | Format cells dialog |
 | `Cmd/Ctrl+Shift+$` | Currency format |
@@ -177,12 +177,13 @@ The user experience must honor Excel's familiar mental model while introducing m
 | Shortcut | Action |
 |----------|--------|
 | `Cmd+K` (Mac) / `Ctrl+K` (Windows/Linux) | Inline AI edit |
-| `Cmd+I` (Mac) / `Ctrl+Shift+A` (Windows/Linux) | Toggle AI chat sidebar |
+| `Cmd+Shift+A` (Mac) / `Ctrl+Shift+A` (Windows/Linux) | Toggle AI chat sidebar |
 | `Tab` (in formula bar, when an AI suggestion is shown) | Accept AI suggestion |
 
 Platform notes:
 
-- **macOS:** `Cmd+I` is reserved for **AI Chat**. Use `Ctrl+I` for **Italic** (Excel-compatible).
+- **macOS:** `Cmd+I` is reserved for **Italic** (Excel-compatible).
+  Use `Cmd+Shift+A` to toggle the AI chat sidebar.
 - **Windows/Linux:** `Ctrl+I` is reserved for **Italic** (Excel-compatible).
   Use `Ctrl+Shift+A` to toggle the AI chat sidebar.
 
