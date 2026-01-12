@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, openSheetTabContextMenu } from "./helpers";
 
 function installTauriStubForTests(
   options: {
@@ -208,23 +208,8 @@ test.describe("tauri workbook integration", () => {
     await expect(switcher.locator("option")).toHaveText(["Sheet1", "Sheet3"]);
 
     // Unhide Sheet2 and ensure it appears again in the correct order.
-    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet1 tab");
-      const rect = tab.getBoundingClientRect();
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: rect.left + 10,
-          clientY: rect.top + 10,
-        }),
-      );
-    });
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Unhide…" }).click();
+    const menu = await openSheetTabContextMenu(page, "Sheet1");
+    await menu.getByRole("button", { name: "Unhide…", exact: true }).click();
     await menu.getByRole("button", { name: "Sheet2" }).click();
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
@@ -258,24 +243,8 @@ test.describe("tauri workbook integration", () => {
     await expect(switcher.locator("option")).toHaveText(["Sheet1"]);
 
     // Unhide Sheet2 via the sheet tab context menu.
-    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet1 tab");
-      const rect = tab.getBoundingClientRect();
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: rect.left + 10,
-          clientY: rect.top + 10,
-        }),
-      );
-    });
-
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Unhide…" }).click();
+    const menu = await openSheetTabContextMenu(page, "Sheet1");
+    await menu.getByRole("button", { name: "Unhide…", exact: true }).click();
     await expect(menu.getByRole("button", { name: "Sheet2" })).toBeVisible();
     await menu.getByRole("button", { name: "Sheet2" }).click();
 
@@ -480,25 +449,10 @@ test.describe("tauri workbook integration", () => {
     const switcher = page.getByTestId("sheet-switcher");
     await expect(switcher.locator("option")).toHaveText(["Sheet1", "Sheet4"]);
 
-    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet1 tab");
-      const rect = tab.getBoundingClientRect();
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: rect.left + 10,
-          clientY: rect.top + 10,
-        }),
-      );
-    });
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
+    const menu = await openSheetTabContextMenu(page, "Sheet1");
 
     await expect(menu.getByRole("button", { name: "Unhide…" })).toBeVisible();
-    await menu.getByRole("button", { name: "Unhide…" }).click();
+    await menu.getByRole("button", { name: "Unhide…", exact: true }).click();
     await expect(menu.getByRole("button", { name: "Sheet2" })).toBeVisible();
     await expect(menu.getByRole("button", { name: "Sheet3" })).toHaveCount(0);
 
@@ -625,22 +579,7 @@ test.describe("tauri workbook integration", () => {
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
     // Hide Sheet1.
-    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet1 tab");
-      const rect = tab.getBoundingClientRect();
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: rect.left + 10,
-          clientY: rect.top + 10,
-        }),
-      );
-    });
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
+    const menu = await openSheetTabContextMenu(page, "Sheet1");
     // "Unhide…" also contains "Hide" in its accessible name; require an exact match.
     await menu.getByRole("button", { name: "Hide", exact: true }).click();
 
@@ -659,20 +598,7 @@ test.describe("tauri workbook integration", () => {
       .toBe(1);
 
     // Unhide Sheet1.
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-Sheet2"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing Sheet2 tab");
-      const rect = tab.getBoundingClientRect();
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          clientX: rect.left + 10,
-          clientY: rect.top + 10,
-        }),
-      );
-    });
-    await expect(menu).toBeVisible();
+    await openSheetTabContextMenu(page, "Sheet2");
     await menu.getByRole("button", { name: "Unhide…", exact: true }).click();
     await menu.getByRole("button", { name: "Sheet1" }).click();
 
@@ -692,9 +618,7 @@ test.describe("tauri workbook integration", () => {
     // Set tab color for Sheet1.
     // Open via synthetic contextmenu event and use arrow navigation to avoid pointer-driven
     // scrolling that can close the menu (ContextMenu closes on window scroll/wheel events).
-    await page
-      .getByTestId("sheet-tab-Sheet1")
-      .dispatchEvent("contextmenu", { button: 2, clientX: 0, clientY: 0, bubbles: true, cancelable: true });
+    await openSheetTabContextMenu(page, "Sheet1");
     await expect(menu).toBeVisible();
     await page.keyboard.press("ArrowDown"); // Rename -> Hide
     await page.keyboard.press("ArrowDown"); // Hide -> Tab Color
@@ -738,24 +662,8 @@ test.describe("tauri workbook integration", () => {
     await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
 
     // Delete sheet-2 via the sheet tab context menu.
-    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
-    await page.evaluate(() => {
-      const tab = document.querySelector('[data-testid="sheet-tab-sheet-2"]') as HTMLElement | null;
-      if (!tab) throw new Error("Missing sheet-tab-sheet-2");
-      const rect = tab.getBoundingClientRect();
-      tab.dispatchEvent(
-        new MouseEvent("contextmenu", {
-          bubbles: true,
-          cancelable: true,
-          button: 2,
-          clientX: rect.left + 10,
-          clientY: rect.top + 10,
-        }),
-      );
-    });
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Delete" }).click();
+    const menu = await openSheetTabContextMenu(page, "sheet-2");
+    await menu.getByRole("button", { name: "Delete", exact: true }).click();
     // The desktop web harness uses the non-blocking quick-pick dialog instead of the
     // browser-native `window.confirm` prompt.
     const quickPick = page.getByTestId("quick-pick");

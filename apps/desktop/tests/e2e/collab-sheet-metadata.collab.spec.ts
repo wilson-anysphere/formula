@@ -6,7 +6,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { getAvailablePort, startSyncServer } from "../../../../services/sync-server/test/test-helpers";
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, openSheetTabContextMenu } from "./helpers";
 
 test.describe("collaboration: sheet metadata", () => {
   test("syncs sheet list order + names from Yjs session.sheets across clients", async ({ browser }, testInfo) => {
@@ -167,20 +167,7 @@ test.describe("collaboration: sheet metadata", () => {
 
       const menuA = pageA.getByTestId("sheet-tab-context-menu");
       const openSheetTabContextMenuA = async (sheetId: string) => {
-        await pageA.evaluate((sheetId) => {
-          const el = document.querySelector<HTMLElement>(`[data-testid="sheet-tab-${sheetId}"]`);
-          if (!el) throw new Error(`Missing sheet tab: ${sheetId}`);
-          const rect = el.getBoundingClientRect();
-          el.dispatchEvent(
-            new MouseEvent("contextmenu", {
-              bubbles: true,
-              cancelable: true,
-              clientX: rect.left + rect.width / 2,
-              clientY: rect.top + rect.height / 2,
-            }),
-          );
-        }, sheetId);
-        await expect(menuA).toBeVisible({ timeout: 10_000 });
+        await openSheetTabContextMenu(pageA, sheetId);
       };
 
       // 1.5) Perform sheet-tab UI actions on client A and assert they propagate to client B
