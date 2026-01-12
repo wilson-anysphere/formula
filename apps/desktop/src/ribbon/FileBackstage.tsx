@@ -97,7 +97,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.versionHistory,
       },
       {
-        iconId: "open-branch-manager-panel",
+        iconId: "file.info.manageWorkbook.branches",
         label: "Branches",
         hint: "",
         ariaKeyShortcuts: "",
