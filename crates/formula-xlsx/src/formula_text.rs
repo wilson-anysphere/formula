@@ -27,6 +27,7 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "HSTACK",
     "IFNA",
     "IFS",
+    "IMAGE",
     "ISO.CEILING",
     "ISO.WEEKNUM",
     "ISOMITTED",
@@ -293,6 +294,14 @@ mod tests {
         let input = r#"CONCAT("_xlfn.",SEQUENCE(1))"#;
         let expected = r#"_xlfn.CONCAT("_xlfn.",_xlfn.SEQUENCE(1))"#;
         assert_eq!(add_xlfn_prefixes(input), expected);
+    }
+
+    #[test]
+    fn xlfn_roundtrip_preserves_image_function() {
+        let input = r#"IMAGE("https://example.com/x.png")"#;
+        let expected = r#"_xlfn.IMAGE("https://example.com/x.png")"#;
+        assert_eq!(add_xlfn_prefixes(input), expected);
+        assert_eq!(strip_xlfn_prefixes(expected), input);
     }
 
     #[test]
