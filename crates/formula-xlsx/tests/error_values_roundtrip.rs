@@ -1,10 +1,12 @@
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Write};
 
 use formula_model::{CellValue, ErrorValue, Workbook};
 use formula_xlsx::{read_workbook_model_from_bytes, XlsxDocument};
 use quick_xml::events::Event;
 use quick_xml::Reader;
+use zip::write::FileOptions;
 use zip::ZipArchive;
+use zip::ZipWriter;
 
 fn worksheet_cell_type_and_value(xml: &str, a1: &str) -> Option<(Option<String>, Option<String>)> {
     let mut reader = Reader::from_str(xml);
@@ -142,3 +144,58 @@ fn xlsx_error_values_roundtrip_for_newer_excel_errors() {
     );
 }
 
+#[test]
+fn xlsx_error_value_na_exclamation_alias_parses_as_na() {
+    let mut workbook = Workbook::new();
+    let sheet_id = workbook.add_sheet("Sheet1").expect("add sheet");
+
+    workbook
+        .sheet_mut(sheet_id)
+        .expect("sheet exists")
+        .set_value_a1("A1", CellValue::Error(ErrorValue::NA))
+        .expect("set A1");
+
+    let doc = XlsxDocument::new(workbook);
+    let bytes = doc.save_to_vec().expect("write xlsx");
+
+    // Excel sometimes serializes `#N/A` as `#N/A!` in SpreadsheetML. Rewrite the
+    // sheet XML in-place to simulate a workbook produced by Excel.
+    let mut archive = ZipArchive::new(Cursor::new(&bytes)).expect("open zip");
+    let cursor = Cursor::new(Vec::new());
+    let mut writer = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i).expect("read zip entry");
+        if file.is_dir() {
+            continue;
+        }
+
+        let name = file.name().to_string();
+        let mut data = Vec::with_capacity(file.size() as usize);
+        file.read_to_end(&mut data).expect("read zip entry bytes");
+
+        if name == "xl/worksheets/sheet1.xml" {
+            let xml = String::from_utf8(data).expect("sheet xml should be utf-8");
+            assert!(
+                xml.contains("<v>#N/A</v>"),
+                "expected canonical #N/A error in baseline sheet xml"
+            );
+            let patched = xml.replace("<v>#N/A</v>", "<v>#N/A!</v>");
+            data = patched.into_bytes();
+        }
+
+        writer
+            .start_file(name, options)
+            .expect("start zip file");
+        writer.write_all(&data).expect("write zip file bytes");
+    }
+    let patched_bytes = writer.finish().expect("finish zip").into_inner();
+
+    let loaded = read_workbook_model_from_bytes(&patched_bytes).expect("read workbook model");
+    let sheet = &loaded.sheets[0];
+    assert_eq!(
+        sheet.value_a1("A1").expect("A1"),
+        CellValue::Error(ErrorValue::NA)
+    );
+}
