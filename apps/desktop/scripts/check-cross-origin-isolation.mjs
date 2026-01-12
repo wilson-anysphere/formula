@@ -12,6 +12,15 @@ const repoRoot = path.resolve(desktopDir, "../..");
 const DESKTOP_TAURI_PACKAGE = "formula-desktop-tauri";
 const DESKTOP_BINARY_NAME = "formula-desktop";
 
+function cargoTargetDir() {
+  // Respect `CARGO_TARGET_DIR` if set, since some developer/CI environments override it
+  // for caching. Cargo interprets relative paths relative to the working directory used
+  // for `cargo build`, which this script sets to `repoRoot`.
+  const targetDir = process.env.CARGO_TARGET_DIR;
+  if (!targetDir || targetDir.trim() === "") return path.join(repoRoot, "target");
+  return path.isAbsolute(targetDir) ? targetDir : path.join(repoRoot, targetDir);
+}
+
 function run(
   cmd,
   args,
@@ -38,7 +47,7 @@ function run(
 
 function desktopBinaryPath() {
   const exe = process.platform === "win32" ? `${DESKTOP_BINARY_NAME}.exe` : DESKTOP_BINARY_NAME;
-  return path.join(repoRoot, "target", "release", exe);
+  return path.join(cargoTargetDir(), "release", exe);
 }
 
 async function cargoBuildDesktopBinary() {
