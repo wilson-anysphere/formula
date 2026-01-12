@@ -392,9 +392,12 @@ For string-like fields that have both ANSI/MBCS and Unicode record variants:
 
 - If the Unicode record exists, the ANSI record does **not** contribute.
 - Unicode record payloads are UTF-16LE bytes. Some producers also embed an *internal* `u32le` length
-  prefix before the UTF-16LE bytes (with the length interpreted as either code units or bytes).
-  `formula-vba` strips that internal length prefix only when it is consistent with the record
-  length; otherwise it treats the full payload as raw UTF-16LE bytes.
+  prefix before the UTF-16LE bytes (with the length interpreted as either code units or bytes). Some
+  producers also include a trailing UTF-16 NUL terminator but do **not** include it in the internal
+  length prefix.
+  `formula-vba` strips the internal length prefix only when it is consistent with the record length
+  (including the “length excludes trailing NUL terminator” variant); otherwise it treats the full
+  payload as raw UTF-16LE bytes.
 
 #### `MODULESTREAMNAME` reserved trimming
 
