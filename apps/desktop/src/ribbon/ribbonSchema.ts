@@ -1647,7 +1647,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               id: "data.getTransform.getData",
               label: "Get Data",
               ariaLabel: "Get Data",
-              iconId: "arrowDown",
+              iconId: "download",
               kind: "dropdown",
               size: "large",
               menuItems: [
