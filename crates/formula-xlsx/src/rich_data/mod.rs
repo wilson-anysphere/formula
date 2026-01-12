@@ -35,7 +35,10 @@ pub use worksheet_scan::scan_cells_with_metadata_indices;
 
 use std::cmp::Ordering;
 
-/// Workbook relationship type for `xl/richData/richValueRel.xml`.
+/// One observed workbook relationship type for `xl/richData/richValueRel.xml`.
+///
+/// Note: Excel also emits other relationship type URIs for rich values depending on build/version;
+/// see `docs/20-images-in-cells-richdata.md` for a fixture-backed summary.
 pub const REL_TYPE_RICH_VALUE_REL: &str =
     "http://schemas.microsoft.com/office/2022/10/relationships/richValueRel";
 /// Workbook relationship type for `xl/richData/rdrichvalue.xml`.
