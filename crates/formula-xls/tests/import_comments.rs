@@ -120,6 +120,24 @@ fn imports_note_comment_text_split_across_continue_records_using_multibyte_codep
 }
 
 #[test]
+fn imports_note_comment_author_stored_as_biff8_short_string_biff5() {
+    let bytes = xls_fixture_builder::build_note_comment_biff5_author_biff8_short_string_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("NotesBiff5AuthorBiff8")
+        .expect("NotesBiff5AuthorBiff8 missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let comments = sheet.comments_for_cell(a1);
+    assert_eq!(comments.len(), 1, "expected 1 comment on A1");
+    assert_eq!(comments[0].content, "Hi");
+    assert_eq!(comments[0].author.name, "\u{0410}");
+    assert_eq!(comments[0].id, "xls-note:A1:1");
+}
+
+#[test]
 fn anchors_note_comments_to_merged_region_top_left_cell() {
     let bytes = xls_fixture_builder::build_note_comment_in_merged_region_fixture_xls();
     let result = import_fixture(&bytes);

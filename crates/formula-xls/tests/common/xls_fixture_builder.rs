@@ -578,6 +578,22 @@ pub fn build_note_comment_biff5_split_across_continues_codepage_932_fixture_xls(
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF5 `.xls` fixture where the NOTE author string is stored as a BIFF8-style
+/// `ShortXLUnicodeString` (length + flags byte) even though the workbook is BIFF5.
+pub fn build_note_comment_biff5_author_biff8_short_string_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_biff5_author_biff8_short_string_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single sheet with a merged region (`A1:B1`).
 ///
 /// The NOTE record is targeted at the non-anchor cell (`B1`), but the importer should
@@ -2075,6 +2091,14 @@ fn build_note_comment_biff5_split_across_continues_codepage_932_workbook_stream(
     )
 }
 
+fn build_note_comment_biff5_author_biff8_short_string_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream_biff5(
+        "NotesBiff5AuthorBiff8",
+        &build_note_comment_biff5_author_biff8_short_string_sheet_stream(),
+        1251,
+    )
+}
+
 fn build_note_comment_codepage_1251_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream(
         "NotesCp1251",
@@ -2294,7 +2318,7 @@ fn build_note_comment_biff5_sheet_stream() -> Vec<u8> {
     let author_bytes = [0xC0u8];
     let text_bytes = [b'H', b'i', b' ', 0xC0u8];
     let segments: [&[u8]; 1] = [&text_bytes];
-    build_note_comment_biff5_sheet_stream_with_ansi_txo(&author_bytes, &segments, false)
+    build_note_comment_biff5_sheet_stream_with_ansi_txo(&author_bytes, &segments, false, false)
 }
 
 fn build_note_comment_biff5_split_across_continues_sheet_stream(prefix_flags: bool) -> Vec<u8> {
@@ -2303,7 +2327,7 @@ fn build_note_comment_biff5_split_across_continues_sheet_stream(prefix_flags: bo
     let part1 = [b'H', b'i', b' '];
     let part2 = [0xC0u8];
     let segments: [&[u8]; 2] = [&part1, &part2];
-    build_note_comment_biff5_sheet_stream_with_ansi_txo(&author_bytes, &segments, prefix_flags)
+    build_note_comment_biff5_sheet_stream_with_ansi_txo(&author_bytes, &segments, prefix_flags, false)
 }
 
 fn build_note_comment_biff5_split_across_continues_codepage_932_sheet_stream() -> Vec<u8> {
@@ -2313,13 +2337,14 @@ fn build_note_comment_biff5_split_across_continues_codepage_932_sheet_stream() -
     let part1 = [0x82u8];
     let part2 = [0xA0u8];
     let segments: [&[u8]; 2] = [&part1, &part2];
-    build_note_comment_biff5_sheet_stream_with_ansi_txo(&author_bytes, &segments, false)
+    build_note_comment_biff5_sheet_stream_with_ansi_txo(&author_bytes, &segments, false, false)
 }
 
 fn build_note_comment_biff5_sheet_stream_with_ansi_txo(
     author_bytes: &[u8],
     text_segments: &[&[u8]],
     prefix_flags: bool,
+    author_is_biff8_short_string: bool,
 ) -> Vec<u8> {
     const OBJECT_ID: u16 = 1;
     // The workbook globals above create 16 style XFs + 1 cell XF, so the first usable
@@ -2352,11 +2377,12 @@ fn build_note_comment_biff5_sheet_stream_with_ansi_txo(
     // Ensure the anchor cell exists in the calamine value grid.
     push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
 
-    push_record(
-        &mut sheet,
-        RECORD_NOTE,
-        &note_record_biff5_author_bytes(0u16, 0u16, OBJECT_ID, author_bytes),
-    );
+    let note = if author_is_biff8_short_string {
+        note_record_biff5_author_biff8_short_string_bytes(0u16, 0u16, OBJECT_ID, author_bytes)
+    } else {
+        note_record_biff5_author_bytes(0u16, 0u16, OBJECT_ID, author_bytes)
+    };
+    push_record(&mut sheet, RECORD_NOTE, &note);
     push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
 
     // TXO header: cchText at offset 6, cbRuns at offset 12.
@@ -2383,6 +2409,15 @@ fn build_note_comment_biff5_sheet_stream_with_ansi_txo(
 
     push_record(&mut sheet, RECORD_EOF, &[]);
     sheet
+}
+
+fn build_note_comment_biff5_author_biff8_short_string_sheet_stream() -> Vec<u8> {
+    // In Windows-1251, 0xC0 maps to Cyrillic "А" (U+0410). Encode the author as a BIFF8-style
+    // ShortXLUnicodeString ([len][flags][chars]) even though the workbook is BIFF5.
+    let author_bytes = [0xC0u8];
+    let text_bytes = [b'H', b'i'];
+    let segments: [&[u8]; 1] = [&text_bytes];
+    build_note_comment_biff5_sheet_stream_with_ansi_txo(&author_bytes, &segments, false, true)
 }
 
 fn build_note_comment_codepage_1251_sheet_stream() -> Vec<u8> {
@@ -3112,6 +3147,31 @@ fn note_record_biff5_author_bytes(
     out.extend_from_slice(&object_id.to_le_bytes()); // grbit (or idObj)
     out.extend_from_slice(&object_id.to_le_bytes()); // idObj (or grbit)
     write_short_ansi_bytes(&mut out, author_bytes);
+    out
+}
+
+fn note_record_biff5_author_biff8_short_string_bytes(
+    row: u16,
+    col: u16,
+    object_id: u16,
+    author_bytes: &[u8],
+) -> Vec<u8> {
+    // NOTE record (BIFF5) with a non-standard BIFF8 ShortXLUnicodeString author encoding:
+    //   [rw:u16][col:u16][grbit:u16][idObj:u16][cch:u8][flags:u8][chars...]
+    //
+    // Some `.xls` producers appear to use this encoding even in BIFF5 workbooks.
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&row.to_le_bytes());
+    out.extend_from_slice(&col.to_le_bytes());
+    out.extend_from_slice(&object_id.to_le_bytes()); // grbit (or idObj)
+    out.extend_from_slice(&object_id.to_le_bytes()); // idObj (or grbit)
+    let len: u8 = author_bytes
+        .len()
+        .try_into()
+        .expect("author string too long for u8 length");
+    out.push(len);
+    out.push(0); // flags: compressed 8-bit chars
+    out.extend_from_slice(author_bytes);
     out
 }
 
