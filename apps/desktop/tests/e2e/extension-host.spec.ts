@@ -610,6 +610,28 @@ test.describe("BrowserExtensionHost", () => {
       const commandId = "selectionEvents.getCount";
       const extensionId = "formula-test.selection-events";
 
+      // The desktop host now uses a real permission prompt UI. Pre-grant `ui.commands`
+      // for this ad-hoc test extension so the worker can activate without blocking
+      // on an interactive modal.
+      try {
+        const key = "formula.extensionHost.permissions";
+        const existing = (() => {
+          try {
+            const raw = localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : {};
+          } catch {
+            return {};
+          }
+        })();
+        existing[extensionId] = {
+          ...(existing[extensionId] ?? {}),
+          "ui.commands": true,
+        };
+        localStorage.setItem(key, JSON.stringify(existing));
+      } catch {
+        // ignore
+      }
+
       const manifest = {
         name: "selection-events",
         version: "1.0.0",
