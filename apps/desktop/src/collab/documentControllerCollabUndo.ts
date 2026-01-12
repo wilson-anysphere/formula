@@ -129,11 +129,12 @@ export async function bindDocumentControllerWithCollabUndo(options: {
       // Best-effort.
     }
 
-    // Offline persistence can hydrate the Y.Doc before provider sync. Ensure we
-    // add comments to the undo scope as soon as offline hydration completes.
-    if (typeof (session as any).offline?.whenLoaded === "function") {
-      void (session as any).offline
-        .whenLoaded()
+    // Local persistence can hydrate the Y.Doc before provider sync. Ensure we add
+    // comments to the undo scope as soon as persistence hydration completes so
+    // comment edits are undoable immediately even while offline.
+    if (typeof (session as any).whenLocalPersistenceLoaded === "function") {
+      void session
+        .whenLocalPersistenceLoaded()
         .then(() => {
           try {
             if (session.doc.share.get("comments")) ensureCommentsUndoScope();
