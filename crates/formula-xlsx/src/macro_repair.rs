@@ -76,6 +76,17 @@ pub(crate) fn ensure_xlsm_content_types(
     let mut has_vba_data_override = false;
     let mut changed = false;
 
+    fn is_macro_enabled_workbook_content_type(content_type: &str) -> bool {
+        // Preserve any macro-enabled workbook kind (`.xlsm`, `.xltm`, `.xlam`) rather than
+        // unconditionally forcing `.xlsm`. This allows callers to patch `[Content_Types].xml`
+        // for templates/add-ins and still rely on macro repair to inject the other required
+        // VBA overrides.
+        content_type
+            .trim()
+            .to_ascii_lowercase()
+            .contains("macroenabled.main+xml")
+    }
+
     fn part_name_matches(candidate: &str, expected: &str) -> bool {
         let candidate = candidate.trim().strip_prefix('/').unwrap_or(candidate.trim());
         let expected = expected.trim().strip_prefix('/').unwrap_or(expected.trim());
@@ -108,7 +119,13 @@ pub(crate) fn ensure_xlsm_content_types(
         let desired_content_type = match part_name.as_deref() {
             Some(part) if part_name_matches(part, WORKBOOK_PART_NAME) => {
                 *has_workbook_override = true;
-                Some(WORKBOOK_MACRO_CONTENT_TYPE)
+                // If the workbook already advertises a macro-enabled content type (for example
+                // `.xltm` templates or `.xlam` add-ins), keep it. Otherwise, upgrade to the default
+                // XLSM workbook type.
+                match content_type.as_deref() {
+                    Some(existing) if is_macro_enabled_workbook_content_type(existing) => None,
+                    _ => Some(WORKBOOK_MACRO_CONTENT_TYPE),
+                }
             }
             Some(part) if part_name_matches(part, VBA_PART_NAME) => {
                 *has_vba_override = true;
@@ -667,4 +684,3 @@ pub(crate) fn ensure_vba_project_rels_has_signature(
 
     Ok(())
 }
-
