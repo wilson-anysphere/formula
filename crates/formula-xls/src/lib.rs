@@ -26,9 +26,10 @@
 //! be skipped).
 
 use std::collections::{HashMap, HashSet};
+use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
-use calamine::{open_workbook, Data, Reader, Sheet, SheetType, SheetVisible, Xls};
+use calamine::{Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
     normalize_formula_text, CellRef, CellValue, ColRange, Comment, CommentAuthor, CommentKind,
     DefinedNameScope, ErrorValue, HyperlinkTarget, PrintTitles, Range, RowRange, SheetAutoFilter,
@@ -220,7 +221,6 @@ fn import_xls_path_with_biff_reader(
             None
         }
     };
-
     let mut biff_version: Option<biff::BiffVersion> = None;
     let mut biff_codepage: Option<u16> = None;
     let mut biff_globals: Option<biff::globals::BiffWorkbookGlobals> = None;
@@ -251,7 +251,24 @@ fn import_xls_path_with_biff_reader(
         }
     }
 
-    let mut workbook: Xls<_> = open_workbook(path)?;
+    // `calamine` can panic when parsing BIFF8 defined-name `NAME` (0x0018) records that are split
+    // across `CONTINUE` records. Detect and mask *continued* NAME records before handing the
+    // workbook stream to calamine; we parse defined names ourselves via BIFF.
+    let mut workbook: Xls<_> = match workbook_stream.as_deref() {
+        Some(stream) => {
+            let xls_bytes = match mask_biff_record_id_followed_by_continue(stream, 0x0018, 0xFFFF)
+            {
+                Some(sanitized) => build_in_memory_xls(&sanitized)?,
+                None => build_in_memory_xls(stream)?,
+            };
+            Xls::new(Cursor::new(xls_bytes))?
+        }
+        None => {
+            let bytes =
+                std::fs::read(path).map_err(|err| ImportError::Xls(calamine::XlsError::Io(err)))?;
+            Xls::new(Cursor::new(bytes))?
+        }
+    };
 
     // We need to snapshot metadata (names, visibility, type) up-front because we
     // need mutable access to the workbook while iterating over ranges.
@@ -2107,4 +2124,69 @@ fn reconcile_biff_sheet_mapping(
     });
 
     (mapping, warning)
+}
+
+fn mask_biff_record_id_followed_by_continue(
+    stream: &[u8],
+    target_id: u16,
+    replacement_id: u16,
+) -> Option<Vec<u8>> {
+    let mut offsets = Vec::<usize>::new();
+    let mut offset: usize = 0;
+
+    while offset + 4 <= stream.len() {
+        let record_id = u16::from_le_bytes([stream[offset], stream[offset + 1]]);
+        let len = u16::from_le_bytes([stream[offset + 2], stream[offset + 3]]) as usize;
+
+        let next = match offset.checked_add(4 + len) {
+            Some(v) => v,
+            None => break,
+        };
+        if next > stream.len() {
+            break;
+        }
+
+        if record_id == target_id && next + 4 <= stream.len() {
+            let next_id = u16::from_le_bytes([stream[next], stream[next + 1]]);
+            // BIFF `CONTINUE` record id.
+            if next_id == 0x003C {
+                offsets.push(offset);
+            }
+        }
+
+        offset = next;
+    }
+
+    if offsets.is_empty() {
+        return None;
+    }
+
+    let mut out = stream.to_vec();
+    for offset in offsets {
+        out[offset..offset + 2].copy_from_slice(&replacement_id.to_le_bytes());
+    }
+    Some(out)
+}
+
+fn build_in_memory_xls(workbook_stream: &[u8]) -> Result<Vec<u8>, ImportError> {
+    // Construct a minimal CFB container containing only the Workbook stream. This is sufficient
+    // for calamine's `Xls` parser and avoids needing to modify the original file on disk.
+    //
+    // Calamine's internal CFB parser rejects v4 compound files whose root directory has no
+    // mini-stream (root start sector = ENDOFCHAIN). To keep `.xls` import best-effort for large
+    // workbooks, always build a v3 CFB container here.
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create_with_version(cfb::Version::V3, cursor)
+        .map_err(|err| ImportError::Xls(calamine::XlsError::Io(err)))?;
+
+    {
+        let mut stream = ole
+            .create_stream("Workbook")
+            .map_err(|err| ImportError::Xls(calamine::XlsError::Io(err)))?;
+        stream
+            .write_all(workbook_stream)
+            .map_err(|err| ImportError::Xls(calamine::XlsError::Io(err)))?;
+    }
+
+    Ok(ole.into_inner().into_inner())
 }

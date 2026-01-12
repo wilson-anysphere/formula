@@ -285,6 +285,28 @@ pub fn build_defined_names_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a defined name whose `NAME` record is split across
+/// `CONTINUE` records.
+///
+/// The payload is intentionally split twice:
+/// - within the `rgce` token stream
+/// - within the description string
+///
+/// This exercises the importer’s handling of continued BIFF8 `NAME` records.
+pub fn build_continued_name_record_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_continued_name_record_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing workbook-scoped defined names that reference sheets
 /// requiring quoting (spaces, embedded quotes, reserved words), plus a 3D sheet span.
 ///
@@ -1600,6 +1622,65 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_continued_name_record_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "DefinedNames");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // Minimal EXTERNSHEET table with a single internal sheet entry (itab 0).
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
+
+    // A workbook-scoped defined name referencing DefinedNames!$A$1.
+    let name = "MyContinuedName";
+    let description = "This is a long description used to test continued NAME records.";
+    let rgce = ptg_ref3d(0, 0, 0);
+
+    // Split rgce after 3 bytes (mid token payload) and split description after 10 bytes of
+    // character data.
+    let (name_part1, cont1, cont2) =
+        continued_name_record_fragments(name, 0, false, description, &rgce, 3, 10);
+    push_record(&mut globals, RECORD_NAME, &name_part1);
+    push_record(&mut globals, RECORD_CONTINUE, &cont1);
+    push_record(&mut globals, RECORD_CONTINUE, &cont2);
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_empty_sheet_stream(xf_general);
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
 fn build_defined_names_quoting_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -1946,6 +2027,79 @@ fn name_record_calamine_compat(name: &str, rgce: &[u8]) -> Vec<u8> {
 
     out.extend_from_slice(rgce);
     out
+}
+
+fn continued_name_record_fragments(
+    name: &str,
+    itab: u16,
+    hidden: bool,
+    description: &str,
+    rgce: &[u8],
+    split_rgce_at: usize,
+    split_description_at: usize,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    // NAME record payload (BIFF8) header:
+    // [grbit: u16][chKey: u8][cch: u8][cce: u16][ixals: u16][itab: u16]
+    // [cchCustMenu: u8][cchDescription: u8][cchHelpTopic: u8][cchStatusText: u8]
+    let mut header = Vec::<u8>::new();
+
+    let mut grbit: u16 = 0;
+    if hidden {
+        grbit |= 0x0001; // fHidden
+    }
+    header.extend_from_slice(&grbit.to_le_bytes());
+    header.push(0); // chKey
+
+    let cch: u8 = name
+        .len()
+        .try_into()
+        .expect("defined name too long for u8 length");
+    header.push(cch);
+
+    let cce: u16 = rgce
+        .len()
+        .try_into()
+        .expect("rgce too long for u16 length");
+    header.extend_from_slice(&cce.to_le_bytes());
+    header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+    header.extend_from_slice(&itab.to_le_bytes());
+
+    header.push(0); // cchCustMenu
+
+    let desc_len: u8 = description
+        .len()
+        .try_into()
+        .expect("description too long for u8 length");
+    header.push(desc_len); // cchDescription
+    header.push(0); // cchHelpTopic
+    header.push(0); // cchStatusText
+
+    let mut part1 = Vec::<u8>::new();
+    part1.extend_from_slice(&header);
+    // Name string (XLUnicodeStringNoCch).
+    write_unicode_string_no_cch(&mut part1, name);
+
+    let split_rgce_at = split_rgce_at.min(rgce.len());
+    part1.extend_from_slice(&rgce[..split_rgce_at]);
+
+    let mut cont1 = Vec::<u8>::new();
+    cont1.extend_from_slice(&rgce[split_rgce_at..]);
+
+    // Description string (XLUnicodeStringNoCch) begins in the first CONTINUE record, then is split
+    // across another CONTINUE record.
+    let desc_bytes = description.as_bytes();
+    let split_description_at = split_description_at.min(desc_bytes.len());
+
+    // Initial string fragment includes the XLUnicodeStringNoCch flags byte.
+    cont1.push(0); // flags (compressed)
+    cont1.extend_from_slice(&desc_bytes[..split_description_at]);
+
+    // Continuation fragment begins with continued-segment option flags (fHighByte).
+    let mut cont2 = Vec::<u8>::new();
+    cont2.push(0); // continued segment option flags (compressed)
+    cont2.extend_from_slice(&desc_bytes[split_description_at..]);
+
+    (part1, cont1, cont2)
 }
 
 fn write_unicode_string_no_cch(out: &mut Vec<u8>, s: &str) {
