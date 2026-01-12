@@ -53,7 +53,8 @@ The collaborative workbook is a single shared `Y.Doc` with these primary roots:
 
 Note: even “empty” cells may still exist in Yjs as marker-only `Y.Map`s (for example, to
 record a causal `formula = null` clear for deterministic conflict detection; see “Conflict
-monitoring” below).
+monitoring” below). `CollabSession.getCell()` treats these marker-only cells as empty UI
+state (returns `null`) even though the underlying Yjs map entry is preserved for causality.
 
 `@formula/collab-workbook` (`getWorkbookRoots`, `ensureWorkbookSchema`) is the canonical place that defines/normalizes these roots.
 
