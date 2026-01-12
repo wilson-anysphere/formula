@@ -304,8 +304,8 @@ following content types (formatted for readability):
 
 Notes:
 
-* Other producers may use the default `application/xml` for some of these parts; preserve whatever the
-  source file uses when round-tripping.
+* In this repo’s fixtures, explicit overrides are present for these parts; other producers may vary.
+  Preserve whatever the source file uses when round-tripping.
 * The image bytes are stored under `xl/media/*.png` (or other formats) and typically use the relevant
   `<Default Extension="…">` entry rather than an explicit `<Override>`.
 
