@@ -1203,6 +1203,10 @@ export function createSyncServer(
       )
     : http.createServer(handler);
 
+  // Reduce exposure to slowloris-style attacks (clients that slowly drip headers).
+  // The sync-server request surface area is small, so a short header timeout is safe.
+  server.headersTimeout = 10_000;
+
   wss.on("connection", (ws, req) => {
     const ip = pickIp(req, config.trustProxy);
     // Match y-websocket docName extraction (no normalization/decoding).
