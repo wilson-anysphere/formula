@@ -49,7 +49,6 @@ pub(crate) fn load_cell_images_from_parts(
         let _ = parse_cell_images_part(path, parts, workbook);
     }
 }
-
 /// Parsed workbook-level cell images parts.
 #[derive(Debug, Clone, Default)]
 pub struct CellImages {

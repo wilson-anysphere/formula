@@ -1443,7 +1443,10 @@ fn parse_biff_font_record(data: &[u8], biff: BiffVersion, codepage: u16) -> Resu
     // let charset = data[12];
     // let reserved = data[13];
 
-    let (name, _) = strings::parse_biff_short_string(&data[14..], biff, codepage)?;
+    let (mut name, _) = strings::parse_biff_short_string(&data[14..], biff, codepage)?;
+    // Excel stores some strings with embedded NUL bytes; strip them so font names round-trip
+    // deterministically and match Excel’s visible semantics.
+    strip_embedded_nuls(&mut name);
 
     let size_100pt = height_twips.saturating_mul(5);
     let bold = weight >= 700;
@@ -1578,6 +1581,29 @@ mod tests {
                 offset: 0x1234
             }]
         );
+    }
+
+    #[test]
+    fn font_strips_embedded_nuls() {
+        // FONT record with a compressed 8-bit name containing an embedded NUL byte.
+        //
+        // BIFF8 `ShortXLUnicodeString`: [cch=3][flags=0][A][\\0][B]
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&200u16.to_le_bytes()); // height_twips (10pt)
+        payload.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        payload.extend_from_slice(&0u16.to_le_bytes()); // icv
+        payload.extend_from_slice(&400u16.to_le_bytes()); // weight
+        payload.extend_from_slice(&0u16.to_le_bytes()); // sss
+        payload.push(0); // underline
+        payload.push(0); // family
+        payload.push(0); // charset
+        payload.push(0); // reserved
+        payload.push(3); // cch
+        payload.push(0); // flags (compressed)
+        payload.extend_from_slice(&[b'A', 0x00, b'B']);
+
+        let font = parse_biff_font_record(&payload, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(font.name, "AB");
     }
 
     #[test]

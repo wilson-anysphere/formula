@@ -961,6 +961,13 @@ fn format_cell_ref(row: u16, col_with_flags: u16) -> String {
     out
 }
 
+fn format_cell_ref_no_dollars(row0: u32, col0: u32) -> String {
+    let mut out = String::new();
+    push_column(col0, &mut out);
+    out.push_str(&(row0 + 1).to_string());
+    out
+}
+
 fn format_row_ref(row: u16, row_rel: bool) -> String {
     let mut out = String::new();
     if !row_rel {
@@ -1216,6 +1223,13 @@ mod tests {
         let mut warnings = Vec::<crate::ImportWarning>::new();
         crate::parse_print_titles_refers_to(sheet_name, expr, &mut warnings)
             .expect("parse print titles defined name");
+    }
+
+    #[test]
+    fn formats_cell_ref_no_dollars() {
+        assert_eq!(format_cell_ref_no_dollars(0, 0), "A1");
+        assert_eq!(format_cell_ref_no_dollars(1, 1), "B2");
+        assert_eq!(format_cell_ref_no_dollars(0, 26), "AA1");
     }
 
     const BIFF8_MAX_ROW: u16 = 0xFFFF;
