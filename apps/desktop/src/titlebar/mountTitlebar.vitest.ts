@@ -138,7 +138,12 @@ describe("mountTitlebar", () => {
     minimizeButton?.click();
     maximizeButton?.click();
 
-    expect(calls).toEqual({ close: 1, minimize: 1, maximize: 1 });
+    // Double-clicking the drag region should also toggle maximize.
+    container.querySelector<HTMLElement>('[data-testid="titlebar-drag-region"]')?.dispatchEvent(
+      new MouseEvent("dblclick", { bubbles: true }),
+    );
+
+    expect(calls).toEqual({ close: 1, minimize: 1, maximize: 2 });
 
     act(() => {
       handle?.dispose();

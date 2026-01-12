@@ -181,7 +181,12 @@ export function Titlebar({
       ) : null}
 
       {/* Only the middle section is marked as draggable so controls remain clickable. */}
-      <div className="formula-titlebar__drag-region" data-tauri-drag-region data-testid="titlebar-drag-region">
+      <div
+        className="formula-titlebar__drag-region"
+        data-tauri-drag-region
+        data-testid="titlebar-drag-region"
+        onDoubleClick={windowControls?.onToggleMaximize}
+      >
         <div className="formula-titlebar__titles" data-testid="titlebar-titles">
           <span className="formula-titlebar__app-name">{appName}</span>
           {normalizedDocumentName.trim().length > 0 ? (
