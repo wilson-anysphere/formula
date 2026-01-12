@@ -7506,7 +7506,9 @@ fn fn_xmatch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() < 2 || args.len() > 4 {
         return Value::Error(ErrorKind::Value);
     }
-    let lookup_value = args[0].clone();
+    // `lookup_value` is a scalar argument; when provided as a range reference Excel applies implicit
+    // intersection based on the formula cell. Match the AST evaluator's `eval_scalar_arg` behavior.
+    let lookup_value = apply_implicit_intersection(args[0].clone(), grid, base);
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
@@ -7573,7 +7575,9 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if args.len() < 3 || args.len() > 6 {
         return Value::Error(ErrorKind::Value);
     }
-    let lookup_value = args[0].clone();
+    // `lookup_value` is a scalar argument; when provided as a range reference Excel applies implicit
+    // intersection based on the formula cell. Match the AST evaluator's `eval_scalar_arg` behavior.
+    let lookup_value = apply_implicit_intersection(args[0].clone(), grid, base);
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }

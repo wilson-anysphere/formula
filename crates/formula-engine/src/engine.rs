@@ -8155,8 +8155,9 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() < 2 || args.len() > 4 {
                     return false;
                 }
+                // `lookup_value` is scalar and uses implicit intersection when passed a range.
                 let lookup_ok =
-                    bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes);
+                    bytecode_expr_is_eligible_inner(&args[0], true, false, lexical_scopes);
                 // Restrict to reference-like lookup_array arguments; the bytecode runtime does not
                 // support implicit intersection on arbitrary arrays.
                 //
@@ -8181,8 +8182,9 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() < 3 || args.len() > 6 {
                     return false;
                 }
+                // `lookup_value` is scalar and uses implicit intersection when passed a range.
                 let lookup_ok =
-                    bytecode_expr_is_eligible_inner(&args[0], false, false, lexical_scopes);
+                    bytecode_expr_is_eligible_inner(&args[0], true, false, lexical_scopes);
                 let lookup_array_is_range_like = matches!(args[1], bytecode::Expr::CellRef(_))
                     || matches!(
                         infer_binding_kind(&args[1], lexical_scopes),
