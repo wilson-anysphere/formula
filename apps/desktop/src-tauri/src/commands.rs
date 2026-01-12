@@ -423,6 +423,7 @@ pub struct PivotTableSummary {
 use crate::file_io::read_workbook;
 #[cfg(feature = "desktop")]
 use crate::ipc_origin;
+#[cfg(feature = "desktop")]
 use crate::persistence::{
     autosave_db_path_for_new_workbook, autosave_db_path_for_workbook, WorkbookPersistenceLocation,
 };
