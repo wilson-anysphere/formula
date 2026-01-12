@@ -20,6 +20,15 @@ const FALLBACK_CELL_IMAGES_PART: &str = "xl/cellimages.xml";
 const IMAGE_REL_TYPE: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
+fn strip_fragment(target: &str) -> &str {
+    // OPC relationship targets are URIs; some producers include a fragment (e.g. `foo.xml#bar`).
+    // OPC part names do not include fragments, so they must be ignored when resolving ZIP entries.
+    target
+        .split_once('#')
+        .map(|(base, _)| base)
+        .unwrap_or(target)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CellImagesPartInfo {
     /// ZIP entry name for the cell images part (typically `xl/cellimages.xml`).
@@ -112,7 +121,11 @@ fn discover_cell_images_part(pkg: &XlsxPackage) -> Result<Option<String>> {
                     continue;
                 }
 
-                let candidate = resolve_target(WORKBOOK_PART, &rel.target);
+                let target = strip_fragment(&rel.target);
+                if target.is_empty() {
+                    continue;
+                }
+                let candidate = resolve_target(WORKBOOK_PART, target);
                 if super::is_cell_images_part(&candidate) && pkg.part(&candidate).is_some() {
                     return Ok(Some(candidate));
                 }
@@ -213,13 +226,6 @@ fn parse_cell_images_image_relationships(
 ) -> Result<HashMap<String, String>> {
     let relationships = parse_relationships(rels_xml)?;
     let mut out: HashMap<String, String> = HashMap::new();
-
-    fn strip_fragment(target: &str) -> &str {
-        target
-            .split_once('#')
-            .map(|(base, _)| base)
-            .unwrap_or(target)
-    }
 
     for rel in relationships {
         if rel

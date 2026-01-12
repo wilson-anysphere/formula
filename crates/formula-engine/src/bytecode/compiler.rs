@@ -497,8 +497,7 @@ impl<'a> CompileCtx<'a> {
 
         for idx in jump_if_idxs {
             let a = self.program.instrs[idx].a();
-            self.program.instrs[idx] =
-                Instruction::new(OpCode::JumpIfFalseOrError, a, end_target);
+            self.program.instrs[idx] = Instruction::new(OpCode::JumpIfFalseOrError, a, end_target);
         }
         for idx in jump_end_idxs {
             self.program.instrs[idx] = Instruction::new(OpCode::Jump, end_target, 0);
