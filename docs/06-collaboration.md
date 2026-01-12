@@ -319,6 +319,7 @@ Notes:
 
 - If `persistence` is provided, `connection.docId` (or `options.docId`) must be set; otherwise the session throws.
 - When `presence` is enabled, `session.presence` is a `PresenceManager` instance.
+- Desktop/Tauri note: the WebView CSP must allow WebSocket connections (`connect-src ws: wss:`) for the sync provider; see [`docs/11-desktop-shell.md`](./11-desktop-shell.md).
 
 ### Sync provider connection + “ready” signals
 
@@ -382,6 +383,8 @@ You can include additional roots via:
 - `undo.includeRoots(doc)` (include arbitrary Yjs root types)
 
 Some internal roots are intentionally excluded from undo tracking (e.g. `cellStructuralOps`, the structural conflict monitor log), so conflict detection metadata is never undone.
+
+Mixed-module Yjs note: in some Node/test environments, a `Y.Doc` may contain root types/items created by a different `yjs` module instance (ESM vs CJS). Upstream `Y.UndoManager` uses `instanceof` checks and can warn `[yjs#509] Not same Y.Doc` when scope types fail those checks. `@formula/collab-undo` includes best-effort patching of “foreign” constructors in the undo scope/transactions so collaborative undo works without warnings.
 
 ### Transactions + origins (local vs remote)
 
