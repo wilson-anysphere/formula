@@ -605,7 +605,11 @@ export function SheetTabStrip({
               // presentation attributes).
               leading: { type: "swatch" as const, color: rgb },
               onSelect: async () => {
-                const tabColor: TabColor = { rgb: entry.excelArgb };
+                // Prefer persisting the currently resolved token color so the workbook matches
+                // what the user saw in the swatch, but fall back to the palette's canonical
+                // ARGB if we cannot parse the CSS color (e.g. missing DOM APIs in tests).
+                const excelArgb = normalizeCssHexToExcelArgb(rgb) ?? entry.excelArgb;
+                const tabColor: TabColor = { rgb: excelArgb };
                 try {
                   await onPersistSheetTabColor?.(sheet.id, tabColor);
                 } catch (err) {
