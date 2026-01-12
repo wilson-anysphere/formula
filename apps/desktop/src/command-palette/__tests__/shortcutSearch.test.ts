@@ -89,6 +89,17 @@ describe("command-palette shortcut search", () => {
     ]);
   });
 
+  test("matches function key tokens (F2)", () => {
+    const commands = [
+      { commandId: "edit.editCell", title: "Edit Cell", category: "Edit", source: { kind: "builtin" as const } },
+    ];
+    const keybindingIndex = new Map<string, readonly string[]>([["edit.editCell", ["F2"]]]);
+
+    expect(searchShortcutCommands({ commands, keybindingIndex, query: "f2" }).map((c) => c.commandId)).toEqual([
+      "edit.editCell",
+    ]);
+  });
+
   test("accepts ctl synonym in shortcut query (ctl+shift+p)", () => {
     const commands = [
       { commandId: "workbench.showCommandPalette", title: "Show Command Palette", category: "Navigation", source: { kind: "builtin" as const } },
