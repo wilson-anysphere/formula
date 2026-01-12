@@ -29,6 +29,17 @@ test("desktop docs use the correct Cargo package name for desktop shell builds",
     "docs/11-desktop-shell.md should not suggest `-p formula-desktop-tauri` (use -p desktop via cargo_agent.sh remapping)",
   );
 
+  const platformDoc = fs.readFileSync(path.join(repoRoot, "instructions", "platform.md"), "utf8");
+  assert.match(
+    platformDoc,
+    /\bcargo_agent\.sh\s+check\s+-p\s+desktop\b[^\\n]*--features\s+desktop\b[^\\n]*--lib\b/,
+    "expected instructions/platform.md to use -p desktop in cargo_agent check example",
+  );
+  assert.ok(
+    !/\bcargo_agent\.sh\s+check\s+-p\s+formula-desktop-tauri\b/.test(platformDoc),
+    "instructions/platform.md should not suggest `-p formula-desktop-tauri` (use -p desktop via cargo_agent.sh remapping)",
+  );
+
   const desktopReadme = fs.readFileSync(path.join(repoRoot, "apps", "desktop", "README.md"), "utf8");
   assert.match(
     desktopReadme,
