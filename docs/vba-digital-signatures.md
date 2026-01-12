@@ -179,6 +179,21 @@ If you need to update or extend signature handling, start with:
 - `crates/formula-vba/src/project_digest.rs`
   - best-effort MS-OVBA-style project digest transcript over OLE streams
 
+## Tests / examples in this repo
+
+The `formula-vba` crate includes unit tests that act as runnable examples of the signature formats
+and binding behavior:
+
+- `crates/formula-vba/tests/signature_parse.rs`
+  - verifies signature stream discovery including the nested-storage edge case (`\x05DigitalSignature/sig`).
+- `crates/formula-vba/tests/signature.rs`
+  - verifies PKCS#7 verification behavior, including prefix scanning and detached `content || pkcs7`.
+- `crates/formula-vba/tests/signed_digest.rs`
+  - exercises `SpcIndirectDataContent` / `DigestInfo` extraction.
+- `crates/formula-vba/tests/signature_binding.rs`
+  - constructs an Authenticode-like `SpcIndirectDataContent` payload with an embedded digest, signs it,
+    and checks that tampering with non-signature streams flips `VbaSignatureBinding` to `NotBound`.
+
 ## Specs / references
 
 - **MS-OVBA**: VBA project storage, signature streams, and VBA project digest computation.
