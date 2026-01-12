@@ -508,6 +508,49 @@ fn bytecode_if_is_lazy_for_unused_false_branch() {
 }
 
 #[test]
+fn bytecode_eval_ast_if_is_lazy_for_unused_false_branch() {
+    // `bytecode::eval_ast` should match VM semantics and avoid evaluating unused IF branches.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IF(TRUE, 7, A2)", origin).expect("parse");
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let value = bytecode::eval_ast(
+        &expr,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(7.0));
+}
+
+#[test]
+fn bytecode_eval_ast_if_condition_error_short_circuits() {
+    // If the IF condition evaluation errors, IF should return that error without evaluating either
+    // branch.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IF(1/0, A2, A2)", origin).expect("parse");
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let value = bytecode::eval_ast(
+        &expr,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Div0));
+}
+
+#[test]
 fn bytecode_iferror_is_lazy_for_unused_fallback() {
     // IFERROR(<non-error>, <unused>) must not evaluate the fallback.
     let origin = CellCoord::new(0, 0);
@@ -531,6 +574,27 @@ fn bytecode_iferror_is_lazy_for_unused_fallback() {
 }
 
 #[test]
+fn bytecode_eval_ast_iferror_is_lazy_for_unused_fallback() {
+    // `bytecode::eval_ast` should match VM semantics and avoid evaluating unused IFERROR fallbacks.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFERROR(1, A2)", origin).expect("parse");
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let value = bytecode::eval_ast(
+        &expr,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(1.0));
+}
+
+#[test]
 fn bytecode_ifna_is_lazy_for_unused_fallback() {
     // IFNA(<non-#N/A>, <unused>) must not evaluate the fallback.
     let origin = CellCoord::new(0, 0);
@@ -545,6 +609,27 @@ fn bytecode_ifna_is_lazy_for_unused_fallback() {
     let mut vm = bytecode::Vm::with_capacity(32);
     let value = vm.eval(
         &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(1.0));
+}
+
+#[test]
+fn bytecode_eval_ast_ifna_is_lazy_for_unused_fallback() {
+    // `bytecode::eval_ast` should match VM semantics and avoid evaluating unused IFNA fallbacks.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFNA(1, A2)", origin).expect("parse");
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let value = bytecode::eval_ast(
+        &expr,
         &grid,
         0,
         origin,
@@ -578,6 +663,28 @@ fn bytecode_ifna_does_not_eval_fallback_for_non_na_errors() {
 }
 
 #[test]
+fn bytecode_eval_ast_ifna_does_not_eval_fallback_for_non_na_errors() {
+    // Ensure `bytecode::eval_ast` matches VM semantics for IFNA when the first argument is a
+    // non-#N/A error.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFNA(1/0, A2)", origin).expect("parse");
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let value = bytecode::eval_ast(
+        &expr,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Div0));
+}
+
+#[test]
 fn bytecode_iferror_evaluates_fallback_for_errors() {
     // IFERROR should evaluate its fallback when the first argument is an error.
     let origin = CellCoord::new(0, 0);
@@ -593,6 +700,28 @@ fn bytecode_iferror_evaluates_fallback_for_errors() {
     let mut vm = bytecode::Vm::with_capacity(32);
     let value = vm.eval(
         &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(7.0));
+}
+
+#[test]
+fn bytecode_eval_ast_iferror_evaluates_fallback_for_errors() {
+    // Ensure `bytecode::eval_ast` matches VM semantics for IFERROR when the first argument errors.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFERROR(1/0, A2)", origin).expect("parse");
+
+    let grid = TextGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        coord: CellCoord::new(1, 0),
+        value: Value::Number(7.0),
+    };
+
+    let value = bytecode::eval_ast(
+        &expr,
         &grid,
         0,
         origin,
@@ -630,6 +759,28 @@ fn bytecode_eval_ast_iferror_evaluates_fallback_for_na_error() {
     // `bytecode::eval_ast` should match VM semantics for IFERROR and treat #N/A as an error.
     let origin = CellCoord::new(0, 0);
     let expr = bytecode::parse_formula("=IFERROR(NA(), A2)", origin).expect("parse");
+
+    let grid = TextGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        coord: CellCoord::new(1, 0),
+        value: Value::Number(7.0),
+    };
+
+    let value = bytecode::eval_ast(
+        &expr,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(7.0));
+}
+
+#[test]
+fn bytecode_eval_ast_ifna_evaluates_fallback_for_na_error() {
+    // Ensure `bytecode::eval_ast` matches VM semantics for IFNA and evaluates the fallback on #N/A.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFNA(NA(), A2)", origin).expect("parse");
 
     let grid = TextGrid {
         // A2 relative to origin (A1) => (row=1, col=0)
