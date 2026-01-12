@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::io::BufRead;
 use std::str::Utf8Error;
 
+use crate::xml::{prefixed_tag, SPREADSHEETML_NS};
 use formula_model::rich_text::{RichText, RichTextRunStyle, Underline};
 use formula_model::Color;
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
@@ -46,6 +47,11 @@ pub(crate) struct SharedStringsEditor {
     sst_tag_name: Vec<u8>,
     sst_was_self_closing: bool,
     original_count: Option<u32>,
+    /// Prefix bound to the SpreadsheetML namespace. If SpreadsheetML is the default namespace,
+    /// this will be `None`.
+    spreadsheetml_prefix: Option<String>,
+    /// Whether SpreadsheetML is the default namespace (`xmlns="…/main"`).
+    spreadsheetml_is_default: bool,
 
     entries: Vec<SharedStringEntry>,
     appended: Vec<SharedStringEntry>,
@@ -69,6 +75,8 @@ impl SharedStringsEditor {
             sst_tag_name: b"sst".to_vec(),
             sst_was_self_closing: false,
             original_count: None,
+            spreadsheetml_prefix: None,
+            spreadsheetml_is_default: true,
             entries: Vec::new(),
             appended: Vec::new(),
             plain_index: HashMap::new(),
@@ -89,6 +97,8 @@ impl SharedStringsEditor {
         let mut sst_was_self_closing = false;
 
         let mut original_count: Option<u32> = None;
+        let mut spreadsheetml_prefix: Option<String> = None;
+        let mut spreadsheetml_is_default: bool = false;
 
         let mut entries = Vec::new();
         let mut plain_index: HashMap<String, u32> = HashMap::new();
@@ -108,6 +118,8 @@ impl SharedStringsEditor {
                     sst_start_end = Some(pos_after);
                     inside_sst = true;
                     original_count = parse_u32_attr(&e, b"count")?;
+                    (spreadsheetml_is_default, spreadsheetml_prefix) =
+                        spreadsheetml_namespace_style_from_sst_start(&e)?;
                 }
                 Event::Empty(e) if local_name(e.name().as_ref()) == b"sst" => {
                     // `<sst .../>` - treat as an empty document with no entries.
@@ -118,6 +130,8 @@ impl SharedStringsEditor {
                     sst_was_self_closing = true;
                     inside_sst = false;
                     original_count = parse_u32_attr(&e, b"count")?;
+                    (spreadsheetml_is_default, spreadsheetml_prefix) =
+                        spreadsheetml_namespace_style_from_sst_start(&e)?;
                 }
                 Event::Start(e) if inside_sst && local_name(e.name().as_ref()) == b"si" => {
                     let si_start = pos_before;
@@ -185,6 +199,8 @@ impl SharedStringsEditor {
             sst_tag_name,
             sst_was_self_closing,
             original_count,
+            spreadsheetml_prefix,
+            spreadsheetml_is_default,
             entries,
             appended: Vec::new(),
             plain_index,
@@ -214,6 +230,14 @@ impl SharedStringsEditor {
             .map(|entry| &entry.rich)
     }
 
+    fn spreadsheetml_prefix_for_inserts(&self) -> Option<&str> {
+        if self.spreadsheetml_is_default {
+            None
+        } else {
+            self.spreadsheetml_prefix.as_deref()
+        }
+    }
+
     pub(crate) fn get_or_insert_plain(&mut self, text: &str) -> u32 {
         if let Some(idx) = self.plain_index.get(text).copied() {
             return idx;
@@ -221,7 +245,7 @@ impl SharedStringsEditor {
 
         let idx = self.len() as u32;
         let rich = RichText::new(text.to_string());
-        let raw_xml = write_si_xml(&rich);
+        let raw_xml = write_si_xml(&rich, self.spreadsheetml_prefix_for_inserts());
         self.appended.push(SharedStringEntry { rich, raw_xml });
         self.plain_index.insert(text.to_string(), idx);
         self.dirty = true;
@@ -242,7 +266,7 @@ impl SharedStringsEditor {
         }
 
         let idx = self.len() as u32;
-        let raw_xml = write_si_xml(rich);
+        let raw_xml = write_si_xml(rich, self.spreadsheetml_prefix_for_inserts());
         self.appended.push(SharedStringEntry {
             rich: rich.clone(),
             raw_xml,
@@ -524,7 +548,7 @@ fn read_text<R: BufRead>(
                 text.push_str(&t);
             }
             Event::CData(e) => text.push_str(std::str::from_utf8(e.as_ref())?),
-            Event::End(e) if e.name() == end => break,
+            Event::End(e) if local_name(e.name().as_ref()) == end.as_ref() => break,
             Event::Eof => return Err(PreserveSharedStringsError::Malformed("unexpected EOF in <t>")),
             _ => {}
         }
@@ -574,83 +598,141 @@ fn local_name(name: &[u8]) -> &[u8] {
     name.rsplit(|&b| b == b':').next().unwrap_or(name)
 }
 
-fn write_si_xml(item: &RichText) -> Vec<u8> {
+fn spreadsheetml_namespace_style_from_sst_start(
+    e: &BytesStart<'_>,
+) -> Result<(bool, Option<String>), PreserveSharedStringsError> {
+    let mut spreadsheetml_is_default = false;
+    let mut spreadsheetml_prefix_decl: Option<String> = None;
+
+    for attr in e.attributes().with_checks(false) {
+        let attr = attr?;
+        let key = attr.key.as_ref();
+        let value = attr.value.as_ref();
+
+        if key == b"xmlns" && value == SPREADSHEETML_NS.as_bytes() {
+            spreadsheetml_is_default = true;
+            continue;
+        }
+
+        if let Some(prefix) = key.strip_prefix(b"xmlns:") {
+            if value == SPREADSHEETML_NS.as_bytes() {
+                spreadsheetml_prefix_decl = Some(String::from_utf8_lossy(prefix).into_owned());
+            }
+        }
+    }
+
+    if spreadsheetml_is_default {
+        return Ok((true, None));
+    }
+
+    let name = e.name();
+    let name = name.as_ref();
+    let element_prefix = name
+        .iter()
+        .rposition(|b| *b == b':')
+        .map(|idx| &name[..idx])
+        .map(|bytes| String::from_utf8_lossy(bytes).into_owned());
+
+    // Prefer the prefix used by the `<sst>` element itself, if present. This preserves the source
+    // file's namespace style when appending new `<si>` entries.
+    let spreadsheetml_prefix = element_prefix.or(spreadsheetml_prefix_decl);
+
+    Ok((false, spreadsheetml_prefix))
+}
+
+fn write_si_xml(item: &RichText, spreadsheetml_prefix: Option<&str>) -> Vec<u8> {
     let mut writer = Writer::new(Vec::new());
-    write_si(&mut writer, item);
+    write_si(&mut writer, spreadsheetml_prefix, item);
     writer.into_inner()
 }
 
-fn write_si(writer: &mut Writer<Vec<u8>>, item: &RichText) {
+fn write_si(writer: &mut Writer<Vec<u8>>, spreadsheetml_prefix: Option<&str>, item: &RichText) {
+    let si_name = prefixed_tag(spreadsheetml_prefix, "si");
     writer
-        .write_event(Event::Start(BytesStart::new("si")))
+        .write_event(Event::Start(BytesStart::new(si_name.as_str())))
         .expect("writing to Vec should not fail");
 
     if item.runs.is_empty() {
-        write_t(writer, &item.text).expect("writing to Vec should not fail");
+        write_t(writer, spreadsheetml_prefix, &item.text).expect("writing to Vec should not fail");
     } else {
+        let r_name = prefixed_tag(spreadsheetml_prefix, "r");
+        let rpr_name = prefixed_tag(spreadsheetml_prefix, "rPr");
         for run in &item.runs {
             writer
-                .write_event(Event::Start(BytesStart::new("r")))
+                .write_event(Event::Start(BytesStart::new(r_name.as_str())))
                 .expect("writing to Vec should not fail");
 
             if !run.style.is_empty() {
                 writer
-                    .write_event(Event::Start(BytesStart::new("rPr")))
+                    .write_event(Event::Start(BytesStart::new(rpr_name.as_str())))
                     .expect("writing to Vec should not fail");
-                write_rpr(writer, &run.style).expect("writing to Vec should not fail");
+                write_rpr(writer, spreadsheetml_prefix, &run.style).expect("writing to Vec should not fail");
                 writer
-                    .write_event(Event::End(BytesEnd::new("rPr")))
+                    .write_event(Event::End(BytesEnd::new(rpr_name.as_str())))
                     .expect("writing to Vec should not fail");
             }
 
             let segment = item.slice_run_text(run);
-            write_t(writer, segment).expect("writing to Vec should not fail");
+            write_t(writer, spreadsheetml_prefix, segment).expect("writing to Vec should not fail");
 
             writer
-                .write_event(Event::End(BytesEnd::new("r")))
+                .write_event(Event::End(BytesEnd::new(r_name.as_str())))
                 .expect("writing to Vec should not fail");
         }
     }
 
     writer
-        .write_event(Event::End(BytesEnd::new("si")))
+        .write_event(Event::End(BytesEnd::new(si_name.as_str())))
         .expect("writing to Vec should not fail");
 }
 
-fn write_t(writer: &mut Writer<Vec<u8>>, text: &str) -> Result<(), quick_xml::Error> {
-    let mut t = BytesStart::new("t");
+fn write_t(
+    writer: &mut Writer<Vec<u8>>,
+    spreadsheetml_prefix: Option<&str>,
+    text: &str,
+) -> Result<(), quick_xml::Error> {
+    let t_name = prefixed_tag(spreadsheetml_prefix, "t");
+    let mut t = BytesStart::new(t_name.as_str());
     if needs_space_preserve(text) {
         t.push_attribute(("xml:space", "preserve"));
     }
     writer.write_event(Event::Start(t))?;
     writer.write_event(Event::Text(BytesText::new(text)))?;
-    writer.write_event(Event::End(BytesEnd::new("t")))?;
+    writer.write_event(Event::End(BytesEnd::new(t_name.as_str())))?;
     Ok(())
 }
 
-fn write_rpr(writer: &mut Writer<Vec<u8>>, style: &RichTextRunStyle) -> Result<(), quick_xml::Error> {
+fn write_rpr(
+    writer: &mut Writer<Vec<u8>>,
+    spreadsheetml_prefix: Option<&str>,
+    style: &RichTextRunStyle,
+) -> Result<(), quick_xml::Error> {
     if let Some(font) = &style.font {
-        let mut rfont = BytesStart::new("rFont");
+        let rfont_name = prefixed_tag(spreadsheetml_prefix, "rFont");
+        let mut rfont = BytesStart::new(rfont_name.as_str());
         rfont.push_attribute(("val", font.as_str()));
         writer.write_event(Event::Empty(rfont))?;
     }
 
     if let Some(size_100pt) = style.size_100pt {
-        let mut sz = BytesStart::new("sz");
+        let sz_name = prefixed_tag(spreadsheetml_prefix, "sz");
+        let mut sz = BytesStart::new(sz_name.as_str());
         let value = format_size_100pt(size_100pt);
         sz.push_attribute(("val", value.as_str()));
         writer.write_event(Event::Empty(sz))?;
     }
 
     if let Some(color) = style.color {
-        let mut c = BytesStart::new("color");
+        let c_name = prefixed_tag(spreadsheetml_prefix, "color");
+        let mut c = BytesStart::new(c_name.as_str());
         let value = format!("{:08X}", color.argb().unwrap_or(0));
         c.push_attribute(("rgb", value.as_str()));
         writer.write_event(Event::Empty(c))?;
     }
 
     if let Some(bold) = style.bold {
-        let mut b = BytesStart::new("b");
+        let b_name = prefixed_tag(spreadsheetml_prefix, "b");
+        let mut b = BytesStart::new(b_name.as_str());
         if !bold {
             b.push_attribute(("val", "0"));
         }
@@ -658,7 +740,8 @@ fn write_rpr(writer: &mut Writer<Vec<u8>>, style: &RichTextRunStyle) -> Result<(
     }
 
     if let Some(italic) = style.italic {
-        let mut i = BytesStart::new("i");
+        let i_name = prefixed_tag(spreadsheetml_prefix, "i");
+        let mut i = BytesStart::new(i_name.as_str());
         if !italic {
             i.push_attribute(("val", "0"));
         }
@@ -666,7 +749,8 @@ fn write_rpr(writer: &mut Writer<Vec<u8>>, style: &RichTextRunStyle) -> Result<(
     }
 
     if let Some(ul) = style.underline {
-        let mut u = BytesStart::new("u");
+        let u_name = prefixed_tag(spreadsheetml_prefix, "u");
+        let mut u = BytesStart::new(u_name.as_str());
         if let Some(val) = ul.to_ooxml() {
             u.push_attribute(("val", val));
         }
@@ -692,4 +776,70 @@ fn format_size_100pt(size_100pt: u16) -> String {
         s.pop();
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use roxmltree::Document;
+
+    #[test]
+    fn appends_si_entries_preserving_prefix_only_spreadsheetml() {
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><x:sst xmlns:x="{ns}" count="1" uniqueCount="1"><x:si><x:t>foo</x:t></x:si></x:sst>"#,
+            ns = SPREADSHEETML_NS
+        );
+
+        let mut editor = SharedStringsEditor::parse(xml.as_bytes()).unwrap();
+        editor.get_or_insert_plain("bar");
+        let updated = editor.to_xml_bytes(None).unwrap();
+
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+        let doc = Document::parse(updated_str).unwrap();
+
+        assert!(updated_str.contains("<x:si"));
+        assert!(updated_str.contains("<x:t>bar</x:t>"));
+        assert!(!updated_str.contains("<si"));
+        assert!(!updated_str.contains("<t"));
+
+        let bar_t = doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "t" && n.text() == Some("bar"))
+            .unwrap();
+        let bar_si = bar_t
+            .ancestors()
+            .find(|n| n.is_element() && n.tag_name().name() == "si")
+            .unwrap();
+        assert_eq!(bar_si.tag_name().namespace(), Some(SPREADSHEETML_NS));
+    }
+
+    #[test]
+    fn appends_si_entries_default_namespace_keeps_unprefixed_tags() {
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="{ns}" count="1" uniqueCount="1"><si><t>foo</t></si></sst>"#,
+            ns = SPREADSHEETML_NS
+        );
+
+        let mut editor = SharedStringsEditor::parse(xml.as_bytes()).unwrap();
+        editor.get_or_insert_plain("bar");
+        let updated = editor.to_xml_bytes(None).unwrap();
+
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+        let doc = Document::parse(updated_str).unwrap();
+
+        assert!(updated_str.contains("<si"));
+        assert!(updated_str.contains("<t>bar</t>"));
+        assert!(!updated_str.contains("<x:si"));
+        assert!(!updated_str.contains("<x:t"));
+
+        let bar_t = doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "t" && n.text() == Some("bar"))
+            .unwrap();
+        let bar_si = bar_t
+            .ancestors()
+            .find(|n| n.is_element() && n.tag_name().name() == "si")
+            .unwrap();
+        assert_eq!(bar_si.tag_name().namespace(), Some(SPREADSHEETML_NS));
+    }
 }
