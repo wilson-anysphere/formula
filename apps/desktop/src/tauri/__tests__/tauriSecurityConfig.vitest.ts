@@ -103,11 +103,12 @@ describe("tauri.conf.json security guardrails", () => {
       `connect-src must not allow wildcard/plaintext HTTP networking; found: ${forbiddenConnectSrcTokens.join(", ")}`,
     ).toEqual([]);
 
-    // Tauri capabilities are scoped via `src-tauri/capabilities/*.json` + the capability file's `"windows"` patterns.
-    // Our current `tauri-build` toolchain does not support `app.windows[].capabilities`, and adding it breaks builds.
+    // Tauri capabilities are scoped via `src-tauri/capabilities/*.json` + the window-level capability mapping in
+    // `tauri.conf.json`. Require explicit window capabilities so IPC is never implicitly granted to a webview.
     const windows = Array.isArray(config?.app?.windows) ? (config.app.windows as Array<Record<string, unknown>>) : [];
-    for (const window of windows) {
-      expect(window).not.toHaveProperty("capabilities");
-    }
+    for (const window of windows) expect(Array.isArray((window as any)?.capabilities)).toBe(true);
+    const mainWindow = windows.find((w) => String((w as any)?.label ?? "") === "main") as any;
+    expect(mainWindow).toBeTruthy();
+    expect(mainWindow.capabilities).toContain("main");
   });
 });

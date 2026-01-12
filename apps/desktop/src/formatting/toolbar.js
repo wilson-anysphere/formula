@@ -9,6 +9,10 @@ const EXCEL_MAX_COL = 16_384 - 1;
 // This guard exists to prevent *per-cell* enumeration from exploding (e.g. multi-range
 // selections of many medium rectangles).
 const MAX_RANGE_FORMATTING_CELLS = 100_000;
+// Keep aligned with `DocumentController.setRangeFormat` (compressed range-run formatting).
+// Above this many cells, formatting is stored as per-column range runs instead of enumerating
+// every cell in the rectangle.
+const RANGE_RUN_FORMAT_THRESHOLD = 50_000;
 // Full-width row formatting still requires enumerating each row in the selection
 // (DocumentController row formatting layer). Align with `DEFAULT_FORMATTING_BAND_ROW_LIMIT`.
 const MAX_RANGE_FORMATTING_BAND_ROWS = 50_000;
@@ -68,6 +72,9 @@ function ensureSafeFormattingRange(rangeOrRanges) {
     }
 
     const cellCount = rangeCellCount(r);
+    // Large rectangles use the DocumentController's compressed range-run formatting layer and do
+    // not require enumerating every cell in the selection.
+    if (cellCount > RANGE_RUN_FORMAT_THRESHOLD) continue;
 
     totalEnumeratedCells += cellCount;
     if (totalEnumeratedCells > MAX_RANGE_FORMATTING_CELLS) {
