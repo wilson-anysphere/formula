@@ -64,10 +64,11 @@ pub fn handler<R: Runtime>(
     // If the webview ever navigates to remote/untrusted content, we must not allow that origin to
     // access `asset://` at all (even as a no-cors subresource).
     let window_url = current_window_url(&ctx);
-    if !window_url
-        .as_ref()
-        .is_some_and(desktop::ipc_origin::is_trusted_app_origin)
-    {
+    let is_trusted_origin = window_url.as_ref().is_some_and(|url| {
+        desktop::ipc_origin::is_trusted_app_origin(url)
+            && window_origin_from_url(&ctx, url) == window_origin
+    });
+    if !is_trusted_origin {
         let url_for_log = window_url
             .as_ref()
             .map(|u| u.to_string())
@@ -115,6 +116,24 @@ fn current_window_url<R: Runtime>(ctx: &UriSchemeContext<'_, R>) -> Option<Url> 
     window.as_ref().url().ok()
 }
 
+fn use_https_scheme<R: Runtime>(ctx: &UriSchemeContext<'_, R>) -> bool {
+    ctx.app_handle()
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|w| w.label == ctx.webview_label())
+        .map(|w| w.use_https_scheme)
+        .unwrap_or(false)
+}
+
+fn window_origin_from_url<R: Runtime>(ctx: &UriSchemeContext<'_, R>, url: &Url) -> String {
+    desktop::tauri_origin::webview_origin_from_url(
+        url,
+        use_https_scheme(ctx),
+        desktop::tauri_origin::DesktopPlatform::current(),
+    )
+}
 fn stable_window_origin<R: Runtime>(ctx: &UriSchemeContext<'_, R>) -> String {
     // Mirror Tauri upstream behavior: the window origin is computed once from the
     // *initial* webview URL and then used by the protocol handler.
@@ -123,13 +142,7 @@ fn stable_window_origin<R: Runtime>(ctx: &UriSchemeContext<'_, R>) -> String {
     // arbitrary navigation cannot change the effective CORS policy.
     let config = ctx.app_handle().config();
 
-    let use_https_scheme = config
-        .app
-        .windows
-        .iter()
-        .find(|w| w.label == ctx.webview_label())
-        .map(|w| w.use_https_scheme)
-        .unwrap_or(false);
+    let use_https_scheme = use_https_scheme(ctx);
 
     // `dev_url` is represented as either `String` or `Url` depending on the Tauri version.
     // Both expose `as_str()`, so prefer that over `as_deref()` to avoid tying this code to a

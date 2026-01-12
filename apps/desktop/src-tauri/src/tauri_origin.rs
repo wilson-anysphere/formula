@@ -53,26 +53,39 @@ pub fn stable_webview_origin(
         return "null".to_string();
     };
 
-    if initial_webview_url.scheme() == "data" {
+    webview_origin_from_url(&initial_webview_url, use_https_scheme, platform)
+}
+
+/// Compute the origin string used by Tauri for a given (webview) URL.
+///
+/// This mirrors Tauri's `window_origin` behavior for desktop:
+/// - most platforms: the origin is `<scheme>://<host>[:port]`
+/// - Windows: custom schemes (e.g. `tauri:`) are exposed as `http(s)://<scheme>.localhost`
+pub fn webview_origin_from_url(
+    url: &Url,
+    use_https_scheme: bool,
+    platform: DesktopPlatform,
+) -> String {
+    if url.scheme() == "data" {
         return "null".to_string();
     }
 
     if platform == DesktopPlatform::Windows
-        && initial_webview_url.scheme() != "http"
-        && initial_webview_url.scheme() != "https"
+        && url.scheme() != "http"
+        && url.scheme() != "https"
     {
         // On Windows, WebView2 exposes custom schemes (like `tauri:`) as
         // `http(s)://<scheme>.localhost`.
         let scheme = if use_https_scheme { "https" } else { "http" };
-        return format!("{scheme}://{}.localhost", initial_webview_url.scheme());
+        return format!("{scheme}://{}.localhost", url.scheme());
     }
 
-    if let Some(host) = initial_webview_url.host() {
+    if let Some(host) = url.host() {
         return format!(
             "{}://{}{}",
-            initial_webview_url.scheme(),
+            url.scheme(),
             host,
-            initial_webview_url
+            url
                 .port()
                 .map(|p| format!(":{p}"))
                 .unwrap_or_default()
@@ -85,6 +98,7 @@ pub fn stable_webview_origin(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use url::Url;
 
     #[test]
     fn stable_webview_origin_dev_uses_dev_url_origin() {
@@ -111,5 +125,11 @@ mod tests {
         let https_origin = stable_webview_origin(false, None, true, DesktopPlatform::Windows);
         assert_eq!(https_origin, "https://tauri.localhost");
     }
-}
 
+    #[test]
+    fn webview_origin_from_url_windows_maps_custom_scheme_to_localhost() {
+        let url = Url::parse("tauri://localhost/index.html").unwrap();
+        let origin = webview_origin_from_url(&url, false, DesktopPlatform::Windows);
+        assert_eq!(origin, "http://tauri.localhost");
+    }
+}
