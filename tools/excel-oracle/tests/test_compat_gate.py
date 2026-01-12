@@ -254,6 +254,7 @@ class CompatGateDryRunTests(unittest.TestCase):
         out = stdout.getvalue()
         self.assertIn("engine_cmd:", out)
         self.assertIn("compare_cmd:", out)
+        self.assertIn("cases selected:", out)
 
 
 if __name__ == "__main__":

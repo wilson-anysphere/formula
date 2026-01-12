@@ -150,6 +150,46 @@ def _normalize_tags(tags: list[str]) -> list[str]:
     return [t for t in (s.strip() for s in tags) if t]
 
 
+def _count_selected_cases(
+    *, cases_path: Path, include_tags: list[str], exclude_tags: list[str], max_cases: int
+) -> tuple[int, int]:
+    """
+    Return `(matched_after_tag_filters, selected_after_max_cases)`.
+
+    This mirrors the include/exclude tag semantics used by `compare.py` and the engine runner:
+    - include tags use OR semantics (a case is included if it has any included tag)
+    - exclude tags filter out any case that contains one of the excluded tags
+    """
+
+    payload = json.loads(cases_path.read_text(encoding="utf-8"))
+    cases = payload.get("cases", [])
+    if not isinstance(cases, list):
+        return (0, 0)
+
+    include = set(include_tags)
+    exclude = set(exclude_tags)
+
+    matched = 0
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        tags = case.get("tags", [])
+        if not isinstance(tags, list):
+            tags = []
+        tag_set = {t for t in tags if isinstance(t, str)}
+
+        if include and not (include & tag_set):
+            continue
+        if exclude and (exclude & tag_set):
+            continue
+        matched += 1
+
+    selected = matched
+    if max_cases and max_cases > 0:
+        selected = min(selected, max_cases)
+    return (matched, selected)
+
+
 def _effective_include_tags(*, tier: str, user_include_tags: list[str]) -> list[str]:
     normalized = _normalize_tags(user_include_tags)
     if normalized:
@@ -464,10 +504,19 @@ def main() -> int:
             # Print a shell-ready representation (useful for copy/paste).
             return " ".join(shlex.quote(part) for part in cmd)
 
+        matched, selected = _count_selected_cases(
+            cases_path=cases_path,
+            include_tags=include_tags,
+            exclude_tags=exclude_tags,
+            max_cases=args.max_cases,
+        )
+
         print(f"cases: {cases_path}")
         print(f"expected: {expected_path}")
         print(f"actual: {actual_path}")
         print(f"report: {report_path}")
+        print(f"cases after tag filtering: {matched}")
+        print(f"cases selected: {selected}")
         print()
         print("engine_cmd:")
         print(fmt(engine_cmd))
