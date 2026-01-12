@@ -198,7 +198,6 @@ Notable keys:
 - `bundle.fileAssociations` registers spreadsheet file types with the OS:
   `.xlsx`, `.xls`, `.xlsm`, `.xltx`, `.xltm`, `.xlam`, `.xlsb`, `.csv`, `.parquet`.
   - `.parquet` open support is behind the Cargo `parquet` feature (enabled by the `desktop` feature; see `apps/desktop/src-tauri/Cargo.toml` and `apps/desktop/src-tauri/src/open_file.rs`).
-- `bundle.protocols` registers the custom URL scheme `formula://` (used for deep links like OAuth redirects; see `main.rs` → `oauth-redirect` event).
 - `bundle.linux.deb.depends` documents runtime deps for Linux packaging (e.g. `libwebkit2gtk-4.1-0`, `libgtk-3-0t64 | libgtk-3-0`,
   appindicator, `librsvg2-2`, `libssl3t64 | libssl3`).
 - `bundle.macOS.entitlements` / signing keys and `bundle.windows.timestampUrl`.
@@ -417,7 +416,11 @@ Implementation notes:
 
 #### Deep links (`formula://...`) / OAuth redirects
 
-`bundle.protocols` registers `formula://` as a custom URL scheme. When the OS launches the app with a `formula://...` URL (e.g. an OAuth PKCE redirect), `main.rs` forwards it to the frontend by emitting:
+The desktop shell uses `tauri-plugin-deep-link` to **best-effort** register `formula://` as a custom URL scheme at runtime
+(`main.rs` calls `app.handle().deep_link().register("formula")`).
+
+When the OS launches the app (or forwards an open-url event to a running instance) with a `formula://...` URL (e.g. an
+OAuth PKCE redirect), `main.rs` forwards it to the frontend by emitting:
 
 - `oauth-redirect` (payload: string URL)
 
