@@ -1,3 +1,5 @@
+import type { Pool } from "pg";
+
 export class DataResidencyViolationError extends Error {
   readonly orgId?: string;
   readonly requestedRegion: string;
@@ -6,7 +8,12 @@ export class DataResidencyViolationError extends Error {
 
   constructor(
     message: string,
-    options: { orgId?: string; requestedRegion: string; allowedRegions: string[]; operation: string }
+    options: {
+      orgId?: string;
+      requestedRegion: string;
+      allowedRegions: string[];
+      operation: string;
+    }
   ) {
     super(message);
     this.name = "DataResidencyViolationError";
@@ -18,13 +25,29 @@ export class DataResidencyViolationError extends Error {
   }
 }
 
+export type OrgDataResidencyPolicy = {
+  region: string;
+  allowedRegions: string[];
+  allowCrossRegionProcessing: boolean;
+};
+
 function uniq(values: string[]): string[] {
   return Array.from(new Set(values));
 }
 
+function parseJsonIfString(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
 function toNonEmptyStrings(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
+  const parsed = parseJsonIfString(value);
+  if (!Array.isArray(parsed)) return [];
+  return parsed
     .filter((item): item is string => typeof item === "string")
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
@@ -86,7 +109,7 @@ export function resolveAiProcessingRegion(options: {
   return region;
 }
 
-export function assertRegionAllowed(options: {
+export function assertRegionAllowedInSet(options: {
   orgId?: string;
   requestedRegion: string;
   operation: string;
@@ -117,7 +140,7 @@ export function assertOutboundRegionAllowed(options: {
 }): void {
   if (options.allowCrossRegionProcessing) return;
   const allowed = getAllowedRegions({ region: options.region, allowedRegions: options.allowedRegions });
-  assertRegionAllowed({
+  assertRegionAllowedInSet({
     orgId: options.orgId,
     requestedRegion: options.requestedRegion,
     operation: options.operation,
@@ -125,3 +148,57 @@ export function assertOutboundRegionAllowed(options: {
   });
 }
 
+export async function getOrgDataResidencyPolicy(db: Pool, orgId: string): Promise<OrgDataResidencyPolicy> {
+  const res = await db.query(
+    `
+      SELECT
+        data_residency_region,
+        data_residency_allowed_regions,
+        allow_cross_region_processing
+      FROM org_settings
+      WHERE org_id = $1
+    `,
+    [orgId]
+  );
+
+  if (res.rowCount !== 1) throw new Error(`org_settings row missing for org ${orgId}`);
+
+  const row = res.rows[0] as any;
+  const region = String(row.data_residency_region ?? "us");
+  const allowCrossRegionProcessing = Boolean(row.allow_cross_region_processing);
+  const allowedRegions = getAllowedRegions({ region, allowedRegions: row.data_residency_allowed_regions });
+
+  return { region, allowedRegions, allowCrossRegionProcessing };
+}
+
+export async function assertRegionAllowed(options: {
+  db: Pool;
+  orgId: string;
+  operation: string;
+  targetRegion: string;
+}): Promise<void> {
+  const policy = await getOrgDataResidencyPolicy(options.db, options.orgId);
+  assertRegionAllowedInSet({
+    orgId: options.orgId,
+    requestedRegion: options.targetRegion,
+    operation: options.operation,
+    allowedRegions: policy.allowedRegions
+  });
+}
+
+export async function assertCrossRegionAllowed(options: {
+  db: Pool;
+  orgId: string;
+  operation: string;
+  targetRegion: string;
+}): Promise<void> {
+  const policy = await getOrgDataResidencyPolicy(options.db, options.orgId);
+  if (policy.allowCrossRegionProcessing) return;
+
+  assertRegionAllowedInSet({
+    orgId: options.orgId,
+    requestedRegion: options.targetRegion,
+    operation: options.operation,
+    allowedRegions: policy.allowedRegions
+  });
+}

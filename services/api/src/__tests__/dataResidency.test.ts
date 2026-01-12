@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertOutboundRegionAllowed,
-  assertRegionAllowed,
+  assertRegionAllowedInSet,
   getAllowedRegions,
   resolveAiProcessingRegion,
   DataResidencyViolationError
@@ -64,7 +64,7 @@ describe("dataResidency policy", () => {
 
     const allowed = getAllowedRegions({ region: "eu" });
     expect(() =>
-      assertRegionAllowed({
+      assertRegionAllowedInSet({
         orgId: "org_1",
         operation: "test.assert",
         requestedRegion: "us",
@@ -73,4 +73,3 @@ describe("dataResidency policy", () => {
     ).toThrow(DataResidencyViolationError);
   });
 });
-

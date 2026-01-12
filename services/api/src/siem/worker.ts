@@ -131,6 +131,47 @@ export class SiemExportWorker {
     this.options.metrics.siemBatchErrorsTotal.inc({ reason: label });
   }
 
+  private async disableOrgExports(orgId: string, reason: string): Promise<void> {
+    try {
+      await this.options.db.query(
+        `
+          UPDATE org_siem_configs
+          SET enabled = false, updated_at = now()
+          WHERE org_id = $1
+        `,
+        [orgId]
+      );
+    } catch (err) {
+      this.options.logger.warn({ err, orgId }, "siem_config_disable_failed");
+    }
+
+    // Keep the export cursor, but surface a durable error and clear any transient backoff
+    // so exports can resume immediately once the config is re-enabled / policy is updated.
+    try {
+      await this.options.db.query(
+        `
+          INSERT INTO org_siem_export_state (
+            org_id,
+            updated_at,
+            last_error,
+            consecutive_failures,
+            disabled_until
+          )
+          VALUES ($1, now(), $2, 0, NULL)
+          ON CONFLICT (org_id) DO UPDATE
+          SET
+            updated_at = now(),
+            last_error = EXCLUDED.last_error,
+            consecutive_failures = 0,
+            disabled_until = NULL
+        `,
+        [orgId, reason]
+      );
+    } catch (err) {
+      this.options.logger.warn({ err, orgId }, "siem_export_state_disable_failed");
+    }
+  }
+
   start(): void {
     if (this.timer) return;
     this.timer = setInterval(() => {
@@ -321,6 +362,13 @@ export class SiemExportWorker {
                 "data_residency_blocked_audit_failed"
               );
             }
+
+            // Policy changed after the SIEM config was saved; disable exports until
+            // an admin updates the integration or relaxes the org policy.
+            await this.disableOrgExports(org.orgId, err.message);
+            this.options.metrics.siemBatchesTotal.inc({ status: "blocked" });
+            span.setStatus({ code: SpanStatusCode.OK });
+            return null;
           }
 
           this.options.metrics.siemBatchesTotal.inc({ status: "error" });
