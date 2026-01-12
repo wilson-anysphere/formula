@@ -1741,6 +1741,26 @@ def generate_cases() -> dict[str, Any]:
         output_cell="C1",
     )
 
+    # Accrued interest.
+    _add_case(
+        cases,
+        prefix="accrintm",
+        tags=["financial", "ACCRINTM"],
+        formula="=ACCRINTM(A1,A2,0.1,1000,0)",
+        inputs=[CellInput("A1", _excel_serial_1900(2020, 1, 1)), CellInput("A2", _excel_serial_1900(2020, 7, 1))],
+    )
+    _add_case(
+        cases,
+        prefix="accrint",
+        tags=["financial", "ACCRINT"],
+        formula="=ACCRINT(A1,A2,A3,0.1,1000,2,0,FALSE)",
+        inputs=[
+            CellInput("A1", _excel_serial_1900(2020, 2, 15)),
+            CellInput("A2", _excel_serial_1900(2020, 5, 15)),
+            CellInput("A3", _excel_serial_1900(2020, 8, 15)),
+        ],
+    )
+
     # Range-based cashflow functions.
     cashflows = [-100.0, 30.0, 40.0, 50.0]
     cf_inputs = [CellInput(f"A{i+1}", v) for i, v in enumerate(cashflows)]
