@@ -177,8 +177,6 @@ test("desktop index.html exposes required shell containers and testids", () => {
     // Keep them out of `index.html` so `page.getByTestId(...)` remains unambiguous.
     'data-testid="open-inline-ai-edit"',
     'data-testid="open-marketplace-panel"',
-    'data-testid="open-version-history-panel"',
-    'data-testid="open-branch-manager-panel"',
     'data-testid="theme-selector"',
 
     // Ribbon submenu items / backstage actions are rendered by React. If these appear in the
@@ -200,6 +198,26 @@ test("desktop index.html exposes required shell containers and testids", () => {
     `apps/desktop/index.html should not include legacy debug buttons (they belong in the ribbon):\\n${forbiddenPresent
       .map((m) => `- ${m}`)
       .join("\\n")}`,
+  );
+
+  // Collaboration panels should be discoverable via always-visible status bar buttons.
+  const versionHistoryIndex = html.indexOf('data-testid="open-version-history-panel"');
+  const branchManagerIndex = html.indexOf('data-testid="open-branch-manager-panel"');
+  assert.ok(
+    versionHistoryIndex >= 0,
+    "Expected data-testid=\"open-version-history-panel\" to exist in index.html",
+  );
+  assert.ok(
+    branchManagerIndex >= 0,
+    "Expected data-testid=\"open-branch-manager-panel\" to exist in index.html",
+  );
+  assert.ok(
+    versionHistoryIndex < debugIndex,
+    "Expected open-version-history-panel button to appear in the visible statusbar section (before .statusbar__debug)",
+  );
+  assert.ok(
+    branchManagerIndex < debugIndex,
+    "Expected open-branch-manager-panel button to appear in the visible statusbar section (before .statusbar__debug)",
   );
 
   // Ensure the base app shell styling hooks stay intact.

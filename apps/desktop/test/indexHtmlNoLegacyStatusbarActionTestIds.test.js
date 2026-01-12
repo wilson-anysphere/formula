@@ -172,7 +172,14 @@ test("desktop index.html does not hardcode ribbon action testids (avoid Playwrig
   // Ensure the static shell does not hardcode any of the Ribbon action hooks. Those
   // should render exactly once (in the ribbon), otherwise Playwright strict locators
   // like page.getByTestId(...).click() throw.
-  const overlap = [...new Set(ribbonTestIds)].filter((testId) => indexTestIds.has(testId));
+  // Note: a small set of ribbon test ids are intentionally duplicated in the static
+  // shell (e.g. status bar panel toggles) for discoverability. Playwright tests
+  // must scope locators appropriately (e.g. to `.statusbar__main` vs `#ribbon-root`).
+  const allowedShellRibbonTestIds = new Set(["open-version-history-panel", "open-branch-manager-panel"]);
+
+  const overlap = [...new Set(ribbonTestIds)].filter(
+    (testId) => indexTestIds.has(testId) && !allowedShellRibbonTestIds.has(testId),
+  );
 
   assert.deepEqual(
     overlap,
