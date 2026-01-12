@@ -1,4 +1,10 @@
-import { cellStateEquals, cloneCellState, emptyCellState, isCellStateEmpty } from "./cell.js";
+import {
+  cellStateEquals,
+  cloneCellState,
+  emptyCellState,
+  isCellStateEmpty,
+  normalizeCellState,
+} from "./cell.js";
 import { normalizeRange, parseA1, parseRangeA1 } from "./coords.js";
 import { applyStylePatch, StyleTable } from "../formatting/styleTable.js";
 
@@ -447,6 +453,39 @@ class SheetModel {
     this.rowStyleIds = new Map();
     /** @type {Map<number, number>} */
     this.colStyleIds = new Map();
+
+    /**
+     * Bounding box of cells with user-visible contents (value/formula).
+     *
+     * This intentionally ignores format-only cells so default `getUsedRange()` preserves its
+     * historical semantics.
+     *
+     * @type {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+     */
+    this.contentBounds = null;
+
+    /**
+     * Bounding box of non-empty *stored* cell states (value/formula/cell-level styleId).
+     *
+     * Note: This does NOT include row/col/sheet formatting layers (those are tracked separately
+     * on the sheet model and are incorporated by `DocumentController.getUsedRange({ includeFormat:true })`).
+     *
+     * @type {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+     */
+    this.formatBounds = null;
+
+    // Bounds invalidation flags. We avoid eager rescans during large edits (e.g. clearRange)
+    // by lazily recomputing on demand when a boundary cell is cleared.
+    this.contentBoundsDirty = false;
+    this.formatBoundsDirty = false;
+
+    // Track the number of cells that contribute to `contentBounds` so we can fast-path the
+    // empty case (common when clearing contents but preserving styles).
+    this.contentCellCount = 0;
+
+    // Debug counters for unit tests to verify recomputation only occurs when required.
+    this.__contentBoundsRecomputeCount = 0;
+    this.__formatBoundsRecomputeCount = 0;
   }
 
   /**
@@ -464,11 +503,147 @@ class SheetModel {
    * @param {CellState} cell
    */
   setCell(row, col, cell) {
-    if (isCellStateEmpty(cell)) {
-      this.cells.delete(`${row},${col}`);
-      return;
+    const key = `${row},${col}`;
+    const before = this.cells.get(key) ?? null;
+    const beforeHasContent = Boolean(before && (before.value != null || before.formula != null));
+    const beforeHasFormat = Boolean(before);
+
+    const normalized = normalizeCellState(cell);
+    const afterIsEmpty = normalized.value == null && normalized.formula == null && normalized.styleId === 0;
+    const afterHasContent = Boolean(normalized.value != null || normalized.formula != null);
+    const afterHasFormat = !afterIsEmpty;
+
+    // Update the canonical cell map first.
+    if (afterIsEmpty) {
+      this.cells.delete(key);
+    } else {
+      this.cells.set(key, cloneCellState(normalized));
     }
-    this.cells.set(`${row},${col}`, cloneCellState(cell));
+
+    // Maintain content-cell count.
+    if (beforeHasContent !== afterHasContent) {
+      this.contentCellCount += afterHasContent ? 1 : -1;
+      if (this.contentCellCount < 0) this.contentCellCount = 0;
+    }
+
+    const expandBounds = (bounds) => {
+      bounds.startRow = Math.min(bounds.startRow, row);
+      bounds.endRow = Math.max(bounds.endRow, row);
+      bounds.startCol = Math.min(bounds.startCol, col);
+      bounds.endCol = Math.max(bounds.endCol, col);
+    };
+
+    const isOnEdge = (bounds) =>
+      row === bounds.startRow || row === bounds.endRow || col === bounds.startCol || col === bounds.endCol;
+
+    // Update content bounds (value/formula only).
+    if (afterHasContent) {
+      if (!this.contentBounds) {
+        this.contentBounds = { startRow: row, endRow: row, startCol: col, endCol: col };
+        this.contentBoundsDirty = false;
+      } else {
+        expandBounds(this.contentBounds);
+      }
+    } else if (beforeHasContent) {
+      // Content removed (or converted to style-only).
+      if (this.contentCellCount === 0) {
+        this.contentBounds = null;
+        this.contentBoundsDirty = false;
+      } else if (this.contentBounds && !this.contentBoundsDirty && isOnEdge(this.contentBounds)) {
+        this.contentBoundsDirty = true;
+      }
+    }
+
+    // Update format bounds (any non-empty cell state).
+    if (afterHasFormat) {
+      if (!this.formatBounds) {
+        this.formatBounds = { startRow: row, endRow: row, startCol: col, endCol: col };
+        this.formatBoundsDirty = false;
+      } else {
+        expandBounds(this.formatBounds);
+      }
+    } else if (beforeHasFormat) {
+      // Entire cell state cleared (including style).
+      if (this.cells.size === 0) {
+        this.formatBounds = null;
+        this.formatBoundsDirty = false;
+      } else if (this.formatBounds && !this.formatBoundsDirty && isOnEdge(this.formatBounds)) {
+        this.formatBoundsDirty = true;
+      }
+    }
+  }
+
+  /**
+   * @returns {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+   */
+  getContentBounds() {
+    if (this.contentCellCount === 0) {
+      this.contentBounds = null;
+      this.contentBoundsDirty = false;
+      return null;
+    }
+    if (!this.contentBounds) return null;
+    if (this.contentBoundsDirty) {
+      this.__contentBoundsRecomputeCount += 1;
+      this.contentBounds = this.#recomputeBounds({ includeFormat: false });
+      this.contentBoundsDirty = false;
+    }
+    return this.contentBounds ? { ...this.contentBounds } : null;
+  }
+
+  /**
+   * @returns {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+   */
+  getFormatBounds() {
+    if (this.cells.size === 0) {
+      this.formatBounds = null;
+      this.formatBoundsDirty = false;
+      return null;
+    }
+    if (!this.formatBounds) return null;
+    if (this.formatBoundsDirty) {
+      this.__formatBoundsRecomputeCount += 1;
+      this.formatBounds = this.#recomputeBounds({ includeFormat: true });
+      this.formatBoundsDirty = false;
+    }
+    return this.formatBounds ? { ...this.formatBounds } : null;
+  }
+
+  /**
+   * Recompute bounds by scanning the sparse cell map.
+   *
+   * This is intentionally only used when a boundary cell is cleared (shrinking requires
+   * discovering the next extreme), keeping `getUsedRange` amortized O(1).
+   *
+   * @param {{ includeFormat: boolean }} options
+   * @returns {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+   */
+  #recomputeBounds(options) {
+    const includeFormat = options.includeFormat;
+
+    let minRow = Infinity;
+    let minCol = Infinity;
+    let maxRow = -Infinity;
+    let maxCol = -Infinity;
+    let hasData = false;
+
+    for (const [key, cell] of this.cells.entries()) {
+      if (!cell) continue;
+      const hasContent = includeFormat
+        ? cell.value != null || cell.formula != null || cell.styleId !== 0
+        : cell.value != null || cell.formula != null;
+      if (!hasContent) continue;
+
+      const { row, col } = parseRowColKey(key);
+      hasData = true;
+      minRow = Math.min(minRow, row);
+      minCol = Math.min(minCol, col);
+      maxRow = Math.max(maxRow, row);
+      maxCol = Math.max(maxCol, col);
+    }
+
+    if (!hasData) return null;
+    return { startRow: minRow, endRow: maxRow, startCol: minCol, endCol: maxCol };
   }
 
   /**
@@ -834,55 +1009,60 @@ export class DocumentController {
     const includeFormat = Boolean(options.includeFormat);
     if (!sheet) return null;
 
+    // Default behavior: content bounds (value/formula only).
+    if (!includeFormat) {
+      return sheet.getContentBounds();
+    }
+
+    // includeFormat=true: formatting layers can apply to otherwise-empty cells without
+    // materializing them in the sparse cell map. Incorporate all layers.
+
+    // Sheet default formatting applies to every cell.
+    if (sheet.defaultStyleId !== 0) {
+      return { startRow: 0, endRow: EXCEL_MAX_ROW, startCol: 0, endCol: EXCEL_MAX_COL };
+    }
+
     let minRow = Infinity;
     let minCol = Infinity;
     let maxRow = -Infinity;
     let maxCol = -Infinity;
     let hasData = false;
 
-    if (includeFormat) {
-      // Sheet default formatting applies to every cell.
-      if (sheet.defaultStyleId !== 0) {
-        return { startRow: 0, endRow: EXCEL_MAX_ROW, startCol: 0, endCol: EXCEL_MAX_COL };
-      }
+    const mergeBounds = (bounds) => {
+      if (!bounds) return;
+      hasData = true;
+      minRow = Math.min(minRow, bounds.startRow);
+      minCol = Math.min(minCol, bounds.startCol);
+      maxRow = Math.max(maxRow, bounds.endRow);
+      maxCol = Math.max(maxCol, bounds.endCol);
+    };
 
-      if (sheet.colStyleIds && sheet.colStyleIds.size > 0) {
-        hasData = true;
-        minRow = Math.min(minRow, 0);
-        maxRow = Math.max(maxRow, EXCEL_MAX_ROW);
-        for (const col of sheet.colStyleIds.keys()) {
-          minCol = Math.min(minCol, col);
-          maxCol = Math.max(maxCol, col);
-        }
+    if (sheet.colStyleIds && sheet.colStyleIds.size > 0) {
+      let minStyledCol = Infinity;
+      let maxStyledCol = -Infinity;
+      for (const col of sheet.colStyleIds.keys()) {
+        minStyledCol = Math.min(minStyledCol, col);
+        maxStyledCol = Math.max(maxStyledCol, col);
       }
-
-      if (sheet.rowStyleIds && sheet.rowStyleIds.size > 0) {
-        hasData = true;
-        minCol = Math.min(minCol, 0);
-        maxCol = Math.max(maxCol, EXCEL_MAX_COL);
-        for (const row of sheet.rowStyleIds.keys()) {
-          minRow = Math.min(minRow, row);
-          maxRow = Math.max(maxRow, row);
-        }
+      if (minStyledCol !== Infinity) {
+        mergeBounds({ startRow: 0, endRow: EXCEL_MAX_ROW, startCol: minStyledCol, endCol: maxStyledCol });
       }
     }
 
-    if (sheet.cells && sheet.cells.size > 0) {
-      for (const [key, cell] of sheet.cells.entries()) {
-        if (!cell) continue;
-        const hasContent = includeFormat
-          ? cell.value != null || cell.formula != null || cell.styleId !== 0
-          : cell.value != null || cell.formula != null;
-        if (!hasContent) continue;
-
-        const { row, col } = parseRowColKey(key);
-        hasData = true;
-        minRow = Math.min(minRow, row);
-        minCol = Math.min(minCol, col);
-        maxRow = Math.max(maxRow, row);
-        maxCol = Math.max(maxCol, col);
+    if (sheet.rowStyleIds && sheet.rowStyleIds.size > 0) {
+      let minStyledRow = Infinity;
+      let maxStyledRow = -Infinity;
+      for (const row of sheet.rowStyleIds.keys()) {
+        minStyledRow = Math.min(minStyledRow, row);
+        maxStyledRow = Math.max(maxStyledRow, row);
+      }
+      if (minStyledRow !== Infinity) {
+        mergeBounds({ startRow: minStyledRow, endRow: maxStyledRow, startCol: 0, endCol: EXCEL_MAX_COL });
       }
     }
+
+    // Merge in bounds from stored cell states (values/formulas/cell-level format-only entries).
+    mergeBounds(sheet.getFormatBounds());
 
     if (!hasData) return null;
     return { startRow: minRow, endRow: maxRow, startCol: minCol, endCol: maxCol };

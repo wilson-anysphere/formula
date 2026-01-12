@@ -171,6 +171,115 @@ test("setRangeFormat for full-height columns does not materialize 1M cell entrie
   assert.deepEqual(doc.getCellFormat("Sheet1", "A1048576"), { font: { bold: true } });
 });
 
+test("getUsedRange maintains separate content and format bounds", () => {
+  const doc = new DocumentController();
+
+  // Style-only cell should only affect includeFormat bounds.
+  doc.setRangeFormat("Sheet1", "A1", { font: { bold: true } });
+
+  // Content cells establish the default used range.
+  doc.setCellFormula("Sheet1", "B2", "1+1");
+  doc.setCellValue("Sheet1", "C3", "x");
+
+  assert.deepEqual(doc.getUsedRange("Sheet1"), {
+    startRow: 1,
+    endRow: 2,
+    startCol: 1,
+    endCol: 2,
+  });
+
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 0,
+    endRow: 2,
+    startCol: 0,
+    endCol: 2,
+  });
+});
+
+test("getUsedRange recomputes bounds only when clearing a boundary content cell", () => {
+  const doc = new DocumentController();
+
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.setCellValue("Sheet1", "B2", 2);
+  doc.setCellValue("Sheet1", "C3", 3);
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+
+  // No rescans needed for inserts or repeated reads.
+  assert.deepEqual(doc.getUsedRange("Sheet1"), {
+    startRow: 0,
+    endRow: 2,
+    startCol: 0,
+    endCol: 2,
+  });
+  assert.equal(sheet.__contentBoundsRecomputeCount, 0);
+  doc.getUsedRange("Sheet1");
+  assert.equal(sheet.__contentBoundsRecomputeCount, 0);
+
+  // Clearing an interior cell should not invalidate bounds.
+  doc.clearCell("Sheet1", "B2");
+  assert.deepEqual(doc.getUsedRange("Sheet1"), {
+    startRow: 0,
+    endRow: 2,
+    startCol: 0,
+    endCol: 2,
+  });
+  assert.equal(sheet.__contentBoundsRecomputeCount, 0);
+
+  // Clearing a boundary cell requires a rescan to shrink.
+  doc.clearCell("Sheet1", "C3");
+  assert.deepEqual(doc.getUsedRange("Sheet1"), {
+    startRow: 0,
+    endRow: 0,
+    startCol: 0,
+    endCol: 0,
+  });
+  assert.equal(sheet.__contentBoundsRecomputeCount, 1);
+
+  // Subsequent reads reuse the cached bounds.
+  doc.getUsedRange("Sheet1");
+  assert.equal(sheet.__contentBoundsRecomputeCount, 1);
+});
+
+test("clearRange preserves style-only cells for includeFormat used range", () => {
+  const doc = new DocumentController();
+
+  // Establish a format-only region.
+  doc.setRangeFormat("Sheet1", "A1:C3", { font: { italic: true } });
+
+  // Add some content inside the formatted region.
+  doc.setCellValue("Sheet1", "B2", 1);
+  doc.setCellValue("Sheet1", "C3", 2);
+
+  assert.deepEqual(doc.getUsedRange("Sheet1"), {
+    startRow: 1,
+    endRow: 2,
+    startCol: 1,
+    endCol: 2,
+  });
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 0,
+    endRow: 2,
+    startCol: 0,
+    endCol: 2,
+  });
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+
+  // Clearing content should not clear formatting, so includeFormat bounds remain.
+  doc.clearRange("Sheet1", "B2:C3");
+  assert.equal(doc.getUsedRange("Sheet1"), null);
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 0,
+    endRow: 2,
+    startCol: 0,
+    endCol: 2,
+  });
+  assert.equal(sheet.__formatBoundsRecomputeCount, 0);
+});
+
 test("setFrozen is undoable", () => {
   const doc = new DocumentController();
 
