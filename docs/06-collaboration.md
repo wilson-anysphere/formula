@@ -228,7 +228,13 @@ type SheetViewState = {
   frozenCols: number;
   colWidths?: Record<string, number>;
   rowHeights?: Record<string, number>;
-  // Optional per-sheet and per-axis formatting overrides (BranchService snapshots).
+};
+
+// Optional layered formatting defaults (sheet/row/col).
+// In Yjs these may be stored either:
+// - as top-level keys on the sheet entry (`defaultFormat` / `rowFormats` / `colFormats`), or
+// - nested inside `sheets[].view` in some BranchService-style snapshots.
+type SheetFormatDefaults = {
   defaultFormat?: Record<string, any>;
   rowFormats?: Record<string, Record<string, any>>;
   colFormats?: Record<string, Record<string, any>>;
@@ -238,12 +244,13 @@ type Sheet = {
   id: string;
   name: string | null;
   view?: SheetViewState;
+} & SheetFormatDefaults;
 };
 ```
 
 Implementation references:
 
-- BranchService `SheetViewState` (superset, used for versioning/branching snapshots): [`packages/versioning/branches/src/types.js`](../packages/versioning/branches/src/types.js)
+- BranchService `SheetViewState` (superset, used for versioning/branching snapshots; includes optional layered formats): [`packages/versioning/branches/src/types.js`](../packages/versioning/branches/src/types.js)
 - Desktop `DocumentController` `SheetViewState` (subset: frozen panes + row/col sizes): [`apps/desktop/src/document/documentController.js`](../apps/desktop/src/document/documentController.js)
 
 ---
@@ -407,6 +414,9 @@ It synchronizes:
 - **Sheet view state** (frozen panes + row/col sizes):
   - `Y.Doc` → `sheets[].view`
   - Desktop `DocumentController` sheet view state (`applyExternalSheetViewDeltas` / `sheetViewDeltas`)
+- **Layered formatting defaults** (sheet/row/col formats):
+  - `Y.Doc` → `sheets[].defaultFormat`, `sheets[].rowFormats`, `sheets[].colFormats` (with legacy fallback from `sheets[].view`)
+  - Desktop `DocumentController` format state (`applyExternalFormatDeltas` / `formatDeltas`)
 
 > Note: the binder syncs **cell contents** (`cells`) *and* **sheet view state**
 > (`sheets[].view`), but it does **not** implement full sheet list semantics
@@ -567,6 +577,14 @@ desktop projection in sync with the shared view state:
   `setFrozen`/`setColWidth`/`setRowHeight` for older controllers).
 - **Desktop → Yjs:** listens for `sheetViewDeltas` emitted by `DocumentController`
   and writes normalized state back into `sheets[i].view`.
+
+In addition, the binder synchronizes layered formatting defaults (sheet/row/col styles):
+
+- **Yjs → desktop:** reads `defaultFormat` / `rowFormats` / `colFormats` from sheet metadata
+  (preferring top-level keys, with fallback to `sheets[].view.*` for legacy snapshots) and applies
+  them via `DocumentController.applyExternalFormatDeltas` when available.
+- **Desktop → Yjs:** listens for `formatDeltas` emitted by `DocumentController` and writes them
+  into the sheet entry using sparse encodings (`defaultFormat`, `rowFormats`, `colFormats`).
 
 Semantics note:
 

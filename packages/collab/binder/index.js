@@ -334,6 +334,7 @@ function sameNormalizedCell(a, b) {
  *
  * - Cell contents: `value`, `formula`, and `format` (cell styles) via the Yjs `cells` root
  * - Sheet view state: `sheets[].view` (frozen panes + row/col size overrides)
+ * - Layered formatting defaults: `defaultFormat`, `rowFormats`, `colFormats` (sheet/row/col styles)
  *
  * It does **not** currently implement full sheet list semantics (create/delete/rename/reorder).
  *
