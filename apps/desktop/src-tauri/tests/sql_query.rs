@@ -381,6 +381,72 @@ async fn odbc_sqlite_file_path_outside_scope_is_denied() {
 }
 
 #[tokio::test]
+async fn sqlite_attach_cannot_read_out_of_scope_db_via_multi_statement() {
+    let roots = desktop_allowed_roots();
+    assert!(!roots.is_empty(), "expected at least one allowed root");
+
+    // Create a real database file outside the allowed roots.
+    let outside_dir = tempfile::tempdir().expect("tempdir");
+    let outside_dir_canon = std::fs::canonicalize(outside_dir.path()).expect("canonicalize");
+
+    if is_in_roots(&outside_dir_canon, &roots) {
+        eprintln!(
+            "skipping sqlite attach test: tempdir {} is within allowed roots {roots:?}",
+            outside_dir_canon.display()
+        );
+        return;
+    }
+
+    let outside_db = outside_dir.path().join("outside.sqlite");
+    create_sqlite_db(&outside_db).await;
+
+    // Insert a sentinel value so a successful attach+select would exfiltrate it.
+    let opts = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(&outside_db)
+        .create_if_missing(false);
+    let mut conn = sqlx::SqliteConnection::connect_with(&opts)
+        .await
+        .expect("connect outside db");
+    conn.execute("CREATE TABLE IF NOT EXISTS t (v INTEGER);")
+        .await
+        .expect("create table");
+    conn.execute("DELETE FROM t;").await.expect("clear table");
+    conn.execute("INSERT INTO t (v) VALUES (42);")
+        .await
+        .expect("insert sentinel");
+
+    // Attempt to attach + query the out-of-scope db in a single SQL payload. This should not be
+    // able to return the sentinel value.
+    let db_path_sql = outside_db.to_string_lossy().replace('\'', "''");
+    let sql_text = format!("ATTACH DATABASE '{db_path_sql}' AS ext; SELECT v FROM ext.t;");
+
+    match sql::sql_query(
+        json!({ "kind": "sqlite", "inMemory": true }),
+        sql_text,
+        Vec::new(),
+        None,
+    )
+    .await
+    {
+        Ok(result) => {
+            let leaked = result
+                .rows
+                .iter()
+                .flat_map(|row| row.iter())
+                .any(|v| *v == json!(42));
+            assert!(
+                !leaked,
+                "expected ATTACH+SELECT to not return data from an out-of-scope sqlite db"
+            );
+        }
+        Err(_) => {
+            // Accept errors here; the important security property is that we don't successfully
+            // return data from the out-of-scope database.
+        }
+    }
+}
+
+#[tokio::test]
 async fn sqlite_get_schema_file_path_within_scope_is_allowed() {
     let roots = desktop_allowed_roots();
     assert!(!roots.is_empty(), "expected at least one allowed root");
