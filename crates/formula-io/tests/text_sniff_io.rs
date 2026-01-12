@@ -106,6 +106,103 @@ fn opens_utf16be_tab_delimited_text_via_content_sniffing() {
 }
 
 #[test]
+fn opens_utf16le_tab_delimited_text_without_bom_via_content_sniffing() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("data.txt");
+
+    let tsv = "col1\tcol2\r\n1\thello\r\n2\tworld\r\n";
+    let mut bytes = Vec::new();
+    for unit in tsv.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    std::fs::write(&path, &bytes).expect("write utf16le tsv bytes");
+
+    let wb = open_workbook(&path).expect("open workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    let sheet = model.sheet_by_name("data").expect("data sheet missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value_a1("A2").unwrap(), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value_a1("B2").unwrap(),
+        CellValue::String("world".to_string())
+    );
+}
+
+#[test]
+fn opens_utf16be_tab_delimited_text_without_bom_via_content_sniffing() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("data.txt");
+
+    let tsv = "col1\tcol2\r\n1\thello\r\n2\tworld\r\n";
+    let mut bytes = Vec::new();
+    for unit in tsv.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_be_bytes());
+    }
+    std::fs::write(&path, &bytes).expect("write utf16be tsv bytes");
+
+    let wb = open_workbook(&path).expect("open workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    let sheet = model.sheet_by_name("data").expect("data sheet missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value_a1("A2").unwrap(), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value_a1("B2").unwrap(),
+        CellValue::String("world".to_string())
+    );
+}
+
+#[test]
+fn opens_single_line_csv_via_content_sniffing() {
+    // Single-row exports (or temp files) may omit the trailing newline; sniffing should still
+    // classify the input as CSV.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("data.txt");
+    std::fs::write(&path, "a,b").expect("write csv bytes");
+
+    let wb = open_workbook(&path).expect("open workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    let sheet = model.sheet_by_name("data").expect("data sheet missing");
+    let table = sheet.columnar_table().expect("expected columnar table");
+    assert_eq!(table.column_count(), 2);
+    assert_eq!(table.row_count(), 0);
+    assert_eq!(table.schema()[0].name, "a");
+    assert_eq!(table.schema()[1].name, "b");
+}
+
+#[test]
+fn does_not_classify_single_line_prose_as_csv() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("note.txt");
+    std::fs::write(&path, "Hello, world").expect("write text");
+
+    let err = open_workbook(&path).expect_err("expected open_workbook to fail");
+    assert!(
+        matches!(err, Error::UnsupportedExtension { .. }),
+        "expected UnsupportedExtension, got {err:?}"
+    );
+}
+
+#[test]
 fn does_not_classify_binary_data_as_csv() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("binary");
