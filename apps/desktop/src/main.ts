@@ -832,6 +832,68 @@ const app = new SpreadsheetApp(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (window as any).__workbookSheetStore = workbookSheetStore;
 
+// Panels persist state keyed by a workbook/document identifier. For file-backed workbooks we use
+// their on-disk path; for unsaved sessions we generate a random session id so distinct new
+// workbooks don't collide.
+let activePanelWorkbookId = workbookId;
+
+function sharedGridZoomStorageKey(): string {
+  // Scope zoom persistence by workbook/session id. For file-backed workbooks this can be
+  // swapped to a path-based id if/when the desktop shell exposes it.
+  return `formula:shared-grid:zoom:${activePanelWorkbookId}`;
+}
+
+function loadPersistedSharedGridZoom(): number | null {
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) return null;
+    const raw = storage.getItem(sharedGridZoomStorageKey());
+    if (!raw) return null;
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value <= 0) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+function persistSharedGridZoom(value: number): void {
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) return;
+    storage.setItem(sharedGridZoomStorageKey(), String(value));
+  } catch {
+    // Ignore storage errors (disabled storage, quota, etc).
+  }
+}
+
+function persistCurrentSharedGridZoom(): void {
+  if (!app.supportsZoom()) return;
+  persistSharedGridZoom(app.getZoom());
+}
+
+function applyPersistedSharedGridZoom(options: { resetIfMissing?: boolean } = {}): void {
+  if (!app.supportsZoom()) return;
+  const persisted = loadPersistedSharedGridZoom();
+  if (persisted == null) {
+    if (options.resetIfMissing) {
+      const current = app.getZoom();
+      if (Math.abs(current - 1) > 1e-6) app.setZoom(1);
+    }
+    return;
+  }
+  app.setZoom(persisted);
+}
+
+// Apply persisted zoom as early as possible so shared-grid renders at the user's
+// preferred zoom before they interact with the sheet.
+applyPersistedSharedGridZoom();
+
+window.addEventListener("formula:zoom-changed", () => {
+  syncZoomControl();
+  persistCurrentSharedGridZoom();
+});
+
 function getGridLimitsForFormatting(): GridLimits {
   const anyApp = app as any;
   const raw = anyApp.limits ?? { maxRows: DEFAULT_DESKTOP_LOAD_MAX_ROWS, maxCols: DEFAULT_DESKTOP_LOAD_MAX_COLS };
@@ -1007,7 +1069,6 @@ function stepFontSize(current: number, direction: "increase" | "decrease"): numb
   }
   return resolved;
 }
-
 function parseDecimalPlaces(format: string): number {
   const dot = format.indexOf(".");
   if (dot === -1) return 0;
@@ -1041,10 +1102,6 @@ function stepDecimalPlacesInNumberFormat(format: string | null, direction: "incr
   const fraction = nextDecimals > 0 ? `.${"0".repeat(nextDecimals)}` : "";
   return `${prefix}${integer}${fraction}${suffix}`;
 }
-// Panels persist state keyed by a workbook/document identifier. For file-backed workbooks we use
-// their on-disk path; for unsaved sessions we generate a random session id so distinct new
-// workbooks don't collide.
-let activePanelWorkbookId = workbookId;
 if (collabStatus) installCollabStatusIndicator(app, collabStatus);
 // Treat the seeded demo workbook as an initial "saved" baseline so web reloads
 // and Playwright tests aren't blocked by unsaved-changes prompts.
@@ -1578,7 +1635,6 @@ app.subscribeSelection(() => {
 app.getDocument().on("change", () => scheduleRibbonSelectionFormatStateUpdate());
 app.onEditStateChange(() => scheduleRibbonSelectionFormatStateUpdate());
 window.addEventListener("formula:view-changed", () => scheduleRibbonSelectionFormatStateUpdate());
-window.addEventListener("formula:zoom-changed", () => syncZoomControl());
 scheduleRibbonSelectionFormatStateUpdate();
 
 function isTextInputTarget(target: EventTarget | null): boolean {
@@ -2763,6 +2819,25 @@ if (
   (window as any).__layoutController = layoutController;
 
   let lastAppliedZoom: number | null = null;
+
+  // Shared-grid zoom is persisted separately (see `sharedGridZoomStorageKey`) so it can
+  // survive quick reloads even if layout persistence (which is debounced) hasn't flushed
+  // yet. When booting we need to hydrate the layout's primary-pane zoom from the persisted
+  // value; otherwise `renderLayout()` would restore the stale layout zoom (typically 1)
+  // and clobber the user's setting.
+  if (app.supportsZoom()) {
+    const persistedZoom = loadPersistedSharedGridZoom();
+    if (persistedZoom != null) {
+      const currentLayoutZoom = layoutController.layout?.splitView?.panes?.primary?.zoom;
+      if (
+        typeof currentLayoutZoom !== "number" ||
+        !Number.isFinite(currentLayoutZoom) ||
+        Math.abs(currentLayoutZoom - persistedZoom) > 1e-6
+      ) {
+        layoutController.setSplitPaneZoom("primary", persistedZoom, { persist: false });
+      }
+    }
+  }
 
   function applyPrimaryPaneZoomFromLayout(): void {
     const zoom = (layoutController.layout as any)?.splitView?.panes?.primary?.zoom;
@@ -8400,6 +8475,10 @@ async function openWorkbookFromPath(
     if (queuedInvoke) {
       vbaEventMacros = installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
     }
+
+    // Each workbook has its own persisted zoom. Restore it (or reset to the default zoom)
+    // after switching the active workbook id.
+    applyPersistedSharedGridZoom({ resetIfMissing: true });
   } catch (err) {
     activePanelWorkbookId = previousPanelWorkbookId;
     // If we were unable to swap workbooks, restore syncing for the previously-active
@@ -8538,6 +8617,8 @@ async function handleSaveAsPath(
 
   await copyPowerQueryPersistence(previousPanelWorkbookId, path);
   activePanelWorkbookId = path;
+  // Ensure zoom persistence follows the workbook when its id changes (e.g. Save As).
+  persistCurrentSharedGridZoom();
   startPowerQueryService();
   rerenderLayout?.();
 }
@@ -8626,6 +8707,10 @@ async function handleNewWorkbook(
     if (queuedInvoke) {
       vbaEventMacros = installVbaEventMacros({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
     }
+
+    // New workbooks should not inherit zoom from the prior workbook; treat zoom as a per-workbook
+    // view setting and restore (or reset) based on the new session id.
+    applyPersistedSharedGridZoom({ resetIfMissing: true });
   } catch (err) {
     activePanelWorkbookId = previousPanelWorkbookId;
     if (hadActiveWorkbook) {
