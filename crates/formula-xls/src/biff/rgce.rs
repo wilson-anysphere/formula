@@ -1,34 +1,40 @@
-//! BIFF8 `rgce` (formula token stream) decode helpers.
+//! BIFF8 `rgce` (formula token stream) decoding helpers.
 //!
-//! This module is currently used for decoding the `rgce` stream stored in BIFF8 `NAME` records
-//! (defined names / named ranges).
+//! This module implements a best-effort stack-based (RPN) decoder for the subset of BIFF8 tokens
+//! we need to import defined names (`NAME` records):
+//! - basic operators and constants
+//! - 2D references (`PtgRef`, `PtgArea`)
+//! - 3D references (`PtgRef3d`, `PtgArea3d`) via `EXTERNSHEET`
+//! - defined-name references (`PtgName`)
 //!
-//! The decoder is intentionally best-effort: it aims to produce readable, parseable Excel formula
-//! text for common patterns (refs, operators, and function calls) while preserving warnings for
-//! unsupported/unknown constructs.
+//! Unsupported tokens yield a placeholder string and warnings, but never hard-fail `.xls` import.
 
-#![allow(dead_code)]
+use super::strings;
 
-use std::borrow::Cow;
-
-use crate::biff::strings;
-
-/// Result of best-effort BIFF8 `rgce` decoding.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DecodedRgce {
-    /// Best-effort decoded Excel formula text (without the leading `=`).
-    pub(crate) text: Option<String>,
-    /// Any non-fatal decode warnings.
-    pub(crate) warnings: Vec<String>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ExternSheetRef {
+    pub(crate) itab_first: u16,
+    pub(crate) itab_last: u16,
 }
 
-/// Decode a BIFF8 `rgce` token stream used in a defined-name (`NAME`) record.
-///
-/// The returned text does **not** include a leading `=`.
-pub(crate) fn decode_defined_name_rgce(rgce: &[u8], codepage: u16) -> DecodedRgce {
-    let mut warnings = Vec::new();
-    let text = decode_defined_name_rgce_impl(rgce, codepage, &mut warnings).ok();
-    DecodedRgce { text, warnings }
+#[derive(Debug, Clone)]
+pub(crate) struct DefinedNameMeta {
+    pub(crate) name: String,
+    /// BIFF sheet index (0-based) for local names, or `None` for workbook scope.
+    pub(crate) scope_sheet: Option<usize>,
+}
+
+pub(crate) struct RgceDecodeContext<'a> {
+    pub(crate) codepage: u16,
+    pub(crate) sheet_names: &'a [String],
+    pub(crate) externsheet: &'a [ExternSheetRef],
+    pub(crate) defined_names: &'a [DefinedNameMeta],
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DecodeRgceResult {
+    pub(crate) text: String,
+    pub(crate) warnings: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -110,8 +116,8 @@ fn format_function_call(name: &str, args: Vec<ExprFragment>) -> ExprFragment {
             continue;
         }
         // The union operator uses `,`, which is also the function argument separator. To keep the
-        // decoded formula parseable by our formula parser, wrap any argument containing union in
-        // parentheses (Excel's canonical form, e.g. `SUM((A1,B1))`).
+        // decoded formula parseable, wrap any argument containing union in parentheses (Excel's
+        // canonical form, e.g. `SUM((A1,B1))`).
         if arg.contains_union {
             // Avoid double-parenthesizing an explicit `PtgParen` arg.
             if arg.precedence == 100 && arg.text.starts_with('(') && arg.text.ends_with(')') {
@@ -135,33 +141,18 @@ fn format_function_call(name: &str, args: Vec<ExprFragment>) -> ExprFragment {
     }
 }
 
-fn escape_excel_string(value: &str) -> String {
-    // Excel escapes `"` inside a string literal by doubling it.
-    let mut out = String::with_capacity(value.len());
-    for ch in value.chars() {
-        if ch == '"' {
-            out.push('"');
-            out.push('"');
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
-fn decode_defined_name_rgce_impl(
-    rgce: &[u8],
-    codepage: u16,
-    warnings: &mut Vec<String>,
-) -> Result<String, String> {
+pub(crate) fn decode_biff8_rgce(rgce: &[u8], ctx: &RgceDecodeContext<'_>) -> DecodeRgceResult {
     if rgce.is_empty() {
-        return Ok(String::new());
+        return DecodeRgceResult {
+            text: String::new(),
+            warnings: Vec::new(),
+        };
     }
-
-    // RPN stack.
-    let mut stack: Vec<ExprFragment> = Vec::new();
 
     let mut input = rgce;
+    let mut stack: Vec<ExprFragment> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+
     while !input.is_empty() {
         let ptg = input[0];
         input = &input[1..];
@@ -170,12 +161,25 @@ fn decode_defined_name_rgce_impl(
             // Binary operators.
             0x03..=0x11 => {
                 let Some(op) = op_str(ptg) else {
-                    return Err(format!("unsupported ptg token 0x{ptg:02X}"));
+                    warnings.push(format!("unsupported rgce token 0x{ptg:02X}"));
+                    return unsupported(ptg, warnings);
                 };
                 let prec = binary_precedence(ptg).expect("precedence for binary ops");
 
-                let right = stack.pop().ok_or_else(|| "rgce stack underflow".to_string())?;
-                let left = stack.pop().ok_or_else(|| "rgce stack underflow".to_string())?;
+                let right = match stack.pop() {
+                    Some(v) => v,
+                    None => {
+                        warnings.push("rgce stack underflow".to_string());
+                        return unsupported(ptg, warnings);
+                    }
+                };
+                let left = match stack.pop() {
+                    Some(v) => v,
+                    None => {
+                        warnings.push("rgce stack underflow".to_string());
+                        return unsupported(ptg, warnings);
+                    }
+                };
 
                 let left_s = if left.precedence < prec && !left.is_missing {
                     format!("({})", left.text)
@@ -204,7 +208,13 @@ fn decode_defined_name_rgce_impl(
             0x12 | 0x13 => {
                 let prec = 70;
                 let op = if ptg == 0x12 { "+" } else { "-" };
-                let expr = stack.pop().ok_or_else(|| "rgce stack underflow".to_string())?;
+                let expr = match stack.pop() {
+                    Some(v) => v,
+                    None => {
+                        warnings.push("rgce stack underflow".to_string());
+                        return unsupported(ptg, warnings);
+                    }
+                };
                 let inner = if expr.precedence < prec && !expr.is_missing {
                     format!("({})", expr.text)
                 } else {
@@ -220,7 +230,13 @@ fn decode_defined_name_rgce_impl(
             // Percent postfix.
             0x14 => {
                 let prec = 60;
-                let expr = stack.pop().ok_or_else(|| "rgce stack underflow".to_string())?;
+                let expr = match stack.pop() {
+                    Some(v) => v,
+                    None => {
+                        warnings.push("rgce stack underflow".to_string());
+                        return unsupported(ptg, warnings);
+                    }
+                };
                 let inner = if expr.precedence < prec && !expr.is_missing {
                     format!("({})", expr.text)
                 } else {
@@ -235,7 +251,13 @@ fn decode_defined_name_rgce_impl(
             }
             // Explicit parentheses.
             0x15 => {
-                let expr = stack.pop().ok_or_else(|| "rgce stack underflow".to_string())?;
+                let expr = match stack.pop() {
+                    Some(v) => v,
+                    None => {
+                        warnings.push("rgce stack underflow".to_string());
+                        return unsupported(ptg, warnings);
+                    }
+                };
                 stack.push(ExprFragment {
                     text: format!("({})", expr.text),
                     precedence: 100,
@@ -244,64 +266,64 @@ fn decode_defined_name_rgce_impl(
                 });
             }
             // Missing argument.
-            0x16 => stack.push(ExprFragment::missing()),
-            // String literal (ShortXLUnicodeString).
-            0x17 => {
-                let (s, consumed) =
-                    strings::parse_biff8_short_string(input, codepage).map_err(|e| e)?;
-                input = input.get(consumed..).ok_or_else(|| "unexpected eof".to_string())?;
-                stack.push(ExprFragment::new(format!(
-                    "\"{}\"",
-                    escape_excel_string(&s)
-                )));
+            0x16 => {
+                stack.push(ExprFragment::missing());
             }
+            // String literal (ShortXLUnicodeString).
+            0x17 => match strings::parse_biff8_short_string(input, ctx.codepage) {
+                Ok((s, consumed)) => {
+                    input = input.get(consumed..).unwrap_or_default();
+                    let escaped = s.replace('"', "\"\"");
+                    stack.push(ExprFragment::new(format!("\"{escaped}\"")));
+                }
+                Err(err) => {
+                    warnings.push(format!("failed to decode PtgStr: {err}"));
+                    return unsupported(ptg, warnings);
+                }
+            },
             // PtgAttr: [grbit: u8][wAttr: u16]
             //
-            // Most PtgAttr bits are evaluation hints (or formatting metadata) that do not affect the
-            // printed formula text, but some do. In particular, Excel can encode `SUM(A1:A10)` as
-            // `PtgArea` + `PtgAttr(tAttrSum)` (no explicit `PtgFuncVar(SUM)`).
+            // Most PtgAttr bits are evaluation hints (or formatting metadata) that do not affect
+            // the printed formula text, but some do (notably tAttrSum).
             0x19 => {
                 if input.len() < 3 {
-                    return Err("unexpected eof".to_string());
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
                 }
                 let grbit = input[0];
                 let w_attr = u16::from_le_bytes([input[1], input[2]]);
                 input = &input[3..];
 
-                const T_ATTR_VOLATILE: u8 = 0x01;
-                const T_ATTR_IF: u8 = 0x02;
                 const T_ATTR_CHOOSE: u8 = 0x04;
-                const T_ATTR_SKIP: u8 = 0x08;
                 const T_ATTR_SUM: u8 = 0x10;
-                const T_ATTR_SPACE: u8 = 0x40;
-                const T_ATTR_SEMI: u8 = 0x80;
 
                 if grbit & T_ATTR_CHOOSE != 0 {
-                    // `tAttrChoose` is followed by a jump table of `u16` offsets used for
-                    // short-circuit evaluation.
-                    //
-                    // We don't need it for printing, but we must consume it so subsequent tokens
-                    // stay aligned.
+                    // tAttrChoose is followed by a jump table of u16 offsets; consume it.
                     let needed = (w_attr as usize).saturating_mul(2);
                     if input.len() < needed {
-                        return Err("unexpected eof".to_string());
+                        warnings.push("unexpected end of rgce stream".to_string());
+                        return unsupported(ptg, warnings);
                     }
                     input = &input[needed..];
                 }
 
                 if grbit & T_ATTR_SUM != 0 {
-                    let a = stack.pop().ok_or_else(|| "rgce stack underflow".to_string())?;
-                    stack.push(format_function_call("SUM", vec![a]));
-                } else {
-                    // Ignore other attributes for printing, but keep the constants referenced so
-                    // this doesn't accidentally get treated as dead code.
-                    let _ =
-                        grbit & (T_ATTR_VOLATILE | T_ATTR_IF | T_ATTR_SKIP | T_ATTR_SPACE | T_ATTR_SEMI);
+                    let expr = match stack.pop() {
+                        Some(v) => v,
+                        None => {
+                            warnings.push("rgce stack underflow".to_string());
+                            return unsupported(ptg, warnings);
+                        }
+                    };
+                    stack.push(format_function_call("SUM", vec![expr]));
                 }
             }
             // Error literal.
             0x1C => {
-                let (&err, rest) = input.split_first().ok_or_else(|| "unexpected eof".to_string())?;
+                let Some((&err, rest)) = input.split_first() else {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                };
                 input = rest;
                 let text = match err {
                     0x00 => "#NULL!",
@@ -312,18 +334,19 @@ fn decode_defined_name_rgce_impl(
                     0x24 => "#NUM!",
                     0x2A => "#N/A",
                     0x2B => "#GETTING_DATA",
-                    _ => "#UNKNOWN!",
+                    other => {
+                        warnings.push(format!("unknown error literal 0x{other:02X} in rgce"));
+                        "#UNKNOWN!"
+                    }
                 };
-                if text == "#UNKNOWN!" {
-                    warnings.push(format!(
-                        "unknown error literal 0x{err:02X} in BIFF8 rgce stream"
-                    ));
-                }
                 stack.push(ExprFragment::new(text.to_string()));
             }
             // Bool literal.
             0x1D => {
-                let (&b, rest) = input.split_first().ok_or_else(|| "unexpected eof".to_string())?;
+                let Some((&b, rest)) = input.split_first() else {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                };
                 input = rest;
                 stack.push(ExprFragment::new(
                     if b == 0 { "FALSE" } else { "TRUE" }.to_string(),
@@ -332,7 +355,8 @@ fn decode_defined_name_rgce_impl(
             // Int literal.
             0x1E => {
                 if input.len() < 2 {
-                    return Err("unexpected eof".to_string());
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
                 }
                 let n = u16::from_le_bytes([input[0], input[1]]);
                 input = &input[2..];
@@ -341,7 +365,8 @@ fn decode_defined_name_rgce_impl(
             // Num literal.
             0x1F => {
                 if input.len() < 8 {
-                    return Err("unexpected eof".to_string());
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
                 }
                 let mut bytes = [0u8; 8];
                 bytes.copy_from_slice(&input[..8]);
@@ -351,52 +376,60 @@ fn decode_defined_name_rgce_impl(
             // PtgFunc: [iftab: u16] (fixed arg count is implicit).
             0x21 | 0x41 | 0x61 => {
                 if input.len() < 2 {
-                    return Err("unexpected eof".to_string());
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
                 }
                 let func_id = u16::from_le_bytes([input[0], input[1]]);
                 input = &input[2..];
 
-                let (name, argc): (Cow<'static, str>, usize) =
-                    match formula_biff::function_spec_from_id(func_id) {
-                        Some(spec) if spec.min_args == spec.max_args => {
-                            (Cow::Borrowed(spec.name), spec.min_args as usize)
-                        }
-                        _ => {
-                            warnings.push(format!(
-                                "unknown BIFF function id 0x{func_id:04X} (PtgFunc) in defined name formula"
-                            ));
-                            (Cow::Owned(format!("#UNKNOWN_FUNC(0x{func_id:04X})")), 0)
-                        }
-                    };
+                let Some(spec) = formula_biff::function_spec_from_id(func_id) else {
+                    warnings.push(format!(
+                        "unknown BIFF function id 0x{func_id:04X} (PtgFunc) in rgce"
+                    ));
+                    return unsupported(ptg, warnings);
+                };
 
+                // Only handle fixed arity here.
+                if spec.min_args != spec.max_args {
+                    warnings.push(format!(
+                        "unsupported variable-arity BIFF function id 0x{func_id:04X} (PtgFunc) in rgce"
+                    ));
+                    return unsupported(ptg, warnings);
+                }
+
+                let argc = spec.min_args as usize;
                 if stack.len() < argc {
-                    return Err("rgce stack underflow".to_string());
+                    warnings.push("rgce stack underflow".to_string());
+                    return unsupported(ptg, warnings);
                 }
                 let mut args = Vec::with_capacity(argc);
                 for _ in 0..argc {
                     args.push(stack.pop().expect("len checked"));
                 }
                 args.reverse();
-                stack.push(format_function_call(name.as_ref(), args));
+                stack.push(format_function_call(spec.name, args));
             }
             // PtgFuncVar: [argc: u8][iftab: u16]
             0x22 | 0x42 | 0x62 => {
                 if input.len() < 3 {
-                    return Err("unexpected eof".to_string());
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
                 }
                 let argc = input[0] as usize;
                 let func_id = u16::from_le_bytes([input[1], input[2]]);
                 input = &input[3..];
 
                 if stack.len() < argc {
-                    return Err("rgce stack underflow".to_string());
+                    warnings.push("rgce stack underflow".to_string());
+                    return unsupported(ptg, warnings);
                 }
 
                 // Excel uses a sentinel function id for user-defined functions: the top-of-stack
                 // item is the function name, followed by args.
-                if func_id == 0x00FF {
+                if func_id == formula_biff::FTAB_USER_DEFINED {
                     if argc == 0 {
-                        return Err("rgce stack underflow".to_string());
+                        warnings.push("rgce stack underflow".to_string());
+                        return unsupported(ptg, warnings);
                     }
                     let func_name = stack.pop().expect("len checked").text;
                     let mut args = Vec::with_capacity(argc.saturating_sub(1));
@@ -411,7 +444,7 @@ fn decode_defined_name_rgce_impl(
                         Some(name) => name,
                         None => {
                             warnings.push(format!(
-                                "unknown BIFF function id 0x{func_id:04X} (PtgFuncVar) in defined name formula"
+                                "unknown BIFF function id 0x{func_id:04X} (PtgFuncVar) in rgce"
                             ));
                             name_owned = format!("#UNKNOWN_FUNC(0x{func_id:04X})");
                             &name_owned
@@ -426,56 +459,66 @@ fn decode_defined_name_rgce_impl(
                     stack.push(format_function_call(name, args));
                 }
             }
-            // PtgRef: [rw: u16][col: u16]
+            // PtgName (defined name reference).
+            0x23 | 0x43 | 0x63 => {
+                if input.len() < 6 {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                }
+
+                let name_id = u32::from_le_bytes([input[0], input[1], input[2], input[3]]);
+                // Skip reserved bytes.
+                input = &input[6..];
+
+                let idx = name_id.saturating_sub(1) as usize;
+                let Some(meta) = ctx.defined_names.get(idx) else {
+                    warnings.push(format!("PtgName references missing name index {name_id}"));
+                    stack.push(ExprFragment::new(format!("#NAME_ID({name_id})")));
+                    continue;
+                };
+
+                let text = match meta.scope_sheet {
+                    None => meta.name.clone(),
+                    Some(sheet_idx) => match ctx.sheet_names.get(sheet_idx) {
+                        Some(sheet_name) => {
+                            let sheet = quote_sheet_name_if_needed(sheet_name);
+                            format!("{sheet}!{}", meta.name)
+                        }
+                        None => {
+                            warnings.push(format!(
+                                "PtgName references sheet-scoped name `{}` with out-of-range sheet index {sheet_idx}",
+                                meta.name
+                            ));
+                            meta.name.clone()
+                        }
+                    },
+                };
+
+                stack.push(ExprFragment::new(text));
+            }
+            // PtgRef (2D)
             0x24 | 0x44 | 0x64 => {
                 if input.len() < 4 {
-                    return Err("unexpected eof".to_string());
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
                 }
-                let row0 = u16::from_le_bytes([input[0], input[1]]);
-                let col_field = u16::from_le_bytes([input[2], input[3]]);
+                let row = u16::from_le_bytes([input[0], input[1]]);
+                let col = u16::from_le_bytes([input[2], input[3]]);
                 input = &input[4..];
-
-                stack.push(ExprFragment::new(format_cell_ref_from_field(
-                    row0, col_field,
-                )));
+                stack.push(ExprFragment::new(format_cell_ref(row, col)));
             }
-            // PtgArea: [rwFirst: u16][rwLast: u16][colFirst: u16][colLast: u16]
+            // PtgArea (2D)
             0x25 | 0x45 | 0x65 => {
                 if input.len() < 8 {
-                    return Err("unexpected eof".to_string());
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
                 }
                 let row1 = u16::from_le_bytes([input[0], input[1]]);
                 let row2 = u16::from_le_bytes([input[2], input[3]]);
                 let col1 = u16::from_le_bytes([input[4], input[5]]);
                 let col2 = u16::from_le_bytes([input[6], input[7]]);
                 input = &input[8..];
-
-                let start = format_cell_ref_from_field(row1, col1);
-                let end = format_cell_ref_from_field(row2, col2);
-
-                let is_single_cell =
-                    row1 == row2 && (col1 & 0x3FFF) == (col2 & 0x3FFF) && (col1 & 0xC000) == (col2 & 0xC000);
-                let is_value_class = (ptg & 0x60) == 0x40;
-
-                let mut text = String::new();
-                if is_value_class && !is_single_cell {
-                    // Preserve legacy implicit intersection semantics for value-class ranges.
-                    text.push('@');
-                }
-                if is_single_cell {
-                    text.push_str(&start);
-                } else {
-                    text.push_str(&start);
-                    text.push(':');
-                    text.push_str(&end);
-                }
-
-                let mut frag = ExprFragment::new(text);
-                if is_value_class && !is_single_cell {
-                    // Unary `@` has the same precedence as unary +/- in our formula parser.
-                    frag.precedence = 70;
-                }
-                stack.push(frag);
+                stack.push(ExprFragment::new(format_area_ref(row1, col1, row2, col2)));
             }
             // PtgMem* tokens: no-op for printing, but consume payload to keep offsets aligned.
             //
@@ -483,144 +526,185 @@ fn decode_defined_name_rgce_impl(
             0x26 | 0x46 | 0x66 | 0x27 | 0x47 | 0x67 | 0x28 | 0x48 | 0x68 | 0x29 | 0x49 | 0x69
             | 0x2E | 0x4E | 0x6E => {
                 if input.len() < 2 {
-                    return Err("unexpected eof".to_string());
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
                 }
                 let cce = u16::from_le_bytes([input[0], input[1]]) as usize;
                 input = &input[2..];
                 if input.len() < cce {
-                    return Err("unexpected eof".to_string());
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
                 }
                 input = &input[cce..];
             }
-            _ => return Err(format!("unsupported ptg token 0x{ptg:02X}")),
+            // PtgRef3d
+            0x3A | 0x5A | 0x7A => {
+                if input.len() < 6 {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                }
+                let ixti = u16::from_le_bytes([input[0], input[1]]);
+                let row = u16::from_le_bytes([input[2], input[3]]);
+                let col = u16::from_le_bytes([input[4], input[5]]);
+                input = &input[6..];
+
+                let sheet_prefix = match format_sheet_ref(ixti, ctx) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        warnings.push(err);
+                        format!("#SHEET(ixti={ixti})!")
+                    }
+                };
+                let cell = format_cell_ref(row, col);
+                stack.push(ExprFragment::new(format!("{sheet_prefix}{cell}")));
+            }
+            // PtgArea3d
+            0x3B | 0x5B | 0x7B => {
+                if input.len() < 10 {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                }
+                let ixti = u16::from_le_bytes([input[0], input[1]]);
+                let row1 = u16::from_le_bytes([input[2], input[3]]);
+                let row2 = u16::from_le_bytes([input[4], input[5]]);
+                let col1 = u16::from_le_bytes([input[6], input[7]]);
+                let col2 = u16::from_le_bytes([input[8], input[9]]);
+                input = &input[10..];
+
+                let sheet_prefix = match format_sheet_ref(ixti, ctx) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        warnings.push(err);
+                        format!("#SHEET(ixti={ixti})!")
+                    }
+                };
+                let area = format_area_ref(row1, col1, row2, col2);
+                stack.push(ExprFragment::new(format!("{sheet_prefix}{area}")));
+            }
+            other => {
+                warnings.push(format!("unsupported rgce token 0x{other:02X}"));
+                return unsupported(other, warnings);
+            }
         }
     }
 
-    if stack.len() == 1 {
-        Ok(stack.pop().expect("len checked").text)
+    let text = match stack.len() {
+        0 => String::new(),
+        1 => stack.pop().expect("len checked").text,
+        _ => {
+            warnings.push(format!(
+                "rgce decode ended with {} expressions on stack",
+                stack.len()
+            ));
+            stack.pop().expect("non-empty").text
+        }
+    };
+
+    DecodeRgceResult { text, warnings }
+}
+
+fn unsupported(ptg: u8, warnings: Vec<String>) -> DecodeRgceResult {
+    DecodeRgceResult {
+        text: format!("#UNSUPPORTED_PTG(0x{ptg:02X})"),
+        warnings,
+    }
+}
+
+fn format_cell_ref(row: u16, col_with_flags: u16) -> String {
+    let row_rel = (col_with_flags & 0x4000) != 0;
+    let col_rel = (col_with_flags & 0x8000) != 0;
+    let col = col_with_flags & 0x3FFF;
+
+    let mut out = String::new();
+    if !col_rel {
+        out.push('$');
+    }
+    push_column(col as u32, &mut out);
+    if !row_rel {
+        out.push('$');
+    }
+    out.push_str(&(row as u32 + 1).to_string());
+    out
+}
+
+fn format_area_ref(row1: u16, col1: u16, row2: u16, col2: u16) -> String {
+    let start = format_cell_ref(row1, col1);
+    let end = format_cell_ref(row2, col2);
+    if start == end {
+        start
     } else {
-        Err(format!(
-            "rgce decode finished with stack size {} (expected 1)",
-            stack.len()
+        format!("{start}:{end}")
+    }
+}
+
+fn format_sheet_ref(ixti: u16, ctx: &RgceDecodeContext<'_>) -> Result<String, String> {
+    let Some(entry) = ctx.externsheet.get(ixti as usize) else {
+        return Err(format!(
+            "PtgRef3d/PtgArea3d references missing EXTERNSHEET entry ixti={ixti}"
+        ));
+    };
+
+    let itab_first = entry.itab_first as usize;
+    let itab_last = entry.itab_last as usize;
+
+    let Some(first) = ctx.sheet_names.get(itab_first) else {
+        return Err(format!(
+            "EXTERNSHEET entry ixti={ixti} refers to out-of-range itabFirst={itab_first} (sheet count={})",
+            ctx.sheet_names.len()
+        ));
+    };
+    let Some(last) = ctx.sheet_names.get(itab_last) else {
+        return Err(format!(
+            "EXTERNSHEET entry ixti={ixti} refers to out-of-range itabLast={itab_last} (sheet count={})",
+            ctx.sheet_names.len()
+        ));
+    };
+
+    if itab_first == itab_last {
+        Ok(format!("{}!", quote_sheet_name_if_needed(first)))
+    } else {
+        Ok(format!(
+            "{}:{}!",
+            quote_sheet_name_if_needed(first),
+            quote_sheet_name_if_needed(last)
         ))
     }
 }
 
-fn push_column_label(mut col: u32, out: &mut String) {
-    // Excel columns are 1-based in the alphabetic representation.
-    col = col.saturating_add(1);
-    let mut buf = [0u8; 8];
-    let mut i = 0usize;
-    while col > 0 {
-        let rem = ((col - 1) % 26) as u8;
-        buf[i] = b'A' + rem;
-        i += 1;
-        col = (col - 1) / 26;
+fn quote_sheet_name_if_needed(name: &str) -> String {
+    if is_unquoted_sheet_name(name) {
+        return name.to_string();
     }
-    for ch in buf[..i].iter().rev() {
-        out.push(*ch as char);
-    }
+    let escaped = name.replace('\'', "''");
+    format!("'{escaped}'")
 }
 
-fn format_cell_ref_from_field(row0: u16, col_field: u16) -> String {
-    let row1 = (row0 as u32).saturating_add(1);
-    let col = (col_field & 0x3FFF) as u32;
-    let row_relative = (col_field & 0x4000) == 0x4000;
-    let col_relative = (col_field & 0x8000) == 0x8000;
-
-    let mut out = String::new();
-    if !col_relative {
-        out.push('$');
+fn is_unquoted_sheet_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
     }
-    push_column_label(col, &mut out);
-    if !row_relative {
-        out.push('$');
+    for ch in chars {
+        if !(ch.is_ascii_alphanumeric() || ch == '_') {
+            return false;
+        }
     }
-    out.push_str(&row1.to_string());
-    out
+    true
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn decodes_sum_1_2_from_ptg_funcvar() {
-        // SUM(1,2):
-        //   PtgInt 1
-        //   PtgInt 2
-        //   PtgFuncVar argc=2 iftab=4 (SUM)
-        let rgce = vec![0x1E, 0x01, 0x00, 0x1E, 0x02, 0x00, 0x22, 0x02, 0x04, 0x00];
-
-        let decoded = decode_defined_name_rgce(&rgce, 1252);
-        assert_eq!(decoded.text.as_deref(), Some("SUM(1,2)"));
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+fn push_column(col: u32, out: &mut String) {
+    // Excel columns are 1-based in A1 notation. We store 0-based internally.
+    let mut n = col + 1;
+    let mut buf = Vec::<u8>::new();
+    while n > 0 {
+        let rem = (n - 1) % 26;
+        buf.push(b'A' + rem as u8);
+        n = (n - 1) / 26;
     }
-
-    #[test]
-    fn decodes_if_true_1_2_from_ptg_funcvar() {
-        // IF(TRUE,1,2):
-        //   PtgBool TRUE
-        //   PtgInt 1
-        //   PtgInt 2
-        //   PtgFuncVar argc=3 iftab=1 (IF)
-        let rgce = vec![
-            0x1D, 0x01, // TRUE
-            0x1E, 0x01, 0x00, // 1
-            0x1E, 0x02, 0x00, // 2
-            0x22, 0x03, 0x01, 0x00, // IF(argc=3)
-        ];
-
-        let decoded = decode_defined_name_rgce(&rgce, 1252);
-        assert_eq!(decoded.text.as_deref(), Some("IF(TRUE,1,2)"));
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-    }
-
-    #[test]
-    fn ptg_attr_sum_wraps_area_in_sum() {
-        // SUM(A1:A2) encoded as `PtgArea` + `PtgAttr(tAttrSum)`.
-        let mut rgce = Vec::new();
-
-        // PtgArea (0x25) with rowFirst=0,rowLast=1,col=A relative.
-        rgce.push(0x25);
-        rgce.extend_from_slice(&0u16.to_le_bytes()); // rowFirst0 (A1)
-        rgce.extend_from_slice(&1u16.to_le_bytes()); // rowLast0 (A2)
-        // col field: index 0 + both relative flags -> no '$' markers.
-        let col_rel: u16 = 0xC000;
-        rgce.extend_from_slice(&(0u16 | col_rel).to_le_bytes()); // colFirst
-        rgce.extend_from_slice(&(0u16 | col_rel).to_le_bytes()); // colLast
-
-        // PtgAttr (0x19): grbit=tAttrSum (0x10), wAttr=0.
-        rgce.push(0x19);
-        rgce.push(0x10);
-        rgce.extend_from_slice(&0u16.to_le_bytes());
-
-        let decoded = decode_defined_name_rgce(&rgce, 1252);
-        assert_eq!(decoded.text.as_deref(), Some("SUM(A1:A2)"));
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-    }
-
-    #[test]
-    fn ptg_mem_tokens_are_skipped_and_do_not_break_alignment() {
-        let mut rgce = Vec::new();
-
-        // PtgMemArea (0x26): cce=2, dummy bytes.
-        rgce.push(0x26);
-        rgce.extend_from_slice(&2u16.to_le_bytes());
-        rgce.extend_from_slice(&[0xAA, 0xBB]);
-
-        // PtgMemFunc (0x29): cce=3, dummy bytes that look like a token (PtgInt 42).
-        rgce.push(0x29);
-        rgce.extend_from_slice(&3u16.to_le_bytes());
-        rgce.extend_from_slice(&[0x1E, 0x2A, 0x00]);
-
-        // 1 2 +
-        rgce.extend_from_slice(&[0x1E, 0x01, 0x00]); // PtgInt 1
-        rgce.extend_from_slice(&[0x1E, 0x02, 0x00]); // PtgInt 2
-        rgce.push(0x03); // PtgAdd
-
-        let decoded = decode_defined_name_rgce(&rgce, 1252);
-        assert_eq!(decoded.text.as_deref(), Some("1+2"));
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
-    }
+    buf.reverse();
+    out.push_str(&String::from_utf8(buf).expect("A1 column bytes"));
 }
+

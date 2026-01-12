@@ -25,6 +25,8 @@ const RECORD_OBJ: u16 = 0x005D;
 const RECORD_TXO: u16 = 0x01B6;
 const RECORD_XF: u16 = 0x00E0;
 const RECORD_BOUNDSHEET: u16 = 0x0085;
+const RECORD_EXTERNSHEET: u16 = 0x0017;
+const RECORD_NAME: u16 = 0x0018;
 const RECORD_SAVERECALC: u16 = 0x005F;
 const RECORD_SHEETEXT: u16 = 0x0862;
 const RECORD_WINDOW2: u16 = 0x023E;
@@ -210,6 +212,23 @@ pub fn build_outline_fixture_xls() -> Vec<u8> {
 /// `__builtin_numFmtId:60`.
 pub fn build_unknown_builtin_numfmtid_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_unknown_builtin_numfmtid_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a workbook-scoped defined name, a
+/// worksheet-scoped defined name, and a hidden name. The fixture also includes a
+/// minimal `EXTERNSHEET` table so 3D references can be decoded.
+pub fn build_defined_names_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_defined_names_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -1091,6 +1110,226 @@ fn build_unknown_builtin_numfmtid_workbook_stream() -> Vec<u8> {
 
     globals.extend_from_slice(&sheet);
     globals
+}
+
+fn build_defined_names_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Two worksheets.
+    let boundsheet1_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Sheet1");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet1_offset_pos = boundsheet1_start + 4;
+
+    let boundsheet2_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Sheet2");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet2_offset_pos = boundsheet2_start + 4;
+
+    // Minimal EXTERNSHEET table with two internal sheet entries.
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0), (1, 1)]),
+    );
+
+    // NAME records.
+    // 1) Workbook-scoped name: ZedName -> Sheet1!$B$1
+    let zed_rgce = ptg_ref3d(0, 0, 1);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("ZedName", 0, false, None, &zed_rgce),
+    );
+
+    // 2) Sheet-scoped name: LocalName (scope Sheet1) -> Sheet1!$A$1
+    let local_rgce = ptg_ref3d(0, 0, 0);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record(
+            "LocalName",
+            1,
+            false,
+            Some("Local description"),
+            &local_rgce,
+        ),
+    );
+
+    // 3) Hidden workbook-scoped name: HiddenName -> Sheet1!$A$1:$B$2
+    let hidden_rgce = ptg_area3d(0, 0, 1, 0, 1);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("HiddenName", 0, true, None, &hidden_rgce),
+    );
+
+    // 4) Union to exercise PtgUnion decoding.
+    let union_rgce = [ptg_ref3d(0, 0, 0), ptg_ref3d(0, 0, 1), vec![0x10u8]].concat();
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("UnionName", 0, false, None, &union_rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet substreams -------------------------------------------------------
+    let sheet1_offset = globals.len();
+    let sheet1 = build_empty_sheet_stream(xf_general);
+    let sheet2_offset = sheet1_offset + sheet1.len();
+    let sheet2 = build_empty_sheet_stream(xf_general);
+
+    // Patch BoundSheet offsets.
+    globals[boundsheet1_offset_pos..boundsheet1_offset_pos + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals[boundsheet2_offset_pos..boundsheet2_offset_pos + 4]
+        .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet1);
+    globals.extend_from_slice(&sheet2);
+
+    globals
+}
+
+fn build_empty_sheet_stream(xf_general: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // A1: a single General cell so calamine populates a range for the sheet.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_general, 0.0));
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn externsheet_record(entries: &[(u16, u16)]) -> Vec<u8> {
+    // EXTERNSHEET payload: [cXTI: u16][rgXTI: cXTI * 6 bytes]
+    // Each XTI: [iSupBook: u16][itabFirst: u16][itabLast: u16]
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    for &(itab_first, itab_last) in entries {
+        out.extend_from_slice(&0u16.to_le_bytes()); // iSupBook (internal)
+        out.extend_from_slice(&itab_first.to_le_bytes());
+        out.extend_from_slice(&itab_last.to_le_bytes());
+    }
+    out
+}
+
+fn name_record(
+    name: &str,
+    itab: u16,
+    hidden: bool,
+    description: Option<&str>,
+    rgce: &[u8],
+) -> Vec<u8> {
+    // NAME record payload (BIFF8) header:
+    // [grbit: u16][chKey: u8][cch: u8][cce: u16][ixals: u16][itab: u16]
+    // [cchCustMenu: u8][cchDescription: u8][cchHelpTopic: u8][cchStatusText: u8]
+    let mut out = Vec::<u8>::new();
+
+    let mut grbit: u16 = 0;
+    if hidden {
+        grbit |= 0x0001; // fHidden
+    }
+    out.extend_from_slice(&grbit.to_le_bytes());
+    out.push(0); // chKey
+
+    let cch: u8 = name
+        .len()
+        .try_into()
+        .expect("defined name too long for u8 length");
+    out.push(cch);
+
+    let cce: u16 = rgce
+        .len()
+        .try_into()
+        .expect("rgce too long for u16 length");
+    out.extend_from_slice(&cce.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes()); // ixals
+    out.extend_from_slice(&itab.to_le_bytes());
+
+    out.push(0); // cchCustMenu
+
+    let desc_len: u8 = description
+        .map(|s| s.len().try_into().expect("description too long"))
+        .unwrap_or(0);
+    out.push(desc_len); // cchDescription
+    out.push(0); // cchHelpTopic
+    out.push(0); // cchStatusText
+
+    // Name string (XLUnicodeStringNoCch).
+    write_unicode_string_no_cch(&mut out, name);
+
+    // Formula token stream.
+    out.extend_from_slice(rgce);
+
+    // Optional strings.
+    if let Some(desc) = description {
+        write_unicode_string_no_cch(&mut out, desc);
+    }
+
+    out
+}
+
+fn write_unicode_string_no_cch(out: &mut Vec<u8>, s: &str) {
+    // BIFF8 XLUnicodeStringNoCch: [flags: u8][chars]
+    // We only emit compressed (8-bit) strings in fixtures.
+    out.push(0); // flags (fHighByte=0)
+    out.extend_from_slice(s.as_bytes());
+}
+
+fn ptg_ref3d(ixti: u16, row: u16, col: u16) -> Vec<u8> {
+    // PtgRef3d (0x3A) payload: [ixti: u16][row: u16][col: u16]
+    let mut out = Vec::<u8>::new();
+    out.push(0x3A);
+    out.extend_from_slice(&ixti.to_le_bytes());
+    out.extend_from_slice(&row.to_le_bytes());
+    out.extend_from_slice(&col.to_le_bytes());
+    out
+}
+
+fn ptg_area3d(ixti: u16, row1: u16, row2: u16, col1: u16, col2: u16) -> Vec<u8> {
+    // PtgArea3d (0x3B) payload: [ixti: u16][rowFirst: u16][rowLast: u16][colFirst: u16][colLast: u16]
+    let mut out = Vec::<u8>::new();
+    out.push(0x3B);
+    out.extend_from_slice(&ixti.to_le_bytes());
+    out.extend_from_slice(&row1.to_le_bytes());
+    out.extend_from_slice(&row2.to_le_bytes());
+    out.extend_from_slice(&col1.to_le_bytes());
+    out.extend_from_slice(&col2.to_le_bytes());
+    out
 }
 
 fn build_outline_workbook_stream() -> Vec<u8> {

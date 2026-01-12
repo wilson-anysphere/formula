@@ -1,97 +1,210 @@
+//! BIFF8 defined name (`NAME` / `0x0018`) parsing.
+//!
+//! This module implements a small, best-effort parser for workbook- and sheet-scoped defined
+//! names (named ranges / constants) stored in the workbook-global substream.
+//!
+//! The parser:
+//! - extracts `NAME` records (including scope + hidden + description/comment)
+//! - extracts the workbook `EXTERNSHEET` table (for 3D reference rendering)
+//! - decodes BIFF8 `rgce` token streams into formula text (no leading `=`)
+
 #![allow(dead_code)]
 
-use super::{records, strings, BiffVersion};
+use super::{records, rgce, strings, BiffVersion};
 
-/// BIFF8 `NAME` record id.
-///
-/// See [MS-XLS] 2.4.150 (NAME).
+// Record ids used by workbook-global defined name parsing.
+// See [MS-XLS] sections:
+// - EXTERNSHEET: 2.4.103
+// - NAME: 2.4.150
+const RECORD_EXTERNSHEET: u16 = 0x0017;
 const RECORD_NAME: u16 = 0x0018;
 
+// NAME record flags (Lbl.grbit).
+// See [MS-XLS] 2.4.150 (NAME) / 2.5.114 (Lbl).
+const NAME_FLAG_HIDDEN: u16 = 0x0001;
+// fBuiltin (bit 5) indicates the name is a built-in defined name (e.g. print area).
+const NAME_FLAG_BUILTIN: u16 = 0x0020;
+
 // BIFF8 string option flags used by `XLUnicodeStringNoCch`.
-// See [MS-XLS] 2.5.292.
+// See [MS-XLS] 2.5.277.
 const STR_FLAG_HIGH_BYTE: u8 = 0x01;
 const STR_FLAG_EXT: u8 = 0x04;
 const STR_FLAG_RICH_TEXT: u8 = 0x08;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) struct BiffDefinedName {
     pub(crate) name: String,
-    /// Raw BIFF8 `rgce` bytes for the defined name formula.
-    pub(crate) rgce: Vec<u8>,
+    /// BIFF sheet index (0-based) for local names, or `None` for workbook scope.
+    pub(crate) scope_sheet: Option<usize>,
+    pub(crate) refers_to: String,
+    pub(crate) hidden: bool,
+    pub(crate) comment: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BiffDefinedNames {
+    pub(crate) names: Vec<BiffDefinedName>,
+    pub(crate) warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct RawDefinedName {
+    name: String,
+    scope_sheet: Option<usize>,
+    hidden: bool,
+    comment: Option<String>,
+    rgce: Vec<u8>,
 }
 
 pub(crate) fn parse_biff_defined_names(
     workbook_stream: &[u8],
     biff: BiffVersion,
     codepage: u16,
-) -> Result<Vec<BiffDefinedName>, String> {
-    match biff {
-        BiffVersion::Biff8 => parse_biff8_defined_names(workbook_stream, codepage),
-        // TODO: BIFF5 `NAME` parsing is not yet needed by the importer.
-        BiffVersion::Biff5 => Ok(Vec::new()),
+    sheet_names: &[String],
+) -> Result<BiffDefinedNames, String> {
+    let mut out = BiffDefinedNames::default();
+
+    if biff != BiffVersion::Biff8 {
+        out.warnings
+            .push("BIFF defined name import currently supports BIFF8 only".to_string());
+        return Ok(out);
     }
-}
 
-fn parse_biff8_defined_names(
-    workbook_stream: &[u8],
-    codepage: u16,
-) -> Result<Vec<BiffDefinedName>, String> {
-    let mut out = Vec::new();
-
+    let allows_continuation = |id: u16| id == RECORD_EXTERNSHEET || id == RECORD_NAME;
     let iter = records::LogicalBiffRecordIter::new(workbook_stream, allows_continuation);
+
+    let mut externsheet: Vec<rgce::ExternSheetRef> = Vec::new();
+    let mut raw_names: Vec<RawDefinedName> = Vec::new();
+
     for record in iter {
         let record = match record {
             Ok(record) => record,
-            // Best-effort: stop once we hit a malformed record and return what we have.
-            Err(_) => break,
+            Err(err) => {
+                out.warnings.push(format!("malformed BIFF record: {err}"));
+                break;
+            }
         };
 
-        // The `NAME` record lives in the workbook-global substream. Stop if we see the start of the
-        // next substream (worksheet BOF), even if the workbook-global EOF is missing.
-        if record.offset != 0 && records::is_bof_record(record.record_id) {
+        let record_id = record.record_id;
+
+        // Stop at the next substream BOF; workbook globals start at offset 0.
+        if record.offset != 0 && records::is_bof_record(record_id) {
             break;
         }
 
-        match record.record_id {
-            RECORD_NAME => {
-                if let Ok(name) = parse_biff8_name_record(&record, codepage) {
-                    out.push(name);
-                }
-            }
+        match record_id {
+            RECORD_EXTERNSHEET => match parse_externsheet_record(record.data.as_ref()) {
+                Ok(table) => externsheet = table,
+                Err(err) => out
+                    .warnings
+                    .push(format!("failed to parse EXTERNSHEET record: {err}")),
+            },
+            RECORD_NAME => match parse_biff8_name_record(&record, codepage, sheet_names) {
+                Ok(raw) => raw_names.push(raw),
+                Err(err) => out.warnings.push(format!("failed to parse NAME record: {err}")),
+            },
             records::RECORD_EOF => break,
             _ => {}
         }
     }
 
+    // Build name table metadata (for PtgName resolution), then decode formulas.
+    let metas: Vec<rgce::DefinedNameMeta> = raw_names
+        .iter()
+        .map(|n| rgce::DefinedNameMeta {
+            name: n.name.clone(),
+            scope_sheet: n.scope_sheet,
+        })
+        .collect();
+
+    let ctx = rgce::RgceDecodeContext {
+        codepage,
+        sheet_names,
+        externsheet: &externsheet,
+        defined_names: &metas,
+    };
+
+    for raw in raw_names {
+        let decoded = rgce::decode_biff8_rgce(&raw.rgce, &ctx);
+        for warning in decoded.warnings {
+            out.warnings.push(format!("defined name `{}`: {warning}", raw.name));
+        }
+
+        out.names.push(BiffDefinedName {
+            name: raw.name,
+            scope_sheet: raw.scope_sheet,
+            refers_to: decoded.text,
+            hidden: raw.hidden,
+            comment: raw.comment,
+        });
+    }
+
     Ok(out)
 }
 
-fn allows_continuation(record_id: u16) -> bool {
-    record_id == RECORD_NAME
+fn parse_externsheet_record(data: &[u8]) -> Result<Vec<rgce::ExternSheetRef>, String> {
+    if data.len() < 2 {
+        return Err("EXTERNSHEET record too short".to_string());
+    }
+
+    let count = u16::from_le_bytes([data[0], data[1]]) as usize;
+    let mut offset = 2usize;
+    let mut out = Vec::with_capacity(count);
+
+    for _ in 0..count {
+        if data.len() < offset + 6 {
+            return Err("EXTERNSHEET record truncated".to_string());
+        }
+        // iSupBook is currently ignored; we only support internal sheet refs.
+        let _isupbook = u16::from_le_bytes([data[offset], data[offset + 1]]);
+        let itab_first = u16::from_le_bytes([data[offset + 2], data[offset + 3]]);
+        let itab_last = u16::from_le_bytes([data[offset + 4], data[offset + 5]]);
+        offset += 6;
+        out.push(rgce::ExternSheetRef {
+            itab_first,
+            itab_last,
+        });
+    }
+
+    Ok(out)
 }
 
 fn parse_biff8_name_record(
     record: &records::LogicalBiffRecord<'_>,
     codepage: u16,
-) -> Result<BiffDefinedName, String> {
+    sheet_names: &[String],
+) -> Result<RawDefinedName, String> {
     let fragments: Vec<&[u8]> = record.fragments().collect();
     let mut cursor = FragmentCursor::new(&fragments, 0, 0);
 
     // Fixed-size `NAME` record header (14 bytes).
     // [MS-XLS] 2.4.150
-    let _grbit = cursor.read_u16_le()?;
+    let grbit = cursor.read_u16_le()?;
     let _ch_key = cursor.read_u8()?;
     let cch = cursor.read_u8()? as usize;
     let cce = cursor.read_u16_le()? as usize;
     let _ixals = cursor.read_u16_le()?;
-    let _itab = cursor.read_u16_le()?;
+    let itab_raw = cursor.read_u16_le()?;
     let cch_cust_menu = cursor.read_u8()? as usize;
     let cch_description = cursor.read_u8()? as usize;
     let cch_help_topic = cursor.read_u8()? as usize;
     let cch_status_text = cursor.read_u8()? as usize;
 
-    // `rgchName` (XLUnicodeStringNoCch): flags byte + character bytes.
-    let name = cursor.read_biff8_unicode_string_no_cch(cch, codepage)?;
+    let hidden = (grbit & NAME_FLAG_HIDDEN) != 0;
+    let builtin = (grbit & NAME_FLAG_BUILTIN) != 0;
+
+    let scope_sheet = if itab_raw == 0 {
+        None
+    } else {
+        Some(itab_raw as usize - 1)
+    };
+
+    let name = if builtin {
+        let id = cursor.read_u8()?;
+        builtin_name_to_string(id)
+    } else {
+        cursor.read_biff8_unicode_string_no_cch(cch, codepage)?
+    };
 
     // `rgce`: parsed formula bytes.
     //
@@ -101,14 +214,18 @@ fn parse_biff8_name_record(
     // rgce payload bytes.
     let rgce = cursor.read_biff8_rgce(cce)?;
 
-    // Optional strings (ignored for now, but we need to consume them so continued-string decoding
-    // can validate fragment boundaries).
+    // Optional strings.
     if cch_cust_menu > 0 {
         let _ = cursor.read_biff8_unicode_string_no_cch(cch_cust_menu, codepage)?;
     }
-    if cch_description > 0 {
-        let _ = cursor.read_biff8_unicode_string_no_cch(cch_description, codepage)?;
-    }
+    let comment = if cch_description > 0 {
+        Some(cursor.read_biff8_unicode_string_no_cch(
+            cch_description,
+            codepage,
+        )?)
+    } else {
+        None
+    };
     if cch_help_topic > 0 {
         let _ = cursor.read_biff8_unicode_string_no_cch(cch_help_topic, codepage)?;
     }
@@ -116,7 +233,36 @@ fn parse_biff8_name_record(
         let _ = cursor.read_biff8_unicode_string_no_cch(cch_status_text, codepage)?;
     }
 
-    Ok(BiffDefinedName { name, rgce })
+    if let Some(scope) = scope_sheet {
+        if scope >= sheet_names.len() {
+            log::warn!(
+                "NAME record `{name}` has out-of-range itab={itab_raw} (sheet count={})",
+                sheet_names.len()
+            );
+        }
+    }
+
+    Ok(RawDefinedName {
+        name,
+        scope_sheet,
+        hidden,
+        comment,
+        rgce,
+    })
+}
+
+fn builtin_name_to_string(id: u8) -> String {
+    match id {
+        0x06 => formula_model::XLNM_PRINT_AREA.to_string(),
+        0x07 => formula_model::XLNM_PRINT_TITLES.to_string(),
+        0x0D => formula_model::XLNM_FILTER_DATABASE.to_string(),
+        other => {
+            log::warn!("unknown BIFF built-in defined name id 0x{other:02X}");
+            // Must be a valid `DefinedName` identifier (`validate_defined_name`), so keep it
+            // alphanumeric + underscore only.
+            format!("__biff_builtin_name_0x{other:02X}")
+        }
+    }
 }
 
 struct FragmentCursor<'a> {
@@ -417,6 +563,11 @@ impl<'a> FragmentCursor<'a> {
                     let bytes = self.read_bytes(3)?;
                     out.extend_from_slice(&bytes);
                 }
+                // PtgName (6 bytes)
+                0x23 | 0x43 | 0x63 => {
+                    let bytes = self.read_bytes(6)?;
+                    out.extend_from_slice(&bytes);
+                }
                 // PtgRef (4 bytes)
                 0x24 | 0x44 | 0x64 => {
                     let bytes = self.read_bytes(4)?;
@@ -474,7 +625,6 @@ impl<'a> FragmentCursor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::biff::rgce;
 
     fn record(id: u16, payload: &[u8]) -> Vec<u8> {
         let mut out = Vec::with_capacity(4 + payload.len());
@@ -487,11 +637,13 @@ mod tests {
     #[test]
     fn parses_defined_name_with_continued_rgce_bytes() {
         let name = "Name";
-        // rgce for `1+2`:
-        //   PtgInt 1
-        //   PtgInt 2
-        //   PtgAdd
-        let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00, 0x1E, 0x02, 0x00, 0x03];
+
+        // 1+2
+        let rgce: Vec<u8> = vec![
+            0x1E, 0x01, 0x00, // PtgInt 1
+            0x1E, 0x02, 0x00, // PtgInt 2
+            0x03, // PtgAdd
+        ];
 
         let mut header = Vec::new();
         header.extend_from_slice(&0u16.to_le_bytes()); // grbit
@@ -515,22 +667,18 @@ mod tests {
         let r_eof = record(records::RECORD_EOF, &[]);
         let stream = [r_bof, r_name, r_continue, r_eof].concat();
 
-        let names =
-            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252).expect("parse names");
-        assert_eq!(
-            names,
-            vec![BiffDefinedName {
-                name: name.to_string(),
-                rgce
-            }]
-        );
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, name);
+        assert_eq!(parsed.names[0].refers_to, "1+2");
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
 
     #[test]
     fn parses_defined_name_with_continued_name_string() {
         let name = "ABCDE";
-        // rgce for `1` (PtgInt 1).
-        let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00];
+        let rgce: Vec<u8> = vec![0x1E, 0x2A, 0x00]; // PtgInt 42
 
         let mut header = Vec::new();
         header.extend_from_slice(&0u16.to_le_bytes()); // grbit
@@ -560,15 +708,12 @@ mod tests {
         ]
         .concat();
 
-        let names =
-            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252).expect("parse names");
-        assert_eq!(
-            names,
-            vec![BiffDefinedName {
-                name: name.to_string(),
-                rgce
-            }]
-        );
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, name);
+        assert_eq!(parsed.names[0].refers_to, "42");
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
 
     #[test]
@@ -612,14 +757,12 @@ mod tests {
         ]
         .concat();
 
-        let names =
-            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252).expect("parse names");
-        assert_eq!(names.len(), 1);
-        assert_eq!(names[0].name, name);
-        assert_eq!(names[0].rgce, rgce);
-
-        let decoded = rgce::decode_defined_name_rgce(&names[0].rgce, 1252);
-        assert_eq!(decoded.text.as_deref(), Some("\"ABCDE\""));
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, name);
+        assert_eq!(parsed.names[0].refers_to, "\"ABCDE\"");
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
 
     #[test]

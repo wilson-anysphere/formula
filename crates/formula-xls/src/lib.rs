@@ -25,6 +25,7 @@ use formula_model::{
     HyperlinkTarget, Range, SheetVisibility, Style, TabColor, Workbook, EXCEL_MAX_COLS,
     EXCEL_MAX_ROWS, EXCEL_MAX_SHEET_NAME_LEN,
 };
+use formula_model::DefinedNameScope;
 use thiserror::Error;
 
 mod biff;
@@ -193,8 +194,8 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 
     if let Some(workbook_stream) = workbook_stream.as_deref() {
         let detected_biff_version = biff::detect_biff_version(workbook_stream);
-        biff_version = Some(detected_biff_version);
         let codepage = biff::parse_biff_codepage(workbook_stream);
+        biff_version = Some(detected_biff_version);
         biff_codepage = Some(codepage);
 
         match biff::parse_biff_workbook_globals(workbook_stream, detected_biff_version, codepage) {
@@ -347,6 +348,9 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     }
 
     let mut final_sheet_names_by_idx: Vec<String> = Vec::with_capacity(sheets.len());
+    // Track worksheet ids so BIFF `itab` scopes can be mapped to the output model.
+    let mut sheet_ids_by_calamine_idx: Vec<formula_model::WorksheetId> =
+        Vec::with_capacity(sheets.len());
 
     for (sheet_idx, sheet_meta) in sheets.iter().enumerate() {
         let source_sheet_name = sheet_meta.name.clone();
@@ -427,6 +431,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             }
         };
         final_sheet_names_by_idx.push(sheet_name.clone());
+        sheet_ids_by_calamine_idx.push(sheet_id);
         let sheet = out
             .sheet_mut(sheet_id)
             .expect("sheet id should exist immediately after add");
@@ -888,6 +893,94 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                 "skipping `.xls` active tab index {i_tab_cur}: workbook contains {} imported sheets",
                 out.sheets.len()
             )));
+        }
+    }
+
+    // Import defined names (workbook- and sheet-scoped).
+    if let (Some(workbook_stream), Some(biff_version), Some(codepage)) =
+        (workbook_stream.as_deref(), biff_version, biff_codepage)
+    {
+        // Resolve BIFF sheet indices to the sheet names used by our output workbook.
+        let mut sheet_names_by_biff_idx: Vec<String> = biff_sheets
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|s| s.name.clone())
+            .collect();
+
+        for (cal_idx, maybe_biff_idx) in sheet_mapping.iter().enumerate() {
+            let Some(biff_idx) = *maybe_biff_idx else {
+                continue;
+            };
+            let Some(final_name) = final_sheet_names_by_idx.get(cal_idx) else {
+                continue;
+            };
+            if biff_idx < sheet_names_by_biff_idx.len() {
+                sheet_names_by_biff_idx[biff_idx] = final_name.clone();
+            }
+        }
+
+        // Resolve BIFF sheet indices to WorksheetIds.
+        let mut sheet_ids_by_biff_idx: Vec<Option<formula_model::WorksheetId>> =
+            vec![None; sheet_names_by_biff_idx.len()];
+        for (cal_idx, maybe_biff_idx) in sheet_mapping.iter().enumerate() {
+            let Some(biff_idx) = *maybe_biff_idx else {
+                continue;
+            };
+            let Some(sheet_id) = sheet_ids_by_calamine_idx.get(cal_idx).copied() else {
+                continue;
+            };
+            if biff_idx < sheet_ids_by_biff_idx.len() {
+                sheet_ids_by_biff_idx[biff_idx] = Some(sheet_id);
+            }
+        }
+
+        match biff::parse_biff_defined_names(
+            workbook_stream,
+            biff_version,
+            codepage,
+            &sheet_names_by_biff_idx,
+        ) {
+            Ok(mut parsed) => {
+                warnings.extend(parsed.warnings.drain(..).map(ImportWarning::new));
+
+                for name in parsed.names.drain(..) {
+                    let scope = match name.scope_sheet {
+                        None => DefinedNameScope::Workbook,
+                        Some(biff_idx) => sheet_ids_by_biff_idx
+                            .get(biff_idx)
+                            .copied()
+                            .flatten()
+                            .map(DefinedNameScope::Sheet)
+                            .unwrap_or_else(|| {
+                                warnings.push(ImportWarning::new(format!(
+                                    "defined name `{}` has out-of-range sheet scope itab={} (sheet count={}); importing as workbook-scoped",
+                                    name.name,
+                                    biff_idx.saturating_add(1),
+                                    sheet_ids_by_biff_idx.len()
+                                )));
+                                DefinedNameScope::Workbook
+                            }),
+                    };
+
+                    if let Err(err) = out.create_defined_name(
+                        scope,
+                        name.name.clone(),
+                        name.refers_to.clone(),
+                        name.comment.clone(),
+                        name.hidden,
+                        None,
+                    ) {
+                        warnings.push(ImportWarning::new(format!(
+                            "skipping defined name `{}`: {err}",
+                            name.name
+                        )));
+                    }
+                }
+            }
+            Err(err) => warnings.push(ImportWarning::new(format!(
+                "failed to import `.xls` defined names: {err}"
+            ))),
         }
     }
 
