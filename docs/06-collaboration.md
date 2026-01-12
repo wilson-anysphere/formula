@@ -97,6 +97,39 @@ Implementation detail:
 
 Formula normalization: most consumers normalize formula strings to a canonical **text** form (`=...` with surrounding whitespace stripped). The desktop binder normalizes formulas on read/write, and branching/versioning adapters normalize formulas when producing snapshots/diffs. Direct `session.setCellFormula(...)` writes preserve the input aside from basic trimming, so UI code should prefer writing canonical formula text.
 
+Example (direct Yjs write):
+
+```ts
+import * as Y from "yjs";
+
+class CollaborativeDocument {
+  constructor(readonly doc: Y.Doc) {}
+
+  setCell(sheetId: string, row: number, col: number, value: unknown, formula?: string | null): void {
+    this.doc.transact(() => {
+      const cells = this.doc.getMap("cells");
+      const cellKey = `${sheetId}:${row}:${col}`;
+
+      let cellData = cells.get(cellKey);
+      if (!(cellData instanceof Y.Map)) {
+        cellData = new Y.Map();
+        cells.set(cellKey, cellData);
+      }
+
+      if (formula) {
+        cellData.set("formula", formula);
+        cellData.set("value", null);
+      } else {
+        // Don't delete: map deletes do not create Items; null markers preserve causality
+        // for deterministic delete-vs-overwrite conflict detection.
+        cellData.set("formula", null);
+        cellData.set("value", value);
+      }
+    });
+  }
+}
+```
+
 ### Cell encryption (`enc`) (protected ranges)
 
 Because Yjs updates are broadcast to **all** collaborators (and the sync server), the server cannot filter per-cell content per connection. For true confidentiality of protected ranges, Formula supports optional **end-to-end encryption** of cell contents *before* they are written into the shared CRDT.
@@ -687,6 +720,8 @@ const session = createCollabSession({
 Notes:
 
 - Concurrency detection is **causal** and based on Yjs map entry Item origin ids (not wall-clock timestamps).
+- For deterministic delete-vs-overwrite detection, formula clears must be represented as `formula = null`
+  (not `cell.delete("formula")`) because Yjs map deletes do not create Items.
 - `remoteUserId` attribution is best-effort and may be empty if the overwriting writer did not update `modifiedBy`.
 
 ---
