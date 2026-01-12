@@ -264,12 +264,14 @@ Example (`xl/metadata.xml`, representative):
 
 ##### 2) Workbook relationship types (workbook → richData parts)
 
-Excel wires the rich-data parts via OPC relationships. The relationship type URIs we observed for in-cell images are:
+Excel wires the rich-data parts via OPC relationships. Relationship type URIs used for in-cell images include:
 
 - `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel`
 - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue`
 - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure`
 - `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes`
+- (variant seen in some producers/fixtures) `http://schemas.microsoft.com/office/2017/06/relationships/richValue`
+- (variant seen in some producers/fixtures) `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel`
 - (inside `xl/richData/_rels/richValueRel.xml.rels`) `http://schemas.openxmlformats.org/officeDocument/2006/relationships/image`
 
 Representative `xl/_rels/workbook.xml.rels` snippet:
@@ -296,6 +298,39 @@ Representative `xl/_rels/workbook.xml.rels` snippet:
                 Type="http://schemas.microsoft.com/office/2022/10/relationships/richValueRel"
                 Target="richData/richValueRel.xml"/>
 </Relationships>
+```
+
+##### `xl/richData/rdrichvaluetypes.xml` + `xl/richData/rdrichvaluestructure.xml` (type/structure tables)
+
+Excel commonly emits additional Rich Data “schema” parts:
+
+- `xl/richData/rdrichvaluetypes.xml` — rich value type IDs (numeric) and links to a structure ID
+- `xl/richData/rdrichvaluestructure.xml` — rich value structures (field layouts)
+
+These are not always required to follow the **image byte** chain above (which mainly depends on `metadata.xml`, `rdrichvalue.xml`, and `richValueRel.xml`), but they are important for interpreting rich value payloads and should be preserved for round-trip safety.
+
+Representative (synthetic) shapes (element names/namespaces vary across Excel versions; see [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) for a deeper breakdown):
+
+`xl/richData/rdrichvaluetypes.xml`:
+
+```xml
+<rvTypes xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <types>
+    <type id="0" name="com.microsoft.excel.image" structure="s_image"/>
+  </types>
+</rvTypes>
+```
+
+`xl/richData/rdrichvaluestructure.xml`:
+
+```xml
+<rvStruct xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <structures>
+    <structure id="s_image">
+      <member name="imageRel" kind="rel"/>
+    </structure>
+  </structures>
+</rvStruct>
 ```
 
 ##### 3) `richValueRel.xml` → `xl/media/*` via `.rels`
