@@ -3325,6 +3325,83 @@ export class SpreadsheetApp {
   }
 
   /**
+   * Hide or unhide rows (0-based indices).
+   *
+   * Note: This is only supported in the legacy renderer. Shared-grid mode intentionally does not
+   * currently implement outline-based hidden rows/cols.
+   */
+  setRowsHidden(rows: number[] | null | undefined, hidden: boolean): void {
+    if (this.gridMode !== "legacy") {
+      showToast("Hide/Unhide is not supported in shared grid mode yet.", "info");
+      // Preserve keyboard workflows even when the action is unsupported.
+      this.focus();
+      return;
+    }
+    if (!Array.isArray(rows) || rows.length === 0) return;
+
+    let changed = false;
+    for (const raw of rows) {
+      if (!Number.isFinite(raw)) continue;
+      const row = Math.trunc(raw);
+      if (row < 0 || row >= this.limits.maxRows) continue;
+      const entry = this.outline.rows.entryMut(row + 1);
+      if (entry.hidden.user !== hidden) {
+        entry.hidden.user = hidden;
+        changed = true;
+      }
+    }
+
+    if (!changed) return;
+    this.onOutlineUpdated();
+  }
+
+  /**
+   * Hide or unhide columns (0-based indices).
+   *
+   * Note: This is only supported in the legacy renderer. Shared-grid mode intentionally does not
+   * currently implement outline-based hidden rows/cols.
+   */
+  setColsHidden(cols: number[] | null | undefined, hidden: boolean): void {
+    if (this.gridMode !== "legacy") {
+      showToast("Hide/Unhide is not supported in shared grid mode yet.", "info");
+      this.focus();
+      return;
+    }
+    if (!Array.isArray(cols) || cols.length === 0) return;
+
+    let changed = false;
+    for (const raw of cols) {
+      if (!Number.isFinite(raw)) continue;
+      const col = Math.trunc(raw);
+      if (col < 0 || col >= this.limits.maxCols) continue;
+      const entry = this.outline.cols.entryMut(col + 1);
+      if (entry.hidden.user !== hidden) {
+        entry.hidden.user = hidden;
+        changed = true;
+      }
+    }
+
+    if (!changed) return;
+    this.onOutlineUpdated();
+  }
+
+  hideRows(rows: number[] | null | undefined): void {
+    this.setRowsHidden(rows, true);
+  }
+
+  unhideRows(rows: number[] | null | undefined): void {
+    this.setRowsHidden(rows, false);
+  }
+
+  hideCols(cols: number[] | null | undefined): void {
+    this.setColsHidden(cols, true);
+  }
+
+  unhideCols(cols: number[] | null | undefined): void {
+    this.setColsHidden(cols, false);
+  }
+
+  /**
    * Compute Excel-like status bar stats (Sum / Average / Count) for the current selection.
    *
    * Performance note:

@@ -66,6 +66,27 @@ async function openGridContextMenuAt(
   );
 }
 
+async function selectRange(
+  page: import("@playwright/test").Page,
+  range: { startRow: number; endRow: number; startCol: number; endCol: number },
+): Promise<void> {
+  await page.evaluate((r) => {
+    (window.__formulaApp as any).selectRange({ range: r });
+  }, range);
+}
+
+async function getActiveCell(page: import("@playwright/test").Page): Promise<{ row: number; col: number }> {
+  return await page.evaluate(() => (window.__formulaApp as any).getActiveCell());
+}
+
+async function getActiveCellRect(
+  page: import("@playwright/test").Page,
+): Promise<{ x: number; y: number; width: number; height: number }> {
+  const rect = await page.evaluate(() => (window.__formulaApp as any).getActiveCellRect());
+  if (!rect) throw new Error("Active cell rect was null");
+  return rect;
+}
+
 test.describe("Grid context menus", () => {
   test("right-clicking a row header opens a menu with Row Height…", async ({ page }) => {
     await gotoDesktop(page);
@@ -123,6 +144,86 @@ test.describe("Grid context menus", () => {
     await page.keyboard.press("ArrowLeft");
     await expect(submenu).toBeHidden();
     await expect(pasteSpecial).toBeFocused();
+  test("legacy mode: Hide/Unhide row + column via header context menu affects keyboard navigation", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=legacy");
+    await waitForIdle(page);
+
+    const grid = page.locator("#grid");
+    await expect(grid).toBeVisible();
+    const limits = await page.evaluate(() => (window.__formulaApp as any).getGridLimits());
+    const gridBox = await grid.boundingBox();
+    if (!gridBox) throw new Error("Missing #grid bounding box");
+
+    // Hide row 2 (0-based row=1) using the row-header context menu.
+    await selectRange(page, { startRow: 1, endRow: 1, startCol: 0, endCol: 0 }); // A2
+    const a2 = await getActiveCellRect(page);
+    await openGridContextMenuAt(page, "#grid", {
+      x: a2.x - gridBox.x - 5,
+      y: a2.y - gridBox.y + a2.height / 2,
+    });
+    const menu = page.getByTestId("context-menu");
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Hide", exact: true }).click();
+    await expect(menu).toBeHidden();
+
+    // Verify ArrowDown skips the hidden row (A1 -> A3).
+    await selectRange(page, { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }); // A1
+    await page.evaluate(() => (window.__formulaApp as any).focus());
+    await page.keyboard.press("ArrowDown");
+    await expect.poll(() => getActiveCell(page)).toEqual({ row: 2, col: 0 });
+
+    // Unhide the row by selecting a full-row band that spans it and using the row-header context menu.
+    // (Right-clicking a row header will otherwise replace non-band selections with a single-row band.)
+    await selectRange(page, { startRow: 0, endRow: 2, startCol: 0, endCol: limits.maxCols - 1 });
+    const a1ForRowMenu = await getActiveCellRect(page);
+    await openGridContextMenuAt(page, "#grid", {
+      x: a1ForRowMenu.x - gridBox.x - 5,
+      y: a1ForRowMenu.y - gridBox.y + a1ForRowMenu.height / 2,
+    });
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Unhide", exact: true }).click();
+    await expect(menu).toBeHidden();
+
+    // Verify ArrowDown no longer skips (A1 -> A2).
+    await selectRange(page, { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }); // A1
+    await page.evaluate(() => (window.__formulaApp as any).focus());
+    await page.keyboard.press("ArrowDown");
+    await expect.poll(() => getActiveCell(page)).toEqual({ row: 1, col: 0 });
+
+    // Hide column B (0-based col=1) using the column-header context menu.
+    await selectRange(page, { startRow: 0, endRow: 0, startCol: 1, endCol: 1 }); // B1
+    const b1 = await getActiveCellRect(page);
+    await openGridContextMenuAt(page, "#grid", {
+      x: b1.x - gridBox.x + b1.width / 2,
+      y: b1.y - gridBox.y - 5,
+    });
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Hide", exact: true }).click();
+    await expect(menu).toBeHidden();
+
+    // Verify ArrowRight skips the hidden column (A1 -> C1).
+    await selectRange(page, { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }); // A1
+    await page.evaluate(() => (window.__formulaApp as any).focus());
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(() => getActiveCell(page)).toEqual({ row: 0, col: 2 });
+
+    // Unhide the column by selecting a full-column band that spans it and using the column-header context menu.
+    // (Right-clicking a column header will otherwise replace non-band selections with a single-column band.)
+    await selectRange(page, { startRow: 0, endRow: limits.maxRows - 1, startCol: 0, endCol: 2 });
+    const a1ForColMenu = await getActiveCellRect(page);
+    await openGridContextMenuAt(page, "#grid", {
+      x: a1ForColMenu.x - gridBox.x + a1ForColMenu.width / 2,
+      y: a1ForColMenu.y - gridBox.y - 5,
+    });
+    await expect(menu).toBeVisible();
+    await menu.getByRole("button", { name: "Unhide", exact: true }).click();
+    await expect(menu).toBeHidden();
+
+    // Verify ArrowRight no longer skips (A1 -> B1).
+    await selectRange(page, { startRow: 0, endRow: 0, startCol: 0, endCol: 0 }); // A1
+    await page.evaluate(() => (window.__formulaApp as any).focus());
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(() => getActiveCell(page)).toEqual({ row: 0, col: 1 });
   });
 
   test("right-clicking a row header in split-view secondary pane opens a menu with Row Height…", async ({ page }) => {

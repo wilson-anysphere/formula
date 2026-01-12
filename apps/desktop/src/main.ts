@@ -5218,7 +5218,7 @@ if (
           label: "Hide",
           enabled: allowEditCommands,
           onSelect: () => {
-            showToast("Hide row is not implemented yet.", "info");
+            app.hideRows(selectedRowIndices());
           },
         },
         {
@@ -5226,7 +5226,7 @@ if (
           label: "Unhide",
           enabled: allowEditCommands,
           onSelect: () => {
-            showToast("Unhide row is not implemented yet.", "info");
+            app.unhideRows(selectedRowIndices());
           },
         },
       ];
@@ -5238,7 +5238,7 @@ if (
           label: "Hide",
           enabled: allowEditCommands,
           onSelect: () => {
-            showToast("Hide column is not implemented yet.", "info");
+            app.hideCols(selectedColIndices());
           },
         },
         {
@@ -5246,7 +5246,7 @@ if (
           label: "Unhide",
           enabled: allowEditCommands,
           onSelect: () => {
-            showToast("Unhide column is not implemented yet.", "info");
+            app.unhideCols(selectedColIndices());
           },
         },
       ];
