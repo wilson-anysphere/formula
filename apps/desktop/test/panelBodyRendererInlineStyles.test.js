@@ -52,7 +52,7 @@ test("panelBodyRenderer.tsx avoids inline style assignments for dock panel mount
     false,
     "React panel mount container should not set inline styles; use a CSS class instead",
   );
-  for (const className of ["dock-panel__mount", "panel-mount--fill-column", "panel-body__container"]) {
+  for (const className of ["panel-body__container"]) {
     assert.match(reactMountSection, new RegExp(className), `React panel mount container should apply the ${className} CSS class`);
   }
 
@@ -62,7 +62,7 @@ test("panelBodyRenderer.tsx avoids inline style assignments for dock panel mount
     false,
     "DOM panel mount container should not set inline styles; use a CSS class instead",
   );
-  for (const className of ["dock-panel__mount", "panel-mount--fill-column", "panel-body__container"]) {
+  for (const className of ["panel-body__container"]) {
     assert.match(domMountSection, new RegExp(className), `DOM panel mount container should apply the ${className} CSS class`);
   }
 
@@ -72,7 +72,10 @@ test("panelBodyRenderer.tsx avoids inline style assignments for dock panel mount
     false,
     "makeBodyFillAvailableHeight should not set inline styles; use a CSS class instead",
   );
-  for (const className of ["dock-panel__body--fill", "panel-body--fill"]) {
-    assert.match(bodyFillSection, new RegExp(className), `makeBodyFillAvailableHeight should apply the ${className} CSS class`);
-  }
+  assert.match(bodyFillSection, /panel-body--fill/, "makeBodyFillAvailableHeight should apply the panel-body--fill CSS class");
+  assert.equal(
+    bodyFillSection.includes("dock-panel__body--fill"),
+    false,
+    "makeBodyFillAvailableHeight should not rely on the dock-panel__body--fill class; prefer panel-body--fill",
+  );
 });

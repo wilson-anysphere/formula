@@ -48,11 +48,6 @@ test("desktop main.ts avoids static inline style assignments", () => {
   );
   assert.match(
     scriptEditorMountSection,
-    /panel-mount--fill-column/,
-    "Script Editor panel mount container should apply the panel-mount--fill-column CSS class",
-  );
-  assert.match(
-    scriptEditorMountSection,
     /panel-body__container/,
     "Script Editor panel mount container should apply the panel-body__container CSS class",
   );
@@ -66,11 +61,6 @@ test("desktop main.ts avoids static inline style assignments", () => {
     /\.style\./.test(pythonMountSection),
     false,
     "Python panel mount should not set inline styles; use a CSS class instead",
-  );
-  assert.match(
-    pythonMountSection,
-    /panel-mount--fill-column/,
-    "Python panel mount container should apply the panel-mount--fill-column CSS class",
   );
   assert.match(
     pythonMountSection,

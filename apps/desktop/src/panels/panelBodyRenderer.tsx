@@ -464,7 +464,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     let instance = reactPanels.get(panelId);
     if (!instance) {
       const container = document.createElement("div");
-      container.className = "dock-panel__mount panel-mount--fill-column panel-body__container";
+      container.className = "panel-body__container";
       instance = { root: createRoot(container), container };
       reactPanels.set(panelId, instance);
     }
@@ -477,9 +477,9 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     let instance = domPanels.get(panelId);
     if (!instance) {
       const container = document.createElement("div");
-      container.className = "dock-panel__mount panel-mount--fill-column panel-body__container";
+      container.className = "panel-body__container";
       instance = mount(container);
-      instance.container.classList.add("dock-panel__mount", "panel-mount--fill-column", "panel-body__container");
+      instance.container.classList.add("panel-body__container");
       domPanels.set(panelId, instance);
     }
 
@@ -488,7 +488,7 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
   }
 
   function makeBodyFillAvailableHeight(body: HTMLDivElement) {
-    body.classList.add("dock-panel__body--fill", "panel-body--fill");
+    body.classList.add("panel-body--fill");
   }
 
   function renderPanelBody(panelId: string, body: HTMLDivElement) {

@@ -5224,7 +5224,7 @@ if (
       let mount = panelMounts.get(panelId);
       if (!mount) {
         const container = document.createElement("div");
-        container.className = "dock-panel__mount panel-mount--fill-column panel-body__container";
+        container.className = "panel-body__container";
         const mounted = mountScriptEditorPanel({ workbook: scriptingWorkbook, container });
         mount = { container, dispose: mounted.dispose };
         panelMounts.set(panelId, mount);
@@ -5239,7 +5239,7 @@ if (
       let mount = panelMounts.get(panelId);
       if (!mount) {
         const container = document.createElement("div");
-        container.className = "dock-panel__mount panel-mount--fill-column panel-body__container";
+        container.className = "panel-body__container";
         container.textContent = "Loading Python runtime…";
 
         let disposed = false;
