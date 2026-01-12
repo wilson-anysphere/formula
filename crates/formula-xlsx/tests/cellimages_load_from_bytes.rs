@@ -2,7 +2,7 @@ use std::io::{Cursor, Write};
 
 use formula_model::drawings::ImageId;
 
-fn build_minimal_cellimages_xlsx() -> Vec<u8> {
+fn build_minimal_cellimages_xlsx(cellimages_rel_target: &str, image_bytes: &[u8]) -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -25,13 +25,15 @@ fn build_minimal_cellimages_xlsx() -> Vec<u8> {
     let cellimages_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <etc:cellImages xmlns:etc="http://schemas.microsoft.com/office/spreadsheetml/2020/11/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <etc:cellImage r:id="rId1"/>
+ <etc:cellImage r:id="rId1"/>
 </etc:cellImages>"#;
 
-    let cellimages_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    let cellimages_rels = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
-</Relationships>"#;
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="{cellimages_rel_target}"/>
+</Relationships>"#
+    );
 
     let cursor = Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(cursor);
@@ -56,7 +58,7 @@ fn build_minimal_cellimages_xlsx() -> Vec<u8> {
     zip.write_all(cellimages_rels.as_bytes()).unwrap();
 
     zip.start_file("xl/media/image1.png", options).unwrap();
-    zip.write_all(b"png-bytes").unwrap();
+    zip.write_all(image_bytes).unwrap();
 
     zip.finish().unwrap().into_inner()
 }
@@ -64,17 +66,36 @@ fn build_minimal_cellimages_xlsx() -> Vec<u8> {
 #[test]
 fn load_from_bytes_populates_workbook_images_from_cellimages() -> Result<(), Box<dyn std::error::Error>>
 {
-    let bytes = build_minimal_cellimages_xlsx();
+    let expected = b"png-bytes";
+    let bytes = build_minimal_cellimages_xlsx("media/image1.png", expected);
     let doc = formula_xlsx::load_from_bytes(&bytes)?;
 
-    assert!(
-        doc.workbook
-            .images
-            .get(&ImageId::new("image1.png"))
-            .is_some(),
-        "expected Workbook.images to contain image1.png"
-    );
+    let image = doc
+        .workbook
+        .images
+        .get(&ImageId::new("image1.png"))
+        .expect("expected Workbook.images to contain image1.png");
+    assert_eq!(image.bytes.as_slice(), expected);
 
     Ok(())
 }
 
+#[test]
+fn cellimages_load_from_bytes_tolerates_parent_dir_media_target_for_lightweight_schema(
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Some producers (including older/newer Excel variants) appear to emit `../media/*` targets
+    // from workbook-level `xl/cellimages.xml.rels`, even though the actual media parts live under
+    // `xl/media/*`. We should resolve this best-effort rather than dropping the image.
+    let expected = b"png-bytes-from-parent-dir-target";
+    let bytes = build_minimal_cellimages_xlsx("../media/image1.png", expected);
+    let doc = formula_xlsx::load_from_bytes(&bytes)?;
+
+    let image = doc
+        .workbook
+        .images
+        .get(&ImageId::new("image1.png"))
+        .expect("expected Workbook.images to contain image1.png");
+    assert_eq!(image.bytes.as_slice(), expected);
+
+    Ok(())
+}
