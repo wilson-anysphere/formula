@@ -278,6 +278,7 @@ Representative `xl/_rels/workbook.xml.rels` snippet:
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <!-- ... -->
   <Relationship Id="rIdMeta"
+                <!-- Excel has been observed to use either `.../sheetMetadata` or `.../metadata` here. -->
                 Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"
                 Target="metadata.xml"/>
 
@@ -418,6 +419,7 @@ Simplified relationship sketch (workbook → metadata uses a stable OOXML relati
 ```xml
 <!-- xl/_rels/workbook.xml.rels -->
 <Relationship Id="rIdMeta"
+              <!-- Observed as either `.../metadata` or `.../sheetMetadata` depending on producer/version. -->
               Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"
               Target="metadata.xml"/>
 
