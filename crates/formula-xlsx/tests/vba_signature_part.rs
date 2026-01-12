@@ -205,7 +205,6 @@ fn build_minimal_vba_project_bin_impl(module1: &[u8], signature_blob: Option<&[u
         };
 
         let dir_container = compress_container(&dir_decompressed);
-
         let mut s = ole.create_stream("VBA/dir").expect("dir stream");
         s.write_all(&dir_container).expect("write dir");
     }
