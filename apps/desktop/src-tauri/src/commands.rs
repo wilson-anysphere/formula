@@ -5195,6 +5195,17 @@ mod tests {
     }
 
     #[test]
+    fn sheet_visibility_serializes_as_expected() {
+        let json = serde_json::to_value(SheetVisibility::VeryHidden).expect("serialize visibility");
+        assert_eq!(json, serde_json::Value::String("veryHidden".to_string()));
+
+        let parsed: SheetVisibility =
+            serde_json::from_value(serde_json::Value::String("veryHidden".to_string()))
+                .expect("deserialize visibility");
+        assert_eq!(parsed, SheetVisibility::VeryHidden);
+    }
+
+    #[test]
     fn limited_range_cell_edits_deserializes_small_payloads() {
         let value = serde_json::json!([
             [

@@ -1402,7 +1402,6 @@ impl AppState {
         // `veryHidden` from the host APIs so:
         // - imported workbooks can round-trip their original visibility state, and
         // - advanced integrations (extensions, automation) can opt into the VBA-style behavior.
-
         // Excel invariant: cannot hide the last visible sheet.
         if matches!(current, SheetVisibility::Visible)
             && !matches!(visibility, SheetVisibility::Visible)
@@ -1473,6 +1472,20 @@ impl AppState {
         let tab_color = match tab_color {
             None => None,
             Some(mut color) => {
+                // We currently only support setting sheet tab colors via explicit ARGB hex values.
+                // Theme/indexed colors can still be loaded and round-tripped from XLSX, but are not
+                // accepted as updates via the host APIs yet.
+                if color.theme.is_some()
+                    || color.indexed.is_some()
+                    || color.tint.is_some()
+                    || color.auto.is_some()
+                {
+                    return Err(AppStateError::WhatIf(
+                        "tab color must be specified using an ARGB hex value in `rgb` (AARRGGBB)"
+                            .to_string(),
+                    ));
+                }
+
                 if let Some(rgb) = color.rgb.as_deref() {
                     let trimmed = rgb.trim();
                     if trimmed.is_empty() {
@@ -5809,6 +5822,10 @@ mod tests {
 
         let out_path = tmp.path().join("saved.xlsx");
         let workbook = state.get_workbook().expect("workbook").clone();
+        assert!(
+            workbook.origin_xlsx_bytes.is_some(),
+            "expected metadata edits to preserve origin_xlsx_bytes so save uses patch-based path"
+        );
         let saved_bytes = write_xlsx_blocking(&out_path, &workbook).expect("save xlsx");
 
         let preserved_custom = formula_xlsx::read_part_from_reader(
