@@ -191,7 +191,7 @@ export function startWorkbookSync(args: {
     // Some subsystems (VBA runtime, native Python) execute in the backend and then return
     // cell updates to apply to the frontend DocumentController. Those should not be echoed
     // back to the backend via set_cell/set_range.
-    if (source === "macro" || source === "python") return;
+    if (source === "macro" || source === "python" || source === "pivot") return;
     if (!Array.isArray(deltas) || deltas.length === 0) return;
     for (const delta of deltas) {
       // Ignore format-only deltas (we can't mirror those over set_cell/set_range yet).

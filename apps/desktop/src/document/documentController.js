@@ -544,7 +544,7 @@ export class DocumentController {
    * @param {string} sheetId
    * @param {CellCoord | string} coord
    * @param {CellValue} value
-   * @param {{ mergeKey?: string, label?: string }} [options]
+   * @param {{ mergeKey?: string, label?: string, source?: string }} [options]
    */
   setCellValue(sheetId, coord, value, options = {}) {
     const c = typeof coord === "string" ? parseA1(coord) : coord;
@@ -559,7 +559,7 @@ export class DocumentController {
    * @param {string} sheetId
    * @param {CellCoord | string} coord
    * @param {string | null} formula
-   * @param {{ mergeKey?: string, label?: string }} [options]
+   * @param {{ mergeKey?: string, label?: string, source?: string }} [options]
    */
   setCellFormula(sheetId, coord, formula, options = {}) {
     const c = typeof coord === "string" ? parseA1(coord) : coord;
@@ -579,7 +579,7 @@ export class DocumentController {
    * @param {string} sheetId
    * @param {CellCoord | string} coord
    * @param {any} input
-   * @param {{ mergeKey?: string, label?: string }} [options]
+   * @param {{ mergeKey?: string, label?: string, source?: string }} [options]
    */
   setCellInput(sheetId, coord, input, options = {}) {
     const c = typeof coord === "string" ? parseA1(coord) : coord;
@@ -1104,7 +1104,7 @@ export class DocumentController {
 
   /**
    * @param {CellDelta[]} deltas
-   * @param {{ label?: string, mergeKey?: string }} options
+   * @param {{ label?: string, mergeKey?: string, source?: string }} options
    */
   #applyUserDeltas(deltas, options) {
     if (!deltas || deltas.length === 0) return;
@@ -1116,7 +1116,8 @@ export class DocumentController {
       if (deltas.length === 0) return;
     }
 
-    this.#applyEdits(deltas, [], { recalc: this.batchDepth === 0, emitChange: true });
+    const source = typeof options?.source === "string" ? options.source : undefined;
+    this.#applyEdits(deltas, [], { recalc: this.batchDepth === 0, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       this.#mergeIntoBatch(deltas);
@@ -1165,12 +1166,13 @@ export class DocumentController {
 
   /**
    * @param {SheetViewDelta[]} deltas
-   * @param {{ label?: string, mergeKey?: string }} options
+   * @param {{ label?: string, mergeKey?: string, source?: string }} options
    */
   #applyUserSheetViewDeltas(deltas, options) {
     if (!deltas || deltas.length === 0) return;
 
-    this.#applyEdits([], deltas, { recalc: false, emitChange: true });
+    const source = typeof options?.source === "string" ? options.source : undefined;
+    this.#applyEdits([], deltas, { recalc: false, emitChange: true, source });
 
     if (this.batchDepth > 0) {
       this.#mergeSheetViewIntoBatch(deltas);

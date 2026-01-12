@@ -17,6 +17,8 @@ export function applyPivotCellUpdates(document: DocumentController, updates: rea
     const formula = trimmedFormula.length > 0 ? trimmedFormula : null;
     const value = formula ? null : (update.value ?? null);
 
-    document.setCellInput(sheetId, { row, col }, { value, formula });
+    // Pivot updates originate in the backend pivot engine. Tag them so the desktop workbook sync
+    // bridge does not echo the edits back via `set_cell` / `set_range`.
+    document.setCellInput(sheetId, { row, col }, { value, formula }, { source: "pivot" });
   }
 }

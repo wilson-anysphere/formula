@@ -137,6 +137,21 @@ describe("workbookSync", () => {
     sync.stop();
   });
 
+  it("ignores document changes tagged as pivot updates (already applied in the backend)", async () => {
+    const document = new DocumentController();
+    const sync = startWorkbookSync({ document: document as any });
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
+
+    document.setCellValue("Sheet1", { row: 0, col: 0 }, 123, { source: "pivot" });
+    expect(document.getCell("Sheet1", { row: 0, col: 0 }).value).toBe(123);
+
+    await flushMicrotasks();
+
+    expect(invoke).not.toHaveBeenCalled();
+
+    sync.stop();
+  });
+
   it("markSaved flushes pending edits before saving and clears frontend dirty state", async () => {
     const document = new DocumentController();
     const sync = startWorkbookSync({ document: document as any });
