@@ -1890,6 +1890,57 @@ mod tests {
     }
 
     #[test]
+    fn decodes_ptg_paren_union_arg_without_double_parenthesizing() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // SUM((A1,B1)) with explicit PtgParen around the union expression.
+        //
+        // Without the `PtgParen` special-case in `format_function_call`, we could end up with
+        // SUM(((A1,B1))) (triple parens).
+        let a1_col = encode_col_field(0, true, true);
+        let b1_col = encode_col_field(1, true, true);
+        let rgce = vec![
+            0x24, 0x00, 0x00, a1_col.to_le_bytes()[0], a1_col.to_le_bytes()[1], // A1
+            0x24, 0x00, 0x00, b1_col.to_le_bytes()[0], b1_col.to_le_bytes()[1], // B1
+            0x10, // union operator
+            0x15, // explicit paren
+            0x22, 0x01, 0x04, 0x00, // SUM(argc=1)
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "SUM((A1,B1))");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_attr_sum() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // BIFF8 can encode SUM with a PtgAttr token (tAttrSum bit).
+        //
+        // rgce:
+        //   PtgRef A1
+        //   PtgAttr grbit=tAttrSum (0x10), wAttr=0
+        let a1_col = encode_col_field(0, true, true);
+        let rgce = vec![
+            0x24, 0x00, 0x00, a1_col.to_le_bytes()[0], a1_col.to_le_bytes()[1], // A1
+            0x19, 0x10, 0x00, 0x00, // PtgAttr(tAttrSum)
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "SUM(A1)");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn renders_unsupported_tokens_as_parseable_excel_errors() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = Vec::new();
