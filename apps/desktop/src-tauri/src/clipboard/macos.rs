@@ -34,6 +34,9 @@ const TYPE_TIFF: &str = "public.tiff"; // NSPasteboardTypeTIFF
 const NSBITMAP_IMAGE_FILE_TYPE_TIFF: usize = 0; // NSBitmapImageFileTypeTIFF
 const NSBITMAP_IMAGE_FILE_TYPE_PNG: usize = 4; // NSBitmapImageFileTypePNG
 
+// TIFF compression methods (NSTIFFCompression).
+const NSTIFF_COMPRESSION_LZW: isize = 5; // NSTIFFCompressionLZW
+
 fn ensure_main_thread() -> Result<(), ClipboardError> {
     // +[NSThread isMainThread]
     let is_main: bool = unsafe { objc2::msg_send![objc2::class!(NSThread), isMainThread] };
@@ -201,8 +204,31 @@ unsafe fn png_to_tiff_bytes(png: &[u8]) -> Result<Vec<u8>, ClipboardError> {
         ));
     }
 
-    // Pass an empty properties dictionary.
-    let props: *mut AnyObject = objc2::msg_send![objc2::class!(NSDictionary), dictionary];
+    // Use LZW compression by default to keep TIFF payload sizes reasonable.
+    //
+    // Many consumers (including built-in macOS apps) accept compressed TIFF, and the compression
+    // can drastically reduce size compared to uncompressed RGBA (which would quickly exceed our
+    // `MAX_PNG_BYTES` limit for moderately-sized images).
+    let compression_key = nsstring_from_str("NSImageCompressionMethod")?;
+    let compression_value: *mut AnyObject = objc2::msg_send![
+        objc2::class!(NSNumber),
+        numberWithInteger: NSTIFF_COMPRESSION_LZW
+    ];
+    if compression_value.is_null() {
+        return Err(ClipboardError::OperationFailed(
+            "failed to allocate NSNumber for TIFF compression".to_string(),
+        ));
+    }
+    let props: *mut AnyObject = objc2::msg_send![
+        objc2::class!(NSDictionary),
+        dictionaryWithObject: compression_value
+        forKey: &*compression_key
+    ];
+    if props.is_null() {
+        return Err(ClipboardError::OperationFailed(
+            "failed to allocate NSDictionary for TIFF compression".to_string(),
+        ));
+    }
     let tiff_data: *mut AnyObject = objc2::msg_send![
         rep,
         representationUsingType: NSBITMAP_IMAGE_FILE_TYPE_TIFF
