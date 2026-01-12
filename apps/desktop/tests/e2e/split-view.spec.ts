@@ -125,6 +125,35 @@ test.describe("split view", () => {
     expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
   });
 
+  test("primary selection sync does not scroll the secondary pane", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("split-vertical").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await expect(secondary.locator("canvas")).toHaveCount(3);
+
+    // Scroll the secondary pane so A1 is offscreen.
+    await secondary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(0, 200 * 24);
+    await expect.poll(async () => Number((await secondary.getAttribute("data-scroll-y")) ?? 0)).toBeGreaterThan(0);
+
+    const secondaryScrollBefore = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
+
+    const rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("B2"));
+    if (!rect) throw new Error("Missing B2 rect");
+    await page.locator("#grid").click({ position: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 } });
+
+    await expect(page.getByTestId("active-cell")).toHaveText("B2");
+    const secondaryScrollAfter = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
+    expect(Math.abs(secondaryScrollAfter - secondaryScrollBefore)).toBeLessThan(0.1);
+  });
+
   test("secondary drag selection preserves active cell semantics and does not scroll primary", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
@@ -313,4 +342,3 @@ test.describe("split view / shared grid zoom", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"))).toBe("");
   });
 });
-
