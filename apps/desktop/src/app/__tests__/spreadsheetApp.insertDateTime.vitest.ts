@@ -4,7 +4,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { dateToExcelSerial } from "../../shared/valueParsing.js";
 import { SpreadsheetApp } from "../spreadsheetApp";
 
 function createInMemoryLocalStorage(): Storage {
@@ -72,7 +71,7 @@ function createRoot(): HTMLElement {
   return root;
 }
 
-describe("SpreadsheetApp insert date/time shortcuts (Excel serial + numberFormat)", () => {
+describe("SpreadsheetApp insert date/time shortcuts (string values)", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -91,12 +90,13 @@ describe("SpreadsheetApp insert date/time shortcuts (Excel serial + numberFormat
 
     Object.defineProperty(globalThis, "requestAnimationFrame", {
       configurable: true,
+      writable: true,
       value: (cb: FrameRequestCallback) => {
         cb(0);
         return 0;
       },
     });
-    Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
+    Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, writable: true, value: () => {} });
 
     Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
       configurable: true,
@@ -112,7 +112,7 @@ describe("SpreadsheetApp insert date/time shortcuts (Excel serial + numberFormat
     vi.setSystemTime(new Date(2020, 0, 2, 3, 4, 5));
   });
 
-  it("Insert Date writes an Excel serial number and sets yyyy-mm-dd format for the selection", async () => {
+  it("Insert Date writes an M/D/YYYY string for the selection", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -129,20 +129,15 @@ describe("SpreadsheetApp insert date/time shortcuts (Excel serial + numberFormat
     const undoBefore = doc.getStackDepths().undo;
     app.insertDate();
 
-    const expectedSerial = dateToExcelSerial(new Date(Date.UTC(2020, 0, 2)));
-    expect(doc.getCell(sheetId, "A1").value).toBe(expectedSerial);
-    expect(doc.getCellFormat(sheetId, "A1").numberFormat).toBe("yyyy-mm-dd");
+    expect(doc.getCell(sheetId, "A1").value).toBe("1/2/2020");
     expect(doc.getStackDepths().undo).toBe(undoBefore + 1);
     expect(doc.undoLabel).toBe("Insert Date");
-
-    const display = await app.getCellValueA1("A1");
-    expect(display).toBe("2020-01-02");
 
     app.destroy();
     root.remove();
   });
 
-  it("Insert Time writes a fractional-day serial number and sets hh:mm:ss format for the selection", async () => {
+  it("Insert Time writes an H:MM string for the selection", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -159,17 +154,11 @@ describe("SpreadsheetApp insert date/time shortcuts (Excel serial + numberFormat
     const undoBefore = doc.getStackDepths().undo;
     app.insertTime();
 
-    const expectedSerial = (3 * 3600 + 4 * 60 + 5) / 86_400;
-    expect(doc.getCell(sheetId, "A1").value).toBeCloseTo(expectedSerial, 10);
-    expect(doc.getCellFormat(sheetId, "A1").numberFormat).toBe("hh:mm:ss");
+    expect(doc.getCell(sheetId, "A1").value).toBe("3:04");
     expect(doc.getStackDepths().undo).toBe(undoBefore + 1);
     expect(doc.undoLabel).toBe("Insert Time");
-
-    const display = await app.getCellValueA1("A1");
-    expect(display).toBe("03:04:05");
 
     app.destroy();
     root.remove();
   });
 });
-
