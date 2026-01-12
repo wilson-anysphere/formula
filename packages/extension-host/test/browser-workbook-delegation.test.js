@@ -1980,6 +1980,126 @@ test("BrowserExtensionHost: workbook.save cancellation does not emit beforeSave 
   assert.equal(apiError?.message, "Save cancelled");
 });
 
+test("BrowserExtensionHost: workbook.save updates workbook snapshot when a pathless workbook is saved", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let saveCalls = 0;
+  let active = { name: "Untitled", path: null };
+  const sheets = [{ id: "sheet1", name: "Sheet1" }];
+  const activeSheet = sheets[0];
+
+  /** @type {any} */
+  let beforeSave;
+  /** @type {any} */
+  let apiResult;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveSaveDone;
+  const saveDone = new Promise((resolve) => {
+    resolveSaveDone = resolve;
+  });
+
+  /** @type {(value?: unknown) => void} */
+  let resolveGetDone;
+  const getDone = new Promise((resolve) => {
+    resolveGetDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "event" && msg.event === "beforeSave") {
+          beforeSave = msg.data;
+          return;
+        }
+        if (msg?.type === "api_result" && msg.id === "req1") {
+          resolveSaveDone();
+          return;
+        }
+        if (msg?.type === "api_result" && msg.id === "req2") {
+          apiResult = msg.result;
+          resolveGetDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      listSheets() {
+        return sheets;
+      },
+      getActiveSheet() {
+        return activeSheet;
+      },
+      async getActiveWorkbook() {
+        return active;
+      },
+      async saveWorkbook() {
+        saveCalls += 1;
+        active = { name: "Saved.xlsx", path: "/tmp/saved.xlsx" };
+      },
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-save-pathless-updates";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-save-pathless-updates/",
+    mainUrl: "memory://workbook-save-pathless-updates/main.mjs",
+    manifest: {
+      name: "workbook-save-pathless-updates",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+  extension.active = true;
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "save",
+    args: [],
+  });
+
+  await saveDone;
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req2",
+    namespace: "workbook",
+    method: "getActiveWorkbook",
+    args: [],
+  });
+
+  await getDone;
+
+  assert.equal(saveCalls, 1);
+  assert.equal(beforeSave, undefined);
+  assert.deepEqual(apiResult, {
+    name: "Saved.xlsx",
+    path: "/tmp/saved.xlsx",
+    sheets,
+    activeSheet,
+  });
+});
+
 test("BrowserExtensionHost: workbook.getActiveWorkbook overwrites stored path when spreadsheetApi returns path=null", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
