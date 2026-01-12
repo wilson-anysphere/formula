@@ -1303,11 +1303,9 @@ fn bytecode_compile_diagnostics_reports_unknown_sheet_reason() {
 fn bytecode_compile_diagnostics_reports_external_reference_reason() {
     let mut engine = Engine::new();
 
-    // External workbook reference with a 3D sheet span. These are not valid external sheet keys in
-    // the main evaluator (they expand by workbook sheet ordering), so they are not marked volatile
-    // and reach the bytecode lowering stage.
+    // External workbook references are not supported by the bytecode backend.
     engine
-        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1:Sheet2!A1")
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1!A1")
         .unwrap();
 
     let stats = engine.bytecode_compile_stats();

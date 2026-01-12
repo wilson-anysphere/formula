@@ -2603,6 +2603,15 @@ impl Engine {
         if !self.bytecode_enabled {
             return Err(BytecodeCompileReason::Disabled);
         }
+        // External workbook references are not supported by the bytecode backend. These formulas
+        // are also treated as volatile by the dependency graph, but classify them under the
+        // lowering error so coverage reports can prioritize external-reference support separately
+        // from volatile worksheet functions.
+        if canonical_expr_contains_external_workbook_refs(expr) {
+            return Err(BytecodeCompileReason::LowerError(
+                bytecode::LowerError::ExternalReference,
+            ));
+        }
         if volatile {
             return Err(BytecodeCompileReason::Volatile);
         }
@@ -4468,6 +4477,43 @@ fn canonical_expr_contains_structured_refs(expr: &crate::Expr) -> bool {
         | crate::Expr::CellRef(_)
         | crate::Expr::ColRef(_)
         | crate::Expr::RowRef(_)
+        | crate::Expr::Missing => false,
+    }
+}
+
+fn canonical_expr_contains_external_workbook_refs(expr: &crate::Expr) -> bool {
+    match expr {
+        crate::Expr::NameRef(r) => r.workbook.is_some(),
+        crate::Expr::CellRef(r) => r.workbook.is_some(),
+        crate::Expr::ColRef(r) => r.workbook.is_some(),
+        crate::Expr::RowRef(r) => r.workbook.is_some(),
+        crate::Expr::StructuredRef(r) => r.workbook.is_some(),
+        crate::Expr::FunctionCall(call) => call
+            .args
+            .iter()
+            .any(|arg| canonical_expr_contains_external_workbook_refs(arg)),
+        crate::Expr::Call(call) => {
+            canonical_expr_contains_external_workbook_refs(call.callee.as_ref())
+                || call
+                    .args
+                    .iter()
+                    .any(|arg| canonical_expr_contains_external_workbook_refs(arg))
+        }
+        crate::Expr::Unary(u) => canonical_expr_contains_external_workbook_refs(&u.expr),
+        crate::Expr::Postfix(p) => canonical_expr_contains_external_workbook_refs(&p.expr),
+        crate::Expr::Binary(b) => {
+            canonical_expr_contains_external_workbook_refs(&b.left)
+                || canonical_expr_contains_external_workbook_refs(&b.right)
+        }
+        crate::Expr::Array(arr) => arr
+            .rows
+            .iter()
+            .flat_map(|row| row.iter())
+            .any(|el| canonical_expr_contains_external_workbook_refs(el)),
+        crate::Expr::Number(_)
+        | crate::Expr::String(_)
+        | crate::Expr::Boolean(_)
+        | crate::Expr::Error(_)
         | crate::Expr::Missing => false,
     }
 }
