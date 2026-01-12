@@ -129,3 +129,52 @@ fn randarray_rejects_min_greater_than_max() {
         Value::Error(ErrorKind::Value)
     );
 }
+
+#[test]
+fn randarray_min_equals_max_returns_constant_array() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=RANDARRAY(2,2,5,5)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("B2").unwrap());
+
+    for addr in ["A1", "B1", "A2", "B2"] {
+        assert_eq!(
+            engine.get_cell_value("Sheet1", addr),
+            Value::Number(5.0),
+            "expected {addr} to be the constant min/max value"
+        );
+    }
+}
+
+#[test]
+fn randarray_whole_number_requires_non_empty_integer_interval() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=RANDARRAY(1,1,0.2,0.8,TRUE)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Num)
+    );
+}
+
+#[test]
+fn randarray_rejects_non_finite_bounds() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=RANDARRAY(1,1,0,1E308*1E308)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Num)
+    );
+}
