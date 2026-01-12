@@ -20,6 +20,18 @@ function computeInitialPressed(schema: RibbonSchema): Record<string, boolean> {
   return pressed;
 }
 
+function computeToggleIds(schema: RibbonSchema): Set<string> {
+  const ids = new Set<string>();
+  for (const tab of schema.tabs) {
+    for (const group of tab.groups) {
+      for (const button of group.buttons) {
+        if (button.kind === "toggle") ids.add(button.id);
+      }
+    }
+  }
+  return ids;
+}
+
 export interface RibbonProps {
   actions: RibbonActions;
   schema?: RibbonSchema;
@@ -40,6 +52,20 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
   const [pressedById, setPressedById] = React.useState<Record<string, boolean>>(() => computeInitialPressed(schema));
 
   const tabButtonRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
+
+  React.useEffect(() => {
+    // Keep internal toggle state in sync with schema changes (e.g. when tabs/groups
+    // are swapped out by the host app).
+    const toggleIds = computeToggleIds(schema);
+    const defaults = computeInitialPressed(schema);
+    setPressedById((prev) => {
+      const next: Record<string, boolean> = {};
+      for (const id of toggleIds) {
+        next[id] = Object.prototype.hasOwnProperty.call(prev, id) ? prev[id]! : defaults[id]!;
+      }
+      return next;
+    });
+  }, [schema]);
 
   React.useEffect(() => {
     if (!tabs.some((tab) => tab.id === activeTabId)) {
