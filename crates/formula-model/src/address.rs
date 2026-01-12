@@ -37,7 +37,11 @@ impl CellRef {
 
     /// Convert to Excel A1 notation (e.g. `A1`, `BC32`).
     pub fn to_a1(self) -> String {
-        format!("{}{}", col_to_name(self.col), self.row + 1)
+        // Rows are stored as 0-based u32s and intentionally allow values beyond Excel's
+        // 1,048,576 limit. Do row arithmetic in u64 so formatting is robust even for large
+        // internal sentinel values (e.g. u32::MAX) without debug overflow panics.
+        let row_1_based = u64::from(self.row) + 1;
+        format!("{}{}", col_to_name(self.col), row_1_based)
     }
 
     /// Parse an Excel A1-style reference (e.g. `A1`, `$B$2`).
@@ -444,6 +448,20 @@ mod tests {
             CellRef::from_a1("A1048577").unwrap(),
             CellRef::new(1_048_576, 0)
         );
+    }
+
+    #[test]
+    fn a1_formats_excel_max_row() {
+        // Excel row 1,048,576 is stored as 0-based row 1,048,575.
+        assert_eq!(CellRef::new(1_048_575, 0).to_a1(), "A1048576");
+    }
+
+    #[test]
+    fn a1_formats_u32_max_row_without_overflow() {
+        let a1 = CellRef::new(u32::MAX, 0).to_a1();
+        assert!(a1.starts_with('A'));
+        assert!(a1.contains("4294967296"));
+        assert_eq!(a1, "A4294967296");
     }
 
     #[test]
