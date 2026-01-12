@@ -33,3 +33,26 @@ pub fn format_value_for_display(
 
     formula_format::format_value(fmt_value, format_code, options)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::{EntityValue, RecordValue};
+
+    #[test]
+    fn formats_entity_as_text_using_display_string() {
+        let value = Value::Entity(EntityValue::new("Apple Inc."));
+
+        let formatted = format_value_for_display(&value, None, &FormatOptions::default());
+        assert_eq!(formatted.text, "Apple Inc.");
+    }
+
+    #[test]
+    fn entity_and_record_to_string_use_display_string() {
+        let entity = Value::Entity(EntityValue::new("Apple Inc."));
+        assert_eq!(entity.to_string(), "Apple Inc.");
+
+        let record = Value::Record(RecordValue::new("Apple Inc."));
+        assert_eq!(record.to_string(), "Apple Inc.");
+    }
+}
