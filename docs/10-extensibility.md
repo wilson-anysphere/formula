@@ -62,6 +62,9 @@ The desktop implements a small, VS Code-inspired subset of `when` syntax for men
     (so keys like `view:foo` are valid).
 - Equality: `==` / `!=` against string/number/boolean literals
   - String literals may be single- or double-quoted (e.g. `"Sheet1"` or `'Sheet1'`).
+  - Boolean literals: `true` / `false` (case-insensitive).
+  - Number literals: digits with an optional decimal point (e.g. `1`, `3.14`).
+  - Equality is strict (no type coercion).
   - When an identifier is used directly (e.g. `cellHasValue`), it is evaluated using truthiness:
     `false`, `0`, `""`, `null`, and `undefined` are treated as false.
 
