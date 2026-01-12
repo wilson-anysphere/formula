@@ -91,3 +91,47 @@ fn munit_spills_identity_matrix() {
     assert_eq!(engine.get_cell_value("Sheet1", "D4"), Value::Number(1.0));
 }
 
+#[test]
+fn matrix_functions_coerce_matrix_elements_like_excel() {
+    // Document coercion decisions for matrix elements:
+    // - blanks -> 0
+    // - booleans -> 1/0
+    // - numeric text -> number
+    // - non-numeric text -> #VALUE!
+    // - errors propagate
+    let mut sheet = TestSheet::new();
+
+    // Range input with an implicit blank cell (B1 is missing/blank) should treat the blank as 0.
+    sheet.set("A1", 1.0);
+    sheet.set("A2", 3.0);
+    sheet.set("B2", 4.0);
+    sheet.set_formula("C1", "=MDETERM(A1:B2)");
+    sheet.recalc();
+    assert_number(&sheet.get("C1"), 4.0); // 1*4 - 3*0
+
+    // Changing the blank to a number should update the determinant (dependency tracking).
+    sheet.set("B1", 2.0);
+    sheet.recalc();
+    assert_number(&sheet.get("C1"), -2.0); // 1*4 - 3*2
+
+    // Booleans inside the matrix are coerced like numbers.
+    sheet.set("A1", true);
+    sheet.recalc();
+    assert_number(&sheet.get("C1"), -2.0); // TRUE=1
+
+    // Numeric text is parsed.
+    sheet.set("A1", 1.0);
+    sheet.set("B1", Value::Text("2".to_string()));
+    sheet.recalc();
+    assert_number(&sheet.get("C1"), -2.0);
+
+    // Non-numeric text yields #VALUE!.
+    sheet.set("B1", Value::Text("x".to_string()));
+    sheet.recalc();
+    assert_eq!(sheet.get("C1"), Value::Error(ErrorKind::Value));
+
+    // Errors inside the matrix propagate.
+    sheet.set("B1", Value::Error(ErrorKind::Div0));
+    sheet.recalc();
+    assert_eq!(sheet.get("C1"), Value::Error(ErrorKind::Div0));
+}
