@@ -385,7 +385,7 @@ mod tests {
             CellValue::Text("Entity display".to_string())
         );
 
-        let Some(record_string) = from_json_or_skip_unknown_variant(json!({
+        let Some(record) = from_json_or_skip_unknown_variant(json!({
             "type": "record",
             "value": {
                 "displayField": "name",
@@ -398,7 +398,7 @@ mod tests {
             return;
         };
         assert_eq!(
-            model_cell_value_to_sort_value(&record_string),
+            model_cell_value_to_sort_value(&record),
             CellValue::Text("Alice".to_string())
         );
 
