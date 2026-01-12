@@ -46,6 +46,14 @@ def generate(
         formula='=TEXTSPLIT("a,b,c",",")',
         description="Dynamic array function (Excel 365+)",
     )
+    add_case(
+        cases,
+        prefix="spill_frequency",
+        tags=["spill", "FREQUENCY"],
+        formula="=FREQUENCY({1,2,3,4,5},{2,4})",
+        output_cell="C1",
+        description="Array/spill-producing histogram bucket counts",
+    )
 
     # FILTER / SORT / UNIQUE (simple spill cases)
     filter_inputs = [CellInput(f"A{i}", i) for i in range(1, 6)]
@@ -200,4 +208,3 @@ def generate(
         formula="=LAMBDA(x,y,ISOMITTED(y))(1)",
         description="Missing LAMBDA arguments bind as blank and are detectable via ISOMITTED",
     )
-

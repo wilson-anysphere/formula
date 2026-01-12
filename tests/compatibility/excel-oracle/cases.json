@@ -33692,6 +33692,17 @@
       "id": "spill_textsplit_477254127bdd"
     },
     {
+      "formula": "=FREQUENCY({1,2,3,4,5},{2,4})",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "FREQUENCY"
+      ],
+      "description": "Array/spill-producing histogram bucket counts",
+      "id": "spill_frequency_b0d4e084c1a6"
+    },
+    {
       "formula": "=FILTER(A1:A5,A1:A5>2)",
       "outputCell": "C1",
       "inputs": [

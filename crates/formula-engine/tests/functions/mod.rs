@@ -56,6 +56,7 @@ mod roman_arabic;
 mod reference;
 mod statistical;
 mod statistical_combinatorics;
+mod statistical_frequency;
 mod statistical_distributions_normal;
 mod statistical_moments;
 mod statistical_more;
