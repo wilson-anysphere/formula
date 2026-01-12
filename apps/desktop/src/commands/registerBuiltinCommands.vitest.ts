@@ -153,6 +153,53 @@ describe("registerBuiltinCommands: sheet navigation", () => {
 
     expect(activated).toEqual(["Sheet3", "Sheet1", "Sheet3"]);
   });
+
+  it("jumps to the first visible sheet when the current sheet is not visible", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    let current = "Sheet2";
+    const activated: string[] = [];
+    const focusAfterSheetNavigation = vi.fn();
+
+    const doc = {
+      // Sheet2 is hidden.
+      getVisibleSheetIds: () => ["Sheet1", "Sheet3"],
+    };
+
+    const app = {
+      getDocument: () => doc,
+      getCurrentSheetId: () => current,
+      isEditing: () => false,
+      activateSheet: (id: string) => {
+        current = id;
+        activated.push(id);
+      },
+      focusAfterSheetNavigation: () => {},
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController, focusAfterSheetNavigation });
+
+    await commandRegistry.executeCommand("workbook.nextSheet");
+    expect(current).toBe("Sheet1");
+    expect(focusAfterSheetNavigation).toHaveBeenCalledTimes(1);
+
+    // Previous sheet should behave the same (deterministic "jump to first visible").
+    current = "Sheet2";
+    await commandRegistry.executeCommand("workbook.previousSheet");
+    expect(current).toBe("Sheet1");
+    expect(focusAfterSheetNavigation).toHaveBeenCalledTimes(2);
+
+    expect(activated).toEqual(["Sheet1", "Sheet1"]);
+  });
 });
 
 describe("registerBuiltinCommands: core editing/view/audit commands", () => {
