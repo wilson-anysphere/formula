@@ -28,6 +28,8 @@ test("normalizeExcelColorToCss resolves formula-model/XLSX color reference objec
 
   // Tint values are thousandths, with negatives shading toward black.
   assert.equal(normalizeExcelColorToCss({ theme: 4, tint: -500 }), "#2e4e6b");
+  // Also accept OOXML-style tint fractions.
+  assert.equal(normalizeExcelColorToCss({ theme: 4, tint: -0.5 }), "#2e4e6b");
 
   assert.equal(normalizeExcelColorToCss({ auto: true }), undefined);
 
@@ -38,4 +40,6 @@ test("normalizeExcelColorToCss resolves formula-model/XLSX color reference objec
   assert.equal(normalizeExcelColorToCss({ rgb: "#80112233" }), "rgba(17,34,51,0.502)");
   assert.equal(normalizeExcelColorToCss({ rgb: "80112233" }), "rgba(17,34,51,0.502)");
   assert.equal(normalizeExcelColorToCss({ rgb: "FFFF0000" }), "#ff0000");
+  assert.equal(normalizeExcelColorToCss({ rgb: "#112233", tint: 0.5 }), "#889199");
+  assert.equal(normalizeExcelColorToCss({ rgb: "#80112233", tint: 0.5 }), "rgba(136,145,153,0.502)");
 });

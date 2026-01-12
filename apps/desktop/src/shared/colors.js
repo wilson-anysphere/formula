@@ -30,7 +30,15 @@ export function normalizeExcelColorToCss(input) {
 
   // `{"argb":"#AARRGGBB"}`
   if (typeof input.argb === "string") {
-    return normalizeExcelColorStringToCss(input.argb);
+    const base = normalizeExcelColorStringToCss(input.argb);
+    if (typeof input.tint === "number" && Number.isFinite(input.tint) && input.tint !== 0) {
+      const parsed = parseExcelColorStringToArgb(input.argb);
+      if (parsed != null) {
+        const tinted = applyTint(parsed, input.tint);
+        return normalizeExcelColorStringToCss(toHexArgb(tinted));
+      }
+    }
+    return base;
   }
 
   // `{ auto: true }` is context-dependent ("automatic") and cannot be resolved here.
@@ -38,7 +46,15 @@ export function normalizeExcelColorToCss(input) {
 
   // DocumentController + desktop sheet metadata store represent tab colors as `{ rgb }`.
   if (typeof input.rgb === "string") {
-    return normalizeExcelColorStringToCss(input.rgb);
+    const base = normalizeExcelColorStringToCss(input.rgb);
+    if (typeof input.tint === "number" && Number.isFinite(input.tint) && input.tint !== 0) {
+      const parsed = parseExcelColorStringToArgb(input.rgb);
+      if (parsed != null) {
+        const tinted = applyTint(parsed, input.tint);
+        return normalizeExcelColorStringToCss(toHexArgb(tinted));
+      }
+    }
+    return base;
   }
 
   // `{ indexed: number }`
@@ -122,6 +138,54 @@ function normalizeExcelColorStringToCss(input) {
 }
 
 /**
+ * Parse an Excel/OOXML-style hex color string into an ARGB integer.
+ *
+ * Supports:
+ * - `#AARRGGBB` / `AARRGGBB`
+ * - `#RRGGBB` / `RRGGBB`
+ * - `#RGB` / `RGB` (expanded to `RRGGBB`)
+ *
+ * Returns `null` when the input is not a hex-like token.
+ *
+ * @param {string} input
+ * @returns {number | null}
+ */
+function parseExcelColorStringToArgb(input) {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+
+  const hasHash = trimmed.startsWith("#");
+  const raw = hasHash ? trimmed.slice(1) : trimmed;
+
+  // If the value doesn't look like a hex token, treat it as a CSS string that we can't parse.
+  if (!hasHash && !/^[0-9a-fA-F]+$/.test(raw)) return null;
+  if (!/^[0-9a-fA-F]+$/.test(raw)) return null;
+
+  if (raw.length === 3) {
+    const [r, g, b] = raw.toLowerCase().split("");
+    const expanded = `${r}${r}${g}${g}${b}${b}`;
+    const rgb = Number.parseInt(expanded, 16);
+    if (!Number.isFinite(rgb)) return null;
+    return (0xff << 24) | rgb;
+  }
+
+  if (raw.length === 6) {
+    const rgb = Number.parseInt(raw, 16);
+    if (!Number.isFinite(rgb)) return null;
+    return (0xff << 24) | rgb;
+  }
+
+  if (raw.length === 8) {
+    const argb = Number.parseInt(raw, 16);
+    if (!Number.isFinite(argb)) return null;
+    // Ensure unsigned.
+    return argb >>> 0;
+  }
+
+  return null;
+}
+
+/**
  * @param {unknown} value
  * @returns {value is Record<string, unknown>}
  */
@@ -145,12 +209,23 @@ function toHexArgb(argb) {
 /**
  * Port of `crates/formula-model/src/theme.rs` tint logic.
  *
+ * `tint` values in the wild come in two scales:
+ * - Formula-model uses thousandths (e.g. -500 == -0.5)
+ * - OOXML (and some tooling) use fractions in [-1, 1] (e.g. -0.5)
+ *
+ * Accept either by auto-detecting the scale based on magnitude.
+ *
  * @param {number} argb
- * @param {number} tintThousandths
+ * @param {number} tintValue
  * @returns {number}
  */
-function applyTint(argb, tintThousandths) {
-  const tint = clamp(tintThousandths / 1000, -1, 1);
+function applyTint(argb, tintValue) {
+  let tint = Number(tintValue);
+  if (!Number.isFinite(tint)) return argb;
+  if (Math.abs(tint) > 1) {
+    tint /= 1000;
+  }
+  tint = clamp(tint, -1, 1);
   if (tint === 0) return argb;
 
   const a = (argb >>> 24) & 0xff;
