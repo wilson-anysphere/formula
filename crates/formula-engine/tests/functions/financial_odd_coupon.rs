@@ -5269,6 +5269,16 @@ fn odd_first_coupon_zero_yield_price_is_finite_and_roundtrips() {
         "expected ODDFPRICE with yld=0 to be finite, got {price}"
     );
 
+    // Optional `basis` is omitted => defaults to 0 (same result as explicit basis=0).
+    sheet.set_formula(
+        "B1",
+        "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0,100,2)",
+    );
+    sheet.recalc();
+    let price_omitted = cell_number_or_skip(&sheet, "B1")
+        .expect("ODDFPRICE with omitted basis should evaluate to a number");
+    assert_close(price_omitted, price, 1e-10);
+
     let recovered_yield = match eval_number_or_skip(
         &mut sheet,
         "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,A1,100,2,0)",
@@ -5278,6 +5288,15 @@ fn odd_first_coupon_zero_yield_price_is_finite_and_roundtrips() {
     };
 
     assert_close(recovered_yield, 0.0, 1e-7);
+
+    let recovered_yield_omitted = match eval_number_or_skip(
+        &mut sheet,
+        "=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,B1,100,2)",
+    ) {
+        Some(v) => v,
+        None => return,
+    };
+    assert_close(recovered_yield_omitted, 0.0, 1e-7);
 }
 
 #[test]
@@ -5299,6 +5318,16 @@ fn odd_last_coupon_zero_yield_price_is_finite_and_roundtrips() {
         "expected ODDLPRICE with yld=0 to be finite, got {price}"
     );
 
+    // Optional `basis` is omitted => defaults to 0 (same result as explicit basis=0).
+    sheet.set_formula(
+        "B1",
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0,100,2)",
+    );
+    sheet.recalc();
+    let price_omitted = cell_number_or_skip(&sheet, "B1")
+        .expect("ODDLPRICE with omitted basis should evaluate to a number");
+    assert_close(price_omitted, price, 1e-10);
+
     let recovered_yield = match eval_number_or_skip(
         &mut sheet,
         "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,A1,100,2,0)",
@@ -5308,4 +5337,13 @@ fn odd_last_coupon_zero_yield_price_is_finite_and_roundtrips() {
     };
 
     assert_close(recovered_yield, 0.0, 1e-7);
+
+    let recovered_yield_omitted = match eval_number_or_skip(
+        &mut sheet,
+        "=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,B1,100,2)",
+    ) {
+        Some(v) => v,
+        None => return,
+    };
+    assert_close(recovered_yield_omitted, 0.0, 1e-7);
 }
