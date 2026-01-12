@@ -25,26 +25,42 @@ for (const specifier of ["@formula/marketplace-shared/package.json", "@formula/e
 }
 
 test(
-  "extension-marketplace TS sources are importable under Node ESM when executing TS sources directly",
+  "extension-marketplace MarketplaceClient TS source is importable under Node ESM (strip-types)",
+  async () => {
+    const { MarketplaceClient, normalizeMarketplaceBaseUrl: normalizeFromClient } = await import(
+      "../packages/extension-marketplace/src/MarketplaceClient.ts"
+    );
+
+    assert.equal(typeof MarketplaceClient, "function");
+    assert.equal(typeof normalizeFromClient, "function");
+
+    assert.equal(normalizeFromClient(""), "/api");
+    assert.equal(normalizeFromClient("/api/"), "/api");
+    assert.equal(normalizeFromClient("https://marketplace.formula.app"), "https://marketplace.formula.app/api");
+  },
+);
+
+test(
+  "extension-marketplace full TS sources are importable under Node ESM when executing TS sources directly",
   { skip: !hasWorkspaceDeps },
   async () => {
-  const { MarketplaceClient, WebExtensionManager, normalizeMarketplaceBaseUrl: normalizeFromIndex } = await import(
-    "../packages/extension-marketplace/src/index.ts"
-  );
-  const { normalizeMarketplaceBaseUrl: normalizeFromClient } = await import(
-    "../packages/extension-marketplace/src/MarketplaceClient.ts"
-  );
+    const { MarketplaceClient, WebExtensionManager, normalizeMarketplaceBaseUrl: normalizeFromIndex } = await import(
+      "../packages/extension-marketplace/src/index.ts"
+    );
+    const { normalizeMarketplaceBaseUrl: normalizeFromClient } = await import(
+      "../packages/extension-marketplace/src/MarketplaceClient.ts"
+    );
 
-  assert.equal(typeof MarketplaceClient, "function");
-  assert.equal(typeof WebExtensionManager, "function");
-  assert.equal(typeof normalizeFromIndex, "function");
-  assert.equal(typeof normalizeFromClient, "function");
+    assert.equal(typeof MarketplaceClient, "function");
+    assert.equal(typeof WebExtensionManager, "function");
+    assert.equal(typeof normalizeFromIndex, "function");
+    assert.equal(typeof normalizeFromClient, "function");
 
-  assert.equal(normalizeFromIndex(""), "/api");
-  assert.equal(normalizeFromClient(""), "/api");
-  assert.equal(normalizeFromIndex("/api/"), "/api");
-  assert.equal(normalizeFromClient("/api/"), "/api");
-  assert.equal(normalizeFromIndex("https://marketplace.formula.app"), "https://marketplace.formula.app/api");
-  assert.equal(normalizeFromClient("https://marketplace.formula.app"), "https://marketplace.formula.app/api");
+    assert.equal(normalizeFromIndex(""), "/api");
+    assert.equal(normalizeFromClient(""), "/api");
+    assert.equal(normalizeFromIndex("/api/"), "/api");
+    assert.equal(normalizeFromClient("/api/"), "/api");
+    assert.equal(normalizeFromIndex("https://marketplace.formula.app"), "https://marketplace.formula.app/api");
+    assert.equal(normalizeFromClient("https://marketplace.formula.app"), "https://marketplace.formula.app/api");
   },
 );
