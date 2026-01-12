@@ -183,4 +183,13 @@ fn image_in_cell_fixture_has_expected_rich_value_parts() {
         stored_image2.bytes, image2,
         "expected workbook.images image2.png bytes to match xl/media/image2.png"
     );
+
+    // `vm` should resolve to rich value indices and be captured in `XlsxDocument.meta.rich_value_cells`.
+    // In this fixture:
+    // - vm="1" -> rich value index 0 (image1)
+    // - vm="2" -> rich value index 1 (image2)
+    let sheet_id = doc.workbook.sheets[0].id;
+    assert_eq!(doc.rich_value_index(sheet_id, b2), Some(0));
+    assert_eq!(doc.rich_value_index(sheet_id, b3), Some(0));
+    assert_eq!(doc.rich_value_index(sheet_id, b4), Some(1));
 }
