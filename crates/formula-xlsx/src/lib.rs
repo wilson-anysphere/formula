@@ -314,7 +314,14 @@ impl XlsxDocument {
         sheet.set_value(cell, value.clone());
 
         let Some(cell_record) = sheet.cell(cell) else {
-            self.meta.cell_meta.remove(&(sheet_id, cell));
+            let keep_due_to_metadata = self
+                .meta
+                .cell_meta
+                .get(&(sheet_id, cell))
+                .is_some_and(|meta| meta.cm.is_some() || meta.vm.is_some());
+            if !keep_due_to_metadata {
+                self.meta.cell_meta.remove(&(sheet_id, cell));
+            }
             return true;
         };
 
@@ -435,12 +442,11 @@ impl XlsxDocument {
             // If the cell became truly empty, keep formula metadata (if any) so we can still
             // detect that a formula was removed later.
             if sheet.cell(cell).is_none() {
-                let keep = self
-                    .meta
-                    .cell_meta
-                    .get(&(sheet_id, cell))
-                    .and_then(|m| m.formula.as_ref())
-                    .is_some_and(|f| !f.file_text.is_empty());
+                let keep = self.meta.cell_meta.get(&(sheet_id, cell)).is_some_and(|m| {
+                    m.cm.is_some()
+                        || m.vm.is_some()
+                        || m.formula.as_ref().is_some_and(|f| !f.file_text.is_empty())
+                });
                 if !keep {
                     self.meta.cell_meta.remove(&(sheet_id, cell));
                 }

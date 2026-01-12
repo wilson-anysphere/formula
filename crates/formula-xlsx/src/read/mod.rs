@@ -2143,6 +2143,7 @@ mod tests {
     use std::io::{Cursor, Write};
 
     use formula_model::CellRef;
+    use formula_model::CellValue;
 
     use super::load_from_bytes;
 
@@ -2193,7 +2194,7 @@ mod tests {
 </worksheet>"#;
 
         let bytes = build_minimal_xlsx(worksheet_xml);
-        let doc = load_from_bytes(&bytes).expect("load_from_bytes");
+        let mut doc = load_from_bytes(&bytes).expect("load_from_bytes");
         let sheet_id = doc.workbook.sheets[0].id;
         let cell_ref = CellRef::from_a1("A1").unwrap();
 
@@ -2202,6 +2203,25 @@ mod tests {
             .cell_meta
             .get(&(sheet_id, cell_ref))
             .expect("expected cell meta entry for A1");
+        assert_eq!(meta.cm, Some(7));
+        assert_eq!(meta.vm, Some(9));
+
+        // Ensure the higher-level editing API doesn't accidentally discard the metadata-only entry.
+        doc.set_cell_value(sheet_id, cell_ref, CellValue::Empty);
+        let meta = doc
+            .meta
+            .cell_meta
+            .get(&(sheet_id, cell_ref))
+            .expect("expected cell meta entry for A1 after set_cell_value(empty)");
+        assert_eq!(meta.cm, Some(7));
+        assert_eq!(meta.vm, Some(9));
+
+        doc.set_cell_formula(sheet_id, cell_ref, None);
+        let meta = doc
+            .meta
+            .cell_meta
+            .get(&(sheet_id, cell_ref))
+            .expect("expected cell meta entry for A1 after set_cell_formula(None)");
         assert_eq!(meta.cm, Some(7));
         assert_eq!(meta.vm, Some(9));
     }
