@@ -23,7 +23,7 @@ const WEBVIEW_CSP = [
 
 const HARDEN_TAURI_GLOBALS_SOURCE = `(() => {
   "use strict";
-  const keys = ["__TAURI__", "__TAURI_IPC__", "__TAURI_INTERNALS__", "__TAURI_METADATA__"];
+  const keys = ["__TAURI__", "__TAURI_IPC__", "__TAURI_INTERNALS__", "__TAURI_METADATA__", "__TAURI_INVOKE__"];
   let tauriGlobalsPresent = false;
   const areTauriGlobalsScrubbed = () => {
     for (const key of keys) {

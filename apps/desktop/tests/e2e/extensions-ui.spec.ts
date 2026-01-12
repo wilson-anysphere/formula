@@ -107,6 +107,7 @@ test.describe("Extensions UI integration", () => {
           define("__TAURI_IPC__");
           define("__TAURI_INTERNALS__");
           define("__TAURI_METADATA__");
+          define("__TAURI_INVOKE__");
         } catch {
           // Ignore.
         }
@@ -266,11 +267,13 @@ test.describe("Extensions UI integration", () => {
       tauriIpc: typeof (window as any).__TAURI_IPC__,
       tauriInternals: typeof (window as any).__TAURI_INTERNALS__,
       tauriMetadata: typeof (window as any).__TAURI_METADATA__,
+      tauriInvoke: typeof (window as any).__TAURI_INVOKE__,
     }));
     expect(tauriTypes.tauri, "webview should not expose __TAURI__").toBe("undefined");
     expect(tauriTypes.tauriIpc, "webview should not expose __TAURI_IPC__").toBe("undefined");
     expect(tauriTypes.tauriInternals, "webview should not expose __TAURI_INTERNALS__").toBe("undefined");
     expect(tauriTypes.tauriMetadata, "webview should not expose __TAURI_METADATA__").toBe("undefined");
+    expect(tauriTypes.tauriInvoke, "webview should not expose __TAURI_INVOKE__").toBe("undefined");
 
     const tauriDescriptors = await webviewFrame!.evaluate(() => {
       const read = (key: string) => {
@@ -288,6 +291,7 @@ test.describe("Extensions UI integration", () => {
         tauriIpc: read("__TAURI_IPC__"),
         tauriInternals: read("__TAURI_INTERNALS__"),
         tauriMetadata: read("__TAURI_METADATA__"),
+        tauriInvoke: read("__TAURI_INVOKE__"),
       };
     });
 
