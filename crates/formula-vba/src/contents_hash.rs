@@ -1253,17 +1253,6 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 expect_reference_name_unicode = false;
             }
 
-            // REFERENCENAME (Unicode / reserved marker record)
-            //
-            // In spec-compliant `VBA/dir` streams, REFERENCENAME is followed by a Reserved marker
-            // (0x003E) and the Unicode (UTF-16LE) form. When present, it appears as a standalone
-            // record (id=0x003E) whose payload is the Unicode bytes.
-            //
-            // We include the raw payload bytes to preserve stored order and to avoid decoding.
-            0x003E => {
-                out.extend_from_slice(data);
-            }
-
             // REFERENCEREGISTERED
             0x000D => {
                 out.extend_from_slice(&id.to_le_bytes());
