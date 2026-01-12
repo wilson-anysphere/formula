@@ -400,6 +400,10 @@ test.describe("Content Security Policy (Tauri parity)", () => {
           try {
             const manager = new WebExtensionManager({ host, engineVersion: "1.0.0" });
             await manager.install("formula.sample-hello");
+            const contributedPanelsSeedRaw =
+              globalThis.localStorage?.getItem("formula.extensions.contributedPanels.v1") ?? null;
+            const contributedPanelsSeed = contributedPanelsSeedRaw ? JSON.parse(String(contributedPanelsSeedRaw)) : null;
+            const seededPanel = contributedPanelsSeed?.["sampleHello.panel"] ?? null;
             const id = await manager.loadInstalled("formula.sample-hello");
 
             const loadedMainUrl = (manager as any)?._loadedMainUrls?.get(id)?.mainUrl ?? null;
@@ -411,7 +415,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
             await manager.dispose();
             await host.dispose();
 
-            return { id, loadedMainUrl, sum, fetched, outCell, writes, messages };
+            return { id, loadedMainUrl, seededPanel, sum, fetched, outCell, writes, messages };
           } finally {
             // Ensure we never leak a `process` shim into later runs.
             if (forceData) {
@@ -437,6 +441,10 @@ test.describe("Content Security Policy (Tauri parity)", () => {
 
     expect(result.blob.id).toBe("formula.sample-hello");
     expect(result.blob.loadedMainUrl).toMatch(/^(blob:|data:)/);
+    expect(result.blob.seededPanel).toMatchObject({
+      extensionId: "formula.sample-hello",
+      title: "Sample Hello Panel"
+    });
     if (result.canBlobModuleUrls) {
       expect(result.blob.loadedMainUrl).toMatch(/^blob:/);
     }
@@ -449,6 +457,10 @@ test.describe("Content Security Policy (Tauri parity)", () => {
 
     expect(result.data.id).toBe("formula.sample-hello");
     expect(result.data.loadedMainUrl).toMatch(/^(blob:|data:)/);
+    expect(result.data.seededPanel).toMatchObject({
+      extensionId: "formula.sample-hello",
+      title: "Sample Hello Panel"
+    });
     expect(result.data.loadedMainUrl).toMatch(/^data:/);
     expect(result.data.sum).toBe(10);
     expect(result.data.fetched).toBe("hello");
