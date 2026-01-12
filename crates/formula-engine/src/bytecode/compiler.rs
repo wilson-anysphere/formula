@@ -966,7 +966,6 @@ fn value_to_key(v: &Value, out: &mut String) {
         // runtime for pass-through semantics, but are not currently produced by parsing/lowering
         // as literals. Encode them as an opaque marker so cache keys stay deterministic without
         // needing to serialize the rich payload.
-        #[allow(unreachable_patterns)]
         _ => out.push_str("RICH"),
     }
 }
