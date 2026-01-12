@@ -55,6 +55,25 @@ describe("command-palette shortcut search", () => {
     ]);
   });
 
+  test("matches pageup/pagedown tokens against mac symbol shortcuts (cmd+pgup vs ⌘⇞)", () => {
+    const commands = [
+      {
+        commandId: "workbook.previousSheet",
+        title: "Previous Sheet",
+        category: "Navigation",
+        source: { kind: "builtin" as const },
+      },
+    ];
+    const keybindingIndex = new Map<string, readonly string[]>([["workbook.previousSheet", ["⌘⇞"]]]);
+
+    expect(searchShortcutCommands({ commands, keybindingIndex, query: "cmd+pgup" }).map((c) => c.commandId)).toEqual([
+      "workbook.previousSheet",
+    ]);
+    expect(searchShortcutCommands({ commands, keybindingIndex, query: "cmd+pageup" }).map((c) => c.commandId)).toEqual([
+      "workbook.previousSheet",
+    ]);
+  });
+
   test("does not drop punctuation tokens (cmd+[ should not match all cmd shortcuts)", () => {
     const commands = [
       { commandId: "audit", title: "Audit", category: "Cat", source: { kind: "builtin" as const } },

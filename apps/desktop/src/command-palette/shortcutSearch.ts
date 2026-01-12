@@ -31,6 +31,10 @@ const SHORTCUT_SYMBOL_TOKENS: Record<string, string> = {
   "↓": "down",
   "←": "left",
   "→": "right",
+
+  // Paging keys.
+  "⇞": "pageup",
+  "⇟": "pagedown",
 };
 
 // Keys that appear as literal single-character tokens (e.g. "[" in "⌘[").
@@ -108,6 +112,7 @@ const SHORTCUT_TOKEN_SYNONYMS: Record<string, string> = {
   pgup: "pageup",
   pagedown: "pagedown",
   pgdn: "pagedown",
+  pgdown: "pagedown",
 };
 
 import { t } from "../i18n/index.js";
