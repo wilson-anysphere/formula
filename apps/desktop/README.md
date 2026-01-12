@@ -15,7 +15,14 @@ workbook was loaded.
 
 Preferred (runtime):
 
-- URL query params: `?maxRows=<n>&maxCols=<n>` (e.g. `?maxRows=50000&maxCols=1000`)
+- URL query params: `?loadMaxRows=<n>&loadMaxCols=<n>` (e.g. `?loadMaxRows=50000&loadMaxCols=1000`)
+  - Backwards-compat: `?maxRows=<n>&maxCols=<n>` is still accepted.
+
+Persistent (runtime):
+
+- localStorage keys:
+  - `formula.desktop.workbookLoadMaxRows`
+  - `formula.desktop.workbookLoadMaxCols`
 
 Fallback (build/dev-time):
 
