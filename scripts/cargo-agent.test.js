@@ -113,3 +113,25 @@ test(
     assert.doesNotThrow(() => JSON.parse(stdout));
   },
 );
+
+test(
+  'cargo_agent rejects invalid FORMULA_LLD_THREADS',
+  { skip: !hasBash },
+  () => {
+    const proc = spawnSync(
+      'bash',
+      [
+        '-lc',
+        // Should fail fast before invoking cargo.
+        'export FORMULA_LLD_THREADS=not-a-number && bash scripts/cargo_agent.sh check -h',
+      ],
+      { encoding: 'utf8', cwd: repoRoot },
+    );
+    if (proc.error) throw proc.error;
+    assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_LLD_THREADS');
+    assert.ok(
+      proc.stderr.includes('invalid FORMULA_LLD_THREADS'),
+      `expected stderr to mention invalid FORMULA_LLD_THREADS, got:\n${proc.stderr}`,
+    );
+  },
+);
