@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::env;
 use std::io::{self, Write};
+use std::ops::ControlFlow;
 use std::path::PathBuf;
 
 use formula_xlsb::format::{format_a1, format_hex};
@@ -134,18 +135,27 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut decoded_ok = 0usize;
     let mut decoded_failed = 0usize;
     let mut failures_by_ptg: BTreeMap<String, usize> = BTreeMap::new();
+    let mut stop_all = false;
 
     for sheet_index in selected {
+        if stop_all {
+            break;
+        }
         let sheet_name = wb.sheet_metas()[sheet_index].name.clone();
 
-        wb.for_each_cell(sheet_index, |cell| {
+        wb.for_each_cell_control_flow(sheet_index, |cell| {
+            if stop_all {
+                return ControlFlow::Break(());
+            }
+
             let Some(Formula { rgce, extra, .. }) = cell.formula else {
-                return;
+                return ControlFlow::Continue(());
             };
 
             if let Some(max) = args.max {
                 if formulas_total >= max {
-                    return;
+                    stop_all = true;
+                    return ControlFlow::Break(());
                 }
             }
 
@@ -171,7 +181,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Err(err) => {
                     decoded_failed += 1;
-                    let ptg_hex = err.ptg().map(|b| format!("0x{b:02X}")).unwrap_or_else(|| "null".to_string());
+                    let ptg_hex = err
+                        .ptg()
+                        .map(|b| format!("0x{b:02X}"))
+                        .unwrap_or_else(|| "null".to_string());
                     *failures_by_ptg.entry(ptg_hex.clone()).or_insert(0) += 1;
                     line.ptg = err.ptg().map(|b| format!("0x{b:02X}"));
                     line.offset = Some(err.offset());
@@ -180,6 +193,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
             serde_json::to_writer(&mut stdout, &line).expect("serialize json");
             writeln!(&mut stdout).expect("write newline");
+
+            if let Some(max) = args.max {
+                if formulas_total >= max {
+                    stop_all = true;
+                    return ControlFlow::Break(());
+                }
+            }
+
+            ControlFlow::Continue(())
         })?;
     }
 
@@ -220,4 +242,3 @@ fn resolve_sheets(sheets: &[SheetMeta], selector: Option<&str>) -> Result<Vec<us
         format!("sheet not found: {selector}"),
     ))
 }
-

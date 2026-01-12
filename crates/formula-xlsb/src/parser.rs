@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::{self, BufReader, Read};
+use std::ops::ControlFlow;
 
 use crate::biff12_varint;
 use crate::shared_strings::SharedString;
@@ -1302,12 +1303,15 @@ pub(crate) fn parse_sheet<R: Read>(
         shared_strings,
         ctx,
         preserve_parsed_parts,
-        |cell| cells.push(cell),
+        |cell| {
+            cells.push(cell);
+            ControlFlow::Continue(())
+        },
     )?;
     Ok(SheetData { dimension, cells })
 }
 
-pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
+pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell) -> ControlFlow<(), ()>>(
     sheet_bin: &mut R,
     shared_strings: &[String],
     ctx: &WorkbookContext,
@@ -1322,7 +1326,7 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
     let mut current_row: Option<u32> = None;
     let mut shared_formulas: HashMap<(u32, u32), SharedFormulaDef> = HashMap::new();
 
-    while let Some(rec) = reader.read_record(&mut buf)? {
+    'records: while let Some(rec) = reader.read_record(&mut buf)? {
         match rec.id {
             biff12::DIMENSION => {
                 let mut rr = RecordReader::new(rec.data);
@@ -1817,29 +1821,32 @@ pub(crate) fn parse_sheet_stream<R: Read, F: FnMut(Cell)>(
                             };
                             let text = decoded.text;
                             let warnings = decoded.warnings;
-                            (
-                                CellValue::Error(v),
-                                Some(Formula {
+                        (
+                            CellValue::Error(v),
+                            Some(Formula {
                                     rgce,
                                     text,
                                     flags,
                                     extra,
                                     warnings,
                                 }),
-                                None,
-                            )
-                        }
-                        _ => unreachable!(),
-                    };
+                            None,
+                        )
+                    }
+                    _ => unreachable!(),
+                };
 
-                on_cell(Cell {
+                let cell = Cell {
                     row,
                     col,
                     style,
                     value,
                     formula,
                     preserved_string,
-                });
+                };
+                if let ControlFlow::Break(()) = on_cell(cell) {
+                    break 'records;
+                }
             }
             _ => {}
         }

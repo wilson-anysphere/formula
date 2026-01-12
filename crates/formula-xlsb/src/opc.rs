@@ -17,6 +17,7 @@ use quick_xml::Writer as XmlWriter;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Cursor, Read, Seek, Write};
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -384,9 +385,31 @@ impl XlsbWorkbook {
     }
 
     /// Stream cells from a worksheet without materializing the whole sheet.
+    ///
+    /// This always scans the whole sheet. If you want to stop early (e.g. after finding N
+    /// formulas), use [`XlsbWorkbook::for_each_cell_control_flow`].
     pub fn for_each_cell<F>(&self, sheet_index: usize, mut f: F) -> Result<(), ParseError>
     where
         F: FnMut(Cell),
+    {
+        self.for_each_cell_control_flow(sheet_index, |cell| {
+            f(cell);
+            ControlFlow::Continue(())
+        })
+    }
+
+    /// Stream cells from a worksheet, allowing early exit.
+    ///
+    /// The callback controls iteration via [`ControlFlow`]:
+    /// - `ControlFlow::Continue(())` to keep scanning
+    /// - `ControlFlow::Break(())` to stop scanning the sheet early
+    pub fn for_each_cell_control_flow<F>(
+        &self,
+        sheet_index: usize,
+        mut f: F,
+    ) -> Result<(), ParseError>
+    where
+        F: FnMut(Cell) -> ControlFlow<(), ()>,
     {
         let meta = self
             .sheets
