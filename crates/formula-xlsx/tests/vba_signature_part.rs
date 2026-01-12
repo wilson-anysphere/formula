@@ -2,7 +2,10 @@
 
 use std::io::{Cursor, Write};
 
-use formula_vba::{compute_vba_project_digest, DigestAlg, VbaSignatureBinding, VbaSignatureVerification};
+use formula_vba::{
+    compress_container, compute_vba_project_digest, DigestAlg, VbaSignatureBinding,
+    VbaSignatureVerification,
+};
 use formula_xlsx::XlsxPackage;
 
 const TEST_KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
@@ -74,6 +77,12 @@ fn make_pkcs7_signed_message(data: &[u8]) -> Vec<u8> {
     )
     .expect("pkcs7 sign");
     pkcs7.to_der().expect("pkcs7 DER")
+}
+
+fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
+    out.extend_from_slice(&id.to_le_bytes());
+    out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    out.extend_from_slice(data);
 }
 
 fn der_len(len: usize) -> Vec<u8> {
@@ -152,11 +161,12 @@ fn make_spc_indirect_data_content_sha256(digest: &[u8]) -> Vec<u8> {
 }
 
 fn build_minimal_vba_project_bin(module1: &[u8]) -> Vec<u8> {
-    // This fixture intentionally omits `VBA/dir` so MS-OVBA `ContentNormalizedData` cannot be
-    // computed and signature binding verification falls back to the deterministic
-    // `compute_vba_project_digest` transcript.
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    // `compute_vba_project_digest` expects a parsable/decompressible `VBA/dir` stream and module
+    // streams containing MS-OVBA compressed containers.
+    let module_container = compress_container(module1);
 
     {
         let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
@@ -167,8 +177,43 @@ fn build_minimal_vba_project_bin(module1: &[u8]) -> Vec<u8> {
     ole.create_storage("VBA").expect("VBA storage");
 
     {
+        // Minimal `dir` stream (decompressed form) with a single module.
+        let dir_decompressed = {
+            let mut out = Vec::new();
+            // PROJECTNAME
+            push_record(&mut out, 0x0004, b"VBAProject");
+            // MODULENAME
+            push_record(&mut out, 0x0019, b"Module1");
+            // MODULESTREAMNAME + reserved u16
+            let mut stream_name = Vec::new();
+            stream_name.extend_from_slice(b"Module1");
+            stream_name.extend_from_slice(&0u16.to_le_bytes());
+            push_record(&mut out, 0x001A, &stream_name);
+            // MODULETYPE (standard)
+            push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+            // MODULETEXTOFFSET
+            push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+            out
+        };
+
+        let dir_container = compress_container(&dir_decompressed);
+
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    {
+        // Used by Office and present in most real projects; not required by our binding logic
+        // directly, but makes the fixture a closer match to real files.
+        let mut s = ole
+            .create_stream("VBA/_VBA_PROJECT")
+            .expect("_VBA_PROJECT stream");
+        s.write_all(b"dummy").expect("write _VBA_PROJECT");
+    }
+
+    {
         let mut s = ole.create_stream("VBA/Module1").expect("module stream");
-        s.write_all(module1).expect("write module");
+        s.write_all(&module_container).expect("write module");
     }
 
     ole.into_inner().into_inner()
