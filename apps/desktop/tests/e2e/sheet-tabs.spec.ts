@@ -202,8 +202,10 @@ test.describe("sheet tabs", () => {
     await gotoDesktop(page);
 
     // Ensure A1 is active before switching sheets so the status bar reflects A1 values.
-    // Click inside A1 (avoid the shared-grid corner header/select-all region).
-    await page.click("#grid", { position: { x: 80, y: 40 } });
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.activateCell({ row: 0, col: 0 });
+    });
 
     // Lazily create Sheet2 by writing a value into it.
     await page.evaluate(() => {
@@ -257,8 +259,9 @@ test.describe("sheet tabs", () => {
     await expect(tab).toBeVisible();
 
     await tab.dblclick();
-    const input = page.getByTestId("input-box-field");
+    const input = tab.locator("input.sheet-tab__input");
     await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
 
     await input.fill("Budget");
     await input.press("Enter");
@@ -317,7 +320,7 @@ test.describe("sheet tabs", () => {
     await expect(tab.locator(".sheet-tab__name")).toHaveText("Budget");
 
     await tab.dblclick();
-    const input = page.getByTestId("input-box-field");
+    const input = tab.locator("input.sheet-tab__input");
     await expect(input).toBeVisible();
     await input.fill("Budget2");
     await input.press("Enter");
@@ -341,6 +344,45 @@ test.describe("sheet tabs", () => {
     expect(updatedFormula).toBe("=Budget2!A1+1");
   });
 
+  test("renaming a sheet rewrites formulas that reference its display name", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Create Sheet2 via the UI so both the DocumentController and the sheet metadata
+    // store agree on the sheet list.
+    await page.getByTestId("sheet-add").click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      doc.setCellValue("Sheet1", "A1", 123);
+      doc.setCellFormula("Sheet2", "A1", "=Sheet1!A1");
+    });
+
+    // Sanity check: formula should initially evaluate correctly.
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__formulaApp.getCellComputedValueForSheet("Sheet2", { row: 0, col: 0 })),
+    ).toBe(123);
+
+    // Rename Sheet1 via tab strip inline rename.
+    const sheet1Tab = page.getByTestId("sheet-tab-Sheet1");
+    await sheet1Tab.dblclick();
+    const input = sheet1Tab.locator("input.sheet-tab__input");
+    await expect(input).toBeVisible();
+    await input.fill("RenamedSheet1");
+    await input.press("Enter");
+
+    // Excel-style behavior: formulas should be rewritten from Sheet1 -> RenamedSheet1.
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__formulaApp.getDocument().getCell("Sheet2", "A1").formula),
+    ).toContain("RenamedSheet1");
+
+    // And the formula should still evaluate (it shouldn't degrade to #REF!).
+    await expect.poll(() =>
+      page.evaluate(() => (window as any).__formulaApp.getCellComputedValueForSheet("Sheet2", { row: 0, col: 0 })),
+    ).toBe(123);
+  });
+
   test("rename cancels on Escape (does not commit via blur)", async ({ page }) => {
     await gotoDesktop(page);
 
@@ -348,7 +390,7 @@ test.describe("sheet tabs", () => {
     await expect(tab).toBeVisible();
 
     await tab.dblclick();
-    const input = page.getByTestId("input-box-field");
+    const input = tab.locator("input.sheet-tab__input");
     await expect(input).toBeVisible();
 
     await input.fill("ShouldNotCommit");
@@ -359,7 +401,7 @@ test.describe("sheet tabs", () => {
     await expect(tab).not.toContainText("ShouldNotCommit");
   });
 
-  test("Ctrl+PgUp/PgDn does not switch sheets while a sheet rename dialog is focused", async ({ page }) => {
+  test("Ctrl+PgUp/PgDn does not switch sheets while a sheet tab rename input is focused", async ({ page }) => {
     await gotoDesktop(page);
 
     // Create a second sheet so sheet navigation would be observable.
@@ -373,13 +415,13 @@ test.describe("sheet tabs", () => {
     const initialSheetId = await page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId());
 
     await sheet1Tab.dblclick();
-    const input = page.getByTestId("input-box-field");
+    const input = sheet1Tab.locator("input.sheet-tab__input");
     await expect(input).toBeVisible();
     await expect(input).toBeFocused();
 
     // Dispatch directly to the input so the global shortcut handler must *not* steal it.
     await page.evaluate(() => {
-      const input = document.querySelector('[data-testid="input-box-field"]') as HTMLInputElement | null;
+      const input = document.querySelector("input.sheet-tab__input") as HTMLInputElement | null;
       if (!input) throw new Error("Missing rename input");
       const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
       input.dispatchEvent(evt);
@@ -464,7 +506,7 @@ test.describe("sheet tabs", () => {
     await expect(sheet1Tab).toHaveAttribute("data-active", "true");
 
     await sheet1Tab.dblclick();
-    const input = page.getByTestId("input-box-field");
+    const input = sheet1Tab.locator("input.sheet-tab__input");
     await expect(input).toBeVisible();
 
     // Trigger an invalid name (contains a forbidden character) and attempt to commit.
@@ -473,7 +515,8 @@ test.describe("sheet tabs", () => {
 
     await expect(page.locator('[data-testid="toast"]').filter({ hasText: /invalid character/i })).toBeVisible();
 
-    // Sheet name remains unchanged.
+    // Cancel the in-progress rename; the sheet name should remain unchanged.
+    await input.press("Escape");
     await expect(sheet1Tab.locator(".sheet-tab__name")).toHaveText("Sheet1");
 
     // Switching sheets remains possible after the invalid attempt.
@@ -494,7 +537,7 @@ test.describe("sheet tabs", () => {
     await expect(sheet1Tab).toHaveAttribute("data-active", "true");
 
     await sheet1Tab.dblclick();
-    const input = page.getByTestId("input-box-field");
+    const input = sheet1Tab.locator("input.sheet-tab__input");
     await expect(input).toBeVisible();
 
     // Trigger an invalid name and attempt to commit.
@@ -502,7 +545,8 @@ test.describe("sheet tabs", () => {
     await input.press("Enter");
     await expect(page.locator('[data-testid="toast"]').filter({ hasText: /invalid character/i })).toBeVisible();
 
-    // Attempt to open the overflow menu; invalid rename should not wedge the sheet UI.
+    // Cancel rename to exit edit mode, then open the overflow menu. Invalid rename should not wedge the sheet UI.
+    await input.press("Escape");
     await page.getByTestId("sheet-overflow").click();
     const quickPick = page.getByTestId("quick-pick");
     await expect(quickPick).toBeVisible();
@@ -525,11 +569,14 @@ test.describe("sheet tabs", () => {
     await expect(sheet1Tab).toHaveAttribute("data-active", "true");
 
     await sheet1Tab.dblclick();
-    const input = page.getByTestId("input-box-field");
+    const input = sheet1Tab.locator("input.sheet-tab__input");
     await expect(input).toBeVisible();
     await input.fill("A/B");
     await input.press("Enter");
     await expect(page.locator('[data-testid="toast"]').filter({ hasText: /invalid character/i })).toBeVisible();
+
+    // Cancel rename; sheet name remains unchanged.
+    await input.press("Escape");
     await expect(sheet1Tab.locator(".sheet-tab__name")).toHaveText("Sheet1");
 
     // Attempt to switch via the status-bar sheet switcher. Invalid rename should not wedge the sheet UI.
@@ -843,7 +890,7 @@ test.describe("sheet tabs", () => {
 
     const tab = page.getByTestId("sheet-tab-Sheet1");
     await tab.dblclick();
-    const input = page.getByTestId("input-box-field");
+    const input = tab.locator("input.sheet-tab__input");
     await expect(input).toBeVisible();
     await input.fill("RenamedSheet1");
     await input.press("Enter");
@@ -859,7 +906,7 @@ test.describe("sheet tabs", () => {
     // Rename Sheet1 -> RenamedSheet1 (display name changes, stable id stays Sheet1).
     const sheet1Tab = page.getByTestId("sheet-tab-Sheet1");
     await sheet1Tab.dblclick();
-    const renameInput = page.getByTestId("input-box-field");
+    const renameInput = sheet1Tab.locator("input.sheet-tab__input");
     await expect(renameInput).toBeVisible();
     await renameInput.fill("RenamedSheet1");
     await renameInput.press("Enter");

@@ -3,9 +3,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu.js";
 import { normalizeExcelColorToCss } from "../shared/colors.js";
 import { resolveCssVar } from "../theme/cssVars.js";
-import { showInputBox, showQuickPick } from "../extensions/ui.js";
+import { showQuickPick } from "../extensions/ui.js";
 import * as nativeDialogs from "../tauri/nativeDialogs";
-import { validateSheetName, type SheetMeta, type SheetVisibility, type TabColor, type WorkbookSheetStore } from "./workbookSheetStore";
+import type { SheetMeta, SheetVisibility, TabColor, WorkbookSheetStore } from "./workbookSheetStore";
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
 
 const SHEET_TAB_COLOR_PALETTE: Array<{ label: string; token: string; fallbackCss: string }> = [
@@ -53,12 +53,15 @@ type Props = {
   onActivateSheet: (sheetId: string) => void;
   onAddSheet: () => Promise<void> | void;
   /**
-   * Optional hook to persist sheet renames before updating the local sheet metadata store.
+   * Sheet rename handler.
    *
-   * Used by the desktop (Tauri) shell to route renames through the backend so the workbook
-   * stays consistent across reloads.
+   * The handler is expected to validate + persist the rename (backend + formula rewrite)
+   * and update the passed sheet store on success.
+   *
+   * It should throw on failure so the tab strip can keep the input focused and surface
+   * the error inline.
    */
-  onPersistSheetRename?: (sheetId: string, name: string) => Promise<void> | void;
+  onRenameSheet: (sheetId: string, newName: string) => Promise<void> | void;
   /**
    * Optional hook to persist sheet deletion before updating the local sheet metadata store.
    *
@@ -88,12 +91,6 @@ type Props = {
    */
   onSheetsReordered?: () => void;
   /**
-   * Called after a sheet rename is successfully committed.
-   *
-   * Used by `main.ts` to rewrite DocumentController formulas referencing the old sheet name.
-   */
-  onSheetRenamed?: (event: { sheetId: string; oldName: string; newName: string }) => void;
-  /**
    * Called after a sheet is successfully deleted from the metadata store.
    *
    * Used by `main.ts` to rewrite DocumentController formulas referencing the deleted sheet name.
@@ -117,14 +114,13 @@ export function SheetTabStrip({
   activeSheetId,
   onActivateSheet,
   onAddSheet,
-  onPersistSheetRename,
   onPersistSheetDelete,
   onPersistSheetVisibility,
   onPersistSheetTabColor,
   onSheetsReordered,
-  onSheetRenamed,
   onSheetDeleted,
   onSheetMoved,
+  onRenameSheet,
   onError,
 }: Props) {
   const [sheets, setSheets] = useState<SheetMeta[]>(() => store.listAll());
@@ -165,6 +161,7 @@ export function SheetTabStrip({
   const [editingSheetId, setEditingSheetId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [renameInFlight, setRenameInFlight] = useState(false);
   const renameInputRef = useRef<HTMLInputElement>(null!);
   const renameCommitRef = useRef<Promise<boolean> | null>(null);
   const [canScroll, setCanScroll] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
@@ -271,65 +268,24 @@ export function SheetTabStrip({
     if (renameCommitRef.current) return renameCommitRef.current;
 
     const promise = (async () => {
-      const oldName = store.getName(sheetId) ?? "";
-
-      let normalized: string;
+      setRenameInFlight(true);
       try {
-        normalized = validateSheetName(draftName, {
-          sheets: store.listAll(),
-          ignoreId: sheetId,
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setRenameError(message);
-        onError?.(message);
-        // Keep editing: refocus the input.
-        requestAnimationFrame(() => renameInputRef.current?.focus());
-        return false;
-      }
-
-      // Treat no-op renames as a simple exit from rename mode.
-      if (oldName && normalized === oldName) {
-        setRenameError(null);
-        setEditingSheetId(null);
-        return true;
-      }
-
-      try {
-        await onPersistSheetRename?.(sheetId, normalized);
+        await onRenameSheet(sheetId, draftName);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         setRenameError(message);
         onError?.(message);
         requestAnimationFrame(() => renameInputRef.current?.focus());
         return false;
+      } finally {
+        setRenameInFlight(false);
+        renameCommitRef.current = null;
       }
 
-      try {
-        store.rename(sheetId, normalized);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setRenameError(message);
-        onError?.(message);
-        // Keep editing: refocus the input.
-        requestAnimationFrame(() => renameInputRef.current?.focus());
-        return false;
-      }
-
-      const newName = store.getName(sheetId) ?? normalized;
       setRenameError(null);
       setEditingSheetId(null);
-      if (oldName && newName && oldName !== newName) {
-        try {
-          onSheetRenamed?.({ sheetId, oldName, newName });
-        } catch (err) {
-          onError?.(err instanceof Error ? err.message : String(err));
-        }
-      }
       return true;
-    })().finally(() => {
-      renameCommitRef.current = null;
-    });
+    })();
 
     renameCommitRef.current = promise;
     return promise;
@@ -373,55 +329,15 @@ export function SheetTabStrip({
   };
 
   const beginRenameWithGuard = async (sheet: SheetMeta) => {
+    if (renameInFlight) return;
     if (editingSheetId && editingSheetId !== sheet.id) {
       const ok = await commitRename(editingSheetId);
       if (!ok) return;
     }
 
-    // Excel-style rename is triggered by double click / context menu.
-    // Desktop UX uses the lightweight `showInputBox` dialog.
-    const currentName = store.getName(sheet.id) ?? sheet.name;
-    const nextRaw = await showInputBox({
-      prompt: "Rename sheet",
-      value: currentName,
-      placeHolder: "Sheet name",
-    });
-    if (nextRaw === null) return;
-
-    const oldName = store.getName(sheet.id) ?? sheet.name;
-    try {
-      store.rename(sheet.id, nextRaw);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      onError?.(message);
-      return;
-    }
-
-    const newName = store.getName(sheet.id) ?? "";
-    // Treat no-op renames as a simple exit.
-    if (oldName && newName && oldName === newName) return;
-
-    try {
-      await onPersistSheetRename?.(sheet.id, newName);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      // Best-effort rollback if the desktop host rejects the rename.
-      try {
-        store.rename(sheet.id, oldName);
-      } catch {
-        // ignore
-      }
-      onError?.(message);
-      return;
-    }
-
-    if (oldName && newName && oldName !== newName) {
-      try {
-        onSheetRenamed?.({ sheetId: sheet.id, oldName, newName });
-      } catch (err) {
-        onError?.(err instanceof Error ? err.message : String(err));
-      }
-    }
+    setEditingSheetId(sheet.id);
+    setDraftName(sheet.name);
+    setRenameError(null);
   };
 
   const openSheetPicker = useCallback(async () => {
@@ -986,10 +902,10 @@ export function SheetTabStrip({
                 openSheetTabContextMenu(sheet.id, anchor);
               })();
             }}
-            onCommitRename={() => {
-              void commitRename(sheet.id);
-            }}
+            renameInFlight={renameInFlight && editingSheetId === sheet.id}
+            onCommitRename={() => void commitRename(sheet.id)}
             onCancelRename={() => {
+              if (renameInFlight) return;
               setEditingSheetId(null);
               setRenameError(null);
             }}
@@ -1070,6 +986,7 @@ function SheetTab(props: {
   dropPosition: "before" | "after" | null;
   draftName: string;
   renameError: string | null;
+  renameInFlight: boolean;
   renameInputRef: React.RefObject<HTMLInputElement>;
   tabRef?: React.Ref<HTMLButtonElement>;
   onActivate: () => void;
@@ -1083,7 +1000,7 @@ function SheetTab(props: {
   onDragOverTab: (e: React.DragEvent<HTMLButtonElement>) => void;
   onDropOnTab: (e: React.DragEvent<HTMLButtonElement>) => void;
 }) {
-  const { sheet, active, editing, draftName, renameError } = props;
+  const { sheet, active, editing, draftName, renameError, renameInFlight } = props;
   const cancelBlurCommitRef = useRef(false);
   const tabColorCss = !editing ? (normalizeExcelColorToCss(sheet.tabColor) ?? null) : null;
   const ariaLabel = sheet.visibility === "visible" ? sheet.name : `${sheet.name} (${sheet.visibility})`;
@@ -1140,12 +1057,15 @@ function SheetTab(props: {
           className="sheet-tab__input"
           value={draftName}
           autoFocus
+          readOnly={renameInFlight}
+          aria-busy={renameInFlight ? true : undefined}
           aria-invalid={renameError ? true : undefined}
           title={renameError ?? undefined}
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => props.onDraftNameChange(e.target.value)}
           onFocus={(e) => e.currentTarget.select()}
           onBlur={() => {
+            if (renameInFlight) return;
             if (cancelBlurCommitRef.current) {
               cancelBlurCommitRef.current = false;
               return;
@@ -1154,6 +1074,7 @@ function SheetTab(props: {
           }}
           onKeyDown={(e) => {
             e.stopPropagation();
+            if (renameInFlight) return;
             if (e.key === "Enter") {
               e.preventDefault();
               props.onCommitRename();

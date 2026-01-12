@@ -129,7 +129,6 @@ import {
   type CollabSheetsKeyRef,
 } from "./sheets/collabWorkbookSheetStore";
 import { startSheetStoreDocumentSync } from "./sheets/sheetStoreDocumentSync";
-import { rewriteSheetNamesInFormula } from "./workbook/formulaRewrite";
 import {
   applyAllBorders,
   applyNumberFormatPreset,
@@ -2021,6 +2020,10 @@ window.addEventListener("unload", () => {
   disposeCommandPaletteRecentsTracking();
 });
 
+// `updateContextKeys` is initialized once the extensions/context-key wiring is ready.
+// Sheet UI helpers (like sheet rename) can call it safely; it is a no-op until wired.
+let updateContextKeys: (selection?: SelectionState | null) => void = () => {};
+
 // Expose for Playwright e2e so tests can execute commands by id without going
 // through UI affordances.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2311,6 +2314,74 @@ async function handleAddSheet(): Promise<void> {
   }
 }
 
+async function renameSheetById(
+  sheetId: string,
+  newName: string,
+  opts: {
+    /**
+     * Source label used for undo/telemetry. Defaults to "ui".
+     */
+    source?: string;
+  } = {},
+): Promise<{ id: string; name: string }> {
+  const id = String(sheetId ?? "").trim();
+  if (!id) throw new Error("Sheet id cannot be empty");
+
+  // In case a sheet was created lazily in the DocumentController (or via an extension)
+  // and the doc->store sync hasn't run yet, reconcile once before rejecting the id.
+  let sheet = workbookSheetStore.getById(id);
+  if (!sheet) {
+    reconcileSheetStoreWithDocument(listDocumentSheetIds());
+    sheet = workbookSheetStore.getById(id);
+  }
+  if (!sheet) throw new Error("Sheet not found");
+
+  const oldDisplayName = sheet.name || id;
+  const normalizedNewName = validateSheetName(String(newName ?? ""), {
+    sheets: workbookSheetStore.listAll(),
+    ignoreId: id,
+  });
+
+  // No-op rename; preserve the same return shape as other sheet APIs.
+  if (oldDisplayName === normalizedNewName) {
+    return { id, name: oldDisplayName };
+  }
+
+  const collabSession = app.getCollabSession?.() ?? null;
+  const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+  if (!collabSession && typeof baseInvoke === "function") {
+    // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
+    const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
+
+    // Allow any microtask-batched workbook edits to enqueue before we rename.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+
+    // Persist the rename first; only update UI state once the backend succeeds so we
+    // don't need a rollback path on failure.
+    await invoke("rename_sheet", { sheet_id: id, name: normalizedNewName });
+  }
+
+  // Update UI metadata first so follow-up operations observe the new name.
+  workbookSheetStore.rename(id, normalizedNewName);
+
+  // Rewrite existing formulas that reference the old sheet name (Excel-style behavior).
+  const doc = app.getDocument() as any;
+  try {
+    rewriteDocumentFormulasForSheetRename(doc, oldDisplayName, normalizedNewName);
+  } catch (err) {
+    showToast(`Failed to update formulas after rename: ${String((err as any)?.message ?? err)}`, "error");
+  }
+
+  syncSheetUi();
+  try {
+    updateContextKeys();
+  } catch {
+    // Best-effort; context keys should never block a rename.
+  }
+
+  return { id, name: workbookSheetStore.getName(id) ?? normalizedNewName };
+}
+
 function renderSheetTabs(): void {
   if (!sheetTabsReactRoot) {
     sheetTabsReactRoot = createRoot(sheetTabsRootEl);
@@ -2325,22 +2396,8 @@ function renderSheetTabs(): void {
         restoreFocusAfterSheetNavigation();
       },
       onAddSheet: handleAddSheet,
-      onPersistSheetRename: async (sheetId: string, name: string) => {
-        // In collab mode, sheet metadata changes are persisted to the shared Yjs document.
-        // Skip the local workbook backend.
-        const session = app.getCollabSession?.() ?? null;
-        if (session) return;
-
-        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-        if (typeof baseInvoke !== "function") return;
-
-        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
-
-        // Allow any microtask-batched workbook edits to enqueue before we request a rename.
-        await new Promise<void>((resolve) => queueMicrotask(resolve));
-
-        await invoke("rename_sheet", { sheet_id: sheetId, name });
+      onRenameSheet: async (sheetId: string, newName: string) => {
+        await renameSheetById(sheetId, newName, { source: "ui" });
       },
       onPersistSheetDelete: async (sheetId: string) => {
         // In collab mode, sheet metadata changes are persisted to the shared Yjs document.
@@ -2394,16 +2451,6 @@ function renderSheetTabs(): void {
         await invoke("set_sheet_tab_color", { sheet_id: sheetId, tab_color: tabColor ?? null });
       },
       onSheetsReordered: () => restoreFocusAfterSheetNavigation(),
-      onSheetRenamed: ({ oldName, newName }) => {
-        try {
-          rewriteDocumentFormulasForSheetRename(app.getDocument(), oldName, newName);
-        } catch (err) {
-          showToast(`Failed to update formulas after rename: ${String((err as any)?.message ?? err)}`, "error");
-        }
-        // Renaming sheets affects workbook metadata but does not produce cell deltas, so
-        // mark the document dirty explicitly for unsaved-changes prompts.
-        app.getDocument().markDirty();
-      },
       onSheetDeleted: ({ sheetId, name }) => {
         const doc = app.getDocument() as any;
         try {
@@ -3650,8 +3697,9 @@ if (
 
   let lastSelection: SelectionState | null = null;
 
-  const updateContextKeys = (selection: SelectionState | null = lastSelection) => {
-    if (!selection) return;
+  const updateContextKeysInternal = (selection?: SelectionState | null) => {
+    const resolvedSelection = selection ?? lastSelection;
+    if (!resolvedSelection) return;
     const sheetId = app.getCurrentSheetId();
     // Avoid resurrecting deleted sheets while responding to DocumentController change events.
     //
@@ -3666,11 +3714,11 @@ if (
       // Best-effort: if metadata access fails, continue and let downstream logic handle it.
     }
     const sheetName = workbookSheetStore.getName(sheetId) ?? sheetId;
-    const active = selection.active;
+    const active = resolvedSelection.active;
     const cell = app.getDocument().getCell(sheetId, { row: active.row, col: active.col }) as any;
     const value = normalizeExtensionCellValue(cell?.value ?? null);
     const formula = typeof cell?.formula === "string" ? cell.formula : null;
-    const selectionKeys = deriveSelectionContextKeys(selection);
+    const selectionKeys = deriveSelectionContextKeys(resolvedSelection);
 
     contextKeys.batch({
       sheetName,
@@ -3684,6 +3732,9 @@ if (
       isCorner: currentGridArea === "corner",
     });
   };
+
+  // Expose `updateContextKeys` to sheet helpers outside this dock/layout block.
+  updateContextKeys = updateContextKeysInternal;
 
   app.subscribeSelection((selection) => {
     lastSelection = selection;
@@ -4096,55 +4147,7 @@ if (
       if (!sheetId) {
         throw new Error(`Unknown sheet: ${oldName}`);
       }
-
-      const oldDisplayName = workbookSheetStore.getName(sheetId) ?? sheetId;
-      const normalizedNewName = validateSheetName(String(_newName ?? ""), {
-        sheets: workbookSheetStore.listAll(),
-        ignoreId: sheetId,
-      });
-
-      // No-op rename; preserve the same return shape as other sheet APIs.
-      if (oldDisplayName === normalizedNewName) {
-        return { id: sheetId, name: oldDisplayName };
-      }
-
-      const collabSession = app.getCollabSession?.() ?? null;
-      if (!collabSession) {
-        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-        if (typeof baseInvoke === "function") {
-          // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-          const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
-
-          // Allow any microtask-batched workbook edits to enqueue before we rename.
-          await new Promise<void>((resolve) => queueMicrotask(resolve));
-
-          await invoke("rename_sheet", { sheet_id: sheetId, name: normalizedNewName });
-        }
-      }
-
-      // Update UI metadata first so follow-up operations (eg: `getActiveSheet`) observe the new name.
-      workbookSheetStore.rename(sheetId, normalizedNewName);
-      syncSheetUi();
-      updateContextKeys();
-
-      // Rewrite existing formulas that reference the old sheet name (Excel-style behavior).
-      const doc = app.getDocument();
-      const rewrittenInputs: Array<{ sheetId: string; row: number; col: number; value: null; formula: string }> = [];
-      for (const id of doc.getSheetIds()) {
-        doc.forEachCellInSheet(id, ({ row, col, cell }: any) => {
-          const formula = typeof cell?.formula === "string" ? cell.formula : null;
-          if (!formula) return;
-          const rewritten = rewriteSheetNamesInFormula(formula, oldDisplayName, normalizedNewName);
-          if (rewritten === formula) return;
-          rewrittenInputs.push({ sheetId: id, row, col, value: null, formula: rewritten });
-        });
-      }
-
-      if (rewrittenInputs.length > 0) {
-        doc.setCellInputs(rewrittenInputs, { label: "Rename sheet", source: "extension" });
-      }
-
-      return { id: sheetId, name: workbookSheetStore.getName(sheetId) ?? normalizedNewName };
+      return await renameSheetById(sheetId, String(_newName ?? ""), { source: "extension" });
     },
     async deleteSheet(name: string) {
       const sheetId = findSheetIdByName(name);
