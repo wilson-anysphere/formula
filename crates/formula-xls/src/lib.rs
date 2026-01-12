@@ -657,7 +657,12 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                         biff_version,
                         codepage,
                     ) {
-                        Ok(notes) => {
+                        Ok((notes, note_warnings)) => {
+                            warnings.extend(note_warnings.into_iter().map(|w| {
+                                ImportWarning::new(format!(
+                                    "failed to fully import `.xls` note comments for sheet `{sheet_name}` (index {sheet_idx}): {w}"
+                                ))
+                            }));
                             for note in notes {
                                 let comment = Comment {
                                     kind: CommentKind::Note,
@@ -671,8 +676,8 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 
                                 if let Err(err) = sheet.add_comment(note.cell, comment) {
                                     warnings.push(ImportWarning::new(format!(
-                                        "failed to import `.xls` note comment for sheet `{sheet_name}` at {}: {err}",
-                                        note.cell.to_a1()
+                                        "failed to import `.xls` note comment for sheet `{sheet_name}` (index {sheet_idx}) at {}: {err}",
+                                        note.cell.to_a1(),
                                     )));
                                 }
                             }

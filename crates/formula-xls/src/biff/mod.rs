@@ -16,6 +16,8 @@ pub(crate) mod records;
 pub(crate) mod sheet;
 pub(crate) mod strings;
 
+#[allow(unused_imports)]
+pub(crate) use comments::{parse_biff_sheet_notes, BiffNote};
 pub(crate) use globals::{
     parse_biff_bound_sheets, parse_biff_codepage, parse_biff_workbook_globals, BoundSheetInfo,
 };
