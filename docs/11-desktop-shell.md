@@ -160,7 +160,8 @@ The repo’s custom `asset:` handler adds `Cross-Origin-Resource-Policy: cross-o
 
 Notable keys:
 
-- `bundle.fileAssociations` registers `.xlsx`, `.xls`, `.xlsm`, `.xlsb`, `.csv`, `.parquet` with the OS.
+- `bundle.fileAssociations` registers spreadsheet file types with the OS:
+  `.xlsx`, `.xls`, `.xlsm`, `.xltx`, `.xltm`, `.xlam`, `.xlsb`, `.csv`, `.parquet`.
   - `.parquet` open support is behind the Cargo `parquet` feature (enabled by the `desktop` feature; see `apps/desktop/src-tauri/Cargo.toml` and `apps/desktop/src-tauri/src/open_file.rs`).
 - `bundle.protocols` registers the custom URL scheme `formula://` (used for deep links like OAuth redirects; see `main.rs` → `oauth-redirect` event).
 - `bundle.linux.deb.depends` documents runtime deps for Linux packaging (e.g. `libwebkit2gtk-4.1-0`, `libgtk-3-0t64 | libgtk-3-0`,
@@ -333,6 +334,8 @@ In addition to drag & drop, the desktop shell supports opening workbooks via:
 Implementation notes:
 
 - `apps/desktop/src-tauri/src/open_file.rs` extracts supported spreadsheet paths from argv-style inputs (and also supports `file://...` URLs used by macOS open-document events).
+  - Extension-based support is case-insensitive: `xlsx`, `xls`, `xlsm`, `xltx`, `xltm`, `xlam`, `xlsb`, `csv` (+ `parquet` when compiled with the `parquet` feature).
+  - If the extension is missing or unsupported, it falls back to a lightweight content sniff (`file_io::looks_like_workbook`) so “downloaded/renamed” workbooks can still be opened from OS open-file events.
 - `main.rs` uses a small in-memory queue (`OpenFileState`) so open-file requests received *before* the frontend installs its listeners aren’t lost.
   - Backend emits: `open-file` (payload: `string[]` paths)
   - Frontend emits: `open-file-ready` once its `listen("open-file", ...)` handler is installed, which flushes any queued paths.
@@ -350,7 +353,7 @@ Implementation notes:
 - Similar to open-file, `main.rs` maintains a small in-memory queue (`OauthRedirectState`) so redirects received *before* the frontend installs its listener aren’t lost.
   - Backend emits: `oauth-redirect` (payload: `string` URL)
   - Frontend emits: `oauth-redirect-ready` once its `listen("oauth-redirect", ...)` handler is installed, which flushes any queued URLs.
-- The frontend resolves the pending OAuth broker promise without requiring manual copy/paste.
+- The frontend handles redirects in `apps/desktop/src/main.ts` (via the OAuth broker) without requiring manual copy/paste.
 
 #### Tray + app menu + global shortcuts
 
@@ -381,8 +384,7 @@ The desktop UI intentionally avoids a hard dependency on `@tauri-apps/api` and i
 
 Desktop-specific listeners are set up near the bottom of `apps/desktop/src/main.ts`:
 
-- `oauth-redirect` → resolve pending OAuth broker redirect (and buffers early redirects to avoid a rare PKCE race where the redirect arrives before `waitForRedirect` is registered)
-- emits `oauth-redirect-ready` once the handler is installed (flushes queued redirects on the Rust side)
+- `oauth-redirect` → route deep-link redirects into the OAuth broker (buffers early redirects to avoid a rare PKCE race where the redirect arrives before `waitForRedirect` is registered); emits `oauth-redirect-ready` once the handler is installed (flushes queued redirects on the Rust side)
 - `close-prep` → flush pending workbook sync + call `set_macro_ui_context` → emit `close-prep-done`
 - `close-requested` → run `handleCloseRequest(...)` (unsaved changes prompt + hide vs quit) → emit `close-handled`
 - `open-file` → queue workbook opens; then emits `open-file-ready` once the handler is installed (flushes any queued open-file requests on the Rust side)
@@ -523,10 +525,12 @@ End-to-end flow (grid copy/paste):
 Desktop vs web behavior:
 
 - **Desktop (Tauri)**: prefers custom Rust commands `clipboard_read` / `clipboard_write` for
-  **rich, multi-format** clipboard access via `globalThis.__TAURI__.core.invoke(...)`. If those
-  commands are unavailable or return an error (older builds / unsupported platforms), it
-  falls back to the Web Clipboard API (`navigator.clipboard`) and finally to the legacy
-  `globalThis.__TAURI__.clipboard.readText` / `writeText` helpers (plain text).
+  **rich, multi-format** clipboard access via `globalThis.__TAURI__.core.invoke(...)`.
+  - If `clipboard_read` is missing (older builds), the provider also tries the legacy command name
+    `read_clipboard` as a best-effort merge (never clobbering WebView values).
+  - If native commands are unavailable/unimplemented, it falls back to the Web Clipboard API
+    (`navigator.clipboard`) and finally to `globalThis.__TAURI__.clipboard.readText` / `writeText`
+    (plain text).
 - **Web**: uses the browser Clipboard API only (permission + user-gesture gated).
 
 Supported MIME types (read + write, best-effort):
@@ -641,7 +645,7 @@ High-level contents (see the file for the exhaustive list):
   - startup timing instrumentation: `startup:*` events
   - updater: `update-*` events
 - `event:allow-emit` includes acknowledgements and check-mode signals:
-  - `close-prep-done`, `close-handled`, `open-file-ready`
+  - `close-prep-done`, `close-handled`, `open-file-ready`, `oauth-redirect-ready`
   - `updater-ui-ready`
   - `coi-check-result` (used by `pnpm -C apps/desktop check:coi`)
 - Updater UI requires `updater:allow-check` and `updater:allow-download-and-install` to call the updater plugin from JS.
