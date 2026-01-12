@@ -212,14 +212,24 @@ fn parse_cell_images_part(
         });
     }
 
-    // Some Excel-generated `cellimages.xml` payloads use a lightweight schema where the
+    // Some Excel-generated `cellimages.xml` payloads use a lightweight schema where the image
     // relationship ID is stored directly on a `<cellImage r:id="…">` element (rather than
-    // embedding a full DrawingML `<pic>` subtree).
+    // embedding a full DrawingML `<pic>` subtree). Some variants also wrap a raw `<a:blip>` under
+    // `<cellImage>` without including `<pic>`.
     for cell_image in doc
         .root_element()
         .descendants()
         .filter(|n| n.is_element() && n.tag_name().name() == "cellImage")
     {
+        // If this `<cellImage>` includes a full `<pic>` payload, the `<pic>` loop above will pick
+        // it up (and preserve the actual `<pic>` XML). Avoid double-counting in that case.
+        if cell_image
+            .descendants()
+            .any(|n| n.is_element() && n.tag_name().name() == "pic")
+        {
+            continue;
+        }
+
         let embed_rel_id = get_cell_image_rel_id(&cell_image).or_else(|| {
             // Some minimal schemas store the relationship on a nested `<a:blip r:embed="...">`.
             cell_image
@@ -230,11 +240,6 @@ fn parse_cell_images_part(
         let Some(embed_rel_id) = embed_rel_id else {
             continue;
         };
-
-        // Avoid duplicating images already discovered via `<pic>`.
-        if images.iter().any(|img| img.embed_rel_id == embed_rel_id) {
-            continue;
-        }
 
         let Some(rel) = rels_by_id.get(&embed_rel_id) else {
             // Best-effort: skip broken references instead of failing the whole workbook load.
