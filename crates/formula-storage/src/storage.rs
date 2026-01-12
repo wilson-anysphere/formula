@@ -1227,7 +1227,7 @@ impl Storage {
     /// This is intended for application-specific per-sheet state that should be persisted alongside
     /// core workbook data (e.g. UI formatting layers).
     pub fn set_sheet_metadata(&self, sheet_id: Uuid, metadata: Option<JsonValue>) -> Result<()> {
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
         let updated = tx.execute(
             "UPDATE sheets SET metadata = ?1 WHERE id = ?2",
@@ -1249,7 +1249,7 @@ impl Storage {
     where
         F: FnOnce(Option<JsonValue>) -> Result<Option<JsonValue>>,
     {
-        let mut conn = self.conn.lock().expect("storage mutex poisoned");
+        let mut conn = lock_unpoisoned(&self.conn);
         let tx = conn.transaction()?;
 
         let raw_row: Option<Option<String>> = tx
