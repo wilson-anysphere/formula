@@ -770,8 +770,10 @@ export class SpreadsheetApp {
   private selectionSummaryCache:
     | {
         sheetId: string;
+        sheetContentVersion: number;
         workbookContentVersion: number;
         computedValuesVersion: number;
+        selectionHasFormula: boolean;
         rangesKey: number[];
         summary: SpreadsheetSelectionSummary;
       }
@@ -3283,41 +3285,50 @@ export class SpreadsheetApp {
    */
   getSelectionSummary(): SpreadsheetSelectionSummary {
     const sheetId = this.sheetId;
+    const sheetContentVersion = this.document.getSheetContentVersion(sheetId);
     const workbookContentVersion = this.document.contentVersion;
     // `getCellComputedValue` only consults the WASM engine cache when a single sheet is present.
-    // When multiple sheets exist we evaluate formulas in-process, so engine computed-value updates
-    // should not invalidate the selection summary cache.
+    // When multiple sheets exist we evaluate formulas in-process.
     const sheetCount = (this.document as any)?.model?.sheets?.size;
-    const useEngineCache = (typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length) <= 1;
-    const computedValuesVersionKey = useEngineCache ? this.computedValuesVersion : 0;
+    const actualSheetCount = typeof sheetCount === "number" ? sheetCount : this.document.getSheetIds().length;
+    const isMultiSheet = actualSheetCount > 1;
+    const useEngineCache = actualSheetCount <= 1;
 
     const cached = this.selectionSummaryCache;
-    if (
-      cached &&
-      cached.sheetId === sheetId &&
-      cached.workbookContentVersion === workbookContentVersion &&
-      cached.computedValuesVersion === computedValuesVersionKey &&
-      cached.rangesKey.length === this.selection.ranges.length * 4
-    ) {
-      let sameRanges = true;
-      for (let rangeIdx = 0; rangeIdx < this.selection.ranges.length; rangeIdx += 1) {
-        const r = this.selection.ranges[rangeIdx]!;
-        const startRow = Math.min(r.startRow, r.endRow);
-        const endRow = Math.max(r.startRow, r.endRow);
-        const startCol = Math.min(r.startCol, r.endCol);
-        const endCol = Math.max(r.startCol, r.endCol);
-        const keyIdx = rangeIdx * 4;
-        if (
-          cached.rangesKey[keyIdx] !== startRow ||
-          cached.rangesKey[keyIdx + 1] !== endRow ||
-          cached.rangesKey[keyIdx + 2] !== startCol ||
-          cached.rangesKey[keyIdx + 3] !== endCol
-        ) {
-          sameRanges = false;
-          break;
+    if (cached && cached.sheetId === sheetId && cached.rangesKey.length === this.selection.ranges.length * 4) {
+      // If the cached selection includes formulas in a multi-sheet workbook, those formulas can
+      // reference *other* sheets. In that case we must key the cache on the workbook-level content
+      // version. Otherwise, we can key it on the active sheet's content version.
+      const versionOk =
+        cached.selectionHasFormula && isMultiSheet
+          ? cached.workbookContentVersion === workbookContentVersion
+          : cached.sheetContentVersion === sheetContentVersion;
+      if (versionOk) {
+        // Only key on engine computed-value churn when the engine cache is used *and* the selection
+        // includes formulas (value-only selections do not depend on computed values).
+        const computedValuesVersionKey = useEngineCache && cached.selectionHasFormula ? this.computedValuesVersion : 0;
+        if (cached.computedValuesVersion === computedValuesVersionKey) {
+          let sameRanges = true;
+          for (let rangeIdx = 0; rangeIdx < this.selection.ranges.length; rangeIdx += 1) {
+            const r = this.selection.ranges[rangeIdx]!;
+            const startRow = Math.min(r.startRow, r.endRow);
+            const endRow = Math.max(r.startRow, r.endRow);
+            const startCol = Math.min(r.startCol, r.endCol);
+            const endCol = Math.max(r.startCol, r.endCol);
+            const keyIdx = rangeIdx * 4;
+            if (
+              cached.rangesKey[keyIdx] !== startRow ||
+              cached.rangesKey[keyIdx + 1] !== endRow ||
+              cached.rangesKey[keyIdx + 2] !== startCol ||
+              cached.rangesKey[keyIdx + 3] !== endCol
+            ) {
+              sameRanges = false;
+              break;
+            }
+          }
+          if (sameRanges) return cached.summary;
         }
       }
-      if (sameRanges) return cached.summary;
     }
 
     const SELECTION_AREA_SCAN_THRESHOLD = 10_000;
@@ -3364,8 +3375,10 @@ export class SpreadsheetApp {
       };
       this.selectionSummaryCache = {
         sheetId,
+        sheetContentVersion,
         workbookContentVersion,
-        computedValuesVersion: computedValuesVersionKey,
+        computedValuesVersion: 0,
+        selectionHasFormula: false,
         rangesKey,
         summary,
       };
@@ -3382,8 +3395,10 @@ export class SpreadsheetApp {
       };
       this.selectionSummaryCache = {
         sheetId,
+        sheetContentVersion,
         workbookContentVersion,
-        computedValuesVersion: computedValuesVersionKey,
+        computedValuesVersion: 0,
+        selectionHasFormula: false,
         rangesKey,
         summary,
       };
@@ -3403,6 +3418,7 @@ export class SpreadsheetApp {
     let countNonEmpty = 0;
     let numericCount = 0;
     let numericSum = 0;
+    let selectionHasFormula = false;
 
     const inSelection =
       ranges.length === 1
@@ -3450,6 +3466,7 @@ export class SpreadsheetApp {
 
             // Sum/average operate on numeric values only (computed values for formulas).
             if (cell.formula != null) {
+              selectionHasFormula = true;
               const computed = this.getCellComputedValue(coordScratch);
               if (typeof computed === "number" && Number.isFinite(computed)) {
                 numericCount += 1;
@@ -3475,6 +3492,7 @@ export class SpreadsheetApp {
 
         // Sum/average operate on numeric values only (computed values for formulas).
         if (cell.formula != null) {
+          selectionHasFormula = true;
           coordScratch.row = row;
           coordScratch.col = col;
           const computed = this.getCellComputedValue(coordScratch);
@@ -3503,10 +3521,13 @@ export class SpreadsheetApp {
       countNonEmpty,
     };
 
+    const computedValuesVersionKey = useEngineCache && selectionHasFormula ? this.computedValuesVersion : 0;
     this.selectionSummaryCache = {
       sheetId,
+      sheetContentVersion,
       workbookContentVersion,
       computedValuesVersion: computedValuesVersionKey,
+      selectionHasFormula,
       rangesKey,
       summary,
     };
