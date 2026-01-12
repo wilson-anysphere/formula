@@ -3923,4 +3923,29 @@ mod tests {
         );
         assert_parseable(&decoded.text);
     }
+
+    #[test]
+    fn quotes_sheet_names_that_look_like_booleans() {
+        // Sheet name "TRUE" must be quoted or it will lex as a boolean literal instead of a sheet
+        // identifier.
+        let rgce = [0x3Au8, 0, 0, 0, 0, 0, 0];
+
+        let sheet_names = vec!["TRUE".to_string()];
+        let externsheet = vec![ExternSheetEntry {
+            supbook: 0,
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'TRUE'!$A$1");
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
 }
