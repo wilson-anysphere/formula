@@ -5294,8 +5294,7 @@ fn rewrite_defined_name_constants_for_bytecode(
             Value::Text(s) => Some(crate::Expr::String(s.clone())),
             Value::Bool(b) => Some(crate::Expr::Boolean(*b)),
             Value::Blank => Some(crate::Expr::Missing),
-            // Bytecode lowering currently does not support error literals (see `bytecode::lower`).
-            Value::Error(_)
+            Value::Error(e) => Some(crate::Expr::Error(e.as_code().to_string())),
             | Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)

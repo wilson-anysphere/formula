@@ -1579,6 +1579,32 @@ fn bytecode_backend_inlines_constant_defined_names() {
 }
 
 #[test]
+fn bytecode_backend_inlines_constant_defined_name_error_values() {
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "MyNa",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Error(ErrorKind::NA)),
+        )
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=IFNA(MyNa, 7)").unwrap();
+
+    // Ensure the constant error value was inlined and compiled to bytecode.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "A1");
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "A1");
+
+    assert_eq!(via_bytecode, Value::Number(7.0));
+    assert_eq!(via_bytecode, via_ast);
+}
+
+#[test]
 fn bytecode_backend_inlines_reference_defined_names_when_static_refs() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 0.1).unwrap();
