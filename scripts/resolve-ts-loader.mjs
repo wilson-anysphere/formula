@@ -27,6 +27,7 @@ const transpileInFlight = new Map();
  *
  * This loader:
  * - Resolves missing relative/absolute `.js` specifiers to `.ts` / `.tsx`
+ * - Resolves missing relative/absolute `.jsx` specifiers to `.tsx` / `.ts`
  * - Resolves extensionless relative/absolute specifiers to `.ts` / `.tsx` / `.js`
  * - Resolves directory imports like `./foo` -> `./foo/index.ts` (bundler-style resolution)
  * - Transpiles `.ts` / `.tsx` sources on the fly (strip-only mode is insufficient for

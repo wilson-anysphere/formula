@@ -17,6 +17,10 @@
  * This loader keeps runtime semantics identical when a real `.js`/`.jsx` file exists, but
  * falls back to the matching `.ts` source when it doesn't.
  *
+ * Some TS sources also use `.jsx` specifiers (bundler-style) that should resolve to
+ * `.ts` sources. We support that too (but do **not** resolve to `.tsx`, since Node's
+ * built-in TypeScript execution cannot load `.tsx`).
+ *
  * Additionally, some TS sources in this repo still use extensionless relative
  * imports (e.g. `import "./foo"`). Node ESM does not support extensionless path
  * resolution, so when the specifier is missing (and the file exists as `foo.ts`)
