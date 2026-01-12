@@ -325,7 +325,7 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
       "csp": "..." // see `apps/desktop/src-tauri/tauri.conf.json` for the full, current CSP
     },
     "windows": [
-      { "label": "main", "title": "Formula", "width": 1280, "height": 800, "dragDropEnabled": true }
+      { "label": "main", "title": "Formula", "width": 1280, "height": 800, "dragDropEnabled": true, "capabilities": ["main"] }
     ]
   },
   "bundle": {
@@ -822,13 +822,16 @@ Source of truth in this repo:
 
 - `apps/desktop/src-tauri/capabilities/main.json`
 
-Capabilities are scoped per window via the capability file’s `"windows"` patterns. In this repo the main window is
-labeled `main` (`app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`), and
-`apps/desktop/src-tauri/capabilities/main.json` includes `"windows": ["main"]`.
+Capabilities are scoped per window in **two** places (explicit scoping / defense-in-depth):
 
-> Note: our current Tauri toolchain does **not** support `app.windows[].capabilities` in `tauri.conf.json` (it causes a
-> build error). We rely on the capability file’s `"windows"` patterns instead (guardrailed by
-> `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
+- `apps/desktop/src-tauri/tauri.conf.json` opts windows into capability identifiers via `app.windows[].capabilities`.
+  - The main window includes `"capabilities": ["main"]`.
+- Each capability file under `apps/desktop/src-tauri/capabilities/` further scopes itself to window labels via
+  `"windows": [...]`.
+  - The `main` capability includes `"windows": ["main"]`.
+
+This keeps new windows unprivileged by default, and makes granting a capability to additional windows an intentional
+two-file change (guardrailed by `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
 
 ### What `main.json` does
 
@@ -903,7 +906,9 @@ trust, DLP, extension permissions) for privileged operations.
 
 Guardrail tests (to prevent accidental “allow everything” capability drift):
 
-- `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts` — asserts the hardened CSP/headers (COOP/COEP, no framing, restricted network) and that `tauri.conf.json` does **not** include `app.windows[].capabilities` (unsupported by our current toolchain).
+- `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts` — asserts the hardened CSP/headers (COOP/COEP, no framing, restricted network) and capability scoping:
+  - `tauri.conf.json` main window includes `"capabilities": ["main"]` (and no other window has `main`)
+  - `capabilities/main.json` includes `"windows": ["main"]`
 - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts` — asserts the `core:event:allow-listen` / `core:event:allow-emit`
   allowlists match the desktop shell’s real event usage (and contain no wildcards).
 - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` — asserts required plugin permissions stay explicit/minimal (dialogs, window ops, clipboard plain text, updater, etc), we don’t grant dangerous extras (e.g. `shell:allow-open`, notification permissions), and that `core:allow-invoke` matches actual frontend invoke usage (no allow-all / no unused commands).
