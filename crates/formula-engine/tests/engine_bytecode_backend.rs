@@ -2061,6 +2061,64 @@ fn bytecode_backend_if_two_arg_default_false_branch_matches_ast() {
 }
 
 #[test]
+fn bytecode_backend_if_family_trailing_blank_args_match_ast() {
+    let mut engine = Engine::new();
+    engine
+        // Trailing blank else-branch should behave like an explicit blank, not the 2-arg default.
+        .set_cell_formula("Sheet1", "A1", "=IF(FALSE,1,)")
+        .unwrap();
+    engine
+        // IF should still short-circuit the unused branch.
+        .set_cell_formula("Sheet1", "A2", "=IF(FALSE,1/0,)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=IFERROR(1/0,)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", "=IFERROR(1,)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A5", "=IFNA(NA(),)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A6", "=IFNA(1/0,)")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected all formulas to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, 6);
+    assert_eq!(stats.compiled, 6);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Blank);
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Blank);
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Blank);
+    assert_eq!(engine.get_cell_value("Sheet1", "A4"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A5"), Value::Blank);
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A6"),
+        Value::Error(ErrorKind::Div0)
+    );
+
+    for (formula, cell) in [
+        ("=IF(FALSE,1,)", "A1"),
+        ("=IF(FALSE,1/0,)", "A2"),
+        ("=IFERROR(1/0,)", "A3"),
+        ("=IFERROR(1,)", "A4"),
+        ("=IFNA(NA(),)", "A5"),
+        ("=IFNA(1/0,)", "A6"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_logical_error_functions_with_error_literals() {
     let mut engine = Engine::new();
     engine
