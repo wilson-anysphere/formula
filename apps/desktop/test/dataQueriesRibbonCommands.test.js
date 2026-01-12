@@ -46,7 +46,18 @@ test("Desktop main.ts wires Data → Queries & Connections controls to the panel
   assert.match(main, /\bgetPanelPlacement\([^)]*PanelIds\.DATA_QUERIES\)/);
 
   // Refresh All wires to powerQueryService.refreshAll().
-  assert.match(main, /\bcommandId\s*===\s*["']data\.queriesConnections\.refreshAll["']/);
+  const refreshCommandIds = [
+    "data.queriesConnections.refreshAll",
+    "data.queriesConnections.refreshAll.refresh",
+    "data.queriesConnections.refreshAll.refreshAllConnections",
+    "data.queriesConnections.refreshAll.refreshAllQueries",
+  ];
+  for (const id of refreshCommandIds) {
+    assert.match(
+      main,
+      new RegExp(`\\bcommandId\\s*===\\s*["']${escapeRegExp(id)}["']`),
+      `Expected main.ts to handle refresh command id ${id}`,
+    );
+  }
   assert.match(main, /\brefreshAll\(\)/);
 });
-
