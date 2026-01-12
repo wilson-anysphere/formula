@@ -19,6 +19,7 @@ const DEFAULT_RESOLVED_FORMAT: { style: CellStyle | undefined; numberFormat: str
   style: undefined,
   numberFormat: null,
 };
+const DEFAULT_NUMERIC_ALIGNMENT_STYLE: CellStyle = { textAlign: "end" };
 
 function isPlainObject(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -87,6 +88,7 @@ export class DocumentCellProvider implements CellProvider {
   private readonly coordScratch = { row: 0, col: 0 };
   private readonly styleCache = new Map<number, CellStyle | undefined>();
   private readonly sheetDefaultResolvedFormatCache = new Map<number, { style: CellStyle | undefined; numberFormat: string | null }>();
+  private readonly numericAlignmentStyleCache = new WeakMap<CellStyle, CellStyle>();
   // Cache resolved layered formats by contributing style ids (sheet/col/row/range-run/cell). This avoids
   // re-merging OOXML-ish style objects for every cell when large regions share the same
   // formatting layers (e.g. column formatting).
@@ -646,7 +648,16 @@ export class DocumentCellProvider implements CellProvider {
       // Preserve spreadsheet-like default alignment for numeric values even though we
       // render them as formatted strings (CanvasGridRenderer defaults to left-aligning strings).
       if (resolvedStyle?.textAlign === undefined) {
-        resolvedStyle = { ...(resolvedStyle ?? {}), textAlign: "end" };
+        if (!resolvedStyle) {
+          resolvedStyle = DEFAULT_NUMERIC_ALIGNMENT_STYLE;
+        } else {
+          let aligned = this.numericAlignmentStyleCache.get(resolvedStyle);
+          if (!aligned) {
+            aligned = { ...resolvedStyle, textAlign: "end" };
+            this.numericAlignmentStyleCache.set(resolvedStyle, aligned);
+          }
+          resolvedStyle = aligned;
+        }
       }
     }
 

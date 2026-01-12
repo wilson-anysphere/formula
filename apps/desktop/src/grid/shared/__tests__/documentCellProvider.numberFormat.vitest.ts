@@ -12,6 +12,8 @@ describe("DocumentCellProvider numberFormat display rendering", () => {
 
     doc.setCellValue(sheetId, "A1", 1234.5);
     applyNumberFormatPreset(doc, sheetId, "A1", "currency");
+    doc.setCellValue(sheetId, "A4", 1234.5);
+    applyNumberFormatPreset(doc, sheetId, "A4", "currency");
 
     doc.setCellValue(sheetId, "A2", 0.5);
     applyNumberFormatPreset(doc, sheetId, "A2", "percent");
@@ -44,5 +46,13 @@ describe("DocumentCellProvider numberFormat display rendering", () => {
     const a3 = provider.getCell(3, 1);
     expect(a3?.value).toBe("1/2/2024");
     expect(a3?.style?.textAlign).toBe("end");
+
+    // Numeric alignment should reuse a shared style object when the underlying formatting
+    // has no explicit alignment (avoid per-cell `{...style, textAlign:'end'}` allocations).
+    const a4 = provider.getCell(4, 1);
+    expect(a4?.value).toBe("$1,234.50");
+    expect(a4?.style?.textAlign).toBe("end");
+    // A1 and A4 share the same numberFormat preset (currency), so the aligned style should be reused.
+    expect(a1?.style).toBe(a4?.style);
   });
 });
