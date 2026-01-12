@@ -157,7 +157,7 @@
 .dock-panel__tab {
   flex: 0 0 auto;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 4px 8px;
   background: transparent;
   color: var(--text-secondary);
@@ -184,7 +184,8 @@
 .dock-panel__tab[aria-selected="true"] {
   background: var(--bg-primary);
   color: var(--text-primary);
-  border-color: var(--border);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-surface);
 }
 
 .dock-panel__tab:focus-visible {
@@ -204,7 +205,7 @@
   height: 28px;
   flex: 0 0 auto;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 0;
   background: var(--bg-primary);
   color: var(--text-secondary);
