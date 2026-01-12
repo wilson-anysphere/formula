@@ -11,7 +11,7 @@
 ///   - Project strings: `PROJECTDOCSTRINGUNICODE` (0x0040), `PROJECTCONSTANTSUNICODE` (0x003C),
 ///     `PROJECTHELPFILEPATH2` (0x003D)
 ///   - Module strings: `MODULENAMEUNICODE` (0x0047), `MODULESTREAMNAMEUNICODE` (0x0032),
-///     `MODULEDOCSTRINGUNICODE` (0x0048)
+///     `MODULEDOCSTRINGUNICODE` (0x0048), `MODULEHELPFILEPATHUNICODE` (0x0049)
 /// - `0x004A` is `PROJECTCOMPATVERSION`.
 pub fn record_name(id: u16) -> Option<&'static str> {
     Some(match id {
@@ -58,6 +58,7 @@ pub fn record_name(id: u16) -> Option<&'static str> {
         0x0048 => "MODULEDOCSTRINGUNICODE",
 
         0x001D => "MODULEHELPFILEPATH",
+        0x0049 => "MODULEHELPFILEPATHUNICODE",
         0x001E => "MODULEHELPCONTEXT",
 
         0x0021 => "MODULETYPE (procedural TypeRecord.Id=0x0021)",

@@ -28,6 +28,10 @@ fn unicode_dir_record_ids_match_ms_ovba_table() {
         Some("MODULEDOCSTRINGUNICODE")
     );
     assert_eq!(
+        dir_record_names::record_name(0x0049),
+        Some("MODULEHELPFILEPATHUNICODE")
+    );
+    assert_eq!(
         dir_record_names::record_name(0x003E),
         Some("REFERENCENAMEUNICODE (reserved marker)")
     );
