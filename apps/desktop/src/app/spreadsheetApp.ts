@@ -1384,11 +1384,7 @@ export class SpreadsheetApp {
     this.resizeObserver = new ResizeObserver(() => this.onResize());
     this.resizeObserver.observe(this.root);
 
-    const emitCommentsChanged = () => {
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new Event("formula:comments-changed"));
-      }
-    };
+    const emitCommentsChanged = () => this.dispatchCommentsChanged();
 
     if (!collabEnabled) {
       // Save so we can detach cleanly in `destroy()`.
@@ -1832,6 +1828,11 @@ export class SpreadsheetApp {
     // via keyboard shortcuts).
     if (typeof window === "undefined") return;
     window.dispatchEvent(new CustomEvent("formula:view-changed"));
+  }
+
+  private dispatchCommentsChanged(): void {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new Event("formula:comments-changed"));
   }
 
   private dispatchZoomChanged(): void {
@@ -4071,6 +4072,20 @@ export class SpreadsheetApp {
     }
   }
 
+  private maybeRefreshCommentsUiForLocalEdit(): void {
+    // In collab mode we normally observe the comments root and refresh the UI from
+    // observer callbacks. If the user edits comments before the provider reports
+    // `sync=true`, the observer may not be attached yet; refresh eagerly so the
+    // change is visible immediately.
+    if (this.disposed) return;
+    if (!this.collabSession) return;
+    if (this.stopCommentsRootObserver) return;
+    this.reindexCommentCells();
+    this.renderCommentsPanel();
+    this.refresh();
+    this.dispatchCommentsChanged();
+  }
+
   private reindexCommentCells(): void {
     // Comment updates can happen while the user is hovering. Clear any shared-grid
     // hover caches so the next pointermove re-evaluates comment presence and preview
@@ -4217,6 +4232,7 @@ export class SpreadsheetApp {
         commentId: comment.id,
         resolved: !comment.resolved,
       });
+      this.maybeRefreshCommentsUiForLocalEdit();
     });
 
     header.appendChild(author);
@@ -4268,6 +4284,7 @@ export class SpreadsheetApp {
         author: this.currentUser,
       });
       replyInput.value = "";
+      this.maybeRefreshCommentsUiForLocalEdit();
     });
 
     replyRow.appendChild(replyInput);
@@ -4290,6 +4307,7 @@ export class SpreadsheetApp {
     });
 
     this.newCommentInput.value = "";
+    this.maybeRefreshCommentsUiForLocalEdit();
   }
 
   private onResize(): void {
