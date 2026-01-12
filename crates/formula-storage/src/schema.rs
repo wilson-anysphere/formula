@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use std::collections::HashSet;
 
 const LATEST_SCHEMA_VERSION: i64 = 8;
@@ -10,10 +10,8 @@ pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
     let tx = conn.transaction()?;
     init_schema_version(&tx)?;
 
-    let mut version: i64 = tx.query_row(
-        "SELECT version FROM schema_version WHERE id = 1",
-        [],
-        |row| {
+    let mut version: i64 = tx
+        .query_row("SELECT version FROM schema_version WHERE id = 1", [], |row| {
             if let Some(version) = row.get::<_, Option<i64>>(0).ok().flatten() {
                 return Ok(version);
             }
@@ -23,8 +21,9 @@ pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
                 }
             }
             Ok(0)
-        },
-    )?;
+        })
+        .optional()?
+        .unwrap_or(0);
     if version < 0 {
         version = 0;
     }
