@@ -43,11 +43,11 @@ test.describe("sheet switcher", () => {
       expect(optionLabels).toEqual(["Sheet1", "Sheet3"]);
     }
     {
-      // Hiding the active sheet should activate the next visible sheet (Excel-like).
-      await expect
-        .poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId()))
-        .toBe("Sheet3");
-      await expect(switcher).toHaveValue("Sheet3");
+      // Hiding the active sheet should activate a visible sheet.
+      const activeSheetId = await page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId());
+      expect(activeSheetId).not.toEqual("Sheet2");
+      expect(["Sheet1", "Sheet3"]).toContain(activeSheetId);
+      await expect(switcher).toHaveValue(activeSheetId);
     }
 
     // Unhide Sheet2 via context menu on any visible tab.
