@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { FormulaBarView } from "./FormulaBarView.js";
 
 describe("FormulaBarView F4 absolute reference toggle", () => {
-  it("toggles the active A1 reference and preserves a sane caret position", () => {
+  it("toggles the active A1 reference and keeps the token selected for repeated toggles", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
@@ -24,9 +24,10 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
 
     expect(view.textarea.value).toBe("=$A$1");
     expect(view.model.draft).toBe("=$A$1");
-    // Caret should still be inside the reference token.
-    expect(view.textarea.selectionStart).toBe(4);
-    expect(view.textarea.selectionEnd).toBe(4);
+    // Excel UX: keep the full reference token selected so repeated F4 presses
+    // continue cycling the same token.
+    expect(view.textarea.selectionStart).toBe(1);
+    expect(view.textarea.selectionEnd).toBe(5);
 
     host.remove();
   });
@@ -51,4 +52,3 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
     host.remove();
   });
 });
-
