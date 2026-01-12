@@ -392,3 +392,168 @@ fn bytecode_switch_is_lazy_for_unused_default() {
     );
     assert_eq!(value, Value::Number(7.0));
 }
+
+#[test]
+fn bytecode_choose_does_not_eval_choices_when_index_is_error() {
+    // If the index expression evaluates to an error, CHOOSE should return that error without
+    // evaluating any choice expressions.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=CHOOSE(1/0, A2, 7)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("choose_index_error_lazy"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Div0));
+}
+
+#[test]
+fn bytecode_choose_does_not_eval_choices_when_index_is_out_of_range() {
+    // If the index is out of range, CHOOSE should return #VALUE! without evaluating any choices.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=CHOOSE(3, A2, 7)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("choose_index_oob_lazy"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Value));
+}
+
+#[test]
+fn bytecode_ifs_does_not_eval_values_for_false_conditions() {
+    // IFS(FALSE, <unused_value>, TRUE, 7) must not evaluate the first value argument.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFS(FALSE, A2, TRUE, 7)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("ifs_false_value_lazy"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(7.0));
+}
+
+#[test]
+fn bytecode_ifs_does_not_eval_values_when_no_condition_matches() {
+    // IFS(FALSE, <unused>, FALSE, <unused>) must not evaluate any value arguments and should
+    // return #N/A.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFS(FALSE, A2, FALSE, A2)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("ifs_no_match_lazy"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::NA));
+}
+
+#[test]
+fn bytecode_switch_short_circuits_later_case_values() {
+    // SWITCH(1, 1, 7, <unused_case_value>, 8) must not evaluate the later case value.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=SWITCH(1, 1, 7, A2, 8)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("switch_later_case_value_lazy"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(7.0));
+}
+
+#[test]
+fn bytecode_switch_does_not_eval_results_when_no_case_matches() {
+    // SWITCH(3, 1, <unused_result>, 2, <unused_result>) must not evaluate any case results when
+    // no case matches and there is no default.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=SWITCH(3, 1, A2, 2, A2)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("switch_no_match_lazy"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::NA));
+}
+
+#[test]
+fn bytecode_switch_does_not_eval_anything_after_case_value_error() {
+    // If a case value evaluation errors, SWITCH should return that error and not evaluate any
+    // results or later case values/results.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=SWITCH(2, 1/0, A2, A2, A2)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("switch_case_value_error_lazy"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Div0));
+}
