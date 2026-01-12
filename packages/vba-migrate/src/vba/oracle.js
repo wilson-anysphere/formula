@@ -153,6 +153,9 @@ async function ensureBuilt({ repoRoot, binPath }) {
         MAKEFLAGS: process.env.MAKEFLAGS ?? "-j4",
         CARGO_PROFILE_DEV_CODEGEN_UNITS:
           process.env.CARGO_PROFILE_DEV_CODEGEN_UNITS ?? (process.env.CARGO_BUILD_JOBS ?? "4"),
+        // Rayon defaults to spawning one worker per core; cap it for multi-agent hosts unless
+        // callers explicitly override it.
+        RAYON_NUM_THREADS: process.env.RAYON_NUM_THREADS ?? (process.env.CARGO_BUILD_JOBS ?? "4"),
         // Some environments configure Cargo globally with `build.rustc-wrapper`. When the
         // wrapper is unavailable/misconfigured, builds can fail even for `cargo metadata`.
         // Default to disabling any configured wrapper unless the user explicitly overrides it.
