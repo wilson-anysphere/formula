@@ -1279,7 +1279,23 @@ export class SpreadsheetApp {
       const source = typeof payload?.source === "string" ? payload.source : "";
       const isExternalSource = source === "collab" || source === "backend" || source === "python" || source === "macro";
       if (!isExternalSource) return;
-      this.refresh("scroll");
+
+      // Most external changes only need a scroll-mode refresh (grid repaint + overlay positioning).
+      // However, if a remote edit touches the active cell, we also need to update the status bar /
+      // formula bar value. Use a full refresh in that case (still debounced via rAF).
+      const active = this.selection?.active;
+      const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
+      const touchesActiveCell =
+        active != null &&
+        deltas.some(
+          (d: any) =>
+            d &&
+            String(d.sheetId ?? "") === this.sheetId &&
+            Number(d.row) === active.row &&
+            Number(d.col) === active.col
+        );
+
+      this.refresh(touchesActiveCell ? "full" : "scroll");
     });
 
     if (!collabEnabled && typeof window !== "undefined") {

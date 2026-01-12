@@ -128,14 +128,14 @@ describe("SpreadsheetApp collab repaint", () => {
 
     const doc = app.getDocument();
     const sheetId = app.getCurrentSheetId();
-    const before = doc.getCell(sheetId, { row: 0, col: 0 }) as any;
+    const before = doc.getCell(sheetId, { row: 0, col: 1 }) as any;
 
     doc.applyExternalDeltas(
       [
         {
           sheetId,
           row: 0,
-          col: 0,
+          col: 1,
           before,
           after: { value: "Remote", formula: null, styleId: before?.styleId ?? 0 },
         },
@@ -145,6 +145,42 @@ describe("SpreadsheetApp collab repaint", () => {
 
     expect(refreshSpy).toHaveBeenCalledWith("scroll");
     expect(rafSpy).toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("upgrades to a full refresh when a remote edit touches the active cell (keeps status in sync)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    expect(app.getGridMode()).toBe("legacy");
+
+    const refreshSpy = vi.spyOn(app, "refresh");
+
+    const doc = app.getDocument();
+    const sheetId = app.getCurrentSheetId();
+    const before = doc.getCell(sheetId, { row: 0, col: 0 }) as any;
+
+    doc.applyExternalDeltas(
+      [
+        {
+          sheetId,
+          row: 0,
+          col: 0,
+          before,
+          after: { value: "Remote Active", formula: null, styleId: before?.styleId ?? 0 },
+        },
+      ],
+      { source: "collab" },
+    );
+
+    expect(refreshSpy).toHaveBeenCalledWith("full");
 
     app.destroy();
     root.remove();
