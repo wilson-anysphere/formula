@@ -10,13 +10,14 @@ import { describe, expect, it } from "vitest";
 describe("mountTitlebar", () => {
   it("mounts a Titlebar into a container and unmounts cleanly", async () => {
     const container = document.createElement("div");
+    container.classList.add("formula-titlebar");
     document.body.appendChild(container);
 
     const { mountTitlebar } = await import("./mountTitlebar.js");
 
-    let dispose: (() => void) | null = null;
+    let titlebar: ReturnType<typeof mountTitlebar> | null = null;
     await act(async () => {
-      dispose = mountTitlebar(container, {
+      titlebar = mountTitlebar(container, {
         appName: "Formula",
         documentName: "Untitled.xlsx",
         actions: [
@@ -25,6 +26,10 @@ describe("mountTitlebar", () => {
         ],
       });
     });
+
+    // mountTitlebar should remove any existing `.formula-titlebar` class from the container
+    // so the rendered titlebar isn't nested inside another styled titlebar element.
+    expect(container.classList.contains("formula-titlebar")).toBe(false);
 
     expect(container.querySelector(".formula-titlebar")).toBeInstanceOf(HTMLDivElement);
     expect(container.querySelector(".formula-titlebar--component")).toBeInstanceOf(HTMLDivElement);
@@ -46,10 +51,17 @@ describe("mountTitlebar", () => {
     expect(container.querySelector('[aria-label="Open comments"]')).toBeInstanceOf(HTMLButtonElement);
 
     act(() => {
-      dispose?.();
+      titlebar?.();
     });
 
     expect(container.childElementCount).toBe(0);
+
+    // Disposing should restore the container class.
+    expect(container.classList.contains("formula-titlebar")).toBe(true);
+
+    // It should also be safe to call .dispose() explicitly.
+    act(() => {
+      titlebar?.dispose();
+    });
   });
 });
-
