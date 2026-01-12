@@ -274,10 +274,10 @@ fn verifies_project_digest_binding_with_external_signature_part() {
         .vba_project_signature_binding()
         .expect("binding verification")
         .expect("project present");
-    assert!(matches!(
-        binding2,
-        VbaProjectBindingVerification::BoundMismatch(_)
-    ));
+    assert!(
+        matches!(binding2, VbaProjectBindingVerification::BoundMismatch(_)),
+        "unexpected binding result after mutation: {binding2:?}"
+    );
 
     let sig2 = verify_vba_digital_signature(&signature_ole)
         .expect("signature verification should succeed")
