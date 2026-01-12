@@ -8,6 +8,8 @@
 //!
 //! - `[MS-OSHARED] DigSigBlob` (§2.3.2.2), which contains a `[MS-OSHARED] DigSigInfoSerialized`
 //!   (§2.3.2.1) pointing at the PKCS#7 buffer via offsets.
+//! - `[MS-OSHARED] WordSigBlob` (§2.3.2.3), which wraps the same `DigSigInfoSerialized` payload
+//!   with a UTF-16 length prefix.
 //! - A shorter *length-prefixed* DigSigInfoSerialized-like header (commonly seen in the wild) that
 //!   starts with `cbSignature`, `cbSigningCertStore`, and a project-name length/count, followed by
 //!   variable metadata blobs. This variant does **not** match the MS-OSHARED DigSigInfoSerialized
@@ -36,6 +38,11 @@ pub(crate) struct DigSigInfoSerialized {
 fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
     let b = bytes.get(offset..offset + 4)?;
     Some(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+}
+
+fn read_u16_le(bytes: &[u8], offset: usize) -> Option<u16> {
+    let b = bytes.get(offset..offset + 2)?;
+    Some(u16::from_le_bytes([b[0], b[1]]))
 }
 
 /// Parsed PKCS#7 location information from a `[MS-OSHARED] DigSigBlob` wrapper.
@@ -89,6 +96,73 @@ pub(crate) fn parse_digsig_blob(stream: &[u8]) -> Option<DigSigBlob> {
 
     let sig_end = signature_offset.checked_add(cb_signature)?;
     if signature_offset >= stream.len() || sig_end > stream.len() {
+        return None;
+    }
+
+    let sig_slice = &stream[signature_offset..sig_end];
+    let pkcs7_len = pkcs7_signed_data_len(sig_slice)?;
+
+    Some(DigSigBlob {
+        pkcs7_offset: signature_offset,
+        pkcs7_len,
+    })
+}
+
+/// Best-effort parse of a `[MS-OSHARED] WordSigBlob` wrapper around a PKCS#7 signature.
+///
+/// WordSigBlob is similar to DigSigBlob but uses a UTF-16-length-prefixed wrapper:
+/// - The first field is `cch: u16` (half the byte count of the remainder of the structure).
+/// - Offsets in the embedded `DigSigInfoSerialized` are relative to the start of the `cbSigInfo`
+///   field (at byte offset 2), not the start of the structure.
+///
+/// Returns `None` if the stream does not appear to be a WordSigBlob or if the inferred signature
+/// buffer does not look like a PKCS#7 `SignedData` ContentInfo.
+pub(crate) fn parse_wordsig_blob(stream: &[u8]) -> Option<DigSigBlob> {
+    // Need at least: cch (u16) + cbSigInfo (u32) + serializedPointer (u32) + cbSignature+offset.
+    if stream.len() < 2 + 4 + 4 + 8 {
+        return None;
+    }
+
+    let cch = read_u16_le(stream, 0)? as usize;
+    let remainder_len = cch.checked_mul(2)?;
+    let total_len = 2usize.checked_add(remainder_len)?;
+    if total_len > stream.len() {
+        return None;
+    }
+
+    let cb_siginfo = read_u32_le(stream, 2)? as usize;
+    let serialized_pointer = read_u32_le(stream, 6)? as usize;
+    // MS-OSHARED requires a fixed pointer of 8 bytes from `cbSigInfo` to the DigSigInfoSerialized.
+    if serialized_pointer != 8 {
+        return None;
+    }
+
+    // Validate the `cch` formula from MS-OSHARED §2.3.2.3 to keep the heuristic conservative:
+    // cch = (cbSigInfo + (cbSigInfo mod 2) + 8) / 2
+    let expected_cch =
+        (cb_siginfo.checked_add(cb_siginfo % 2)?.checked_add(8)?) / 2usize;
+    if expected_cch != cch {
+        return None;
+    }
+
+    // WordSigBlob offsets are relative to the start of `cbSigInfo` (byte offset 2).
+    let base = 2usize;
+    let siginfo_offset = base.checked_add(serialized_pointer)?;
+    let siginfo_end = siginfo_offset.checked_add(cb_siginfo)?;
+    if siginfo_offset + 8 > total_len || siginfo_end > total_len {
+        return None;
+    }
+
+    // DigSigInfoSerialized starts with: DWORD cbSignature; DWORD signatureOffset;
+    let cb_signature = read_u32_le(stream, siginfo_offset)? as usize;
+    let signature_offset_rel = read_u32_le(stream, siginfo_offset + 4)? as usize;
+    if cb_signature == 0 {
+        return None;
+    }
+
+    let signature_offset = base.checked_add(signature_offset_rel)?;
+    let sig_end = signature_offset.checked_add(cb_signature)?;
+    if signature_offset >= total_len || sig_end > total_len {
         return None;
     }
 
@@ -916,6 +990,83 @@ mod tests {
         stream[0..4].copy_from_slice(&cb.to_le_bytes());
 
         let parsed = parse_digsig_blob(&stream).expect("should parse digsig blob");
+        assert_eq!(parsed.pkcs7_offset, signature_offset);
+        assert_eq!(parsed.pkcs7_len, pkcs7.len());
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn parses_pkcs7_payload_from_wordsig_blob_wrapper() {
+        use openssl::pkcs7::Pkcs7;
+
+        let pkcs7 = make_pkcs7_signed_message(b"formula-vba-test");
+
+        // Minimal WordSigBlob:
+        // - u16le cch
+        // - u32le cbSigInfo
+        // - u32le serializedPointer (=8)
+        // - DigSigInfoSerialized (starts at offset 10, because offsets are relative to cbSigInfo at 2)
+        // - signature bytes at signatureOffset (relative to cbSigInfo)
+        let wordsig_header_len = 10usize; // cch + cbSigInfo + serializedPointer
+        let digsig_info_len = 0x24usize; // 9 DWORDs
+        let signature_offset = wordsig_header_len + digsig_info_len; // 0x2E
+        let signature_offset_rel = signature_offset - 2; // relative to cbSigInfo at offset 2
+
+        let cb_siginfo = digsig_info_len + pkcs7.len();
+        let cch = (cb_siginfo + (cb_siginfo % 2) + 8) / 2;
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&(cch as u16).to_le_bytes());
+        stream.extend_from_slice(&(cb_siginfo as u32).to_le_bytes());
+        stream.extend_from_slice(&8u32.to_le_bytes()); // serializedPointer
+        stream.extend_from_slice(&(pkcs7.len() as u32).to_le_bytes()); // cbSignature
+        stream.extend_from_slice(&(signature_offset_rel as u32).to_le_bytes()); // signatureOffset (relative)
+        for _ in 0..7 {
+            stream.extend_from_slice(&0u32.to_le_bytes());
+        }
+        assert_eq!(stream.len(), signature_offset);
+        stream.extend_from_slice(&pkcs7);
+        if cb_siginfo % 2 != 0 {
+            stream.push(0);
+        }
+        assert_eq!(stream.len(), 2 + cch * 2);
+
+        let parsed = parse_wordsig_blob(&stream).expect("should parse wordsig blob");
+        assert_eq!(parsed.pkcs7_offset, signature_offset);
+        assert_eq!(parsed.pkcs7_len, pkcs7.len());
+
+        let pkcs7_slice = &stream[parsed.pkcs7_offset..parsed.pkcs7_offset + parsed.pkcs7_len];
+        Pkcs7::from_der(pkcs7_slice).expect("openssl should parse extracted pkcs7");
+    }
+
+    #[test]
+    fn parses_ber_indefinite_pkcs7_payload_from_wordsig_blob_wrapper() {
+        let pkcs7 = include_bytes!("../tests/fixtures/cms_indefinite.der");
+
+        let wordsig_header_len = 10usize; // cch + cbSigInfo + serializedPointer
+        let digsig_info_len = 0x24usize; // 9 DWORDs
+        let signature_offset = wordsig_header_len + digsig_info_len; // 0x2E
+        let signature_offset_rel = signature_offset - 2;
+
+        let cb_siginfo = digsig_info_len + pkcs7.len();
+        let cch = (cb_siginfo + (cb_siginfo % 2) + 8) / 2;
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&(cch as u16).to_le_bytes());
+        stream.extend_from_slice(&(cb_siginfo as u32).to_le_bytes());
+        stream.extend_from_slice(&8u32.to_le_bytes()); // serializedPointer
+        stream.extend_from_slice(&(pkcs7.len() as u32).to_le_bytes()); // cbSignature
+        stream.extend_from_slice(&(signature_offset_rel as u32).to_le_bytes()); // signatureOffset
+        for _ in 0..7 {
+            stream.extend_from_slice(&0u32.to_le_bytes());
+        }
+        stream.extend_from_slice(pkcs7);
+        if cb_siginfo % 2 != 0 {
+            stream.push(0);
+        }
+        assert_eq!(stream.len(), 2 + cch * 2);
+
+        let parsed = parse_wordsig_blob(&stream).expect("should parse wordsig blob");
         assert_eq!(parsed.pkcs7_offset, signature_offset);
         assert_eq!(parsed.pkcs7_len, pkcs7.len());
     }

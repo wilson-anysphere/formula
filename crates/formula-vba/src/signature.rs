@@ -4,6 +4,7 @@ use crate::{
     authenticode::extract_vba_signature_signed_digest,
     contents_hash::content_normalized_data,
     normalized_data::forms_normalized_data,
+    DigestAlg,
     OleError,
     OleFile,
 };
@@ -290,9 +291,11 @@ pub fn list_vba_digital_signatures(
         let signature = ole.read_stream_opt(&path)?.unwrap_or_default();
         let signer_subject = extract_first_certificate_subject(&signature);
         let verification = verify_signature_blob(&signature);
-        // Prefer deterministic MS-OSHARED DigSigBlob offsets when present.
+        // Prefer deterministic MS-OSHARED DigSigBlob/WordSigBlob offsets when present.
         let (digsig_info_version, pkcs7_offset, pkcs7_len) =
-            if let Some(info) = crate::offcrypto::parse_digsig_blob(&signature) {
+            if let Some(info) = crate::offcrypto::parse_wordsig_blob(&signature)
+                .or_else(|| crate::offcrypto::parse_digsig_blob(&signature))
+            {
                 (None, Some(info.pkcs7_offset), Some(info.pkcs7_len))
             } else if let Some(info) = crate::offcrypto::parse_digsig_info_serialized(&signature) {
                 (info.version, Some(info.pkcs7_offset), Some(info.pkcs7_len))
@@ -858,7 +861,7 @@ pub fn verify_vba_signature_certificate_trust(
     }
     verify_pkcs7_trust(signature, &options.trusted_root_certs_der)
 }
-fn digest_alg_from_oid_str(oid: &str) -> Option<crate::DigestAlg> {
+fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
     // DigestInfo.algorithm values found in Authenticode `SpcIndirectDataContent`.
     //
     // - MD5:     1.2.840.113549.2.5
@@ -866,22 +869,22 @@ fn digest_alg_from_oid_str(oid: &str) -> Option<crate::DigestAlg> {
     // - SHA-256: 2.16.840.1.101.3.4.2.1
     match oid.trim() {
         // id-md5 (RFC 1321 / PKCS#1)
-        "1.2.840.113549.2.5" => Some(crate::DigestAlg::Md5),
+        "1.2.840.113549.2.5" => Some(DigestAlg::Md5),
         // id-sha1 (RFC 3279)
-        "1.3.14.3.2.26" => Some(crate::DigestAlg::Sha1),
+        "1.3.14.3.2.26" => Some(DigestAlg::Sha1),
         // id-sha256 (NIST)
-        "2.16.840.1.101.3.4.2.1" => Some(crate::DigestAlg::Sha256),
-        "1.2.840.113549.1.1.4" => Some(crate::DigestAlg::Md5),
-        "1.2.840.113549.1.1.5" => Some(crate::DigestAlg::Sha1),
-        "1.2.840.113549.1.1.11" => Some(crate::DigestAlg::Sha256),
+        "2.16.840.1.101.3.4.2.1" => Some(DigestAlg::Sha256),
+        "1.2.840.113549.1.1.4" => Some(DigestAlg::Md5),
+        "1.2.840.113549.1.1.5" => Some(DigestAlg::Sha1),
+        "1.2.840.113549.1.1.11" => Some(DigestAlg::Sha256),
         _ => None,
     }
 }
 fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
     digest_alg_from_oid_str(oid).map(|alg| match alg {
-        crate::DigestAlg::Md5 => "MD5",
-        crate::DigestAlg::Sha1 => "SHA-1",
-        crate::DigestAlg::Sha256 => "SHA-256",
+        DigestAlg::Md5 => "MD5",
+        DigestAlg::Sha1 => "SHA-1",
+        DigestAlg::Sha256 => "SHA-256",
     })
 }
 fn signature_kind_rank(kind: VbaSignatureStreamKind) -> u8 {
@@ -1144,9 +1147,18 @@ fn parse_pkcs7_with_offset(signature: &[u8]) -> Option<(openssl::pkcs7::Pkcs7, u
     // last, so we prefer the last candidate in the stream.
     let mut best: Option<(Pkcs7, usize)> = None;
 
-    // Office apps sometimes wrap the PKCS#7 blob in an [MS-OSHARED] DigSigBlob that points at the
-    // actual signature buffer via offsets. Parsing it avoids false positives when the stream
-    // contains multiple SignedData blobs (e.g. cert stores or other metadata).
+    // Office apps sometimes wrap the PKCS#7 blob in an [MS-OSHARED] DigSigBlob/WordSigBlob that
+    // points at the actual signature buffer via offsets. Parsing it avoids false positives when the
+    // stream contains multiple SignedData blobs (e.g. cert stores or other metadata).
+    if let Some(info) = crate::offcrypto::parse_wordsig_blob(signature) {
+        let end = info.pkcs7_offset.saturating_add(info.pkcs7_len);
+        if end <= signature.len() {
+            let slice = &signature[info.pkcs7_offset..end];
+            if let Ok(pkcs7) = Pkcs7::from_der(slice) {
+                return Some((pkcs7, info.pkcs7_offset));
+            }
+        }
+    }
     if let Some(info) = crate::offcrypto::parse_digsig_blob(signature) {
         let end = info.pkcs7_offset.saturating_add(info.pkcs7_len);
         if end <= signature.len() {

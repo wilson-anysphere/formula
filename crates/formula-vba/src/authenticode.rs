@@ -63,6 +63,28 @@ pub fn extract_vba_signature_signed_digest(
     let mut any_candidate = false;
     let mut last_err = None;
 
+    // Prefer a deterministic MS-OSHARED WordSigBlob location when present.
+    if let Some(info) = crate::offcrypto::parse_wordsig_blob(signature_stream) {
+        let end = info.pkcs7_offset.saturating_add(info.pkcs7_len);
+        if end <= signature_stream.len() {
+            any_candidate = true;
+            if attempted_count < attempted_offsets.len() {
+                attempted_offsets[attempted_count] = Some(info.pkcs7_offset);
+                attempted_count += 1;
+            }
+            match extract_signed_digest_from_pkcs7_location(
+                signature_stream,
+                Pkcs7Location {
+                    der: &signature_stream[info.pkcs7_offset..end],
+                    offset: info.pkcs7_offset,
+                },
+            ) {
+                Ok(digest) => return Ok(Some(digest)),
+                Err(err) => last_err = Some(err),
+            }
+        }
+    }
+
     // Prefer a deterministic MS-OSHARED DigSigBlob location when present.
     if let Some(info) = crate::offcrypto::parse_digsig_blob(signature_stream) {
         let end = info.pkcs7_offset.saturating_add(info.pkcs7_len);
@@ -181,6 +203,9 @@ pub fn extract_vba_signature_signed_digest(
 /// is the total length of the ASN.1 TLV (including tag/length/EOC for indefinite encodings).
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn locate_pkcs7_signed_data_bounds(signature_stream: &[u8]) -> Option<(usize, usize)> {
+    if let Some(info) = crate::offcrypto::parse_wordsig_blob(signature_stream) {
+        return Some((info.pkcs7_offset, info.pkcs7_len));
+    }
     if let Some(info) = crate::offcrypto::parse_digsig_blob(signature_stream) {
         return Some((info.pkcs7_offset, info.pkcs7_len));
     }
