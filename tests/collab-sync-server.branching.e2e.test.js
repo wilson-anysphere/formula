@@ -21,10 +21,13 @@ import {
 function getYMap(value) {
   if (!value || typeof value !== "object") return null;
   const maybe = value;
-  if (maybe.constructor?.name !== "YMap") return null;
   if (typeof maybe.get !== "function") return null;
   if (typeof maybe.set !== "function") return null;
   if (typeof maybe.delete !== "function") return null;
+  // Require Yjs' deep observer APIs so we don't accidentally treat a plain JS
+  // `Map` as a Y.Map (and tolerate multiple `yjs` module instances / renamed ctors).
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
   return maybe;
 }
 
