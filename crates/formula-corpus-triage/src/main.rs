@@ -628,8 +628,8 @@ fn normalize_model_value(value: &CellValue) -> NormalizedValue {
         CellValue::String(s) => NormalizedValue::Text(s.clone()),
         CellValue::Error(e) => NormalizedValue::Error(map_error_value(*e).as_code().to_string()),
         CellValue::RichText(r) => NormalizedValue::Text(r.text.clone()),
-        CellValue::Entity(e) => NormalizedValue::Text(e.display.clone()),
-        CellValue::Record(r) => NormalizedValue::Text(r.display.clone()),
+        CellValue::Entity(e) => NormalizedValue::Text(e.display_value.clone()),
+        CellValue::Record(r) => NormalizedValue::Text(r.to_string()),
         CellValue::Array(_) | CellValue::Spill(_) => NormalizedValue::Blank,
     }
 }
@@ -661,8 +661,8 @@ fn set_engine_value(engine: &mut Engine, sheet: &str, addr: &str, value: &CellVa
         CellValue::Boolean(b) => EngineValue::Bool(*b),
         CellValue::Error(e) => EngineValue::Error(map_error_value(*e)),
         CellValue::RichText(r) => EngineValue::Text(r.text.clone()),
-        CellValue::Entity(e) => EngineValue::Text(e.display.clone()),
-        CellValue::Record(r) => EngineValue::Text(r.display.clone()),
+        CellValue::Entity(e) => EngineValue::Text(e.display_value.clone()),
+        CellValue::Record(r) => EngineValue::Text(r.to_string()),
         CellValue::Array(_) | CellValue::Spill(_) => EngineValue::Blank,
     };
     engine
