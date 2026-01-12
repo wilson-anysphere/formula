@@ -10,7 +10,8 @@ const WEBVIEW_CSP = [
   "object-src 'none'",
   "img-src data: blob:",
   "style-src 'unsafe-inline'",
-  "script-src 'unsafe-inline'",
+  // Desktop/Tauri CSP disallows inline scripts. Allow only self-contained module sources.
+  "script-src blob: data:",
   "connect-src 'none'",
   "worker-src 'none'",
   "child-src 'none'",
@@ -22,8 +23,7 @@ const WEBVIEW_CSP = [
 
 export function injectWebviewCsp(html: string): string {
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${WEBVIEW_CSP}">`;
-  const hardenTauriGlobalsScript = `<script>
- (() => {
+  const hardenTauriGlobalsSource = `(() => {
   "use strict";
   const keys = ["__TAURI__", "__TAURI_IPC__", "__TAURI_INTERNALS__", "__TAURI_METADATA__"];
   let tauriGlobalsPresent = false;
@@ -136,7 +136,13 @@ export function injectWebviewCsp(html: string): string {
     // Ignore.
   }
 })();
-</script>`;
+`;
+  // Avoid inline scripts: Tauri CSP blocks 'unsafe-inline', and blob: documents inherit the
+  // parent document CSP. Use a `data:` URL script so it can execute under the default policy.
+  const hardenTauriGlobalsScriptUrl = `data:text/javascript;charset=utf-8,${encodeURIComponent(
+    hardenTauriGlobalsSource,
+  )}`;
+  const hardenTauriGlobalsScript = `<script src="${hardenTauriGlobalsScriptUrl}"></script>`;
   const injectedHeadContent = `${cspMeta}${hardenTauriGlobalsScript}`;
   const src = String(html ?? "");
 

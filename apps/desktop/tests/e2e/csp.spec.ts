@@ -394,7 +394,15 @@ test.describe("Content Security Policy (Tauri parity)", () => {
           malicious: false,
           downloadCount: 0,
           latestVersion: "1.0.0",
-          versions: [{ version: "1.0.0", sha256: pkgSha256, uploadedAt: new Date().toISOString(), yanked: false }],
+          versions: [
+            {
+              version: "1.0.0",
+              sha256: pkgSha256,
+              uploadedAt: new Date().toISOString(),
+              yanked: false,
+              scanStatus: "passed",
+            },
+          ],
           readme: "",
           publisherPublicKeyPem: keys.publicKeyPem,
           publisherKeys: [{ id: publisherKeyId, publicKeyPem: keys.publicKeyPem, revoked: false }],
@@ -412,6 +420,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
           "X-Package-Sha256": pkgSha256,
           "X-Package-Signature": pkgSignatureBase64,
           "X-Package-Format-Version": "2",
+          "X-Package-Scan-Status": "passed",
           "X-Publisher": "formula",
           "X-Publisher-Key-Id": publisherKeyId
         },
@@ -650,6 +659,11 @@ test.describe("Content Security Policy (Tauri parity)", () => {
   test("extension panels are sandboxed with connect-src 'none' (no network bypass) under CSP", async ({
     page
   }) => {
+    await page.addInitScript(() => {
+      // Avoid permission modal flakiness here; this test only cares about CSP sandboxing.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).__formulaPermissionPrompt = async () => true;
+    });
     const cspViolations: string[] = [];
 
     page.on("console", (msg) => {
