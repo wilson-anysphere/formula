@@ -907,7 +907,31 @@ fn write_updated_cell<W: Write>(
 
     let a1 = cell_ref.to_a1();
     let meta = super::lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
-    let meta_vm = meta.and_then(|m| m.vm.clone());
+    // `CellMeta.vm` is captured from the original file to allow lossless round-trip (including
+    // preserving formatting like leading zeros). For existing cells we *also* have access to the
+    // original `vm` attribute via `preserved_attrs`.
+    //
+    // Treat `meta.vm` as an explicit override only when:
+    // - the original cell did not have a `vm` attribute (e.g. inserted cell / synthesized meta), or
+    // - the stored value differs from the original attribute (caller mutated metadata).
+    //
+    // Otherwise, rely on the preserved original attribute so we can still drop `vm` when the cell
+    // value changes away from rich-value semantics.
+    let meta_vm = meta.and_then(|m| m.vm.clone()).and_then(|vm| {
+        if original_has_vm {
+            let original_vm = preserved_attrs
+                .iter()
+                .find(|(k, _)| k == "vm")
+                .map(|(_, v)| v.as_str());
+            if original_vm.is_some_and(|orig| orig == vm.as_str()) {
+                None
+            } else {
+                Some(vm)
+            }
+        } else {
+            Some(vm)
+        }
+    });
     let meta_cm = meta.and_then(|m| m.cm.clone());
     let value_kind = super::effective_value_kind(meta, cell);
     let meta_sheet_id = cell_meta_sheet_ids
