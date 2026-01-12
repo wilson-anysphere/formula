@@ -239,7 +239,7 @@ pnpm install
 # Run tests
 pnpm test
 
-# Run AI-specific tests (skip WASM build)
+# Run AI-specific tests (skip WASM build; set `FORMULA_SKIP_WASM_BUILD=1` or `true`)
 FORMULA_SKIP_WASM_BUILD=1 pnpm vitest run packages/ai-*/src/*.test.ts
 FORMULA_SKIP_WASM_BUILD=1 pnpm vitest run packages/llm/src/*.test.ts
 ```

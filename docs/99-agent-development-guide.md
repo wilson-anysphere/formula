@@ -238,7 +238,8 @@ build of `crates/formula-wasm` exists. This may trigger a Rust/wasm-pack build,
 which is slow and memory intensive.
 
 For test runs that don't touch the WASM engine (e.g. `packages/llm`,
-`packages/ai-tools`), you can skip the setup step:
+`packages/ai-tools`), you can skip the setup step (set `FORMULA_SKIP_WASM_BUILD=1`
+or `true`):
 
 ```bash
 FORMULA_SKIP_WASM_BUILD=1 pnpm vitest run packages/llm/src/*.test.ts
