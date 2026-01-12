@@ -20,18 +20,13 @@ test("ScriptEditorPanel avoids static inline styles and uses token-based classes
   const panelPath = path.join(__dirname, "..", "src", "panels", "script-editor", "ScriptEditorPanel.js");
   const source = fs.readFileSync(panelPath, "utf8");
 
-  const mountSection = extractSection(source, "export function mountScriptEditorPanel", "function defaultScript()");
+  assert.equal(
+    /\.style\b/.test(source) || /setAttribute\(\s*["']style["']/.test(source),
+    false,
+    "ScriptEditorPanel.js should not use inline styles (element.style* / setAttribute('style', ...)); use src/styles/script-editor.css classes instead",
+  );
 
-  assert.equal(
-    /\.style\./.test(mountSection),
-    false,
-    "mountScriptEditorPanel should not set inline styles; use token-based CSS classes instead",
-  );
-  assert.equal(
-    /setAttribute\(\s*["']style["']/.test(mountSection),
-    false,
-    "mountScriptEditorPanel should not set inline styles via setAttribute('style', ...); use token-based CSS classes instead",
-  );
+  const mountSection = extractSection(source, "export function mountScriptEditorPanel", "function defaultScript()");
 
   assert.match(
     mountSection,
