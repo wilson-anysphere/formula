@@ -1028,9 +1028,9 @@ Important notes:
     `FormsNormalizedData` (designer/UserForm storages).
   - For the `DigitalSignatureExt` stream variant, Office uses the MS-OVBA §2.4.2 v3 transcript and
     computes the **V3 Content Hash** (MS-OVBA §2.4.2.7):
-    `V3ContentHash = SHA-256(ProjectNormalizedData || V3ContentNormalizedData || FormsNormalizedData)`.
-    (See `docs/vba-digital-signatures.md` for `ProjectNormalizedData` (`VBA/dir` record allowlist +
-    Unicode-vs-ANSI rules).)
+    `V3ContentHash = SHA-256(ProjectNormalizedData)` where
+    `ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData`.
+    (See `docs/vba-digital-signatures.md` for transcript details.)
   
   Per MS-OSHARED §4.3, the digest bytes embedded in **legacy** VBA signature streams
   (`DigitalSignature` / `DigitalSignatureEx`) are always **MD5 (16 bytes)** even when the PKCS#7/CMS
@@ -1107,7 +1107,8 @@ Binding (best-effort; see MS-OVBA):
    and the MS-OVBA `Agile Content Hash` = `MD5(ContentNormalizedData || FormsNormalizedData)` (MS-OVBA §2.4.2.4),
    then compare the signed digest bytes to either digest.
 3. For the v3 `DigitalSignatureExt` stream, compute the MS-OVBA **V3 Content Hash**
-   `V3ContentHash = SHA-256(ProjectNormalizedData || V3ContentNormalizedData || FormsNormalizedData)`
+   `V3ContentHash = SHA-256(ProjectNormalizedData)` where
+   `ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData`
    (MS-OVBA §2.4.2.7) and compare it to the signed digest bytes.
 4. `trusted_signed_only` is treated as satisfied only when:
     - the PKCS#7/CMS signature verifies (`SignedVerified`), **and**
