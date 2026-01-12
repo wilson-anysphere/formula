@@ -35,6 +35,23 @@ async function loadDataIoModule() {
 }
 
 /**
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isOptionalArrowDependencyError(err) {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.includes("optional 'apache-arrow'");
+}
+
+/**
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isModuleNotFoundError(err) {
+  return Boolean(err && typeof err === "object" && "code" in err && err.code === "ERR_MODULE_NOT_FOUND");
+}
+
+/**
  * @typedef {import("./model.js").Query} Query
  * @typedef {import("./model.js").QuerySource} QuerySource
  * @typedef {import("./model.js").QueryStep} QueryStep
@@ -1997,43 +2014,57 @@ export class QueryEngine {
       if (source.type === "parquet" && connector.openFile) {
         const handle = await connector.openFile(source.path, { signal: options.signal });
         throwIfAborted(options.signal);
-        const { parquetFileToArrowTable } = await loadDataIoModule();
-        const arrowTable = await parquetFileToArrowTable(handle, source.options);
-        const table = new ArrowTableAdapter(arrowTable);
-        this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? source.path]);
-        const meta = {
-          refreshedAt: new Date(state.now()),
-          sourceTimestamp: sourceState.sourceTimestamp,
-          etag: sourceState.etag,
-          sourceKey,
-          schema: { columns: table.columns, inferred: true },
-          rowCount: table.rowCount,
-          rowCountEstimate: table.rowCount,
-          provenance: { kind: "file", path: source.path, format: "parquet" },
-        };
-        options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
-        return { table, meta, sources: [meta] };
+        try {
+          const { parquetFileToArrowTable } = await loadDataIoModule();
+          const arrowTable = await parquetFileToArrowTable(handle, source.options);
+          const table = new ArrowTableAdapter(arrowTable);
+          this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? source.path]);
+          const meta = {
+            refreshedAt: new Date(state.now()),
+            sourceTimestamp: sourceState.sourceTimestamp,
+            etag: sourceState.etag,
+            sourceKey,
+            schema: { columns: table.columns, inferred: true },
+            rowCount: table.rowCount,
+            rowCountEstimate: table.rowCount,
+            provenance: { kind: "file", path: source.path, format: "parquet" },
+          };
+          options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+          return { table, meta, sources: [meta] };
+        } catch (err) {
+          // Arrow/parquet support is optional. If the Arrow stack isn't available, fall back
+          // to the row-backed `readParquetTable` adapter (via `FileConnector.execute`).
+          if (!isOptionalArrowDependencyError(err) && !isModuleNotFoundError(err)) {
+            throw err;
+          }
+        }
       }
 
       if (source.type === "parquet" && connector.readBinary) {
         const bytes = await connector.readBinary(source.path);
         throwIfAborted(options.signal);
-        const { parquetToArrowTable } = await loadDataIoModule();
-        const arrowTable = await parquetToArrowTable(bytes, source.options);
-        const table = new ArrowTableAdapter(arrowTable);
-        this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? source.path]);
-        const meta = {
-          refreshedAt: new Date(state.now()),
-          sourceTimestamp: sourceState.sourceTimestamp,
-          etag: sourceState.etag,
-          sourceKey,
-          schema: { columns: table.columns, inferred: true },
-          rowCount: table.rowCount,
-          rowCountEstimate: table.rowCount,
-          provenance: { kind: "file", path: source.path, format: "parquet" },
-        };
-        options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
-        return { table, meta, sources: [meta] };
+        try {
+          const { parquetToArrowTable } = await loadDataIoModule();
+          const arrowTable = await parquetToArrowTable(bytes, source.options);
+          const table = new ArrowTableAdapter(arrowTable);
+          this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? source.path]);
+          const meta = {
+            refreshedAt: new Date(state.now()),
+            sourceTimestamp: sourceState.sourceTimestamp,
+            etag: sourceState.etag,
+            sourceKey,
+            schema: { columns: table.columns, inferred: true },
+            rowCount: table.rowCount,
+            rowCountEstimate: table.rowCount,
+            provenance: { kind: "file", path: source.path, format: "parquet" },
+          };
+          options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+          return { table, meta, sources: [meta] };
+        } catch (err) {
+          if (!isOptionalArrowDependencyError(err) && !isModuleNotFoundError(err)) {
+            throw err;
+          }
+        }
       }
 
       if (source.type === "parquet" && connector.readBinaryStream) {
@@ -3314,39 +3345,68 @@ export class QueryEngine {
       }
       throwIfAborted(options.signal);
 
-      const { parquetFileToGridBatches } = await loadDataIoModule();
-      const iterator = parquetFileToGridBatches(handle, {
-        ...(source.options ?? {}),
-        gridBatchSize: batchSize,
-        includeHeader: true,
-      })[Symbol.asyncIterator]();
+      try {
+        const { parquetFileToGridBatches } = await loadDataIoModule();
+        const iterator = parquetFileToGridBatches(handle, {
+          ...(source.options ?? {}),
+          gridBatchSize: batchSize,
+          includeHeader: true,
+        })[Symbol.asyncIterator]();
 
-      const first = await iterator.next();
-      const header = !first.done && Array.isArray(first.value?.values) ? first.value.values[0] ?? [] : [];
-      const columns = header.map((name) => ({ name: String(name ?? ""), type: "any" }));
+        const first = await iterator.next();
+        const header = !first.done && Array.isArray(first.value?.values) ? first.value.values[0] ?? [] : [];
+        const columns = header.map((name) => ({ name: String(name ?? ""), type: "any" }));
 
-      async function* batches() {
-        try {
-          while (true) {
-            const next = await iterator.next();
-            if (next.done) break;
-            const values = next.value?.values;
-            if (Array.isArray(values) && values.length > 0) {
-              yield values;
+        async function* batches() {
+          try {
+            while (true) {
+              const next = await iterator.next();
+              if (next.done) break;
+              const values = next.value?.values;
+              if (Array.isArray(values) && values.length > 0) {
+                yield values;
+              }
             }
-          }
-        } finally {
-          if (typeof iterator.return === "function") {
-            try {
-              await iterator.return();
-            } catch {
-              // ignore
+          } finally {
+            if (typeof iterator.return === "function") {
+              try {
+                await iterator.return();
+              } catch {
+                // ignore
+              }
             }
           }
         }
-      }
 
-      return { columns, batches: batches() };
+        return { columns, batches: batches() };
+      } catch (err) {
+        // Arrow/parquet support is optional. If the Arrow stack isn't available, fall back
+        // to the row-backed `readParquetTable` adapter.
+        if (!isOptionalArrowDependencyError(err) && !isModuleNotFoundError(err)) {
+          throw err;
+        }
+        if (!connector.readParquetTable) {
+          throw err;
+        }
+
+        const table = await connector.readParquetTable(source.path, { signal: options.signal });
+        const columns = table.columns.map((c) => ({ name: c.name, type: c.type ?? "any" }));
+
+        async function* batches() {
+          /** @type {unknown[][]} */
+          let batch = [];
+          for (const row of table.iterRows()) {
+            batch.push(row);
+            if (batch.length >= batchSize) {
+              yield batch;
+              batch = [];
+            }
+          }
+          if (batch.length > 0) yield batch;
+        }
+
+        return { columns, batches: batches() };
+      }
     }
 
     /** @type {never} */
