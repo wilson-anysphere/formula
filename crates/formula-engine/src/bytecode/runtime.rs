@@ -7667,9 +7667,16 @@ fn fn_vlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let lookup_value = apply_implicit_intersection(args[0].clone(), grid, base);
+    let lookup_value = match &args[0] {
+        Value::Range(_) | Value::MultiRange(_) => {
+            Some(apply_implicit_intersection(args[0].clone(), grid, base))
+        }
+        _ => None,
+    };
+    let lookup_value = lookup_value.as_ref().unwrap_or(&args[0]);
+
     if let Value::Error(e) = lookup_value {
-        return Value::Error(e);
+        return Value::Error(*e);
     }
     if matches!(lookup_value, Value::Lambda(_)) {
         return Value::Error(ErrorKind::Value);
@@ -7712,12 +7719,12 @@ fn fn_vlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     };
 
     let row_offset = if approx {
-        match approximate_match_in_first_col(grid, &lookup_value, table) {
+        match approximate_match_in_first_col(grid, lookup_value, table) {
             Some(r) => r,
             None => return Value::Error(ErrorKind::NA),
         }
     } else {
-        match exact_match_in_first_col(grid, &lookup_value, table) {
+        match exact_match_in_first_col(grid, lookup_value, table) {
             Some(r) => r,
             None => return Value::Error(ErrorKind::NA),
         }
@@ -7733,9 +7740,16 @@ fn fn_hlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let lookup_value = apply_implicit_intersection(args[0].clone(), grid, base);
+    let lookup_value = match &args[0] {
+        Value::Range(_) | Value::MultiRange(_) => {
+            Some(apply_implicit_intersection(args[0].clone(), grid, base))
+        }
+        _ => None,
+    };
+    let lookup_value = lookup_value.as_ref().unwrap_or(&args[0]);
+
     if let Value::Error(e) = lookup_value {
-        return Value::Error(e);
+        return Value::Error(*e);
     }
     if matches!(lookup_value, Value::Lambda(_)) {
         return Value::Error(ErrorKind::Value);
@@ -7778,12 +7792,12 @@ fn fn_hlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     };
 
     let col_offset = if approx {
-        match approximate_match_in_first_row(grid, &lookup_value, table) {
+        match approximate_match_in_first_row(grid, lookup_value, table) {
             Some(c) => c,
             None => return Value::Error(ErrorKind::NA),
         }
     } else {
-        match exact_match_in_first_row(grid, &lookup_value, table) {
+        match exact_match_in_first_row(grid, lookup_value, table) {
             Some(c) => c,
             None => return Value::Error(ErrorKind::NA),
         }
@@ -7799,9 +7813,16 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Value);
     }
 
-    let lookup_value = apply_implicit_intersection(args[0].clone(), grid, base);
+    let lookup_value = match &args[0] {
+        Value::Range(_) | Value::MultiRange(_) => {
+            Some(apply_implicit_intersection(args[0].clone(), grid, base))
+        }
+        _ => None,
+    };
+    let lookup_value = lookup_value.as_ref().unwrap_or(&args[0]);
+
     if let Value::Error(e) = lookup_value {
-        return Value::Error(e);
+        return Value::Error(*e);
     }
     if matches!(lookup_value, Value::Lambda(_)) {
         return Value::Error(ErrorKind::Value);
@@ -7838,9 +7859,9 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 let value_at =
                     |idx: usize| grid.get_value(CellCoord { row, col: range.col_start + idx as i32 });
                 match match_type {
-                    0 => exact_match_1d(&lookup_value, len, &value_at),
-                    1 => approximate_match_1d(&lookup_value, len, &value_at, true),
-                    -1 => approximate_match_1d(&lookup_value, len, &value_at, false),
+                    0 => exact_match_1d(lookup_value, len, &value_at),
+                    1 => approximate_match_1d(lookup_value, len, &value_at, true),
+                    -1 => approximate_match_1d(lookup_value, len, &value_at, false),
                     _ => return Value::Error(ErrorKind::NA),
                 }
             } else if range.col_start == range.col_end {
@@ -7852,9 +7873,9 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
                 let value_at =
                     |idx: usize| grid.get_value(CellCoord { row: range.row_start + idx as i32, col });
                 match match_type {
-                    0 => exact_match_1d(&lookup_value, len, &value_at),
-                    1 => approximate_match_1d(&lookup_value, len, &value_at, true),
-                    -1 => approximate_match_1d(&lookup_value, len, &value_at, false),
+                    0 => exact_match_1d(lookup_value, len, &value_at),
+                    1 => approximate_match_1d(lookup_value, len, &value_at, true),
+                    -1 => approximate_match_1d(lookup_value, len, &value_at, false),
                     _ => return Value::Error(ErrorKind::NA),
                 }
             } else {
@@ -7872,9 +7893,9 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             }
             let value_at = |idx: usize| arr.values.get(idx).cloned().unwrap_or(Value::Empty);
             match match_type {
-                0 => exact_match_1d(&lookup_value, len, &value_at),
-                1 => approximate_match_1d(&lookup_value, len, &value_at, true),
-                -1 => approximate_match_1d(&lookup_value, len, &value_at, false),
+                0 => exact_match_1d(lookup_value, len, &value_at),
+                1 => approximate_match_1d(lookup_value, len, &value_at, true),
+                -1 => approximate_match_1d(lookup_value, len, &value_at, false),
                 _ => return Value::Error(ErrorKind::NA),
             }
         }
@@ -7958,7 +7979,14 @@ fn fn_xmatch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     }
     // `lookup_value` is a scalar argument; when provided as a range reference Excel applies implicit
     // intersection based on the formula cell. Match the AST evaluator's `eval_scalar_arg` behavior.
-    let lookup_value = apply_implicit_intersection(args[0].clone(), grid, base);
+    let lookup_value = match &args[0] {
+        Value::Range(_) | Value::MultiRange(_) => {
+            apply_implicit_intersection(args[0].clone(), grid, base)
+        }
+        // Arrays cannot be used as scalar lookup values.
+        Value::Array(_) => return Value::Error(ErrorKind::Spill),
+        _ => args[0].clone(),
+    };
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
@@ -8054,7 +8082,14 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     }
     // `lookup_value` is a scalar argument; when provided as a range reference Excel applies implicit
     // intersection based on the formula cell. Match the AST evaluator's `eval_scalar_arg` behavior.
-    let lookup_value = apply_implicit_intersection(args[0].clone(), grid, base);
+    let lookup_value = match &args[0] {
+        Value::Range(_) | Value::MultiRange(_) => {
+            apply_implicit_intersection(args[0].clone(), grid, base)
+        }
+        // Arrays cannot be used as scalar lookup values.
+        Value::Array(_) => return Value::Error(ErrorKind::Spill),
+        _ => args[0].clone(),
+    };
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
