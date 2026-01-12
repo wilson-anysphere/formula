@@ -3,6 +3,8 @@
 import { act } from "react";
 import { describe, expect, it } from "vitest";
 
+import { mountTitlebar } from "./mountTitlebar.js";
+
 // React 18 relies on this flag to suppress act() warnings in test runners.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -12,8 +14,6 @@ describe("mountTitlebar", () => {
     const container = document.createElement("div");
     container.classList.add("formula-titlebar");
     document.body.appendChild(container);
-
-    const { mountTitlebar } = await import("./mountTitlebar.js");
 
     let titlebar: ReturnType<typeof mountTitlebar> | null = null;
     await act(async () => {
