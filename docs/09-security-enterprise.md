@@ -57,7 +57,7 @@ See also: [docs/saml.md](./saml.md), [docs/oidc.md](./oidc.md)
 
 #### OIDC SSO administration (services/api)
 
-OIDC providers are configured **per organization** via org-admin API endpoints. Client secrets are stored in the database-backed secret store (`secrets` table) and encrypted using `SECRET_STORE_KEYS_JSON` (preferred) or the legacy `SECRET_STORE_KEY`.
+OIDC providers are configured **per organization** via org-admin API endpoints. Client secrets are stored in the database-backed secret store (`secrets` table) and encrypted using `SECRET_STORE_KEYS` (recommended), `SECRET_STORE_KEYS_JSON`, or the legacy `SECRET_STORE_KEY`.
 
 Routes (org admin only; session or API key auth; session auth requires MFA):
 
