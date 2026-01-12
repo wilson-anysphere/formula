@@ -34,6 +34,7 @@ import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
 import { getPanelPlacement } from "./layout/layoutState.js";
 import { SecondaryGridView } from "./grid/splitView/secondaryGridView.js";
+import { resolveDesktopGridMode } from "./grid/shared/desktopGridMode.js";
 import { getPanelTitle, panelRegistry, PanelIds } from "./panels/panelRegistry.js";
 import { createPanelBodyRenderer } from "./panels/panelBodyRenderer.js";
 import { MacroRecorder, generatePythonMacro, generateTypeScriptMacro } from "./macro-recorder/index.js";
@@ -212,6 +213,16 @@ warnIfMissingCrossOriginIsolationInTauriProd();
 
 let workbookSheetStore = new WorkbookSheetStore([{ id: "Sheet1", name: "Sheet1", visibility: "visible" }]);
 const workbookSheetNames = new Map<string, string>();
+
+function getWorkbookLoadLimits(): { maxRows: number; maxCols: number } {
+  return resolveWorkbookLoadLimits({
+    queryString: typeof window !== "undefined" ? window.location.search : "",
+    env: {
+      ...((import.meta as any).env ?? {}),
+      ...(((globalThis as any).process?.env as Record<string, unknown> | undefined) ?? {}),
+    },
+  });
+}
 
 function syncWorkbookSheetNamesFromSheetStore(): void {
   workbookSheetNames.clear();
@@ -672,10 +683,19 @@ const sheetPositionEl = sheetPosition;
 const docIdParam = new URL(window.location.href).searchParams.get("docId");
 const docId = typeof docIdParam === "string" && docIdParam.trim() !== "" ? docIdParam : null;
 const workbookId = docId ?? "local-workbook";
+const legacyGridLimits = resolveDesktopGridMode() === "legacy" ? getWorkbookLoadLimits() : undefined;
 const app = new SpreadsheetApp(
   gridRoot,
   { activeCell, selectionRange, activeValue, selectionSum, selectionAverage, selectionCount },
-  { formulaBar: formulaBarRoot, workbookId, sheetNameResolver },
+  {
+    formulaBar: formulaBarRoot,
+    workbookId,
+    sheetNameResolver,
+    // Legacy renderer uses a smaller grid by default for performance reasons. When users
+    // explicitly raise the workbook load limits (via query params/env), align the legacy
+    // grid limits so the loaded data is reachable.
+    limits: legacyGridLimits,
+  },
 );
 
 // Expose a small API for Playwright assertions early so e2e can still attach even if
@@ -6830,13 +6850,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
   installSheetStoreSubscription();
 
   const CHUNK_ROWS = 200;
-  const { maxRows: MAX_ROWS, maxCols: MAX_COLS } = resolveWorkbookLoadLimits({
-    queryString: typeof window !== "undefined" ? window.location.search : "",
-    env: {
-      ...((import.meta as any).env ?? {}),
-      ...(((globalThis as any).process?.env as Record<string, unknown> | undefined) ?? {}),
-    },
-  });
+  const { maxRows: MAX_ROWS, maxCols: MAX_COLS } = getWorkbookLoadLimits();
 
   const snapshotSheets: Array<{ id: string; cells: any[] }> = [];
   let truncated = false;
