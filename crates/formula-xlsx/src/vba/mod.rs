@@ -7,7 +7,7 @@ use crate::{XlsxDocument, XlsxPackage};
 pub use formula_vba::{
     SignatureError, VbaDigitalSignature, VbaDigitalSignatureBound, VbaProjectBindingVerification,
     VbaProjectDigestDebugInfo, VbaSignatureVerification, VBAModule, VBAProject, VBAReference,
-    VbaCertificateTrust, VbaDigitalSignatureTrusted, VbaSignatureTrustOptions,
+    VbaCertificateTrust, VbaDigitalSignatureTrusted, VbaSignatureStreamKind, VbaSignatureTrustOptions,
 };
 
 const VBA_PROJECT_BIN: &str = "xl/vbaProject.bin";
@@ -181,6 +181,7 @@ fn parse_vba_digital_signature_from_parts(
                     if signer_subject.is_some() {
                         return Ok(Some(VbaDigitalSignature {
                             stream_path: signature_part_name,
+                            stream_kind: formula_vba::VbaSignatureStreamKind::Unknown,
                             signer_subject,
                             signature: bytes.to_vec(),
                             verification: VbaSignatureVerification::SignedButUnverified,
@@ -233,6 +234,7 @@ fn verify_vba_digital_signature_from_parts(
                     let (verification, signer_subject) = formula_vba::verify_vba_signature_blob(bytes);
                     signature_part_result = Some(VbaDigitalSignature {
                         stream_path: signature_part_name,
+                        stream_kind: formula_vba::VbaSignatureStreamKind::Unknown,
                         signer_subject,
                         signature: bytes.to_vec(),
                         verification,

@@ -9,6 +9,25 @@ use crate::{
 };
 use md5::{Digest as _, Md5};
 
+/// Identifies which `\x05DigitalSignature*` stream/storage variant a signature was loaded from.
+///
+/// Excel stores VBA project signatures in one of three known variants:
+/// - `\x05DigitalSignature` (legacy)
+/// - `\x05DigitalSignatureEx` (extended, SHA-2-era)
+/// - `\x05DigitalSignatureExt` (extension; newest / used for V3 contents-hash signatures)
+///
+/// Some producers store the signature stream inside a storage (e.g. `\x05DigitalSignatureEx/sig`);
+/// detection therefore inspects all OLE path components.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VbaSignatureStreamKind {
+    DigitalSignature,
+    DigitalSignatureEx,
+    DigitalSignatureExt,
+    /// The stream path looks signature-related (e.g. component begins with `DigitalSignature` after
+    /// trimming leading C0 control chars) but doesn't exactly match a known variant name.
+    Unknown,
+}
+
 /// Metadata extracted from the signer certificate embedded in a VBA digital signature.
 ///
 /// This is intended for UI display (e.g. Trust Center) and is **best-effort**:
@@ -42,6 +61,8 @@ pub struct VbaSignerCertificateInfo {
 pub struct VbaDigitalSignature {
     /// OLE stream path the signature was loaded from.
     pub stream_path: String,
+    /// Which `DigitalSignature*` variant this signature stream corresponds to.
+    pub stream_kind: VbaSignatureStreamKind,
     /// Best-effort signer certificate subject (e.g. `CN=...`), if found.
     pub signer_subject: Option<String>,
     /// Raw signature stream bytes.
@@ -111,6 +132,8 @@ pub enum VbaProjectBindingVerification {
 pub struct VbaDigitalSignatureStream {
     /// OLE stream path the signature was loaded from.
     pub stream_path: String,
+    /// Which `DigitalSignature*` variant this signature stream corresponds to.
+    pub stream_kind: VbaSignatureStreamKind,
     /// Best-effort signer certificate subject (e.g. `CN=...`), if found.
     pub signer_subject: Option<String>,
     /// Raw signature stream bytes.
@@ -278,6 +301,7 @@ pub fn list_vba_digital_signatures(
 
     let mut out = Vec::new();
     for path in candidates {
+        let stream_kind = signature_path_stream_kind(&path).unwrap_or(VbaSignatureStreamKind::Unknown);
         let signature = ole.read_stream_opt(&path)?.unwrap_or_default();
         let signer_subject = extract_first_certificate_subject(&signature);
         let verification = verify_signature_blob(&signature);
@@ -295,6 +319,7 @@ pub fn list_vba_digital_signatures(
 
         out.push(VbaDigitalSignatureStream {
             stream_path: path,
+            stream_kind,
             signer_subject,
             signature,
             verification,
@@ -386,6 +411,8 @@ pub fn parse_vba_digital_signature(
         .into_iter()
         .next()
         .expect("candidates non-empty");
+    let stream_kind =
+        signature_path_stream_kind(&chosen).unwrap_or(VbaSignatureStreamKind::Unknown);
     let signature = ole
         .read_stream_opt(&chosen)?
         .unwrap_or_else(|| Vec::new());
@@ -394,6 +421,7 @@ pub fn parse_vba_digital_signature(
 
     Ok(Some(VbaDigitalSignature {
         stream_path: chosen,
+        stream_kind,
         signer_subject,
         signature,
         verification: VbaSignatureVerification::SignedButUnverified,
@@ -568,6 +596,7 @@ pub fn verify_vba_digital_signature_with_project(
     let mut first: Option<VbaDigitalSignature> = None;
     let mut first_verified: Option<VbaDigitalSignature> = None;
     for path in candidates {
+        let stream_kind = signature_path_stream_kind(&path).unwrap_or(VbaSignatureStreamKind::Unknown);
         let signature = ole.read_stream_opt(&path)?.unwrap_or_default();
         let signer_subject = extract_first_certificate_subject(&signature);
         let verification = verify_signature_blob(&signature);
@@ -579,6 +608,7 @@ pub fn verify_vba_digital_signature_with_project(
         };
         let sig = VbaDigitalSignature {
             stream_path: path,
+            stream_kind,
             signer_subject,
             signature,
             verification,
@@ -636,6 +666,8 @@ pub fn verify_vba_digital_signature_with_trust(
     let mut first: Option<VbaDigitalSignatureTrusted> = None;
     let mut first_verified: Option<VbaDigitalSignatureTrusted> = None;
     for path in candidates {
+        let stream_kind =
+            signature_path_stream_kind(&path).unwrap_or(VbaSignatureStreamKind::Unknown);
         let signature_bytes = ole.read_stream_opt(&path)?.unwrap_or_default();
         let signer_subject = extract_first_certificate_subject(&signature_bytes);
 
@@ -662,6 +694,7 @@ pub fn verify_vba_digital_signature_with_trust(
 
         let sig = VbaDigitalSignature {
             stream_path: path,
+            stream_kind,
             signer_subject,
             signature: signature_bytes,
             verification,
@@ -738,7 +771,7 @@ pub fn verify_vba_signature_binding_with_stream_path(
                 // to our deterministic "project digest" over OLE streams. This keeps binding checks
                 // useful for synthetically-constructed fixtures while preserving the spec-ish path
                 // for real-world projects.
-                let digest = match crate::compute_vba_project_digest(vba_project_bin, DigestAlg::Md5) {
+                let digest = match compute_vba_project_digest(vba_project_bin, DigestAlg::Md5) {
                     Ok(v) => v,
                     Err(_) => return VbaSignatureBinding::Unknown,
                 };
@@ -835,12 +868,48 @@ fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
     })
 }
 
-fn is_signature_component(component: &str) -> bool {
+fn signature_kind_rank(kind: VbaSignatureStreamKind) -> u8 {
+    match kind {
+        VbaSignatureStreamKind::DigitalSignatureExt => 0,
+        VbaSignatureStreamKind::DigitalSignatureEx => 1,
+        VbaSignatureStreamKind::DigitalSignature => 2,
+        VbaSignatureStreamKind::Unknown => 3,
+    }
+}
+
+fn signature_component_stream_kind(component: &str) -> Option<VbaSignatureStreamKind> {
+    // Excel/VBA signature storages/streams are control-character prefixed in OLE; normalize by
+    // stripping leading C0 control chars.
     let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
-    matches!(
-        trimmed,
-        "DigitalSignature" | "DigitalSignatureEx" | "DigitalSignatureExt"
-    )
+    match trimmed {
+        "DigitalSignatureExt" => Some(VbaSignatureStreamKind::DigitalSignatureExt),
+        "DigitalSignatureEx" => Some(VbaSignatureStreamKind::DigitalSignatureEx),
+        "DigitalSignature" => Some(VbaSignatureStreamKind::DigitalSignature),
+        // Some files may use a signature-like storage name that doesn't exactly match one of the
+        // known variants. Treat it as a signature candidate, but mark the kind as unknown.
+        _ if trimmed.starts_with("DigitalSignature") => Some(VbaSignatureStreamKind::Unknown),
+        _ => None,
+    }
+}
+
+fn signature_path_stream_kind(path: &str) -> Option<VbaSignatureStreamKind> {
+    let mut best: Option<(u8, VbaSignatureStreamKind)> = None;
+    for component in path.split('/') {
+        let Some(kind) = signature_component_stream_kind(component) else {
+            continue;
+        };
+        let rank = signature_kind_rank(kind);
+        match best {
+            None => best = Some((rank, kind)),
+            Some((best_rank, _)) if rank < best_rank => best = Some((rank, kind)),
+            _ => {}
+        }
+    }
+    best.map(|(_, kind)| kind)
+}
+
+fn is_signature_component(component: &str) -> bool {
+    signature_component_stream_kind(component).is_some()
 }
 
 fn signature_path_rank(path: &str) -> u8 {
@@ -859,17 +928,8 @@ fn signature_path_rank(path: &str) -> u8 {
     // based on observed Office/Excel behavior and existing files produced by different Office
     // versions.
     // https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
-    path.split('/')
-        .map(|component| {
-            let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
-            match trimmed {
-                "DigitalSignatureExt" => 0,
-                "DigitalSignatureEx" => 1,
-                "DigitalSignature" => 2,
-                _ => 3,
-            }
-        })
-        .min()
+    signature_path_stream_kind(path)
+        .map(signature_kind_rank)
         .unwrap_or(3)
 }
 

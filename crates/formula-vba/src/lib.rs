@@ -37,8 +37,8 @@ pub use signature::{
     verify_vba_signature_blob, verify_vba_signature_certificate_trust, SignatureError,
     VbaCertificateTrust, VbaDigitalSignature, VbaDigitalSignatureBound, VbaDigitalSignatureStream,
     VbaDigitalSignatureTrusted, VbaProjectBindingVerification, VbaProjectDigestDebugInfo,
-    VbaSignatureBinding, VbaSignatureBlobInfo, VbaSignatureTrustOptions, VbaSignatureVerification,
-    VbaSignerCertificateInfo,
+    VbaSignatureBinding, VbaSignatureBlobInfo, VbaSignatureStreamKind, VbaSignatureTrustOptions,
+    VbaSignatureVerification, VbaSignerCertificateInfo,
 };
 
 use std::collections::BTreeMap;

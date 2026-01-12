@@ -1,6 +1,6 @@
 use std::io::{Cursor, Write};
 
-use formula_vba::parse_vba_digital_signature;
+use formula_vba::{parse_vba_digital_signature, VbaSignatureStreamKind};
 
 #[test]
 fn parse_prefers_signature_component_even_when_stream_is_nested_under_storage() {
@@ -37,6 +37,13 @@ fn parse_prefers_signature_component_even_when_stream_is_nested_under_storage() 
         .expect("parse should succeed")
         .expect("signature should be present");
 
+    assert_eq!(
+        sig.stream_kind,
+        VbaSignatureStreamKind::DigitalSignatureEx,
+        "expected nested DigitalSignatureEx stream to be classified as DigitalSignatureEx, got {:?} (path {})",
+        sig.stream_kind,
+        sig.stream_path
+    );
     assert!(
         sig.stream_path.contains("/sig"),
         "expected nested DigitalSignatureEx stream to be selected, got {}",
@@ -80,10 +87,35 @@ fn parse_prefers_digital_signature_ext_over_ex() {
         .expect("parse should succeed")
         .expect("signature should be present");
 
+    assert_eq!(sig.stream_kind, VbaSignatureStreamKind::DigitalSignatureExt);
     assert!(
         sig.stream_path.contains("DigitalSignatureExt") && sig.stream_path.contains("/sig"),
         "expected nested DigitalSignatureExt stream to be selected, got {}",
         sig.stream_path
     );
     assert_eq!(sig.signature, b"nested-ext-signature");
+}
+
+#[test]
+fn parse_root_digital_signature_ext_sets_stream_kind() {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
+
+    {
+        let mut stream = ole
+            .create_stream("\u{0005}DigitalSignatureExt")
+            .expect("create signature stream");
+        stream
+            .write_all(b"ext-signature")
+            .expect("write signature bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let sig = parse_vba_digital_signature(&vba_project_bin)
+        .expect("parse should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.stream_kind, VbaSignatureStreamKind::DigitalSignatureExt);
+    assert!(sig.stream_path.contains("DigitalSignatureExt"));
+    assert_eq!(sig.signature, b"ext-signature");
 }
