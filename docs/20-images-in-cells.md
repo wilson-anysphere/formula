@@ -30,6 +30,7 @@ Workbooks using images-in-cells are expected to include some/all of the followin
 ```
 xl/
 ├── cellimages.xml
+├── cellimages1.xml (optional; Excel appears to use `cellimages.xml` today, but allow suffixes)
 ├── _rels/
 │   └── cellimages.xml.rels
 ├── media/
@@ -184,6 +185,24 @@ Representative example (from `crates/formula-xlsx/tests/cell_images.rs`; non-nor
 </cx:cellImages>
 ```
 
+Another observed shape (from `crates/formula-xlsx/tests/cellimages_preservation.rs`) wraps the `<xdr:pic>`
+in a `cellImage` container element:
+
+```xml
+<etc:cellImages xmlns:etc="http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages"
+                xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+                xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+                xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <etc:cellImage>
+    <xdr:pic>
+      <xdr:blipFill>
+        <a:blip r:embed="rId1"/>
+      </xdr:blipFill>
+    </xdr:pic>
+  </etc:cellImage>
+</etc:cellImages>
+```
+
 ### `xl/_rels/cellimages.xml.rels`
 
 `xl/_rels/cellimages.xml.rels` contains OPC relationships from `cellimages.xml` to the binary image parts
@@ -199,6 +218,9 @@ This relationships file is standard OPC, and the **image relationship type URI i
                 Target="media/image1.png"/>
 </Relationships>
 ```
+
+Targets are usually relative paths and may appear as `media/image1.png` or `../media/image1.png`
+(preserve the original `Target` exactly).
 
 **Round-trip rules:**
 
