@@ -19,6 +19,10 @@ const WHEN_COMMAND_PALETTE_CLOSED = "workbench.commandPaletteOpen == false";
 // Dialog-style shortcuts (Find/Replace/Go To, comments panel) should not steal focus while
 // the user is typing in a text input (notably the formula bar editor).
 const WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT = "workbench.commandPaletteOpen == false && focus.inTextInput == false";
+// Find/Replace/Go To should not run while the spreadsheet is editing. This avoids stealing
+// focus during formula-bar range selection mode where focus can temporarily return to the grid
+// even though an edit session is active.
+const WHEN_FIND_REPLACE_GOTO = `${WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT} && spreadsheet.isEditing == false`;
 const WHEN_EDIT_CELL = `${WHEN_SPREADSHEET_READY} && focus.inGrid == false`;
 const WHEN_OPEN_CONTEXT_MENU = `${WHEN_SPREADSHEET_READY} && ${WHEN_COMMAND_PALETTE_CLOSED} && focus.inSheetTabs == false`;
 
@@ -239,20 +243,20 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "edit.find",
     key: "ctrl+f",
     mac: "cmd+f",
-    when: WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT,
+    when: WHEN_FIND_REPLACE_GOTO,
   },
   {
     command: "edit.replace",
     key: "ctrl+h",
     // Cmd+H is reserved by macOS for "Hide". Use Cmd+Option+F like many native apps.
     mac: "cmd+option+f",
-    when: WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT,
+    when: WHEN_FIND_REPLACE_GOTO,
   },
   {
     command: "navigation.goTo",
     key: "ctrl+g",
     mac: "cmd+g",
-    when: WHEN_COMMAND_PALETTE_CLOSED_AND_NOT_IN_TEXT_INPUT,
+    when: WHEN_FIND_REPLACE_GOTO,
   },
   {
     command: "edit.clearContents",

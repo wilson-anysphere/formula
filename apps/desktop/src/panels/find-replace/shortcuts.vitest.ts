@@ -75,6 +75,7 @@ describe("find/replace shortcuts", () => {
     // uninitialized (capture-phase safe). Ensure this test opts into the "not in input"
     // state so Find/Replace shortcuts are eligible to fire.
     contextKeys.set("focus.inTextInput", false);
+    contextKeys.set("spreadsheet.isEditing", false);
     const keybindingService = new KeybindingService({ commandRegistry, contextKeys, platform: "mac" });
     keybindingService.setBuiltinKeybindings(builtinKeybindings);
     const disposeKeybindings = keybindingService.installWindowListener(window);
