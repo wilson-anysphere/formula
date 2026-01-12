@@ -12,9 +12,11 @@ use thiserror::Error;
 pub struct VbaSignedDigest {
     /// Algorithm OID from the signed digest structure.
     ///
-    /// Note: for VBA signatures this OID is not authoritative for binding: Office uses **16-byte
-    /// MD5** digest bytes per MS-OSHARED §4.3 even when this OID indicates SHA-256. This applies to
-    /// all `\x05DigitalSignature*` variants, including `\x05DigitalSignatureExt`.
+    /// Note: for VBA signatures this OID is not authoritative for binding:
+    /// - v1/v2 (`\x05DigitalSignature` / `\x05DigitalSignatureEx`): digest bytes are always
+    ///   **16-byte MD5** per MS-OSHARED §4.3 even when this OID indicates SHA-256.
+    /// - v3 (`\x05DigitalSignatureExt`): digest bytes are expected to be the MS-OVBA `ContentsHashV3`
+    ///   (SHA-256); some producers emit inconsistent OIDs.
     ///
     /// This field is surfaced for debugging/UI display only.
     ///

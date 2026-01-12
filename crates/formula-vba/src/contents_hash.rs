@@ -1169,9 +1169,9 @@ fn starts_with_ascii_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
 
 /// Compute the MS-OVBA §2.4.2.3 **Content Hash** (v1) for a VBA project.
 ///
-/// Per MS-OSHARED §4.3, the digest bytes used for VBA signature binding are **MD5 (16 bytes)** even
-/// when the PKCS#7/CMS signature uses SHA-1/SHA-256 and even when the Authenticode `DigestInfo`
-/// algorithm OID indicates SHA-256.
+/// Per MS-OSHARED §4.3, for legacy VBA signature streams, the digest bytes used for signature
+/// binding are **MD5 (16 bytes)** even when the PKCS#7/CMS signature uses SHA-1/SHA-256 and even
+/// when the Authenticode `DigestInfo` algorithm OID indicates SHA-256.
 pub fn content_hash_md5(vba_project_bin: &[u8]) -> Result<[u8; 16], ParseError> {
     let normalized = content_normalized_data(vba_project_bin)?;
     Ok(Md5::digest(&normalized).into())
