@@ -128,6 +128,25 @@ if [[ -z "${RAYON_NUM_THREADS:-}" ]]; then
   export RAYON_NUM_THREADS="${rayon_threads}"
 fi
 
+# OpenSSL: avoid expensive vendored builds when a system OpenSSL is available.
+#
+# Some crates enable the `openssl/vendored` feature for portability, but building OpenSSL from
+# source is slow and can fail under process/thread pressure on multi-agent hosts.
+#
+# When we're on Linux and `pkg-config` can locate OpenSSL, force `openssl-sys` to use the system
+# installation even if `vendored` is enabled.
+#
+# Override:
+# - set `OPENSSL_NO_VENDOR` explicitly to control openssl-sys directly, or
+# - set `FORMULA_OPENSSL_VENDOR=1` to prevent this wrapper from setting `OPENSSL_NO_VENDOR`.
+if [[ -z "${CI:-}" && -z "${OPENSSL_NO_VENDOR:-}" && -z "${FORMULA_OPENSSL_VENDOR:-}" ]]; then
+  if command -v uname >/dev/null 2>&1 && [[ "$(uname -s)" == "Linux" ]]; then
+    if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists openssl; then
+      export OPENSSL_NO_VENDOR=1
+    fi
+  fi
+fi
+
 # Subcommand
 subcommand="$1"
 shift
