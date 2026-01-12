@@ -5702,7 +5702,49 @@ export class SpreadsheetApp {
     // materializing per-cell format objects.
     const docAny = this.document as any;
     const styleIdByLayerKey = new Map<string, number>();
-    const styleIdByResolvedStyle = new WeakMap<object, number>();
+
+    // Best-effort access to the underlying sheet model to cheaply derive a stable
+    // (sheet,row,col,cell) style id tuple key without computing full merges for
+    // every copied cell.
+    const sheetModel = (() => {
+      try {
+        // Ensure sheet exists (DocumentController creates sheets lazily).
+        docAny?.model?.getCell?.(this.sheetId, 0, 0);
+        return docAny?.model?.sheets?.get?.(this.sheetId) ?? null;
+      } catch {
+        return null;
+      }
+    })();
+
+    const normalizeStyleId = (value: unknown): number => {
+      const n = Number(value);
+      return Number.isInteger(n) && n >= 0 ? n : 0;
+    };
+
+    const getStyleIdTupleKey = (row: number, col: number, cellStyleId: number): string | null => {
+      // Prefer a public tuple helper if present (some controller implementations expose these).
+      if (typeof docAny.getCellFormatStyleIds === "function") {
+        try {
+          const tuple = docAny.getCellFormatStyleIds(this.sheetId, { row, col });
+          if (Array.isArray(tuple) && tuple.length === 4) {
+            const normalized = tuple.map(normalizeStyleId);
+            return normalized.join(",");
+          }
+        } catch {
+          // Ignore and fall back to the sheet model.
+        }
+      }
+
+      // DocumentController layered-formatting storage (sheet/row/col/cell).
+      if (sheetModel && typeof sheetModel === "object") {
+        const sheetStyleId = normalizeStyleId((sheetModel as any).sheetStyleId);
+        const rowStyleId = normalizeStyleId((sheetModel as any).rowStyles?.get?.(row));
+        const colStyleId = normalizeStyleId((sheetModel as any).colStyles?.get?.(col));
+        return [sheetStyleId, rowStyleId, colStyleId, normalizeStyleId(cellStyleId)].join(",");
+      }
+
+      return null;
+    };
 
     const cells: Array<Array<{ value: unknown; formula: string | null; styleId: number }>> = [];
     for (let row = range.startRow; row <= range.endRow; row += 1) {
@@ -5713,66 +5755,27 @@ export class SpreadsheetApp {
           formula: string | null;
           styleId: number;
         };
-        const baseStyleId = typeof cell.styleId === "number" ? cell.styleId : 0;
+        const baseStyleId = normalizeStyleId(cell.styleId);
 
-        // Cache effective style ids by their underlying layer ids when possible.
-        const layerKey = (() => {
-          if (typeof docAny.getEffectiveStyleKey === "function") {
-            try {
-              const key = docAny.getEffectiveStyleKey(this.sheetId, { row, col });
-              if (typeof key === "string" && key) return key;
-            } catch {
-              // Ignore; fall back to other key strategies.
-            }
-          }
-
-          const sheetStyleId =
-            typeof docAny.getSheetStyleId === "function" ? (docAny.getSheetStyleId(this.sheetId) as unknown) : null;
-          const rowStyleId =
-            typeof docAny.getRowStyleId === "function" ? (docAny.getRowStyleId(this.sheetId, row) as unknown) : null;
-          const colStyleId =
-            typeof docAny.getColStyleId === "function" ? (docAny.getColStyleId(this.sheetId, col) as unknown) : null;
-
-          if (typeof sheetStyleId === "number" && typeof rowStyleId === "number" && typeof colStyleId === "number") {
-            return `${sheetStyleId}:${rowStyleId}:${colStyleId}:${baseStyleId}`;
-          }
-
-          return null;
-        })();
-
+        const layerKey = getStyleIdTupleKey(row, col, baseStyleId);
         let styleId = layerKey ? styleIdByLayerKey.get(layerKey) : undefined;
+
         if (styleId === undefined) {
-          // Prefer an API that returns the effective style id directly if available.
-          if (typeof docAny.getEffectiveStyleId === "function") {
-            try {
-              const effective = docAny.getEffectiveStyleId(this.sheetId, { row, col });
-              if (typeof effective === "number") {
-                styleId = effective;
-              }
-            } catch {
-              // Ignore and fall back to style object resolution.
-            }
+          // If everything is default, skip resolving/interning.
+          if (layerKey === "0,0,0,0") {
+            styleId = 0;
+          } else {
+            const effectiveStyle = (() => {
+              const coord = { row, col };
+              if (typeof docAny.getCellFormat === "function") return docAny.getCellFormat(this.sheetId, coord);
+              if (typeof docAny.getEffectiveCellStyle === "function") return docAny.getEffectiveCellStyle(this.sheetId, coord);
+              if (typeof docAny.getCellStyle === "function") return docAny.getCellStyle(this.sheetId, coord);
+              return this.document.styleTable.get(baseStyleId);
+            })();
+
+            styleId = this.document.styleTable.intern(effectiveStyle);
           }
 
-          if (styleId === undefined) {
-            // Otherwise resolve the effective style object, intern it, and snapshot the id.
-            if (typeof docAny.getEffectiveStyle === "function") {
-              try {
-                const effectiveStyle = docAny.getEffectiveStyle(this.sheetId, { row, col });
-                if (effectiveStyle && typeof effectiveStyle === "object") {
-                  styleId = styleIdByResolvedStyle.get(effectiveStyle as object);
-                  if (styleId === undefined) {
-                    styleId = this.document.styleTable.intern(effectiveStyle);
-                    styleIdByResolvedStyle.set(effectiveStyle as object, styleId);
-                  }
-                }
-              } catch {
-                // Ignore and fall back to base style id.
-              }
-            }
-          }
-
-          if (styleId === undefined) styleId = baseStyleId;
           if (layerKey) styleIdByLayerKey.set(layerKey, styleId);
         }
 
