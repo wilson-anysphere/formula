@@ -29,10 +29,26 @@ pub fn parse_rich_value_relationship_indices(
     let doc = Document::parse(xml)?;
 
     let mut out = Vec::new();
-    for rv in doc
+    // Typical shape:
+    // <rvData> <values> <rv>...</rv>* </values> </rvData>
+    //
+    // Be tolerant: allow wrapper nodes under `<values>`. If there is a `<values>` container, prefer
+    // scanning within it to avoid false-positive `<rv>` matches elsewhere in the document.
+    let values_root = doc
         .descendants()
-        .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
-    {
+        .find(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("values"));
+    let rv_nodes: Vec<roxmltree::Node<'_, '_>> = match values_root {
+        Some(values) => values
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
+            .collect(),
+        None => doc
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
+            .collect(),
+    };
+
+    for rv in rv_nodes {
         out.push(parse_rv_relationship_index(&rv));
     }
 
@@ -105,10 +121,26 @@ pub fn parse_rich_values_xml(xml_bytes: &[u8]) -> Result<RichValues, XlsxError> 
     let doc = Document::parse(xml)?;
 
     let mut values = Vec::new();
-    for rv in doc
+    // Typical shape:
+    // <rvData> <values> <rv>...</rv>* </values> </rvData>
+    //
+    // Be tolerant: allow wrapper nodes under `<values>`. If there is a `<values>` container, prefer
+    // scanning within it to avoid false-positive `<rv>` matches elsewhere in the document.
+    let values_root = doc
         .descendants()
-        .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
-    {
+        .find(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("values"));
+    let rv_nodes: Vec<roxmltree::Node<'_, '_>> = match values_root {
+        Some(values) => values
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
+            .collect(),
+        None => doc
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
+            .collect(),
+    };
+
+    for rv in rv_nodes {
         // Rich value instances typically use `t`/`type` to reference a type definition from
         // `richValueTypes.xml`.
         //
@@ -266,6 +298,28 @@ mod tests {
     }
 
     #[test]
+    fn rich_value_relationship_indices_prefers_values_container_when_present() {
+        // Avoid false positives: if a document contains an unrelated `<rv>` outside `<values>`,
+        // do not treat it as part of the rich value table.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv type="0">
+      <v kind="rel">0</v>
+    </rv>
+  </values>
+  <other>
+    <rv type="0">
+      <v kind="rel">1</v>
+    </rv>
+  </other>
+</rvData>"#;
+
+        let parsed = parse_rich_value_relationship_indices(xml.as_bytes()).expect("parse");
+        assert_eq!(parsed, vec![Some(0)]);
+    }
+
+    #[test]
     fn rich_values_xml_parses_fields_in_document_order() {
         let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rd:rvData xmlns:rd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
@@ -348,5 +402,28 @@ mod tests {
                 value: Some("outer".to_string())
             }]
         );
+    }
+
+    #[test]
+    fn rich_values_xml_prefers_values_container_when_present() {
+        // If a document contains an unrelated `<rv>` element outside the `<values>` container,
+        // avoid treating it as part of the rich value table.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv t="1">
+      <v kind="string">in</v>
+    </rv>
+  </values>
+  <other>
+    <rv t="2">
+      <v kind="string">out</v>
+    </rv>
+  </other>
+</rvData>"#;
+
+        let parsed = parse_rich_values_xml(xml.as_bytes()).expect("parse");
+        assert_eq!(parsed.values.len(), 1);
+        assert_eq!(parsed.values[0].type_id, Some(1));
     }
 }
