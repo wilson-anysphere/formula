@@ -11,7 +11,7 @@ use crate::types::{
 };
 use formula_model::{
     rewrite_deleted_sheet_references_in_formula, rewrite_sheet_names_in_formula, validate_sheet_name,
-    DefinedName, DefinedNameScope, ErrorValue, SheetNameError,
+    sheet_name_eq_case_insensitive, DefinedName, DefinedNameScope, ErrorValue, SheetNameError,
 };
 use rusqlite::{params, Connection, DatabaseName, OpenFlags, OptionalExtension, Transaction};
 use serde::de::DeserializeOwned;
@@ -59,12 +59,6 @@ fn map_sheet_name_error(err: SheetNameError) -> StorageError {
         SheetNameError::EmptyName => StorageError::EmptySheetName,
         other => StorageError::InvalidSheetName(other),
     }
-}
-
-fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
-    a.nfkc()
-        .flat_map(|c| c.to_uppercase())
-        .eq(b.nfkc().flat_map(|c| c.to_uppercase()))
 }
 
 fn parse_optional_json_value(raw: Option<String>) -> Option<serde_json::Value> {

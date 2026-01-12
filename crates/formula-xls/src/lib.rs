@@ -32,10 +32,10 @@ use std::path::{Path, PathBuf};
 
 use calamine::{Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
-    normalize_formula_text, CellRef, CellValue, ColRange, Comment, CommentAuthor, CommentKind,
-    DefinedNameScope, ErrorValue, HyperlinkTarget, PrintTitles, Range, RowRange, SheetAutoFilter,
-    SheetVisibility, Style, TabColor, Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
-    EXCEL_MAX_SHEET_NAME_LEN, XLNM_FILTER_DATABASE,
+    normalize_formula_text, sheet_name_eq_case_insensitive, CellRef, CellValue, ColRange, Comment,
+    CommentAuthor, CommentKind, DefinedNameScope, ErrorValue, HyperlinkTarget, PrintTitles, Range,
+    RowRange, SheetAutoFilter, SheetVisibility, Style, TabColor, Workbook, EXCEL_MAX_COLS,
+    EXCEL_MAX_ROWS, EXCEL_MAX_SHEET_NAME_LEN, XLNM_FILTER_DATABASE,
 };
 use thiserror::Error;
 
@@ -1904,12 +1904,6 @@ fn is_filter_database_defined_name(name: &str) -> bool {
         || name.eq_ignore_ascii_case("_xlnm._FilterDatabas")
         || name.eq_ignore_ascii_case("_FilterDatabase")
         || name.eq_ignore_ascii_case("_FilterDatabas")
-}
-
-fn sheet_name_eq_case_insensitive(a: &str, b: &str) -> bool {
-    a.chars()
-        .flat_map(|ch| ch.to_uppercase())
-        .eq(b.chars().flat_map(|ch| ch.to_uppercase()))
 }
 
 fn infer_sheet_name_from_workbook_scoped_defined_name(
