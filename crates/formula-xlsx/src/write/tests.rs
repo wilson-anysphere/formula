@@ -499,3 +499,108 @@ fn patch_content_types_for_sheet_edits_preserves_prefix_only_content_types() {
         );
     }
 }
+#[test]
+fn relationship_target_by_type_handles_prefixed_relationship_elements() {
+    let rels = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships">
+  <pr:Relationship Id="rId1" Type="{REL_TYPE_STYLES}" Target="styles.xml"/>
+</pr:Relationships>"#
+    );
+
+    let target = relationship_target_by_type(rels.as_bytes(), REL_TYPE_STYLES).expect("parse rels");
+    assert_eq!(target.as_deref(), Some("styles.xml"));
+}
+
+#[test]
+fn ensure_workbook_rels_has_relationship_inserts_prefixed_relationship() {
+    let rels = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships">
+  <pr:Relationship Id="rId1" Type="{REL_TYPE_STYLES}" Target="styles.xml"/>
+</pr:Relationships>"#
+    );
+
+    let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    parts.insert(WORKBOOK_RELS_PART.to_string(), rels.into_bytes());
+
+    ensure_workbook_rels_has_relationship(&mut parts, REL_TYPE_SHARED_STRINGS, "sharedStrings.xml")
+        .expect("patch workbook rels");
+
+    let out = String::from_utf8(
+        parts
+            .get(WORKBOOK_RELS_PART)
+            .expect("workbook rels present")
+            .clone(),
+    )
+    .expect("utf8");
+    roxmltree::Document::parse(&out).expect("output rels should be valid xml");
+    assert!(
+        out.contains(REL_TYPE_SHARED_STRINGS),
+        "expected sharedStrings relationship to be inserted"
+    );
+    assert!(
+        !out.contains("<Relationship"),
+        "prefix-only rels must not contain namespace-less <Relationship> tags, got:\n{out}"
+    );
+}
+
+#[test]
+fn patch_workbook_rels_for_sheet_edits_handles_prefixed_relationships() {
+    let rels = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships">
+  <pr:Relationship Id="rId1" Type="{WORKSHEET_REL_TYPE}" Target="worksheets/sheet1.xml"/>
+  <pr:Relationship Id="rId2" Type="{REL_TYPE_STYLES}" Target="styles.xml"/>
+  <pr:Relationship Id="rId3" Type="{REL_TYPE_SHARED_STRINGS}" Target="sharedStrings.xml"/>
+</pr:Relationships>"#
+    );
+
+    let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    parts.insert(WORKBOOK_RELS_PART.to_string(), rels.into_bytes());
+
+    let removed = vec![SheetMeta {
+        worksheet_id: 1,
+        sheet_id: 1,
+        relationship_id: "rId1".to_string(),
+        state: None,
+        path: "xl/worksheets/sheet1.xml".to_string(),
+    }];
+    let added = vec![SheetMeta {
+        worksheet_id: 2,
+        sheet_id: 2,
+        relationship_id: "rId4".to_string(),
+        state: None,
+        path: "xl/worksheets/sheet2.xml".to_string(),
+    }];
+
+    patch_workbook_rels_for_sheet_edits(&mut parts, &removed, &added).expect("patch rels");
+
+    let out = String::from_utf8(
+        parts
+            .get(WORKBOOK_RELS_PART)
+            .expect("workbook rels present")
+            .clone(),
+    )
+    .expect("utf8");
+    roxmltree::Document::parse(&out).expect("output rels should be valid xml");
+    assert!(
+        !out.contains("<Relationship"),
+        "prefix-only rels must not contain namespace-less <Relationship> tags, got:\n{out}"
+    );
+
+    let doc = roxmltree::Document::parse(&out).expect("parse output");
+    let ids: Vec<&str> = doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "Relationship")
+        .filter_map(|n| n.attribute("Id"))
+        .collect();
+    assert!(
+        !ids.contains(&"rId1"),
+        "expected removed sheet relationship to be dropped"
+    );
+    assert!(
+        ids.contains(&"rId4"),
+        "expected added sheet relationship to be inserted"
+    );
+}
