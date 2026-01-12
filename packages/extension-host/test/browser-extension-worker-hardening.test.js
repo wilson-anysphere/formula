@@ -188,8 +188,20 @@ parentPort.postMessage({ type: "__ready__" });
     process.allowedNodeEnvironmentFlags && typeof process.allowedNodeEnvironmentFlags.has === "function"
       ? process.allowedNodeEnvironmentFlags
       : new Set();
-  const loaderFlag = allowedFlags.has("--loader") ? "--loader" : "--experimental-loader";
-  const execArgv = [loaderFlag, pathToFileURL(loaderPath).href];
+  const loaderUrl = pathToFileURL(loaderPath).href;
+  const supportsRegister = typeof require("node:module")?.register === "function";
+  /** @type {string[]} */
+  const execArgv = [];
+
+  if (supportsRegister && allowedFlags.has("--import")) {
+    const registerScript = `import { register } from "node:module"; register(${JSON.stringify(loaderUrl)});`;
+    const dataUrl = `data:text/javascript;base64,${Buffer.from(registerScript, "utf8").toString("base64")}`;
+    execArgv.push("--import", dataUrl);
+  } else if (allowedFlags.has("--loader")) {
+    execArgv.push("--loader", loaderUrl);
+  } else {
+    execArgv.push("--experimental-loader", loaderUrl);
+  }
   if (allowedFlags.has("--disable-warning")) {
     execArgv.unshift("--disable-warning=ExperimentalWarning");
   } else if (allowedFlags.has("--no-warnings")) {

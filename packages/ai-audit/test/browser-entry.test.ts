@@ -1,6 +1,34 @@
 import { describe, expect, it } from "vitest";
 
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+
+function supportsRegister(): boolean {
+  try {
+    return typeof (require("node:module") as any)?.register === "function";
+  } catch {
+    return false;
+  }
+}
+
+function resolveNodeLoaderArgs(loaderUrl: string): string[] {
+  const allowedFlags =
+    process.allowedNodeEnvironmentFlags && typeof process.allowedNodeEnvironmentFlags.has === "function"
+      ? process.allowedNodeEnvironmentFlags
+      : new Set<string>();
+
+  if (supportsRegister() && allowedFlags.has("--import")) {
+    const registerScript = `import { register } from "node:module"; register(${JSON.stringify(loaderUrl)});`;
+    const dataUrl = `data:text/javascript;base64,${Buffer.from(registerScript, "utf8").toString("base64")}`;
+    return ["--import", dataUrl];
+  }
+
+  if (allowedFlags.has("--loader")) return ["--loader", loaderUrl];
+  if (allowedFlags.has("--experimental-loader")) return [`--experimental-loader=${loaderUrl}`];
+  return [];
+}
 
 describe("@formula/ai-audit browser entrypoint", () => {
   it("imports without Node-only globals (process.versions.node, Buffer)", () => {
@@ -10,7 +38,7 @@ describe("@formula/ai-audit browser entrypoint", () => {
       process.execPath,
       [
         "--no-warnings",
-        `--experimental-loader=${loaderUrl.href}`,
+        ...resolveNodeLoaderArgs(loaderUrl.href),
         "--input-type=module",
         "--eval",
         `
