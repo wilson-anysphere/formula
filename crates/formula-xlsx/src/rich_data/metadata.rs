@@ -487,6 +487,50 @@ mod tests {
     }
 
     #[test]
+    fn parses_vm_to_rich_value_indices_mixed_t_indexing() {
+        // Some producers appear to mix 0-based and 1-based indexing for `rc/@t` in the same
+        // document. When we can detect this case, we should still resolve rich values correctly.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="2">
+    <metadataType name="SOMEOTHERTYPE"/>
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <futureMetadata name="XLRICHVALUE" count="2">
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000000}">
+          <xlrd:rvb i="5"/>
+        </ext>
+      </extLst>
+    </bk>
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000001}">
+          <xlrd:rvb i="42"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+  <valueMetadata count="3">
+    <!-- `t` uses 1-based indexing. -->
+    <bk><rc t="2" v="0"/></bk>
+    <!-- `t` uses 0-based indexing. -->
+    <bk><rc t="1" v="1"/></bk>
+    <!-- Wrong metadata type; should be ignored. -->
+    <bk><rc t="0" v="0"/></bk>
+  </valueMetadata>
+</metadata>
+"#;
+
+        let map = parse_value_metadata_vm_to_rich_value_index_map(xml.as_bytes()).unwrap();
+        assert_eq!(map.get(&1), Some(&5));
+        assert_eq!(map.get(&2), Some(&42));
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
     fn parses_bk_count_run_length_encoding() {
         // valueMetadata uses bk/@count to compress repeated vm entries, and futureMetadata can do
         // the same for `rc/@v` indices. Ensure we resolve both without assuming 1:1 bk->index.
