@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::cmp::Ordering;
 use std::fmt;
 use std::sync::Arc;
 
@@ -11,6 +12,49 @@ mod number_parse;
 
 pub use number_parse::NumberLocale;
 pub(crate) use number_parse::parse_number;
+
+pub(crate) fn cmp_ascii_case_insensitive(a: &str, b: &str) -> Ordering {
+    let mut a_iter = a.as_bytes().iter();
+    let mut b_iter = b.as_bytes().iter();
+    loop {
+        match (a_iter.next(), b_iter.next()) {
+            (Some(&ac), Some(&bc)) => {
+                let ac = ac.to_ascii_uppercase();
+                let bc = bc.to_ascii_uppercase();
+                match ac.cmp(&bc) {
+                    Ordering::Equal => continue,
+                    ord => return ord,
+                }
+            }
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (None, None) => return Ordering::Equal,
+        }
+    }
+}
+
+pub(crate) fn cmp_case_insensitive(a: &str, b: &str) -> Ordering {
+    if a.is_ascii() && b.is_ascii() {
+        return cmp_ascii_case_insensitive(a, b);
+    }
+
+    // Compare using Unicode-aware uppercasing so matches behave like Excel (e.g. ß -> SS).
+    // This intentionally uses the same `char::to_uppercase` logic as criteria matching and
+    // lookup semantics.
+    let mut a_iter = a.chars().flat_map(|c| c.to_uppercase());
+    let mut b_iter = b.chars().flat_map(|c| c.to_uppercase());
+    loop {
+        match (a_iter.next(), b_iter.next()) {
+            (Some(ac), Some(bc)) => match ac.cmp(&bc) {
+                Ordering::Equal => continue,
+                ord => return ord,
+            },
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (None, None) => return Ordering::Equal,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ErrorKind {

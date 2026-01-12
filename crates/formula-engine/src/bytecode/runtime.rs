@@ -2,7 +2,7 @@ use super::ast::{BinaryOp, Expr, Function, UnaryOp};
 use super::grid::Grid;
 use super::value::{Array as ArrayValue, CellCoord, ErrorKind, RangeRef, ResolvedRange, Value};
 use crate::error::ExcelError;
-use crate::value::parse_number;
+use crate::value::{cmp_case_insensitive, parse_number};
 use crate::simd::{self, CmpOp, NumericCriteria};
 use smallvec::SmallVec;
 use std::cmp::Ordering;
@@ -251,11 +251,7 @@ fn excel_order(left: Value, right: Value) -> Result<Ordering, ErrorKind> {
 
     Ok(match (l, r) {
         (Value::Number(a), Value::Number(b)) => a.partial_cmp(&b).unwrap_or(Ordering::Equal),
-        (Value::Text(a), Value::Text(b)) => {
-            let au = a.to_ascii_uppercase();
-            let bu = b.to_ascii_uppercase();
-            au.cmp(&bu)
-        }
+        (Value::Text(a), Value::Text(b)) => cmp_case_insensitive(&a, &b),
         (Value::Bool(a), Value::Bool(b)) => a.cmp(&b),
         // Type precedence (approximate Excel): numbers < text < booleans.
         (Value::Number(_), Value::Text(_) | Value::Bool(_)) => Ordering::Less,

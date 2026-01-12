@@ -4,7 +4,7 @@ use crate::eval::CompiledExpr;
 use crate::functions::array_lift;
 use crate::functions::{ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{Array, ErrorKind, Value};
+use crate::value::{cmp_case_insensitive, Array, ErrorKind, Value};
 use std::cmp::Ordering;
 
 const VAR_ARGS: usize = 255;
@@ -509,47 +509,4 @@ fn excel_eq(left: &Value, right: &Value) -> Result<bool, ErrorKind> {
     };
 
     Ok(ord == Ordering::Equal)
-}
-
-fn cmp_ascii_case_insensitive(a: &str, b: &str) -> Ordering {
-    let mut a_iter = a.as_bytes().iter();
-    let mut b_iter = b.as_bytes().iter();
-    loop {
-        match (a_iter.next(), b_iter.next()) {
-            (Some(&ac), Some(&bc)) => {
-                let ac = ac.to_ascii_uppercase();
-                let bc = bc.to_ascii_uppercase();
-                match ac.cmp(&bc) {
-                    Ordering::Equal => continue,
-                    ord => return ord,
-                }
-            }
-            (None, Some(_)) => return Ordering::Less,
-            (Some(_), None) => return Ordering::Greater,
-            (None, None) => return Ordering::Equal,
-        }
-    }
-}
-
-fn cmp_case_insensitive(a: &str, b: &str) -> Ordering {
-    if a.is_ascii() && b.is_ascii() {
-        return cmp_ascii_case_insensitive(a, b);
-    }
-
-    // Compare using Unicode-aware uppercasing so matches behave like Excel (e.g. ß -> SS).
-    // This intentionally uses the same `char::to_uppercase` logic as criteria matching and
-    // lookup semantics.
-    let mut a_iter = a.chars().flat_map(|c| c.to_uppercase());
-    let mut b_iter = b.chars().flat_map(|c| c.to_uppercase());
-    loop {
-        match (a_iter.next(), b_iter.next()) {
-            (Some(ac), Some(bc)) => match ac.cmp(&bc) {
-                Ordering::Equal => continue,
-                ord => return ord,
-            },
-            (None, Some(_)) => return Ordering::Less,
-            (Some(_), None) => return Ordering::Greater,
-            (None, None) => return Ordering::Equal,
-        }
-    }
 }

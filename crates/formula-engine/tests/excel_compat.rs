@@ -73,3 +73,22 @@ fn structured_references_match_tables_and_columns_case_insensitively() {
 
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
 }
+
+#[test]
+fn text_comparisons_are_case_insensitive_unicode() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"="Straße"="STRASSE""#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", r#"="Straße"<>"STRASSE""#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", r#"=IF("Straße"="STRASSE", 1, 0)"#)
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Bool(true));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Bool(false));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Number(1.0));
+}
