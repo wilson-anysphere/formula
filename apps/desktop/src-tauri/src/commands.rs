@@ -433,7 +433,7 @@ fn read_text_file_blocking(path: &std::path::Path) -> Result<String, String> {
     crate::ipc_file_limits::validate_full_read_size(metadata.len()).map_err(|e| e.to_string())?;
 
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut buf = Vec::new();
+    let mut buf = Vec::with_capacity(metadata.len() as usize);
     file.take(crate::ipc_file_limits::MAX_READ_FULL_BYTES + 1)
         .read_to_end(&mut buf)
         .map_err(|e| e.to_string())?;
@@ -536,7 +536,7 @@ fn read_binary_file_blocking(path: &std::path::Path) -> Result<Vec<u8>, String> 
     crate::ipc_file_limits::validate_full_read_size(metadata.len()).map_err(|e| e.to_string())?;
 
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut buf = Vec::new();
+    let mut buf = Vec::with_capacity(metadata.len() as usize);
     file.take(crate::ipc_file_limits::MAX_READ_FULL_BYTES + 1)
         .read_to_end(&mut buf)
         .map_err(|e| e.to_string())?;
@@ -562,7 +562,10 @@ fn read_binary_file_range_blocking(
     file.seek(SeekFrom::Start(offset))
         .map_err(|e| e.to_string())?;
 
-    let mut buf = Vec::with_capacity(len);
+    // Pre-allocate based on the expected read size to avoid wasting memory when callers request
+    // ranges past EOF (which should return an empty buffer).
+    let cap = metadata.len().saturating_sub(offset).min(len as u64) as usize;
+    let mut buf = Vec::with_capacity(cap);
     file.take(len as u64)
         .read_to_end(&mut buf)
         .map_err(|e| e.to_string())?;
