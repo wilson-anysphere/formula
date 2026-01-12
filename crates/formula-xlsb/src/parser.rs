@@ -682,6 +682,81 @@ mod tests {
     }
 
     #[test]
+    fn parse_workbook_parses_brt_extern_sheet_even_when_table_is_already_populated() {
+        // Some XLSB files contain multiple ExternSheet-like tables. Our workbook parser should
+        // recognize the MS-XLSB `BrtExternSheet` record id (`0x016A`) even when we have already
+        // populated the ExternSheet table from an earlier BIFF8-style record (`0x0017`).
+        //
+        // This test intentionally writes an incorrect BIFF8 ExternSheet mapping first (both `ixti`
+        // entries point at Sheet1), followed by a `BrtExternSheet` that corrects `ixti=1` to point
+        // at Sheet2. If we fail to parse `0x016A` after the table has been populated, Sheet2 will
+        // remain unresolved.
+        let mut workbook_bin = Vec::new();
+
+        // Sheet1 (rId1).
+        let mut sheet1 = Vec::new();
+        sheet1.extend_from_slice(&0u32.to_le_bytes()); // flags/state
+        sheet1.extend_from_slice(&1u32.to_le_bytes()); // sheet id
+        write_utf16_string(&mut sheet1, "rId1");
+        write_utf16_string(&mut sheet1, "Sheet1");
+        write_record(&mut workbook_bin, biff12::SHEET, &sheet1);
+
+        // Sheet2 (rId2).
+        let mut sheet2 = Vec::new();
+        sheet2.extend_from_slice(&0u32.to_le_bytes()); // flags/state
+        sheet2.extend_from_slice(&2u32.to_le_bytes()); // sheet id
+        write_utf16_string(&mut sheet2, "rId2");
+        write_utf16_string(&mut sheet2, "Sheet2");
+        write_record(&mut workbook_bin, biff12::SHEET, &sheet2);
+
+        // End of sheets list (we keep scanning for context records).
+        write_record(&mut workbook_bin, biff12::SHEETS_END, &[]);
+
+        // Internal SupBook.
+        let mut supbook = Vec::new();
+        supbook.extend_from_slice(&2u16.to_le_bytes()); // ctab
+        write_utf16_string(&mut supbook, "Sheet1");
+        write_record(&mut workbook_bin, 0x00AE, &supbook);
+
+        // BIFF8 ExternSheet table (incorrectly maps both ixti entries to Sheet1).
+        let mut extern_sheet_biff8 = Vec::new();
+        extern_sheet_biff8.extend_from_slice(&2u16.to_le_bytes()); // cxti
+        // ixti 0: Sheet1
+        extern_sheet_biff8.extend_from_slice(&0u16.to_le_bytes()); // supbook index
+        extern_sheet_biff8.extend_from_slice(&0u16.to_le_bytes()); // sheet first
+        extern_sheet_biff8.extend_from_slice(&0u16.to_le_bytes()); // sheet last
+        // ixti 1: (wrongly) also Sheet1
+        extern_sheet_biff8.extend_from_slice(&0u16.to_le_bytes()); // supbook index
+        extern_sheet_biff8.extend_from_slice(&0u16.to_le_bytes()); // sheet first
+        extern_sheet_biff8.extend_from_slice(&0u16.to_le_bytes()); // sheet last
+        write_record(&mut workbook_bin, 0x0017, &extern_sheet_biff8);
+
+        // MS-XLSB BrtExternSheet table (corrects ixti 1 -> Sheet2).
+        let mut extern_sheet_brt = Vec::new();
+        extern_sheet_brt.extend_from_slice(&2u32.to_le_bytes()); // cxti
+        // ixti 0: Sheet1
+        extern_sheet_brt.extend_from_slice(&0u32.to_le_bytes()); // supbook index
+        extern_sheet_brt.extend_from_slice(&0u32.to_le_bytes()); // sheet first
+        extern_sheet_brt.extend_from_slice(&0u32.to_le_bytes()); // sheet last
+        // ixti 1: Sheet2
+        extern_sheet_brt.extend_from_slice(&0u32.to_le_bytes()); // supbook index
+        extern_sheet_brt.extend_from_slice(&1u32.to_le_bytes()); // sheet first
+        extern_sheet_brt.extend_from_slice(&1u32.to_le_bytes()); // sheet last
+        write_record(&mut workbook_bin, 0x016A, &extern_sheet_brt);
+
+        let rels: HashMap<String, String> = HashMap::from([
+            ("rId1".to_string(), "worksheets/sheet1.bin".to_string()),
+            ("rId2".to_string(), "worksheets/sheet2.bin".to_string()),
+        ]);
+
+        let (_sheets, ctx, _props, _defined_names) =
+            parse_workbook(&mut Cursor::new(&workbook_bin), &rels).expect("parse workbook.bin");
+
+        assert_eq!(ctx.extern_sheet_index("Sheet1"), Some(0));
+        assert_eq!(ctx.extern_sheet_index("Sheet2"), Some(1));
+    }
+
+    #[test]
     fn normalize_sheet_target_handles_absolute_and_prefixed_paths() {
         assert_eq!(
             normalize_sheet_target("worksheets/sheet1.bin"),
