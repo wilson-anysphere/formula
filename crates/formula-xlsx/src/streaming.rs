@@ -3724,8 +3724,8 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     //
     // We always drop `vm` when patching away from the images-in-cell placeholder representation
     // (`t="e" <v>#VALUE!</v> vm="..."`). For full workbook packages (controlled by
-    // `drop_vm_on_patched_cells`) we also drop `vm` for any patched cell unless the patched value
-    // remains the rich-value placeholder error.
+    // `drop_vm_on_patched_cells`) we also drop `vm` when the cached value changes, unless the
+    // patched value remains the rich-value placeholder error.
     let existing_value_is_value_error = if existing_t.as_deref() == Some("e") {
         extract_cell_v_text(&inner_events)?.is_some_and(|v| v.trim() == "#VALUE!")
     } else {
@@ -3736,10 +3736,17 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         CellValue::Error(formula_model::ErrorValue::Value)
     );
     let clear_cached_value = patch.clear_cached_value && patch_formula.is_some();
+    let value_eq = cell_value_semantics_eq(
+        existing_t.as_deref(),
+        &inner_events,
+        &patch.value,
+        patch.shared_string_idx,
+    )?;
+    let value_changed = !value_eq;
     let drop_vm = has_vm
         && (clear_cached_value
             || (!patch_value_is_value_error
-                && (existing_value_is_value_error || drop_vm_on_patched_cells)));
+                && (existing_value_is_value_error || (drop_vm_on_patched_cells && value_changed))));
 
     let mut c = BytesStart::new(cell_tag.as_str());
     let mut has_r = false;
@@ -4197,6 +4204,187 @@ fn extract_cell_v_text(events: &[Event<'static>]) -> Result<Option<String>, Stre
     }
 
     Ok(None)
+}
+
+fn extract_cell_inline_string_text(
+    events: &[Event<'static>],
+) -> Result<Option<String>, StreamingPatchError> {
+    let mut in_is = false;
+    let mut is_depth: usize = 0;
+    let mut in_t = false;
+    let mut out = String::new();
+
+    for ev in events {
+        match ev {
+            Event::Start(e) => {
+                if local_name(e.name().as_ref()) == b"is" {
+                    in_is = true;
+                    is_depth = 1;
+                    in_t = false;
+                    out.clear();
+                    continue;
+                }
+                if in_is {
+                    is_depth += 1;
+                    if local_name(e.name().as_ref()) == b"t" {
+                        in_t = true;
+                    }
+                }
+            }
+            Event::End(e) => {
+                if !in_is {
+                    continue;
+                }
+                if local_name(e.name().as_ref()) == b"t" {
+                    in_t = false;
+                } else if local_name(e.name().as_ref()) == b"is" {
+                    return Ok(Some(out));
+                }
+                is_depth = is_depth.saturating_sub(1);
+                if is_depth == 0 {
+                    in_is = false;
+                    in_t = false;
+                }
+            }
+            Event::Empty(e) => {
+                if in_is && local_name(e.name().as_ref()) == b"t" {
+                    // empty <t/> contributes no text
+                }
+            }
+            Event::Text(t) if in_t => out.push_str(&t.unescape()?.into_owned()),
+            Event::CData(t) if in_t => out.push_str(&String::from_utf8_lossy(t.as_ref())),
+            _ => {}
+        }
+    }
+
+    Ok(None)
+}
+
+fn cell_value_semantics_eq(
+    existing_t: Option<&str>,
+    inner_events: &[Event<'static>],
+    patch_value: &CellValue,
+    patch_shared_string_idx: Option<u32>,
+) -> Result<bool, StreamingPatchError> {
+    // Mirror `cell_representation`'s "degrade richer types to strings" behavior so style-only
+    // patches on those values do not unnecessarily drop `vm`.
+    match patch_value {
+        CellValue::Entity(entity) => {
+            return cell_value_semantics_eq(
+                existing_t,
+                inner_events,
+                &CellValue::String(entity.display_value.clone()),
+                patch_shared_string_idx,
+            );
+        }
+        CellValue::Record(record) => {
+            return cell_value_semantics_eq(
+                existing_t,
+                inner_events,
+                &CellValue::String(record.to_string()),
+                patch_shared_string_idx,
+            );
+        }
+        CellValue::Image(image) => {
+            if let Some(alt) = image.alt_text.as_deref().filter(|s| !s.is_empty()) {
+                return cell_value_semantics_eq(
+                    existing_t,
+                    inner_events,
+                    &CellValue::String(alt.to_string()),
+                    patch_shared_string_idx,
+                );
+            }
+            return cell_value_semantics_eq(
+                existing_t,
+                inner_events,
+                &CellValue::Empty,
+                patch_shared_string_idx,
+            );
+        }
+        _ => {}
+    }
+
+    // Cached value semantics live in either `<v>` (numbers, bools, errors, shared string indices,
+    // `t="str"`, etc) or `<is>` (inline strings).
+    let v_text = extract_cell_v_text(inner_events)?;
+
+    match patch_value {
+        CellValue::Empty => {
+            if existing_t == Some("inlineStr") {
+                return Ok(extract_cell_inline_string_text(inner_events)?.unwrap_or_default().is_empty());
+            }
+            Ok(v_text.unwrap_or_default().is_empty())
+        }
+        CellValue::Number(n) => {
+            if matches!(existing_t, Some("b" | "e" | "s" | "str" | "inlineStr")) {
+                return Ok(false);
+            }
+            let Some(v) = v_text else {
+                return Ok(false);
+            };
+            Ok(v.trim().parse::<f64>().ok() == Some(*n))
+        }
+        CellValue::Boolean(b) => {
+            if existing_t != Some("b") {
+                return Ok(false);
+            }
+            let Some(v) = v_text else {
+                return Ok(false);
+            };
+            let normalized = v.trim();
+            let existing = normalized == "1" || normalized.eq_ignore_ascii_case("true");
+            Ok(existing == *b)
+        }
+        CellValue::Error(err) => {
+            if existing_t != Some("e") {
+                return Ok(false);
+            }
+            let Some(v) = v_text else {
+                return Ok(false);
+            };
+            Ok(v.trim().parse::<formula_model::ErrorValue>().ok() == Some(*err))
+        }
+        CellValue::String(s) => {
+            match existing_t {
+                Some("inlineStr") => Ok(extract_cell_inline_string_text(inner_events)?.unwrap_or_default() == *s),
+                Some("s") => {
+                    let Some(idx_text) = v_text else {
+                        return Ok(false);
+                    };
+                    let existing_idx = idx_text.trim().parse::<u32>().ok();
+                    Ok(existing_idx.is_some_and(|idx| patch_shared_string_idx == Some(idx)))
+                }
+                Some("str") => Ok(v_text.unwrap_or_default() == *s),
+                // Treat unknown/other `t=` values as raw `<v>`-text comparisons.
+                Some(_) => Ok(v_text.unwrap_or_default() == *s),
+                None => Ok(false),
+            }
+        }
+        CellValue::RichText(rich) => {
+            // Best-effort: compare rich text values by their visible text, and shared-string index
+            // when available.
+            let s = rich.text.as_str();
+            match existing_t {
+                Some("inlineStr") => Ok(extract_cell_inline_string_text(inner_events)?.unwrap_or_default() == s),
+                Some("s") => {
+                    let Some(idx_text) = v_text else {
+                        return Ok(false);
+                    };
+                    let existing_idx = idx_text.trim().parse::<u32>().ok();
+                    Ok(existing_idx.is_some_and(|idx| patch_shared_string_idx == Some(idx)))
+                }
+                Some("str") => Ok(v_text.unwrap_or_default() == s),
+                Some(_) => Ok(v_text.unwrap_or_default() == s),
+                None => Ok(false),
+            }
+        }
+        _other => {
+            // Treat other value types (unsupported for streaming patching) as changed.
+            // This is intentionally conservative; it will preserve the existing behavior
+            // of dropping `vm` for full-package patches.
+            Ok(false)
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
