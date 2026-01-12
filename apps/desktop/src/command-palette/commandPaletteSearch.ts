@@ -230,11 +230,14 @@ function scoreFunctionResults(queryLower: string, limit: number): CommandPalette
 
     let score = match.score;
     const nameLower = name.toLowerCase();
+    const nameLowerNormalized = nameLower.replace(/[^a-z0-9_]/g, "");
 
     // Make exact/prefix matches unambiguous (helps function names beat similarly-named commands like "AutoSum").
-    if (nameLower === trimmed) score += 10_000;
-    else if (nameLower.startsWith(trimmed)) score += 2_500;
-    else if (nameLower.includes(trimmed)) score += 1_000;
+    // Normalize punctuation so dotted function names like `RANK.EQ` still receive the bonus
+    // when the user types `rank.eq` or `rankeq`.
+    if (nameLowerNormalized === trimmed) score += 10_000;
+    else if (nameLowerNormalized.startsWith(trimmed)) score += 2_500;
+    else if (nameLowerNormalized.includes(trimmed)) score += 1_000;
 
     matches.push({ name, score, matchRanges: match.ranges });
   }

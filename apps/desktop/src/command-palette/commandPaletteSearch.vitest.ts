@@ -33,6 +33,17 @@ describe("command palette search", () => {
     expect(functions!.results[0]).toMatchObject({ kind: "function", name: "SUM" });
   });
 
+  it("matches dotted function names (e.g. RANK.EQ)", () => {
+    const sections = buildCommandPaletteSections({
+      query: "rank.eq",
+      commands: [],
+      limits: { maxResults: 50, maxResultsPerGroup: 50 },
+    });
+    const functions = sections.find((s) => s.title === "FUNCTIONS");
+    expect(functions).toBeTruthy();
+    expect(functions!.results[0]).toMatchObject({ kind: "function", name: "RANK.EQ" });
+  });
+
   it("groups recent commands separately from the COMMANDS section", () => {
     const commands: CommandContribution[] = [
       { commandId: "freeze", title: "Freeze Panes", category: "View", source: { kind: "builtin" } },
