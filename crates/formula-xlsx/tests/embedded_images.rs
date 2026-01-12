@@ -154,6 +154,13 @@ const RICH_VALUE_REL_XML_WITH_PLACEHOLDER: &str = r#"<?xml version="1.0" encodin
 </richValueRel>
 "#;
 
+const RICH_VALUE_REL_XML_WITH_ID_WHITESPACE: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<richValueRel xmlns="http://schemas.microsoft.com/office/2022/10/spreadsheetml/richvaluerelationships"
+              xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rel r:id=" rId1 "/>
+</richValueRel>
+"#;
+
 const METADATA_RELS_XML_CUSTOM_RICHVALUE_PARTS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1"
@@ -202,6 +209,7 @@ const RICH_VALUE_REL_RELS_XML_NON_IMAGE: &str = r#"<?xml version="1.0" encoding=
 fn assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema_with_rels(
     metadata_xml: &str,
     vm: u32,
+    rich_value_rel_xml: &str,
     rich_value_rel_rels_xml: &str,
 ) {
     let png_bytes = STANDARD
@@ -232,7 +240,7 @@ fn assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema_with_rel
     );
     pkg.set_part(
         "xl/richData/richValueRel.xml",
-        RICH_VALUE_REL_XML.as_bytes().to_vec(),
+        rich_value_rel_xml.as_bytes().to_vec(),
     );
     pkg.set_part(
         "xl/richData/_rels/richValueRel.xml.rels",
@@ -276,6 +284,7 @@ fn assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(metadata
     assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema_with_rels(
         metadata_xml,
         vm,
+        RICH_VALUE_REL_XML,
         RICH_VALUE_REL_RELS_XML,
     );
 }
@@ -315,6 +324,7 @@ fn extracts_when_rich_value_rel_rels_target_is_relative_to_xl() {
     assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema_with_rels(
         METADATA_XML,
         1,
+        RICH_VALUE_REL_XML,
         RICH_VALUE_REL_RELS_XML_MEDIA_RELATIVE_TO_XL,
     );
 }
@@ -325,7 +335,19 @@ fn extracts_when_rich_value_rel_rels_target_starts_with_xl_prefix() {
     assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema_with_rels(
         METADATA_XML,
         1,
+        RICH_VALUE_REL_XML,
         RICH_VALUE_REL_RELS_XML_XL_MEDIA_NO_LEADING_SLASH,
+    );
+}
+
+#[test]
+fn extracts_when_rich_value_rel_rid_has_whitespace() {
+    // Some producers emit whitespace around the `r:id` value in richValueRel.xml.
+    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema_with_rels(
+        METADATA_XML,
+        1,
+        RICH_VALUE_REL_XML_WITH_ID_WHITESPACE,
+        RICH_VALUE_REL_RELS_XML,
     );
 }
 
