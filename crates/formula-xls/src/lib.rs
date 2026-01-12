@@ -2847,17 +2847,51 @@ mod tests {
         .is_ok()
     }
 
+    fn first_record_payload<'a>(stream: &'a [u8], record_id: u16) -> Option<&'a [u8]> {
+        let mut offset = 0usize;
+        while offset + 4 <= stream.len() {
+            let id = u16::from_le_bytes([stream[offset], stream[offset + 1]]);
+            let len = u16::from_le_bytes([stream[offset + 2], stream[offset + 3]]) as usize;
+            let data_start = offset.checked_add(4)?;
+            let next = data_start.checked_add(len)?;
+            if next > stream.len() {
+                return None;
+            }
+            if id == record_id {
+                return Some(&stream[data_start..next]);
+            }
+            offset = next;
+        }
+        None
+    }
+
     #[test]
     fn sanitizes_malformed_name_record_out_of_bounds_cch_for_calamine() {
         let stream = build_minimal_workbook_stream_with_corrupt_name_oob_cch();
 
-        assert!(
-            !calamine_can_open_workbook_stream(&stream),
-            "expected calamine to fail/panic on malformed NAME record"
-        );
+        // Calamine has historically panicked on malformed NAME records due to unchecked slice
+        // indexing. If a newer calamine version becomes resilient to this input, this test should
+        // still pass; the sanitizer exists for compatibility and defense-in-depth.
+        let _ = calamine_can_open_workbook_stream(&stream);
+
+        let payload =
+            first_record_payload(&stream, RECORD_NAME).expect("expected NAME record in fixture");
+        assert_eq!(payload[3], 200, "expected corrupt cch=200");
 
         let sanitized =
             sanitize_biff8_continued_name_records_for_calamine(&stream).expect("expected sanitize");
+
+        let sanitized_payload = first_record_payload(&sanitized, RECORD_NAME)
+            .expect("expected NAME record in sanitized workbook stream");
+        // Sanitizer should clamp cch down so the name string fits in the physical record.
+        assert_eq!(sanitized_payload[3], 1, "expected clamped cch=1");
+        // And should keep cce patched to 0 so calamine does not attempt to parse a potentially
+        // continued/invalid rgce stream.
+        assert_eq!(
+            u16::from_le_bytes([sanitized_payload[4], sanitized_payload[5]]),
+            0,
+            "expected patched cce=0"
+        );
 
         assert!(
             calamine_can_open_workbook_stream(&sanitized),
