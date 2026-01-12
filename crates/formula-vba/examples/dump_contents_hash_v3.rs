@@ -128,8 +128,8 @@ fn parse_args(
         }
 
         if arg_str == "--alg" {
-            // Optional value. If omitted, default to SHA-256 (the spec-defined v3 binding digest:
-            // `ContentsHashV3`).
+            // Optional value. If omitted, default to SHA-256 (commonly observed for v3 binding
+            // digests, and the algorithm used by `formula_vba::contents_hash_v3`).
             //
             // This allows `--alg <input-path>` as shorthand for printing only the SHA-256 digest.
             if let Some(value) = args.peek() {
