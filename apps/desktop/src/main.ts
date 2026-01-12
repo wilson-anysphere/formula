@@ -1509,6 +1509,10 @@ sheetTabsRootEl.addEventListener("contextmenu", (evt) => {
 let sheetTabsReactRoot: ReturnType<typeof createRoot> | null = null;
 let stopSheetStoreListener: (() => void) | null = null;
 let addSheetInFlight = false;
+// During `DocumentController.applyState` restores, the sheet store is re-ordered to match
+// the restored sheet order. Avoid feeding those intermediate store moves back into the
+// DocumentController while the restore is still in progress.
+let suppressDocReorderFromStore = false;
 
 let sheetStoreDocSync: ReturnType<typeof startSheetStoreDocumentSync> | null = null;
 let sheetStoreDocSyncStore: WorkbookSheetStore | null = null;
@@ -2138,7 +2142,7 @@ function installSheetStoreSubscription(): void {
       // In collab mode the Yjs workbook schema (`session.sheets`) is authoritative for
       // ordering; avoid mutating the DocumentController sheet map there.
       const session = app.getCollabSession?.() ?? null;
-      if (!session) {
+      if (!session && !suppressDocReorderFromStore) {
         const desired = workbookSheetStore.listAll().map((s) => s.id);
         const current = app.getDocument().getSheetIds();
         const desiredKey = desired.join("|");
@@ -2277,7 +2281,13 @@ app.selectRange = (...args: Parameters<SpreadsheetApp["selectRange"]>): void => 
 
 // Keep the canvas renderer in sync with programmatic document mutations (e.g. AI tools)
 // and re-render when edits create new sheets (DocumentController creates sheets lazily).
-app.getDocument().on("change", () => {
+app.getDocument().on("change", (payload: any) => {
+  if (payload?.source === "applyState") {
+    suppressDocReorderFromStore = true;
+    queueMicrotask(() => {
+      suppressDocReorderFromStore = false;
+    });
+  }
   app.refresh();
 
   // Keep the sheet metadata store aligned with the DocumentController's sheet ids.
