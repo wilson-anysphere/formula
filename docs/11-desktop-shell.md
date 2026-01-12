@@ -92,12 +92,16 @@ Rationale:
   - `wss:` for collaboration WebSocket connections.
   - loopback (`http://localhost:*`, `http://127.0.0.1:*`, `ws://localhost:*`, `ws://127.0.0.1:*`) for optional local-model providers like Ollama.
 
-### `app.windows[].capabilities` (Tauri permissions)
+### Tauri v2 capabilities (permissions)
 
-Tauri v2 permissions are granted via **capabilities**, attached to windows in `tauri.conf.json`:
+Tauri v2 permissions are granted via **capability files**:
 
-- `apps/desktop/src-tauri/tauri.conf.json` → `app.windows[].capabilities`
 - `apps/desktop/src-tauri/capabilities/*.json` (for example: `capabilities/main.json`)
+
+Capabilities are associated to windows by **label** using the capability file’s `"windows": [...]` list, which
+matches `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`.
+
+See “Tauri v2 Capabilities & Permissions” below for the concrete `main.json` contents.
 
 ### Cross-origin isolation (COOP/COEP) for Pyodide / `SharedArrayBuffer`
 
@@ -174,10 +178,14 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
   },
   "app": {
     "security": {
-      "csp": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https: wss: blob: data:"
+      "headers": {
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "require-corp"
+      },
+      "csp": "..." // see `apps/desktop/src-tauri/tauri.conf.json` for the full, current CSP
     },
     "windows": [
-      { "label": "main", "title": "Formula", "width": 1280, "height": 800, "dragDropEnabled": true, "capabilities": ["main"] }
+      { "label": "main", "title": "Formula", "width": 1280, "height": 800, "dragDropEnabled": true }
     ]
   },
   "bundle": {
@@ -447,14 +455,14 @@ The main capability in this repo is:
 
 - `apps/desktop/src-tauri/capabilities/main.json` (capabilities live under `apps/desktop/src-tauri/capabilities/`)
 
-The `tauri.conf.json` window config references capabilities via `app.windows[].capabilities`, and the capability file itself also lists which window labels it applies to via `"windows": [...]`.
+Capability files list which window labels they apply to via `"windows": [...]` (matching the `app.windows[].label`
+values in `apps/desktop/src-tauri/tauri.conf.json`).
 
 ### How the main window is assigned a capability
 
 Capabilities are assigned to windows by **label**.
 
 - The main window label is `main` (see `apps/desktop/src-tauri/tauri.conf.json`).
-- The main window also explicitly opts into the `main` capability via `app.windows[0].capabilities: ["main"]` (see `apps/desktop/src-tauri/tauri.conf.json`).
 - `apps/desktop/src-tauri/capabilities/main.json` includes `"windows": ["main"]`, which grants the main window the listed permissions.
 
 ### Which APIs are granted (and why)
