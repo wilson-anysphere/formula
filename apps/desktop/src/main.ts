@@ -3306,56 +3306,40 @@ if (
   const syncSecondaryGridReferenceHighlights = () => {
     if (!secondaryGridView) return;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const formulaBar = (app as any).formulaBar as any;
-    const model = formulaBar?.model as any;
-    const highlights = typeof model?.referenceHighlights === "function" ? model.referenceHighlights() : null;
+    const highlights = app.getFormulaReferenceHighlights();
 
-    if (!Array.isArray(highlights) || highlights.length === 0) {
+    if (highlights.length === 0) {
       secondaryGridView.grid.renderer.setReferenceHighlights(null);
       return;
     }
-
-    const sheetId = app.getCurrentSheetId();
 
     // Split-view secondary pane always uses a shared-grid renderer with a 1x1 frozen
     // header row/col (row/column labels), even when the primary pane is in legacy mode.
     const headerRows = 1;
     const headerCols = 1;
 
-    const gridHighlights = highlights
-      .filter((h: any) => {
-        const sheet = h?.range?.sheet;
-        if (!sheet) return true;
-        const resolved = app.getSheetIdByName(String(sheet));
-        if (!resolved) return false;
-        return resolved.toLowerCase() === sheetId.toLowerCase();
-      })
-      .map((h: any) => {
-        const range = h.range;
-        const startRow = Math.min(range.startRow, range.endRow);
-        const endRow = Math.max(range.startRow, range.endRow);
-        const startCol = Math.min(range.startCol, range.endCol);
-        const endCol = Math.max(range.startCol, range.endCol);
+    const gridHighlights = highlights.map((h) => {
+      const startRow = Math.min(h.start.row, h.end.row);
+      const endRow = Math.max(h.start.row, h.end.row);
+      const startCol = Math.min(h.start.col, h.end.col);
+      const endCol = Math.max(h.start.col, h.end.col);
 
-        const gridRange: GridCellRange = {
-          startRow: startRow + headerRows,
-          endRow: endRow + headerRows + 1,
-          startCol: startCol + headerCols,
-          endCol: endCol + headerCols + 1,
-        };
+      const gridRange: GridCellRange = {
+        startRow: startRow + headerRows,
+        endRow: endRow + headerRows + 1,
+        startCol: startCol + headerCols,
+        endCol: endCol + headerCols + 1,
+      };
 
-        return { range: gridRange, color: String(h.color), active: Boolean(h.active) };
-      });
+      return { range: gridRange, color: h.color, active: h.active };
+    });
 
     secondaryGridView.grid.renderer.setReferenceHighlights(gridHighlights.length > 0 ? gridHighlights : null);
   };
 
   const syncSecondaryGridInteractionMode = () => {
     if (!secondaryGridView) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const formulaBar = (app as any).formulaBar as any;
-    const mode = formulaBar?.isFormulaEditing?.() ? "rangeSelection" : "default";
+    const mode = app.isFormulaBarFormulaEditing() ? "rangeSelection" : "default";
     secondaryGridView.grid.setInteractionMode(mode);
     if (mode === "default") {
       // Ensure we don't leave behind transient formula-range selection overlays when exiting
@@ -3377,52 +3361,14 @@ if (
 
   // Keep the secondary pane interaction mode in sync with the formula bar's state.
   // We use events rather than polling to avoid unnecessary work.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const formulaBar = (app as any).formulaBar as any;
-  if (formulaBar?.textarea instanceof HTMLTextAreaElement) {
-    formulaBar.textarea.addEventListener("input", () => syncSecondaryGridInteractionMode());
-    formulaBar.textarea.addEventListener("focus", () => syncSecondaryGridInteractionMode());
-    formulaBar.textarea.addEventListener("keyup", () => syncSecondaryGridInteractionMode());
-    formulaBar.textarea.addEventListener("select", () => syncSecondaryGridInteractionMode());
-    // `blur` fires before FormulaBarView updates its model state during commit/cancel; sync on a microtask.
-    formulaBar.textarea.addEventListener("blur", () => syncSecondaryGridInteractionModeSoon());
-  }
-  if (formulaBar?.root instanceof HTMLElement) {
-    // Clicking fx/commit/cancel can mutate the draft without triggering a textarea input event.
-    // Sync on a microtask so we observe the final FormulaBarView state.
-    formulaBar.root.addEventListener("click", () => syncSecondaryGridInteractionModeSoon());
-  }
+  const unsubscribeSplitViewFormulaBarOverlaySync = app.onFormulaBarOverlayChange(() => syncSecondaryGridInteractionMode());
+  window.addEventListener("unload", () => unsubscribeSplitViewFormulaBarOverlaySync());
 
   // Programmatic formula bar commit/cancel (e.g. File → Save calling `commitPendingEditsForCommand()`)
   // may not produce textarea blur/input events. Subscribe to SpreadsheetApp edit-state changes so we
   // always leave split-view range-selection mode when formula editing ends.
   const unsubscribeSplitViewEditStateSync = app.onEditStateChange(() => syncSecondaryGridInteractionModeSoon());
   window.addEventListener("unload", () => unsubscribeSplitViewEditStateSync());
-
-  // Range selection insertion updates the formula bar draft + reference highlights via
-  // `FormulaBarView.begin/updateRangeSelection()`, which are programmatic (no textarea `input`
-  // events). When split view is active, mirror those changing highlights onto the secondary pane
-  // so the visual outline stays live during drags initiated from *either* pane (legacy or shared).
-  if (formulaBar && !(formulaBar as any).__formulaSplitViewRangeSelectionHighlightSyncPatched) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (formulaBar as any).__formulaSplitViewRangeSelectionHighlightSyncPatched = true;
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const anyBar = formulaBar as any;
-    const wrap = (methodName: "beginRangeSelection" | "updateRangeSelection" | "endRangeSelection") => {
-      const original = anyBar?.[methodName];
-      if (typeof original !== "function") return;
-      anyBar[methodName] = (...args: any[]) => {
-        const result = original.apply(anyBar, args);
-        syncSecondaryGridReferenceHighlights();
-        return result;
-      };
-    };
-
-    wrap("beginRangeSelection");
-    wrap("updateRangeSelection");
-    wrap("endRangeSelection");
-  }
 
   // High-frequency split-pane interactions (scroll/zoom) update the in-memory layout
   // without persisting on every event. Flush to storage on a debounce so we avoid

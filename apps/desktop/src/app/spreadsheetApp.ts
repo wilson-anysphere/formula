@@ -694,6 +694,7 @@ export class SpreadsheetApp {
   private readonly selectionListeners = new Set<(selection: SelectionState) => void>();
   private readonly scrollListeners = new Set<(scroll: { x: number; y: number }) => void>();
   private readonly zoomListeners = new Set<(zoom: number) => void>();
+  private readonly formulaBarOverlayListeners = new Set<() => void>();
 
   private editState = false;
   private readonly editStateListeners = new Set<(isEditing: boolean) => void>();
@@ -1723,6 +1724,14 @@ export class SpreadsheetApp {
           this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
           if (this.sharedGrid) this.syncSharedGridReferenceHighlights();
           this.renderReferencePreview();
+          // Keep other views (e.g. split-view secondary pane) in sync with formula-bar reference
+          // highlights and formula-editing state. Only emit while the formula bar is actively editing
+          // to avoid spurious callbacks from hover behavior in view mode.
+          if (this.formulaBar?.isEditing()) {
+            for (const listener of this.formulaBarOverlayListeners) {
+              listener();
+            }
+          }
         }
       });
 
@@ -2195,6 +2204,23 @@ export class SpreadsheetApp {
    */
   isFormulaBarFormulaEditing(): boolean {
     return Boolean(this.formulaBar?.isFormulaEditing());
+  }
+
+  onFormulaBarOverlayChange(listener: () => void): () => void {
+    this.formulaBarOverlayListeners.add(listener);
+    listener();
+    return () => {
+      this.formulaBarOverlayListeners.delete(listener);
+    };
+  }
+
+  getFormulaReferenceHighlights(): Array<{ start: CellCoord; end: CellCoord; color: string; active: boolean }> {
+    return this.referenceHighlights.map((h) => ({
+      start: { ...h.start },
+      end: { ...h.end },
+      color: h.color,
+      active: h.active,
+    }));
   }
 
   isEditing(): boolean {
