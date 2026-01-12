@@ -66,15 +66,16 @@
 //! the given `frequency` (even though the first/last period is irregular).
 //!
 //! Implementation note: computing `E` requires generating the regular coupon schedule (see “EOM
-//! stepping” below) and taking the day-count between adjacent regular coupon dates.
+//! stepping” below) and applying Excel’s basis-specific `COUPDAYS` conventions.
 //!
-//! For reference, this engine mostly follows `coupon_schedule::coupon_period_e`, with one
-//! odd-coupon-specific exception for basis 4:
+//! For reference, this engine follows `coupon_schedule::coupon_period_e` (shared with `COUPDAYS`):
 //!
 //! - basis `0` / `2`: `E = 360 / frequency`
 //! - basis `3`: `E = 365 / frequency`
 //! - basis `1`: `E = ncd - pcd` (actual days between regular coupon dates)
-//! - basis `4`: `E = DAYS360(pcd, ncd, method=true)` (European 30E/360; may differ from 360/frequency)
+//! - basis `4`: `E = 360 / frequency`
+//!   - Even when `DAYS360(pcd, ncd, TRUE)` differs for some February/end-of-month schedules. In that
+//!     case, `DAYS360(..., TRUE)` still applies to day counts like `A`, but `E` remains fixed.
 //!
 //! **Coupon amount**
 //!
