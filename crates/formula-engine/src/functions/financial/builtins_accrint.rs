@@ -1,13 +1,9 @@
-use chrono::{DateTime, Utc};
-
-use crate::coercion::ValueLocaleConfig;
-use crate::date::ExcelDateSystem;
-use crate::error::ExcelError;
 use crate::eval::CompiledExpr;
-use crate::functions::date_time;
 use crate::functions::{eval_scalar_arg, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{ErrorKind, Value};
+
+use super::builtins_helpers::{coerce_to_finite_number, datevalue_from_value, excel_error_kind};
 
 inventory::submit! {
     FunctionSpec {
@@ -36,13 +32,12 @@ fn accrintm_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
-    let cfg = ctx.value_locale();
 
-    let issue = match datevalue_from_value(ctx, &issue, system, cfg, now_utc) {
+    let issue = match datevalue_from_value(ctx, &issue, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let settlement = match datevalue_from_value(ctx, &settlement, system, cfg, now_utc) {
+    let settlement = match datevalue_from_value(ctx, &settlement, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -119,17 +114,16 @@ fn accrint_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let system = ctx.date_system();
     let now_utc = ctx.now_utc();
-    let cfg = ctx.value_locale();
 
-    let issue = match datevalue_from_value(ctx, &issue, system, cfg, now_utc) {
+    let issue = match datevalue_from_value(ctx, &issue, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let first_interest = match datevalue_from_value(ctx, &first_interest, system, cfg, now_utc) {
+    let first_interest = match datevalue_from_value(ctx, &first_interest, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
-    let settlement = match datevalue_from_value(ctx, &settlement, system, cfg, now_utc) {
+    let settlement = match datevalue_from_value(ctx, &settlement, system, now_utc) {
         Ok(v) => v,
         Err(e) => return Value::Error(e),
     };
@@ -179,22 +173,6 @@ fn accrint_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 }
 
-fn excel_error_kind(err: ExcelError) -> ErrorKind {
-    match err {
-        ExcelError::Div0 => ErrorKind::Div0,
-        ExcelError::Num => ErrorKind::Num,
-        ExcelError::Value => ErrorKind::Value,
-    }
-}
-
-fn coerce_to_finite_number(ctx: &dyn FunctionContext, v: &Value) -> Result<f64, ErrorKind> {
-    let n = v.coerce_to_number_with_ctx(ctx)?;
-    if !n.is_finite() {
-        return Err(ErrorKind::Num);
-    }
-    Ok(n)
-}
-
 fn coerce_number_to_i32_trunc(n: f64) -> Result<i32, ErrorKind> {
     let t = n.trunc();
     if t < (i32::MIN as f64) || t > (i32::MAX as f64) {
@@ -217,28 +195,5 @@ fn coerce_to_bool_finite(ctx: &dyn FunctionContext, v: &Value) -> Result<bool, E
             Ok(*n != 0.0)
         }
         _ => v.coerce_to_bool_with_ctx(ctx),
-    }
-}
-
-fn datevalue_from_value(
-    ctx: &dyn FunctionContext,
-    value: &Value,
-    system: ExcelDateSystem,
-    cfg: ValueLocaleConfig,
-    now_utc: DateTime<Utc>,
-) -> Result<i32, ErrorKind> {
-    match value {
-        Value::Text(s) => date_time::datevalue(s, cfg, now_utc, system).map_err(excel_error_kind),
-        _ => {
-            let n = value.coerce_to_number_with_ctx(ctx)?;
-            if !n.is_finite() {
-                return Err(ErrorKind::Num);
-            }
-            let serial = n.floor();
-            if serial < (i32::MIN as f64) || serial > (i32::MAX as f64) {
-                return Err(ErrorKind::Num);
-            }
-            Ok(serial as i32)
-        }
     }
 }
