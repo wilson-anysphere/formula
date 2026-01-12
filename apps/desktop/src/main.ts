@@ -1137,6 +1137,12 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       if (format === NUMBER_FORMATS.currency) return "Currency";
       if (format === NUMBER_FORMATS.percent) return "Percent";
       if (format === NUMBER_FORMATS.date) return "Date";
+      if (format === "0.00") return "Number";
+      if (format === "#,##0.00") return "Comma";
+      if (format === "h:mm:ss") return "Time";
+      if (format === "# ?/?") return "Fraction";
+      if (format === "0.00E+00") return "Scientific";
+      if (format === "@") return "Text";
       return "Custom";
     })();
 
@@ -1172,6 +1178,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.font.fontColor": true,
             "home.font.fillColor": true,
             "home.font.borders": true,
+            "home.font.clearFormatting": true,
             "home.alignment.wrapText": true,
             "home.alignment.topAlign": true,
             "home.alignment.middleAlign": true,
@@ -1181,12 +1188,14 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
             "home.alignment.alignRight": true,
             "home.alignment.orientation": true,
             "home.number.numberFormat": true,
+            "home.number.moreFormats": true,
             "home.number.percent": true,
             "home.number.accounting": true,
             "home.number.date": true,
             "home.number.comma": true,
             "home.number.increaseDecimal": true,
             "home.number.decreaseDecimal": true,
+            "home.number.formatCells": true,
           }
         : null),
       // View/zoom controls depend on the current runtime (e.g. shared-grid mode).
@@ -6311,6 +6320,38 @@ mountRibbon(ribbonReactRoot, {
         applyFormattingToSelection("Number format", (_doc, sheetId, ranges) => applyNumberFormatPreset(doc, sheetId, ranges, "date"));
         return;
       }
+      if (kind === "time") {
+        applyToSelection("Number format", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { numberFormat: "h:mm:ss" }, { label: "Number format" });
+          }
+        });
+        return;
+      }
+      if (kind === "fraction") {
+        applyToSelection("Number format", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { numberFormat: "# ?/?" }, { label: "Number format" });
+          }
+        });
+        return;
+      }
+      if (kind === "scientific") {
+        applyToSelection("Number format", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { numberFormat: "0.00E+00" }, { label: "Number format" });
+          }
+        });
+        return;
+      }
+      if (kind === "text") {
+        applyToSelection("Number format", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { numberFormat: "@" }, { label: "Number format" });
+          }
+        });
+        return;
+      }
       return;
     }
 
@@ -6782,6 +6823,7 @@ mountRibbon(ribbonReactRoot, {
       }
       case "home.number.formatCells":
       case "home.number.moreFormats.formatCells":
+      case "home.number.moreFormats.custom":
       case "home.cells.format.formatCells":
         openFormatCells();
         return;
