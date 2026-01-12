@@ -22,6 +22,7 @@ workbook.xlsx (ZIP archive)
 │   ├── workbook.xml             # Workbook structure, sheet refs
 │   ├── styles.xml               # All cell formatting
 │   ├── sharedStrings.xml        # Deduplicated text strings
+│   ├── cellimages.xml           # Excel “image in cell” definitions (in-cell pictures)
 │   ├── calcChain.xml            # Calculation order hints
 │   ├── theme/
 │   │   └── theme1.xml           # Color/font theme
@@ -47,7 +48,8 @@ workbook.xlsx (ZIP archive)
 │   ├── customXml/               # Power Query definitions (base64)
 │   └── vbaProject.bin           # VBA macros (binary)
 └── xl/_rels/
-    └── workbook.xml.rels        # Workbook relationships
+    ├── workbook.xml.rels        # Workbook relationships
+    └── cellimages.xml.rels      # Relationships for in-cell images (to xl/media/*)
 ```
 
 ---
@@ -262,6 +264,77 @@ Notes:
     <xf numFmtId="164" fontId="1" fillId="1" borderId="1" applyNumberFormat="1"/>
   </cellXfs>
 </styleSheet>
+```
+
+### In-cell images (cellimages.xml)
+
+Newer versions of Excel can store “images in cell” (pictures that behave like cell content rather than floating drawing objects) in a dedicated workbook-level OPC part, commonly:
+
+- Part: `xl/cellimages.xml`
+- Relationships: `xl/_rels/cellimages.xml.rels`
+
+From a **packaging / round-trip** perspective, the important thing is the relationship chain that connects this part to the actual image blobs under `xl/media/*`.
+
+#### How it’s usually connected
+
+1. `xl/workbook.xml` (via `xl/_rels/workbook.xml.rels`) contains a relationship that targets `cellimages.xml`:
+   - The relationship **Type URI is a Microsoft extension** and has been observed to vary across Excel builds.
+   - **Detection strategy**: treat any relationship whose `Target` resolves to `/xl/cellimages.xml` as authoritative, rather than hardcoding a single `Type` URI.
+2. `xl/cellimages.xml.rels` contains relationships of type `…/relationships/image` pointing at `xl/media/*` files.
+
+#### `[Content_Types].xml` requirements
+
+If `xl/cellimages.xml` is present, the package typically includes an override:
+
+- `<Override PartName="/xl/cellimages.xml" ContentType="…"/>`
+
+Excel uses a **Microsoft-specific** content type string for this part (the exact string may vary between versions).
+
+**Preservation/detection strategy:**
+- Treat any `[Content_Types].xml` `<Override>` with `PartName="/xl/cellimages.xml"` as authoritative.
+- Preserve the `ContentType` value byte-for-byte on round-trip; **do not** hardcode a single MIME string in the writer.
+
+#### Relationship type URIs
+
+- `xl/cellimages.xml.rels` → `xl/media/*`:
+  - **High confidence**: `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
+- `xl/workbook.xml.rels` → `xl/cellimages.xml`:
+  - **Microsoft extension** (variable). Prefer detection by `Target`/part name.
+
+#### Minimal (non-normative) XML snippets
+
+Workbook relationship entry (in `xl/_rels/workbook.xml.rels`):
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId42"
+                Type="http://schemas.microsoft.com/office/.../relationships/cellimages"
+                Target="cellimages.xml"/>
+</Relationships>
+```
+
+Cellimages-to-media relationship entry (in `xl/_rels/cellimages.xml.rels`):
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+                Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                Target="media/image1.png"/>
+</Relationships>
+```
+
+Cellimages part referencing an image by relationship id (in `xl/cellimages.xml`):
+
+```xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cellImages xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cellImage>
+    <a:blip r:embed="rId1"/>
+  </cellImage>
+</cellImages>
 ```
 
 ---
