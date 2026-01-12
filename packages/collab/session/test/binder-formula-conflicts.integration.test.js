@@ -251,6 +251,9 @@ test("CollabSession↔DocumentController binder edits are treated as local by Fo
   assert.ok(sessionA.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.localFormula));
   await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.formula === conflict.localFormula.trim());
   await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.formula === conflict.localFormula.trim());
+  await waitForCondition(
+    () => documentController.getCell("Sheet1", { row: 0, col: 0 }).formula === conflict.localFormula.trim()
+  );
 
   binder.destroy();
   sessionA.destroy();
@@ -324,6 +327,7 @@ test("CollabSession↔DocumentController binder value edits are treated as local
   assert.ok(sessionA.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.localValue));
   await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.value === "ours");
   await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.value === "ours");
+  await waitForCondition(() => documentController.getCell("Sheet1", { row: 0, col: 0 }).value === "ours");
 
   binder.destroy();
   sessionA.destroy();
@@ -412,6 +416,8 @@ test("CollabSession↔DocumentController binder content conflicts (local formula
   assert.ok(sessionA.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.local));
   await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.formula === "=1");
   await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.formula === "=1");
+  await waitForCondition(() => dcA.getCell("Sheet1", { row: 0, col: 0 }).formula === "=1");
+  await waitForCondition(() => dcB.getCell("Sheet1", { row: 0, col: 0 }).formula === "=1");
 
   binderA.destroy();
   binderB.destroy();
@@ -495,6 +501,7 @@ test("CollabSession↔DocumentController binder content conflicts (local value v
   assert.ok(sessionA.formulaConflictMonitor?.resolveConflict(conflict.id, conflict.local));
   await waitForCondition(async () => (await sessionA.getCell("Sheet1:0:0"))?.value === "ours");
   await waitForCondition(async () => (await sessionB.getCell("Sheet1:0:0"))?.value === "ours");
+  await waitForCondition(() => documentController.getCell("Sheet1", { row: 0, col: 0 }).value === "ours");
 
   binder.destroy();
   sessionA.destroy();
