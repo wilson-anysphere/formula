@@ -466,6 +466,27 @@ fn localized_function_names_are_not_translated_in_sheet_prefixes() {
 }
 
 #[test]
+fn localized_external_data_function_names_are_not_translated_when_used_as_identifiers() {
+    // Function-name translation should only happen for identifiers used in function-call position
+    // (`NAME(`). If a workbook has a defined name that happens to match a localized spelling, it
+    // must not be rewritten.
+    let de = "=CUBEWERT+1";
+    let canon = locale::canonicalize_formula(de, &locale::DE_DE).unwrap();
+    assert_eq!(canon, de);
+    assert_eq!(locale::localize_formula(&canon, &locale::DE_DE).unwrap(), de);
+
+    let fr = "=VALEUR.CUBE+1";
+    let canon = locale::canonicalize_formula(fr, &locale::FR_FR).unwrap();
+    assert_eq!(canon, fr);
+    assert_eq!(locale::localize_formula(&canon, &locale::FR_FR).unwrap(), fr);
+
+    let es = "=VALOR.CUBO+1";
+    let canon = locale::canonicalize_formula(es, &locale::ES_ES).unwrap();
+    assert_eq!(canon, es);
+    assert_eq!(locale::localize_formula(&canon, &locale::ES_ES).unwrap(), es);
+}
+
+#[test]
 fn engine_accepts_localized_formulas_and_persists_canonical() {
     let mut engine = Engine::new();
     engine
