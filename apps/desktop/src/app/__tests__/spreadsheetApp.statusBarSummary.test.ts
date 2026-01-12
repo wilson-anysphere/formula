@@ -333,4 +333,51 @@ describe("SpreadsheetApp selection summary (status bar)", () => {
     app.destroy();
     root.remove();
   });
+
+  it("avoids scanning every coordinate for large selections (sparse iteration)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    clearSeededCells(app);
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+
+    doc.setCellValue(sheetId, "A1", 1);
+    doc.setCellValue(sheetId, "B2", 2);
+
+    // Build a large selection that includes A1 and B2 (area > 10k cells) so the
+    // implementation should use sparse iteration instead of scanning every coordinate.
+    (app as any).selection = buildSelection(
+      {
+        ranges: [{ startRow: 0, endRow: 999, startCol: 0, endCol: 25 }], // A1:Z1000
+        active: { row: 0, col: 0 },
+        anchor: { row: 0, col: 0 },
+        activeRangeIndex: 0,
+      },
+      (app as any).limits,
+    );
+
+    const getCellSpy = vi.spyOn(doc, "getCell");
+    const sparseSpy = vi.spyOn(doc as any, "forEachCellInSheet");
+
+    const summary = app.getSelectionSummary();
+    expect(summary).toEqual({
+      sum: 3,
+      average: 1.5,
+      count: 2,
+      numericCount: 2,
+      countNonEmpty: 2,
+    });
+
+    expect(sparseSpy).toHaveBeenCalledTimes(1);
+    expect(getCellSpy).not.toHaveBeenCalled();
+
+    app.destroy();
+    root.remove();
+  });
 });

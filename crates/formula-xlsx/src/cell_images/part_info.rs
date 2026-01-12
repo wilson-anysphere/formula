@@ -1,3 +1,5 @@
+//! Package-level helpers for workbook `xl/cellimages*.xml` parts.
+
 use std::collections::HashMap;
 use std::io::Cursor;
 
