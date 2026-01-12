@@ -127,6 +127,24 @@ function dlpCacheKeyFor(params: { dlp: any }): string {
   });
 }
 
+function sheetNamesCacheKeyFor(params: { spreadsheet: any }): string {
+  const spreadsheet = params.spreadsheet;
+  if (!spreadsheet || typeof spreadsheet.listSheets !== "function") return "sheets:none";
+  try {
+    const raw = spreadsheet.listSheets();
+    const list = Array.isArray(raw) ? raw : [];
+    const normalized = list
+      .map((name) => String(name ?? "").trim())
+      .filter((name) => name.length > 0);
+    // Sheet order should not matter for indexing validity; only the set of names.
+    normalized.sort((a, b) => a.localeCompare(b));
+    return stableJsonStringify(normalized);
+  } catch {
+    // Never crash AI surfaces due to adapter errors; treat as a changing key so indexing will retry.
+    return `sheets:error:${Date.now()}`;
+  }
+}
+
 export interface DesktopRagService {
   getContextManager(): Promise<ContextManager>;
   buildWorkbookContextFromSpreadsheetApi(params: {
@@ -201,6 +219,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
   let fallbackVersion = 0;
   let indexedVersion: number | null = null;
   let indexedDlpKey: string | null = null;
+  let indexedSheetNamesKey: string | null = null;
   let indexPromise: Promise<unknown> | null = null;
   let lastIndexStats: unknown = null;
 
@@ -271,12 +290,14 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     throwIfAborted(signal);
 
     const versionNow = currentVersion();
-    if (indexedVersion === versionNow) return;
+    const sheetNamesKeyNow = sheetNamesCacheKeyFor({ spreadsheet });
+    if (indexedVersion === versionNow && indexedSheetNamesKey === sheetNamesKeyNow) return;
 
     const run = (async () => {
       throwIfAborted(signal);
       const rag = await awaitWithAbort(getRag(), signal);
       const versionToIndex = currentVersion();
+      const sheetNamesKeyToIndex = sheetNamesCacheKeyFor({ spreadsheet });
       const workbook = workbookFromSpreadsheetApi({
         spreadsheet,
         workbookId: options.workbookId,
@@ -287,6 +308,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
       lastIndexStats = await rag.indexWorkbook(workbook, { sampleRows: options.sampleRows, signal } as any);
       indexedVersion = versionToIndex;
       indexedDlpKey = null;
+      indexedSheetNamesKey = sheetNamesKeyToIndex;
     })();
 
     indexPromise = run;
@@ -346,17 +368,19 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     // DLP mode: only skip workbook scans when both the workbook version AND the DLP inputs
     // (policy/classifications/includeRestrictedContent) match the last indexed state.
     const dlpKey = dlpCacheKeyFor({ dlp: params.dlp });
+    const sheetNamesKeyNow = sheetNamesCacheKeyFor({ spreadsheet: params.spreadsheet });
 
     // Avoid concurrent re-indexing (multiple chat messages, tool loops, etc).
     if (indexPromise) await awaitWithAbort(indexPromise, signal);
     throwIfAborted(signal);
 
     const versionNow = currentVersion();
-    const shouldIndex = indexedVersion !== versionNow || indexedDlpKey !== dlpKey;
+    const shouldIndex = indexedVersion !== versionNow || indexedDlpKey !== dlpKey || indexedSheetNamesKey !== sheetNamesKeyNow;
 
     if (shouldIndex) {
       const run = (async () => {
         const versionToIndex = currentVersion();
+        const sheetNamesKeyToIndex = sheetNamesCacheKeyFor({ spreadsheet: params.spreadsheet });
         try {
           const ctx = await rag.contextManager.buildWorkbookContextFromSpreadsheetApi({
             ...params,
@@ -366,6 +390,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
           lastIndexStats = ctx?.indexStats ?? lastIndexStats;
           indexedVersion = versionToIndex;
           indexedDlpKey = dlpKey;
+          indexedSheetNamesKey = sheetNamesKeyToIndex;
           return ctx;
         } catch (error) {
           // If DLP blocks cloud AI processing, ContextManager throws after indexing so we can
@@ -374,6 +399,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
           if (error instanceof DlpViolationError) {
             indexedVersion = versionToIndex;
             indexedDlpKey = dlpKey;
+            indexedSheetNamesKey = sheetNamesKeyToIndex;
           }
           throw error;
         }

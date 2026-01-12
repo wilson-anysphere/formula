@@ -5,6 +5,7 @@ import { HashEmbedder } from "../../../../../packages/ai-rag/src/index.js";
 
 import { createDesktopRagService } from "./ragService.js";
 import { DocumentControllerSpreadsheetApi } from "../tools/documentControllerSpreadsheetApi.js";
+import { createSheetNameResolverFromIdToNameMap } from "../../sheet/sheetNameResolver.ts";
 
 describe("createDesktopRagService (embedder config)", () => {
   it("uses HashEmbedder by default", async () => {
@@ -103,6 +104,55 @@ describe("createDesktopRagService (embedder config)", () => {
     await service.buildWorkbookContextFromSpreadsheetApi({
       spreadsheet,
       workbookId: "wb_rag_version",
+      query: "hello again",
+    });
+    expect(indexCalls).toBe(2);
+
+    await service.dispose();
+  });
+  it("re-indexes when sheet display names change (rename with sheetNameResolver)", async () => {
+    const controller = new DocumentController();
+    const sheetId = controller.addSheet({ name: "Budget" });
+    controller.setRangeValues(sheetId, "A1", [["Header"], ["Value"]]);
+
+    const sheetIdToName = new Map<string, string>([[sheetId, "Budget"]]);
+    const sheetNameResolver = createSheetNameResolverFromIdToNameMap(sheetIdToName);
+    const spreadsheet = new DocumentControllerSpreadsheetApi(controller, { sheetNameResolver });
+
+    let indexCalls = 0;
+
+    const service = createDesktopRagService({
+      documentController: controller,
+      workbookId: "wb_rag_sheet_rename",
+      // Test seam: avoid sqlite/localstorage and just count re-indexing.
+      createRag: async () =>
+        ({
+          vectorStore: { close: async () => {} },
+          contextManager: {
+            buildWorkbookContextFromSpreadsheetApi: async () => ({ promptContext: "", retrieved: [], indexStats: null }),
+          },
+          indexWorkbook: async () => {
+            indexCalls += 1;
+            return { indexed: indexCalls };
+          },
+        }) as any,
+    });
+
+    await service.buildWorkbookContextFromSpreadsheetApi({
+      spreadsheet,
+      workbookId: "wb_rag_sheet_rename",
+      query: "hello",
+    });
+    expect(indexCalls).toBe(1);
+
+    // Rename should not bump DocumentController.contentVersion, but the sheet display
+    // name used by SpreadsheetApi.listSheets changes, so the RAG index must refresh.
+    controller.renameSheet(sheetId, "Budget 2026");
+    sheetIdToName.set(sheetId, "Budget 2026");
+
+    await service.buildWorkbookContextFromSpreadsheetApi({
+      spreadsheet,
+      workbookId: "wb_rag_sheet_rename",
       query: "hello again",
     });
     expect(indexCalls).toBe(2);
