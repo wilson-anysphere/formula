@@ -244,7 +244,13 @@
 }
 
 @media (forced-colors: active), (prefers-contrast: more) {
-  :root {
+  /*
+    Ensure the high-contrast overrides apply even when a concrete theme is set via
+    `data-theme` (e.g. user-selected dark mode). The attribute selector matches the
+    specificity of `:root[data-theme="dark"]` so these later rules win in the cascade.
+  */
+  :root,
+  :root[data-theme] {
     color-scheme: light dark;
 
     --bg-primary: Canvas;
