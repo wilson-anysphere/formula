@@ -9210,6 +9210,58 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_column_cache_treats_rich_values_like_text() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_value(
+                "Sheet1",
+                "A1",
+                Value::Entity(crate::value::EntityValue::new("Entity display")),
+            )
+            .unwrap();
+        engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
+        engine
+            .set_cell_formula("Sheet1", "B1", "=SUM(A1:A2)")
+            .unwrap();
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        let key = CellKey {
+            sheet: sheet_id,
+            addr: parse_a1("B1").unwrap(),
+        };
+        let compiled = engine
+            .workbook
+            .get_cell(key)
+            .and_then(|c| c.compiled.clone())
+            .expect("compiled formula stored");
+
+        let snapshot = Snapshot::from_workbook(
+            &engine.workbook,
+            &engine.spills,
+            engine.external_value_provider.clone(),
+            engine.external_data_provider.clone(),
+        );
+        let column_cache =
+            BytecodeColumnCache::build(engine.workbook.sheets.len(), &snapshot, &[(key, compiled)]);
+
+        let col = column_cache.by_sheet[sheet_id]
+            .get(&0)
+            .expect("column A is cached");
+        assert_eq!(col.segments.len(), 1);
+        let seg = &col.segments[0];
+        assert_eq!(seg.row_start, 0);
+
+        assert!(seg.values[0].is_nan(), "rich value should not write a numeric slot");
+        assert_eq!(seg.values[1], 3.0);
+
+        assert_eq!(seg.blocked_rows_strict, vec![0]);
+        assert!(
+            seg.blocked_rows_ignore_nonnumeric.is_empty(),
+            "rich values should not block IgnoreNonNumeric slices"
+        );
+    }
+
+    #[test]
     fn bytecode_column_cache_ignores_ranges_used_only_for_implicit_intersection() {
         let mut engine = Engine::new();
         engine

@@ -8,7 +8,7 @@ use formula_engine::functions::{
     ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType, Volatility,
 };
 use formula_engine::locale::ValueLocaleConfig;
-use formula_engine::value::NumberLocale;
+use formula_engine::value::{EntityValue, NumberLocale, RecordValue};
 use formula_engine::{
     bytecode, BytecodeCompileReason, Engine, ErrorKind, ExternalValueProvider, NameDefinition,
     NameScope, ParseOptions, ReferenceStyle, Value,
@@ -1061,26 +1061,31 @@ fn bytecode_backend_respects_external_value_provider() {
 }
 
 #[test]
-fn sum_ignores_non_numeric_values_in_references_via_bytecode_column_slices() {
+fn sum_ignores_rich_values_in_references_via_bytecode_column_slices() {
     // Regression coverage: column-slice evaluation should tolerate non-numeric values in the
     // referenced range (ignored like text in Excel SUM semantics).
     //
     // This is also the intended behavior for future rich values (Entity/Record), which should be
     // classified like text/bool in the bytecode column cache.
-    let mut engine = Engine::new();
+    for rich in [
+        Value::Entity(EntityValue::new("Entity display")),
+        Value::Record(RecordValue::new("Record display")),
+    ] {
+        let mut engine = Engine::new();
 
-    engine.set_cell_value("Sheet1", "A1", "Entity").unwrap();
-    engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
-    engine
-        .set_cell_formula("Sheet1", "B1", "=SUM(A1:A2)")
-        .unwrap();
+        engine.set_cell_value("Sheet1", "A1", rich).unwrap();
+        engine.set_cell_value("Sheet1", "A2", 3.0).unwrap();
+        engine
+            .set_cell_formula("Sheet1", "B1", "=SUM(A1:A2)")
+            .unwrap();
 
-    // Ensure we're exercising the bytecode path.
-    assert_eq!(engine.bytecode_program_count(), 1);
+        // Ensure we're exercising the bytecode path.
+        assert_eq!(engine.bytecode_program_count(), 1);
 
-    engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
-    assert_engine_matches_ast(&engine, "=SUM(A1:A2)", "B1");
+        engine.recalculate_single_threaded();
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(3.0));
+        assert_engine_matches_ast(&engine, "=SUM(A1:A2)", "B1");
+    }
 }
 
 #[test]
