@@ -39,27 +39,28 @@ export function injectWebviewCsp(html: string): string {
       if (!hasKey) continue;
 
       tauriGlobalsPresent = true;
+      let deleted = false;
       try {
         // Some environments (including strict mode) throw if the property is non-configurable.
         // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete window[key];
+        deleted = delete window[key];
       } catch {
         // Ignore.
       }
+
+      if (deleted) {
+        let stillPresent = false;
+        try {
+          stillPresent = key in window;
+        } catch {
+          stillPresent = true;
+        }
+        if (!stillPresent) continue;
+      }
+
       try {
         // If deletion fails, fall back to overwriting.
         window[key] = undefined;
-      } catch {
-        // Ignore.
-      }
-      try {
-        // If a global is present and configurable, attempt to lock it down to undefined so it
-        // can't be re-populated later in the page lifecycle.
-        Object.defineProperty(window, key, {
-          value: undefined,
-          writable: false,
-          configurable: false,
-        });
       } catch {
         // Ignore.
       }
