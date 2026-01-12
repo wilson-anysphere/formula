@@ -55,7 +55,7 @@ export CARGO_BUILD_JOBS="${JOBS}"
 export MAKEFLAGS="${MAKEFLAGS:--j${JOBS}}"
 export CARGO_PROFILE_DEV_CODEGEN_UNITS="${CARGO_PROFILE_DEV_CODEGEN_UNITS:-${JOBS}}"
 export CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-${JOBS}}"
-export RAYON_NUM_THREADS="${RAYON_NUM_THREADS:-${JOBS}}"
+export RAYON_NUM_THREADS="${RAYON_NUM_THREADS:-${FORMULA_RAYON_NUM_THREADS:-${JOBS}}}"
 
 # Print to stderr so stdout remains usable for program output (e.g. JSON).
 echo "🏃 Running with -j${JOBS} (based on available memory)..." >&2

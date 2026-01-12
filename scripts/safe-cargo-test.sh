@@ -75,7 +75,7 @@ export CARGO_PROFILE_TEST_CODEGEN_UNITS="${CARGO_PROFILE_TEST_CODEGEN_UNITS:-1}"
 export CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-1}"
 
 # Rayon defaults to spawning one worker per core; cap it unless callers explicitly override it.
-export RAYON_NUM_THREADS="${RAYON_NUM_THREADS:-${JOBS}}"
+export RAYON_NUM_THREADS="${RAYON_NUM_THREADS:-${FORMULA_RAYON_NUM_THREADS:-${JOBS}}}"
 
 # Rust's test harness defaults to running one thread per core. Cap it for stability unless callers
 # explicitly override it.
