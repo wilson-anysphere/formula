@@ -84,6 +84,45 @@ impl CellEdit {
         })
     }
 
+    /// Convenience helper for updating a formula cell from Excel formula text using workbook
+    /// context, plus a sheet name for table inference.
+    ///
+    /// This is useful for table-less structured references like `[@Col]` in workbooks that contain
+    /// multiple tables; we can infer the correct table id from the base cell location (the cell
+    /// must be inside exactly one table range on that sheet).
+    ///
+    /// `formula` may include a leading `=`.
+    pub fn with_formula_text_with_context_in_sheet(
+        row: u32,
+        col: u32,
+        new_value: CellValue,
+        formula: &str,
+        sheet: &str,
+        ctx: &crate::workbook_context::WorkbookContext,
+    ) -> Result<Self, crate::rgce::EncodeError> {
+        let base = crate::rgce::CellCoord::new(row, col);
+        let encoded = {
+            #[cfg(feature = "write")]
+            {
+                crate::rgce::encode_rgce_with_context_ast_in_sheet(formula, ctx, sheet, base)?
+            }
+            #[cfg(not(feature = "write"))]
+            {
+                // Without the AST encoder, the sheet name currently only affects structured
+                // reference inference (not supported), so fall back to the legacy path.
+                crate::rgce::encode_rgce_with_context(formula, ctx, base)?
+            }
+        };
+        Ok(Self {
+            row,
+            col,
+            new_value,
+            new_formula: Some(encoded.rgce),
+            new_rgcb: Some(encoded.rgcb),
+            shared_string_index: None,
+        })
+    }
+
     /// Replace `new_formula` + `new_rgcb` by encoding the provided formula text using workbook
     /// context.
     ///
@@ -102,6 +141,34 @@ impl CellEdit {
             #[cfg(feature = "write")]
             {
                 crate::rgce::encode_rgce_with_context_ast(formula, ctx, base)?
+            }
+            #[cfg(not(feature = "write"))]
+            {
+                crate::rgce::encode_rgce_with_context(formula, ctx, base)?
+            }
+        };
+        self.new_formula = Some(encoded.rgce);
+        self.new_rgcb = Some(encoded.rgcb);
+        Ok(())
+    }
+
+    /// Replace `new_formula` + `new_rgcb` by encoding the provided formula text using workbook
+    /// context, plus a sheet name for table inference.
+    ///
+    /// See [`Self::with_formula_text_with_context_in_sheet`] for details.
+    ///
+    /// `formula` may include a leading `=`.
+    pub fn set_formula_text_with_context_in_sheet(
+        &mut self,
+        formula: &str,
+        sheet: &str,
+        ctx: &crate::workbook_context::WorkbookContext,
+    ) -> Result<(), crate::rgce::EncodeError> {
+        let base = crate::rgce::CellCoord::new(self.row, self.col);
+        let encoded = {
+            #[cfg(feature = "write")]
+            {
+                crate::rgce::encode_rgce_with_context_ast_in_sheet(formula, ctx, sheet, base)?
             }
             #[cfg(not(feature = "write"))]
             {

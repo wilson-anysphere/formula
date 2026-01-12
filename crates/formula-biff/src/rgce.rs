@@ -965,6 +965,7 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                 "structured references require workbook table-id context",
             ))
         }
+        Expr::FieldAccess(_) => return Err(EncodeRgceError::Unsupported("field access (.)")),
         Expr::Array(_) => return Err(EncodeRgceError::Unsupported("array literals")),
     }
 
