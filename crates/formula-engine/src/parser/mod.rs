@@ -1217,6 +1217,10 @@ impl<'a> Lexer<'a> {
                     let raw = self.lex_number();
                     self.push(TokenKind::Number(raw), start, self.idx);
                 }
+                '.' => {
+                    self.bump();
+                    self.push(TokenKind::Dot, start, self.idx);
+                }
                 c if is_ident_start_char(c) => {
                     if self.reference_style == ReferenceStyle::R1C1 {
                         if let Some(cell) = self.try_lex_r1c1_cell_ref() {

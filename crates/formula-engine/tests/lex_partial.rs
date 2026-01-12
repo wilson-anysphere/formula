@@ -1,4 +1,4 @@
-use formula_engine::{lex_partial, ParseOptions, TokenKind};
+use formula_engine::{lex_partial, Coord, ParseOptions, ReferenceStyle, TokenKind};
 
 #[test]
 fn lex_partial_unterminated_string_literal_returns_tokens_and_error() {
@@ -51,4 +51,27 @@ fn lex_partial_true_false_are_ident_when_followed_by_paren() {
     let out_literal = lex_partial("TRUE", &ParseOptions::default());
     assert!(out_literal.error.is_none());
     assert_eq!(out_literal.tokens[0].kind, TokenKind::Boolean(true));
+}
+
+#[test]
+fn lex_partial_r1c1_ref_followed_by_dot_produces_field_access_tokens() {
+    let opts = ParseOptions {
+        reference_style: ReferenceStyle::R1C1,
+        ..ParseOptions::default()
+    };
+    let out = lex_partial("RC[-1].Price", &opts);
+    assert!(out.error.is_none());
+
+    assert_eq!(out.tokens.len(), 4);
+    assert!(
+        matches!(
+            &out.tokens[0].kind,
+            TokenKind::R1C1Cell(cell) if cell.row == Coord::Offset(0) && cell.col == Coord::Offset(-1)
+        ),
+        "unexpected first token: {:?}",
+        out.tokens[0].kind
+    );
+    assert_eq!(out.tokens[1].kind, TokenKind::Dot);
+    assert_eq!(out.tokens[2].kind, TokenKind::Ident("Price".to_string()));
+    assert_eq!(out.tokens[3].kind, TokenKind::Eof);
 }
