@@ -3403,6 +3403,35 @@ fn bytecode_compile_diagnostics_reports_disabled_reason() {
 }
 
 #[test]
+fn bytecode_compile_diagnostics_reports_unsupported_function_reason() {
+    let mut engine = Engine::new();
+    // SIN is implemented by the AST evaluator but not yet supported by the bytecode backend.
+    engine.set_cell_formula("Sheet1", "A1", "=SIN(0)").unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 0);
+    assert_eq!(stats.fallback, 1);
+    assert_eq!(
+        stats
+            .fallback_reasons
+            .get(&BytecodeCompileReason::UnsupportedFunction(Arc::from("SIN")))
+            .copied()
+            .unwrap_or(0),
+        1
+    );
+
+    let report = engine.bytecode_compile_report(10);
+    assert_eq!(report.len(), 1);
+    assert_eq!(report[0].sheet, "Sheet1");
+    assert_eq!(report[0].addr, parse_a1("A1").unwrap());
+    assert_eq!(
+        report[0].reason,
+        BytecodeCompileReason::UnsupportedFunction(Arc::from("SIN"))
+    );
+}
+
+#[test]
 fn bytecode_compile_diagnostics_reports_grid_and_range_limits() {
     let mut engine = Engine::new();
 
