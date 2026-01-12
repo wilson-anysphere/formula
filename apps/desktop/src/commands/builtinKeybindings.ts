@@ -104,18 +104,6 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     when: null,
   },
   {
-    command: "edit.undo",
-    key: "ctrl+z",
-    mac: "cmd+z",
-    when: null,
-  },
-  {
-    command: "edit.redo",
-    key: "ctrl+y",
-    mac: "cmd+shift+z",
-    when: null,
-  },
-  {
     command: "audit.tracePrecedents",
     key: "ctrl+[",
     mac: "cmd+[",
