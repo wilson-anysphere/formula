@@ -48,11 +48,13 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     await page.addInitScript(() => {
       const listeners: Record<string, Array<(event: any) => void>> = {};
       const emitted: Array<{ event: string; payload: any }> = [];
+      const invokes: Array<{ cmd: string; args: any }> = [];
       const callOrder: Array<{ kind: "listen" | "listen-registered" | "emit"; name: string; seq: number }> = [];
       let seq = 0;
 
       (window as any).__tauriListeners = listeners;
       (window as any).__tauriEmittedEvents = emitted;
+      (window as any).__tauriInvokes = invokes;
       (window as any).__tauriCallOrder = callOrder;
       (window as any).__tauriShowCalls = 0;
       (window as any).__tauriFocusCalls = 0;
@@ -68,9 +70,8 @@ test.describe("desktop updater UI wiring (tauri)", () => {
 
       (window as any).__TAURI__ = {
         core: {
-          invoke: async (_cmd: string, _args: any) => {
-            // Keep the invoke surface flexible; updater UI wiring should not depend on
-            // unrelated backend commands.
+          invoke: async (cmd: string, args: any) => {
+            invokes.push({ cmd, args });
             return null;
           },
         },
@@ -170,6 +171,18 @@ test.describe("desktop updater UI wiring (tauri)", () => {
     await expect(dialog).toHaveJSProperty("open", true);
     await expect(page.getByTestId("updater-version")).toContainText("Version 9.9.9");
     await expect(page.getByTestId("updater-body")).toContainText("Release notes");
+
+    // Verify the dialog action wiring uses the Tauri shell open command.
+    await page.getByTestId("updater-view-versions").click();
+    await page.waitForFunction(() =>
+      Array.isArray((window as any).__tauriInvokes) &&
+        (window as any).__tauriInvokes.some((entry: any) => entry?.cmd === "open_external_url"),
+    );
+    const openExternal = await page.evaluate(
+      () => (window as any).__tauriInvokes?.find((entry: any) => entry?.cmd === "open_external_url") ?? null,
+    );
+    expect(openExternal).not.toBeNull();
+    expect(String(openExternal.args?.url ?? "")).toContain("github.com/wilson-anysphere/formula/releases");
 
     await waitForTauriListeners(page, "update-not-available");
     await dispatchTauriEvent(page, "update-not-available", { source: "manual" });
