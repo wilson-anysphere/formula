@@ -1,4 +1,5 @@
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+use formula_engine::error::ExcelError;
 use formula_engine::functions::financial::{oddfprice, oddfyield, oddlprice, oddlyield};
 use formula_engine::{ErrorKind, Value};
 
@@ -432,4 +433,206 @@ fn odd_last_coupon_roundtrips_yield_with_quarterly_frequency_and_non_100_redempt
 
     assert_close(recovered_yield_100, 0.07, 1e-10);
     assert_close(recovered_yield_105, 0.07, 1e-10);
+}
+
+#[test]
+fn oddfprice_returns_num_error_for_non_finite_price_near_negative_frequency_boundary() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    let issue = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 15), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 15), system).unwrap();
+    // Long maturity to ensure the discount factor underflows and PV overflows for yields near -frequency.
+    let maturity = ymd_to_serial(ExcelDate::new(2033, 1, 15), system).unwrap();
+
+    let rate = 0.05;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 0;
+
+    let yld = -(frequency as f64) + 1e-12;
+    let result = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    );
+
+    assert!(
+        matches!(result, Err(ExcelError::Num)),
+        "expected #NUM!, got {result:?}"
+    );
+}
+
+#[test]
+fn oddlprice_returns_num_error_for_non_finite_price_near_negative_frequency_boundary() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    let last_interest = ymd_to_serial(ExcelDate::new(2020, 1, 15), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 7, 15), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2033, 1, 15), system).unwrap();
+
+    let rate = 0.05;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 0;
+
+    let yld = -(frequency as f64) + 1e-12;
+    let result = oddlprice(
+        settlement,
+        maturity,
+        last_interest,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    );
+
+    assert!(
+        matches!(result, Err(ExcelError::Num)),
+        "expected #NUM!, got {result:?}"
+    );
+}
+
+#[test]
+fn odd_coupon_prices_are_finite_for_large_redemption_values() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Reuse the existing odd first coupon setup.
+    let issue = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 15), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 15), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2023, 1, 15), system).unwrap();
+
+    let rate = 0.05;
+    let yld = 0.06;
+    let redemption = 1e12;
+    let frequency = 2;
+    let basis = 0;
+
+    let price = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("ODDFPRICE should succeed for large finite redemption");
+    assert!(price.is_finite(), "expected finite price, got {price}");
+
+    // Odd last coupon setup.
+    let last_interest = ymd_to_serial(ExcelDate::new(2022, 7, 15), system).unwrap();
+    let settlement_last = ymd_to_serial(ExcelDate::new(2022, 10, 15), system).unwrap();
+    let maturity_last = ymd_to_serial(ExcelDate::new(2023, 1, 15), system).unwrap();
+
+    let price_last = oddlprice(
+        settlement_last,
+        maturity_last,
+        last_interest,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("ODDLPRICE should succeed for large finite redemption");
+    assert!(
+        price_last.is_finite(),
+        "expected finite price, got {price_last}"
+    );
+}
+
+#[test]
+fn odd_yield_solver_falls_back_when_derivative_is_non_finite() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Construct a case where the Newton step fails because the analytic derivative overflows at the
+    // default guess (0.1), but the price itself remains finite.
+    let issue = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 15), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 15), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2033, 1, 15), system).unwrap();
+
+    let rate = 0.05;
+    let frequency = 2;
+    let basis = 0;
+    let redemption = 1e308;
+    let target_yield = 0.1;
+
+    let pr = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        target_yield,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("ODDFPRICE should be finite for the target yield");
+
+    let recovered = oddfyield(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        pr,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("ODDFYIELD should converge via bisection fallback");
+
+    assert_close(recovered, target_yield, 1e-6);
+
+    // Repeat for the odd last coupon solver.
+    let last_interest = ymd_to_serial(ExcelDate::new(2020, 1, 15), system).unwrap();
+    let settlement_last = ymd_to_serial(ExcelDate::new(2020, 7, 15), system).unwrap();
+    let maturity_last = ymd_to_serial(ExcelDate::new(2033, 1, 15), system).unwrap();
+
+    let pr_last = oddlprice(
+        settlement_last,
+        maturity_last,
+        last_interest,
+        rate,
+        target_yield,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("ODDLPRICE should be finite for the target yield");
+
+    let recovered_last = oddlyield(
+        settlement_last,
+        maturity_last,
+        last_interest,
+        rate,
+        pr_last,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .expect("ODDLYIELD should converge via bisection fallback");
+
+    assert_close(recovered_last, target_yield, 1e-6);
 }

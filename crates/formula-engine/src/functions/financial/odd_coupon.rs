@@ -43,7 +43,7 @@ impl BondEquation {
         })
     }
 
-    fn price_and_derivative(&self, yld: f64) -> ExcelResult<(f64, f64)> {
+    fn discount_base(&self, yld: f64) -> ExcelResult<f64> {
         if !yld.is_finite() {
             return Err(ExcelError::Num);
         }
@@ -62,20 +62,52 @@ impl BondEquation {
         if base < 0.0 || !base.is_finite() {
             return Err(ExcelError::Num);
         }
+        Ok(base)
+    }
+
+    fn price(&self, yld: f64) -> ExcelResult<f64> {
+        let base = self.discount_base(yld)?;
 
         let mut pv = 0.0;
-        let mut dpv = 0.0;
         for (t, amt) in &self.payments {
             if *amt == 0.0 {
                 continue;
             }
             // PV_i = amt * base^(-t)
             let base_pow = base.powf(-*t);
-            if base_pow.is_nan() {
+            if !base_pow.is_finite() {
                 return Err(ExcelError::Num);
             }
             let pv_i = *amt * base_pow;
+            if !pv_i.is_finite() {
+                return Err(ExcelError::Num);
+            }
             pv += pv_i;
+            if !pv.is_finite() {
+                return Err(ExcelError::Num);
+            }
+        }
+
+        let price = pv - self.accrued_interest;
+        if price.is_finite() {
+            Ok(price)
+        } else {
+            Err(ExcelError::Num)
+        }
+    }
+
+    fn price_derivative(&self, yld: f64) -> ExcelResult<f64> {
+        let base = self.discount_base(yld)?;
+
+        let mut dpv = 0.0;
+        for (t, amt) in &self.payments {
+            if *amt == 0.0 || *t == 0.0 {
+                continue;
+            }
+            let base_pow = base.powf(-*t);
+            if !base_pow.is_finite() {
+                return Err(ExcelError::Num);
+            }
 
             // d/dy base^(-t) = (-t) * base^(-t-1) * (1/freq)
             //               = (-t) * base^(-t) / (freq * base)
@@ -84,21 +116,31 @@ impl BondEquation {
             if denom == 0.0 {
                 return Err(ExcelError::Div0);
             }
-            dpv += -*amt * *t * base_pow / denom;
+            if !denom.is_finite() {
+                return Err(ExcelError::Num);
+            }
+            let dpv_i = -*amt * *t * base_pow / denom;
+            if !dpv_i.is_finite() {
+                return Err(ExcelError::Num);
+            }
+            dpv += dpv_i;
+            if !dpv.is_finite() {
+                return Err(ExcelError::Num);
+            }
         }
 
-        let price = pv - self.accrued_interest;
-        if price.is_nan() || dpv.is_nan() {
-            return Err(ExcelError::Num);
+        if dpv.is_finite() {
+            Ok(dpv)
+        } else {
+            Err(ExcelError::Num)
         }
-        Ok((price, dpv))
     }
 
     fn f(&self, yld: f64, pr: f64) -> Option<f64> {
-        match self.price_and_derivative(yld) {
-            Ok((price, _)) => {
+        match self.price(yld) {
+            Ok(price) => {
                 let v = price - pr;
-                if v.is_nan() {
+                if !v.is_finite() {
                     None
                 } else {
                     Some(v)
@@ -109,8 +151,8 @@ impl BondEquation {
     }
 
     fn df(&self, yld: f64) -> Option<f64> {
-        match self.price_and_derivative(yld) {
-            Ok((_price, dprice)) => (dprice.is_finite() && dprice != 0.0).then_some(dprice),
+        match self.price_derivative(yld) {
+            Ok(dprice) => (dprice.is_finite() && dprice != 0.0).then_some(dprice),
             Err(_) => None,
         }
     }
@@ -371,19 +413,71 @@ fn solve_odd_yield(pr: f64, equation: &BondEquation) -> ExcelResult<f64> {
     // Deterministic fallback: monotonic bracketing + bisection.
     // For typical bond cashflows (positive redemption, non-negative coupon), price decreases with yield.
     let mut lo = -equation.freq + 1e-8;
-    let mut flo = equation.f(lo, pr).ok_or(ExcelError::Num)?;
-    if flo.abs() <= EXCEL_ITERATION_TOLERANCE {
-        return Ok(lo);
+    if !lo.is_finite() || lo <= -equation.freq {
+        return Err(ExcelError::Num);
+    }
+
+    // Ensure the low end of the bracket has a positive residual. If the residual is negative at our
+    // initial `lo`, move closer to the `-frequency` boundary (where price → +∞) until the residual
+    // becomes positive or the evaluation overflows (treated as positive).
+    let mut expansions = 0usize;
+    loop {
+        match equation.f(lo, pr) {
+            Some(flo) => {
+                if flo.abs() <= EXCEL_ITERATION_TOLERANCE {
+                    return Ok(lo);
+                }
+                if flo > 0.0 {
+                    break;
+                }
+            }
+            None => break, // non-finite price => effectively +∞ residual
+        }
+
+        expansions += 1;
+        if expansions > MAX_BRACKET_EXPANSIONS {
+            return Err(ExcelError::Num);
+        }
+
+        let eps = lo + equation.freq;
+        let next_eps = eps / 2.0;
+        if next_eps <= 0.0 || !next_eps.is_finite() {
+            return Err(ExcelError::Num);
+        }
+        lo = -equation.freq + next_eps;
+        if lo <= -equation.freq {
+            return Err(ExcelError::Num);
+        }
     }
 
     let mut hi = 1.0;
-    let mut fhi = equation.f(hi, pr).ok_or(ExcelError::Num)?;
+    let mut fhi;
+    loop {
+        match equation.f(hi, pr) {
+            Some(v) => {
+                fhi = v;
+                break;
+            }
+            None => {
+                // Non-finite residual => treat as "too low yield" and increase `hi`.
+                expansions += 1;
+                if expansions > MAX_BRACKET_EXPANSIONS {
+                    return Err(ExcelError::Num);
+                }
+                hi *= 2.0;
+                if hi > YIELD_UPPER_CAP || !hi.is_finite() {
+                    return Err(ExcelError::Num);
+                }
+                continue;
+            }
+        }
+    }
+
     if fhi.abs() <= EXCEL_ITERATION_TOLERANCE {
         return Ok(hi);
     }
 
-    let mut expansions = 0usize;
-    while flo.signum() == fhi.signum() {
+    while fhi >= 0.0 {
         expansions += 1;
         if expansions > MAX_BRACKET_EXPANSIONS {
             return Err(ExcelError::Num);
@@ -392,25 +486,35 @@ fn solve_odd_yield(pr: f64, equation: &BondEquation) -> ExcelResult<f64> {
         if hi > YIELD_UPPER_CAP || !hi.is_finite() {
             return Err(ExcelError::Num);
         }
-        fhi = equation.f(hi, pr).ok_or(ExcelError::Num)?;
-        if fhi.abs() <= EXCEL_ITERATION_TOLERANCE {
-            return Ok(hi);
+        match equation.f(hi, pr) {
+            Some(v) => {
+                fhi = v;
+                if fhi.abs() <= EXCEL_ITERATION_TOLERANCE {
+                    return Ok(hi);
+                }
+            }
+            None => continue,
         }
     }
 
     for _ in 0..MAX_ITER_ODD_YIELD_BISECT {
         let mid = 0.5 * (lo + hi);
-        let fmid = equation.f(mid, pr).ok_or(ExcelError::Num)?;
-
-        if fmid.abs() <= EXCEL_ITERATION_TOLERANCE {
-            return Ok(mid);
-        }
-
-        if flo.signum() == fmid.signum() {
-            lo = mid;
-            flo = fmid;
-        } else {
-            hi = mid;
+        match equation.f(mid, pr) {
+            Some(fmid) => {
+                if fmid.abs() <= EXCEL_ITERATION_TOLERANCE {
+                    return Ok(mid);
+                }
+                if fmid > 0.0 {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            None => {
+                // A non-finite price implies we're too close to the `-frequency` boundary; treat it
+                // as a positive residual and move the lower bracket upward.
+                lo = mid;
+            }
         }
     }
 
@@ -446,12 +550,7 @@ pub fn oddfprice(
         basis,
         system,
     )?;
-    let (price, _dprice) = eq.price_and_derivative(yld)?;
-    if price.is_finite() {
-        Ok(price)
-    } else {
-        Err(ExcelError::Num)
-    }
+    eq.price(yld)
 }
 
 /// ODDFYIELD: yield of a security with an odd (short/long) first coupon period.
@@ -503,12 +602,7 @@ pub fn oddlprice(
         basis,
         system,
     )?;
-    let (price, _dprice) = eq.price_and_derivative(yld)?;
-    if price.is_finite() {
-        Ok(price)
-    } else {
-        Err(ExcelError::Num)
-    }
+    eq.price(yld)
 }
 
 /// ODDLYIELD: yield of a security with an odd (short/long) last coupon period.
