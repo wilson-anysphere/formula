@@ -177,7 +177,7 @@ fn negative_yield_below_minus_one_is_allowed_when_frequency_gt_one() {
     let basis = 0;
 
     let freq = frequency as f64;
-    let coupon_payment = redemption * rate / freq;
+    let coupon_payment = 100.0 * rate / freq;
     let expected = (coupon_payment + redemption) / (1.0 + yld / freq);
     let actual = price(settlement, maturity, rate, yld, redemption, frequency, basis, system).unwrap();
     assert_close(actual, expected, 1e-12);

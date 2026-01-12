@@ -115,7 +115,9 @@ fn oddf_price_excel_model(
     system: ExcelDateSystem,
 ) -> f64 {
     let freq = frequency as f64;
-    let c = redemption * rate / freq;
+    // Excel's odd-coupon bond functions are priced per $100 face value, and coupon payments are
+    // based on the $100 face value (not on the `redemption` amount).
+    let c = 100.0 * rate / freq;
 
     let a = days_between(issue, settlement, basis, system);
     let dfc = days_between(issue, first_coupon, basis, system);
@@ -176,7 +178,9 @@ fn oddl_price_excel_model(
     system: ExcelDateSystem,
 ) -> f64 {
     let freq = frequency as f64;
-    let c = redemption * rate / freq;
+    // Excel's odd-coupon bond functions are priced per $100 face value, and coupon payments are
+    // based on the $100 face value (not on the `redemption` amount).
+    let c = 100.0 * rate / freq;
 
     let a = days_between(last_interest, settlement, basis, system);
     let dlm = days_between(last_interest, maturity, basis, system);
@@ -517,12 +521,12 @@ fn odd_coupon_price_and_yield_handle_zero_yield() {
     // With yld=0, all discount factors are 1 and price becomes:
     // price = (sum of cashflows) - accrued_interest.
     // For this schedule/basis:
-    // - regular coupon C = redemption * rate / frequency
+    // - regular coupon C = 100 * rate / frequency
     // - odd first coupon = 1.5 * C (issue->first_coupon is 270 days vs E=180)
     // - accrued_interest = 0.5 * C (issue->settlement is 90 days vs E=180)
     // - total cashflows = odd_first_coupon + C + (redemption + C)
     // => price = redemption + 3*C
-    let c = redemption * rate / (frequency as f64);
+    let c = 100.0 * rate / (frequency as f64);
     let expected_price = redemption + 3.0 * c;
 
     let price = oddfprice(

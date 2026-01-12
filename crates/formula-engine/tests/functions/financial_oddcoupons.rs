@@ -109,6 +109,111 @@ fn oddfprice_basis1_uses_prev_coupon_period_for_e() {
 }
 
 #[test]
+fn odd_coupon_coupon_payment_is_based_on_face_value() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Excel's odd-coupon bond functions return a price per $100 face value, and the periodic coupon
+    // amount is computed from the $100 face value (not from the `redemption` amount).
+    let rate = 0.10;
+    let yld = 0.0;
+    let redemption = 105.0;
+    let frequency = 2;
+    let basis = 0;
+
+    let c = 100.0 * rate / (frequency as f64);
+
+    // ODDF*: settlement == first_coupon is allowed.
+    let issue = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+    let settlement = first_coupon;
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 7, 1), system).unwrap();
+
+    // With `yld=0` and settlement on the first coupon date, the clean price is just the sum of the
+    // remaining cashflows: two regular coupons plus redemption.
+    let expected_oddf = redemption + 2.0 * c;
+    let price_oddf = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+    assert_close(price_oddf, expected_oddf, 1e-12);
+    let recovered_yld = oddfyield(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        price_oddf,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+    assert_close(recovered_yld, yld, 1e-10);
+
+    // ODDL*: settlement == last_interest is allowed.
+    let last_interest = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+    let settlement2 = last_interest;
+    let maturity2 = ymd_to_serial(ExcelDate::new(2021, 1, 1), system).unwrap();
+
+    // With `yld=0` and a single odd-last period that is exactly one regular coupon period, the
+    // clean price is redemption + one regular coupon.
+    let expected_oddl = redemption + c;
+    let price_oddl = oddlprice(
+        settlement2,
+        maturity2,
+        last_interest,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+    assert_close(price_oddl, expected_oddl, 1e-12);
+    let recovered_yld = oddlyield(
+        settlement2,
+        maturity2,
+        last_interest,
+        rate,
+        price_oddl,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+    assert_close(recovered_yld, yld, 1e-10);
+
+    // Worksheet wiring.
+    let mut sheet = TestSheet::new();
+    let v = sheet.eval(
+        "=ODDFPRICE(DATE(2020,7,1),DATE(2021,7,1),DATE(2020,1,1),DATE(2020,7,1),0.1,0,105,2,0)",
+    );
+    match v {
+        Value::Number(n) => assert_close(n, expected_oddf, 1e-12),
+        other => panic!("expected number, got {other:?}"),
+    }
+    let v = sheet.eval(
+        "=ODDLPRICE(DATE(2020,7,1),DATE(2021,1,1),DATE(2020,7,1),0.1,0,105,2,0)",
+    );
+    match v {
+        Value::Number(n) => assert_close(n, expected_oddl, 1e-12),
+        other => panic!("expected number, got {other:?}"),
+    }
+}
+
+#[test]
 fn odd_coupon_settlement_boundary_behavior() {
     let system = ExcelDateSystem::EXCEL_1900;
 
