@@ -1,3 +1,5 @@
+#![cfg_attr(target_arch = "wasm32", allow(dead_code, unused_imports))]
+
 use std::collections::BTreeSet;
 use std::error::Error;
 #[cfg(not(target_arch = "wasm32"))]
