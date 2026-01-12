@@ -120,6 +120,14 @@ test.describe("updater UI wiring", () => {
     );
   });
 
+  test("update-downloaded shows a ready-to-restart toast when dialog is closed", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await fireTauriEvent(page, "update-downloaded", { source: "startup", version: "9.9.9" });
+    await expect(page.getByTestId("update-ready-toast")).toBeVisible();
+    await expect(page.getByTestId("update-ready-toast")).toContainText(/download/i);
+  });
+
   test("download progress events update the dialog and show a restart CTA when open", async ({ page }) => {
     await gotoDesktop(page);
 
