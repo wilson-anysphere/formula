@@ -10115,6 +10115,15 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_if_short_circuits_unused_volatile_true_branch() {
+        let v = assert_bytecode_eq_ast("=IF(FALSE, RAND(), 1) + RAND()");
+        match v {
+            Value::Number(n) => assert!((1.0..2.0).contains(&n), "got {n}"),
+            other => panic!("expected number, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn bytecode_iferror_short_circuits_unused_volatile_fallback() {
         let v = assert_bytecode_eq_ast("=IFERROR(1, RAND()) + RAND()");
         match v {
@@ -10152,6 +10161,15 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_ifs_short_circuits_unused_volatile_condition() {
+        let v = assert_bytecode_eq_ast("=IFS(TRUE, 1, RAND(), 2) + RAND()");
+        match v {
+            Value::Number(n) => assert!((1.0..2.0).contains(&n), "got {n}"),
+            other => panic!("expected number, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn bytecode_switch_short_circuits_later_case_values() {
         assert_bytecode_matches_ast("=SWITCH(1, 1, 10, 1/0, 20)", Value::Number(10.0));
     }
@@ -10166,6 +10184,24 @@ mod tests {
         let v = assert_bytecode_eq_ast("=SWITCH(1, 1, 10, RAND()) + RAND()");
         match v {
             Value::Number(n) => assert!((10.0..11.0).contains(&n), "got {n}"),
+            other => panic!("expected number, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bytecode_switch_short_circuits_unused_volatile_case_value() {
+        let v = assert_bytecode_eq_ast("=SWITCH(1, 1, 10, RAND(), 20) + RAND()");
+        match v {
+            Value::Number(n) => assert!((10.0..11.0).contains(&n), "got {n}"),
+            other => panic!("expected number, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bytecode_switch_short_circuits_unused_volatile_case_result() {
+        let v = assert_bytecode_eq_ast("=SWITCH(2, 1, RAND(), 2, 20) + RAND()");
+        match v {
+            Value::Number(n) => assert!((20.0..21.0).contains(&n), "got {n}"),
             other => panic!("expected number, got {other:?}"),
         }
     }
