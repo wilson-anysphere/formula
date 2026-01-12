@@ -62,7 +62,9 @@ const XF_FLAG_STYLE: u16 = 0x0004;
 // WINDOW1.grbit option flags [MS-XLS 2.4.346].
 //
 // Bit 1 (`fIconic`) indicates the workbook window is minimized.
+// Bit 5 (`fMaximized`) indicates the workbook window is maximized.
 const WINDOW1_GRBIT_ICONIC: u16 = 0x0002;
+const WINDOW1_GRBIT_MAXIMIZED: u16 = 0x0020;
 
 fn strip_embedded_nuls(s: &mut String) {
     if s.contains('\0') {
@@ -837,7 +839,7 @@ pub(crate) fn parse_biff_workbook_globals(
                     continue;
                 }
                 let hash = u16::from_le_bytes([data[0], data[1]]);
-                out.workbook_protection.password_hash = Some(hash);
+                out.workbook_protection.password_hash = (hash != 0).then_some(hash);
             }
             // WINDOW1 [MS-XLS 2.4.346]
             RECORD_WINDOW1 => {
@@ -872,6 +874,8 @@ pub(crate) fn parse_biff_workbook_globals(
                             let grbit = u16::from_le_bytes([data[8], data[9]]);
                             Some(if (grbit & WINDOW1_GRBIT_ICONIC) != 0 {
                                 WorkbookWindowState::Minimized
+                            } else if (grbit & WINDOW1_GRBIT_MAXIMIZED) != 0 {
+                                WorkbookWindowState::Maximized
                             } else {
                                 WorkbookWindowState::Normal
                             })
@@ -897,7 +901,6 @@ pub(crate) fn parse_biff_workbook_globals(
                     }
                 }
 
-                // iTabCur is a 0-based active sheet tab index stored at offset 10.
                 if data.len() < 12 {
                     out.warnings
                         .push("WINDOW1 record too short to read active tab index".to_string());

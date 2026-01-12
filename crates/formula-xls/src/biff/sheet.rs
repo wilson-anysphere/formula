@@ -186,7 +186,7 @@ pub(crate) fn parse_biff_sheet_protection(
                     continue;
                 }
                 let hash = u16::from_le_bytes([data[0], data[1]]);
-                out.protection.password_hash = Some(hash);
+                out.protection.password_hash = (hash != 0).then_some(hash);
             }
             RECORD_OBJPROTECT => {
                 if data.len() < 2 {
@@ -219,7 +219,6 @@ pub(crate) fn parse_biff_sheet_protection(
 
     Ok(out)
 }
-
 /// Best-effort parse of worksheet view/UI state (frozen panes, zoom, selection, display flags).
 ///
 /// This scan is resilient to malformed records: payload-level parse failures are surfaced as
