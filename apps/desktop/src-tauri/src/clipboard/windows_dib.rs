@@ -16,7 +16,8 @@ use png::{BitDepth, ColorType};
 //
 // This is intentionally larger than `MAX_IMAGE_BYTES` because DIBs are uncompressed, but still
 // bounded to keep clipboard conversions from exhausting memory.
-const MAX_DECODED_RGBA_BYTES: usize = 4 * super::MAX_IMAGE_BYTES; // 40 MiB
+// Allow decoded RGBA buffers up to 4x the raw PNG size cap.
+const MAX_DECODED_RGBA_BYTES: usize = 4 * super::MAX_IMAGE_BYTES;
 
 const BITMAPINFOHEADER_SIZE: usize = 40;
 const BITMAPV5HEADER_SIZE: usize = 124;
