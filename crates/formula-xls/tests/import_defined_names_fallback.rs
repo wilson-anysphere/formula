@@ -53,4 +53,12 @@ fn imports_defined_names_via_calamine_fallback_when_biff_is_unavailable() {
         "expected imported workbook to contain defined name {expected_name:?}; defined_names={:?}",
         result.workbook.defined_names
     );
+
+    assert!(
+        result.warnings.iter().any(|w| w
+            .message
+            .contains("imported `.xls` defined names via calamine fallback")),
+        "missing calamine fallback warning; warnings={:?}",
+        result.warnings
+    );
 }

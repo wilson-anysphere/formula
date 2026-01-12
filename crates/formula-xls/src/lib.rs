@@ -1197,10 +1197,13 @@ fn import_xls_path_with_biff_reader(
             .unwrap_or(refers_to)
             .to_string();
 
-        if out
-            .defined_names
-            .iter()
-            .any(|existing| existing.name.eq_ignore_ascii_case(&name))
+        // When BIFF defined names were imported successfully, prefer them over calamine’s
+        // best-effort string representation.
+        if defined_names_before_calamine != 0
+            && out
+                .defined_names
+                .iter()
+                .any(|existing| existing.name.eq_ignore_ascii_case(&name))
         {
             continue;
         }
