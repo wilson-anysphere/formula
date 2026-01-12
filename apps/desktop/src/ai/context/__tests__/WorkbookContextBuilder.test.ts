@@ -91,6 +91,7 @@ describe("WorkbookContextBuilder", () => {
       },
     };
 
+    const onBuildStats = vi.fn();
     const builder = new WorkbookContextBuilder({
       workbookId: "wb_rag_builder",
       documentController,
@@ -99,6 +100,7 @@ describe("WorkbookContextBuilder", () => {
       mode: "chat",
       model: "unit-test-model",
       maxPromptContextTokens: 4000,
+      onBuildStats,
     });
 
     const ctx = await builder.build({ activeSheetId: "Sheet1", focusQuestion: "revenue by region" });
@@ -106,6 +108,12 @@ describe("WorkbookContextBuilder", () => {
     expect(lastRagResult).toBeTruthy();
     expect(lastRagResult.promptContext).toBe("");
     expect(ctx.retrieved.length).toBeGreaterThan(0);
+
+    expect(onBuildStats).toHaveBeenCalledTimes(1);
+    const stats = onBuildStats.mock.calls[0]![0];
+    expect(stats.rag.enabled).toBe(true);
+    expect(stats.rag.retrievedCount).toBe(ctx.retrieved.length);
+    expect(stats.rag.retrievedBlockCount).toBeGreaterThan(0);
 
     // WorkbookContextBuilder formats the retrieved chunks into the final packed prompt context.
     expect(ctx.promptContext).toContain("## retrieved");
