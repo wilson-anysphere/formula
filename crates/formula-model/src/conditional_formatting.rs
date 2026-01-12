@@ -1456,33 +1456,44 @@ fn range_intersection(a: Range, b: Range) -> Option<Range> {
 fn iter_cells(range: Range) -> RangeIter {
     RangeIter {
         range,
-        cur: range.start,
+        cur: Some(range.start),
     }
 }
 
 struct RangeIter {
     range: Range,
-    cur: CellRef,
+    cur: Option<CellRef>,
 }
 
 impl Iterator for RangeIter {
     type Item = CellRef;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.cur.row > self.range.end.row {
+        let current = self.cur?;
+        if current.row > self.range.end.row {
+            self.cur = None;
             return None;
         }
-        let out = self.cur;
-        if self.cur.col == self.range.end.col {
-            self.cur = CellRef {
-                row: self.cur.row + 1,
+
+        let out = current;
+        if current.row == self.range.end.row && current.col == self.range.end.col {
+            self.cur = None;
+            return Some(out);
+        }
+
+        if current.col == self.range.end.col {
+            // Safe: if we're not at `range.end`, then `current.row < range.end.row`,
+            // so incrementing cannot overflow `u32`.
+            self.cur = Some(CellRef {
+                row: current.row + 1,
                 col: self.range.start.col,
-            };
+            });
         } else {
-            self.cur = CellRef {
-                row: self.cur.row,
-                col: self.cur.col + 1,
-            };
+            // Safe: if we're not at `range.end`, then `current.col < range.end.col`.
+            self.cur = Some(CellRef {
+                row: current.row,
+                col: current.col + 1,
+            });
         }
         Some(out)
     }

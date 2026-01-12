@@ -305,7 +305,7 @@ impl Table {
 
     pub fn data_range(&self) -> Option<Range> {
         let r = self.range;
-        let start_row = r.start.row + self.header_row_count;
+        let start_row = r.start.row.checked_add(self.header_row_count)?;
         let end_row = r.end.row.saturating_sub(self.totals_row_count);
         if start_row > end_row {
             return None;
@@ -321,9 +321,13 @@ impl Table {
             return None;
         }
         let r = self.range;
+        let header_end = self
+            .header_row_count
+            .checked_sub(1)
+            .and_then(|delta| r.start.row.checked_add(delta))?;
         Some(Range::new(
             r.start,
-            CellRef::new(r.start.row + self.header_row_count - 1, r.end.col),
+            CellRef::new(header_end, r.end.col),
         ))
     }
 
@@ -332,7 +336,10 @@ impl Table {
             return None;
         }
         let r = self.range;
-        let start_row = r.end.row + 1 - self.totals_row_count;
+        let start_row = r
+            .end
+            .row
+            .saturating_sub(self.totals_row_count.saturating_sub(1));
         Some(Range::new(CellRef::new(start_row, r.start.col), r.end))
     }
 
