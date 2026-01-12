@@ -63,7 +63,7 @@ This schema uses multiple indices; the most important ones are:
 | `rc/@t` | `xl/metadata.xml` (`valueMetadata/bk/rc`) | Index into `metadataTypes` (`XLRICHVALUE`) | Appears **1-based** (`t="1"` in observed files). |
 | `rc/@v` | `xl/metadata.xml` (`valueMetadata/bk/rc`) | Index into `futureMetadata name="XLRICHVALUE"` `bk` list | Appears **0-based**. |
 | `xlrd:rvb/@i` | `xl/metadata.xml` (`futureMetadata/XLRICHVALUE` extension) | Index into `xl/richData/rdrichvalue.xml` `<rv>` list | **0-based** rich value index. |
-| `_rvRel:LocalImageIdentifier` (first `<v>` inside `<rv>`) | `xl/richData/rdrichvalue.xml` | Relationship-slot index | **0-based index** into the ordered `<rel>` list in `richValueRel.xml`. |
+| `_rvRel:LocalImageIdentifier` | `xl/richData/rdrichvalue.xml` | Relationship-slot index | The relationship slot index is carried by the `<v>` corresponding to the `_rvRel:LocalImageIdentifier` key in `rdrichvaluestructure.xml` (do not assume it is always the first `<v>`; in the observed `_localImage` structure it is first because of the key order). |
 | `rel/@r:id` | `xl/richData/richValueRel.xml` | Relationship ID string | Resolve via `.rels` by matching `Id="..."` (not by element order). |
 
 ### Practical detection (distinguishing “Place in Cell” images from other `vm` uses)
@@ -82,7 +82,7 @@ For the “Place in Cell” local-image shape documented here, a robust detector
    * `rv/@s` selects a structure in `xl/richData/rdrichvaluestructure.xml`.
    * For images, the structure has `t="_localImage"` and includes keys `_rvRel:LocalImageIdentifier` and `CalcOrigin`.
 6. Interpret the rich value payload positionally:
-   * First `<v>` = `_rvRel:LocalImageIdentifier` (relationship slot index).
+   * The `<v>` corresponding to `_rvRel:LocalImageIdentifier` is the relationship slot index (in the observed fixture it is the first `<v>` because `_rvRel:LocalImageIdentifier` is the first `<k>` in `rdrichvaluestructure.xml`).
    * Second `<v>` = `CalcOrigin` (preserve as an opaque Excel flag).
 
 The cached cell representation (`t="e"` + `#VALUE!`) is a strong signal for “Place in Cell”, but the
