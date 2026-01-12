@@ -135,12 +135,34 @@ test.describe("global keybindings", () => {
     await expect(page.getByTestId("formula-input")).toBeFocused();
 
     // Ctrl/Cmd+F should not open our Find dialog while typing in an input.
-    await page.keyboard.press(`${primary}+F`);
+    await page.evaluate((isMac) => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "f",
+          metaKey: isMac,
+          ctrlKey: !isMac,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, process.platform === "darwin");
     await page.waitForTimeout(100);
     await expect(page.getByTestId("find-dialog")).not.toBeVisible();
 
     // Ctrl/Cmd+G should not open Go To while typing in an input.
-    await page.keyboard.press(`${primary}+G`);
+    await page.evaluate((isMac) => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "g",
+          metaKey: isMac,
+          ctrlKey: !isMac,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, process.platform === "darwin");
     await page.waitForTimeout(100);
     await expect(page.getByTestId("goto-dialog")).not.toBeVisible();
 
@@ -255,7 +277,19 @@ test.describe("global keybindings", () => {
     await expect(page.getByTestId("comments-panel")).not.toBeVisible();
 
     // Extension keybinding should not fire while typing in an input.
-    await page.keyboard.press(`${primary}+Shift+Y`);
+    await page.evaluate((isMac) => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "y",
+          metaKey: isMac,
+          ctrlKey: !isMac,
+          shiftKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, process.platform === "darwin");
     await page.waitForTimeout(250);
     await expect(page.getByTestId("toast")).toHaveCount(0);
   });
