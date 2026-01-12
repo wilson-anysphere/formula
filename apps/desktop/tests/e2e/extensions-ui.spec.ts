@@ -209,6 +209,7 @@ test.describe("Extensions UI integration", () => {
       if (!desc) continue;
       expect(desc.valueType, `${key} should be scrubbed to undefined`).toBe("undefined");
       expect(desc.writable, `${key} should not be writable after scrubbing`).toBe(false);
+      expect(desc.configurable, `${key} should not be configurable after scrubbing`).toBe(false);
     }
   });
 
