@@ -420,6 +420,24 @@ fn xlookup_errors_on_mismatched_shapes_and_invalid_modes() {
 }
 
 #[test]
+fn xmatch_and_xlookup_reject_2d_lookup_arrays() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("B1", 2.0);
+    sheet.set("A2", 3.0);
+    sheet.set("B2", 4.0);
+
+    assert_eq!(
+        sheet.eval("=XMATCH(2, A1:B2)"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        sheet.eval("=XLOOKUP(2, A1:B2, A1:A2)"),
+        Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
 fn xmatch_and_xlookup_treat_missing_optional_args_as_defaults() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);
