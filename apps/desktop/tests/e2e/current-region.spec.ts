@@ -51,5 +51,28 @@ test.describe("Ctrl/Cmd+Shift+* (select current region)", () => {
       await expect(page.getByTestId("selection-range")).toHaveText("E1:G3");
       await expect(page.getByTestId("active-cell")).toHaveText("F2");
     });
+
+    test(`falls back to the active cell when there is no adjacent region (${mode})`, async ({ page }) => {
+      await gotoDesktop(page, `/?grid=${mode}`);
+      await waitForIdle(page);
+
+      const gridBox = await page.locator("#grid").boundingBox();
+      expect(gridBox).not.toBeNull();
+
+      const j10Rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("J10"));
+      expect(j10Rect).not.toBeNull();
+
+      await page.mouse.click(
+        gridBox!.x + j10Rect!.x + j10Rect!.width / 2,
+        gridBox!.y + j10Rect!.y + j10Rect!.height / 2,
+      );
+      await expect(page.getByTestId("active-cell")).toHaveText("J10");
+
+      const modifier = process.platform === "darwin" ? "Meta" : "Control";
+      await page.keyboard.press(`${modifier}+Shift+8`);
+
+      await expect(page.getByTestId("selection-range")).toHaveText("J10");
+      await expect(page.getByTestId("active-cell")).toHaveText("J10");
+    });
   }
 });
