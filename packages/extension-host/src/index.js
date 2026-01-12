@@ -161,6 +161,32 @@ function sanitizeEventPayload(event, data) {
   }
   if (!size || size.cellCount <= DEFAULT_EXTENSION_RANGE_CELL_LIMIT) return data;
 
+  // Mirror desktop and browser-host guardrails: `selectionChanged` payloads may include a full
+  // 2D values/formulas matrix. For Excel-scale selections this can allocate hundreds of thousands
+  // of cells and OOM the extension worker.
+  //
+  // If the host explicitly marks the payload as `truncated`, allow small partial matrices
+  // to pass through (e.g. a preview cell). Otherwise, strip the matrices and mark the payload
+  // as truncated.
+  const matrixCellCount = (matrix) => {
+    if (!Array.isArray(matrix)) return 0;
+    let total = 0;
+    for (const row of matrix) {
+      if (!Array.isArray(row) || row.length === 0) continue;
+      total += row.length;
+      if (total > DEFAULT_EXTENSION_RANGE_CELL_LIMIT) return total;
+    }
+    return total;
+  };
+
+  const deliveredValuesCells = matrixCellCount(selection.values);
+  const deliveredFormulasCells = matrixCellCount(selection.formulas);
+  const deliveredCells = Math.max(deliveredValuesCells, deliveredFormulasCells);
+
+  if (selection.truncated === true && deliveredCells <= DEFAULT_EXTENSION_RANGE_CELL_LIMIT) {
+    return data;
+  }
+
   return {
     ...(data ?? {}),
     selection: {

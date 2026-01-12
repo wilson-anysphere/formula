@@ -75,3 +75,42 @@ test("ExtensionHost (node): truncates huge selectionChanged event payloads", asy
   assert.equal(lastMessage.data.selection.truncated, true);
 });
 
+test("ExtensionHost (node): allows partial matrices when huge selectionChanged payload is marked truncated", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-host-selection-truncated-"));
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    spreadsheet: {}
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  /** @type {any} */
+  let lastMessage = null;
+  host._extensions.set("ext", {
+    id: "ext",
+    active: true,
+    worker: { postMessage: (msg) => (lastMessage = msg) }
+  });
+
+  host._broadcastEvent("selectionChanged", {
+    selection: {
+      startRow: 0,
+      startCol: 0,
+      endRow: 9999,
+      endCol: 25,
+      values: [[1]],
+      formulas: [],
+      truncated: true
+    }
+  });
+
+  assert.ok(lastMessage);
+  assert.deepEqual(lastMessage.data.selection.values, [[1]]);
+  assert.deepEqual(lastMessage.data.selection.formulas, []);
+  assert.equal(lastMessage.data.selection.truncated, true);
+});
