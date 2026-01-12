@@ -31975,6 +31975,226 @@
       "id": "oddlyield_value_733c24f148d2"
     },
     {
+      "formula": "=ODDFPRICE(DATE(2019,2,28),DATE(2019,9,30),DATE(2019,1,31),DATE(2019,3,31),0.05,0.06,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE"
+      ],
+      "description": "ODDFPRICE basis=0",
+      "id": "oddfprice_0cf2f0e541ae"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2019,2,28),DATE(2019,9,30),DATE(2019,1,31),DATE(2019,3,31),0.05,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFYIELD"
+      ],
+      "description": "ODDFYIELD basis=0",
+      "id": "oddfyield_8c70f038180e"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2019,3,15),DATE(2019,3,31),DATE(2019,2,28),0.05,0.06,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE"
+      ],
+      "description": "ODDLPRICE basis=0",
+      "id": "oddlprice_c0fe8a998a60"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2019,3,15),DATE(2019,3,31),DATE(2019,2,28),0.05,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD"
+      ],
+      "description": "ODDLYIELD basis=0",
+      "id": "oddlyield_40abd8503829"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2019,2,28),DATE(2019,9,30),DATE(2019,1,31),DATE(2019,3,31),0.05,0.06,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE"
+      ],
+      "description": "ODDFPRICE basis=1",
+      "id": "oddfprice_863f1301c4b5"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2019,2,28),DATE(2019,9,30),DATE(2019,1,31),DATE(2019,3,31),0.05,98,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFYIELD"
+      ],
+      "description": "ODDFYIELD basis=1",
+      "id": "oddfyield_dd1504a94615"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2019,3,15),DATE(2019,3,31),DATE(2019,2,28),0.05,0.06,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE"
+      ],
+      "description": "ODDLPRICE basis=1",
+      "id": "oddlprice_8defdd3ecc72"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2019,3,15),DATE(2019,3,31),DATE(2019,2,28),0.05,98,100,2,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD"
+      ],
+      "description": "ODDLYIELD basis=1",
+      "id": "oddlyield_bfef23a260c3"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2019,2,28),DATE(2019,9,30),DATE(2019,1,31),DATE(2019,3,31),0.05,0.06,100,2,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE"
+      ],
+      "description": "ODDFPRICE basis=2",
+      "id": "oddfprice_319b52005b02"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2019,2,28),DATE(2019,9,30),DATE(2019,1,31),DATE(2019,3,31),0.05,98,100,2,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFYIELD"
+      ],
+      "description": "ODDFYIELD basis=2",
+      "id": "oddfyield_8f2eb079d86d"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2019,3,15),DATE(2019,3,31),DATE(2019,2,28),0.05,0.06,100,2,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE"
+      ],
+      "description": "ODDLPRICE basis=2",
+      "id": "oddlprice_1f396eba4a0f"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2019,3,15),DATE(2019,3,31),DATE(2019,2,28),0.05,98,100,2,2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD"
+      ],
+      "description": "ODDLYIELD basis=2",
+      "id": "oddlyield_40d40c42713c"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2019,2,28),DATE(2019,9,30),DATE(2019,1,31),DATE(2019,3,31),0.05,0.06,100,2,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE"
+      ],
+      "description": "ODDFPRICE basis=3",
+      "id": "oddfprice_b6f435572911"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2019,2,28),DATE(2019,9,30),DATE(2019,1,31),DATE(2019,3,31),0.05,98,100,2,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFYIELD"
+      ],
+      "description": "ODDFYIELD basis=3",
+      "id": "oddfyield_447c9f9c96cc"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2019,3,15),DATE(2019,3,31),DATE(2019,2,28),0.05,0.06,100,2,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE"
+      ],
+      "description": "ODDLPRICE basis=3",
+      "id": "oddlprice_14cbdcc60439"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2019,3,15),DATE(2019,3,31),DATE(2019,2,28),0.05,98,100,2,3)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD"
+      ],
+      "description": "ODDLYIELD basis=3",
+      "id": "oddlyield_c90beadfda6c"
+    },
+    {
+      "formula": "=ODDFPRICE(DATE(2019,2,28),DATE(2019,9,30),DATE(2019,1,31),DATE(2019,3,31),0.05,0.06,100,2,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE"
+      ],
+      "description": "ODDFPRICE basis=4",
+      "id": "oddfprice_c48cc7cb0be6"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2019,2,28),DATE(2019,9,30),DATE(2019,1,31),DATE(2019,3,31),0.05,98,100,2,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFYIELD"
+      ],
+      "description": "ODDFYIELD basis=4",
+      "id": "oddfyield_768a27d4aa08"
+    },
+    {
+      "formula": "=ODDLPRICE(DATE(2019,3,15),DATE(2019,3,31),DATE(2019,2,28),0.05,0.06,100,2,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE"
+      ],
+      "description": "ODDLPRICE basis=4",
+      "id": "oddlprice_2cf09b0e3653"
+    },
+    {
+      "formula": "=ODDLYIELD(DATE(2019,3,15),DATE(2019,3,31),DATE(2019,2,28),0.05,98,100,2,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD"
+      ],
+      "description": "ODDLYIELD basis=4",
+      "id": "oddlyield_7091ab544f8f"
+    },
+    {
       "formula": "=NPV(0.1,A1:A4)",
       "outputCell": "C1",
       "inputs": [

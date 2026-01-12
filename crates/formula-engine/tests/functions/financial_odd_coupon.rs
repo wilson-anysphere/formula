@@ -3289,3 +3289,118 @@ fn odd_coupon_bond_functions_return_value_for_unparseable_date_text() {
         other => panic!("expected #VALUE!, got {other:?}"),
     }
 }
+
+#[test]
+fn oddfprice_day_count_basis_relationships() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Month-end / Feb dates chosen so 30/360 US vs EU differ (basis 0 vs 4).
+    // issue=2019-01-31, settlement=2019-02-28, first_coupon=2019-03-31, maturity=2019-09-30
+    let issue = serial(2019, 1, 31, system);
+    let settlement = serial(2019, 2, 28, system);
+    let first_coupon = serial(2019, 3, 31, system);
+    let maturity = serial(2019, 9, 30, system);
+
+    let rate = 0.05;
+    let yld = 0.06;
+    let redemption = 100.0;
+    let frequency = 2;
+
+    let mut prices = [0.0f64; 5];
+    for basis in 0..=4 {
+        let price = oddfprice(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .unwrap_or_else(|e| panic!("ODDFPRICE basis={basis} returned error: {e:?}"));
+        assert!(price.is_finite(), "expected finite price for basis={basis}, got {price}");
+        prices[basis as usize] = price;
+    }
+
+    // basis=2 (Actual/360) vs basis=3 (Actual/365): E differs (360/f vs 365/f).
+    assert!(
+        (prices[2] - prices[3]).abs() > 1e-9,
+        "expected basis=2 != basis=3, got {} vs {}",
+        prices[2],
+        prices[3]
+    );
+    // basis=0 (US 30/360) vs basis=2 (Actual/360): day-difference differs.
+    assert!(
+        (prices[0] - prices[2]).abs() > 1e-9,
+        "expected basis=0 != basis=2, got {} vs {}",
+        prices[0],
+        prices[2]
+    );
+    // basis=0 vs basis=4 (US vs EU 30/360): 30/360 conventions diverge for month-end cases.
+    assert!(
+        (prices[0] - prices[4]).abs() > 1e-9,
+        "expected basis=0 != basis=4, got {} vs {}",
+        prices[0],
+        prices[4]
+    );
+}
+
+#[test]
+fn oddlprice_day_count_basis_relationships() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Month-end / Feb dates chosen so 30/360 US vs EU differ (basis 0 vs 4).
+    // last_interest=2019-02-28, settlement=2019-03-15, maturity=2019-03-31
+    // (Settlement must fall after last_interest for ODDL*.)
+    let last_interest = serial(2019, 2, 28, system);
+    let settlement = serial(2019, 3, 15, system);
+    let maturity = serial(2019, 3, 31, system);
+
+    let rate = 0.05;
+    let yld = 0.06;
+    let redemption = 100.0;
+    let frequency = 2;
+
+    let mut prices = [0.0f64; 5];
+    for basis in 0..=4 {
+        let price = oddlprice(
+            settlement,
+            maturity,
+            last_interest,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .unwrap_or_else(|e| panic!("ODDLPRICE basis={basis} returned error: {e:?}"));
+        assert!(price.is_finite(), "expected finite price for basis={basis}, got {price}");
+        prices[basis as usize] = price;
+    }
+
+    // basis=2 (Actual/360) vs basis=3 (Actual/365): E differs (360/f vs 365/f).
+    assert!(
+        (prices[2] - prices[3]).abs() > 1e-9,
+        "expected basis=2 != basis=3, got {} vs {}",
+        prices[2],
+        prices[3]
+    );
+    // basis=0 (US 30/360) vs basis=2 (Actual/360): day-difference differs.
+    assert!(
+        (prices[0] - prices[2]).abs() > 1e-9,
+        "expected basis=0 != basis=2, got {} vs {}",
+        prices[0],
+        prices[2]
+    );
+    // basis=0 vs basis=4 (US vs EU 30/360): 30/360 conventions diverge for month-end cases.
+    assert!(
+        (prices[0] - prices[4]).abs() > 1e-9,
+        "expected basis=0 != basis=4, got {} vs {}",
+        prices[0],
+        prices[4]
+    );
+}

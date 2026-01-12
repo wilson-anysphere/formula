@@ -2300,6 +2300,82 @@ def generate_cases() -> dict[str, Any]:
         formula='=ODDLYIELD(DATE(2020,1,1),"nope",DATE(2024,7,1),0.05,95,100,2)',
         description="Unparseable maturity date should return #VALUE!",
     )
+    # Odd-coupon bond pricing (basis variants 0..4).
+    for basis in range(5):
+        _add_case(
+            cases,
+            prefix="oddfprice",
+            tags=["financial", "ODDFPRICE"],
+            formula=(
+                "=ODDFPRICE("
+                "DATE(2019,2,28),"
+                "DATE(2019,9,30),"
+                "DATE(2019,1,31),"
+                "DATE(2019,3,31),"
+                "0.05,"
+                "0.06,"
+                "100,"
+                "2,"
+                f"{basis}"
+                ")"
+            ),
+            description=f"ODDFPRICE basis={basis}",
+        )
+        _add_case(
+            cases,
+            prefix="oddfyield",
+            tags=["financial", "ODDFYIELD"],
+            formula=(
+                "=ODDFYIELD("
+                "DATE(2019,2,28),"
+                "DATE(2019,9,30),"
+                "DATE(2019,1,31),"
+                "DATE(2019,3,31),"
+                "0.05,"
+                "98,"
+                "100,"
+                "2,"
+                f"{basis}"
+                ")"
+            ),
+            description=f"ODDFYIELD basis={basis}",
+        )
+        _add_case(
+            cases,
+            prefix="oddlprice",
+            tags=["financial", "ODDLPRICE"],
+            formula=(
+                "=ODDLPRICE("
+                "DATE(2019,3,15),"
+                "DATE(2019,3,31),"
+                "DATE(2019,2,28),"
+                "0.05,"
+                "0.06,"
+                "100,"
+                "2,"
+                f"{basis}"
+                ")"
+            ),
+            description=f"ODDLPRICE basis={basis}",
+        )
+        _add_case(
+            cases,
+            prefix="oddlyield",
+            tags=["financial", "ODDLYIELD"],
+            formula=(
+                "=ODDLYIELD("
+                "DATE(2019,3,15),"
+                "DATE(2019,3,31),"
+                "DATE(2019,2,28),"
+                "0.05,"
+                "98,"
+                "100,"
+                "2,"
+                f"{basis}"
+                ")"
+            ),
+            description=f"ODDLYIELD basis={basis}",
+        )
 
     # Range-based cashflow functions.
     cashflows = [-100.0, 30.0, 40.0, 50.0]
