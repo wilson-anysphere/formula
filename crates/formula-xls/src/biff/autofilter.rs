@@ -215,18 +215,7 @@ fn supbook_record_is_internal(data: &[u8], codepage: u16) -> bool {
     // Different producers appear to encode the "internal workbook" marker differently. Prefer
     // best-effort detection over strict validation so we can recover 3D NAME references in the
     // wild.
-    if data.len() >= 4 {
-        let field0 = u16::from_le_bytes([data[0], data[1]]);
-        let field1 = u16::from_le_bytes([data[2], data[3]]);
-
-        // Some producers use a sentinel value `0x0401` to tag the record as internal.
-        if field0 == 0x0401 || field1 == 0x0401 {
-            return true;
-        }
-    }
-
-    // Best-effort fallback: some producers may encode the internal tag as a short string
-    // containing control characters (commonly a single `0x01` byte).
+    // Best-effort: detect the internal tag in `virtPath` (an XLUnicodeString after `ctab`).
     if data.len() >= 5 {
         if let Ok((s, _)) = strings::parse_biff8_unicode_string(&data[2..], codepage) {
             if matches!(s.as_str(), "\u{1}" | "\0" | "\u{1}\u{4}") {
@@ -617,11 +606,18 @@ fn resolve_ixti_to_internal_sheet(
 ) -> Option<usize> {
     let xti = *externsheets.get(ixti as usize)?;
 
-    let is_internal = match internal_supbook_index {
-        Some(internal_idx) => xti.i_sup_book == internal_idx,
-        // Best-effort fallback: some producer streams omit SUPBOOK records (or we failed to
-        // identify the internal one). In that case, treat `iSupBook==0` as internal.
-        None => xti.i_sup_book == 0,
+    // BIFF8 conventions in the wild:
+    // - Some writers use `iSupBook==0` to mean "internal workbook", regardless of the SUPBOOK
+    //   table contents.
+    // - Other writers reference the internal workbook SUPBOOK explicitly via its index.
+    //
+    // Be permissive and treat either as internal when possible.
+    let is_internal = if xti.i_sup_book == 0 {
+        true
+    } else if let Some(internal_idx) = internal_supbook_index {
+        xti.i_sup_book == internal_idx
+    } else {
+        false
     };
     if !is_internal {
         return None;
@@ -726,6 +722,80 @@ mod tests {
             supbook_internal,
             externsheet_first,
             externsheet_continue,
+            name,
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(1))
+            .expect("parse");
+
+        assert_eq!(
+            parsed.by_sheet.get(&0).copied(),
+            Some(Range::new(CellRef::new(0, 0), CellRef::new(4, 2)))
+        );
+    }
+
+    #[test]
+    fn treats_isupbook_zero_as_internal_even_when_internal_supbook_index_is_nonzero() {
+        // SUPBOOK[0]: add-in marker (not internal workbook).
+        let supbook_addin = {
+            let mut data = Vec::new();
+            data.extend_from_slice(&1u16.to_le_bytes()); // ctab
+            data.extend_from_slice(&1u16.to_le_bytes()); // cch
+            data.push(0); // flags (compressed)
+            data.push(0x02); // virtPath marker for add-in
+            record(RECORD_SUPBOOK, &data)
+        };
+        // SUPBOOK[1]: internal workbook marker.
+        let supbook_internal = {
+            let mut data = Vec::new();
+            data.extend_from_slice(&1u16.to_le_bytes()); // ctab
+            data.extend_from_slice(&1u16.to_le_bytes()); // cch
+            data.push(0); // flags (compressed)
+            data.push(0x01); // virtPath marker for internal workbook
+            record(RECORD_SUPBOOK, &data)
+        };
+
+        // EXTERNSHEET uses iSupBook==0 for internal refs, even though the internal workbook SUPBOOK
+        // record is at index 1. Some writers do this; we should still resolve it.
+        let externsheet = {
+            let mut data = Vec::new();
+            data.extend_from_slice(&1u16.to_le_bytes()); // cXTI
+            data.extend_from_slice(&0u16.to_le_bytes()); // iSupBook == 0 (internal)
+            data.extend_from_slice(&0u16.to_le_bytes()); // itabFirst
+            data.extend_from_slice(&0u16.to_le_bytes()); // itabLast
+            record(RECORD_EXTERNSHEET, &data)
+        };
+
+        // NAME record: built-in _FilterDatabase, workbook-scope, rgce = PtgArea3d.
+        let name = {
+            let mut rgce = Vec::new();
+            rgce.push(0x3B); // PtgArea3d
+            rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti
+            rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+            rgce.extend_from_slice(&4u16.to_le_bytes()); // rwLast
+            rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+            rgce.extend_from_slice(&2u16.to_le_bytes()); // colLast
+
+            let mut data = Vec::new();
+            data.extend_from_slice(&NAME_FLAG_BUILTIN.to_le_bytes()); // grbit (builtin)
+            data.push(0); // chKey
+            data.push(1); // cch (builtin id length)
+            data.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+            data.extend_from_slice(&0u16.to_le_bytes()); // ixals
+            data.extend_from_slice(&0u16.to_le_bytes()); // itab (workbook-scope)
+            data.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu..cchStatusText
+            data.push(BUILTIN_NAME_FILTER_DATABASE); // built-in name id
+            data.extend_from_slice(&rgce);
+            record(RECORD_NAME, &data)
+        };
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_globals()),
+            supbook_addin,
+            supbook_internal,
+            externsheet,
             name,
             record(records::RECORD_EOF, &[]),
         ]
