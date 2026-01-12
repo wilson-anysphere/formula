@@ -1301,6 +1301,104 @@ fn rich_values_support_field_access_formulas() {
 }
 
 #[wasm_bindgen_test]
+fn rich_values_support_bracketed_field_access_formulas() {
+    let mut wb = WasmWorkbook::new();
+
+    let entity = json!({
+        "type": "entity",
+        "entityType": "stock",
+        "entityId": "AAPL",
+        "displayValue": "Apple Inc.",
+        "properties": {
+            "Change%": 0.0133
+        }
+    });
+
+    wb.set_cell_rich(
+        DEFAULT_SHEET.to_string(),
+        "A1".to_string(),
+        serde_wasm_bindgen::to_value(&entity).unwrap(),
+    )
+    .unwrap();
+    wb.set_cell(
+        "B1".to_string(),
+        JsValue::from_str(r#"=A1.["Change%"]"#),
+        None,
+    )
+    .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_json_number(&b1.value, 0.0133);
+}
+
+#[wasm_bindgen_test]
+fn rich_values_support_nested_field_access_formulas() {
+    let mut wb = WasmWorkbook::new();
+
+    let entity = json!({
+        "type": "entity",
+        "entityType": "stock",
+        "entityId": "AAPL",
+        "displayValue": "Apple Inc.",
+        "properties": {
+            "Owner": {
+                "type": "record",
+                "displayField": "Name",
+                "fields": { "Name": "Alice", "Age": 42.0 }
+            }
+        }
+    });
+
+    wb.set_cell_rich(
+        DEFAULT_SHEET.to_string(),
+        "A1".to_string(),
+        serde_wasm_bindgen::to_value(&entity).unwrap(),
+    )
+    .unwrap();
+    wb.set_cell("B1".to_string(), JsValue::from_str("=A1.Owner.Age"), None)
+        .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_json_number(&b1.value, 42.0);
+}
+
+#[wasm_bindgen_test]
+fn rich_values_missing_field_access_returns_field_error() {
+    let mut wb = WasmWorkbook::new();
+
+    let entity = json!({
+        "type": "entity",
+        "entityType": "stock",
+        "entityId": "AAPL",
+        "displayValue": "Apple Inc.",
+        "properties": {
+            "Price": 12.5
+        }
+    });
+
+    wb.set_cell_rich(
+        DEFAULT_SHEET.to_string(),
+        "A1".to_string(),
+        serde_wasm_bindgen::to_value(&entity).unwrap(),
+    )
+    .unwrap();
+    wb.set_cell("B1".to_string(), JsValue::from_str("=A1.Nope"), None)
+        .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_eq!(b1.value, JsonValue::String("#FIELD!".to_string()));
+}
+
+#[wasm_bindgen_test]
 fn rich_values_roundtrip_through_wasm_exports() {
     let mut wb = WasmWorkbook::new();
 
