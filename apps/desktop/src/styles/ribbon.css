@@ -35,6 +35,19 @@
   overflow-y: hidden;
 }
 
+.ribbon[data-responsive-density="hidden"] .ribbon__tabs {
+  overflow-x: hidden;
+}
+
+.ribbon[data-responsive-density="hidden"] .ribbon__tab {
+  display: none;
+}
+
+.ribbon[data-responsive-density="hidden"] .ribbon__tab.is-active,
+.ribbon[data-responsive-density="hidden"] .ribbon__tab.ribbon__tab--file {
+  display: inline-flex;
+}
+
 .ribbon__tabstrip-right {
   display: flex;
   align-items: center;

@@ -388,6 +388,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
     <div
       className="ribbon"
       data-testid="ribbon-root"
+      data-responsive-density={responsiveDensity}
       data-density={density}
       data-flyout-open={flyoutOpen && !contentVisible ? "true" : undefined}
       ref={rootRef}
