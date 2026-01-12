@@ -17,7 +17,7 @@ import { ThemeController } from "./theme/themeController.js";
 import { mountRibbon } from "./ribbon/index.js";
 
 import { computeSelectionFormatState } from "./ribbon/selectionFormatState.js";
-import { setRibbonPressedOverrides } from "./ribbon/ribbonPressedOverrides.js";
+import { setRibbonUiState } from "./ribbon/ribbonUiState.js";
 
 import { LayoutController } from "./layout/layoutController.js";
 import { LayoutWorkspaceManager } from "./layout/layoutPersistence.js";
@@ -99,6 +99,7 @@ import {
   toggleItalic,
   toggleUnderline,
   toggleWrap,
+  NUMBER_FORMATS,
   type CellRange,
 } from "./formatting/toolbar.js";
 import { PageSetupDialog, type CellRange as PrintCellRange, type PageSetup } from "./print/index.js";
@@ -443,7 +444,6 @@ window.addEventListener("unload", () => {
 // responsive by throttling to one computation per animation frame.
 let ribbonFormatStateUpdateScheduled = false;
 let ribbonFormatStateUpdateRequested = false;
-let lastRibbonPressedOverridesKey: string | null = null;
 
 function scheduleRibbonSelectionFormatStateUpdate(): void {
   ribbonFormatStateUpdateRequested = true;
@@ -459,7 +459,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const ranges = app.getSelectionRanges();
     const formatState = computeSelectionFormatState(app.getDocument(), sheetId, ranges);
 
-    const pressedOverrides = {
+    const pressedById = {
       "home.font.bold": formatState.bold,
       "home.font.italic": formatState.italic,
       "home.font.underline": formatState.underline,
@@ -471,10 +471,21 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "view.show.performanceStats": Boolean((app.getGridPerfStats() as any)?.enabled),
     };
 
-    const nextKey = JSON.stringify(pressedOverrides);
-    if (nextKey === lastRibbonPressedOverridesKey) return;
-    lastRibbonPressedOverridesKey = nextKey;
-    setRibbonPressedOverrides(pressedOverrides);
+    const numberFormatLabel = (() => {
+      const format = formatState.numberFormat;
+      if (format === "mixed") return "Mixed";
+      if (format == null) return "General";
+      if (format === NUMBER_FORMATS.currency) return "Currency";
+      if (format === NUMBER_FORMATS.percent) return "Percent";
+      if (format === NUMBER_FORMATS.date) return "Date";
+      return "Custom";
+    })();
+
+    setRibbonUiState({
+      pressedById,
+      labelById: { "home.number.numberFormat": numberFormatLabel },
+      disabledById: Object.create(null),
+    });
   });
 }
 

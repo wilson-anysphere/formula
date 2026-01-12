@@ -3,7 +3,7 @@ import React from "react";
 import type { RibbonActions, RibbonButtonDefinition, RibbonSchema } from "./ribbonSchema.js";
 import { defaultRibbonSchema } from "./ribbonSchema.js";
 import { RibbonGroup } from "./RibbonGroup.js";
-import { getRibbonPressedOverridesSnapshot, subscribeRibbonPressedOverrides } from "./ribbonPressedOverrides.js";
+import { getRibbonUiStateSnapshot, subscribeRibbonUiState } from "./ribbonUiState.js";
 
 import "../styles/ribbon.css";
 
@@ -85,10 +85,10 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
   const [pressedById, setPressedById] = React.useState<Record<string, boolean>>(() => computeInitialPressed(schema));
   const pressedByIdRef = React.useRef<Record<string, boolean>>(pressedById);
 
-  const pressedOverrides = React.useSyncExternalStore(
-    subscribeRibbonPressedOverrides,
-    getRibbonPressedOverridesSnapshot,
-    getRibbonPressedOverridesSnapshot,
+  const uiState = React.useSyncExternalStore(
+    subscribeRibbonUiState,
+    getRibbonUiStateSnapshot,
+    getRibbonUiStateSnapshot,
   );
   const [ribbonWidth, setRibbonWidth] = React.useState<number>(0);
   const [userCollapsed, setUserCollapsed] = React.useState<boolean>(() => readRibbonCollapsedFromStorage());
@@ -110,8 +110,8 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
 
   const mergedPressedById = React.useMemo(() => {
     // Spread here is fine: there are only ~tens of ribbon controls.
-    return { ...pressedById, ...pressedOverrides };
-  }, [pressedById, pressedOverrides]);
+    return { ...pressedById, ...uiState.pressedById };
+  }, [pressedById, uiState.pressedById]);
 
   React.useEffect(() => {
     const root = rootRef.current;
@@ -163,8 +163,8 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
       const kind = button.kind ?? "button";
 
       if (kind === "toggle") {
-        const currentPressed = Object.prototype.hasOwnProperty.call(pressedOverrides, button.id)
-          ? pressedOverrides[button.id]
+        const currentPressed = Object.prototype.hasOwnProperty.call(uiState.pressedById, button.id)
+          ? uiState.pressedById[button.id]
           : pressedByIdRef.current[button.id];
         const nextPressed = !currentPressed;
         setPressedById((prev) => ({ ...prev, [button.id]: nextPressed }));
@@ -175,7 +175,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
 
       actions.onCommand?.(button.id);
     },
-    [actions, pressedOverrides],
+    [actions, uiState.pressedById],
   );
 
   const selectTabByIndex = React.useCallback(
@@ -356,6 +356,8 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                   key={group.id}
                   group={group}
                   pressedById={mergedPressedById}
+                  labelById={uiState.labelById}
+                  disabledById={uiState.disabledById}
                   onActivateButton={activateButton}
                 />
               ))}

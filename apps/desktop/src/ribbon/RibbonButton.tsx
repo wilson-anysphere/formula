@@ -5,6 +5,8 @@ import type { RibbonButtonDefinition, RibbonButtonKind, RibbonButtonSize } from 
 export interface RibbonButtonProps {
   button: RibbonButtonDefinition;
   pressed?: boolean;
+  labelOverride?: string;
+  disabledOverride?: boolean;
   onActivate?: (button: RibbonButtonDefinition) => void;
 }
 
@@ -32,7 +34,13 @@ function classForSize(size: RibbonButtonSize): string {
   }
 }
 
-export const RibbonButton = React.memo(function RibbonButton({ button, pressed, onActivate }: RibbonButtonProps) {
+export const RibbonButton = React.memo(function RibbonButton({
+  button,
+  pressed,
+  labelOverride,
+  disabledOverride,
+  onActivate,
+}: RibbonButtonProps) {
   const kind = button.kind ?? "button";
   const size = button.size ?? "small";
   const isPressed = Boolean(pressed);
@@ -40,6 +48,8 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
   const ariaHaspopup = kind === "dropdown" ? ("menu" as const) : undefined;
   const hasMenu = kind === "dropdown" && Boolean(button.menuItems?.length);
   const menuId = React.useMemo(() => `ribbon-menu-${button.id.replace(/[^a-zA-Z0-9_-]/g, "-")}`, [button.id]);
+  const label = labelOverride ?? button.label;
+  const disabled = typeof disabledOverride === "boolean" ? disabledOverride : Boolean(button.disabled);
 
   const [menuOpen, setMenuOpen] = React.useState(false);
   const dropdownRef = React.useRef<HTMLDivElement | null>(null);
@@ -113,7 +123,7 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
       aria-haspopup={ariaHaspopup}
       aria-expanded={hasMenu ? menuOpen : undefined}
       aria-controls={hasMenu ? menuId : undefined}
-      disabled={button.disabled}
+      disabled={disabled}
       data-testid={button.testId}
       data-command-id={button.id}
       ref={buttonRef}
@@ -145,7 +155,7 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
           {button.icon}
         </span>
       ) : null}
-      <span className="ribbon-button__label">{button.label}</span>
+      <span className="ribbon-button__label">{label}</span>
       {kind === "dropdown" ? (
         <span className="ribbon-button__caret" aria-hidden="true">
           ▾
