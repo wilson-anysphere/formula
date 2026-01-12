@@ -3293,7 +3293,8 @@ export class SpreadsheetApp {
 
     const docCell = this.docCellFromGridCell(picked);
     const cellKey = docCell.row * COMMENT_COORD_COL_STRIDE + docCell.col;
-    if (!this.commentMetaByCoord.has(cellKey)) {
+    const preview = this.commentPreviewByCoord.get(cellKey);
+    if (!preview) {
       this.hideCommentTooltip();
       return;
     }
@@ -3302,12 +3303,6 @@ export class SpreadsheetApp {
       this.lastHoveredCommentCellKey === cellKey &&
       this.commentTooltip.classList.contains("comment-tooltip--visible")
     ) {
-      return;
-    }
-
-    const preview = this.commentPreviewByCoord.get(cellKey) ?? "";
-    if (!preview) {
-      this.hideCommentTooltip();
       return;
     }
 
@@ -6280,12 +6275,7 @@ export class SpreadsheetApp {
 
     const cell = this.cellFromPoint(x, y);
     const metaKey = cell.row * COMMENT_COORD_COL_STRIDE + cell.col;
-    if (!this.commentMetaByCoord.get(metaKey)) {
-      this.hideCommentTooltip();
-      return;
-    }
-
-    const preview = this.commentPreviewByCoord.get(metaKey) ?? "";
+    const preview = this.commentPreviewByCoord.get(metaKey);
     if (!preview) {
       this.hideCommentTooltip();
       return;
