@@ -87,4 +87,11 @@ test("panelBodyRenderer.tsx avoids inline style assignments for dock panel mount
     "makeBodyFillAvailableHeight should not set inline styles; use a CSS class instead",
   );
   assert.match(bodyFillSection, /panel-body--fill/, "makeBodyFillAvailableHeight should apply the panel-body--fill CSS class");
+
+  const renderPanelBodySection = extractSection(source, "function renderPanelBody", "function cleanup");
+  assert.match(
+    renderPanelBodySection,
+    /classList\.remove\([^)]*panel-body--fill/,
+    "renderPanelBody should clear panel-body--fill before applying the next panel's layout",
+  );
 });
