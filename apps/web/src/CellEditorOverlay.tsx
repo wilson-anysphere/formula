@@ -1,4 +1,5 @@
 import type { GridApi } from "@formula/grid";
+import { extractFormulaReferences, toggleA1AbsoluteAtCursor } from "@formula/spreadsheet-frontend";
 import { useLayoutEffect, useRef, useState } from "react";
 
 type ViewportRect = { x: number; y: number; width: number; height: number };
@@ -19,6 +20,7 @@ export function CellEditorOverlay(props: {
 }): JSX.Element | null {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const focusedCellKeyRef = useRef<string | null>(null);
+  const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null);
   const [rect, setRect] = useState<ViewportRect | null>(null);
 
   useLayoutEffect(() => {
@@ -47,6 +49,15 @@ export function CellEditorOverlay(props: {
     input.setSelectionRange(end, end);
   }, [props.cell, rect]);
 
+  useLayoutEffect(() => {
+    const pending = pendingSelectionRef.current;
+    if (!pending) return;
+    const input = inputRef.current;
+    if (!input) return;
+    pendingSelectionRef.current = null;
+    input.setSelectionRange(pending.start, pending.end);
+  }, [props.value]);
+
   if (!props.cell || !rect) return null;
 
   return (
@@ -57,6 +68,29 @@ export function CellEditorOverlay(props: {
       value={props.value}
       onChange={(event) => props.onChange(event.currentTarget.value)}
       onKeyDown={(event) => {
+        if (event.key === "F4" && props.value.trim().startsWith("=")) {
+          event.preventDefault();
+          const input = event.currentTarget;
+          const value = input.value;
+          const start = input.selectionStart ?? value.length;
+          const end = input.selectionEnd ?? value.length;
+          const { references, activeIndex } = extractFormulaReferences(value, start, end);
+          const active = activeIndex == null ? null : references[activeIndex] ?? null;
+          if (!active) return;
+
+          const toggled = toggleA1AbsoluteAtCursor(value, start, end);
+          if (!toggled) return;
+
+          const delta = toggled.text.length - value.length;
+          const oldTokenLen = active.end - active.start;
+          const nextStart = active.start;
+          const nextEnd = Math.max(nextStart, Math.min(nextStart + oldTokenLen + delta, toggled.text.length));
+
+          pendingSelectionRef.current = { start: nextStart, end: nextEnd };
+          props.onChange(toggled.text);
+          return;
+        }
+
         if (event.key === "Escape") {
           event.preventDefault();
           props.onCancel();

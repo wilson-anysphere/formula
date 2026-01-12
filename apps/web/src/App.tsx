@@ -11,6 +11,7 @@ import {
   serializeGridToHtmlTable,
   serializeGridToTsv,
   shiftA1References,
+  toggleA1AbsoluteAtCursor,
   toA1,
   type Range0
 } from "@formula/spreadsheet-frontend";
@@ -1303,6 +1304,35 @@ function EngineDemoApp() {
               };
             }}
             onKeyDown={(event) => {
+              if (event.key === "F4" && isFormulaEditingRef.current) {
+                event.preventDefault();
+                const input = event.currentTarget;
+                const value = input.value;
+                const start = input.selectionStart ?? value.length;
+                const end = input.selectionEnd ?? value.length;
+                const { references, activeIndex } = extractFormulaReferences(value, start, end);
+                const active = activeIndex == null ? null : references[activeIndex] ?? null;
+                if (!active) return;
+
+                const toggled = toggleA1AbsoluteAtCursor(value, start, end);
+                if (!toggled) return;
+
+                // Keep the updated token selected so repeated F4 presses continue cycling
+                // (Excel behavior).
+                const delta = toggled.text.length - value.length;
+                const oldTokenLen = active.end - active.start;
+                const nextStart = active.start;
+                const nextEnd = Math.max(nextStart, Math.min(nextStart + oldTokenLen + delta, toggled.text.length));
+
+                rangeInsertionRef.current = null;
+                selectedReferenceIndexRef.current = activeIndex;
+                cursorRef.current = { start: nextStart, end: nextEnd };
+                pendingSelectionRef.current = { start: nextStart, end: nextEnd };
+                draftRef.current = toggled.text;
+                setDraft(toggled.text);
+                return;
+              }
+
               if (event.key !== "Enter") return;
               event.preventDefault();
               void commitDraft();
