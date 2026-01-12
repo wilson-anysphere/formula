@@ -113,9 +113,41 @@ pub struct RangeData {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum SheetVisibility {
+    Visible,
+    Hidden,
+    VeryHidden,
+}
+
+impl From<formula_model::SheetVisibility> for SheetVisibility {
+    fn from(value: formula_model::SheetVisibility) -> Self {
+        match value {
+            formula_model::SheetVisibility::Visible => SheetVisibility::Visible,
+            formula_model::SheetVisibility::Hidden => SheetVisibility::Hidden,
+            formula_model::SheetVisibility::VeryHidden => SheetVisibility::VeryHidden,
+        }
+    }
+}
+
+impl From<SheetVisibility> for formula_model::SheetVisibility {
+    fn from(value: SheetVisibility) -> Self {
+        match value {
+            SheetVisibility::Visible => formula_model::SheetVisibility::Visible,
+            SheetVisibility::Hidden => formula_model::SheetVisibility::Hidden,
+            SheetVisibility::VeryHidden => formula_model::SheetVisibility::VeryHidden,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct SheetInfo {
     pub id: String,
     pub name: String,
+    pub visibility: SheetVisibility,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_color: Option<formula_model::TabColor>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -390,7 +422,7 @@ pub struct PivotTableSummary {
 #[cfg(feature = "desktop")]
 use crate::file_io::read_workbook;
 #[cfg(feature = "desktop")]
-use crate::path_scope::PathScopePolicy;
+use crate::ipc_origin;
 #[cfg(feature = "desktop")]
 use crate::persistence::{
     autosave_db_path_for_new_workbook, autosave_db_path_for_workbook, WorkbookPersistenceLocation,
@@ -484,15 +516,24 @@ fn cell_update_from_state(update: CellUpdateData) -> CellUpdate {
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn open_workbook(
+    window: tauri::WebviewWindow,
     path: String,
     state: State<'_, SharedAppState>,
 ) -> Result<WorkbookInfo, String> {
-    let policy = PathScopePolicy::default_desktop();
-    let validated_path = policy.validate_read_path(std::path::Path::new(&path))?;
-    let path = validated_path.to_string_lossy().to_string();
+    ipc_origin::ensure_main_window(window.label(), "workbook opening", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "workbook opening", ipc_origin::Verb::Is)?;
 
-    let workbook = read_workbook(validated_path).await.map_err(|e| e.to_string())?;
-    let location = autosave_db_path_for_workbook(&path)
+    let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
+    let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
+        std::path::Path::new(&path),
+        &allowed_roots,
+    )
+    .map_err(|e| e.to_string())?;
+    let resolved_str = resolved.to_string_lossy().to_string();
+
+    let workbook = read_workbook(resolved).await.map_err(|e| e.to_string())?;
+    let location = autosave_db_path_for_workbook(&resolved_str)
         .map(WorkbookPersistenceLocation::OnDisk)
         .unwrap_or(WorkbookPersistenceLocation::InMemory);
 
@@ -516,6 +557,8 @@ pub async fn open_workbook(
             .map(|s| SheetInfo {
                 id: s.id,
                 name: s.name,
+                visibility: s.visibility.into(),
+                tab_color: s.tab_color,
             })
             .collect(),
     })
@@ -550,6 +593,8 @@ pub async fn new_workbook(state: State<'_, SharedAppState>) -> Result<WorkbookIn
             .map(|s| SheetInfo {
                 id: s.id,
                 name: s.name,
+                visibility: s.visibility.into(),
+                tab_color: s.tab_color,
             })
             .collect(),
     })
@@ -559,6 +604,8 @@ pub async fn new_workbook(state: State<'_, SharedAppState>) -> Result<WorkbookIn
 #[tauri::command]
 pub async fn add_sheet(
     name: String,
+    sheet_id: Option<String>,
+    id: Option<String>,
     after_sheet_id: Option<String>,
     index: Option<usize>,
     state: State<'_, SharedAppState>,
@@ -566,12 +613,15 @@ pub async fn add_sheet(
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
+        let sheet_id = sheet_id.or(id);
         let sheet = state
-            .add_sheet(name, after_sheet_id, index)
+            .add_sheet(name, sheet_id, after_sheet_id, index)
             .map_err(app_error)?;
         Ok::<_, String>(SheetInfo {
             id: sheet.id,
             name: sheet.name,
+            visibility: sheet.visibility.into(),
+            tab_color: sheet.tab_color,
         })
     })
     .await
@@ -601,15 +651,90 @@ pub async fn add_sheet_with_id(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn rename_sheet(
+pub async fn rename_sheet(sheet_id: String, name: String, state: State<'_, SharedAppState>) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        state.rename_sheet(&sheet_id, name).map_err(app_error)?;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn set_sheet_visibility(
     sheet_id: String,
-    name: String,
+    visibility: SheetVisibility,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
-        state.rename_sheet(&sheet_id, name).map_err(app_error)?;
+        state
+            .set_sheet_visibility(&sheet_id, visibility.into())
+            .map_err(app_error)?;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(any(feature = "desktop", test))]
+fn normalize_tab_color_rgb(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("tab color rgb cannot be empty".to_string());
+    }
+    let hex = trimmed.strip_prefix('#').unwrap_or(trimmed);
+    if hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Ok(format!("FF{}", hex.to_ascii_uppercase()));
+    }
+    if hex.len() == 8 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Ok(hex.to_ascii_uppercase());
+    }
+    Err("tab color rgb must be 6-digit (RRGGBB) or 8-digit (AARRGGBB) hex".to_string())
+}
+
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn set_sheet_tab_color(
+    sheet_id: String,
+    tab_color: Option<formula_model::TabColor>,
+    state: State<'_, SharedAppState>,
+) -> Result<(), String> {
+    let shared = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut state = shared.lock().unwrap();
+        let tab_color = match tab_color {
+            None => None,
+            Some(mut color) => {
+                if let Some(rgb) = color.rgb.as_deref() {
+                    let trimmed = rgb.trim();
+                    if trimmed.is_empty() {
+                        color.rgb = None;
+                    } else {
+                        color.rgb = Some(normalize_tab_color_rgb(trimmed)?);
+                    }
+                }
+
+                // Treat an all-empty payload as clearing the tab color.
+                if color.rgb.is_none()
+                    && color.theme.is_none()
+                    && color.indexed.is_none()
+                    && color.tint.is_none()
+                    && color.auto.is_none()
+                {
+                    None
+                } else {
+                    Some(color)
+                }
+            }
+        };
+        state
+            .set_sheet_tab_color(&sheet_id, tab_color)
+            .map_err(app_error)?;
         Ok::<_, String>(())
     })
     .await
@@ -645,6 +770,7 @@ pub async fn delete_sheet(sheet_id: String, state: State<'_, SharedAppState>) ->
     .await
     .map_err(|e| e.to_string())?
 }
+
 #[cfg(any(feature = "desktop", test))]
 fn read_text_file_blocking(path: &std::path::Path) -> Result<String, String> {
     use std::io::Read;
@@ -671,7 +797,11 @@ fn read_text_file_blocking(path: &std::path::Path) -> Result<String, String> {
 /// depending on the optional Tauri FS plugin.
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn read_text_file(path: String) -> Result<String, String> {
+pub async fn read_text_file(window: tauri::WebviewWindow, path: String) -> Result<String, String> {
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
+
     tauri::async_runtime::spawn_blocking(move || {
         let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
         let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
@@ -699,8 +829,12 @@ pub struct FileStat {
 /// reused when reading local sources (CSV/JSON/Parquet).
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn stat_file(path: String) -> Result<FileStat, String> {
+pub async fn stat_file(window: tauri::WebviewWindow, path: String) -> Result<FileStat, String> {
     use std::time::UNIX_EPOCH;
+
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
 
     tauri::async_runtime::spawn_blocking(move || {
         let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
@@ -729,8 +863,15 @@ pub async fn stat_file(path: String) -> Result<FileStat, String> {
 /// The frontend decodes this into a `Uint8Array` for Parquet sources.
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn read_binary_file(path: String) -> Result<String, String> {
+pub async fn read_binary_file(
+    window: tauri::WebviewWindow,
+    path: String,
+) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
 
     let bytes = tauri::async_runtime::spawn_blocking(move || {
         let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
@@ -803,11 +944,16 @@ fn read_binary_file_range_blocking(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn read_binary_file_range(
+    window: tauri::WebviewWindow,
     path: String,
     offset: u64,
     length: u64,
 ) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
 
     let len =
         crate::ipc_file_limits::validate_read_range_length(length).map_err(|e| e.to_string())?;
@@ -936,8 +1082,16 @@ fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, S
 /// If a limit is reached, the command returns an error instead of a truncated result.
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn list_dir(path: String, recursive: Option<bool>) -> Result<Vec<ListDirEntry>, String> {
+pub async fn list_dir(
+    window: tauri::WebviewWindow,
+    path: String,
+    recursive: Option<bool>,
+) -> Result<Vec<ListDirEntry>, String> {
     let recursive = recursive.unwrap_or(false);
+
+    ipc_origin::ensure_main_window(window.label(), "filesystem access", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "filesystem access", ipc_origin::Verb::Is)?;
 
     tauri::async_runtime::spawn_blocking(move || list_dir_blocking(&path, recursive))
         .await
@@ -1278,9 +1432,14 @@ pub fn list_tables(state: State<'_, SharedAppState>) -> Result<Vec<TableInfo>, S
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn save_workbook(
+    window: tauri::WebviewWindow,
     path: Option<String>,
     state: State<'_, SharedAppState>,
 ) -> Result<(), String> {
+    ipc_origin::ensure_main_window(window.label(), "workbook saving", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "workbook saving", ipc_origin::Verb::Is)?;
+
     let (save_path, workbook, storage, memory, workbook_id, autosave) = {
         let state = state.inner().lock().unwrap();
         let workbook = state.get_workbook().map_err(app_error)?.clone();
@@ -1313,12 +1472,16 @@ pub async fn save_workbook(
     memory.flush_dirty_pages().map_err(|e| e.to_string())?;
 
     let save_path_clone = save_path.clone();
-    let written_bytes = tauri::async_runtime::spawn_blocking(move || {
-        let policy = PathScopePolicy::default_desktop();
-        let validated_path = policy.validate_write_path(std::path::Path::new(&save_path_clone))?;
+    let (validated_save_path, written_bytes) = tauri::async_runtime::spawn_blocking(move || {
+        let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
+        let resolved_path = crate::fs_scope::resolve_save_path_in_allowed_roots(
+            std::path::Path::new(&save_path_clone),
+            &allowed_roots,
+        )
+        .map_err(|e| e.to_string())?;
+        let validated_save_path = resolved_path.to_string_lossy().to_string();
 
-        let path = validated_path.as_path();
-        let ext = path
+        let ext = resolved_path
             .extension()
             .and_then(|s| s.to_str())
             .unwrap_or_default();
@@ -1326,7 +1489,9 @@ pub async fn save_workbook(
         // XLSB saves must go through the `formula-xlsb` round-trip writer. The storage export
         // path only knows how to generate XLSX.
         if ext.eq_ignore_ascii_case("xlsb") {
-            return crate::file_io::write_xlsx_blocking(path, &workbook).map_err(|e| e.to_string());
+            let bytes = crate::file_io::write_xlsx_blocking(&resolved_path, &workbook)
+                .map_err(|e| e.to_string())?;
+            return Ok::<_, String>((validated_save_path, bytes));
         }
 
         // Prefer the existing patch-based save path when we have the original XLSX bytes.
@@ -1335,12 +1500,18 @@ pub async fn save_workbook(
         //
         // Fall back to the storage->model export path for non-XLSX origins (csv/xls) and
         // for new workbooks without an `origin_xlsx_bytes` baseline.
-        if workbook.origin_xlsx_bytes.is_some() {
-            crate::file_io::write_xlsx_blocking(path, &workbook).map_err(|e| e.to_string())
+        let bytes = if workbook.origin_xlsx_bytes.is_some() {
+            crate::file_io::write_xlsx_blocking(&resolved_path, &workbook).map_err(|e| e.to_string())?
         } else {
-            crate::persistence::write_xlsx_from_storage(&storage, workbook_id, &workbook, path)
-                .map_err(|e| e.to_string())
-        }
+            crate::persistence::write_xlsx_from_storage(
+                &storage,
+                workbook_id,
+                &workbook,
+                &resolved_path,
+            )
+            .map_err(|e| e.to_string())?
+        };
+        Ok::<_, String>((validated_save_path, bytes))
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -1348,7 +1519,10 @@ pub async fn save_workbook(
     {
         let mut state = state.inner().lock().unwrap();
         state
-            .mark_saved(Some(save_path), wants_origin_bytes.then_some(written_bytes))
+            .mark_saved(
+                Some(validated_save_path),
+                wants_origin_bytes.then_some(written_bytes),
+            )
             .map_err(app_error)?;
     }
 
@@ -3926,26 +4100,13 @@ pub fn check_for_updates(
 #[tauri::command]
 pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(), String> {
     use tauri::Manager as _;
-
-    // Restrict URL opening to the main application window. This avoids accidental abuse if we
-    // ever embed untrusted content in secondary webviews.
-    if window.label() != "main" {
-        return Err("external URL opening is only allowed from the main window".to_string());
-    }
-
-    // Prevent arbitrary remote web content from using IPC to open external URLs. This is a
-    // defense-in-depth check: even though Tauri's security model should prevent remote origins
-    // from accessing the invoke API by default, keep the command itself resilient.
-    //
-    // Mirrors the trusted-origin checks used by other privileged commands in `main.rs`.
+    ipc_origin::ensure_main_window(window.label(), "external URL opening", ipc_origin::Verb::Is)?;
     {
         let Some(webview) = window.app_handle().get_webview_window(window.label()) else {
             return Err("main webview window not available".to_string());
         };
         let origin_url = webview.url().map_err(|err| err.to_string())?;
-        if !is_trusted_ipc_origin(&origin_url) {
-            return Err("external URL opening is not allowed from this origin".to_string());
-        }
+        ipc_origin::ensure_trusted_origin(&origin_url, "external URL opening", ipc_origin::Verb::Is)?;
     }
 
     let parsed =
@@ -3973,26 +4134,6 @@ pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(),
         .open(parsed.as_str(), None)
         .map_err(|e| format!("Failed to open URL: {e}"))?;
     Ok(())
-}
-
-#[cfg(feature = "desktop")]
-fn is_trusted_ipc_origin(url: &tauri::Url) -> bool {
-    // Treat app-local content as trusted:
-    // - packaged builds typically run on an internal `*.localhost` origin
-    // - dev builds run on `http://localhost:<port>`
-    //
-    // Note: `file://` is included as a best-effort compatibility fallback.
-    match url.scheme() {
-        "data" => return false,
-        "file" => return true,
-        _ => {}
-    }
-
-    let Some(host) = url.host_str() else {
-        return false;
-    };
-
-    host == "localhost" || host == "127.0.0.1" || host == "::1" || host.ends_with(".localhost")
 }
 
 #[cfg(feature = "desktop")]
@@ -4040,15 +4181,20 @@ pub fn restart_app(app: tauri::AppHandle) {
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn read_clipboard(
-    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
 ) -> Result<crate::clipboard::ClipboardContent, String> {
+    ipc_origin::ensure_main_window(window.label(), "clipboard access", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "clipboard access", ipc_origin::Verb::Is)?;
+
     // Clipboard APIs on macOS call into AppKit. AppKit is not thread-safe, and Tauri
     // commands can execute on a background thread, so we always dispatch to the main
     // thread before touching NSPasteboard.
     #[cfg(target_os = "macos")]
     {
         use tauri::Manager as _;
-        return app
+        return window
+            .app_handle()
             .run_on_main_thread(crate::clipboard::read)
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string());
@@ -4056,7 +4202,6 @@ pub async fn read_clipboard(
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = app;
         tauri::async_runtime::spawn_blocking(|| crate::clipboard::read().map_err(|e| e.to_string()))
             .await
             .map_err(|e| e.to_string())?
@@ -4067,12 +4212,16 @@ pub async fn read_clipboard(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn write_clipboard(
-    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     text: String,
     html: Option<String>,
     rtf: Option<String>,
     image_png_base64: Option<String>,
 ) -> Result<(), String> {
+    ipc_origin::ensure_main_window(window.label(), "clipboard access", ipc_origin::Verb::Is)?;
+    let url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&url, "clipboard access", ipc_origin::Verb::Is)?;
+
     let payload = crate::clipboard::ClipboardWritePayload {
         text: Some(text),
         html,
@@ -4082,7 +4231,8 @@ pub async fn write_clipboard(
     #[cfg(target_os = "macos")]
     {
         use tauri::Manager as _;
-        return app
+        return window
+            .app_handle()
             .run_on_main_thread(move || crate::clipboard::write(&payload))
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string());
@@ -4090,7 +4240,6 @@ pub async fn write_clipboard(
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = app;
         tauri::async_runtime::spawn_blocking(move || {
             crate::clipboard::write(&payload).map_err(|e| e.to_string())
         })
@@ -4103,12 +4252,15 @@ pub async fn write_clipboard(
 // Network + Marketplace proxy (desktop webview)
 //
 // Desktop extensions and the in-webview marketplace client run inside the Tauri WebView, which is
-// governed by the app CSP (including `connect-src`). We keep `connect-src` locked down (no outbound
-// http(s) from the WebView) so the extension permission system cannot be bypassed via direct
-// `fetch()` / `WebSocket` calls.
+// governed by the app CSP (including `connect-src`). The production CSP is intentionally
+// restrictive (HTTPS + WebSockets via `https:`/`ws:`/`wss:`; no `http:`).
 //
-// To still enable outbound HTTP(S) in production builds, the webview calls these Tauri commands and
-// the Rust backend performs the network request.
+// Network access for extensions is primarily enforced by Formula's permission model + extension
+// worker guardrails (which replace `fetch`/`WebSocket` inside the worker); CSP is defense-in-depth.
+//
+// To avoid relying on permissive CORS headers for the `tauri://…` origin (and to keep networking
+// behavior consistent across WebViews), the WebView prefers routing outbound HTTP(S) through these
+// Tauri commands so the Rust backend performs the network request.
 
 #[cfg(feature = "desktop")]
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -4176,8 +4328,16 @@ fn apply_request_init(
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn network_fetch(url: String, init: Option<JsonValue>) -> Result<NetworkFetchResult, String> {
+pub async fn network_fetch(
+    window: tauri::WebviewWindow,
+    url: String,
+    init: Option<JsonValue>,
+) -> Result<NetworkFetchResult, String> {
     use reqwest::Method;
+
+    ipc_origin::ensure_main_window(window.label(), "network access", ipc_origin::Verb::Is)?;
+    let origin_url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&origin_url, "network access", ipc_origin::Verb::Is)?;
 
     let parsed_url = reqwest::Url::parse(&url).map_err(|e| format!("Invalid url: {e}"))?;
     match parsed_url.scheme() {
@@ -4266,7 +4426,14 @@ fn parse_marketplace_base_url(base_url: &str) -> Result<reqwest::Url, String> {
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn marketplace_search(args: MarketplaceSearchArgs) -> Result<JsonValue, String> {
+pub async fn marketplace_search(
+    window: tauri::WebviewWindow,
+    args: MarketplaceSearchArgs,
+) -> Result<JsonValue, String> {
+    ipc_origin::ensure_main_window(window.label(), "marketplace access", ipc_origin::Verb::Is)?;
+    let origin_url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&origin_url, "marketplace access", ipc_origin::Verb::Is)?;
+
     let mut url = parse_marketplace_base_url(&args.base_url)?;
     {
         let mut segments = url
@@ -4328,8 +4495,13 @@ pub struct MarketplaceGetExtensionArgs {
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn marketplace_get_extension(
+    window: tauri::WebviewWindow,
     args: MarketplaceGetExtensionArgs,
 ) -> Result<Option<JsonValue>, String> {
+    ipc_origin::ensure_main_window(window.label(), "marketplace access", ipc_origin::Verb::Is)?;
+    let origin_url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&origin_url, "marketplace access", ipc_origin::Verb::Is)?;
+
     let mut url = parse_marketplace_base_url(&args.base_url)?;
     {
         let mut segments = url
@@ -4383,9 +4555,14 @@ pub struct MarketplaceDownloadPayload {
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn marketplace_download_package(
+    window: tauri::WebviewWindow,
     args: MarketplaceDownloadArgs,
 ) -> Result<Option<MarketplaceDownloadPayload>, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    ipc_origin::ensure_main_window(window.label(), "marketplace access", ipc_origin::Verb::Is)?;
+    let origin_url = window.url().map_err(|err| err.to_string())?;
+    ipc_origin::ensure_trusted_origin(&origin_url, "marketplace access", ipc_origin::Verb::Is)?;
 
     let mut url = parse_marketplace_base_url(&args.base_url)?;
     {
@@ -4625,6 +4802,33 @@ mod tests {
                 "expected wants_origin_bytes_for_save_path to reject {ext}"
             );
         }
+    }
+
+    #[test]
+    fn normalize_tab_color_rgb_accepts_rgb_and_argb_hex() {
+        assert_eq!(normalize_tab_color_rgb("ff00ff").expect("normalize RRGGBB"), "FFFF00FF");
+        assert_eq!(
+            normalize_tab_color_rgb("#ff00ff").expect("normalize #RRGGBB"),
+            "FFFF00FF"
+        );
+        assert_eq!(
+            normalize_tab_color_rgb("80ff00ff").expect("normalize AARRGGBB"),
+            "80FF00FF"
+        );
+        assert_eq!(
+            normalize_tab_color_rgb("  #FF00FF  ").expect("normalize trims whitespace"),
+            "FFFF00FF"
+        );
+    }
+
+    #[test]
+    fn normalize_tab_color_rgb_rejects_invalid_inputs() {
+        assert!(normalize_tab_color_rgb("").is_err());
+        assert!(normalize_tab_color_rgb("#").is_err());
+        assert!(normalize_tab_color_rgb("GG00FF").is_err());
+        assert!(normalize_tab_color_rgb("12345").is_err());
+        assert!(normalize_tab_color_rgb("1234567").is_err());
+        assert!(normalize_tab_color_rgb("123456789").is_err());
     }
 
     #[test]
