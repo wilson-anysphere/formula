@@ -103,6 +103,44 @@ fn streaming_patch_emits_spans_on_inserted_rows() -> Result<(), Box<dyn std::err
 }
 
 #[test]
+fn streaming_patch_does_not_introduce_spans_on_inserted_rows_in_sheets_without_spans(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/basic/basic.xlsx");
+    let bytes = fs::read(&fixture_path)?;
+
+    // Row 10 doesn't exist in the fixture; patching it forces insertion of a new `<row r="10">`.
+    let patch = WorksheetCellPatch::new(
+        "xl/worksheets/sheet1.xml",
+        CellRef::from_a1("B10")?,
+        CellValue::Number(10.0),
+        None,
+    );
+
+    let mut out = Cursor::new(Vec::new());
+    patch_xlsx_streaming(Cursor::new(bytes), &mut out, &[patch])?;
+
+    let mut archive = ZipArchive::new(Cursor::new(out.into_inner()))?;
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")?
+        .read_to_string(&mut sheet_xml)?;
+
+    let doc = roxmltree::Document::parse(&sheet_xml)?;
+    let row_10 = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "row" && n.attribute("r") == Some("10"))
+        .expect("expected row r=\"10\" to be inserted");
+    assert_eq!(
+        row_10.attribute("spans"),
+        None,
+        "streaming patcher should not introduce row spans on inserted rows when the worksheet does not already use spans"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn streaming_patch_inserts_dimension_after_sheet_pr() -> Result<(), Box<dyn std::error::Error>> {
     use zip::write::FileOptions;
     use zip::{CompressionMethod, ZipWriter};

@@ -800,6 +800,7 @@ fn scan_worksheet_shared_string_indices<R: Read>(
 pub(crate) struct WorksheetXmlMetadata {
     has_dimension: bool,
     has_sheet_pr: bool,
+    sheet_uses_row_spans: bool,
     existing_used_range: Option<PatchBounds>,
 }
 
@@ -813,6 +814,7 @@ fn scan_worksheet_xml_metadata<R: Read>(
     let mut in_sheet_data = false;
     let mut has_dimension = false;
     let mut has_sheet_pr = false;
+    let mut sheet_uses_row_spans = false;
     let mut used_range: Option<PatchBounds> = None;
 
     loop {
@@ -825,6 +827,19 @@ fn scan_worksheet_xml_metadata<R: Read>(
             }
             Event::End(ref e) if local_name(e.name().as_ref()) == b"sheetData" => {
                 in_sheet_data = false;
+            }
+            Event::Start(ref e) | Event::Empty(ref e)
+                if in_sheet_data && local_name(e.name().as_ref()) == b"row" =>
+            {
+                if !sheet_uses_row_spans {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if local_name(attr.key.as_ref()) == b"spans" {
+                            sheet_uses_row_spans = true;
+                            break;
+                        }
+                    }
+                }
             }
             Event::Start(ref e) | Event::Empty(ref e)
                 if local_name(e.name().as_ref()) == b"dimension" =>
@@ -917,6 +932,7 @@ fn scan_worksheet_xml_metadata<R: Read>(
     Ok(WorksheetXmlMetadata {
         has_dimension,
         has_sheet_pr,
+        sheet_uses_row_spans,
         existing_used_range: used_range,
     })
 }
@@ -1535,13 +1551,23 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                     // Expand `<sheetData/>` into `<sheetData>...</sheetData>`.
                     let sheet_data_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                     writer.write_event(Event::Start(e.to_owned()))?;
-                    write_pending_rows(&mut writer, &mut patches_by_row, sheet_prefix.as_deref())?;
+                    write_pending_rows(
+                        &mut writer,
+                        &mut patches_by_row,
+                        sheet_prefix.as_deref(),
+                        worksheet_meta.sheet_uses_row_spans,
+                    )?;
                     writer.write_event(Event::End(BytesEnd::new(sheet_data_tag.as_str())))?;
                 }
             }
             Event::End(ref e) if local_name(e.name().as_ref()) == b"sheetData" => {
                 // Flush any remaining patch rows at the end of sheetData.
-                write_pending_rows(&mut writer, &mut patches_by_row, sheet_prefix.as_deref())?;
+                write_pending_rows(
+                    &mut writer,
+                    &mut patches_by_row,
+                    sheet_prefix.as_deref(),
+                    worksheet_meta.sheet_uses_row_spans,
+                )?;
                 in_sheet_data = false;
                 writer.write_event(Event::End(e.to_owned()))?;
             }
@@ -1555,7 +1581,12 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                     };
                     let sheet_data_tag = prefixed_tag(sheet_prefix, "sheetData");
                     writer.write_event(Event::Start(BytesStart::new(sheet_data_tag.as_str())))?;
-                    write_pending_rows(&mut writer, &mut patches_by_row, sheet_prefix)?;
+                    write_pending_rows(
+                        &mut writer,
+                        &mut patches_by_row,
+                        sheet_prefix,
+                        worksheet_meta.sheet_uses_row_spans,
+                    )?;
                     writer.write_event(Event::End(BytesEnd::new(sheet_data_tag.as_str())))?;
                 }
                 writer.write_event(Event::End(e.to_owned()))?;
@@ -1601,6 +1632,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                             next_row,
                             &pending,
                             sheet_prefix.as_deref(),
+                            worksheet_meta.sheet_uses_row_spans,
                         )?;
                     } else {
                         break;
@@ -1639,6 +1671,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                             next_row,
                             &pending,
                             sheet_prefix.as_deref(),
+                            worksheet_meta.sheet_uses_row_spans,
                         )?;
                     } else {
                         break;
@@ -1886,10 +1919,11 @@ fn write_pending_rows<W: Write>(
     writer: &mut Writer<W>,
     patches_by_row: &mut BTreeMap<u32, Vec<CellPatchInternal>>,
     prefix: Option<&str>,
+    sheet_uses_row_spans: bool,
 ) -> Result<(), StreamingPatchError> {
     while let Some((&row_1, _)) = patches_by_row.iter().next() {
         let pending = patches_by_row.remove(&row_1).unwrap_or_default();
-        write_inserted_row(writer, row_1, &pending, prefix)?;
+        write_inserted_row(writer, row_1, &pending, prefix, sheet_uses_row_spans)?;
     }
     Ok(())
 }
@@ -1899,6 +1933,7 @@ fn write_inserted_row<W: Write>(
     row_1: u32,
     patches: &[CellPatchInternal],
     prefix: Option<&str>,
+    sheet_uses_row_spans: bool,
 ) -> Result<(), StreamingPatchError> {
     if !patches.iter().any(|p| p.material_for_insertion) {
         return Ok(());
@@ -1907,8 +1942,12 @@ fn write_inserted_row<W: Write>(
     let mut row = BytesStart::new(row_tag.as_str());
     let row_num = row_1.to_string();
     row.push_attribute(("r", row_num.as_str()));
-    let spans = spans_for_patches(patches)
-        .map(|(min_col_1, max_col_1)| format_row_spans(min_col_1, max_col_1));
+    let spans = if sheet_uses_row_spans {
+        spans_for_patches(patches)
+            .map(|(min_col_1, max_col_1)| format_row_spans(min_col_1, max_col_1))
+    } else {
+        None
+    };
     if let Some(spans) = spans.as_deref() {
         row.push_attribute(("spans", spans));
     }
