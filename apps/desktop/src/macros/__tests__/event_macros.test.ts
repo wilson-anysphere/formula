@@ -195,6 +195,79 @@ describe("VBA event macros wiring", () => {
     wiring.dispose();
   });
 
+  it("uses the UI context captured at edit time when firing Worksheet_Change", async () => {
+    const calls: Array<{ cmd: string; args?: any }> = [];
+
+    let resolveStatus: ((value: any) => void) | null = null;
+    const statusPromise = new Promise<any>((resolve) => {
+      resolveStatus = resolve;
+    });
+
+    const invoke = vi.fn(async (cmd: string, args?: any) => {
+      calls.push({ cmd, args });
+      if (cmd === "get_macro_security_status") {
+        return await statusPromise;
+      }
+      if (cmd === "set_macro_ui_context") return null;
+      if (cmd === "fire_workbook_open") return { ok: true, output: [], updates: [] };
+      if (cmd === "fire_worksheet_change") return { ok: true, output: [], updates: [] };
+      throw new Error(`Unexpected invoke: ${cmd}`);
+    });
+
+    const doc = new DocumentController();
+    const app = new FakeApp(doc);
+    // Establish a non-default selection before wiring installs the selection listener (so the
+    // initial selection emission is suppressed but Worksheet_Change captures this state).
+    app.emitSelection([{ startRow: 1, startCol: 1, endRow: 1, endCol: 1 }], { sheetId: "Sheet1", active: { row: 1, col: 1 } });
+
+    const wiring = installVbaEventMacros({
+      app,
+      workbookId: "workbook-1",
+      invoke,
+      drainBackendSync: vi.fn(async () => undefined),
+    });
+
+    // Ensure the status call has been issued.
+    await Promise.resolve();
+
+    doc.setCellValue("Sheet1", { row: 0, col: 0 }, "A");
+
+    // Simulate the user switching sheets before the delayed macro execution begins.
+    (app as any).sheetId = "Sheet2";
+    (app as any).active = { row: 9, col: 9 };
+    (app as any).selection = [{ startRow: 9, startCol: 9, endRow: 9, endCol: 9 }];
+
+    resolveStatus?.({
+      has_macros: true,
+      origin_path: null,
+      workbook_fingerprint: null,
+      signature: null,
+      trust: "trusted_always",
+    });
+
+    await flushAsync();
+    await flushAsync();
+
+    const changeIdx = calls.findIndex((c) => c.cmd === "fire_worksheet_change");
+    expect(changeIdx).toBeGreaterThanOrEqual(0);
+
+    const uiIdx = calls
+      .slice(0, changeIdx)
+      .map((call, idx) => (call.cmd === "set_macro_ui_context" ? idx : -1))
+      .filter((idx) => idx >= 0)
+      .pop();
+    expect(uiIdx).not.toBeUndefined();
+
+    expect(calls[uiIdx!]?.args).toMatchObject({
+      sheet_id: "Sheet1",
+      active_row: 1,
+      active_col: 1,
+      selection: { start_row: 1, start_col: 1, end_row: 1, end_col: 1 },
+    });
+
+    wiring.dispose();
+  });
+
   it("captures Worksheet_SelectionChange changes that occur before macro security status resolves", async () => {
     vi.useFakeTimers();
 
@@ -572,6 +645,14 @@ describe("VBA event macros wiring", () => {
 
     await vi.advanceTimersByTimeAsync(100);
     await flushMicrotasks();
+
+    const uiIdx = calls.findIndex((c) => c.cmd === "set_macro_ui_context");
+    expect(calls[uiIdx]?.args).toMatchObject({
+      sheet_id: "Sheet1",
+      active_row: 2,
+      active_col: 3,
+      selection: { start_row: 2, start_col: 3, end_row: 4, end_col: 5 },
+    });
 
     const selectionCalls = calls.filter((c) => c.cmd === "fire_selection_change");
     expect(selectionCalls).toHaveLength(1);

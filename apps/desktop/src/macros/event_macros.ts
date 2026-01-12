@@ -53,6 +53,13 @@ export interface VbaEventMacrosHandle {
 
 type Rect = { startRow: number; startCol: number; endRow: number; endCol: number };
 
+type UiContext = {
+  sheetId: string;
+  activeRow: number;
+  activeCol: number;
+  selection: Rect;
+};
+
 const EVENT_MACRO_BATCH_LABEL = "VBA event macro";
 const WORKBOOK_OPEN_EVENT_ID = "Workbook_Open";
 const WORKBOOK_BEFORE_CLOSE_EVENT_ID = "Workbook_BeforeClose";
@@ -131,10 +138,10 @@ function getUiSelectionRect(app: SpreadsheetAppLike): Rect {
   });
 }
 
-async function setMacroUiContext(args: InstallVbaEventMacrosArgs): Promise<void> {
-  const sheetId = args.app.getCurrentSheetId();
-  const active = args.app.getActiveCell();
-  const selection = getUiSelectionRect(args.app);
+async function setMacroUiContext(args: InstallVbaEventMacrosArgs, context?: UiContext): Promise<void> {
+  const sheetId = context?.sheetId ?? args.app.getCurrentSheetId();
+  const active = context ? { row: context.activeRow, col: context.activeCol } : args.app.getActiveCell();
+  const selection = context?.selection ?? getUiSelectionRect(args.app);
 
   try {
     await args.invoke("set_macro_ui_context", {
@@ -315,6 +322,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
   let macroStatusResolved = false;
 
   let pendingChangesBySheet = new Map<string, Rect>();
+  let pendingWorksheetContexts = new Map<string, UiContext>();
   let changeFlushScheduled = false;
   let changeQueuedAfterMacro = false;
   let changeFlushPromise: Promise<void> | null = null;
@@ -322,8 +330,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
   let changeFlushDeferredUntilIdle = false;
 
   let selectionTimer: ReturnType<typeof setTimeout> | null = null;
-  let pendingSelectionRect: Rect | null = null;
-  let pendingSelectionSheetId: string | null = null;
+  let pendingSelectionContext: UiContext | null = null;
   let pendingSelectionKey = "";
   let lastSelectionKeyFired = "";
   let selectionQueuedAfterMacro = false;
@@ -349,6 +356,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     kind: "workbook_open" | "worksheet_change" | "selection_change" | "workbook_before_close",
     cmd: string,
     cmdArgs: Record<string, unknown>,
+    uiContext?: UiContext,
   ): Promise<void> {
     // `await statusPromise` always yields a microtask (even if already resolved),
     // which can introduce races between Workbook_Open and events queued while the
@@ -405,9 +413,9 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
       // firing the macro. Selection changes are sourced from the UI (not the backend sync chain),
       // so draining backend sync here only adds latency.
       if (kind === "selection_change") {
-        await setMacroUiContext(args);
+        await setMacroUiContext(args, uiContext);
       } else {
-        await Promise.all([args.drainBackendSync(), setMacroUiContext(args)]);
+        await Promise.all([args.drainBackendSync(), setMacroUiContext(args, uiContext)]);
       }
 
       let raw: any;
@@ -477,7 +485,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
           changeFlushDeferredUntilIdle = false;
         }
 
-        if (selectionFlushDeferredUntilIdle && pendingSelectionRect && !selectionTimer) {
+        if (selectionFlushDeferredUntilIdle && pendingSelectionContext && !selectionTimer) {
           selectionFlushDeferredUntilIdle = false;
           startFlushSelectionChange();
         } else {
@@ -540,10 +548,12 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     if (disposed) return;
     if (eventsDisabled) {
       pendingChangesBySheet.clear();
+      pendingWorksheetContexts.clear();
       return;
     }
     if (!eventsAllowed) {
       pendingChangesBySheet.clear();
+      pendingWorksheetContexts.clear();
       return;
     }
     if (applyingMacroUpdates) {
@@ -558,7 +568,9 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
 
     if (pendingChangesBySheet.size === 0) return;
     const entries = Array.from(pendingChangesBySheet.entries());
+    const contexts = pendingWorksheetContexts;
     pendingChangesBySheet = new Map();
+    pendingWorksheetContexts = new Map();
 
     for (const [sheetId, rect] of entries) {
       if (disposed || eventsDisabled) return;
@@ -572,7 +584,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
         start_col: rect.startCol,
         end_row: rect.endRow,
         end_col: rect.endCol,
-      });
+      }, contexts.get(sheetId));
     }
   }
 
@@ -602,6 +614,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
         if (disposed) return;
         if (eventsDisabled) {
           pendingChangesBySheet.clear();
+          pendingWorksheetContexts.clear();
           changeFlushQueued = false;
           return;
         }
@@ -628,18 +641,16 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     if (!macroStatusResolved) await statusPromise;
     if (disposed) return;
     if (eventsDisabled) {
-      pendingSelectionRect = null;
-      pendingSelectionSheetId = null;
+      pendingSelectionContext = null;
       pendingSelectionKey = "";
       return;
     }
     if (!eventsAllowed) {
-      pendingSelectionRect = null;
-      pendingSelectionSheetId = null;
+      pendingSelectionContext = null;
       pendingSelectionKey = "";
       return;
     }
-    if (!pendingSelectionRect) return;
+    if (!pendingSelectionContext) return;
     if (applyingMacroUpdates) {
       selectionFlushDeferredUntilIdle = true;
       return;
@@ -650,24 +661,21 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
       return;
     }
 
-    const rect = pendingSelectionRect;
+    const context = pendingSelectionContext;
     const key = pendingSelectionKey;
-    const selectionSheetId = pendingSelectionSheetId;
-    pendingSelectionRect = null;
-    pendingSelectionSheetId = null;
+    pendingSelectionContext = null;
     pendingSelectionKey = "";
 
-    if (!rect) return;
+    if (!context) return;
     if (key && key === lastSelectionKeyFired) return;
 
-    const sheetId = selectionSheetId ?? args.app.getCurrentSheetId();
     await runEventMacro("selection_change", "fire_selection_change", {
-      sheet_id: sheetId,
-      start_row: rect.startRow,
-      start_col: rect.startCol,
-      end_row: rect.endRow,
-      end_col: rect.endCol,
-    });
+      sheet_id: context.sheetId,
+      start_row: context.selection.startRow,
+      start_col: context.selection.startCol,
+      end_row: context.selection.endRow,
+      end_col: context.selection.endCol,
+    }, context);
 
     lastSelectionKeyFired = key;
   }
@@ -678,7 +686,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
       selectionFlushQueued = true;
       return;
     }
-    if (!pendingSelectionRect) return;
+    if (!pendingSelectionContext) return;
     selectionFlushPromise = doFlushSelectionChange()
       .catch((err) => {
         console.warn("Failed to flush SelectionChange event macros:", err);
@@ -688,14 +696,13 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
         if (disposed) return;
 
         if (eventsDisabled) {
-          pendingSelectionRect = null;
-          pendingSelectionSheetId = null;
+          pendingSelectionContext = null;
           pendingSelectionKey = "";
           selectionFlushQueued = false;
           return;
         }
 
-        const shouldRerun = Boolean(pendingSelectionRect) || selectionFlushQueued;
+        const shouldRerun = Boolean(pendingSelectionContext) || selectionFlushQueued;
         selectionFlushQueued = false;
         if (!shouldRerun) return;
 
@@ -723,6 +730,17 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     // Only run Worksheet_Change when macros are already trusted.
     if (!eventsAllowed) return;
 
+    const active = args.app.getActiveCell();
+    const ranges = args.app.getSelectionRanges();
+    const firstRange =
+      ranges[0] ?? { startRow: active.row, startCol: active.col, endRow: active.row, endCol: active.col };
+    const selectionRect = normalizeRect({
+      startRow: Number(firstRange.startRow) || 0,
+      startCol: Number(firstRange.startCol) || 0,
+      endRow: Number(firstRange.endRow) || 0,
+      endCol: Number(firstRange.endCol) || 0,
+    });
+
     for (const delta of deltas) {
       if (!delta?.before || !delta?.after) continue;
       if (inputEquals(delta.before, delta.after)) continue;
@@ -735,6 +753,12 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
 
       const prev = pendingChangesBySheet.get(sheetId);
       pendingChangesBySheet.set(sheetId, unionCell(prev, row, col));
+      pendingWorksheetContexts.set(sheetId, {
+        sheetId,
+        activeRow: active.row,
+        activeCol: active.col,
+        selection: selectionRect,
+      });
     }
 
     scheduleFlushWorksheetChanges();
@@ -769,8 +793,7 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
     if (key === pendingSelectionKey) return;
 
     pendingSelectionKey = key;
-    pendingSelectionRect = rect;
-    pendingSelectionSheetId = sheetId;
+    pendingSelectionContext = { sheetId, activeRow: active.row, activeCol: active.col, selection: rect };
 
     if (selectionTimer) clearTimeout(selectionTimer);
     selectionTimer = setTimeout(() => {
@@ -794,8 +817,8 @@ export function installVbaEventMacros(args: InstallVbaEventMacrosArgs): VbaEvent
       stopDocListening();
       stopSelectionListening();
       pendingChangesBySheet.clear();
-      pendingSelectionRect = null;
-      pendingSelectionSheetId = null;
+      pendingWorksheetContexts.clear();
+      pendingSelectionContext = null;
       pendingSelectionKey = "";
       if (selectionTimer) {
         clearTimeout(selectionTimer);
