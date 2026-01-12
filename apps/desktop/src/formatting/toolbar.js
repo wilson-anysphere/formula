@@ -5,13 +5,9 @@ import { applyStylePatch } from "./styleTable.js";
 // Excel grid limits (used by the selection model and layered formatting fast paths).
 const EXCEL_MAX_ROW = 1_048_576 - 1;
 const EXCEL_MAX_COL = 16_384 - 1;
-// Keep aligned with `RANGE_RUN_FORMAT_THRESHOLD` in `DocumentController.setRangeFormat`.
-// Above this area, formatting is stored in compressed range runs rather than enumerating
-// every cell in the rectangle.
-const RANGE_RUN_FORMAT_THRESHOLD = 50_000;
 // Keep aligned with `apps/desktop/src/formatting/selectionSizeGuard.ts` default UI limit.
-// This guard blocks extremely large non-band selections so toolbar actions remain
-// predictable (and consistent with the UI selection-size guard).
+// This guard exists to prevent *per-cell* enumeration from exploding (e.g. multi-range
+// selections of many medium rectangles).
 const MAX_RANGE_FORMATTING_CELLS = 100_000;
 // Keep aligned with `DocumentController.setRangeFormat` (compressed range-run formatting).
 // Above this many cells, formatting is stored as per-column range runs instead of enumerating
@@ -80,21 +76,9 @@ function ensureSafeFormattingRange(rangeOrRanges) {
     }
 
     const cellCount = rangeCellCount(r);
-    // Large rectangles use DocumentController's range-run formatting layer, which scales with
-    // columns rather than O(rows * cols) cell enumeration. Only count ranges that will
-    // actually enumerate cells toward the safety cap.
-    if (cellCount > RANGE_RUN_FORMAT_THRESHOLD) continue;
-
-    // Even though large rectangles can use the DocumentController's compressed range-run formatting,
-    // we still guard against formatting *enormous* selections that would be surprising (and expensive
-    // to undo) for typical UI interactions.
-    if (cellCount > MAX_RANGE_FORMATTING_CELLS) {
-      showTooLargeToast();
-      return false;
-    }
-
-    // Large rectangles use the range-run formatting layer and do not require enumerating every
-    // cell in the selection. Do not count these towards the "per-cell enumeration" safety cap.
+    // Large rectangles use the DocumentController's compressed range-run formatting layer and do
+    // not require enumerating every cell in the selection. Do not count these towards the
+    // "per-cell enumeration" safety cap.
     if (cellCount > RANGE_RUN_FORMAT_THRESHOLD) continue;
 
     // Large rectangles are stored as compressed range runs, not per-cell overrides.
