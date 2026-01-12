@@ -118,6 +118,17 @@ test("desktop index.html exposes required shell containers and testids", () => {
     'data-testid="open-version-history-panel"',
     'data-testid="open-branch-manager-panel"',
     'data-testid="theme-selector"',
+
+    // Ribbon submenu items / backstage actions are rendered by React. If these appear in the
+    // static HTML they can also cause strict-mode collisions.
+    'data-testid="ribbon-find"',
+    'data-testid="ribbon-replace"',
+    'data-testid="ribbon-goto"',
+    'data-testid="ribbon-show-formulas"',
+    'data-testid="ribbon-perf-stats"',
+    'data-testid="file-new"',
+    'data-testid="file-open"',
+    'data-testid="file-quit"',
   ];
 
   const forbiddenPresent = forbiddenSnippets.filter((snippet) => html.includes(snippet));
