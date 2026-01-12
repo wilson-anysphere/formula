@@ -643,6 +643,8 @@ const app = new SpreadsheetApp(
 // optional desktop integrations (e.g. Tauri host wiring) fail during startup.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (window as any).__formulaApp = app;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(app as any).getWorkbookSheetStore = () => workbookSheetStore;
 
 function sharedGridZoomStorageKey(): string {
   // Scope zoom persistence by workbook/session id. For file-backed workbooks this can be

@@ -160,5 +160,35 @@ test.describe("sheet tabs", () => {
       window.dispatchEvent(evt);
     });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet3");
+
+  test("sheet position indicator uses visible sheets (hide/unhide)", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.activateCell({ row: 0, col: 0 });
+      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+      app.getDocument().setCellValue("Sheet3", "A1", "Hello from Sheet3");
+    });
+
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
+
+    await page.getByTestId("sheet-tab-Sheet3").click();
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getWorkbookSheetStore().hide("Sheet2");
+    });
+
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getWorkbookSheetStore().unhide("Sheet2");
+    });
+
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
+  });
   });
 });
