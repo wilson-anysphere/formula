@@ -4301,7 +4301,7 @@ mod tests {
         let dates_sheet = recovered
             .sheets
             .iter()
-            .find(|s| s.name.eq_ignore_ascii_case("Dates"))
+            .find(|s| sheet_name_eq_case_insensitive(&s.name, "Dates"))
             .expect("Dates sheet exists");
         let cell = dates_sheet.get_cell(0, 0);
         assert_eq!(cell.number_format.as_deref(), Some("m/d/yy"));

@@ -3227,7 +3227,7 @@ mod tests {
         let sheet = workbook
             .sheets
             .iter()
-            .find(|s| s.name.eq_ignore_ascii_case("Dates"))
+            .find(|s| crate::sheet_name::sheet_name_eq_case_insensitive(&s.name, "Dates"))
             .expect("Dates sheet exists");
 
         // `dates.xls` has a serial date value in A1 with Excel's default date format applied.
