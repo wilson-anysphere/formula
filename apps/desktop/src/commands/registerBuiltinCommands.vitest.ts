@@ -108,7 +108,6 @@ describe("registerBuiltinCommands: panel toggles", () => {
 describe("registerBuiltinCommands: sheet navigation", () => {
   it("uses DocumentController.getVisibleSheetIds when UI sheet-store order is not provided", async () => {
     const commandRegistry = new CommandRegistry();
-
     const layoutController = {
       layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
       openPanel(panelId: string) {
@@ -136,6 +135,7 @@ describe("registerBuiltinCommands: sheet navigation", () => {
         activated.push(id);
       },
       focusAfterSheetNavigation: () => {},
+      isEditing: () => false,
     } as any;
 
     registerBuiltinCommands({ commandRegistry, app, layoutController });
@@ -152,5 +152,62 @@ describe("registerBuiltinCommands: sheet navigation", () => {
     expect(current).toBe("Sheet3");
 
     expect(activated).toEqual(["Sheet3", "Sheet1", "Sheet3"]);
+  });
+});
+
+describe("registerBuiltinCommands: core editing/view/audit commands", () => {
+  it("registers required commands and respects edit-state guards", async () => {
+    const commandRegistry = new CommandRegistry();
+    const layoutController = {
+      layout: createDefaultLayout({ primarySheetId: "Sheet1" }),
+      openPanel(panelId: string) {
+        this.layout = openPanel(this.layout, panelId, { panelRegistry });
+      },
+      closePanel(panelId: string) {
+        this.layout = closePanel(this.layout, panelId);
+      },
+    } as any;
+
+    const app = {
+      undo: vi.fn(),
+      redo: vi.fn(),
+      isEditing: vi.fn(() => false),
+      toggleShowFormulas: vi.fn(),
+      toggleAuditingPrecedents: vi.fn(),
+      toggleAuditingDependents: vi.fn(),
+    } as any;
+
+    registerBuiltinCommands({ commandRegistry, app, layoutController });
+
+    for (const id of [
+      "edit.undo",
+      "edit.redo",
+      "view.toggleShowFormulas",
+      "audit.togglePrecedents",
+      "audit.toggleDependents",
+    ]) {
+      expect(commandRegistry.getCommand(id)).toBeDefined();
+    }
+
+    await commandRegistry.executeCommand("edit.undo");
+    await commandRegistry.executeCommand("edit.redo");
+    expect(app.undo).toHaveBeenCalledTimes(1);
+    expect(app.redo).toHaveBeenCalledTimes(1);
+
+    await commandRegistry.executeCommand("view.toggleShowFormulas");
+    await commandRegistry.executeCommand("audit.togglePrecedents");
+    await commandRegistry.executeCommand("audit.toggleDependents");
+    expect(app.toggleShowFormulas).toHaveBeenCalledTimes(1);
+    expect(app.toggleAuditingPrecedents).toHaveBeenCalledTimes(1);
+    expect(app.toggleAuditingDependents).toHaveBeenCalledTimes(1);
+
+    // When editing, these commands should no-op (Excel-like behavior).
+    app.isEditing.mockReturnValue(true);
+    await commandRegistry.executeCommand("view.toggleShowFormulas");
+    await commandRegistry.executeCommand("audit.togglePrecedents");
+    await commandRegistry.executeCommand("audit.toggleDependents");
+    expect(app.toggleShowFormulas).toHaveBeenCalledTimes(1);
+    expect(app.toggleAuditingPrecedents).toHaveBeenCalledTimes(1);
+    expect(app.toggleAuditingDependents).toHaveBeenCalledTimes(1);
   });
 });
