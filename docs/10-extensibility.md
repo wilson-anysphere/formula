@@ -818,6 +818,9 @@ declare namespace formula {
 Workbook APIs are synchronous *from the extension’s perspective* (async Promises), but in desktop builds they may
 involve **user prompts** (discard-unsaved-changes confirmation, Save As dialogs, etc).
 
+- Most workbook lifecycle operations require the `workbook.manage` permission:
+  - requires `workbook.manage`: `openWorkbook`, `createWorkbook`, `save`, `saveAs`, `close`
+  - no permission required: `getActiveWorkbook`
 - `formula.workbook.openWorkbook(path)` / `saveAs(path)` require a **non-empty** path string.
 - If the user cancels a workbook UI prompt, the Promise rejects with an error whose `name` is **`"AbortError"`**.
   - Cancellation does **not** emit `events.onWorkbookOpened` / `events.onBeforeSave`.
