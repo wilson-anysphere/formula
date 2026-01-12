@@ -87,6 +87,20 @@ describe("tauri/updaterUi dismissal persistence", () => {
     expect(Number(localStorage.getItem(DISMISSED_AT_KEY))).toBeGreaterThan(0);
   }, TEST_TIMEOUT_MS);
 
+  it("treats dialog cancel (Escape) as 'Later' and persists the dismissal", async () => {
+    const { handleUpdaterEvent } = await loadUpdaterUi();
+
+    await handleUpdaterEvent("update-available", { source: "manual", version: "1.2.3", body: "Notes" });
+
+    const dialog = document.querySelector<HTMLDialogElement>('[data-testid="updater-dialog"]');
+    expect(dialog).toBeTruthy();
+
+    dialog!.dispatchEvent(new Event("cancel", { cancelable: true }));
+
+    expect(localStorage.getItem(DISMISSED_VERSION_KEY)).toBe("1.2.3");
+    expect(Number(localStorage.getItem(DISMISSED_AT_KEY))).toBeGreaterThan(0);
+  }, TEST_TIMEOUT_MS);
+
   it("clears stored dismissal when the user initiates an update download", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
