@@ -10,6 +10,10 @@ This document is the implementation-backed reference for how Formula wires toget
 
 If you are editing collaboration code, start here and keep this doc in sync with the implementation.
 
+## Design decisions
+
+- [ADR-0004: Collaboration semantics for sheet view state and undo](./adr/ADR-0004-collab-sheet-view-and-undo.md)
+
 ---
 
 ## Key modules (source of truth)
