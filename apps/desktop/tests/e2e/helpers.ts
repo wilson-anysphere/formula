@@ -269,7 +269,13 @@ export async function openExtensionsPanel(page: Page): Promise<void> {
  */
 export async function openSheetTabContextMenu(page: Page, sheetId: string): Promise<Locator> {
   await page.evaluate((id) => {
-    const tab = document.querySelector(`[data-testid="sheet-tab-${id}"]`) as HTMLElement | null;
+    // Avoid interpolating the sheet id into a CSS selector (ids can contain characters
+    // that require escaping). Instead, query all sheet tabs and then match by attribute.
+    const expected = `sheet-tab-${id}`;
+    const tab =
+      Array.from(document.querySelectorAll<HTMLElement>('[data-testid^="sheet-tab-"]')).find(
+        (el) => el.getAttribute("data-testid") === expected,
+      ) ?? null;
     if (!tab) throw new Error(`Missing sheet-tab-${id}`);
     const rect = tab.getBoundingClientRect();
     tab.dispatchEvent(
