@@ -958,62 +958,6 @@ fn coerce_countif_value_to_number(v: &Value) -> Option<f64> {
 }
 
 pub fn apply_implicit_intersection(v: Value, grid: &dyn Grid, base: CellCoord) -> Value {
-    fn apply_implicit_intersection_on_sheet(
-        grid: &dyn Grid,
-        sheet: usize,
-        range: ResolvedRange,
-        base: CellCoord,
-    ) -> Value {
-        // Single-cell ranges return that cell.
-        if range.row_start == range.row_end && range.col_start == range.col_end {
-            return grid.get_value_on_sheet(
-                sheet,
-                CellCoord {
-                    row: range.row_start,
-                    col: range.col_start,
-                },
-            );
-        }
-
-        // 1D ranges intersect on the matching row/column.
-        if range.col_start == range.col_end {
-            if base.row >= range.row_start && base.row <= range.row_end {
-                return grid.get_value_on_sheet(
-                    sheet,
-                    CellCoord {
-                        row: base.row,
-                        col: range.col_start,
-                    },
-                );
-            }
-            return Value::Error(ErrorKind::Value);
-        }
-
-        if range.row_start == range.row_end {
-            if base.col >= range.col_start && base.col <= range.col_end {
-                return grid.get_value_on_sheet(
-                    sheet,
-                    CellCoord {
-                        row: range.row_start,
-                        col: base.col,
-                    },
-                );
-            }
-            return Value::Error(ErrorKind::Value);
-        }
-
-        // 2D ranges intersect only if the current cell is within the rectangle.
-        if base.row >= range.row_start
-            && base.row <= range.row_end
-            && base.col >= range.col_start
-            && base.col <= range.col_end
-        {
-            return grid.get_value_on_sheet(sheet, base);
-        }
-
-        Value::Error(ErrorKind::Value)
-    }
-
     match v {
         Value::Error(e) => Value::Error(e),
         Value::Range(r) => {
@@ -1631,35 +1575,6 @@ fn intersect_ranges(a: ResolvedRange, b: ResolvedRange) -> Option<ResolvedRange>
         col_start,
         col_end,
     })
-}
-
-fn multi_range_has_overlaps(range: &MultiRangeRef, base: CellCoord) -> bool {
-    let areas = range.areas.as_ref();
-    if areas.len() <= 1 {
-        return false;
-    }
-
-    // Fast path: 3D sheet spans never overlap because each area is on a distinct sheet.
-    // (Reference unions/intersections operate within a single sheet, where overlap is possible.)
-    let mut sheets = HashSet::with_capacity(areas.len());
-    if areas.iter().all(|area| sheets.insert(area.sheet)) {
-        return false;
-    }
-
-    for i in 0..areas.len() {
-        let a = areas[i];
-        let ra = a.range.resolve(base);
-        for b in &areas[i + 1..] {
-            if b.sheet != a.sheet {
-                continue;
-            }
-            let rb = b.range.resolve(base);
-            if intersect_ranges(ra, rb).is_some() {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 fn excel_compare(left: &Value, right: &Value, op: BinaryOp) -> Value {
