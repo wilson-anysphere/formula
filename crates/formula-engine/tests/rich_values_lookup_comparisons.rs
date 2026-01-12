@@ -1,4 +1,7 @@
-use formula_engine::{value::EntityValue, Engine, Value};
+use formula_engine::{
+    value::{EntityValue, RecordValue},
+    Engine, Value,
+};
 
 #[test]
 fn match_compares_entity_and_text_by_display_string_case_insensitive() {
@@ -53,4 +56,40 @@ fn xlookup_compares_entity_and_text_by_display_string_case_insensitive() {
     engine.recalculate();
 
     assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(1.0));
+}
+
+#[test]
+fn vlookup_compares_record_and_text_by_display_string_case_insensitive() {
+    let mut engine = Engine::new();
+    // Ensure we exercise the AST evaluator path, which preserves rich Value variants.
+    engine.set_bytecode_enabled(false);
+
+    engine
+        .set_cell_value("Sheet1", "A1", Value::Record(RecordValue::new("Apple")))
+        .unwrap();
+    engine.set_cell_value("Sheet1", "B1", 42.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=VLOOKUP(\"apple\", A1:B1, 2, FALSE)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(42.0));
+}
+
+#[test]
+fn xmatch_compares_record_and_text_by_display_string_case_insensitive() {
+    let mut engine = Engine::new();
+    // Ensure we exercise the AST evaluator path, which preserves rich Value variants.
+    engine.set_bytecode_enabled(false);
+
+    engine
+        .set_cell_value("Sheet1", "A1", Value::Record(RecordValue::new("Apple")))
+        .unwrap();
+    engine.set_cell_value("Sheet1", "B1", "apple").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=XMATCH(B1, A1:A1, 0)")
+        .unwrap();
+    engine.recalculate();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "C1"), Value::Number(1.0));
 }
