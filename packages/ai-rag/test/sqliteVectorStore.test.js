@@ -41,3 +41,22 @@ test("SqliteVectorStore persists vectors and can reload them", { skip: !sqlJsAva
     await rm(tmpDir, { recursive: true, force: true });
   }
 });
+
+test("SqliteVectorStore.list respects AbortSignal", { skip: !sqlJsAvailable }, async () => {
+  const tmpRoot = path.join(__dirname, ".tmp");
+  await mkdir(tmpRoot, { recursive: true });
+  const tmpDir = await mkdtemp(path.join(tmpRoot, "sqlite-store-abort-"));
+  const filePath = path.join(tmpDir, "vectors.sqlite");
+
+  try {
+    const store = await createSqliteFileVectorStore({ filePath, dimension: 3, autoSave: false });
+
+    const abortController = new AbortController();
+    abortController.abort();
+
+    await assert.rejects(store.list({ signal: abortController.signal }), { name: "AbortError" });
+    await store.close();
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
+});

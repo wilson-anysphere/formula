@@ -34,3 +34,13 @@ test("HashEmbedder returns a stable zero vector for empty/whitespace input", asy
   assert.equal(norm, 0);
   assert.ok(Array.from(vec).every((n) => Number.isFinite(n) && n === 0));
 });
+
+test("HashEmbedder respects AbortSignal", async () => {
+  const embedder = new HashEmbedder({ dimension: 64 });
+  const abortController = new AbortController();
+  abortController.abort();
+
+  await assert.rejects(embedder.embedTexts(["hello world"], { signal: abortController.signal }), {
+    name: "AbortError",
+  });
+});
