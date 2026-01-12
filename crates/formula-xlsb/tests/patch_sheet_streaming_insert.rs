@@ -18,6 +18,8 @@ fn read_sheet_bin(xlsb_bytes: Vec<u8>) -> Vec<u8> {
 }
 
 fn read_dimension_bounds(sheet_bin: &[u8]) -> Option<(u32, u32, u32, u32)> {
+    // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
+    // See `crates/formula-xlsb/src/parser.rs` (`biff12` module).
     const DIMENSION: u32 = 0x0094;
 
     let mut cursor = Cursor::new(sheet_bin);
@@ -37,6 +39,7 @@ fn read_dimension_bounds(sheet_bin: &[u8]) -> Option<(u32, u32, u32, u32)> {
 }
 
 fn move_dimension_record_to_end(sheet_bin: &[u8]) -> Vec<u8> {
+    // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
     const DIMENSION: u32 = 0x0094;
     const WORKSHEET_END: u32 = 0x0082;
 
@@ -82,6 +85,7 @@ fn move_dimension_record_to_end(sheet_bin: &[u8]) -> Vec<u8> {
 }
 
 fn cell_coords_in_stream_order(sheet_bin: &[u8]) -> Vec<(u32, u32)> {
+    // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
     const SHEETDATA: u32 = 0x0091;
     const SHEETDATA_END: u32 = 0x0092;
     const ROW: u32 = 0x0000;
@@ -127,6 +131,7 @@ fn cell_coords_in_stream_order(sheet_bin: &[u8]) -> Vec<(u32, u32)> {
 }
 
 fn find_cell_record(sheet_bin: &[u8], target_row: u32, target_col: u32) -> Option<(u32, Vec<u8>)> {
+    // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
     const SHEETDATA: u32 = 0x0091;
     const SHEETDATA_END: u32 = 0x0092;
     const ROW: u32 = 0x0000;
