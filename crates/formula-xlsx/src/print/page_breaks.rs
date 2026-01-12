@@ -1,4 +1,7 @@
-use super::{CellRange, ManualPageBreaks, Orientation, PageSetup, Scaling};
+use super::{
+    CellRange, ManualPageBreaks, Orientation, PageSetup, Scaling, DEFAULT_COL_WIDTH_POINTS,
+    DEFAULT_ROW_HEIGHT_POINTS,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Page {
@@ -36,9 +39,19 @@ pub fn calculate_pages(
         Scaling::Percent(pct) => (pct as f64) / 100.0,
         Scaling::FitTo { width, height } => {
             let content_w =
-                sum_slice_range(col_widths_points, print_area.start_col, print_area.end_col);
+                sum_slice_range(
+                    col_widths_points,
+                    print_area.start_col,
+                    print_area.end_col,
+                    DEFAULT_COL_WIDTH_POINTS,
+                );
             let content_h =
-                sum_slice_range(row_heights_points, print_area.start_row, print_area.end_row);
+                sum_slice_range(
+                    row_heights_points,
+                    print_area.start_row,
+                    print_area.end_row,
+                    DEFAULT_ROW_HEIGHT_POINTS,
+                );
 
             let scale_w = if width > 0 && content_w > 0.0 {
                 Some((width as f64 * printable_w) / content_w)
@@ -80,6 +93,7 @@ pub fn calculate_pages(
             .col_breaks_after
             .iter()
             .map(|break_after| break_after.saturating_add(1)),
+        DEFAULT_COL_WIDTH_POINTS,
     );
 
     let row_starts = compute_break_starts(
@@ -91,6 +105,7 @@ pub fn calculate_pages(
             .row_breaks_after
             .iter()
             .map(|break_after| break_after.saturating_add(1)),
+        DEFAULT_ROW_HEIGHT_POINTS,
     );
 
     let col_segments = starts_to_segments(&col_starts, print_area.end_col);
@@ -131,6 +146,7 @@ fn compute_break_starts<I: IntoIterator<Item = u32>>(
     sizes: &[f64],
     page_capacity: f64,
     manual_starts: I,
+    default_size: f64,
 ) -> Vec<u32> {
     let mut starts = Vec::new();
     starts.push(start);
@@ -141,7 +157,10 @@ fn compute_break_starts<I: IntoIterator<Item = u32>>(
         let mut next = current;
 
         while next <= end {
-            let size = sizes.get((next - 1) as usize).copied().unwrap_or(0.0);
+            let size = sizes
+                .get((next - 1) as usize)
+                .copied()
+                .unwrap_or(default_size);
 
             if next > current && acc + size > page_capacity {
                 break;
@@ -172,10 +191,13 @@ fn compute_break_starts<I: IntoIterator<Item = u32>>(
     starts
 }
 
-fn sum_slice_range(sizes: &[f64], start: u32, end: u32) -> f64 {
+fn sum_slice_range(sizes: &[f64], start: u32, end: u32, default_size: f64) -> f64 {
     let mut sum = 0.0;
     for idx in start..=end {
-        sum += sizes.get((idx - 1) as usize).copied().unwrap_or(0.0);
+        sum += sizes
+            .get((idx - 1) as usize)
+            .copied()
+            .unwrap_or(default_size);
     }
     sum
 }

@@ -14,6 +14,16 @@ pub use xlsx::{read_workbook_print_settings, write_workbook_print_settings};
 
 use std::collections::BTreeSet;
 
+/// Default column width in points when no explicit width is available.
+///
+/// This matches the desktop shell's prior behavior when it padded `col_widths_points`.
+pub const DEFAULT_COL_WIDTH_POINTS: f64 = 64.0;
+
+/// Default row height in points when no explicit height is available.
+///
+/// This matches the desktop shell's prior behavior when it padded `row_heights_points`.
+pub const DEFAULT_ROW_HEIGHT_POINTS: f64 = 20.0;
+
 #[derive(Debug, thiserror::Error)]
 pub enum PrintError {
     #[error("io error: {0}")]

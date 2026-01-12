@@ -1426,6 +1426,7 @@ pub fn export_sheet_range_pdf(
     state: State<'_, SharedAppState>,
 ) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use crate::resource_limits::{MAX_PDF_BYTES, MAX_PDF_CELLS_PER_CALL, MAX_RANGE_DIM};
 
     let state_guard = state.inner().lock().unwrap();
     let workbook = state_guard.get_workbook().map_err(app_error)?;
@@ -1442,20 +1443,43 @@ pub fn export_sheet_range_pdf(
         end_row: range.end_row,
         start_col: range.start_col,
         end_col: range.end_col,
-    };
-
-    let mut col_widths = col_widths_points.unwrap_or_default();
-    let mut row_heights = row_heights_points.unwrap_or_default();
-
-    let needed_cols = print_area.end_col.max(1) as usize;
-    let needed_rows = print_area.end_row.max(1) as usize;
-
-    if col_widths.len() < needed_cols {
-        col_widths.resize(needed_cols, 64.0);
     }
-    if row_heights.len() < needed_rows {
-        row_heights.resize(needed_rows, 20.0);
+    .normalized();
+
+    if print_area.start_row == 0
+        || print_area.start_col == 0
+        || print_area.end_row == 0
+        || print_area.end_col == 0
+    {
+        return Err("invalid print range: rows/cols must be 1-based".to_string());
     }
+
+    let row_count =
+        (print_area.end_row as u64).saturating_sub(print_area.start_row as u64) + 1;
+    let col_count =
+        (print_area.end_col as u64).saturating_sub(print_area.start_col as u64) + 1;
+
+    // Fail fast before PDF generation to avoid CPU/memory DoS from untrusted webview input.
+    let row_count_usize = row_count as usize;
+    let col_count_usize = col_count as usize;
+    if row_count_usize > MAX_RANGE_DIM || col_count_usize > MAX_RANGE_DIM {
+        return Err(app_error(AppStateError::RangeDimensionTooLarge {
+            rows: row_count_usize,
+            cols: col_count_usize,
+            limit: MAX_RANGE_DIM,
+        }));
+    }
+    let cell_count = (row_count as u128) * (col_count as u128);
+    if cell_count > MAX_PDF_CELLS_PER_CALL as u128 {
+        return Err(app_error(AppStateError::RangeTooLarge {
+            rows: row_count_usize,
+            cols: col_count_usize,
+            limit: MAX_PDF_CELLS_PER_CALL,
+        }));
+    }
+
+    let col_widths = col_widths_points.unwrap_or_default();
+    let row_heights = row_heights_points.unwrap_or_default();
 
     let pdf_bytes = formula_xlsx::print::export_range_to_pdf_bytes(
         &sheet.name,
@@ -1475,6 +1499,14 @@ pub fn export_sheet_range_pdf(
         },
     )
     .map_err(|e| e.to_string())?;
+
+    if pdf_bytes.len() > MAX_PDF_BYTES {
+        return Err(format!(
+            "generated PDF is too large: {} bytes (limit {})",
+            pdf_bytes.len(),
+            MAX_PDF_BYTES
+        ));
+    }
 
     Ok(STANDARD.encode(pdf_bytes))
 }

@@ -1,5 +1,6 @@
 use super::{
     calculate_pages, CellRange, ManualPageBreaks, Orientation, PageSetup, PrintError, Scaling,
+    DEFAULT_COL_WIDTH_POINTS, DEFAULT_ROW_HEIGHT_POINTS,
 };
 
 /// Generate a basic PDF for a sheet range using the same pagination rules as `calculate_pages`.
@@ -73,7 +74,7 @@ where
             let row_height = row_heights_points
                 .get((row - 1) as usize)
                 .copied()
-                .unwrap_or(0.0)
+                .unwrap_or(DEFAULT_ROW_HEIGHT_POINTS)
                 * scale_factor;
 
             let mut x_cursor = left;
@@ -81,7 +82,7 @@ where
                 let col_width = col_widths_points
                     .get((col - 1) as usize)
                     .copied()
-                    .unwrap_or(0.0)
+                    .unwrap_or(DEFAULT_COL_WIDTH_POINTS)
                     * scale_factor;
 
                 if let Some(text) = cell_text(row, col) {
@@ -129,9 +130,19 @@ fn calculate_scale_factor(
         Scaling::FitTo { width, height } => {
             let print_area = print_area.normalized();
             let content_w =
-                sum_slice_range(col_widths_points, print_area.start_col, print_area.end_col);
+                sum_slice_range(
+                    col_widths_points,
+                    print_area.start_col,
+                    print_area.end_col,
+                    DEFAULT_COL_WIDTH_POINTS,
+                );
             let content_h =
-                sum_slice_range(row_heights_points, print_area.start_row, print_area.end_row);
+                sum_slice_range(
+                    row_heights_points,
+                    print_area.start_row,
+                    print_area.end_row,
+                    DEFAULT_ROW_HEIGHT_POINTS,
+                );
 
             let scale_w = if width > 0 && content_w > 0.0 {
                 Some((width as f64 * printable_w) / content_w)
@@ -281,10 +292,13 @@ fn build_stream_obj(stream: &[u8]) -> Vec<u8> {
     out
 }
 
-fn sum_slice_range(sizes: &[f64], start: u32, end: u32) -> f64 {
+fn sum_slice_range(sizes: &[f64], start: u32, end: u32, default_size: f64) -> f64 {
     let mut sum = 0.0;
     for idx in start..=end {
-        sum += sizes.get((idx - 1) as usize).copied().unwrap_or(0.0);
+        sum += sizes
+            .get((idx - 1) as usize)
+            .copied()
+            .unwrap_or(default_size);
     }
     sum
 }

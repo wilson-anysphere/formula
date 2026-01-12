@@ -30,6 +30,7 @@ use formula_storage::{
 use formula_xlsx::print::{
     CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings,
 };
+use crate::resource_limits::{MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
@@ -54,6 +55,18 @@ pub enum AppStateError {
         start_col: usize,
         end_row: usize,
         end_col: usize,
+    },
+    #[error("range too large: {rows}x{cols} cells exceeds limit {limit}")]
+    RangeTooLarge {
+        rows: usize,
+        cols: usize,
+        limit: usize,
+    },
+    #[error("range too large: {rows}x{cols} exceeds max dimension {limit}")]
+    RangeDimensionTooLarge {
+        rows: usize,
+        cols: usize,
+        limit: usize,
     },
     #[error("unknown pivot id: {0}")]
     UnknownPivot(String),
@@ -957,6 +970,32 @@ impl AppState {
             });
         }
 
+        let row_count = end_row
+            .checked_sub(start_row)
+            .and_then(|d| d.checked_add(1))
+            .unwrap_or(usize::MAX);
+        let col_count = end_col
+            .checked_sub(start_col)
+            .and_then(|d| d.checked_add(1))
+            .unwrap_or(usize::MAX);
+
+        if row_count > MAX_RANGE_DIM || col_count > MAX_RANGE_DIM {
+            return Err(AppStateError::RangeDimensionTooLarge {
+                rows: row_count,
+                cols: col_count,
+                limit: MAX_RANGE_DIM,
+            });
+        }
+
+        let cell_count = (row_count as u128) * (col_count as u128);
+        if cell_count > MAX_RANGE_CELLS_PER_CALL as u128 {
+            return Err(AppStateError::RangeTooLarge {
+                rows: row_count,
+                cols: col_count,
+                limit: MAX_RANGE_CELLS_PER_CALL,
+            });
+        }
+
         let workbook = self
             .workbook
             .as_ref()
@@ -989,9 +1028,9 @@ impl AppState {
             None
         };
 
-        let mut rows = Vec::with_capacity(end_row - start_row + 1);
+        let mut rows = Vec::with_capacity(row_count);
         for r in start_row..=end_row {
-            let mut row_out = Vec::with_capacity(end_col - start_col + 1);
+            let mut row_out = Vec::with_capacity(col_count);
             for c in start_col..=end_col {
                 let cell = sheet.get_cell(r, c);
                 let addr = coord_to_a1(r, c);
@@ -1157,8 +1196,34 @@ impl AppState {
             });
         }
 
-        let expected_rows = end_row - start_row + 1;
-        let expected_cols = end_col - start_col + 1;
+        let row_count = end_row
+            .checked_sub(start_row)
+            .and_then(|d| d.checked_add(1))
+            .unwrap_or(usize::MAX);
+        let col_count = end_col
+            .checked_sub(start_col)
+            .and_then(|d| d.checked_add(1))
+            .unwrap_or(usize::MAX);
+
+        if row_count > MAX_RANGE_DIM || col_count > MAX_RANGE_DIM {
+            return Err(AppStateError::RangeDimensionTooLarge {
+                rows: row_count,
+                cols: col_count,
+                limit: MAX_RANGE_DIM,
+            });
+        }
+
+        let cell_count = (row_count as u128) * (col_count as u128);
+        if cell_count > MAX_RANGE_CELLS_PER_CALL as u128 {
+            return Err(AppStateError::RangeTooLarge {
+                rows: row_count,
+                cols: col_count,
+                limit: MAX_RANGE_CELLS_PER_CALL,
+            });
+        }
+
+        let expected_rows = row_count;
+        let expected_cols = col_count;
         if values.len() != expected_rows || values.iter().any(|row| row.len() != expected_cols) {
             return Err(AppStateError::InvalidRange {
                 start_row,
@@ -3101,6 +3166,7 @@ fn ensure_sheet_print_settings<'a>(
 mod tests {
     use super::*;
     use crate::file_io::{read_xlsx_blocking, write_xlsx_blocking};
+    use crate::resource_limits::{MAX_RANGE_CELLS_PER_CALL, MAX_RANGE_DIM};
     use formula_engine::pivot::{
         AggregationType, GrandTotals, Layout, PivotConfig, PivotField, SubtotalPosition, ValueField,
     };
@@ -3258,6 +3324,87 @@ mod tests {
             .expect("expected A1 update");
         assert_eq!(update.value, CellScalar::Number(2.5));
         assert_eq!(update.display_value, "2.50");
+    }
+
+    #[test]
+    fn get_range_rejects_oversized_ranges() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        assert!(
+            (MAX_RANGE_DIM as u128) * (MAX_RANGE_DIM as u128) > MAX_RANGE_CELLS_PER_CALL as u128,
+            "test expects MAX_RANGE_DIM^2 > MAX_RANGE_CELLS_PER_CALL"
+        );
+
+        let end_row = MAX_RANGE_DIM - 1;
+        let end_col = MAX_RANGE_DIM - 1;
+        let err = state
+            .get_range(&sheet_id, 0, 0, end_row, end_col)
+            .expect_err("expected oversized get_range to fail");
+        assert!(matches!(
+            err,
+            AppStateError::RangeTooLarge {
+                rows: MAX_RANGE_DIM,
+                cols: MAX_RANGE_DIM,
+                limit: MAX_RANGE_CELLS_PER_CALL
+            }
+        ));
+    }
+
+    #[test]
+    fn set_range_rejects_oversized_ranges() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let end_row = MAX_RANGE_DIM - 1;
+        let end_col = MAX_RANGE_DIM - 1;
+        let err = state
+            .set_range(&sheet_id, 0, 0, end_row, end_col, Vec::new())
+            .expect_err("expected oversized set_range to fail");
+        assert!(matches!(
+            err,
+            AppStateError::RangeTooLarge {
+                rows: MAX_RANGE_DIM,
+                cols: MAX_RANGE_DIM,
+                limit: MAX_RANGE_CELLS_PER_CALL
+            }
+        ));
+    }
+
+    #[test]
+    fn set_range_allows_typical_ui_ranges() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let values = vec![
+            vec![(Some(JsonValue::from(1)), None), (Some(JsonValue::from(2)), None)],
+            vec![(Some(JsonValue::from(3)), None), (Some(JsonValue::from(4)), None)],
+        ];
+
+        let updates = state
+            .set_range(&sheet_id, 0, 0, 1, 1, values)
+            .expect("set_range should succeed");
+        assert!(
+            updates.iter().any(|u| u.row == 0 && u.col == 0),
+            "expected updates to include A1"
+        );
+
+        let a1 = state.get_cell(&sheet_id, 0, 0).expect("get A1");
+        assert_eq!(a1.value, CellScalar::Number(1.0));
+        let b2 = state.get_cell(&sheet_id, 1, 1).expect("get B2");
+        assert_eq!(b2.value, CellScalar::Number(4.0));
     }
 
     #[test]
