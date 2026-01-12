@@ -443,6 +443,9 @@ describe("KeybindingService", () => {
     const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
     service.setBuiltinKeybindings(builtinKeybindings.filter((kb) => kb.command === "edit.autoSum"));
 
+    // Builtin spreadsheet shortcuts are gated by context keys and should fail closed.
+    contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": false });
+
     // Simulate a layout where pressing the physical Equal key requires Shift to reach "=".
     // KeybindingService requires Shift to match exactly, so we should still resolve to AutoSum.
     const event = makeKeydownEvent({ key: "+", code: "Equal", altKey: true, shiftKey: true });

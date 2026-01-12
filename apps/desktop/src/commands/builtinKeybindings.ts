@@ -266,7 +266,7 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "edit.autoSum",
     key: "alt+shift+=",
     mac: "option+shift+=",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "format.toggleBold",
