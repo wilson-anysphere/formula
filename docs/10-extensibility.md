@@ -1218,8 +1218,8 @@ The web runtime and the Tauri/WebView desktop runtime use the same **no-Node** i
 - Extensions are downloaded as signed v2 `.fextpkg` blobs from the Marketplace.
 - The client verifies the package (tar parsing + SHA-256 checksums + Ed25519 signature verification) before persisting
   anything.
-  - Desktop builds may optionally delegate verification to a Rust/Tauri command as an optimization/fallback, but
-    verification is always mandatory.
+  - Verification happens inside the WebView using WebCrypto (`crypto.subtle.digest/importKey/verify`) and is always
+    mandatory. If the runtime does not support Ed25519 in WebCrypto, marketplace installs must fail.
 - Verified package bytes + metadata are stored in IndexedDB (`formula.webExtensions`), and the extension is loaded into
   `BrowserExtensionHost` via a `blob:`/`data:` module URL (no remote module graph imports).
 - Updates replace the stored `{id, version}` atomically and reload the extension in the host if it is
