@@ -72,6 +72,16 @@ class UpdatePinnedDatasetTests(unittest.TestCase):
             result_ids = {r.get("caseId") for r in pinned_updated.get("results", []) if isinstance(r, dict)}
             self.assertEqual(result_ids, {"case1", "case2"})
 
+            versioned_dir = tmp / "versioned"
+            versioned_path = update.write_versioned_copy(pinned_path=pinned_path, versioned_dir=versioned_dir)
+            self.assertTrue(versioned_path.is_file())
+            self.assertEqual(
+                versioned_path.name,
+                f"excel-unknown-build-unknown-cases-{cases_sha[:8]}.json",
+            )
+            versioned_payload = json.loads(versioned_path.read_text(encoding="utf-8"))
+            self.assertEqual(versioned_payload["caseSet"]["sha256"], cases_sha)
+
     def test_overwrite_existing_replaces_case_results(self) -> None:
         update = self._load_update_module()
 

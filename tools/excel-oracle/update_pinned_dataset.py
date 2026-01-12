@@ -51,6 +51,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -77,6 +78,41 @@ def _write_json(path: Path, payload: Any) -> None:
     with path.open("w", encoding="utf-8", newline="\n") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=False)
         f.write("\n")
+
+
+def _sanitize_fragment(text: str) -> str:
+    # Keep filenames portable and reasonably readable.
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", text.strip())
+    safe = re.sub(r"_+", "_", safe).strip("_")
+    return safe or "unknown"
+
+
+def write_versioned_copy(*, pinned_path: Path, versioned_dir: Path) -> Path:
+    """
+    Write a version-tagged copy of `pinned_path` into `versioned_dir`.
+
+    This mirrors the naming scheme used by `tools/excel-oracle/pin_dataset.py` so other tooling
+    (like `compat_gate.py`) can auto-select the expected dataset for the current `cases.json` hash.
+    """
+
+    payload = _load_json(pinned_path)
+    source = payload.get("source", {})
+    case_set = payload.get("caseSet", {})
+
+    if not isinstance(source, dict):
+        raise SystemExit(f"{pinned_path}: expected source object")
+    if not isinstance(case_set, dict):
+        raise SystemExit(f"{pinned_path}: expected caseSet object")
+
+    excel_version = _sanitize_fragment(str(source.get("version", "unknown")))
+    excel_build = _sanitize_fragment(str(source.get("build", "unknown")))
+    cases_sha = _sanitize_fragment(str(case_set.get("sha256", "unknown")))
+
+    versioned_name = f"excel-{excel_version}-build-{excel_build}-cases-{cases_sha[:8]}.json"
+    versioned_dir.mkdir(parents=True, exist_ok=True)
+    out_path = versioned_dir / versioned_name
+    shutil.copyfile(pinned_path, out_path)
+    return out_path
 
 
 def _tool_env(repo_root: Path) -> dict[str, str]:
@@ -397,6 +433,19 @@ def main() -> int:
         help="Path to pinned dataset to update (default: %(default)s)",
     )
     p.add_argument(
+        "--versioned-dir",
+        default="tests/compatibility/excel-oracle/datasets/versioned",
+        help=(
+            "If set, also write/update a version-tagged copy of the pinned dataset in this directory "
+            "(default: %(default)s). Use --no-versioned to disable."
+        ),
+    )
+    p.add_argument(
+        "--no-versioned",
+        action="store_true",
+        help="Do not write/update the versioned dataset copy (only update the pinned dataset).",
+    )
+    p.add_argument(
         "--merge-results",
         action="append",
         default=[],
@@ -467,6 +516,13 @@ def main() -> int:
         print("Pinned dataset already covered all cases (updated metadata only).")
     else:
         print(f"Filled {missing_before - missing_after}/{missing_before} missing case results.")
+
+    if not args.no_versioned:
+        raw = str(args.versioned_dir or "").strip()
+        if raw:
+            versioned_dir = (repo_root / raw).resolve() if not os.path.isabs(raw) else Path(raw).resolve()
+            out = write_versioned_copy(pinned_path=pinned_path, versioned_dir=versioned_dir)
+            print(f"Versioned copy -> {out.as_posix()}")
 
     return 0
 

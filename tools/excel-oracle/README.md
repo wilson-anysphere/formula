@@ -215,6 +215,13 @@ You can instead update the pinned dataset incrementally to fill in only the miss
 python tools/excel-oracle/update_pinned_dataset.py
 ```
 
+By default this also refreshes the matching **versioned** dataset copy under:
+
+* `tests/compatibility/excel-oracle/datasets/versioned/`
+
+so `tools/excel-oracle/compat_gate.py` (which prefers the versioned dataset when present) stays in
+sync. To update only the pinned file, pass `--no-versioned`.
+
 If you generated **real Excel** results for a subset of cases and want to overwrite the synthetic
 baseline values in the pinned dataset (while keeping the rest of the corpus unchanged), pass
 `--merge-results` and `--overwrite-existing`:
