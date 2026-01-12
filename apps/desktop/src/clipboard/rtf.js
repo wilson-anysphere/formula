@@ -497,8 +497,10 @@ const IGNORED_RTF_DESTINATIONS = new Set([
  * words and drop everything else (control words, groups, destinations).
  *
  * Supported conversions:
- * - `\par` / `\line` / `\row` -> `\n`
- * - `\tab` / `\cell` -> `\t`
+ * - Table structure: `\cell` -> `\t`, `\row` -> `\n` (dropping the final trailing `\cell`).
+ * - `\tab` -> `\t` when not in a table; treated as whitespace when `\intbl`/`\trowd` is active.
+ * - `\par` / `\line` -> `\n` when not in a table; treated as whitespace inside tables to avoid
+ *   creating phantom rows during TSV parsing.
  * - Hex escapes `\'hh` decoded as Windows-1252 bytes (best-effort)
  *
  * @param {string} rtf
