@@ -180,3 +180,38 @@ test("rejects websocket upgrade when max connections per IP is exceeded", async 
   await expectWebSocketUpgradeStatus(wsUrl, 429, "max_connections_per_ip_exceeded");
 });
 
+test("rejects websocket upgrade when max total connections is exceeded", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-max-total-"));
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const base = createConfig(dataDir);
+  const logger = createLogger("silent");
+  const server = createSyncServer(
+    {
+      ...base,
+      trustProxy: true,
+      limits: {
+        ...base.limits,
+        maxConnections: 1,
+        // Ensure per-IP limit does not interfere with total limit.
+        maxConnectionsPerIp: 100,
+      },
+    },
+    logger
+  );
+  await server.start();
+  t.after(async () => {
+    await server.stop();
+  });
+
+  const url = `${server.getWsUrl()}/max-total-doc?token=test-token`;
+
+  const ws1 = new WebSocket(url, { headers: { "x-forwarded-for": "1.2.3.4" } });
+  t.after(() => ws1.terminate());
+  await waitForWebSocketOpen(ws1);
+
+  // Use a distinct x-forwarded-for so the server treats it as a separate IP.
+  await expectWebSocketUpgradeStatus(url, 429, "max_connections_exceeded");
+});
