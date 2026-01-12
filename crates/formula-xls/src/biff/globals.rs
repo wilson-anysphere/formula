@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use formula_model::{
     Alignment, Border, BorderEdge, BorderStyle, CalculationMode, Color, DateSystem, Fill,
     FillPattern, Font, HorizontalAlignment, Protection, Style, TabColor, VerticalAlignment,
+    WorkbookProtection,
 };
 
 use super::{records, strings, BiffVersion};
@@ -31,6 +32,12 @@ const RECORD_CALCMODE: u16 = 0x000D;
 const RECORD_PRECISION: u16 = 0x000E;
 const RECORD_DELTA: u16 = 0x0010;
 const RECORD_ITERATION: u16 = 0x0011;
+// PROTECT [MS-XLS 2.4.203] (workbook globals: lock structure)
+const RECORD_PROTECT: u16 = 0x0012;
+// PASSWORD [MS-XLS 2.4.191] (workbook globals: protection password hash)
+const RECORD_PASSWORD: u16 = 0x0013;
+// WINDOWPROTECT [MS-XLS 2.4.347] (lock workbook windows)
+const RECORD_WINDOWPROTECT: u16 = 0x0019;
 const RECORD_WINDOW1: u16 = 0x003D;
 // FILEPASS [MS-XLS 2.4.105] indicates the workbook stream is encrypted/password-protected.
 // When present in the workbook globals substream, subsequent records are encrypted.
@@ -144,6 +151,7 @@ pub(crate) struct BiffWorkbookGlobals {
     pub(crate) iterative_max_change: Option<f64>,
     pub(crate) full_precision: Option<bool>,
     pub(crate) calculate_before_save: Option<bool>,
+    pub(crate) workbook_protection: WorkbookProtection,
     pub(crate) active_tab_index: Option<u16>,
     formats: HashMap<u16, String>,
     palette: Vec<u32>,
@@ -169,6 +177,7 @@ impl Default for BiffWorkbookGlobals {
             iterative_max_change: None,
             full_precision: None,
             calculate_before_save: None,
+            workbook_protection: WorkbookProtection::default(),
             active_tab_index: None,
             formats: HashMap::new(),
             palette: Vec::new(),
@@ -735,6 +744,42 @@ pub(crate) fn parse_biff_workbook_globals(
                 // "missing EOF" warning.
                 saw_eof = true;
                 break;
+            }
+            // PROTECT [MS-XLS 2.4.203] (workbook globals: lock structure)
+            RECORD_PROTECT => {
+                if data.len() < 2 {
+                    out.warnings.push(format!(
+                        "truncated PROTECT record at offset {}",
+                        record.offset
+                    ));
+                    continue;
+                }
+                let flag = u16::from_le_bytes([data[0], data[1]]);
+                out.workbook_protection.lock_structure = flag != 0;
+            }
+            // WINDOWPROTECT [MS-XLS 2.4.347]
+            RECORD_WINDOWPROTECT => {
+                if data.len() < 2 {
+                    out.warnings.push(format!(
+                        "truncated WINDOWPROTECT record at offset {}",
+                        record.offset
+                    ));
+                    continue;
+                }
+                let flag = u16::from_le_bytes([data[0], data[1]]);
+                out.workbook_protection.lock_windows = flag != 0;
+            }
+            // PASSWORD [MS-XLS 2.4.191]
+            RECORD_PASSWORD => {
+                if data.len() < 2 {
+                    out.warnings.push(format!(
+                        "truncated PASSWORD record at offset {}",
+                        record.offset
+                    ));
+                    continue;
+                }
+                let hash = u16::from_le_bytes([data[0], data[1]]);
+                out.workbook_protection.password_hash = Some(hash);
             }
             // WINDOW1 [MS-XLS 2.4.346]
             RECORD_WINDOW1 => {

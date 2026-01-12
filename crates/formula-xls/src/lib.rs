@@ -286,6 +286,7 @@ fn import_xls_path_with_biff_reader(
             if let Some(full_precision) = globals.full_precision {
                 out.calc_settings.full_precision = full_precision;
             }
+            out.workbook_protection = std::mem::take(&mut globals.workbook_protection);
             workbook_active_tab = globals.active_tab_index;
             warnings.extend(globals.warnings.drain(..).map(ImportWarning::new));
             sheet_tab_colors = Some(std::mem::take(&mut globals.sheet_tab_colors));
@@ -564,6 +565,17 @@ fn import_xls_path_with_biff_reader(
                         }
                         Err(err) => warnings.push(ImportWarning::new(format!(
                             "failed to import `.xls` view state for BIFF sheet index {} (`{}`): {err}",
+                            biff_idx, sheet_name
+                        ))),
+                    }
+
+                    match biff::parse_biff_sheet_protection(workbook_stream, sheet_info.offset) {
+                        Ok(mut protection) => {
+                            warnings.extend(protection.warnings.drain(..).map(ImportWarning::new));
+                            sheet.sheet_protection = protection.protection;
+                        }
+                        Err(err) => warnings.push(ImportWarning::new(format!(
+                            "failed to import `.xls` sheet protection for BIFF sheet index {} (`{}`): {err}",
                             biff_idx, sheet_name
                         ))),
                     }

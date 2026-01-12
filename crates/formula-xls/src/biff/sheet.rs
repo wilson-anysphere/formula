@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use formula_model::{
     CellRef, Hyperlink, HyperlinkTarget, OutlinePr, Range, SheetPane, SheetSelection, EXCEL_MAX_COLS,
-    EXCEL_MAX_ROWS,
+    EXCEL_MAX_ROWS, SheetProtection,
 };
 
 use super::records;
@@ -33,6 +33,17 @@ const RECORD_MULRK: u16 = 0x00BD;
 const RECORD_MULBLANK: u16 = 0x00BE;
 /// HLINK [MS-XLS 2.4.110]
 const RECORD_HLINK: u16 = 0x01B8;
+
+// Sheet protection records (worksheet substream).
+// See [MS-XLS] sections:
+// - PROTECT: 2.4.203
+// - PASSWORD: 2.4.191
+// - OBJPROTECT: 2.4.169
+// - SCENPROTECT: 2.4.235
+const RECORD_PROTECT: u16 = 0x0012;
+const RECORD_PASSWORD: u16 = 0x0013;
+const RECORD_OBJPROTECT: u16 = 0x0063;
+const RECORD_SCENPROTECT: u16 = 0x00DD;
 
 // View/UX records (worksheet substream).
 // - WINDOW2: [MS-XLS 2.4.354]
@@ -114,6 +125,95 @@ pub(crate) struct SheetViewState {
     pub(crate) pane: Option<SheetPane>,
     pub(crate) selection: Option<SheetSelection>,
     pub(crate) warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BiffSheetProtection {
+    pub(crate) protection: SheetProtection,
+    pub(crate) warnings: Vec<String>,
+}
+
+/// Best-effort parse of worksheet protection state.
+///
+/// This scans the sheet substream for basic protection records:
+/// - `PROTECT` → [`SheetProtection::enabled`]
+/// - `PASSWORD` → [`SheetProtection::password_hash`]
+/// - `OBJPROTECT` → [`SheetProtection::edit_objects`] (best-effort mapping)
+/// - `SCENPROTECT` → [`SheetProtection::edit_scenarios`] (best-effort mapping)
+///
+/// This scan is resilient to malformed records: payload-level parse failures are surfaced as
+/// warnings and otherwise ignored.
+pub(crate) fn parse_biff_sheet_protection(
+    workbook_stream: &[u8],
+    start: usize,
+) -> Result<BiffSheetProtection, String> {
+    let mut out = BiffSheetProtection::default();
+
+    let mut iter = records::BiffRecordIter::from_offset(workbook_stream, start)?;
+
+    while let Some(next) = iter.next() {
+        let record = match next {
+            Ok(r) => r,
+            Err(err) => {
+                out.warnings.push(format!("malformed BIFF record: {err}"));
+                break;
+            }
+        };
+
+        if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+
+        let data = record.data;
+        match record.record_id {
+            RECORD_PROTECT => {
+                if data.len() < 2 {
+                    out.warnings
+                        .push(format!("truncated PROTECT record at offset {}", record.offset));
+                    continue;
+                }
+                let flag = u16::from_le_bytes([data[0], data[1]]);
+                out.protection.enabled = flag != 0;
+            }
+            RECORD_PASSWORD => {
+                if data.len() < 2 {
+                    out.warnings
+                        .push(format!("truncated PASSWORD record at offset {}", record.offset));
+                    continue;
+                }
+                let hash = u16::from_le_bytes([data[0], data[1]]);
+                out.protection.password_hash = Some(hash);
+            }
+            RECORD_OBJPROTECT => {
+                if data.len() < 2 {
+                    out.warnings.push(format!(
+                        "truncated OBJPROTECT record at offset {}",
+                        record.offset
+                    ));
+                    continue;
+                }
+                let flag = u16::from_le_bytes([data[0], data[1]]);
+                // Best-effort mapping: BIFF stores "is protected" flags, while the model stores
+                // "is allowed" flags. When objects are protected, editing objects is not allowed.
+                out.protection.edit_objects = flag == 0;
+            }
+            RECORD_SCENPROTECT => {
+                if data.len() < 2 {
+                    out.warnings.push(format!(
+                        "truncated SCENPROTECT record at offset {}",
+                        record.offset
+                    ));
+                    continue;
+                }
+                let flag = u16::from_le_bytes([data[0], data[1]]);
+                out.protection.edit_scenarios = flag == 0;
+            }
+            records::RECORD_EOF => break,
+            _ => {}
+        }
+    }
+
+    Ok(out)
 }
 
 /// Best-effort parse of worksheet view/UI state (frozen panes, zoom, selection, display flags).

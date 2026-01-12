@@ -10,6 +10,9 @@ const RECORD_BOF: u16 = 0x0809;
 const RECORD_EOF: u16 = 0x000A;
 const RECORD_CODEPAGE: u16 = 0x0042;
 const RECORD_DATEMODE: u16 = 0x0022;
+const RECORD_PROTECT: u16 = 0x0012;
+const RECORD_PASSWORD: u16 = 0x0013;
+const RECORD_WINDOWPROTECT: u16 = 0x0019;
 const RECORD_WINDOW1: u16 = 0x003D;
 const RECORD_FILEPASS: u16 = 0x002F;
 const RECORD_FONT: u16 = 0x0031;
@@ -44,6 +47,8 @@ const RECORD_HLINK: u16 = 0x01B8;
 const RECORD_WSBOOL: u16 = 0x0081;
 const RECORD_ROW: u16 = 0x0208;
 const RECORD_COLINFO: u16 = 0x007D;
+const RECORD_OBJPROTECT: u16 = 0x0063;
+const RECORD_SCENPROTECT: u16 = 0x00DD;
 
 const ROW_OPTION_HIDDEN: u16 = 0x0020;
 const ROW_OPTION_COLLAPSED: u16 = 0x1000;
@@ -416,6 +421,25 @@ pub fn build_hyperlink_fixture_xls() -> Vec<u8> {
 /// records are imported into [`formula_model::Workbook::calc_settings`].
 pub fn build_calc_settings_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_calc_settings_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture with workbook and worksheet protection enabled.
+///
+/// This fixture includes:
+/// - Workbook globals: `PROTECT`, `WINDOWPROTECT`, `PASSWORD`
+/// - Worksheet: `PROTECT`, `PASSWORD` (plus object/scenario protection records)
+pub fn build_protection_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_protection_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -1918,6 +1942,46 @@ fn build_calc_settings_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_protection_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+
+    // Workbook protection (structure + windows) with a legacy password hash.
+    push_record(&mut globals, RECORD_PROTECT, &1u16.to_le_bytes()); // lock structure
+    push_record(&mut globals, RECORD_WINDOWPROTECT, &1u16.to_le_bytes()); // lock windows
+    push_record(&mut globals, RECORD_PASSWORD, &0x83AFu16.to_le_bytes()); // "password" hash
+
+    // Remaining required/standard globals.
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table (style XFs only).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Protected");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    let sheet_offset = globals.len();
+    let sheet = build_protection_sheet_stream();
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
 fn build_tab_color_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -2094,6 +2158,33 @@ fn build_calc_settings_sheet_stream(xf: u16) -> Vec<u8> {
 
     // A1: NUMBER record (value doesn't matter; ensures calamine sees a used cell).
     push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf, 42.0));
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_protection_sheet_stream() -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Worksheet protection with a legacy password hash.
+    push_record(&mut sheet, RECORD_PROTECT, &1u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_PASSWORD, &0xCBEBu16.to_le_bytes()); // "test" hash
+    // Objects and scenarios are protected by default in Excel.
+    push_record(&mut sheet, RECORD_OBJPROTECT, &1u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_SCENPROTECT, &1u16.to_le_bytes());
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
