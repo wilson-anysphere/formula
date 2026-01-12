@@ -1495,6 +1495,14 @@ def generate_cases() -> dict[str, Any]:
         output_cell="C1",
         description="Dynamic array function (Excel 365+)",
     )
+    _add_case(
+        cases,
+        prefix="spill_textsplit",
+        tags=["spill", "TEXTSPLIT", "dynarr"],
+        formula='=TEXTSPLIT("a,b,c",",")',
+        output_cell="C1",
+        description="Dynamic array text function (Excel 365+)",
+    )
 
     # FILTER / SORT / UNIQUE (simple spill cases)
     filter_inputs = [CellInput(f"A{i}", i) for i in range(1, 6)]

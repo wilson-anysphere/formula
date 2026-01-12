@@ -28732,6 +28732,18 @@
       "id": "spill_sequence_fafca1fa5240"
     },
     {
+      "formula": "=TEXTSPLIT(\"a,b,c\",\",\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "spill",
+        "TEXTSPLIT",
+        "dynarr"
+      ],
+      "description": "Dynamic array text function (Excel 365+)",
+      "id": "spill_textsplit_638c36d35fa9"
+    },
+    {
       "formula": "=FILTER(A1:A5,A1:A5>2)",
       "outputCell": "C1",
       "inputs": [
