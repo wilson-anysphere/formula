@@ -250,9 +250,6 @@ if (outputExists) {
 
 console.log("[formula] Building WASM artifacts via wasm-pack…");
 
-// `wasm-pack` refuses to overwrite some files if the output already exists.
-await rm(outDir, { recursive: true, force: true });
-
 // Some environments configure Cargo to use `sccache` via `build.rustc-wrapper` or
 // other wrapper settings. When the wrapper is unavailable/misconfigured, wasm-pack
 // builds can fail even for `cargo metadata`/`rustc -vV`. Default to disabling any
@@ -263,43 +260,86 @@ const wasmPackEnv = {
   RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
 };
 
-const result = spawnSync(
-  wasmPackBin,
-  [
-    "build",
-    crateDir,
-    "--target",
-    "web",
-    "--release",
-    "--out-dir",
-    outDir,
-    "--out-name",
-    "formula_wasm",
-    // Avoid generating a nested package.json in the output directory; consumers
-    // import the wrapper by URL and do not need `wasm-pack`'s npm packaging.
-    "--no-pack"
-  ],
-  {
-    cwd: repoRoot,
-    stdio: "inherit",
-    env: {
-      ...wasmPackEnv,
-      // Keep builds safe in high-core-count environments (e.g. agent sandboxes) even
-      // if the caller didn't source `scripts/agent-init.sh`.
-      CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "4",
-      MAKEFLAGS: process.env.MAKEFLAGS ?? "-j4",
-      RUSTFLAGS: process.env.RUSTFLAGS ?? "-C codegen-units=4",
-      // Rayon defaults to spawning one thread per core. On multi-agent hosts this can be very
-      // large and can even fail to initialize ("Resource temporarily unavailable"). Default it
-      // to our safe cargo job count unless explicitly overridden by the caller.
-      RAYON_NUM_THREADS:
-        process.env.RAYON_NUM_THREADS ??
-        process.env.FORMULA_RAYON_NUM_THREADS ??
-        process.env.CARGO_BUILD_JOBS ??
-        "4",
+function isPositiveIntegerString(value) {
+  return typeof value === "string" && /^[1-9]\d*$/.test(value.trim());
+}
+
+function defaultWasmConcurrency() {
+  const rawJobs = process.env.CARGO_BUILD_JOBS;
+  const jobsFromEnv = isPositiveIntegerString(rawJobs) ? rawJobs.trim() : null;
+  const jobs = jobsFromEnv ?? "4";
+  return {
+    jobs,
+    makeflags: process.env.MAKEFLAGS ?? `-j${jobs}`,
+    rustflags: process.env.RUSTFLAGS ?? `-C codegen-units=${jobs}`,
+    rayonThreads:
+      process.env.RAYON_NUM_THREADS ??
+      process.env.FORMULA_RAYON_NUM_THREADS ??
+      // When CARGO_BUILD_JOBS is explicitly set, prefer that.
+      jobsFromEnv ??
+      jobs,
+  };
+}
+
+function runWasmPack({ jobs, makeflags, rustflags, rayonThreads }) {
+  return spawnSync(
+    wasmPackBin,
+    [
+      "build",
+      crateDir,
+      "--target",
+      "web",
+      "--release",
+      "--out-dir",
+      outDir,
+      "--out-name",
+      "formula_wasm",
+      // Avoid generating a nested package.json in the output directory; consumers
+      // import the wrapper by URL and do not need `wasm-pack`'s npm packaging.
+      "--no-pack",
+    ],
+    {
+      cwd: repoRoot,
+      stdio: "inherit",
+      env: {
+        ...wasmPackEnv,
+        // Keep builds safe in high-core-count environments (e.g. agent sandboxes) even
+        // if the caller didn't source `scripts/agent-init.sh`.
+        CARGO_BUILD_JOBS: jobs,
+        MAKEFLAGS: makeflags,
+        RUSTFLAGS: rustflags,
+        // Rayon defaults to spawning one thread per core. On multi-agent hosts this can be very
+        // large and can even fail to initialize ("Resource temporarily unavailable"). Default it
+        // to our safe cargo job count unless explicitly overridden by the caller.
+        RAYON_NUM_THREADS: rayonThreads,
+      },
     },
+  );
+}
+
+// `wasm-pack` refuses to overwrite some files if the output already exists.
+await rm(outDir, { recursive: true, force: true });
+
+const concurrency = defaultWasmConcurrency();
+let result = runWasmPack({
+  jobs: concurrency.jobs,
+  makeflags: concurrency.makeflags,
+  rustflags: concurrency.rustflags,
+  rayonThreads: concurrency.rayonThreads,
+});
+
+// When running on heavily loaded/locked-down hosts, even modest parallelism can fail with
+// `Resource temporarily unavailable` (thread or process spawn failures). If the caller didn't
+// explicitly opt into custom concurrency settings, retry once with the most conservative config.
+if ((result.status ?? 0) !== 0) {
+  const userProvidedConcurrency =
+    process.env.CARGO_BUILD_JOBS || process.env.MAKEFLAGS || process.env.RUSTFLAGS || process.env.RAYON_NUM_THREADS || process.env.FORMULA_RAYON_NUM_THREADS;
+  if (!userProvidedConcurrency && concurrency.jobs !== "1") {
+    console.warn("[formula] wasm-pack build failed; retrying with CARGO_BUILD_JOBS=1 for stability.");
+    await rm(outDir, { recursive: true, force: true });
+    result = runWasmPack({ jobs: "1", makeflags: "-j1", rustflags: "-C codegen-units=1", rayonThreads: "1" });
   }
-);
+}
 
 if (result.error) {
   fatal(`[formula] Failed to run wasm-pack: ${result.error.message}`);
