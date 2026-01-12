@@ -117,7 +117,9 @@ Minimal structure from the observed file:
   xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
 
   <metadataTypes count="1">
-    <metadataType name="XLRICHVALUE" minSupportedVersion="120000" .../>
+    <metadataType name="XLRICHVALUE" minSupportedVersion="120000"
+                  copy="1" pasteAll="1" pasteValues="1" merge="1" splitFirst="1" rowColShift="1"
+                  clearFormats="1" clearComments="1" assign="1" coerce="1"/>
   </metadataTypes>
 
   <futureMetadata name="XLRICHVALUE" count="1">
