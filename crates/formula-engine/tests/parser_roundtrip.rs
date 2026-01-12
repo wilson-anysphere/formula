@@ -87,6 +87,13 @@ fn roundtrip_union_inside_function_arg_is_parenthesized() {
 }
 
 #[test]
+fn roundtrip_call_expression() {
+    let opts = ParseOptions::default();
+    let ser = SerializeOptions::default();
+    roundtrip("=LAMBDA(x,x+1)(5)", opts, ser);
+}
+
+#[test]
 fn serializes_sheet_names_that_require_quoting() {
     let opts = ParseOptions::default();
     let ser = SerializeOptions::default();

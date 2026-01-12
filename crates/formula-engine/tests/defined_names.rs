@@ -242,3 +242,30 @@ fn let_bound_lambda_calls_do_not_depend_on_same_named_defined_names() {
     engine.set_cell_value("Sheet1", "A1", 20.0).unwrap();
     assert!(!engine.is_dirty("Sheet1", "B1"));
 }
+
+#[test]
+fn let_variable_names_do_not_register_defined_name_dependencies() {
+    let mut engine = Engine::new();
+    engine
+        .define_name("X", NameScope::Workbook, NameDefinition::Constant(Value::Number(1.0)))
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(X,1,X+1)")
+        .unwrap();
+    engine.recalculate();
+    assert!(
+        !engine.is_dirty("Sheet1", "A1"),
+        "cell should be clean after recalc"
+    );
+
+    // Updating a workbook-scoped name "X" should not dirty the cell because all references to "X"
+    // in the LET expression are local bindings.
+    engine
+        .define_name("X", NameScope::Workbook, NameDefinition::Constant(Value::Number(2.0)))
+        .unwrap();
+    assert!(
+        !engine.is_dirty("Sheet1", "A1"),
+        "LET-bound variable should not create a defined-name dependency"
+    );
+}

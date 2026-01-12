@@ -1375,6 +1375,13 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
+            // Call expressions like `LAMBDA(x,x+1)(5)` or `(A1,B1)(C1)`.
+            let call_bp = 90;
+            if matches!(self.peek_kind(), TokenKind::LParen) && call_bp >= min_bp {
+                lhs = self.parse_call(lhs)?;
+                continue;
+            }
+
             let op = match self.peek_kind() {
                 TokenKind::Colon => Some(BinaryOp::Range),
                 TokenKind::Intersect(_) => Some(BinaryOp::Intersect),
@@ -1462,6 +1469,12 @@ impl<'a> Parser<'a> {
                     op: PostfixOp::SpillRange,
                     expr: Box::new(lhs),
                 });
+                continue;
+            }
+
+            let call_bp = 90;
+            if matches!(self.peek_kind(), TokenKind::LParen) && call_bp >= min_bp {
+                lhs = self.parse_call_best_effort(lhs);
                 continue;
             }
 

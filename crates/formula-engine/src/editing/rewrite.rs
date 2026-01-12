@@ -1755,4 +1755,17 @@ mod tests {
         assert!(changed);
         assert_eq!(out, "=#REF!");
     }
+
+    #[test]
+    fn copy_delta_rewrites_references_inside_call_expressions() {
+        let (out, changed) = rewrite_formula_for_copy_delta(
+            "=LAMBDA(x,x+1)(A1)",
+            "Sheet1",
+            CellAddr::new(0, 0),
+            1,
+            0,
+        );
+        assert!(changed);
+        assert_eq!(out, "=LAMBDA(x,x+1)(A2)");
+    }
 }
