@@ -64,6 +64,77 @@ use thiserror::Error;
 
 use crate::{path, XlsxError, XlsxPackage};
 
+/// Cached lookup tables for resolving worksheet `c/@vm` indices into rich value + media targets.
+///
+/// This is intended primarily for debugging tooling (like `dump_rich_data`) and is intentionally
+/// best-effort:
+/// - Missing parts yield empty lookups.
+/// - Malformed XML yields an error.
+#[derive(Debug, Clone, Default)]
+pub struct RichDataVmIndex {
+    vm_to_rich_value_index: HashMap<u32, u32>,
+    rich_value_index_to_rel_index: HashMap<u32, u32>,
+    rel_index_to_target_part: Vec<Option<String>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RichDataVmResolution {
+    pub rich_value_index: Option<u32>,
+    pub rel_index: Option<u32>,
+    /// Resolved OPC part name (e.g. `xl/media/image1.png`).
+    pub target_part: Option<String>,
+}
+
+impl RichDataVmIndex {
+    /// Build the lookup tables used to resolve `vm` indices.
+    pub fn build(pkg: &XlsxPackage) -> Result<Self, RichDataError> {
+        let metadata_part = resolve_workbook_metadata_part_name(pkg)?;
+        let vm_to_rich_value_index = pkg
+            .part(&metadata_part)
+            .map(|bytes| parse_vm_to_rich_value_index_map(bytes, &metadata_part))
+            .transpose()?
+            .unwrap_or_default();
+
+        let mut rich_value_parts: Vec<&str> = pkg
+            .part_names()
+            .filter(|name| is_rich_value_part(name))
+            .collect();
+        rich_value_parts.sort_by(|a, b| cmp_rich_value_parts_by_numeric_suffix(a, b));
+
+        let rich_value_index_to_rel_index = if rich_value_parts.is_empty() {
+            HashMap::new()
+        } else {
+            parse_rich_value_parts_rel_indices(pkg, &rich_value_parts)?
+        };
+
+        let rel_index_to_target_part = build_rich_value_rel_index_to_target_part(pkg)?;
+
+        Ok(Self {
+            vm_to_rich_value_index,
+            rich_value_index_to_rel_index,
+            rel_index_to_target_part,
+        })
+    }
+
+    /// Resolve a worksheet `c/@vm` value into rich value + relationship indices and a target part.
+    pub fn resolve_vm(&self, vm: u32) -> RichDataVmResolution {
+        let rich_value_index = self.vm_to_rich_value_index.get(&vm).copied();
+        let rel_index =
+            rich_value_index.and_then(|idx| self.rich_value_index_to_rel_index.get(&idx).copied());
+        let target_part = rel_index.and_then(|idx| {
+            self.rel_index_to_target_part
+                .get(idx as usize)
+                .cloned()
+                .flatten()
+        });
+        RichDataVmResolution {
+            rich_value_index,
+            rel_index,
+            target_part,
+        }
+    }
+}
+
 /// Errors returned by rich-data parsing helpers.
 ///
 /// These parsers are intentionally "best effort": missing parts yield empty results, while
@@ -311,6 +382,65 @@ fn resolve_workbook_metadata_part_name(pkg: &XlsxPackage) -> Result<String, Rich
     }
 
     Ok(DEFAULT.to_string())
+}
+
+fn build_rich_value_rel_index_to_target_part(
+    pkg: &XlsxPackage,
+) -> Result<Vec<Option<String>>, RichDataError> {
+    const SOURCE_PART: &str = "xl/richData/richValueRel.xml";
+
+    let Some(rich_value_rel_bytes) = pkg.part(SOURCE_PART) else {
+        return Ok(Vec::new());
+    };
+    let rel_index_to_rid =
+        rich_value_rel::parse_rich_value_rel_table(rich_value_rel_bytes).map_err(RichDataError::from)?;
+    if rel_index_to_rid.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let rels_part_name = crate::openxml::rels_part_name(SOURCE_PART);
+    let Some(rels_bytes) = pkg.part(&rels_part_name) else {
+        return Ok(vec![None; rel_index_to_rid.len()]);
+    };
+
+    let relationships = crate::openxml::parse_relationships(rels_bytes)?;
+    let mut rid_to_target_part: HashMap<String, String> = HashMap::new();
+    for rel in relationships {
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
+
+        let target = strip_fragment(&rel.target);
+        if target.is_empty() {
+            continue;
+        }
+
+        // Some producers emit `Target="media/image1.png"` (relative to `xl/`) rather than the more
+        // common `Target="../media/image1.png"` (relative to `xl/richData/`). Make a best-effort
+        // guess for this case.
+        let target_part = if target.starts_with("media/") {
+            format!("xl/{target}")
+        } else {
+            path::resolve_target(SOURCE_PART, target)
+        };
+
+        rid_to_target_part.insert(rel.id, target_part);
+    }
+
+    let mut out: Vec<Option<String>> = Vec::with_capacity(rel_index_to_rid.len());
+    for rid in rel_index_to_rid {
+        if rid.is_empty() {
+            out.push(None);
+        } else {
+            out.push(rid_to_target_part.get(&rid).cloned());
+        }
+    }
+
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
