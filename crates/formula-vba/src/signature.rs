@@ -3,6 +3,7 @@ use thiserror::Error;
 use crate::{
     authenticode::extract_vba_signature_signed_digest,
     contents_hash::content_normalized_data,
+    project_digest::{compute_vba_project_digest, DigestAlg},
     normalized_data::forms_normalized_data,
     DigestAlg, OleError, OleFile,
 };
