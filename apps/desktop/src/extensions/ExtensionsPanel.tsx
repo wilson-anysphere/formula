@@ -296,26 +296,36 @@ export function ExtensionsPanel({
                             if (!webExtensionManager) return;
                             setRepairingId(item.id);
                             try {
+                              let shouldAttemptLoad = true;
                               if (isIncompatible) {
                                 const installedVersion = String(item.version ?? "");
+                                const reason = String(item.incompatibleReason ?? "");
+                                const isEngineMismatch = reason.toLowerCase().includes("engine mismatch");
                                 const updated = await webExtensionManager.update(item.id);
                                 const updatedVersion = String(updated?.version ?? "");
 
                                 const didUpdate = updatedVersion.length > 0 && updatedVersion !== installedVersion;
                                 if (!didUpdate) {
-                                  const reason = String(item.incompatibleReason ?? "");
-                                  const isEngineMismatch = reason.toLowerCase().includes("engine mismatch");
                                   // If the extension is quarantined due to a corrupted/invalid stored
                                   // manifest (not an engine mismatch), reinstalling the current version
                                   // can repair it even when no update is available.
                                   if (!isEngineMismatch) {
                                     await webExtensionManager.repair(item.id);
+                                  } else {
+                                    shouldAttemptLoad = false;
+                                    try {
+                                      showToast("No compatible update", "warning");
+                                    } catch {
+                                      // ignore missing toast root
+                                    }
                                   }
                                 }
                               } else {
                                 await webExtensionManager.repair(item.id);
                               }
-                              await webExtensionManager.loadInstalled(item.id).catch(() => {});
+                              if (shouldAttemptLoad) {
+                                await webExtensionManager.loadInstalled(item.id).catch(() => {});
+                              }
                               await refreshInstalled();
                               onSyncExtensions?.();
                               bump((v) => v + 1);

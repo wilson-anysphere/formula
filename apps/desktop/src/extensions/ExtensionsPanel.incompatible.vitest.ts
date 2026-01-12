@@ -296,6 +296,7 @@ describe("ExtensionsPanel (IndexedDB installs)", () => {
 
     expect(webExtensionManager.update).toHaveBeenCalledWith("test.incompatible-ext");
     expect(webExtensionManager.repair).not.toHaveBeenCalled();
+    expect(webExtensionManager.loadInstalled).not.toHaveBeenCalled();
 
     const statusAfter = rootEl.querySelector(
       '[data-testid="installed-extension-status-test.incompatible-ext"]',
