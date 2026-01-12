@@ -33,3 +33,34 @@ test("browser BrowserExtensionHost.clearExtensionStorage awaits async storageApi
   assert.equal(cleared, true);
 });
 
+test("browser BrowserExtensionHost.clearExtensionStorage falls back to clearing keys when clearExtensionStore throws", async () => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  const data = new Map();
+  const storageApi = {
+    getExtensionStore(extensionId) {
+      const id = String(extensionId);
+      if (!data.has(id)) data.set(id, {});
+      return data.get(id);
+    },
+    clearExtensionStore() {
+      throw new Error("clearExtensionStore failed");
+    }
+  };
+
+  const store = storageApi.getExtensionStore("pub.ext");
+  store.foo = "bar";
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => true,
+    storageApi
+  });
+
+  await host.clearExtensionStorage("pub.ext");
+
+  const after = storageApi.getExtensionStore("pub.ext");
+  assert.equal(after, store);
+  assert.deepEqual(after, {});
+});

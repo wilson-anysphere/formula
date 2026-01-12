@@ -710,13 +710,19 @@ class BrowserExtensionHost {
 
     try {
       const storageApi = this._storageApi;
-      if (storageApi && typeof storageApi.clearExtensionStore === "function") {
-        await storageApi.clearExtensionStore(id);
-        return;
+      if (!storageApi) return;
+
+      if (typeof storageApi.clearExtensionStore === "function") {
+        try {
+          await storageApi.clearExtensionStore(id);
+          return;
+        } catch {
+          // Fall back to clearing keys below.
+        }
       }
 
       // Fallback: clear all keys from the per-extension store.
-      if (storageApi && typeof storageApi.getExtensionStore === "function") {
+      if (typeof storageApi.getExtensionStore === "function") {
         const store = storageApi.getExtensionStore(id);
         if (store && typeof store === "object") {
           for (const key of Object.keys(store)) {
@@ -952,12 +958,33 @@ class BrowserExtensionHost {
     const id = String(extensionId);
     const api = this._storageApi;
     if (!api) return;
-    const fn = api.clearExtensionStore;
-    if (typeof fn !== "function") return;
-    try {
-      await fn.call(api, id);
-    } catch {
-      // ignore
+    if (typeof api.clearExtensionStore === "function") {
+      try {
+        await api.clearExtensionStore(id);
+        return;
+      } catch {
+        // fall through to clearing keys
+      }
+    }
+
+    // Back-compat fallback: clear all keys from the per-extension store.
+    // This does not guarantee the backing record is removed (depends on the storage backend),
+    // but ensures the next install sees an empty store.
+    if (typeof api.getExtensionStore === "function") {
+      try {
+        const store = api.getExtensionStore(id);
+        if (store && typeof store === "object") {
+          for (const key of Object.keys(store)) {
+            try {
+              delete store[key];
+            } catch {
+              // ignore
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
     }
   }
 

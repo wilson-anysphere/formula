@@ -56,6 +56,25 @@ function createStorageApiWithoutClear() {
   };
 }
 
+function createStorageApiWithFailingClear() {
+  const data = new Map();
+  /** @type {string[]} */
+  const cleared = [];
+  return {
+    cleared,
+    getExtensionStore(extensionId) {
+      const id = String(extensionId);
+      if (!data.has(id)) data.set(id, {});
+      return data.get(id);
+    },
+    clearExtensionStore(extensionId) {
+      const id = String(extensionId);
+      cleared.push(id);
+      throw new Error("clearExtensionStore failed");
+    }
+  };
+}
+
 test("browser resetExtensionState clears injected permission storage and calls storageApi.clearExtensionStore when available", async () => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
@@ -117,3 +136,27 @@ test("browser resetExtensionState falls back to clearing keys when storageApi la
   assert.deepEqual(after, {});
 });
 
+test("browser resetExtensionState falls back when storageApi.clearExtensionStore throws", async () => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  const storageApi = createStorageApiWithFailingClear();
+  const store = storageApi.getExtensionStore("pub.ext");
+  store.foo = "bar";
+  store.baz = 1;
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => true,
+    storageApi
+  });
+
+  await host.resetExtensionState("pub.ext");
+
+  // clearExtensionStore should have been attempted, then we fall back to deleting keys
+  // from the per-extension store.
+  assert.deepEqual(storageApi.cleared, ["pub.ext"]);
+  const after = storageApi.getExtensionStore("pub.ext");
+  assert.equal(after, store);
+  assert.deepEqual(after, {});
+});
