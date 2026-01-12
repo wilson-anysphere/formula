@@ -43,3 +43,5 @@ export function MyIcon(props: Omit<IconProps, "children">) {
 The desktop ribbon renders icons exclusively via the internal ribbon icon library
 in `apps/desktop/src/ribbon/icons` using stable `iconId` values in the ribbon
 schema.
+
+See `apps/desktop/src/ribbon/icons/README.md` for details.
