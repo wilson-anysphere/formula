@@ -391,6 +391,33 @@ fn logest_stats_true_spills_5_rows() {
 }
 
 #[test]
+fn logest_errors_on_shape_mismatch_and_insufficient_points() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 4.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 8.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "B1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 2.0).unwrap();
+
+    // Shape mismatch: known_y has 3 points, known_x has 2.
+    engine
+        .set_cell_formula("Sheet1", "D1", "=LOGEST(A1:A3,B1:B2)")
+        .unwrap();
+
+    // Insufficient points: with 1 observation and 1 predictor + intercept, n < k (1 < 2).
+    engine
+        .set_cell_formula("Sheet1", "D3", "=LOGEST(A1:A1,B1:B1)")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    assert_error(engine.get_cell_value("Sheet1", "D1"), ErrorKind::Ref);
+    assert_error(engine.get_cell_value("Sheet1", "D3"), ErrorKind::Div0);
+}
+
+#[test]
 fn logest_errors_on_nonpositive_y() {
     let mut engine = Engine::new();
 
@@ -510,6 +537,145 @@ fn logest_multi_x_two_predictors() {
     assert_eq!(end, parse_a1("E4").unwrap());
     assert_number_close(engine.get_cell_value("Sheet1", "E3"), 20.0);
     assert_number_close(engine.get_cell_value("Sheet1", "E4"), 45.0);
+}
+
+#[test]
+fn trend_single_predictor_new_x_matrix_preserves_shape() {
+    let mut engine = Engine::new();
+
+    // y = 2x + 1 for x=1..5
+    for (i, (x, y)) in [(1.0, 3.0), (2.0, 5.0), (3.0, 7.0), (4.0, 9.0), (5.0, 11.0)]
+        .into_iter()
+        .enumerate()
+    {
+        let row = i + 1;
+        engine
+            .set_cell_value("Sheet1", &format!("A{row}"), y)
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("B{row}"), x)
+            .unwrap();
+    }
+
+    engine
+        .set_cell_formula("Sheet1", "D1", "=TREND(A1:A5,B1:B5,{6,7;8,9})")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "D1").expect("spill range");
+    assert_eq!(start, parse_a1("D1").unwrap());
+    assert_eq!(end, parse_a1("E2").unwrap());
+    assert_number_close(engine.get_cell_value("Sheet1", "D1"), 13.0);
+    assert_number_close(engine.get_cell_value("Sheet1", "E1"), 15.0);
+    assert_number_close(engine.get_cell_value("Sheet1", "D2"), 17.0);
+    assert_number_close(engine.get_cell_value("Sheet1", "E2"), 19.0);
+}
+
+#[test]
+fn growth_single_predictor_new_x_matrix_preserves_shape() {
+    let mut engine = Engine::new();
+
+    // y = 3 * 2^x for x=0..4
+    for (i, (x, y)) in [
+        (0.0, 3.0),
+        (1.0, 6.0),
+        (2.0, 12.0),
+        (3.0, 24.0),
+        (4.0, 48.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let row = i + 1;
+        engine
+            .set_cell_value("Sheet1", &format!("A{row}"), y)
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("B{row}"), x)
+            .unwrap();
+    }
+
+    engine
+        .set_cell_formula("Sheet1", "D1", "=GROWTH(A1:A5,B1:B5,{5,6;7,8})")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "D1").expect("spill range");
+    assert_eq!(start, parse_a1("D1").unwrap());
+    assert_eq!(end, parse_a1("E2").unwrap());
+    assert_number_close(engine.get_cell_value("Sheet1", "D1"), 96.0);
+    assert_number_close(engine.get_cell_value("Sheet1", "E1"), 192.0);
+    assert_number_close(engine.get_cell_value("Sheet1", "D2"), 384.0);
+    assert_number_close(engine.get_cell_value("Sheet1", "E2"), 768.0);
+}
+
+#[test]
+fn trend_multi_predictor_new_x_shape_mismatch_returns_ref() {
+    let mut engine = Engine::new();
+
+    // y = 1 + 2*x1 + 3*x2
+    // rows: (x1, x2, y)
+    let data = [
+        (0.0, 0.0, 1.0),
+        (1.0, 0.0, 3.0),
+        (0.0, 1.0, 4.0),
+        (1.0, 1.0, 6.0),
+    ];
+    for (i, (x1, x2, y)) in data.into_iter().enumerate() {
+        let row = i + 1;
+        engine
+            .set_cell_value("Sheet1", &format!("A{row}"), y)
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("B{row}"), x1)
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("C{row}"), x2)
+            .unwrap();
+    }
+
+    // Wrong new_x shape (p=2 but new_x has 3 columns).
+    engine
+        .set_cell_formula("Sheet1", "E1", "=TREND(A1:A4,B1:C4,{2,0,0;0,2,0})")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+    assert_error(engine.get_cell_value("Sheet1", "E1"), ErrorKind::Ref);
+}
+
+#[test]
+fn growth_multi_predictor_new_x_shape_mismatch_returns_ref() {
+    let mut engine = Engine::new();
+
+    // y = 5 * 2^x1 * 3^x2
+    let data = [
+        (0.0, 0.0, 5.0),
+        (1.0, 0.0, 10.0),
+        (0.0, 1.0, 15.0),
+        (1.0, 1.0, 30.0),
+    ];
+    for (i, (x1, x2, y)) in data.into_iter().enumerate() {
+        let row = i + 1;
+        engine
+            .set_cell_value("Sheet1", &format!("A{row}"), y)
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("B{row}"), x1)
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("C{row}"), x2)
+            .unwrap();
+    }
+
+    // Wrong new_x shape (p=2 but new_x has 3 columns).
+    engine
+        .set_cell_formula("Sheet1", "E1", "=GROWTH(A1:A4,B1:C4,{2,0,0;0,2,0})")
+        .unwrap();
+
+    engine.recalculate_single_threaded();
+    assert_error(engine.get_cell_value("Sheet1", "E1"), ErrorKind::Ref);
 }
 
 #[test]
