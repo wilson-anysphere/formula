@@ -144,5 +144,11 @@ describe("tauri capability event permissions", () => {
     for (const event of requiredEmit) {
       expect(emitEvents.has(event)).toBe(true);
     }
+
+    // Sanity check: events outside the allowlist should be denied by Tauri's permission system.
+    // (We can't assert the runtime error message here without running the desktop shell, but we
+    // can assert the capability file does not include arbitrary names.)
+    expect(listenEvents.has("totally-not-a-real-event")).toBe(false);
+    expect(emitEvents.has("totally-not-a-real-event")).toBe(false);
   });
 });
