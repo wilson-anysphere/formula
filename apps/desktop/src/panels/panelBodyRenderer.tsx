@@ -1,10 +1,11 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 import { PanelIds } from "./panelRegistry.js";
 import { AIChatPanelContainer } from "./ai-chat/AIChatPanelContainer.js";
 import { DataQueriesPanelContainer } from "./data-queries/DataQueriesPanelContainer.js";
 import { QueryEditorPanelContainer } from "./query-editor/QueryEditorPanelContainer.js";
+import { createCollabVersioning, type CollabVersioning, type VersionRecord } from "@formula/collab-versioning";
 import { createAIAuditPanel } from "./ai-audit/index.js";
 import { mountPythonPanel } from "./python/index.js";
 import { VbaMigratePanel } from "./vba-migrate/index.js";
@@ -15,6 +16,236 @@ import type { DesktopExtensionHostManager } from "../extensions/extensionHostMan
 import type { PanelRegistry } from "./panelRegistry.js";
 import { PivotBuilderPanelContainer } from "./pivot-builder/PivotBuilderPanelContainer.js";
 import type { SpreadsheetApi } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
+import type { CollabSession } from "@formula/collab-session";
+import { buildVersionHistoryItems } from "./version-history/index.js";
+import { BranchManagerPanel, type Actor as BranchActor } from "./branch-manager/BranchManagerPanel.js";
+import { MergeBranchPanel } from "./branch-manager/MergeBranchPanel.js";
+import { BranchService, YjsBranchStore, applyDocumentStateToYjsDoc, yjsDocToDocumentState } from "../../../../packages/versioning/branches/src/index.js";
+
+function formatVersionTimestamp(timestampMs: number): string {
+  try {
+    return new Date(timestampMs).toLocaleString();
+  } catch {
+    return String(timestampMs);
+  }
+}
+
+function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
+  const collabVersioning = useMemo<CollabVersioning>(() => createCollabVersioning({ session }), [session]);
+
+  const [versions, setVersions] = useState<VersionRecord[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      collabVersioning.destroy();
+    };
+  }, [collabVersioning]);
+
+  const refresh = async () => {
+    try {
+      setError(null);
+      const next = await collabVersioning.listVersions();
+      setVersions(next);
+      if (selectedId && !next.some((v) => v.id === selectedId)) setSelectedId(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collabVersioning]);
+
+  const items = useMemo(() => buildVersionHistoryItems(versions as any), [versions]);
+
+  return (
+    <div style={{ padding: 12, fontFamily: "system-ui, sans-serif", overflow: "auto" }}>
+      <h3 style={{ marginTop: 0 }}>Version history</h3>
+
+      {error ? <div style={{ color: "var(--error)", marginBottom: 8 }}>{error}</div> : null}
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <button
+          disabled={busy}
+          onClick={async () => {
+            const name = window.prompt("Checkpoint name?");
+            if (!name || !name.trim()) return;
+            try {
+              setBusy(true);
+              setError(null);
+              await collabVersioning.createCheckpoint({ name: name.trim() });
+              await refresh();
+            } catch (e) {
+              setError((e as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Create checkpoint
+        </button>
+
+        <button
+          disabled={busy || !selectedId}
+          onClick={async () => {
+            const id = selectedId;
+            if (!id) return;
+            if (!window.confirm("Restore this version? This will overwrite the current collaborative document state.")) return;
+            try {
+              setBusy(true);
+              setError(null);
+              await collabVersioning.restoreVersion(id);
+              await refresh();
+            } catch (e) {
+              setError((e as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Restore selected
+        </button>
+
+        <button disabled={busy} onClick={() => void refresh()}>
+          Refresh
+        </button>
+      </div>
+
+      {items.length === 0 ? (
+        <div style={{ color: "var(--text-secondary)" }}>No versions yet.</div>
+      ) : (
+        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          {items.map((item) => {
+            const selected = item.id === selectedId;
+            return (
+              <li
+                key={item.id}
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  padding: "6px 0",
+                  borderBottom: "1px solid var(--border)",
+                  cursor: "pointer",
+                  background: selected ? "var(--panel-highlight, rgba(0,0,0,0.06))" : "transparent",
+                }}
+                onClick={() => setSelectedId(item.id)}
+              >
+                <input type="radio" checked={selected} onChange={() => setSelectedId(item.id)} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600 }}>{item.title}</div>
+                  <div style={{ color: "var(--text-secondary)", fontSize: 12 }}>
+                    {formatVersionTimestamp(item.timestampMs)} • {item.kind}
+                    {item.locked ? " • locked" : ""}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function CollabBranchManagerPanel({ session }: { session: CollabSession }) {
+  const actor = useMemo<BranchActor>(() => ({ userId: "desktop", role: "owner" }), []);
+  const docId = session.doc.guid;
+
+  const store = useMemo(() => new YjsBranchStore({ ydoc: session.doc }), [session]);
+  const branchService = useMemo(() => new BranchService({ docId, store }), [docId, store]);
+
+  const [error, setError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
+  const [mergeSource, setMergeSource] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        setError(null);
+        setReady(false);
+        const initialState = yjsDocToDocumentState(session.doc);
+        await branchService.init(actor as any, initialState as any);
+        if (cancelled) return;
+        setReady(true);
+      } catch (e) {
+        if (cancelled) return;
+        setError((e as Error).message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [actor, branchService, session]);
+
+  const workflow = useMemo(() => {
+    const commitCurrentState = async (message: string) => {
+      const nextState = yjsDocToDocumentState(session.doc);
+      await branchService.commit(actor as any, { nextState, message });
+    };
+
+    return {
+      listBranches: () => branchService.listBranches(),
+      createBranch: async (a: BranchActor, input: { name: string; description?: string }) => {
+        await commitCurrentState("auto: create branch");
+        return branchService.createBranch(a as any, input as any);
+      },
+      renameBranch: (a: BranchActor, input: { oldName: string; newName: string }) => branchService.renameBranch(a as any, input as any),
+      deleteBranch: (a: BranchActor, input: { name: string }) => branchService.deleteBranch(a as any, input as any),
+      checkoutBranch: async (a: BranchActor, input: { name: string }) => {
+        await commitCurrentState("auto: checkout");
+        const state = await branchService.checkoutBranch(a as any, input as any);
+        applyDocumentStateToYjsDoc(session.doc, state as any, { origin: session.origin });
+        return state;
+      },
+      previewMerge: async (a: BranchActor, input: { sourceBranch: string }) => {
+        await commitCurrentState("auto: preview merge");
+        return branchService.previewMerge(a as any, input as any);
+      },
+      merge: async (a: BranchActor, input: { sourceBranch: string; resolutions: any[]; message?: string }) => {
+        await commitCurrentState("auto: merge");
+        const result = await branchService.merge(a as any, input as any);
+        applyDocumentStateToYjsDoc(session.doc, (result as any).state, { origin: session.origin });
+        return result;
+      },
+    } as any;
+  }, [actor, branchService, session]);
+
+  if (error) {
+    return (
+      <div style={{ padding: 12, color: "var(--error)" }}>
+        {error}
+      </div>
+    );
+  }
+
+  if (!ready) {
+    return <div style={{ padding: 12 }}>Loading branches…</div>;
+  }
+
+  if (mergeSource) {
+    return (
+      <MergeBranchPanel
+        actor={actor}
+        branchService={workflow}
+        sourceBranch={mergeSource}
+        onClose={() => setMergeSource(null)}
+      />
+    );
+  }
+
+  return (
+    <BranchManagerPanel
+      actor={actor}
+      branchService={workflow}
+      onStartMerge={(sourceBranch) => setMergeSource(sourceBranch)}
+    />
+  );
+}
 
 export interface PanelBodyRendererOptions {
   getDocumentController: () => unknown;
@@ -55,6 +286,13 @@ export interface PanelBodyRendererOptions {
    * to re-render with the latest workbook id.
    */
   getWorkbookId?: () => string | undefined;
+  /**
+   * Optional accessor for the active collaboration session.
+   *
+   * When provided and returns a session, panels like Version History / Branch
+   * Manager can use the shared Y.Doc as their backend.
+   */
+  getCollabSession?: () => import("@formula/collab-session").CollabSession | null;
   renderMacrosPanel?: (body: HTMLDivElement) => void;
   createChart?: SpreadsheetApi["createChart"];
   panelRegistry?: PanelRegistry;
@@ -236,7 +474,24 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
     }
 
     if (panelId === PanelIds.VERSION_HISTORY) {
-      body.textContent = "Version history will appear here.";
+      const session = options.getCollabSession?.() ?? null;
+      if (!session) {
+        body.textContent = "Version history will appear here.";
+        return;
+      }
+      makeBodyFillAvailableHeight(body);
+      renderReactPanel(panelId, body, <CollabVersionHistoryPanel session={session} />);
+      return;
+    }
+
+    if (panelId === PanelIds.BRANCH_MANAGER) {
+      const session = options.getCollabSession?.() ?? null;
+      if (!session) {
+        body.textContent = "Branch manager requires collaboration mode.";
+        return;
+      }
+      makeBodyFillAvailableHeight(body);
+      renderReactPanel(panelId, body, <CollabBranchManagerPanel session={session} />);
       return;
     }
 

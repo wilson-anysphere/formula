@@ -1724,6 +1724,7 @@ if (
     },
     workbookId,
     getWorkbookId: () => activePanelWorkbookId,
+    getCollabSession: () => (app as any).getCollabSession?.() ?? null,
     invoke:
       typeof (globalThis as any).__TAURI__?.core?.invoke === "function"
         ? (cmd, args) => {

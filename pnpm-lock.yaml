@@ -59,6 +59,12 @@ importers:
       '@formula/collab-comments':
         specifier: workspace:*
         version: link:../../packages/collab/comments
+      '@formula/collab-session':
+        specifier: workspace:*
+        version: link:../../packages/collab/session
+      '@formula/collab-versioning':
+        specifier: workspace:*
+        version: link:../../packages/collab/versioning
       '@formula/data-io':
         specifier: workspace:*
         version: link:../../packages/data-io

@@ -19,6 +19,8 @@
     "@formula/ai-audit": "workspace:*",
     "@formula/ai-completion": "workspace:*",
     "@formula/collab-comments": "workspace:*",
+    "@formula/collab-session": "workspace:*",
+    "@formula/collab-versioning": "workspace:*",
     "@formula/data-io": "workspace:*",
     "@formula/engine": "workspace:*",
     "@formula/extension-marketplace": "workspace:*",
