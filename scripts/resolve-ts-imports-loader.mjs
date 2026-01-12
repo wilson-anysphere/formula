@@ -18,7 +18,8 @@
  * Additionally, some TS sources in this repo still use extensionless relative
  * imports (e.g. `import "./foo"`). Node ESM does not support extensionless path
  * resolution, so when the specifier is missing (and the file exists as
- * `foo.ts`/`foo.tsx`) we also provide a `.ts`/`.tsx` fallback.
+ * `foo.ts`/`foo.tsx`) we also provide a `.ts`/`.tsx` fallback. This includes
+ * directory imports (e.g. `import "./foo"` where `foo/index.ts` exists).
  *
  * Notes
  * -----
