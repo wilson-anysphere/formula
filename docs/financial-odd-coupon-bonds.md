@@ -87,8 +87,11 @@ The generator includes a small set of boundary-date equality cases (e.g. `issue 
 
 Current engine behavior:
 
-- **ODDF\*** enforces strict chronology like `issue < settlement < first_coupon <= maturity`; boundary
-  equalities like `issue == settlement` and `settlement == first_coupon` are rejected with `#NUM!`.
+- **ODDF\*** allows equality boundaries like `issue == settlement` and `settlement == first_coupon`
+  (both imply zero-length day-count intervals in parts of the stub period), but still requires:
+  - `issue < first_coupon` (otherwise there is no first coupon period)
+  - `settlement < maturity`
+  - `first_coupon <= maturity`
 - **ODDL\*** requires `settlement < maturity` and `last_interest < maturity`, but allows settlement
   dates **on or before** `last_interest` (as well as inside the odd-last stub).
   - `settlement == last_interest` is allowed (it implies zero accrued interest).
@@ -185,7 +188,8 @@ date-like inputs are truncated to integers before validation:
 
 The current engine implementation enforces:
 
-- ODDF\*: `issue < settlement < first_coupon <= maturity`
+- ODDF\*: `issue <= settlement <= first_coupon <= maturity` with the additional constraints
+  `issue < first_coupon` and `settlement < maturity`
 - ODDL\*: `settlement < maturity` and `last_interest < maturity` (settlement may be before, on, or
   after `last_interest`; see `odd_coupon.rs::oddl_equation`).
 
