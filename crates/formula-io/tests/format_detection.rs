@@ -207,6 +207,24 @@ fn detect_workbook_format_sniffs_utf16le_tab_delimited_text_without_bom_mostly_n
 }
 
 #[test]
+fn detect_workbook_format_sniffs_utf16be_tab_delimited_text_without_bom_mostly_non_ascii() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("data.xlsx");
+
+    let left = "あ".repeat(200);
+    let right = "い".repeat(200);
+    let tsv = format!("{left}\t{right}\r\n{left}\t{right}\r\n");
+    let mut bytes = Vec::new();
+    for unit in tsv.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_be_bytes());
+    }
+    std::fs::write(&path, &bytes).expect("write utf16be tsv");
+
+    let fmt = detect_workbook_format(&path).expect("detect format");
+    assert_eq!(fmt, WorkbookFormat::Csv);
+}
+
+#[test]
 fn detect_workbook_format_does_not_misclassify_binary_as_csv() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("blob");

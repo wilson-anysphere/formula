@@ -289,6 +289,31 @@ fn csv_import_supports_utf16le_tab_delimited_text_without_bom_mostly_non_ascii()
 }
 
 #[test]
+fn csv_import_supports_utf16be_tab_delimited_text_without_bom_mostly_non_ascii() {
+    let left = "あ".repeat(200);
+    let right = "い".repeat(200);
+    let tsv = format!("{left}\t{right}\r\n");
+    let mut bytes = Vec::new();
+    for unit in tsv.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_be_bytes());
+    }
+
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(bytes),
+        CsvOptions {
+            has_header: false,
+            ..CsvOptions::default()
+        },
+    )
+    .expect("import utf16be tsv without bom");
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::String(left));
+    assert_eq!(sheet.value(CellRef::new(0, 1)), CellValue::String(right));
+}
+
+#[test]
 fn csv_import_handles_wide_rows() {
     let cols = 200usize;
     let header = (0..cols)
