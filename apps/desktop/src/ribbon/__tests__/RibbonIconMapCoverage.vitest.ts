@@ -1,41 +1,40 @@
 import { describe, it, expect } from "vitest";
 
+import type { RibbonButtonDefinition } from "../ribbonSchema";
 import { defaultRibbonSchema } from "../ribbonSchema";
-import { ribbonIconMap } from "../../ui/icons/ribbonIconMap";
 
-function collectButtonIdsBySize(size: "icon" | "large"): string[] {
-  const ids: string[] = [];
+function collectButtonsBySize(size: "icon" | "large"): RibbonButtonDefinition[] {
+  const buttons: RibbonButtonDefinition[] = [];
   for (const tab of defaultRibbonSchema.tabs) {
     for (const group of tab.groups) {
       for (const button of group.buttons) {
         if (button.size === size) {
-          ids.push(button.id);
+          buttons.push(button);
         }
       }
     }
   }
-  return ids;
+  return buttons;
 }
 
-describe("ribbonIconMap coverage", () => {
-  it('includes mappings for every schema button with size: "icon"', () => {
-    const iconButtonIds = collectButtonIdsBySize("icon");
+describe("Ribbon schema icon coverage", () => {
+  it('assigns an iconId for every schema button with size: "icon"', () => {
+    const iconButtons = collectButtonsBySize("icon");
 
     // Guard against a broken traversal so the test can't pass vacuously.
-    expect(iconButtonIds).toContain("home.font.bold");
+    expect(iconButtons.map((button) => button.id)).toContain("home.font.bold");
 
-    const missing = iconButtonIds.filter((id) => !Object.prototype.hasOwnProperty.call(ribbonIconMap, id));
+    const missing = iconButtons.filter((button) => !button.iconId).map((button) => button.id);
     expect(missing).toEqual([]);
   });
 
-  it('includes mappings for every schema button with size: "large"', () => {
-    const largeButtonIds = collectButtonIdsBySize("large");
+  it('assigns an iconId for every schema button with size: "large"', () => {
+    const largeButtons = collectButtonsBySize("large");
 
     // Guard against a broken traversal so the test can't pass vacuously.
-    expect(largeButtonIds).toContain("file.save.save");
+    expect(largeButtons.map((button) => button.id)).toContain("file.save.save");
 
-    const missing = largeButtonIds.filter((id) => !Object.prototype.hasOwnProperty.call(ribbonIconMap, id));
+    const missing = largeButtons.filter((button) => !button.iconId).map((button) => button.id);
     expect(missing).toEqual([]);
   });
 });
-
