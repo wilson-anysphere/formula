@@ -12,8 +12,8 @@ For a **concrete, confirmed** “Place in Cell” (embedded local image) package
 
 - [`docs/xlsx-embedded-images-in-cells.md`](./xlsx-embedded-images-in-cells.md)
 
-> Status: best-effort reverse engineering. This repo contains **real Excel fixtures** with concrete
-> namespaces/root elements for both `richValue*` and `rdRichValue*` variants — see
+> Status: best-effort reverse engineering. This repo contains a **real Excel** “Place in Cell” fixture
+> (`rdRichValue*` variant) plus **synthetic** fixtures used by tests for the `richValue*` variant — see
 > [Observed in fixtures](#observed-in-fixtures-in-repo). Exact namespaces / relationship-type URIs may
 > still vary by Excel version; preserve unknown attributes and namespaces when round-tripping.
 
@@ -56,11 +56,11 @@ Notes:
 
 ## Observed in fixtures (in-repo)
 
-This repo includes **two real Excel fixtures** that exercise two distinct "image in cell" / rich-data
-encodings:
+This repo includes fixture workbooks that exercise two distinct "image in cell" / rich-data encodings
+(one is real Excel, one is synthetic):
 
-* A minimal **`richValue.xml`** variant (`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`)
-* A **`rdRichValue`** variant (`fixtures/xlsx/basic/image-in-cell.xlsx`) that uses a **structure table**
+* A minimal (synthetic) **`richValue.xml`** variant (`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`)
+* A real Excel **`rdRichValue`** variant (`fixtures/xlsx/basic/image-in-cell.xlsx`) that uses a **structure table**
   (`rdrichvaluestructure.xml`) to assign meanings to positional `<v>` fields.
 
 ### Fixture: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (`richValue.xml` + `richValueRel.xml` 2017 variant)

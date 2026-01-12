@@ -120,10 +120,15 @@ sheetN.xml: <c vm="VM_INDEX">…</c>
 
 ## Observed in fixtures (in-repo)
 
-These are **real Excel-generated** XLSX files in this repository, and should be treated as the primary
-ground truth for namespaces/root element names.
+These are fixture XLSX files in this repository used for parser/round-trip testing.
 
-### Fixture: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (`richValue.xml` + `richValueRel.xml` 2017 variant)
+- `fixtures/xlsx/basic/image-in-cell.xlsx` is **real Excel-generated** (see `docProps/app.xml`).
+- `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` is **synthetic** (tagged `Application=Formula Fixtures`).
+
+Treat Excel-generated fixtures as the primary ground truth for Excel’s current on-disk schema. Synthetic
+fixtures are still useful for exercising edge cases and ensuring we preserve unknown parts/attributes.
+
+### Fixture: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (synthetic; `richValue.xml` + `richValueRel.xml` 2017 variant)
 
 See also: [`fixtures/xlsx/basic/image-in-cell-richdata.md`](../fixtures/xlsx/basic/image-in-cell-richdata.md) (walkthrough of this fixture).
 
