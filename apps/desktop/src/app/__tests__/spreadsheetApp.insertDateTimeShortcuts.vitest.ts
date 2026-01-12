@@ -268,4 +268,43 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts", () => {
     app.destroy();
     root.remove();
   });
+
+  it("falls back to only inserting into the active cell for Ctrl+Shift+; when the selection exceeds 10k cells", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2020, 0, 2, 3, 4, 5));
+
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const app = new SpreadsheetApp(root, status);
+    // 101 * 101 = 10,201 cells (> 10k cap).
+    app.selectRange({ range: { startRow: 0, endRow: 100, startCol: 0, endCol: 100 } });
+
+    root.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: true,
+        shiftKey: true,
+        code: "Semicolon",
+        // On US keyboards this would typically be ":"; the handler uses `code`.
+        key: ":",
+      }),
+    );
+
+    const doc = app.getDocument();
+    const sheetId = app.getCurrentSheetId();
+    const expectedTimeSerial = (3 * 3600 + 4 * 60 + 5) / 86_400;
+    expect(doc.getCell(sheetId, { row: 0, col: 0 }).value).toBeCloseTo(expectedTimeSerial, 12);
+    expect(doc.getCellFormat(sheetId, { row: 0, col: 0 }).numberFormat).toBe("hh:mm:ss");
+    // This cell is inside the selection, but should remain unchanged due to the safety cap.
+    expect(doc.getCell(sheetId, { row: 1, col: 1 }).value).toBe(2);
+
+    app.destroy();
+    root.remove();
+  });
 });
