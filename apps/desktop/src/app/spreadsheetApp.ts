@@ -7270,7 +7270,7 @@ export class SpreadsheetApp {
     } catch (err) {
       if (err instanceof DlpViolationError) {
         try {
-          showToast(err.message, "warning");
+          showToast(err.message || "Copy blocked by data loss prevention policy.", "error");
         } catch {
           // `showToast` requires a #toast-root; unit tests don't always include it.
         }
@@ -7439,7 +7439,6 @@ export class SpreadsheetApp {
         }
       }
       const payload = serializeCellGridToClipboardPayload(grid as any);
-
       const cells = this.snapshotClipboardCells(range);
       const provider = await this.getClipboardProvider();
       await provider.write(payload);
@@ -7464,7 +7463,15 @@ export class SpreadsheetApp {
       this.syncEngineNow();
       this.refresh();
       this.focus();
-    } catch {
+    } catch (err) {
+      if (err instanceof DlpViolationError) {
+        try {
+          showToast(err.message || "Cut blocked by data loss prevention policy.", "error");
+        } catch {
+          // Best-effort: if the toast UI isn't mounted, don't crash clipboard actions.
+        }
+      }
+
       // Ignore clipboard failures (permissions, platform restrictions).
     }
   }

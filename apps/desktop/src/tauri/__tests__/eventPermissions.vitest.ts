@@ -23,11 +23,14 @@ describe("tauri capability event permissions", () => {
     expect(Array.isArray(mainWindow?.capabilities)).toBe(true);
     expect(mainWindow.capabilities).toContain("main");
 
+    const mainWindowLabel = String(mainWindow?.label ?? "");
+    expect(mainWindowLabel).toBe("main");
+
     const capabilityUrl = new URL("../../../src-tauri/capabilities/main.json", import.meta.url);
     const capability = JSON.parse(readFileSync(capabilityUrl, "utf8")) as any;
     expect(capability?.identifier).toBe("main");
     expect(Array.isArray(capability?.windows)).toBe(true);
-    expect(capability.windows).toContain("main");
+    expect(capability.windows).toContain(mainWindowLabel);
   });
 
   it("scopes event.listen / event.emit (no allow-all event permissions)", () => {

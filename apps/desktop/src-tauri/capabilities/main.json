@@ -79,16 +79,19 @@
     {
       "identifier": "event:allow-listen",
       "allow": [
-        { "event": "oauth-redirect" },
         { "event": "close-prep" },
         { "event": "close-requested" },
+
         { "event": "open-file" },
         { "event": "file-dropped" },
+
         { "event": "tray-open" },
         { "event": "tray-new" },
         { "event": "tray-quit" },
+
         { "event": "shortcut-quick-open" },
         { "event": "shortcut-command-palette" },
+
         { "event": "menu-open" },
         { "event": "menu-new" },
         { "event": "menu-save" },
@@ -107,15 +110,19 @@
         { "event": "menu-zoom-reset" },
         { "event": "menu-about" },
         { "event": "menu-check-updates" },
+
         { "event": "startup:window-visible" },
         { "event": "startup:webview-loaded" },
         { "event": "startup:tti" },
         { "event": "startup:metrics" },
+
         { "event": "update-check-started" },
         { "event": "update-check-already-running" },
         { "event": "update-not-available" },
         { "event": "update-check-error" },
-        { "event": "update-available" }
+        { "event": "update-available" },
+
+        { "event": "oauth-redirect" }
       ]
     },
     {
