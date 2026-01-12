@@ -1064,7 +1064,8 @@ export class CanvasGridRenderer {
       const fontSize = (style?.fontSize ?? 12) * zoom;
       const fontFamily = style?.fontFamily ?? "system-ui";
       const fontWeight = style?.fontWeight ?? "400";
-      const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight } satisfies FontSpec;
+      const fontStyle = style?.fontStyle ?? "normal";
+      const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight, style: fontStyle } satisfies FontSpec;
 
       if (hasRichText) {
         const offsets = buildCodePointIndex(richTextText);
@@ -1078,7 +1079,7 @@ export class CanvasGridRenderer {
           family: fontFamily,
           sizePx: fontSize,
           weight: fontWeight,
-          style: "normal"
+          style: fontStyle
         } satisfies Required<Pick<FontSpec, "family" | "sizePx">> & { weight: string | number; style: string };
 
         const layoutRuns = rawRuns.map((run) => {
@@ -1201,13 +1202,14 @@ export class CanvasGridRenderer {
       const fontSize = (style?.fontSize ?? 12) * zoom;
       const fontFamily = style?.fontFamily ?? "system-ui";
       const fontWeight = style?.fontWeight ?? "400";
-      const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight } satisfies FontSpec;
+      const fontStyle = style?.fontStyle ?? "normal";
+      const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight, style: fontStyle } satisfies FontSpec;
 
       const defaults = {
         family: fontFamily,
         sizePx: fontSize,
         weight: fontWeight,
-        style: "normal"
+        style: fontStyle
       } satisfies Required<Pick<FontSpec, "family" | "sizePx">> & { weight: string | number; style: string };
 
       const layoutRuns = (() => {
@@ -2268,10 +2270,11 @@ export class CanvasGridRenderer {
 
     // Font specs are part of the text-layout cache key and are returned in layout runs.
     // Avoid mutating a shared object after passing it to the layout engine.
-    let fontSpec = { family: "system-ui", sizePx: 12 * zoom, weight: "400" };
+    let fontSpec = { family: "system-ui", sizePx: 12 * zoom, weight: "400", style: "normal" };
     let currentFontFamily = "";
     let currentFontSize = -1;
     let currentFontWeight = "";
+    let currentFontStyle = "";
 
     const rowAxis = this.scroll.rows;
     const colAxis = this.scroll.cols;
@@ -2344,12 +2347,19 @@ export class CanvasGridRenderer {
         const fontSize = (style?.fontSize ?? 12) * zoom;
         const fontFamily = style?.fontFamily ?? "system-ui";
         const fontWeight = style?.fontWeight ?? "400";
+        const fontStyle = style?.fontStyle ?? "normal";
 
-        if (currentFontSize !== fontSize || currentFontFamily !== fontFamily || currentFontWeight !== fontWeight) {
+        if (
+          currentFontSize !== fontSize ||
+          currentFontFamily !== fontFamily ||
+          currentFontWeight !== fontWeight ||
+          currentFontStyle !== fontStyle
+        ) {
           currentFontSize = fontSize;
           currentFontFamily = fontFamily;
           currentFontWeight = fontWeight;
-          fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight };
+          currentFontStyle = fontStyle;
+          fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight, style: fontStyle };
           contentCtx.font = toCanvasFontString(fontSpec);
         }
 
@@ -2398,7 +2408,7 @@ export class CanvasGridRenderer {
             family: fontFamily,
             sizePx: fontSize,
             weight: fontWeight,
-            style: "normal"
+            style: fontStyle
           } satisfies Required<Pick<FontSpec, "family" | "sizePx">> & { weight: string | number; style: string };
 
           const layoutRuns = rawRuns.map((run) => {
@@ -3324,7 +3334,8 @@ export class CanvasGridRenderer {
           const fontSize = (style?.fontSize ?? 12) * zoom;
           const fontFamily = style?.fontFamily ?? "system-ui";
           const fontWeight = style?.fontWeight ?? "400";
-          const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight };
+          const fontStyle = style?.fontStyle ?? "normal";
+          const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight, style: fontStyle };
           const font = toCanvasFontString(fontSpec);
 
           if (font !== currentFont) {

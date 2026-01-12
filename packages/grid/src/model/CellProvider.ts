@@ -4,6 +4,12 @@ export interface CellStyle {
   fontFamily?: string;
   fontSize?: number;
   fontWeight?: string;
+  /**
+   * Canvas font style (e.g. `"normal"`, `"italic"`).
+   *
+   * Note: This maps directly into the `FontSpec.style` field used by `@formula/text-layout`.
+   */
+  fontStyle?: string;
   textAlign?: CanvasTextAlign;
   /**
    * Wrapping strategy for cell text.
