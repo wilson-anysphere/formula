@@ -477,10 +477,10 @@ export class DocumentCellProvider implements CellProvider {
     // and keep CellData objects lean for fast scrolling.
     const cell: CellData = richText
       ? meta
-        ? { row, col, value, richText, style: resolvedStyle, comment: { resolved: meta.resolved } }
+        ? { row, col, value, richText, style: resolvedStyle, comment: meta }
         : { row, col, value, richText, style: resolvedStyle }
       : meta
-        ? { row, col, value, style: resolvedStyle, comment: { resolved: meta.resolved } }
+        ? { row, col, value, style: resolvedStyle, comment: meta }
         : { row, col, value, style: resolvedStyle };
     cache.set(key, cell);
     return cell;
