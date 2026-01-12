@@ -31,7 +31,14 @@ const DEFAULT_RETENTION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const storePromiseByKey = new Map<string, Promise<AIAuditStore>>();
 
 function isNodeRuntime(): boolean {
-  return typeof process !== "undefined" && typeof process.versions === "object" && typeof process.versions.node === "string";
+  // Avoid dot-accessing Node version info on `process.versions` so the desktop/WebView bundle stays Node-free.
+  // We only need a best-effort Node detector for Vitest/Node environments where
+  // sql.js uses `fs.readFileSync` for WASM loading.
+  const proc = (globalThis as any).process as any;
+  if (!proc || typeof proc !== "object") return false;
+  if (proc.release && typeof proc.release === "object" && proc.release.name === "node") return true;
+  // Fallback for odd environments: `process.version` is a Node-only string like "v22.10.0".
+  return typeof proc.version === "string" && proc.version.startsWith("v");
 }
 
 function coerceViteUrlToNodeFileUrl(href: string): string {

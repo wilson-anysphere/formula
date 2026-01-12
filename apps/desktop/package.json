@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "check:no-node": "node scripts/check-no-node.mjs",
     "predev": "pnpm -w build:wasm",
     "prebuild": "pnpm -w build:wasm",
     "dev": "node scripts/ensure-pyodide-assets.mjs && vite --port 4174 --strictPort",
@@ -10,6 +11,7 @@
     "preview": "vite preview --port 4174 --strictPort",
     "check:coi": "node scripts/check-cross-origin-isolation.mjs",
     "pyodide:setup": "node scripts/ensure-pyodide-assets.mjs",
+    "pretest": "pnpm check:no-node",
     "test:node": "node scripts/run-node-tests.mjs",
     "test": "vitest run --minWorkers=1",
     "pretest:e2e": "pnpm -w build:wasm",
