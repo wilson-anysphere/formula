@@ -119,6 +119,73 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def _print_expected_dataset_patch_summary(*, expected_path: Path) -> None:
+    """
+    Best-effort reporting for mixed synthetic+Excel datasets.
+
+    The repo typically uses a synthetic baseline pinned dataset (source.kind="excel" with
+    source.syntheticSource metadata). Over time we may incrementally overwrite subsets of case IDs
+    with real Excel results via `update_pinned_dataset.py --merge-results --overwrite-existing`.
+
+    When those real-Excel merges occur, `update_pinned_dataset.py` records compact provenance entries
+    under `source.patches` in the pinned dataset. Surfacing a summary here makes it obvious in CI
+    logs whether the expected dataset includes any real Excel patches.
+    """
+
+    try:
+        payload = json.loads(expected_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    if not isinstance(payload, dict):
+        return
+    source = payload.get("source")
+    if not isinstance(source, dict):
+        return
+    patches = source.get("patches")
+    if not isinstance(patches, list) or not patches:
+        return
+
+    # Keep logs compact; print a short summary and cap the number of entries we render.
+    print(f"Expected dataset includes {len(patches)} real Excel patch entries (source.patches):")
+    max_entries = 10
+    shown = 0
+    for entry in patches:
+        if shown >= max_entries:
+            break
+        if not isinstance(entry, dict):
+            continue
+
+        version = str(entry.get("version", "unknown"))
+        build = str(entry.get("build", "unknown"))
+        os_name = str(entry.get("operatingSystem", "unknown"))
+        case_set = entry.get("caseSet")
+        if not isinstance(case_set, dict):
+            case_set = {}
+        case_path = str(case_set.get("path", "")).strip()
+        case_sha = str(case_set.get("sha256", "")).strip()
+        applied = entry.get("applied")
+        if not isinstance(applied, dict):
+            applied = {}
+        added = int(applied.get("added", 0) or 0)
+        overwritten = int(applied.get("overwritten", 0) or 0)
+
+        suffix = []
+        if case_sha:
+            suffix.append(f"cases_sha={case_sha[:8]}")
+        suffix.append(f"added={added}")
+        suffix.append(f"overwritten={overwritten}")
+        suffix_text = ", ".join(suffix)
+
+        if case_path:
+            print(f"  - Excel {version} build {build} ({os_name}): {case_path} ({suffix_text})")
+        else:
+            print(f"  - Excel {version} build {build} ({os_name}) ({suffix_text})")
+        shown += 1
+
+    if len(patches) > shown:
+        print(f"  (+{len(patches) - shown} more)")
+
+
 def _default_expected_dataset(*, cases_path: Path) -> Path:
     versioned_dir = Path("tests/compatibility/excel-oracle/datasets/versioned")
     if versioned_dir.is_dir():
@@ -388,6 +455,7 @@ def main() -> int:
         f"Excel-oracle datasets: expected={expected_path} actual={actual_path} report={report_path}",
         flush=True,
     )
+    _print_expected_dataset_patch_summary(expected_path=expected_path)
 
     include_tags = _effective_include_tags(tier=args.tier, user_include_tags=args.include_tag)
     exclude_tags = _normalize_tags(args.exclude_tag)
