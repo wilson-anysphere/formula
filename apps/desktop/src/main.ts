@@ -4171,6 +4171,48 @@ mountRibbon(ribbonRoot, {
     }
 
     switch (commandId) {
+      case "home.clipboard.cut":
+        void app.clipboardCut();
+        app.focus();
+        return;
+      case "home.clipboard.copy":
+        void app.clipboardCopy();
+        app.focus();
+        return;
+      case "home.clipboard.paste.default":
+        void app.clipboardPaste();
+        app.focus();
+        return;
+      case "home.clipboard.paste.values":
+        void app.clipboardPasteSpecial("values");
+        app.focus();
+        return;
+      case "home.clipboard.paste.formulas":
+        void app.clipboardPasteSpecial("formulas");
+        app.focus();
+        return;
+      case "home.clipboard.paste.formats":
+        void app.clipboardPasteSpecial("formats");
+        app.focus();
+        return;
+      case "home.clipboard.paste.transpose":
+        showToast("Paste Transpose not implemented");
+        app.focus();
+        return;
+      case "home.clipboard.pasteSpecial":
+        void (async () => {
+          const picked = await showQuickPick(
+            getPasteSpecialMenuItems().map((item) => ({ label: item.label, value: item })),
+            { placeHolder: "Paste Special" },
+          );
+          if (picked == null) {
+            app.focus();
+            return;
+          }
+          await app.clipboardPasteSpecial(picked.mode);
+          app.focus();
+        })();
+        return;
       case "insert.tables.pivotTable":
         ribbonLayoutController?.openPanel(PanelIds.PIVOT_BUILDER);
         window.dispatchEvent(new CustomEvent("pivot-builder:use-selection"));
