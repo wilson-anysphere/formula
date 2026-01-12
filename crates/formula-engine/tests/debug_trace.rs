@@ -549,6 +549,72 @@ fn debug_trace_supports_structured_references() {
 }
 
 #[test]
+fn debug_trace_supports_sheet_prefixed_structured_references() {
+    let mut engine = Engine::new();
+    engine.set_sheet_tables("Sheet1", vec![table_fixture_multi_col()]);
+    engine.set_cell_value("Sheet1", "B2", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "B4", 30.0).unwrap();
+
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM(Sheet1!Table1[Col2])")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let computed = engine.get_cell_value("Summary", "A1");
+    assert_eq!(computed, Value::Number(60.0));
+
+    let dbg = engine.debug_evaluate("Summary", "A1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(
+        slice(&dbg.formula, dbg.trace.span),
+        "SUM(Sheet1!Table1[Col2])"
+    );
+
+    let arg = &dbg.trace.children[0];
+    assert_eq!(slice(&dbg.formula, arg.span), "Sheet1!Table1[Col2]");
+    assert!(matches!(arg.kind, TraceKind::StructuredRef));
+    assert_eq!(
+        arg.reference,
+        Some(TraceRef::Range {
+            sheet: formula_engine::functions::SheetId::Local(0),
+            start: CellAddr { row: 1, col: 1 },
+            end: CellAddr { row: 3, col: 1 }
+        })
+    );
+}
+
+#[test]
+fn debug_trace_rejects_external_workbook_structured_references() {
+    let mut engine = Engine::new();
+    engine.set_sheet_tables("Sheet1", vec![table_fixture_multi_col()]);
+    engine.set_cell_value("Sheet1", "B2", 10.0).unwrap();
+
+    engine
+        .set_cell_formula("Summary", "A1", "=SUM([Book.xlsx]Sheet1!Table1[Col2])")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let computed = engine.get_cell_value("Summary", "A1");
+    assert_eq!(computed, Value::Error(formula_engine::ErrorKind::Ref));
+
+    let dbg = engine.debug_evaluate("Summary", "A1").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(
+        slice(&dbg.formula, dbg.trace.span),
+        "SUM([Book.xlsx]Sheet1!Table1[Col2])"
+    );
+
+    let arg = &dbg.trace.children[0];
+    assert_eq!(
+        slice(&dbg.formula, arg.span),
+        "[Book.xlsx]Sheet1!Table1[Col2]"
+    );
+    assert!(matches!(arg.kind, TraceKind::Error));
+    assert_eq!(arg.value, Value::Error(formula_engine::ErrorKind::Ref));
+}
+
+#[test]
 fn trace_preserves_reference_context_for_sum_over_external_ranges() {
     let provider = Arc::new(TestExternalProvider::default());
     provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);

@@ -1169,6 +1169,38 @@ impl ParserImpl {
             });
         }
 
+        if matches!(self.peek().kind, TokenKind::StructuredRef(_)) {
+            let sref_tok = self.next();
+            let sref = match sref_tok.kind {
+                TokenKind::StructuredRef(sref) => sref,
+                _ => unreachable!("peeked structured ref then consumed different token"),
+            };
+
+            // Excel accepts sheet-prefixed structured references like `Sheet1!Table1[Col]`, but
+            // external workbook structured references (`[Book.xlsx]Sheet1!Table1[Col]`) are not
+            // supported by the engine and must evaluate to `#REF!`.
+            let is_external = match &sheet {
+                SheetReference::External(_) => true,
+                SheetReference::Sheet(name) => crate::eval::is_valid_external_sheet_key(name),
+                SheetReference::SheetRange(a, b) => {
+                    crate::eval::is_valid_external_sheet_key(a)
+                        || crate::eval::is_valid_external_sheet_key(b)
+                }
+                SheetReference::Current => false,
+            };
+
+            let kind = if is_external {
+                SpannedExprKind::Error(ErrorKind::Ref)
+            } else {
+                SpannedExprKind::StructuredRef(sref)
+            };
+
+            return Ok(SpannedExpr {
+                span: Span::new(sheet_tok.span.start, sref_tok.span.end),
+                kind,
+            });
+        }
+
         let addr_tok = self.next();
         let addr_str = match addr_tok.kind {
             TokenKind::Ident(s) => s,
