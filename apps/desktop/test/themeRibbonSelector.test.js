@@ -59,3 +59,17 @@ test("Desktop ribbon command ids for theme switching are handled in main.ts", ()
   }
 });
 
+test("Desktop startup instantiates and starts ThemeController in main.ts", () => {
+  const mainPath = path.join(__dirname, "..", "src", "main.ts");
+  const main = fs.readFileSync(mainPath, "utf8");
+
+  // Import should come from the dedicated desktop theming module.
+  assert.match(main, /import\s+\{\s*ThemeController\s*\}\s+from\s+["']\.\/theme\/themeController\.js["']/);
+
+  // Instantiate and start early in startup.
+  assert.match(main, /\bnew\s+ThemeController\s*\(/);
+  assert.match(main, /\bthemeController\.start\s*\(\s*\)\s*;/);
+
+  // Best-effort cleanup on unload.
+  assert.match(main, /\bthemeController\.stop\s*\(\s*\)\s*;/);
+});
