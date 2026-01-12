@@ -8,9 +8,20 @@ test.describe("tauri native menu integration", () => {
       const listeners: Record<string, any> = {};
       (window as any).__tauriListeners = listeners;
       (window as any).__tauriDialogOpenCalls = 0;
+      (window as any).__tauriClipboardWriteText = null;
 
       // Avoid accidental modal prompts blocking the test.
       window.confirm = () => true;
+
+      // Force menu copy/paste to exercise the fallback code paths instead of relying on
+      // browser/OS clipboard behavior (which is often disabled in headless WebViews).
+      const originalExecCommand = document.execCommand?.bind(document) ?? null;
+      document.execCommand = ((commandId: string, showUI?: boolean, value?: string) => {
+        if (commandId === "paste" || commandId === "copy" || commandId === "cut") {
+          return false;
+        }
+        return originalExecCommand ? originalExecCommand(commandId, showUI, value) : false;
+      }) as any;
 
       (window as any).__TAURI__ = {
         core: {
@@ -53,6 +64,13 @@ test.describe("tauri native menu integration", () => {
 
               case "fire_workbook_open":
                 return { ok: true, output: [], updates: [] };
+
+              case "clipboard_read":
+                return { text: "PASTED" };
+
+              case "clipboard_write":
+                (window as any).__tauriClipboardWriteText = args?.payload?.text ?? null;
+                return null;
 
               case "get_macro_security_status":
                 return { has_macros: true, trust: "blocked" };
@@ -111,6 +129,26 @@ test.describe("tauri native menu integration", () => {
     await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
     await expect(page.getByTestId("active-value")).toHaveText("Hello");
 
+    // Menu Edit items should work while editing text (formula bar).
+    await page.getByTestId("formula-input").click();
+    await page.getByTestId("formula-input").fill("CopyMe");
+    await page.evaluate(() => {
+      const input = document.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+      input?.setSelectionRange(0, input.value.length);
+    });
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["menu-copy"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["menu-copy"]({ payload: null });
+    });
+    await page.waitForFunction(() => (window as any).__tauriClipboardWriteText === "CopyMe");
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["menu-paste"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["menu-paste"]({ payload: null });
+    });
+    await expect(page.getByTestId("formula-input")).toHaveValue(/PASTED/);
+
     await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["menu-quit"]));
     await page.evaluate(() => {
       (window as any).__tauriListeners["menu-quit"]({ payload: null });
@@ -119,4 +157,3 @@ test.describe("tauri native menu integration", () => {
     await page.waitForFunction(() => Boolean((window as any).__tauriClosed));
   });
 });
-
