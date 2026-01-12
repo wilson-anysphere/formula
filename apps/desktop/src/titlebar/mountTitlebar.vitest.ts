@@ -21,7 +21,7 @@ describe("mountTitlebar", () => {
         appName: "Formula",
         documentName: "Untitled.xlsx",
         actions: [
-          { label: "Share", ariaLabel: "Share document" },
+          { label: "Share", ariaLabel: "Share document", disabled: true },
           { label: "Comments", ariaLabel: "Open comments" },
         ],
       });
@@ -54,7 +54,9 @@ describe("mountTitlebar", () => {
     const actionsToolbar = container.querySelector<HTMLElement>(".formula-titlebar__actions");
     expect(actionsToolbar?.getAttribute("role")).toBe("toolbar");
     expect(actionsToolbar?.getAttribute("aria-label")).toBe("Titlebar actions");
-    expect(container.querySelector('[aria-label="Share document"]')).toBeInstanceOf(HTMLButtonElement);
+    const shareButton = container.querySelector<HTMLButtonElement>('[aria-label="Share document"]');
+    expect(shareButton).toBeInstanceOf(HTMLButtonElement);
+    expect(shareButton?.disabled).toBe(true);
     expect(container.querySelector('[aria-label="Open comments"]')).toBeInstanceOf(HTMLButtonElement);
 
     act(() => {

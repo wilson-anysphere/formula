@@ -22,6 +22,10 @@ export type TitlebarAction = {
    * Optional visual treatment.
    */
   variant?: "default" | "primary";
+  /**
+   * Optional disabled state (useful for placeholders).
+   */
+  disabled?: boolean;
 };
 
 export type TitlebarProps = {
@@ -147,6 +151,7 @@ export function Titlebar({
               aria-label={action.ariaLabel}
               title={action.ariaLabel}
               onClick={action.onClick}
+              disabled={action.disabled}
             >
               {action.label}
             </button>
