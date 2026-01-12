@@ -1,6 +1,6 @@
 import { FormulaBarModel, type FormulaBarAiSuggestion } from "./FormulaBarModel.js";
 import { parseA1Range, type RangeAddress } from "../spreadsheet/a1.js";
-import { toggleA1AbsoluteAtCursor, type FormulaReferenceRange } from "@formula/spreadsheet-frontend";
+import { extractFormulaReferences, toggleA1AbsoluteAtCursor, type FormulaReferenceRange } from "@formula/spreadsheet-frontend";
 
 export interface FormulaBarViewCallbacks {
   onBeginEdit?: (activeCellAddress: string) => void;
@@ -343,26 +343,17 @@ export class FormulaBarView {
       const toggled = toggleA1AbsoluteAtCursor(prevText, cursorStart, cursorEnd);
       if (!toggled) return;
 
+      // Excel UX: after toggling (even from a caret), keep the whole reference token
+      // selected so repeated F4 presses continue cycling the same token.
+      const { references, activeIndex } = extractFormulaReferences(toggled.text, toggled.cursorStart, toggled.cursorEnd);
+      const active = activeIndex == null ? null : references[activeIndex] ?? null;
+      const nextStart = active?.start ?? toggled.cursorStart;
+      const nextEnd = active?.end ?? toggled.cursorEnd;
+
       this.textarea.value = toggled.text;
-      // Prime the model with the mapped caret/selection so we can resolve the
-      // active reference token in the new text.
-      this.model.updateDraft(toggled.text, toggled.cursorStart, toggled.cursorEnd);
-
-      // Excel UX: after toggling, keep the full reference token selected so repeated
-      // F4 presses continue cycling the same reference.
-      const activeIndex = this.model.activeReferenceIndex();
-      const active = activeIndex == null ? null : this.model.coloredReferences()[activeIndex] ?? null;
-
-      if (active && active.start !== active.end) {
-        this.textarea.setSelectionRange(active.start, active.end);
-        this.model.updateDraft(toggled.text, active.start, active.end);
-        this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(active.start, active.end);
-      } else {
-        // Fallback: preserve the mapped cursor positions from the toggle helper.
-        this.textarea.setSelectionRange(toggled.cursorStart, toggled.cursorEnd);
-        this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(toggled.cursorStart, toggled.cursorEnd);
-      }
-
+      this.textarea.setSelectionRange(nextStart, nextEnd);
+      this.model.updateDraft(toggled.text, nextStart, nextEnd);
+      this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(nextStart, nextEnd);
       this.#render({ preserveTextareaValue: true });
       this.#emitOverlays();
       return;
