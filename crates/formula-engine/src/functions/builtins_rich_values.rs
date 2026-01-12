@@ -57,7 +57,7 @@ fn fieldaccess_scalar(base: &Value, field: &str) -> Value {
             Some(v) => v.clone(),
             None => Value::Error(ErrorKind::Field),
         },
-        _ => Value::Error(ErrorKind::Field),
+        _ => Value::Error(ErrorKind::Value),
     }
 }
 
