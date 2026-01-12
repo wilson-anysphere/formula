@@ -174,36 +174,4 @@ test.describe("dockable panels layout persistence", () => {
     await page.keyboard.press("Meta+I");
     await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
   });
-
-  test("Cmd+I toggles AI chat panel open/closed", async ({ page }) => {
-    await gotoDesktop(page);
-    await page.evaluate(() => localStorage.clear());
-    await page.reload();
-    await waitForDesktopReady(page);
-
-    // Ensure focus is on the grid (not an input) so the global shortcut should fire.
-    // Avoid clicking the shared-grid corner header (select-all), which can be slow/flaky under Playwright.
-    await page.locator("#grid").focus();
-
-    await page.keyboard.press("Meta+i");
-    await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toBeVisible();
-
-    await page.keyboard.press("Meta+i");
-    await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
-  });
-
-  test("Cmd+I does not toggle AI chat while typing in the formula bar", async ({ page }) => {
-    await gotoDesktop(page);
-    await page.evaluate(() => localStorage.clear());
-    await page.reload();
-    await waitForDesktopReady(page);
-
-    // Enter formula-bar edit mode (this reveals + focuses the textarea).
-    await page.getByTestId("formula-highlight").click();
-    await expect(page.getByTestId("formula-input")).toBeVisible();
-    await expect(page.getByTestId("formula-input")).toBeFocused();
-
-    await page.keyboard.press("Meta+i");
-    await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
-  });
 });
