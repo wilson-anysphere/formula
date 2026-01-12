@@ -48,6 +48,34 @@ describe("ToolExecutor", () => {
     expect(workbook.listSheets()).toEqual(["Sheet2"]);
   });
 
+  it("canonicalizes default_sheet when it is provided as a display sheet name", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet2"]);
+    const sheetNameResolver = {
+      getSheetIdByName(name: string) {
+        return name.toLowerCase() === "budget" ? "Sheet2" : null;
+      },
+      getSheetNameById(id: string) {
+        return id === "Sheet2" ? "Budget" : null;
+      }
+    };
+
+    const executor = new ToolExecutor(workbook, { default_sheet: "Budget", sheet_name_resolver: sheetNameResolver });
+    const result = await executor.execute({
+      name: "write_cell",
+      parameters: { cell: "A1", value: 123 }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("write_cell");
+    if (!result.ok || result.tool !== "write_cell") throw new Error("Unexpected tool result");
+    // Returned cell ref is user-facing (display name).
+    expect(result.data?.cell).toBe("Budget!A1");
+
+    // Underlying workbook still uses stable ids and does not create a "Budget" sheet.
+    expect(workbook.getCell(parseA1Cell("Sheet2!A1")).value).toBe(123);
+    expect(workbook.listSheets()).toEqual(["Sheet2"]);
+  });
+
   it("write_cell writes a formula when value starts with '='", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     const executor = new ToolExecutor(workbook);

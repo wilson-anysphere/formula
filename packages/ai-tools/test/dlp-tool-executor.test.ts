@@ -144,6 +144,83 @@ describe("ToolExecutor DLP enforcement", () => {
     expect(event.decision?.decision).toBe("redact");
   });
 
+  it("canonicalizes dlp.sheet_id when it is provided as a display sheet name", async () => {
+    const workbook = new InMemoryWorkbook(["Sheet2"]);
+    workbook.setCell(parseA1Cell("Sheet2!A1"), { value: "ok" });
+    workbook.setCell(parseA1Cell("Sheet2!B1"), { value: "secret" });
+    workbook.setCell(parseA1Cell("Sheet2!C1"), { value: 123 });
+
+    const sheetNameResolver = {
+      getSheetIdByName(name: string) {
+        return name.toLowerCase() === "budget" ? "Sheet2" : null;
+      },
+      getSheetNameById(id: string) {
+        return id === "Sheet2" ? "Budget" : null;
+      }
+    };
+
+    const audit_logger = { log: vi.fn() };
+    const executor = new ToolExecutor(workbook, {
+      // Note: both default_sheet and dlp.sheet_id are passed as the *display* name.
+      // The executor should canonicalize them to the stable sheet id for internal use.
+      default_sheet: "Budget",
+      sheet_name_resolver: sheetNameResolver,
+      dlp: {
+        document_id: "doc-1",
+        sheet_id: "Budget",
+        policy: {
+          version: 1,
+          allowDocumentOverrides: true,
+          rules: {
+            [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+              maxAllowed: "Internal",
+              allowRestrictedContent: false,
+              redactDisallowed: true
+            }
+          }
+        },
+        classification_records: [
+          {
+            selector: {
+              scope: CLASSIFICATION_SCOPE.CELL,
+              documentId: "doc-1",
+              sheetId: "Sheet2",
+              row: 0,
+              col: 1
+            },
+            classification: { level: "Restricted", labels: [] }
+          }
+        ],
+        audit_logger
+      }
+    });
+
+    const result = await executor.execute({
+      name: "read_range",
+      parameters: { range: "A1:C1", include_formulas: true }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.tool).toBe("read_range");
+    if (!result.ok || result.tool !== "read_range") throw new Error("Unexpected tool result");
+
+    expect(result.data?.range).toBe("Budget!A1:C1");
+    expect(result.data?.values).toEqual([["ok", "[REDACTED]", 123]]);
+    expect(result.data?.formulas).toEqual([[null, "[REDACTED]", null]]);
+
+    expect(audit_logger.log).toHaveBeenCalledTimes(1);
+    const event = audit_logger.log.mock.calls[0]?.[0];
+    expect(event).toMatchObject({
+      type: "ai.tool.dlp",
+      tool: "read_range",
+      action: DLP_ACTION.AI_CLOUD_PROCESSING,
+      range: "Sheet2!A1:C1",
+      redactedCellCount: 1
+    });
+    expect(event.sheetId).toBe("Sheet2");
+    expect(event.decision?.decision).toBe("redact");
+  });
+
   it("read_range blocks when policy maxAllowed is null", async () => {
     const workbook = new InMemoryWorkbook(["Sheet1"]);
     workbook.setCell(parseA1Cell("Sheet1!A1"), { value: "data" });
