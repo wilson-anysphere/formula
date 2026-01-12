@@ -168,18 +168,13 @@ impl BondEquation {
 }
 
 fn normalize_frequency(frequency: i32) -> ExcelResult<f64> {
-    match frequency {
-        1 | 2 | 4 => Ok(frequency as f64),
-        _ => Err(ExcelError::Num),
-    }
+    Ok(f64::from(super::coupon_schedule::validate_frequency(
+        frequency,
+    )?))
 }
 
 fn validate_basis(basis: i32) -> ExcelResult<i32> {
-    if (0..=4).contains(&basis) {
-        Ok(basis)
-    } else {
-        Err(ExcelError::Num)
-    }
+    super::coupon_schedule::validate_basis(basis)
 }
 
 fn validate_finite(n: f64) -> ExcelResult<f64> {
@@ -191,14 +186,7 @@ fn validate_finite(n: f64) -> ExcelResult<f64> {
 }
 
 fn days_between(start: i32, end: i32, basis: i32, system: ExcelDateSystem) -> ExcelResult<f64> {
-    match basis {
-        // 30/360 day count (basis 0 and 4).
-        0 => Ok(date_time::days360(start, end, false, system)? as f64),
-        4 => Ok(date_time::days360(start, end, true, system)? as f64),
-        // Actual day count (basis 1/2/3).
-        1 | 2 | 3 => Ok((end - start) as f64),
-        _ => Err(ExcelError::Num),
-    }
+    validate_finite(super::coupon_schedule::days_between(start, end, basis, system)? as f64)
 }
 
 fn is_end_of_month(date: i32, system: ExcelDateSystem) -> ExcelResult<bool> {
@@ -274,21 +262,14 @@ fn coupon_period_e(
     ncd: i32,
     basis: i32,
     freq: f64,
-    _system: ExcelDateSystem,
+    system: ExcelDateSystem,
 ) -> ExcelResult<f64> {
-    let e = match basis {
-        // US 30/360, Actual/360, European 30/360: fixed 360-day year.
-        0 | 2 | 4 => 360.0 / freq,
-        // Actual/365: fixed 365-day year.
-        3 => 365.0 / freq,
-        // Actual/Actual: actual days in the period.
-        1 => (ncd - pcd) as f64,
-        _ => return Err(ExcelError::Num),
-    };
-    if e == 0.0 {
-        return Err(ExcelError::Div0);
-    }
-    validate_finite(e)
+    // `freq` is the number of coupon payments per year. Reuse the shared COUP* helper to ensure
+    // `E` conventions stay in sync across regular and odd coupon bond implementations.
+    //
+    // `freq` has already been validated as one of {1, 2, 4} by `normalize_frequency`.
+    let frequency = freq as i32;
+    super::coupon_schedule::coupon_period_e(pcd, ncd, frequency, basis, system)
 }
 
 fn oddf_equation(
