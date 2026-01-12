@@ -248,6 +248,40 @@ fn add_sheet_disambiguates_unicode_case_folding_expansion_duplicate() {
 }
 
 #[test]
+fn add_sheet_disambiguates_unicode_nfkc_duplicate_when_suffix_collides() {
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("fi".to_string());
+    workbook.add_sheet("fi 2".to_string());
+
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    // U+FB01 NFKC-normalizes to "fi". The first disambiguation would be "\u{FB01} 2", which
+    // NFKC-normalizes to "fi 2" and therefore collides; we should skip to suffix 3.
+    let added = state
+        .add_sheet("\u{FB01}".to_string(), None, None, None)
+        .expect("expected add_sheet to disambiguate NFKC-equivalent duplicate");
+    assert_eq!(added.name, "\u{FB01} 3");
+}
+
+#[test]
+fn add_sheet_disambiguates_unicode_case_folding_expansion_duplicate_when_suffix_collides() {
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("straße".to_string());
+    workbook.add_sheet("STRASSE 2".to_string());
+
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    // German ß uppercases to "SS". The first disambiguation ("STRASSE 2") collides with an
+    // existing sheet; we should skip to suffix 3.
+    let added = state
+        .add_sheet("STRASSE".to_string(), None, None, None)
+        .expect("expected add_sheet to disambiguate unicode duplicate");
+    assert_eq!(added.name, "STRASSE 3");
+}
+
+#[test]
 fn create_sheet_rejects_invalid_character() {
     let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
     let err = state
