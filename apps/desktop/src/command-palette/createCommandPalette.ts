@@ -642,8 +642,17 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
       description.textContent = goToSuggestion.resolved;
       main.appendChild(description);
 
+      const right = document.createElement("div");
+      right.className = "command-palette__item-right";
+
+      const enterHint = document.createElement("span");
+      enterHint.className = "command-palette__shortcut command-palette__selected-hint";
+      enterHint.textContent = "↵";
+      right.appendChild(enterHint);
+
       li.appendChild(icon);
       li.appendChild(main);
+      li.appendChild(right);
 
       li.addEventListener("mousedown", (e) => {
         e.preventDefault();
@@ -717,7 +726,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
         right.className = "command-palette__item-right";
 
         const enterHint = document.createElement("span");
-        enterHint.className = "command-palette__shortcut command-palette__function-hint";
+        enterHint.className = "command-palette__shortcut command-palette__selected-hint";
         enterHint.textContent = "↵";
         right.appendChild(enterHint);
 

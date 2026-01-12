@@ -580,11 +580,11 @@
   letter-spacing: 0.02em;
 }
 
-.command-palette__function-hint {
+.command-palette__selected-hint {
   display: none;
 }
 
-.command-palette__item[aria-selected="true"] .command-palette__function-hint {
+.command-palette__item[aria-selected="true"] .command-palette__selected-hint {
   display: inline-flex;
 }
 
