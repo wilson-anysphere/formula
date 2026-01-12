@@ -544,10 +544,23 @@ async fn show_system_notification(
 
 #[tauri::command]
 async fn oauth_loopback_listen(
-    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     state: State<'_, SharedOauthLoopbackState>,
     redirect_uri: String,
 ) -> Result<(), String> {
+    // Restrict loopback listener startup to the main application window. This avoids
+    // accidental abuse if we ever embed untrusted content in secondary webviews.
+    if window.label() != "main" {
+        return Err("oauth loopback listeners are only allowed from the main window".to_string());
+    }
+
+    let url = window.url().map_err(|err| err.to_string())?;
+    if !is_trusted_notification_origin(&url) {
+        return Err("oauth loopback listeners are not allowed from this origin".to_string());
+    }
+
+    let app = window.app_handle();
+
     let parsed = Url::parse(redirect_uri.trim())
         .map_err(|err| format!("Invalid OAuth redirect URI: {err}"))?;
 
