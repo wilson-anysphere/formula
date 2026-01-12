@@ -1,6 +1,6 @@
 import * as Y from "yjs";
 
-import type { Comment, CommentAuthor, CommentKind, Reply } from "./types";
+import type { Comment, CommentAuthor, CommentKind, Reply } from "./types.ts";
 
 export interface CommentManagerOptions {
   transact?: (fn: () => void) => void;

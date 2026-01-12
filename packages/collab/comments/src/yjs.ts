@@ -1,4 +1,4 @@
-export type { CommentsRoot, YCommentsArray, YCommentsMap } from "./manager";
+export type { CommentsRoot, YCommentsArray, YCommentsMap } from "./manager.ts";
 export {
   createYComment,
   createYReply,
@@ -7,4 +7,4 @@ export {
   migrateCommentsArrayToMap,
   yCommentToComment,
   yReplyToReply,
-} from "./manager";
+} from "./manager.ts";
