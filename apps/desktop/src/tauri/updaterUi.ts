@@ -1,6 +1,7 @@
 import { showToast } from "../extensions/ui.js";
 
 import { requestAppRestart } from "./appQuit";
+import { shellOpen } from "./shellOpen";
 import { installUpdateAndRestart } from "./updater";
 
 export const FORMULA_RELEASES_URL = "https://github.com/wilson-anysphere/formula/releases";
@@ -67,15 +68,10 @@ async function showMainWindowBestEffort(): Promise<void> {
 let updateDialogShownForVersion: string | null = null;
 
 async function openExternalUrl(url: string): Promise<void> {
-  const tauri = (globalThis as any).__TAURI__;
-  const tauriOpen = tauri?.shell?.open ?? tauri?.plugin?.shell?.open;
-  if (typeof tauriOpen === "function") {
-    await tauriOpen(url);
-    return;
-  }
-
-  if (typeof window !== "undefined" && typeof window.open === "function") {
-    window.open(url, "_blank", "noopener,noreferrer");
+  try {
+    await shellOpen(url);
+  } catch {
+    // Best-effort.
   }
 }
 
