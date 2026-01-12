@@ -146,6 +146,34 @@ fn days360_matches_excel_examples() {
 }
 
 #[test]
+fn days360_accounts_for_lotus_bug_feb_1900() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let jan31 = ymd_to_serial(ExcelDate::new(1900, 1, 31), system).unwrap();
+    let feb28 = ymd_to_serial(ExcelDate::new(1900, 2, 28), system).unwrap();
+    let feb29 = ymd_to_serial(ExcelDate::new(1900, 2, 29), system).unwrap();
+    let mar1 = ymd_to_serial(ExcelDate::new(1900, 3, 1), system).unwrap();
+    let mar31 = ymd_to_serial(ExcelDate::new(1900, 3, 31), system).unwrap();
+
+    // Under the Lotus 1900 leap-year bug, Feb 29 1900 exists as serial 60.
+    // That means Feb 28 1900 is not month-end, while Feb 29 1900 is.
+    assert_eq!(date_time::days360(feb28, mar1, false, system).unwrap(), 3);
+    assert_eq!(date_time::days360(feb28, mar1, true, system).unwrap(), 3);
+
+    assert_eq!(date_time::days360(feb28, feb29, false, system).unwrap(), 3);
+    assert_eq!(date_time::days360(feb28, feb29, true, system).unwrap(), 1);
+
+    // Feb 29 is treated as month-end, so US/NASD adjusts it to day 30.
+    assert_eq!(date_time::days360(feb29, mar1, false, system).unwrap(), 1);
+    assert_eq!(date_time::days360(feb29, mar1, true, system).unwrap(), 2);
+
+    assert_eq!(date_time::days360(jan31, feb29, false, system).unwrap(), 30);
+    assert_eq!(date_time::days360(jan31, feb29, true, system).unwrap(), 29);
+
+    assert_eq!(date_time::days360(feb29, mar31, false, system).unwrap(), 30);
+    assert_eq!(date_time::days360(feb29, mar31, true, system).unwrap(), 31);
+}
+
+#[test]
 fn yearfrac_respects_basis_conventions() {
     let system = ExcelDateSystem::EXCEL_1900;
     let start = ymd_to_serial(ExcelDate::new(2011, 1, 1), system).unwrap();
@@ -260,6 +288,38 @@ fn yearfrac_respects_basis_conventions() {
     assert!((np + date_time::yearfrac(p, n, 1, system).unwrap()).abs() < 1e-12);
 
     assert_eq!(date_time::yearfrac(start, end, 9, system).unwrap_err(), ExcelError::Num);
+}
+
+#[test]
+fn yearfrac_basis1_accounts_for_lotus_bug_feb_1900() {
+    let system = ExcelDateSystem::EXCEL_1900;
+    let jan1 = ymd_to_serial(ExcelDate::new(1900, 1, 1), system).unwrap();
+    let dec31 = ymd_to_serial(ExcelDate::new(1900, 12, 31), system).unwrap();
+    let feb28 = ymd_to_serial(ExcelDate::new(1900, 2, 28), system).unwrap();
+    let feb29 = ymd_to_serial(ExcelDate::new(1900, 2, 29), system).unwrap();
+    let mar1 = ymd_to_serial(ExcelDate::new(1900, 3, 1), system).unwrap();
+    let feb28_1901 = ymd_to_serial(ExcelDate::new(1901, 2, 28), system).unwrap();
+
+    // 1900 is treated as a leap year, so there are 366 days between 1900-01-01 and 1901-01-01.
+    let jan_to_dec = date_time::yearfrac(jan1, dec31, 1, system).unwrap();
+    assert!((jan_to_dec - (365.0 / 366.0)).abs() < 1e-12);
+
+    let feb28_to_feb29 = date_time::yearfrac(feb28, feb29, 1, system).unwrap();
+    assert!((feb28_to_feb29 - (1.0 / 366.0)).abs() < 1e-12);
+    assert!((feb28_to_feb29 + date_time::yearfrac(feb29, feb28, 1, system).unwrap()).abs() < 1e-12);
+
+    let feb28_to_mar1 = date_time::yearfrac(feb28, mar1, 1, system).unwrap();
+    assert!((feb28_to_mar1 - (2.0 / 366.0)).abs() < 1e-12);
+    assert!((feb28_to_mar1 + date_time::yearfrac(mar1, feb28, 1, system).unwrap()).abs() < 1e-12);
+
+    // Year anniversaries from Feb 29 clamp to Feb 28 in non-leap years, yielding a 365-day span.
+    let feb29_to_mar1 = date_time::yearfrac(feb29, mar1, 1, system).unwrap();
+    assert!((feb29_to_mar1 - (1.0 / 365.0)).abs() < 1e-12);
+    assert!((feb29_to_mar1 + date_time::yearfrac(mar1, feb29, 1, system).unwrap()).abs() < 1e-12);
+
+    let feb29_to_feb28_1901 = date_time::yearfrac(feb29, feb28_1901, 1, system).unwrap();
+    assert!((feb29_to_feb28_1901 - 1.0).abs() < 1e-12);
+    assert!((feb29_to_feb28_1901 + date_time::yearfrac(feb28_1901, feb29, 1, system).unwrap()).abs() < 1e-12);
 }
 
 #[test]

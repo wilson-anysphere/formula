@@ -304,6 +304,57 @@ fn days360_matches_excel_examples() {
 }
 
 #[test]
+fn days360_accounts_for_lotus_bug_feb_1900() {
+    let mut sheet = TestSheet::new();
+    sheet.set_date_system(ExcelDateSystem::Excel1900 { lotus_compat: true });
+
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,2,28),DATE(1900,3,1))"),
+        3.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,2,28),DATE(1900,3,1),TRUE)"),
+        3.0,
+    );
+
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,2,28),DATE(1900,2,29))"),
+        3.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,2,28),DATE(1900,2,29),TRUE)"),
+        1.0,
+    );
+
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,2,29),DATE(1900,3,1))"),
+        1.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,2,29),DATE(1900,3,1),TRUE)"),
+        2.0,
+    );
+
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,1,31),DATE(1900,2,29))"),
+        30.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,1,31),DATE(1900,2,29),TRUE)"),
+        29.0,
+    );
+
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,2,29),DATE(1900,3,31))"),
+        30.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(1900,2,29),DATE(1900,3,31),TRUE)"),
+        31.0,
+    );
+}
+
+#[test]
 fn days360_spills_over_array_inputs() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("A1", "=DAYS360({DATE(2011,1,1);DATE(2011,1,31)},DATE(2011,12,31))");
@@ -443,6 +494,37 @@ fn yearfrac_matches_basis_conventions() {
     assert_eq!(
         sheet.eval("=YEARFRAC(DATE(2020,1,1),DATE(2020,12,31),A1)"),
         Value::Error(ErrorKind::Num)
+    );
+}
+
+#[test]
+fn yearfrac_basis1_accounts_for_lotus_bug_feb_1900() {
+    let mut sheet = TestSheet::new();
+    sheet.set_date_system(ExcelDateSystem::Excel1900 { lotus_compat: true });
+
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(1900,1,1),DATE(1900,12,31),1)"),
+        365.0 / 366.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(1900,2,28),DATE(1900,2,29),1)"),
+        1.0 / 366.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(1900,2,28),DATE(1900,3,1),1)"),
+        2.0 / 366.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(1900,2,29),DATE(1900,3,1),1)"),
+        1.0 / 365.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(1900,3,1),DATE(1900,2,29),1)"),
+        -(1.0 / 365.0),
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(1900,2,29),DATE(1901,2,28),1)"),
+        1.0,
     );
 }
 
