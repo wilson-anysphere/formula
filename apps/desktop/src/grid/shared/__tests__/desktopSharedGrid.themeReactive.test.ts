@@ -130,4 +130,80 @@ describe("DesktopSharedGrid theme reactivity", () => {
       grid.destroy();
     }
   });
+
+  it("updates its renderer theme when a relevant matchMedia query fires a change event", () => {
+    // Disable MutationObserver so this test specifically exercises the matchMedia path.
+    vi.stubGlobal("MutationObserver", undefined);
+
+    const listenersByQuery = new Map<string, Set<() => void>>();
+    const matchMediaMock = vi.fn((query: string) => {
+      const listeners = new Set<() => void>();
+      listenersByQuery.set(query, listeners);
+
+      return {
+        media: query,
+        matches: false,
+        addEventListener: (type: string, listener: () => void) => {
+          if (type !== "change") return;
+          listeners.add(listener);
+        },
+        removeEventListener: (type: string, listener: () => void) => {
+          if (type !== "change") return;
+          listeners.delete(listener);
+        }
+      } as unknown as MediaQueryList;
+    });
+    vi.stubGlobal("matchMedia", matchMediaMock);
+
+    const container = document.createElement("div");
+    container.style.setProperty("--formula-grid-bg", "rgb(10, 20, 30)");
+    document.body.appendChild(container);
+
+    const provider = new MockCellProvider({ rowCount: 10, colCount: 10 });
+
+    const canvases = {
+      grid: document.createElement("canvas"),
+      content: document.createElement("canvas"),
+      selection: document.createElement("canvas")
+    };
+
+    const scrollbars = {
+      vTrack: document.createElement("div"),
+      vThumb: document.createElement("div"),
+      hTrack: document.createElement("div"),
+      hThumb: document.createElement("div")
+    };
+
+    const grid = new DesktopSharedGrid({
+      container,
+      provider,
+      rowCount: 10,
+      colCount: 10,
+      canvases,
+      scrollbars
+    });
+
+    try {
+      expect(matchMediaMock).toHaveBeenCalledWith("(prefers-color-scheme: dark)");
+      expect(matchMediaMock).toHaveBeenCalledWith("(prefers-contrast: more)");
+      expect(matchMediaMock).toHaveBeenCalledWith("(forced-colors: active)");
+
+      expect(grid.renderer.getTheme().gridBg).toBe("rgb(10, 20, 30)");
+
+      container.style.setProperty("--formula-grid-bg", "rgb(40, 50, 60)");
+
+      // Simulate a system preference change (e.g. dark mode / forced-colors) by firing the
+      // media query listener. The implementation should re-resolve the theme from CSS vars.
+      const listeners = listenersByQuery.get("(prefers-color-scheme: dark)");
+      expect(listeners?.size).toBeGreaterThan(0);
+      for (const listener of listeners ?? []) listener();
+
+      expect(grid.renderer.getTheme().gridBg).toBe("rgb(40, 50, 60)");
+    } finally {
+      grid.destroy();
+    }
+
+    // Ensure listeners were detached on destroy.
+    expect(listenersByQuery.get("(prefers-color-scheme: dark)")?.size ?? 0).toBe(0);
+  });
 });
