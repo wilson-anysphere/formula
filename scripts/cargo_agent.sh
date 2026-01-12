@@ -256,6 +256,15 @@ if [[ "${subcommand}" == "test" && -z "${caller_jobs_env}" ]]; then
   fi
 fi
 
+# Make: default to matching the chosen Cargo parallelism.
+#
+# Some Rust crates invoke Make/CMake/etc from their build scripts. When Make is allowed
+# to spawn one worker per core it can contribute to process/thread spawn failures on
+# multi-agent hosts. Default to `-j<jobs>` unless the caller explicitly set MAKEFLAGS.
+if [[ -z "${MAKEFLAGS:-}" ]]; then
+  export MAKEFLAGS="-j${jobs}"
+fi
+
 # Limit rustc's internal codegen parallelism on multi-agent hosts.
 #
 # Even with `cargo -j` and Rayon's thread pool capped, rustc/LLVM may still spawn helper threads
@@ -263,7 +272,7 @@ fi
 # "Resource temporarily unavailable" (EAGAIN) and crash compilation.
 #
 # Default to a single codegen unit for tests to reduce thread usage. Callers can override via the
-# standard Cargo env vars (`CARGO_PROFILE_{dev,test}_CODEGEN_UNITS`).
+# standard Cargo env vars (`CARGO_PROFILE_{dev,test,release,bench}_CODEGEN_UNITS`).
 default_codegen_units="${jobs}"
 if [[ "${subcommand}" == "test" ]]; then
   default_codegen_units="1"
@@ -273,6 +282,12 @@ if [[ -z "${CARGO_PROFILE_DEV_CODEGEN_UNITS:-}" ]]; then
 fi
 if [[ -z "${CARGO_PROFILE_TEST_CODEGEN_UNITS:-}" ]]; then
   export CARGO_PROFILE_TEST_CODEGEN_UNITS="${default_codegen_units}"
+fi
+if [[ -z "${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-}" ]]; then
+  export CARGO_PROFILE_RELEASE_CODEGEN_UNITS="${default_codegen_units}"
+fi
+if [[ -z "${CARGO_PROFILE_BENCH_CODEGEN_UNITS:-}" ]]; then
+  export CARGO_PROFILE_BENCH_CODEGEN_UNITS="${default_codegen_units}"
 fi
 
 # Callers (or their shell environment) may set `RUSTFLAGS` with `-C codegen-units=...`.
