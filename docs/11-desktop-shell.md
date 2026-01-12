@@ -16,6 +16,7 @@ This document is a “what’s real in the repo” reference for contributors.
   - Tauri config: `apps/desktop/src-tauri/tauri.conf.json`
   - Entry point: `apps/desktop/src-tauri/src/main.rs`
   - IPC commands: `apps/desktop/src-tauri/src/commands.rs`
+  - “Open file” path normalization: `apps/desktop/src-tauri/src/open_file.rs`
   - Tray: `apps/desktop/src-tauri/src/tray.rs`
   - Global shortcuts: `apps/desktop/src-tauri/src/shortcuts.rs`
   - Updater integration: `apps/desktop/src-tauri/src/updater.rs`
@@ -121,6 +122,7 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
 - Tauri plugins:
   - `tauri_plugin_global_shortcut` (registers accelerators + emits app events)
   - `tauri_plugin_updater` (update checks)
+  - `tauri_plugin_single_instance` (forward argv/cwd from subsequent launches into the running instance)
 - `invoke_handler(...)` mapping commands in `commands.rs`
 - window/tray event forwarding to the frontend via `app.emit(...)` / `window.emit(...)`
 
@@ -148,7 +150,23 @@ When a file is dropped onto the window, `main.rs` listens for `WindowEvent::Drag
 
 - `file-dropped` with `Vec<String>` of filesystem paths
 
-The frontend listens for this event and calls `openWorkbookFromPath(...)`.
+The frontend listens for this event and queues an open via `queueOpenWorkbook(...)` (so opens are serialized).
+
+#### Open-with / file associations / CLI args
+
+In addition to drag & drop, the desktop shell supports opening workbooks via:
+
+- “Open with…” / Finder / Explorer (file associations configured in `bundle.fileAssociations` in `tauri.conf.json`)
+- passing a path on the command line (cold start)
+- launching the app again while an instance is already running (warm start)
+
+Implementation notes:
+
+- `apps/desktop/src-tauri/src/open_file.rs` extracts supported spreadsheet paths from argv-style inputs (and also supports `file://...` URLs used by macOS open-document events).
+- `main.rs` uses a small in-memory queue (`OpenFileState`) so open-file requests received *before* the frontend installs its listeners aren’t lost.
+  - Backend emits: `open-file` (payload: `string[]` paths)
+  - Frontend emits: `open-file-ready` once its `listen("open-file", ...)` handler is installed, which flushes any queued paths.
+- On macOS, `tauri::RunEvent::Opened { urls, .. }` is routed through the same pipeline so opening a document in Finder reaches the running instance.
 
 #### Tray + global shortcuts
 
@@ -175,6 +193,7 @@ Desktop-specific listeners are set up near the bottom of `apps/desktop/src/main.
 
 - `close-prep` → flush pending workbook sync + call `set_macro_ui_context` → emit `close-prep-done`
 - `close-requested` → run `handleCloseRequest(...)` (unsaved changes prompt + hide vs quit) → emit `close-handled`
+- `open-file` → queue workbook opens; then emits `open-file-ready` once the handler is installed (flushes any queued open-file requests on the Rust side)
 - `file-dropped` → open the first dropped path
 - `tray-open` / `tray-new` / `tray-quit` → open dialog/new workbook/quit flow
 - `shortcut-quick-open` / `shortcut-command-palette` → open dialog/palette
@@ -225,6 +244,7 @@ Events emitted by the Rust host (see `main.rs`, `tray.rs`, `updater.rs`):
 - Window lifecycle:
   - `close-prep` (payload: token `string`)
   - `close-requested` (payload: `{ token: string, updates: CellUpdate[] }`)
+  - `open-file` (payload: `string[]` paths)
   - `file-dropped` (payload: `string[]` paths)
 - Tray:
   - `tray-new`, `tray-open`, `tray-quit`
@@ -239,6 +259,7 @@ Related frontend → backend events used as acknowledgements during close:
 
 - `close-prep-done` (token)
 - `close-handled` (token)
+- `open-file-ready` (signals that the frontend’s `open-file` listener is installed; causes the Rust host to flush queued open requests)
 
 ---
 
