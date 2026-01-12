@@ -177,11 +177,21 @@ fn coerce_value_to_number(value: &Value) -> Option<f64> {
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Blank => Some(0.0),
         Value::Text(s) => s.trim().parse::<f64>().ok(),
-        Value::Error(_)
-        | Value::Reference(_)
-        | Value::ReferenceUnion(_)
-        | Value::Array(_)
-        | Value::Lambda(_)
-        | Value::Spill { .. } => None,
+        // Solver only supports numeric values (variables/constraints/objectives are `f64`).
+        //
+        // Any non-scalar / rich values (e.g. Entity/Record) should degrade safely to "not a
+        // number" rather than crashing or panicking.
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn coerce_value_to_number_returns_none_for_non_numeric_values() {
+        let value = Value::Array(crate::value::Array::new(1, 1, vec![Value::Number(1.0)]));
+        assert_eq!(coerce_value_to_number(&value), None);
     }
 }
