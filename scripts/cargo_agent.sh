@@ -344,6 +344,10 @@ fi
 # higher parallelism. This avoids sporadic rustc panics like:
 # "failed to spawn helper thread: Resource temporarily unavailable" (EAGAIN)
 if [[ "${subcommand}" == "test" ]]; then
+  # Record the pre-clamp job count so we can keep Rayon aligned when it was already set to track
+  # the prior `jobs` value (common when environments default `RAYON_NUM_THREADS=$CARGO_BUILD_JOBS`).
+  jobs_before_test_override="${jobs}"
+
   # If the caller explicitly passed `-j/--jobs`, respect it even if
   # `FORMULA_CARGO_TEST_JOBS` is set.
   if [[ -z "${explicit_jobs}" ]]; then
@@ -355,8 +359,12 @@ if [[ "${subcommand}" == "test" ]]; then
   fi
 
   export CARGO_BUILD_JOBS="${jobs}"
-  if [[ -z "${orig_rayon_num_threads}" && -z "${orig_formula_rayon_num_threads}" ]]; then
-    export RAYON_NUM_THREADS="${jobs}"
+  if [[ -z "${orig_formula_rayon_num_threads}" ]]; then
+    # If Rayon threads were not explicitly configured (or were set to track the previous `jobs`
+    # value), keep it aligned with the chosen `jobs` to avoid excessive thread creation under load.
+    if [[ -z "${orig_rayon_num_threads}" || "${orig_rayon_num_threads}" == "${jobs_before_test_override}" ]]; then
+      export RAYON_NUM_THREADS="${jobs}"
+    fi
   fi
   if [[ -z "${MAKEFLAGS:-}" || "${MAKEFLAGS}" =~ ^-j[0-9]+$ ]]; then
     export MAKEFLAGS="-j${jobs}"
@@ -521,7 +529,7 @@ case "${subcommand}" in
     ;;
 esac
 
-echo "cargo_agent: jobs=${jobs} as=${limit_as} test_threads=${RUST_TEST_THREADS:-auto}" >&2
+echo "cargo_agent: jobs=${jobs} as=${limit_as} test_threads=${RUST_TEST_THREADS:-auto} rayon=${RAYON_NUM_THREADS:-auto}" >&2
 
 run_cargo_cmd=("${cargo_cmd[@]}")
 if [[ -n "${limit_as}" && "${limit_as}" != "0" && "${limit_as}" != "off" && "${limit_as}" != "unlimited" ]]; then

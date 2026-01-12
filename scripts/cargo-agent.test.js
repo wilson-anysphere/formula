@@ -177,3 +177,17 @@ test(
     );
   },
 );
+
+test(
+  'cargo_agent aligns default RAYON_NUM_THREADS with test jobs when it was tracking jobs',
+  { skip: !hasBash || !hasCargo },
+  () => {
+    // Simulate a common environment setup where Rayon is preconfigured to match build jobs.
+    // The wrapper should still be able to reduce Rayon threads when it reduces `cargo test` jobs.
+    const { stderr } = runBash(
+      'export RAYON_NUM_THREADS=4 && unset FORMULA_RAYON_NUM_THREADS FORMULA_CARGO_JOBS FORMULA_CARGO_TEST_JOBS RUST_TEST_THREADS FORMULA_RUST_TEST_THREADS && bash scripts/cargo_agent.sh test -h',
+    );
+    assert.ok(stderr.includes('jobs=1'), stderr);
+    assert.ok(stderr.includes('rayon=1'), stderr);
+  },
+);
