@@ -168,9 +168,10 @@ test.describe("tauri native menu integration", () => {
     await expect(page.getByTestId("active-value")).toHaveText("Hello");
 
     // Menu Edit items should work while editing text (formula bar).
-    // In view mode the formula bar textarea is hidden; click the highlight to enter edit mode.
     await page.getByTestId("formula-highlight").click();
-    await page.getByTestId("formula-input").fill("CopyMe");
+    const formulaInput = page.getByTestId("formula-input");
+    await expect(formulaInput).toBeVisible();
+    await formulaInput.fill("CopyMe");
     await page.evaluate(() => {
       const input = document.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
       input?.setSelectionRange(0, input.value.length);

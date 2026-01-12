@@ -8,7 +8,24 @@ const SAMPLE_HELLO_ID = "formula.sample-hello";
 async function setExtensionPermissionGrants(page: Page, grants: Record<string, any>): Promise<void> {
   await page.evaluate(
     ({ key, grants }) => {
-      localStorage.setItem(key, JSON.stringify(grants));
+      const existing = (() => {
+        try {
+          const raw = localStorage.getItem(key);
+          return raw ? JSON.parse(raw) : {};
+        } catch {
+          return {};
+        }
+      })();
+
+      const merged =
+        existing && typeof existing === "object" && !Array.isArray(existing)
+          ? {
+              ...existing,
+              ...grants,
+            }
+          : { ...grants };
+
+      localStorage.setItem(key, JSON.stringify(merged));
     },
     { key: PERMISSIONS_KEY, grants },
   );

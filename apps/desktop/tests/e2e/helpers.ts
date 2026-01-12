@@ -46,6 +46,41 @@ export async function gotoDesktop(page: Page, path: string = "/", options: Deskt
           }
         }
       }, { waitForIdle, idleTimeoutMs });
+
+      // The desktop build includes a built-in "formula.e2e-events" extension used by other
+      // Playwright specs (e.g. `extension-events.spec.ts`). That extension writes to
+      // `formula.storage`, which is gated by the `"storage"` permission. If we don't pre-seed a
+      // grant here, unrelated tests can flake when the permission prompt appears and blocks
+      // pointer events.
+      //
+      // Merge the grant instead of overwriting because many specs pre-configure additional
+      // extension permissions via `page.addInitScript(...)`.
+      await page.evaluate(() => {
+        const key = "formula.extensionHost.permissions";
+        const extensionId = "formula.e2e-events";
+        let existing: any = {};
+        try {
+          const raw = localStorage.getItem(key);
+          existing = raw ? JSON.parse(raw) : {};
+        } catch {
+          existing = {};
+        }
+        if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+          existing = {};
+        }
+        const current = existing[extensionId];
+        const merged =
+          current && typeof current === "object" && !Array.isArray(current)
+            ? { ...current, storage: true }
+            : { storage: true };
+        existing[extensionId] = merged;
+        try {
+          localStorage.setItem(key, JSON.stringify(existing));
+        } catch {
+          // ignore storage errors (disabled/quota/etc.)
+        }
+      });
+
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
