@@ -59,8 +59,8 @@ function ensureSafeFormattingRange(rangeOrRanges) {
             // ignore (e.g. toast root missing in tests)
           }
           // Avoid calling into DocumentController for extremely large full-width row selections.
-          // Even though DocumentController has its own safety caps, the toolbar-level guard should
-          // short-circuit so we don't build large intermediate structures or spam the console.
+          // Formatting full-width rows requires enumerating each row to update the row formatting
+          // layer; above this threshold it can freeze the UI and allocate enormous delta arrays.
           return false;
         }
       }
