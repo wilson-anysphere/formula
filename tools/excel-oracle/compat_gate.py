@@ -134,9 +134,12 @@ def main() -> int:
     p.add_argument(
         "--expected",
         default="",
-        help="Path to pinned Excel results JSON. Defaults to the newest file in "
-        "tests/compatibility/excel-oracle/datasets/versioned/ if present, else "
-        "tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json.",
+        help=(
+            "Path to pinned Excel results JSON. Defaults to the newest matching file in "
+            "tests/compatibility/excel-oracle/datasets/versioned/ (by cases.json SHA-256 suffix "
+            "'*-cases-<sha8>.json') if present, else "
+            "tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json."
+        ),
     )
     p.add_argument(
         "--actual",

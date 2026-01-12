@@ -28,6 +28,8 @@ and exits non-zero if mismatches exceed the configured threshold.
 - `datasets/` — results datasets:
   - `excel-oracle.pinned.json` — pinned Excel dataset for CI (no Excel needed).
   - `versioned/` — version-tagged pinned datasets (useful when Excel behavior differs across versions/builds).
+    Versioned datasets include the `cases.json` SHA-256 prefix in the filename (`*-cases-<sha8>.json`) so
+    `compat_gate.py` can auto-select the right dataset.
   - `engine-results.json` — generated locally/CI by the engine runner.
 - `reports/` — mismatch reports produced by `compare.py`.
 
@@ -109,8 +111,8 @@ python tools/excel-oracle/compat_gate.py --tier full
 - `--tier p0` and `--tier full` are better suited for local runs or nightly CI.
 
 The gate **does not require Excel** at runtime; it compares against a pinned
-Excel dataset (`datasets/excel-oracle.pinned.json` or the newest file in
-`datasets/versioned/`).
+Excel dataset (`datasets/excel-oracle.pinned.json` or the newest matching file in
+`datasets/versioned/` for the current `cases.json` hash).
 
 Important: the pinned dataset must contain results for the cases you choose to
 run. With a **full pinned dataset**, using tag filtering (tiers or explicit
