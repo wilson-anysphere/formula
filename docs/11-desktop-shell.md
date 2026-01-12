@@ -207,8 +207,8 @@ Security notes:
 
 - The Rust command `show_system_notification` (exposed via `__TAURI__.core.invoke(...)`) is restricted to the
   main window and to trusted app-local origins.
-- The frontend `notify(...)` helper intentionally does **not** fall back to the Web Notification API when running
-  under Tauri (`__TAURI__` present), so remote/navigated content cannot bypass the Rust-side checks.
+- The frontend `notify(...)` helper prefers the Rust-side command above (so the origin/window checks are enforced).
+  On non-Tauri builds (or if desktop notification APIs are unavailable/blocked), it can fall back to the Web Notification API.
 
 Minimal excerpt (not copy/pasteable; see the full file for everything):
 
