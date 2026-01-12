@@ -2,10 +2,13 @@ import { DLP_ACTION } from "./actions.js";
 import { evaluatePolicy, DLP_DECISION } from "./policyEngine.js";
 import { effectiveCellClassification, effectiveRangeClassification, normalizeRange } from "./selectors.js";
 import { DlpViolationError } from "./errors.js";
-import { CLASSIFICATION_LEVEL, DEFAULT_CLASSIFICATION, maxClassification } from "./classification.js";
+import { CLASSIFICATION_LEVEL, DEFAULT_CLASSIFICATION, classificationRank, maxClassification } from "./classification.js";
 import dlpCore from "./core.js";
 
 const { redact } = dlpCore;
+
+const DEFAULT_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.PUBLIC);
+const RESTRICTED_CLASSIFICATION_RANK = classificationRank(CLASSIFICATION_LEVEL.RESTRICTED);
 
 /**
  * Build AI context from spreadsheet cells while respecting DLP classification.
@@ -106,6 +109,13 @@ export class AiContextManager {
     }
 
     const index = buildDlpRangeIndex({ documentId, sheetId, range: normalizedRange }, records);
+    const maxAllowedRank = evaluation.maxAllowed === null ? null : classificationRank(evaluation.maxAllowed);
+    const policyAllowsRestrictedContent = Boolean(
+      policy?.rules?.[DLP_ACTION.AI_CLOUD_PROCESSING]?.allowRestrictedContent
+    );
+    const restrictedAllowed = includeRestrictedContent
+      ? policyAllowsRestrictedContent
+      : maxAllowedRank !== null && maxAllowedRank >= RESTRICTED_CLASSIFICATION_RANK;
 
     const redactions = [];
     let redactedCount = 0;
@@ -118,14 +128,11 @@ export class AiContextManager {
       for (let col = normalizedRange.start.col; col <= normalizedRange.end.col; col++) {
         const value = byRowCol.get(`${row},${col}`);
         const classification = effectiveCellClassificationFromIndex(index, { documentId, sheetId, row, col });
-        const allowedDecision = evaluatePolicy({
-          action: DLP_ACTION.AI_CLOUD_PROCESSING,
-          classification,
-          policy,
-          options: { includeRestrictedContent },
-        });
+        const cellRank = classificationRank(classification.level);
+        const allowed =
+          cellRank === RESTRICTED_CLASSIFICATION_RANK ? restrictedAllowed : maxAllowedRank !== null && cellRank <= maxAllowedRank;
 
-        if (allowedDecision.decision !== DLP_DECISION.ALLOW) {
+        if (!allowed) {
           // Individual cell is not allowed to be sent to the cloud (either "block" or
           // "redact"). Since the overall request is permitted via redaction, replace the
           // cell with a placeholder.
@@ -214,7 +221,8 @@ function buildDlpRangeIndex(ref, records) {
             existing ? maxClassification(existing, record.classification) : record.classification,
           );
         } else {
-          fallbackRecords.push(record);
+          // Table/columnId selectors require table metadata to evaluate; AiContextManager's cell refs
+          // do not include table context, so these selectors cannot apply and are ignored.
         }
         break;
       }
@@ -243,7 +251,7 @@ function buildDlpRangeIndex(ref, records) {
         break;
       }
       default: {
-        fallbackRecords.push(record);
+        // Unknown selector scope: ignore (selectorAppliesToCell would treat it as non-matching).
         break;
       }
     }
