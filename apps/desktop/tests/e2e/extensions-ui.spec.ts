@@ -144,9 +144,9 @@ test.describe("Extensions UI integration", () => {
       "webview should inject a restrictive CSP meta tag",
     ).toHaveCount(1);
     await expect(
-      frame.locator('script[src^="data:text/javascript"]'),
+      frame.locator('script[src^="data:text/javascript"]').first(),
       "webview should inject a hardening script via a data: URL (not inline)",
-    ).toHaveCount(1);
+    ).toBeAttached();
     const cspContent = await frame.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute("content");
     expect(cspContent).toContain("default-src 'none'");
     expect(cspContent).toContain("connect-src 'none'");
@@ -160,6 +160,25 @@ test.describe("Extensions UI integration", () => {
 
     const webviewFrame = await iframeHandle!.contentFrame();
     expect(webviewFrame, "expected webview iframe to have a content frame").not.toBeNull();
+
+    const hasHardeningDataScript = await webviewFrame!.evaluate(() => {
+      try {
+        const scripts = Array.from(document.querySelectorAll('script[src^="data:text/javascript"]'));
+        return scripts.some((script) => {
+          const src = script.getAttribute("src") ?? "";
+          const comma = src.indexOf(",");
+          if (comma === -1) return false;
+          try {
+            return decodeURIComponent(src.slice(comma + 1)).includes("__formulaWebviewSandbox");
+          } catch {
+            return false;
+          }
+        });
+      } catch {
+        return false;
+      }
+    });
+    expect(hasHardeningDataScript, "webview should include a hardening data: script").toBe(true);
 
     // Ensure the document lifecycle has advanced far enough that our simulated Tauri injection
     // (DOMContentLoaded/load) and the hardening script's re-scrub passes have both executed.
