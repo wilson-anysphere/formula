@@ -662,6 +662,7 @@ impl AppState {
         new_origin_xlsx_bytes: Option<Arc<[u8]>>,
     ) -> Result<(), AppStateError> {
         let requested_path = new_path.clone();
+        let is_real_save = requested_path.is_some() || new_origin_xlsx_bytes.is_some();
         let workbook = self
             .workbook
             .as_mut()
@@ -693,8 +694,10 @@ impl AppState {
         // subsequent edits are tracked against this saved state (not the previously opened or
         // previously saved workbook bytes).
         workbook.cell_input_baseline.clear();
-        workbook.original_print_settings = workbook.print_settings.clone();
-        workbook.original_power_query_xml = workbook.power_query_xml.clone();
+        if is_real_save {
+            workbook.original_print_settings = workbook.print_settings.clone();
+            workbook.original_power_query_xml = workbook.power_query_xml.clone();
+        }
         for sheet in &mut workbook.sheets {
             sheet.clear_dirty_cells();
         }

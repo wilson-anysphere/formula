@@ -24,8 +24,11 @@ type StorageLike = { getItem(key: string): string | null; setItem(key: string, v
 type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
 function getTauriInvokeOrNull(): TauriInvoke | null {
-  const invoke = (globalThis as any)?.__TAURI__?.core?.invoke as TauriInvoke | undefined;
-  if (!invoke || typeof invoke !== "function") return null;
+  // Prefer a host-provided queued invoke (set by the desktop entrypoint) so writes
+  // like `power_query_state_set` cannot race ahead of pending workbook edits/saves.
+  const invoke = ((globalThis as any).__FORMULA_WORKBOOK_INVOKE__ ??
+    (globalThis as any).__TAURI__?.core?.invoke) as TauriInvoke | undefined;
+  if (typeof invoke !== "function") return null;
   return invoke;
 }
 
