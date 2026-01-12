@@ -27,10 +27,15 @@ async function waitForCell(documentController, sheetId, coord, expected) {
 async function waitForCellStyle(documentController, sheetId, coord, expectedStyle) {
   await waitForCondition(() => {
     const cell = documentController.getCell(sheetId, coord);
-    if (expectedStyle == null) return cell.styleId === 0;
-    if (cell.styleId === 0) return false;
+    const style =
+      typeof documentController.getCellFormat === "function"
+        ? documentController.getCellFormat(sheetId, coord)
+        : documentController.styleTable.get(cell.styleId);
+    if (expectedStyle == null) {
+      return !style || (typeof style === "object" && Object.keys(style).length === 0);
+    }
     try {
-      assert.deepEqual(documentController.styleTable.get(cell.styleId), expectedStyle);
+      assert.deepEqual(style, expectedStyle);
       return true;
     } catch {
       return false;

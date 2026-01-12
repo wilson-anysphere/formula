@@ -476,6 +476,16 @@ export function bindYjsToDocumentController(options) {
   }
 
   /**
+   * @param {any[]} deltas
+   */
+  function enqueueSheetFormatWrite(deltas) {
+    const snapshot = Array.from(deltas ?? []);
+    sheetWriteChain = sheetWriteChain.then(() => applyDocumentFormatDeltas(snapshot)).catch((err) => {
+      console.error(err);
+    });
+  }
+
+  /**
    * @param {string} canonicalKey
    * @param {string} rawKey
    */
@@ -742,6 +752,93 @@ export function bindYjsToDocumentController(options) {
   }
 
   /**
+   * Read a single metadata field from a Yjs sheet entry (supports both Y.Maps and
+   * plain-object sheet entries).
+   *
+   * @param {any} sheetEntry
+   * @param {string} key
+   * @returns {any}
+   */
+  function readSheetEntryField(sheetEntry, key) {
+    const sheetMap = getYMap(sheetEntry);
+    if (sheetMap) return sheetMap.get(key);
+    if (isRecord(sheetEntry)) return sheetEntry[key];
+    return undefined;
+  }
+
+  /**
+   * @param {any} raw
+   * @returns {Record<string, any> | null}
+   */
+  function normalizeFormatObject(raw) {
+    const json = yjsValueToJson(raw);
+    if (!isRecord(json)) return null;
+    return json;
+  }
+
+  /**
+   * @param {any} raw
+   * @returns {number}
+   */
+  function styleIdFromYjsFormat(raw) {
+    const format = normalizeFormatObject(raw);
+    if (format == null) return 0;
+    return documentController.styleTable.intern(format);
+  }
+
+  /**
+   * Normalize a sparse row/col format map into a `Map<index, styleId>`.
+   *
+   * Supported encodings:
+   * - Y.Map / object: `{ "12": { ...format... } }`
+   * - arrays: `[{ row: 12, format: {...} }, ...]` / `[{ col: 3, format: {...} }, ...]`
+   * - tuple arrays: `[[12, {...format...}], ...]`
+   *
+   * @param {any} raw
+   * @param {"row" | "col"} axis
+   * @returns {Map<number, number>}
+   */
+  function readSparseStyleIds(raw, axis) {
+    /** @type {Map<number, number>} */
+    const out = new Map();
+    const json = yjsValueToJson(raw);
+    if (json == null) return out;
+
+    if (Array.isArray(json)) {
+      for (const entry of json) {
+        let index;
+        let format;
+        if (Array.isArray(entry)) {
+          index = entry[0];
+          format = entry[1];
+        } else if (isRecord(entry)) {
+          index = entry[axis] ?? entry.index;
+          format = entry.format ?? entry.style ?? entry.value;
+        } else {
+          continue;
+        }
+
+        const idx = Number(index);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        const styleId = styleIdFromYjsFormat(format);
+        if (styleId !== 0) out.set(idx, styleId);
+      }
+      return out;
+    }
+
+    if (isRecord(json)) {
+      for (const [key, value] of Object.entries(json)) {
+        const idx = Number(key);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        const styleId = styleIdFromYjsFormat(value);
+        if (styleId !== 0) out.set(idx, styleId);
+      }
+    }
+
+    return out;
+  }
+
+  /**
    * @param {string} sheetId
    * @returns {Array<{ index: number, entry: any, isLocal: boolean }>}
    */
@@ -796,39 +893,83 @@ export function bindYjsToDocumentController(options) {
     if (!changedSheetIds || changedSheetIds.size === 0) return;
 
     /** @type {any[]} */
-    const deltas = [];
+    const sheetViewDeltas = [];
+    /** @type {any[]} */
+    const formatDeltas = [];
 
     for (const sheetId of changedSheetIds) {
       if (!sheetId) continue;
 
       const found = findYjsSheetEntryById(sheetId);
-      const after = readSheetViewFromYjsSheetEntry(found?.entry);
+      const sheetEntry = found?.entry;
+
+      const after = readSheetViewFromYjsSheetEntry(sheetEntry);
       const before = documentController.getSheetView(sheetId);
 
-      if (sheetViewStateEquals(before, after)) continue;
+      if (!sheetViewStateEquals(before, after)) {
+        sheetViewDeltas.push({ sheetId, before, after });
+      }
 
-      deltas.push({ sheetId, before, after });
+      // Layered formats (sheet/row/col defaults) are stored sparsely on sheet metadata.
+      const sheetModel = documentController?.model?.sheets?.get?.(sheetId) ?? null;
+      const beforeDefaultStyleId = Number.isInteger(sheetModel?.defaultStyleId) ? sheetModel.defaultStyleId : 0;
+      const afterDefaultStyleId = styleIdFromYjsFormat(readSheetEntryField(sheetEntry, "defaultFormat"));
+      if (beforeDefaultStyleId !== afterDefaultStyleId) {
+        formatDeltas.push({
+          sheetId,
+          layer: "sheet",
+          beforeStyleId: beforeDefaultStyleId,
+          afterStyleId: afterDefaultStyleId,
+        });
+      }
+
+      const beforeRowStyles = sheetModel?.rowStyleIds instanceof Map ? sheetModel.rowStyleIds : new Map();
+      const beforeColStyles = sheetModel?.colStyleIds instanceof Map ? sheetModel.colStyleIds : new Map();
+      const afterRowStyles = readSparseStyleIds(readSheetEntryField(sheetEntry, "rowFormats"), "row");
+      const afterColStyles = readSparseStyleIds(readSheetEntryField(sheetEntry, "colFormats"), "col");
+
+      const rowKeys = new Set([...beforeRowStyles.keys(), ...afterRowStyles.keys()]);
+      for (const row of rowKeys) {
+        const beforeStyleId = beforeRowStyles.get(row) ?? 0;
+        const afterStyleId = afterRowStyles.get(row) ?? 0;
+        if (beforeStyleId === afterStyleId) continue;
+        formatDeltas.push({ sheetId, layer: "row", index: row, beforeStyleId, afterStyleId });
+      }
+
+      const colKeys = new Set([...beforeColStyles.keys(), ...afterColStyles.keys()]);
+      for (const col of colKeys) {
+        const beforeStyleId = beforeColStyles.get(col) ?? 0;
+        const afterStyleId = afterColStyles.get(col) ?? 0;
+        if (beforeStyleId === afterStyleId) continue;
+        formatDeltas.push({ sheetId, layer: "col", index: col, beforeStyleId, afterStyleId });
+      }
     }
 
-    if (deltas.length === 0) return;
+    if (sheetViewDeltas.length === 0 && formatDeltas.length === 0) return;
 
     applyingRemote = true;
     try {
-      if (typeof documentController.applyExternalSheetViewDeltas === "function") {
-        documentController.applyExternalSheetViewDeltas(deltas, { source: "collab" });
-      } else {
-        // Best-effort fallback: apply the full view state via `setFrozen`/`setColWidth`/`setRowHeight`.
-        // This is not perfectly atomic but preserves reasonable behavior for older controllers.
-        for (const delta of deltas) {
-          const view = delta.after ?? emptySheetViewState();
-          documentController.setFrozen(delta.sheetId, view.frozenRows, view.frozenCols);
-          for (const [col, width] of Object.entries(view.colWidths ?? {})) {
-            documentController.setColWidth(delta.sheetId, Number(col), width);
-          }
-          for (const [row, height] of Object.entries(view.rowHeights ?? {})) {
-            documentController.setRowHeight(delta.sheetId, Number(row), height);
+      if (sheetViewDeltas.length > 0) {
+        if (typeof documentController.applyExternalSheetViewDeltas === "function") {
+          documentController.applyExternalSheetViewDeltas(sheetViewDeltas, { source: "collab" });
+        } else {
+          // Best-effort fallback: apply the full view state via `setFrozen`/`setColWidth`/`setRowHeight`.
+          // This is not perfectly atomic but preserves reasonable behavior for older controllers.
+          for (const delta of sheetViewDeltas) {
+            const view = delta.after ?? emptySheetViewState();
+            documentController.setFrozen(delta.sheetId, view.frozenRows, view.frozenCols);
+            for (const [col, width] of Object.entries(view.colWidths ?? {})) {
+              documentController.setColWidth(delta.sheetId, Number(col), width);
+            }
+            for (const [row, height] of Object.entries(view.rowHeights ?? {})) {
+              documentController.setRowHeight(delta.sheetId, Number(row), height);
+            }
           }
         }
+      }
+
+      if (formatDeltas.length > 0 && typeof documentController.applyExternalFormatDeltas === "function") {
+        documentController.applyExternalFormatDeltas(formatDeltas, { source: "collab" });
       }
     } finally {
       applyingRemote = false;
@@ -947,8 +1088,14 @@ export function bindYjsToDocumentController(options) {
    */
   const handleSheetsDeepChange = (events, transaction) => {
     if (!events || events.length === 0) return;
-    const origin = transaction?.origin ?? null;
-    if (localOrigins.has(origin)) return;
+    // Avoid processing the deep event that immediately follows a local
+    // DocumentController -> Yjs write we initiated.
+    //
+    // Note: we intentionally do NOT blanket-suppress by `transaction.origin`
+    // (even if it's "local") because CollabSession and other integrations often
+    // reuse the same origin token for programmatic local mutations (e.g. branch
+    // checkout/merge/restore) that *must* update the DocumentController.
+    if (applyingLocal) return;
 
     /** @type {Set<string>} */
     const changed = new Set();
@@ -958,16 +1105,6 @@ export function bindYjsToDocumentController(options) {
       const path = event?.path;
       const touchesView = Array.isArray(path) && path.includes("view");
       const changes = event?.changes?.keys;
-      const hasPotentialViewChange = Boolean(
-        changes &&
-          (touchesView ||
-            changes.has("view") ||
-            changes.has("id") ||
-            changes.has("frozenRows") ||
-            changes.has("frozenCols") ||
-            changes.has("colWidths") ||
-            changes.has("rowHeights")),
-      );
 
       // Array-level changes (insert/delete/move) don't expose `changes.keys`. This can
       // happen for the root `sheets` array, or for nested arrays under `sheet.view`.
@@ -988,8 +1125,6 @@ export function bindYjsToDocumentController(options) {
         needsFullScan = true;
         continue;
       }
-
-      if (!hasPotentialViewChange) continue;
 
       // If the event target is a sheet map, read its id directly.
       const targetId = coerceString(event?.target?.get?.("id"));
@@ -1251,9 +1386,194 @@ export function bindYjsToDocumentController(options) {
     };
 
     if (typeof undoService?.transact === "function") {
-      undoService.transact(apply);
+      applyingLocal = true;
+      try {
+        undoService.transact(apply);
+      } finally {
+        applyingLocal = false;
+      }
     } else {
-      ydoc.transact(apply, binderOrigin);
+      applyingLocal = true;
+      try {
+        ydoc.transact(apply, binderOrigin);
+      } finally {
+        applyingLocal = false;
+      }
+    }
+  }
+
+  /**
+   * Apply DocumentController layered format deltas (sheet/row/col defaults) into Yjs.
+   *
+   * Canonical storage format:
+   *   sheets[i].set("defaultFormat", styleObject)
+   *   sheets[i].set("rowFormats", Y.Map<string,rowIndex> -> styleObject)
+   *   sheets[i].set("colFormats", Y.Map<string,colIndex> -> styleObject)
+   *
+   * Values are stored sparsely:
+   * - missing key means "no default" (style id 0)
+   * - row/col keys are deleted when clearing
+   * - empty rowFormats/colFormats maps are removed from the sheet entry
+   *
+   * @param {any[]} deltas
+   */
+  function applyDocumentFormatDeltas(deltas) {
+    if (!deltas || deltas.length === 0) return;
+
+    /** @type {Array<{ sheetId: string, layer: string, index?: number, style: any | null }>} */
+    const prepared = [];
+
+    for (const delta of deltas) {
+      const sheetId = delta?.sheetId;
+      if (typeof sheetId !== "string" || sheetId === "") continue;
+      const layer = delta?.layer;
+      if (layer !== "sheet" && layer !== "row" && layer !== "col") continue;
+
+      const afterStyleId = Number.isInteger(delta?.afterStyleId) ? delta.afterStyleId : 0;
+      const style = afterStyleId === 0 ? null : documentController.styleTable.get(afterStyleId);
+
+      if (layer === "row" || layer === "col") {
+        const index = Number(delta?.index);
+        if (!Number.isInteger(index) || index < 0) continue;
+        prepared.push({ sheetId, layer, index, style });
+      } else {
+        prepared.push({ sheetId, layer, style });
+      }
+    }
+
+    if (prepared.length === 0) return;
+
+    /**
+     * If we see duplicate sheet entries for the same id (can happen while two clients
+     * concurrently initialize an empty workbook), apply format updates to *all* matching
+     * entries so schema normalization doesn't drop the newly written formatting.
+     *
+     * @param {string} sheetId
+     * @returns {Y.Map<any>[]}
+     */
+    const ensureYjsSheetMaps = (sheetId) => {
+      let foundEntries = findYjsSheetEntriesById(sheetId);
+
+      if (foundEntries.length === 0) {
+        const sheetMap = new Y.Map();
+        sheetMap.set("id", sheetId);
+        sheetMap.set("name", sheetId);
+        sheets.push([sheetMap]);
+        foundEntries = [{ index: sheets.length - 1, entry: sheetMap, isLocal: true }];
+      }
+
+      /** @type {Y.Map<any>[]} */
+      const out = [];
+
+      for (const found of foundEntries) {
+        let sheetMap = getYMap(found?.entry);
+        if (!sheetMap) {
+          sheetMap = new Y.Map();
+          sheetMap.set("id", sheetId);
+
+          const name = coerceString(found?.entry?.get?.("name") ?? found?.entry?.name) ?? sheetId;
+          sheetMap.set("name", name);
+
+          if (isRecord(found?.entry)) {
+            const keys = Object.keys(found.entry).sort();
+            for (const key of keys) {
+              if (key === "id" || key === "name") continue;
+              const value = found.entry[key];
+              try {
+                sheetMap.set(key, structuredClone(value));
+              } catch {
+                sheetMap.set(key, value);
+              }
+            }
+          }
+
+          sheets.delete(found.index, 1);
+          sheets.insert(found.index, [sheetMap]);
+        }
+
+        out.push(sheetMap);
+      }
+
+      return out;
+    };
+
+    /**
+     * @param {Y.Map<any>} sheetMap
+     * @param {string} key
+     * @returns {Y.Map<any>}
+     */
+    const ensureNestedMap = (sheetMap, key) => {
+      const existing = sheetMap.get(key);
+      const existingMap = getYMap(existing);
+      if (existingMap) return existingMap;
+      const next = new Y.Map();
+      if (isRecord(existing)) {
+        const keys = Object.keys(existing).sort();
+        for (const k of keys) {
+          next.set(k, existing[k]);
+        }
+      }
+      sheetMap.set(key, next);
+      return next;
+    };
+
+    /** @type {Map<string, Array<{ sheetId: string, layer: string, index?: number, style: any | null }>>} */
+    const preparedBySheet = new Map();
+    for (const item of prepared) {
+      let list = preparedBySheet.get(item.sheetId);
+      if (!list) {
+        list = [];
+        preparedBySheet.set(item.sheetId, list);
+      }
+      list.push(item);
+    }
+
+    const apply = () => {
+      for (const [sheetId, items] of preparedBySheet.entries()) {
+        const sheetMaps = ensureYjsSheetMaps(sheetId);
+        for (const sheetMap of sheetMaps) {
+          for (const item of items) {
+            const { layer, index, style } = item;
+
+            if (layer === "sheet") {
+              if (style == null) sheetMap.delete("defaultFormat");
+              else sheetMap.set("defaultFormat", style);
+              continue;
+            }
+
+            const mapKey = layer === "row" ? "rowFormats" : "colFormats";
+            const idxKey = String(index);
+            const existing = getYMap(sheetMap.get(mapKey));
+
+            if (style == null) {
+              if (existing) {
+                existing.delete(idxKey);
+                if (existing.size === 0) sheetMap.delete(mapKey);
+              }
+              continue;
+            }
+
+            const ensured = existing ?? ensureNestedMap(sheetMap, mapKey);
+            ensured.set(idxKey, style);
+          }
+        }
+      }
+    };
+
+    if (typeof undoService?.transact === "function") {
+      applyingLocal = true;
+      try {
+        undoService.transact(apply);
+      } finally {
+        applyingLocal = false;
+      }
+    } else {
+      applyingLocal = true;
+      try {
+        ydoc.transact(apply, binderOrigin);
+      } finally {
+        applyingLocal = false;
+      }
     }
   }
 
@@ -1303,31 +1623,98 @@ export function bindYjsToDocumentController(options) {
   }
 
   /**
+   * Determine whether a layered format edit should be allowed to propagate into Yjs.
+   *
+   * For role-based permissions, we conservatively reject sheet/row/col style edits if they
+   * intersect *any* restricted range the user cannot edit.
+   *
+   * @param {any} delta
+   * @returns {boolean}
+   */
+  function canEditFormatDelta(delta) {
+    if (!editGuard) return true;
+    const sheetId = typeof delta?.sheetId === "string" ? delta.sheetId : null;
+    if (!sheetId) return false;
+
+    const layer = delta?.layer;
+    if (layer !== "sheet" && layer !== "row" && layer !== "col") return false;
+
+    const indexRaw = delta?.index;
+    const index = Number(indexRaw);
+    if ((layer === "row" || layer === "col") && (!Number.isInteger(index) || index < 0)) return false;
+
+    const restrictions =
+      permissions && typeof permissions === "object" && Array.isArray(permissions.restrictions) ? permissions.restrictions : null;
+
+    // Role-based restrictions: ensure we don't touch any protected ranges.
+    if (restrictions && restrictions.length > 0) {
+      for (const restriction of restrictions) {
+        const range = restriction?.range ?? restriction;
+        const restrictionSheetId = coerceString(
+          range?.sheetId ?? range?.sheetName ?? restriction?.sheetId ?? restriction?.sheetName,
+        );
+        if (restrictionSheetId && restrictionSheetId !== sheetId) continue;
+
+        const startRow = Number(range?.startRow);
+        const endRow = Number(range?.endRow);
+        const startCol = Number(range?.startCol);
+        const endCol = Number(range?.endCol);
+        if (!Number.isInteger(startRow) || !Number.isInteger(endRow) || startRow < 0 || endRow < startRow) continue;
+        if (!Number.isInteger(startCol) || !Number.isInteger(endCol) || startCol < 0 || endCol < startCol) continue;
+
+        let intersects = true;
+        if (layer === "row") intersects = index >= startRow && index <= endRow;
+        else if (layer === "col") intersects = index >= startCol && index <= endCol;
+        if (!intersects) continue;
+
+        const probe = {
+          sheetId,
+          row: layer === "row" ? index : startRow,
+          col: layer === "col" ? index : startCol,
+        };
+        if (!editGuard(probe)) return false;
+      }
+      return true;
+    }
+
+    // Fallback for custom permission functions: probe a representative cell.
+    if (layer === "row") return editGuard({ sheetId, row: index, col: 0 });
+    if (layer === "col") return editGuard({ sheetId, row: 0, col: index });
+    return editGuard({ sheetId, row: 0, col: 0 });
+  }
+
+  /**
    * @param {any} payload
    */
   const handleDocumentChange = (payload) => {
     if (applyingRemote) return;
     const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
     const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
+    const formatDeltas = Array.isArray(payload?.formatDeltas) ? payload.formatDeltas : [];
 
     if (sheetViewDeltas.length > 0) {
       enqueueSheetViewWrite(sheetViewDeltas);
     }
 
-    if (deltas.length === 0) return;
+    if (deltas.length === 0 && formatDeltas.length === 0) return;
 
     const needsEncryptionGuard = Boolean(encryption || hasEncryptedCells);
     if (!editGuard && !needsEncryptionGuard) {
-      enqueueWrite(deltas);
+      if (formatDeltas.length > 0) enqueueSheetFormatWrite(formatDeltas);
+      if (deltas.length > 0) enqueueWrite(deltas);
       return;
     }
 
     /** @type {any[]} */
     const allowed = [];
     /** @type {any[]} */
+    const allowedFormatDeltas = [];
+    /** @type {any[]} */
     const rejected = [];
     /** @type {any[]} */
     const deniedInverse = [];
+    /** @type {any[]} */
+    const deniedInverseFormats = [];
 
     for (const delta of deltas) {
       const cellRef = { sheetId: delta.sheetId, row: delta.row, col: delta.col };
@@ -1354,7 +1741,24 @@ export function bindYjsToDocumentController(options) {
       }
     }
 
+    for (const delta of formatDeltas) {
+      if (canEditFormatDelta(delta)) {
+        allowedFormatDeltas.push(delta);
+      } else {
+        rejected.push(delta);
+        const inv = {
+          sheetId: delta.sheetId,
+          layer: delta.layer,
+          beforeStyleId: delta.afterStyleId,
+          afterStyleId: delta.beforeStyleId,
+        };
+        if (delta.index != null) inv.index = delta.index;
+        deniedInverseFormats.push(inv);
+      }
+    }
+
     if (allowed.length > 0) enqueueWrite(allowed);
+    if (allowedFormatDeltas.length > 0) enqueueSheetFormatWrite(allowedFormatDeltas);
 
     if (rejected.length > 0 && typeof onEditRejected === "function") {
       try {
@@ -1364,27 +1768,33 @@ export function bindYjsToDocumentController(options) {
       }
     }
 
-    if (deniedInverse.length > 0) {
+    if (deniedInverse.length > 0 || deniedInverseFormats.length > 0) {
       // Keep local UI state aligned with the shared document when a user attempts to
       // edit a restricted cell.
       applyingRemote = true;
       try {
-        if (typeof documentController.applyExternalDeltas === "function") {
-          documentController.applyExternalDeltas(deniedInverse, { recalc: false, source: "collab" });
-        } else {
-          const prevCanEdit = "canEditCell" in documentController ? documentController.canEditCell : undefined;
-          if (prevCanEdit !== undefined) documentController.canEditCell = null;
-          try {
-            for (const delta of deniedInverse) {
-              if (delta.after.formula != null) {
-                documentController.setCellFormula(delta.sheetId, { row: delta.row, col: delta.col }, delta.after.formula);
-              } else {
-                documentController.setCellValue(delta.sheetId, { row: delta.row, col: delta.col }, delta.after.value);
+        if (deniedInverse.length > 0) {
+          if (typeof documentController.applyExternalDeltas === "function") {
+            documentController.applyExternalDeltas(deniedInverse, { recalc: false, source: "collab" });
+          } else {
+            const prevCanEdit = "canEditCell" in documentController ? documentController.canEditCell : undefined;
+            if (prevCanEdit !== undefined) documentController.canEditCell = null;
+            try {
+              for (const delta of deniedInverse) {
+                if (delta.after.formula != null) {
+                  documentController.setCellFormula(delta.sheetId, { row: delta.row, col: delta.col }, delta.after.formula);
+                } else {
+                  documentController.setCellValue(delta.sheetId, { row: delta.row, col: delta.col }, delta.after.value);
+                }
               }
+            } finally {
+              if (prevCanEdit !== undefined) documentController.canEditCell = prevCanEdit;
             }
-          } finally {
-            if (prevCanEdit !== undefined) documentController.canEditCell = prevCanEdit;
           }
+        }
+
+        if (deniedInverseFormats.length > 0 && typeof documentController.applyExternalFormatDeltas === "function") {
+          documentController.applyExternalFormatDeltas(deniedInverseFormats, { source: "collab" });
         }
       } finally {
         applyingRemote = false;
