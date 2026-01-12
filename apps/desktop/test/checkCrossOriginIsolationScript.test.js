@@ -13,14 +13,14 @@ test("pnpm check:coi script builds via cargo_agent and targets the desktop tauri
   // Must target the workspace package (not the lib crate name).
   assert.match(
     src,
-    /formula-desktop-tauri/,
-    "expected COI smoke-check script to reference the Cargo package 'formula-desktop-tauri'",
+    /const\s+DESKTOP_TAURI_PACKAGE\s*=\s*["']formula-desktop-tauri["']\s*;/,
+    "expected COI smoke-check script to set DESKTOP_TAURI_PACKAGE to 'formula-desktop-tauri'",
   );
 
   // Must build via the repo's agent-safe wrapper by default.
   assert.match(
     src,
-    /scripts\/cargo_agent\.sh/,
+    /run\(\s*["']bash["']\s*,\s*\[\s*["']scripts\/cargo_agent\.sh["']/,
     "expected COI smoke-check script to invoke scripts/cargo_agent.sh",
   );
 
@@ -49,8 +49,19 @@ test("pnpm check:coi script builds via cargo_agent and targets the desktop tauri
   // On Linux we need to support headless CI, so ensure the script is aware of xvfb-run-safe.sh.
   assert.match(
     src,
-    /xvfb-run-safe\.sh/,
+    /process\.platform\s*===\s*["']linux["'][^]*xvfb-run-safe\.sh/,
     "expected COI smoke-check script to reference scripts/xvfb-run-safe.sh for Linux/headless runs",
   );
-});
 
+  // Windows compatibility: allow falling back to `cargo` when `bash` isn't available.
+  assert.match(
+    src,
+    /process\.platform\s*!==\s*["']win32["'][^]*run\(\s*["']bash["']/,
+    "expected COI smoke-check script to use bash+cargo_agent.sh by default on non-Windows platforms",
+  );
+  assert.match(
+    src,
+    /falling back to `cargo`[^]*run\(\s*["']cargo["']/,
+    "expected COI smoke-check script to fall back to `cargo` on Windows when bash is unavailable",
+  );
+});
