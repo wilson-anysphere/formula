@@ -1899,6 +1899,8 @@ fn build_single_sheet_workbook_stream_biff5(
 
     push_record(
         &mut globals,
+        // Note: BIFF5 BOF record ids vary across producers; calamine accepts 0x0809 here when the
+        // payload version is 0x0500, so we keep using the BIFF8-style id for test fixtures.
         RECORD_BOF,
         &bof_biff5(BOF_DT_WORKBOOK_GLOBALS),
     );

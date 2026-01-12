@@ -271,7 +271,12 @@ fn import_xls_path_with_biff_reader(
     // avoid masking out the NAME records entirely.
     let mut workbook: Xls<_> = match workbook_stream.as_deref() {
         Some(stream) => {
-            let sanitized = sanitize_biff8_continued_name_records_for_calamine(stream);
+            // Calamine's continued-NAME panic workaround only applies to BIFF8 NAME records. Avoid
+            // patching BIFF5 streams (different NAME layout) to keep `.xls` import best-effort.
+            let sanitized = match biff_version.unwrap_or_else(|| biff::detect_biff_version(stream)) {
+                biff::BiffVersion::Biff8 => sanitize_biff8_continued_name_records_for_calamine(stream),
+                biff::BiffVersion::Biff5 => None,
+            };
             let xls_bytes = build_in_memory_xls(sanitized.as_deref().unwrap_or(stream))?;
             Xls::new(Cursor::new(xls_bytes))?
         }
