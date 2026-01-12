@@ -222,6 +222,17 @@ class PermissionManager {
   _save() {
     if (!this._storage) return;
     try {
+      // When the store becomes empty, remove the key entirely so uninstall/reset flows leave a
+      // clean slate in storage (avoids persisting a noisy "{}" record).
+      if (Object.keys(this._data).length === 0) {
+        if (typeof this._storage.removeItem === "function") {
+          this._storage.removeItem(this._storageKey);
+        } else {
+          this._storage.setItem(this._storageKey, JSON.stringify(this._data));
+        }
+        return;
+      }
+
       this._storage.setItem(this._storageKey, JSON.stringify(this._data));
     } catch {
       // Ignore storage failures (quota, disabled localStorage, etc.). Permissions

@@ -237,6 +237,10 @@ test("browser PermissionManager: resetAllPermissions clears all extensions", asy
   await pm.resetAllPermissions();
   assert.deepEqual(await pm.getGrantedPermissions("pub.one"), {});
   assert.deepEqual(await pm.getGrantedPermissions("pub.two"), {});
+
+  // When the permissions store is empty, PermissionManager should remove the persisted key entirely
+  // so reset/uninstall flows leave a clean slate.
+  assert.equal(storage.getItem(storageKey), null);
 });
 
 test("browser PermissionManager: accepts object-form declared permissions", async () => {
