@@ -4,8 +4,11 @@
 {"name":"quoted_sheet_range_prefix","rgce_hex":"3A 00 00 00 00 00 00 00 C0","expected":"'Sheet 1:Sheet 2'!A1","ctx":{"extern_sheets":[{"first":"Sheet 1","last":"Sheet 2","ixti":0}]}}
 {"name":"union_inside_function_arg","rgce_hex":"24 00 00 00 00 00 C0 24 00 00 00 00 01 C0 10 22 01 04 00","expected":"SUM((A1,B1))"}
 {"name":"ptg_memfunc_skips_payload","rgce_hex":"1E 01 00 29 03 00 1E 02 00","expected":"1"}
+{"name":"ptg_memfunc_value_class_skips_payload","rgce_hex":"1E 01 00 49 03 00 1E 02 00","expected":"1"}
 {"name":"ptg_memarea_skips_payload","rgce_hex":"1E 01 00 26 03 00 1E 02 00","expected":"1"}
 {"name":"ptg_array_error_constant","rgce_hex":"20 00 00 00 00 00 00 00","rgcb_hex":"00 00 00 00 10 07","expected":"{#DIV/0!}"}
+{"name":"ptg_array_mixed_types","rgce_hex":"20 00 00 00 00 00 00 00","rgcb_hex":"01 00 01 00 01 00 00 00 00 00 00 F0 3F 02 02 00 48 00 69 00 04 01 10 2A","expected":"{1,\"Hi\";TRUE,#N/A}"}
+{"name":"ptg_array_string_escapes_quotes","rgce_hex":"20 00 00 00 00 00 00 00","rgcb_hex":"00 00 00 00 02 0C 00 48 00 65 00 20 00 73 00 61 00 69 00 64 00 20 00 22 00 48 00 69 00 22 00","expected":"{\"He said \"\"Hi\"\"\"}"}
 {"name":"ptg_name_workbook","rgce_hex":"23 01 00 00 00 00 00","expected":"MyNamedRange","ctx":{"workbook_names":[{"name":"MyNamedRange","index":1}]}}
 {"name":"ptg_name_sheet_scoped","rgce_hex":"23 02 00 00 00 00 00","expected":"'My Sheet'!MyLocalName","ctx":{"sheet_names":[{"sheet":"My Sheet","name":"MyLocalName","index":2}]}}
 {"name":"ptg_namev_sheet_scoped_requires_at","rgce_hex":"43 03 00 00 00 00 00","expected":"@'My Sheet'!MyLocalRange","ctx":{"sheet_names":[{"sheet":"My Sheet","name":"MyLocalRange","index":3}]}}
