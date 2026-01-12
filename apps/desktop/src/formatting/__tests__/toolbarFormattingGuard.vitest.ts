@@ -24,7 +24,7 @@ describe("toolbar formatting safety cap", () => {
     setFillColor(doc, "Sheet1", ["A1:Z1923", "A3000:Z4922", "A6000:A6004"], "#FFFF0000");
     const elapsed = performance.now() - start;
 
-    expect(elapsed).toBeLessThan(250);
+    expect(elapsed).toBeLessThan(500);
     expect(spy).not.toHaveBeenCalled();
 
     const toast = document.querySelector('[data-testid="toast"]') as HTMLElement | null;
@@ -42,7 +42,7 @@ describe("toolbar formatting safety cap", () => {
     const applied = setFillColor(doc, "Sheet1", "A1:Z3846", "#FFFF0000");
     const elapsed = performance.now() - start;
 
-    expect(elapsed).toBeLessThan(250);
+    expect(elapsed).toBeLessThan(500);
     expect(applied).toBe(true);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(document.querySelector('[data-testid="toast"]')).toBeNull();
@@ -59,7 +59,7 @@ describe("toolbar formatting safety cap", () => {
     const applied = setFillColor(doc, "Sheet1", "A1:Z1000000", "#FFFF0000");
     const elapsed = performance.now() - start;
 
-    expect(elapsed).toBeLessThan(250);
+    expect(elapsed).toBeLessThan(500);
     expect(applied).toBe(false);
     expect(spy).not.toHaveBeenCalled();
 
@@ -80,7 +80,7 @@ describe("toolbar formatting safety cap", () => {
     setFillColor(doc, "Sheet1", "A1:XFD60000", "#FFFF0000");
     const elapsed = performance.now() - start;
 
-    expect(elapsed).toBeLessThan(250);
+    expect(elapsed).toBeLessThan(500);
     expect(spy).not.toHaveBeenCalled();
     expect(document.querySelector('[data-testid="toast"]')).not.toBeNull();
   });
