@@ -144,6 +144,34 @@ fn add_sheet_truncates_base_name_to_fit_two_digit_unique_suffix() {
 }
 
 #[test]
+fn add_sheet_truncates_unicode_base_name_to_fit_two_digit_unique_suffix() {
+    // Base is exactly 31 UTF-16 code units: 15 non-BMP chars (30 units) + "a" (1 unit).
+    let base = format!("{}a", "🙂".repeat(15));
+    assert_eq!(base.encode_utf16().count(), 31);
+
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet(base.clone());
+
+    // Seed single-digit disambiguations (" 2" .. " 9"). These are 2 UTF-16 units, so the base
+    // portion can use 29 units. Because the base starts with 15 emoji, truncation happens *before*
+    // we reach the trailing "a", so the disambiguated names are just 14 emojis + suffix.
+    for n in 2..=9 {
+        workbook.add_sheet(format!("{} {n}", "🙂".repeat(14)));
+    }
+
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    let added = state
+        .add_sheet(base, None, None, None)
+        .expect("expected add_sheet to succeed with a unique suffix");
+
+    // Suffix " 10" uses 3 UTF-16 code units, leaving 28 for the base; that's exactly 14 emojis.
+    assert_eq!(added.name, format!("{} 10", "🙂".repeat(14)));
+    assert_eq!(added.name.encode_utf16().count(), 31);
+}
+
+#[test]
 fn add_sheet_truncates_base_name_by_utf16_units_to_fit_unique_suffix() {
     // 🙂 counts as 2 UTF-16 code units in Excel; build an exactly-31-unit name.
     let long = format!("{}a", "🙂".repeat(15));
