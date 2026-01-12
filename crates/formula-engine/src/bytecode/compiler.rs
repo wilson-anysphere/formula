@@ -74,8 +74,20 @@ impl<'a> CompileCtx<'a> {
     fn compile_expr_inner(&mut self, expr: &Expr, allow_range: bool) {
         match expr {
             Expr::Literal(v) => {
+                // `Value::Missing` is used during lowering as a placeholder for syntactically blank
+                // arguments (e.g. `ADDRESS(1,1,,FALSE)`), but it must not be allowed to propagate as
+                // a general runtime value (e.g. via `IF(FALSE,1,)`).
+                //
+                // Treat literal `Missing` as a normal blank value during expression evaluation.
+                // `compile_func_arg` special-cases direct blank arguments and preserves `Missing`
+                // so functions that need to distinguish omitted args from blank cell values can
+                // still do so.
+                let v = match v {
+                    Value::Missing => Value::Empty,
+                    other => other.clone(),
+                };
                 let idx = self.program.consts.len() as u32;
-                self.program.consts.push(ConstValue::Value(v.clone()));
+                self.program.consts.push(ConstValue::Value(v));
                 self.program
                     .instrs
                     .push(Instruction::new(OpCode::PushConst, idx, 0));
@@ -476,6 +488,19 @@ impl<'a> CompileCtx<'a> {
     }
 
     fn compile_func_arg(&mut self, func: &Function, arg_idx: usize, arg: &Expr) {
+        // Preserve `Missing` for *direct* blank arguments so functions can distinguish a
+        // syntactically omitted argument from a blank cell value.
+        if matches!(arg, Expr::Literal(Value::Missing)) {
+            let idx = self.program.consts.len() as u32;
+            self.program
+                .consts
+                .push(ConstValue::Value(Value::Missing));
+            self.program
+                .instrs
+                .push(Instruction::new(OpCode::PushConst, idx, 0));
+            return;
+        }
+
         // Excel-style aggregate functions have a quirk: a cell reference passed directly as an
         // argument (e.g. `SUM(A1)`) is treated as a *reference* argument, not a scalar, which means
         // logical/text values in the referenced cell are ignored (unlike `SUM(TRUE)` / `SUM("5")`).

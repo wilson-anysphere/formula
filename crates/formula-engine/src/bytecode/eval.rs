@@ -125,6 +125,14 @@ impl Vm {
                     let argc = inst.b() as usize;
                     let start = self.stack.len().saturating_sub(argc);
                     let result = call_function(func, &self.stack[start..], grid, base, locale);
+                    // `Value::Missing` is an internal placeholder for syntactically blank arguments.
+                    // It must not escape as a runtime value result, otherwise downstream calls may
+                    // misinterpret it as an omitted argument and apply incorrect defaulting.
+                    let result = if matches!(result, Value::Missing) {
+                        Value::Empty
+                    } else {
+                        result
+                    };
                     self.stack.truncate(start);
                     self.stack.push(result);
                 }

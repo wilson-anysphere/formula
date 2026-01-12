@@ -3148,14 +3148,18 @@ fn bytecode_backend_distinguishes_missing_args_from_blank_cells_for_address() {
     engine
         .set_cell_formula("Sheet1", "B2", "=ADDRESS(1,1,A1,FALSE)")
         .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=ADDRESS(1,1,IF(FALSE,1,),FALSE)")
+        .unwrap();
 
     // Ensure both formulas compiled to bytecode.
-    assert_eq!(engine.bytecode_program_count(), 2);
+    assert_eq!(engine.bytecode_program_count(), 3);
 
     engine.recalculate_single_threaded();
 
     assert_engine_matches_ast(&engine, "=ADDRESS(1,1,,FALSE)", "B1");
     assert_engine_matches_ast(&engine, "=ADDRESS(1,1,A1,FALSE)", "B2");
+    assert_engine_matches_ast(&engine, "=ADDRESS(1,1,IF(FALSE,1,),FALSE)", "B3");
 
     // Regression: omitted abs_num defaults to 1, but a blank cell passed for abs_num should error.
     assert_ne!(
@@ -3164,6 +3168,13 @@ fn bytecode_backend_distinguishes_missing_args_from_blank_cells_for_address() {
     );
     assert_eq!(
         engine.get_cell_value("Sheet1", "B2"),
+        Value::Error(ErrorKind::Value)
+    );
+
+    // A blank *value* produced by an expression is not the same as an omitted argument; it should
+    // not trigger ADDRESS's defaulting behavior.
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B3"),
         Value::Error(ErrorKind::Value)
     );
 }
