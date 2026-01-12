@@ -683,6 +683,23 @@ fn odd_coupon_functions_coerce_frequency_like_excel() {
         other => panic!("expected #NUM! for ODDLPRICE frequency=FALSE (0), got {other:?}"),
     }
 
+    let oddl_blank_cell_freq =
+        "=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,A1,0)";
+    match sheet.eval(oddl_blank_cell_freq) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM! for ODDLPRICE frequency=<blank> (0), got {other:?}"),
+    }
+    let oddl_blank_arg_freq =
+        "=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,,0)";
+    match sheet.eval(oddl_blank_arg_freq) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => {
+            panic!("expected #NUM! for ODDLPRICE frequency=<explicit blank arg> (0), got {other:?}")
+        }
+    }
+
     let oddl_empty_string_freq =
         r#"=ODDLPRICE(DATE(2022,11,1),DATE(2023,3,1),DATE(2022,7,1),0.06,0.05,100,"",0)"#;
     match sheet.eval(oddl_empty_string_freq) {
