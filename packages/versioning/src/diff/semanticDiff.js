@@ -7,8 +7,25 @@ import { normalizeFormula } from "../formula/normalize.js";
  *
  * @typedef {{ cells: Map<string, Cell> }} SheetState
  *
- * @typedef {{ cell: CellRef, oldValue?: any, newValue?: any, oldFormula?: string | null, newFormula?: string | null }} CellChange
- * @typedef {{ oldLocation: CellRef, newLocation: CellRef, value: any, formula?: string | null }} MoveChange
+ * @typedef {{
+ *   cell: CellRef,
+ *   oldValue?: any,
+ *   newValue?: any,
+ *   oldFormula?: string | null,
+ *   newFormula?: string | null,
+ *   oldEncrypted?: boolean,
+ *   newEncrypted?: boolean,
+ *   oldKeyId?: string | null,
+ *   newKeyId?: string | null,
+ * }} CellChange
+ * @typedef {{
+ *   oldLocation: CellRef,
+ *   newLocation: CellRef,
+ *   value: any,
+ *   formula?: string | null,
+ *   encrypted?: boolean,
+ *   keyId?: string | null,
+ * }} MoveChange
  *
  * @typedef {{
  *   added: CellChange[],
@@ -56,6 +73,19 @@ function stableStringify(value) {
     return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+/**
+ * @param {Cell | undefined} cell
+ * @returns {{ encrypted: boolean, keyId: string | null }}
+ */
+function encryptionMeta(cell) {
+  if (!cell || !Object.prototype.hasOwnProperty.call(cell, "enc")) {
+    return { encrypted: false, keyId: null };
+  }
+  const enc = cell.enc;
+  const keyId = enc && typeof enc === "object" && typeof enc.keyId === "string" ? enc.keyId : null;
+  return { encrypted: true, keyId };
 }
 
 /**
@@ -107,7 +137,7 @@ function sameFormat(a, b) {
 /**
  * Semantic sheet diff:
  * - Detects added/removed/modified cells
- * - Detects moves by matching removed content to added content (value + normalized formula + format)
+ * - Detects moves by matching removed content to added content (value + normalized formula + format + enc)
  * - Classifies format-only edits separately
  *
  * @param {SheetState} before
@@ -138,6 +168,8 @@ export function semanticDiff(before, after) {
     if (!afterKeys.has(key)) continue;
     const beforeCell = before.cells.get(key);
     const afterCell = after.cells.get(key);
+    const beforeEncMeta = encryptionMeta(beforeCell);
+    const afterEncMeta = encryptionMeta(afterCell);
     if (sameValueAndFormula(beforeCell, afterCell)) {
       if (!sameFormat(beforeCell, afterCell)) {
         result.formatOnly.push({
@@ -146,6 +178,14 @@ export function semanticDiff(before, after) {
           newValue: afterCell?.value ?? null,
           oldFormula: beforeCell?.formula ?? null,
           newFormula: afterCell?.formula ?? null,
+          ...(beforeEncMeta.encrypted || afterEncMeta.encrypted
+            ? {
+                oldEncrypted: beforeEncMeta.encrypted,
+                newEncrypted: afterEncMeta.encrypted,
+                oldKeyId: beforeEncMeta.keyId,
+                newKeyId: afterEncMeta.keyId,
+              }
+            : {}),
         });
       }
       continue;
@@ -156,6 +196,14 @@ export function semanticDiff(before, after) {
       newValue: afterCell?.value ?? null,
       oldFormula: beforeCell?.formula ?? null,
       newFormula: afterCell?.formula ?? null,
+      ...(beforeEncMeta.encrypted || afterEncMeta.encrypted
+        ? {
+            oldEncrypted: beforeEncMeta.encrypted,
+            newEncrypted: afterEncMeta.encrypted,
+            oldKeyId: beforeEncMeta.keyId,
+            newKeyId: afterEncMeta.keyId,
+          }
+        : {}),
     });
   }
 
@@ -177,6 +225,7 @@ export function semanticDiff(before, after) {
     const sig = cellSignature(cell);
     const list = addedBySig.get(sig);
     if (list && list.length > 0) {
+      const encMeta = encryptionMeta(cell);
       const destKey = list.shift();
       movedDestinations.add(destKey);
       result.moved.push({
@@ -184,23 +233,28 @@ export function semanticDiff(before, after) {
         newLocation: parseCellKey(destKey),
         value: cell?.value ?? null,
         formula: cell?.formula ?? null,
+        ...(encMeta.encrypted ? { encrypted: true, keyId: encMeta.keyId } : {}),
       });
       continue;
     }
+    const encMeta = encryptionMeta(cell);
     result.removed.push({
       cell: parseCellKey(key),
       oldValue: cell?.value ?? null,
       oldFormula: cell?.formula ?? null,
+      ...(encMeta.encrypted ? { oldEncrypted: true, oldKeyId: encMeta.keyId } : {}),
     });
   }
 
   for (const key of addedKeys) {
     if (movedDestinations.has(key)) continue;
     const cell = after.cells.get(key);
+    const encMeta = encryptionMeta(cell);
     result.added.push({
       cell: parseCellKey(key),
       newValue: cell?.value ?? null,
       newFormula: cell?.formula ?? null,
+      ...(encMeta.encrypted ? { newEncrypted: true, newKeyId: encMeta.keyId } : {}),
     });
   }
 

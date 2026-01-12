@@ -44,6 +44,10 @@ test("diffYjsWorkbookSnapshots: encrypted cell payload changes are classified as
 
   assert.equal(sheetDiff.modified.length, 1);
   assert.deepEqual(sheetDiff.modified[0].cell, { row: 0, col: 0 });
+  assert.equal(sheetDiff.modified[0].oldEncrypted, true);
+  assert.equal(sheetDiff.modified[0].newEncrypted, true);
+  assert.equal(sheetDiff.modified[0].oldKeyId, "k1");
+  assert.equal(sheetDiff.modified[0].newKeyId, "k1");
   // User-facing diff records should not include ciphertext payloads.
   assert.equal("enc" in sheetDiff.modified[0], false);
 });
@@ -77,6 +81,8 @@ test("diffYjsWorkbookSnapshots: encrypted cell moves are detected via encrypted 
   assert.equal(sheetDiff.moved.length, 1);
   assert.deepEqual(sheetDiff.moved[0].oldLocation, { row: 0, col: 0 });
   assert.deepEqual(sheetDiff.moved[0].newLocation, { row: 0, col: 1 });
+  assert.equal(sheetDiff.moved[0].encrypted, true);
+  assert.equal(sheetDiff.moved[0].keyId, "k1");
   assert.equal(sheetDiff.added.length, 0);
   assert.equal(sheetDiff.removed.length, 0);
 });
@@ -109,6 +115,10 @@ test("diffYjsWorkbookSnapshots: encrypted format-only changes are classified as 
 
   assert.equal(sheetDiff.formatOnly.length, 1);
   assert.deepEqual(sheetDiff.formatOnly[0].cell, { row: 0, col: 0 });
+  assert.equal(sheetDiff.formatOnly[0].oldEncrypted, true);
+  assert.equal(sheetDiff.formatOnly[0].newEncrypted, true);
+  assert.equal(sheetDiff.formatOnly[0].oldKeyId, "k1");
+  assert.equal(sheetDiff.formatOnly[0].newKeyId, "k1");
   assert.equal(sheetDiff.modified.length, 0);
 });
 
@@ -148,6 +158,10 @@ test("diffYjsWorkbookSnapshots: encrypted cells win over plaintext duplicates ac
   assert.deepEqual(sheetDiff.modified[0].cell, { row: 0, col: 0 });
   assert.equal(sheetDiff.modified[0].oldValue, null);
   assert.equal(sheetDiff.modified[0].newValue, null);
+  assert.equal(sheetDiff.modified[0].oldEncrypted, true);
+  assert.equal(sheetDiff.modified[0].newEncrypted, true);
+  assert.equal(sheetDiff.modified[0].oldKeyId, "k1");
+  assert.equal(sheetDiff.modified[0].newKeyId, "k1");
 });
 
 test("diffYjsWorkbookSnapshots: encrypted format-only changes work even when format is only present on a legacy duplicate", () => {
@@ -184,5 +198,9 @@ test("diffYjsWorkbookSnapshots: encrypted format-only changes work even when for
 
   assert.equal(sheetDiff.formatOnly.length, 1);
   assert.deepEqual(sheetDiff.formatOnly[0].cell, { row: 0, col: 0 });
+  assert.equal(sheetDiff.formatOnly[0].oldEncrypted, true);
+  assert.equal(sheetDiff.formatOnly[0].newEncrypted, true);
+  assert.equal(sheetDiff.formatOnly[0].oldKeyId, "k1");
+  assert.equal(sheetDiff.formatOnly[0].newKeyId, "k1");
   assert.equal(sheetDiff.modified.length, 0);
 });
