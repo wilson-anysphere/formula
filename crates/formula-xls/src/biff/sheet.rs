@@ -1673,4 +1673,83 @@ mod tests {
         let xfs = parse_biff_sheet_cell_xf_indices_filtered(&stream, 0, None).expect("parse");
         assert_eq!(xfs.get(&CellRef::new(0, 0)).copied(), Some(7));
     }
+
+    #[test]
+    fn parses_sheet_protection_records() {
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_PROTECT, &1u16.to_le_bytes()),
+            record(RECORD_PASSWORD, &0xCBEBu16.to_le_bytes()),
+            record(RECORD_OBJPROTECT, &0u16.to_le_bytes()),
+            record(RECORD_SCENPROTECT, &0u16.to_le_bytes()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let parsed = parse_biff_sheet_protection(&stream, 0).expect("parse");
+        assert_eq!(parsed.protection.enabled, true);
+        assert_eq!(parsed.protection.password_hash, Some(0xCBEB));
+        assert_eq!(parsed.protection.edit_objects, true);
+        assert_eq!(parsed.protection.edit_scenarios, true);
+        assert!(
+            parsed.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            parsed.warnings
+        );
+    }
+
+    #[test]
+    fn sheet_protection_warns_on_truncated_records_and_continues() {
+        // Emit truncated protection records followed by valid ones; parser should warn but still
+        // return the final values.
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_PROTECT, &[1]), // truncated
+            record(RECORD_PROTECT, &1u16.to_le_bytes()),
+            record(RECORD_PASSWORD, &[0xEF]), // truncated
+            record(RECORD_PASSWORD, &0xBEEFu16.to_le_bytes()),
+            record(RECORD_OBJPROTECT, &[0]), // truncated
+            record(RECORD_OBJPROTECT, &0u16.to_le_bytes()),
+            record(RECORD_SCENPROTECT, &[0]), // truncated
+            record(RECORD_SCENPROTECT, &0u16.to_le_bytes()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let parsed = parse_biff_sheet_protection(&stream, 0).expect("parse");
+        assert_eq!(parsed.protection.enabled, true);
+        assert_eq!(parsed.protection.password_hash, Some(0xBEEF));
+        assert_eq!(parsed.protection.edit_objects, true);
+        assert_eq!(parsed.protection.edit_scenarios, true);
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("truncated PROTECT record")),
+            "expected truncated-PROTECT warning, got {:?}",
+            parsed.warnings
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("truncated PASSWORD record")),
+            "expected truncated-PASSWORD warning, got {:?}",
+            parsed.warnings
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("truncated OBJPROTECT record")),
+            "expected truncated-OBJPROTECT warning, got {:?}",
+            parsed.warnings
+        );
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.contains("truncated SCENPROTECT record")),
+            "expected truncated-SCENPROTECT warning, got {:?}",
+            parsed.warnings
+        );
+    }
 }

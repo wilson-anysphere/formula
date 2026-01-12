@@ -1918,6 +1918,50 @@ mod tests {
     }
 
     #[test]
+    fn parses_workbook_protection_records() {
+        let stream = [
+            record(RECORD_PROTECT, &1u16.to_le_bytes()),
+            record(RECORD_WINDOWPROTECT, &1u16.to_le_bytes()),
+            record(RECORD_PASSWORD, &0x83AFu16.to_le_bytes()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(globals.workbook_protection.lock_structure, true);
+        assert_eq!(globals.workbook_protection.lock_windows, true);
+        assert_eq!(globals.workbook_protection.password_hash, Some(0x83AF));
+        assert!(
+            globals.warnings.is_empty(),
+            "expected no warnings, got {:?}",
+            globals.warnings
+        );
+    }
+
+    #[test]
+    fn workbook_protection_warns_on_truncated_protect_but_continues() {
+        // PROTECT record with a 1-byte payload (too short for u16).
+        let stream = [
+            record(RECORD_PROTECT, &[1]),
+            record(RECORD_WINDOWPROTECT, &1u16.to_le_bytes()),
+            record(RECORD_PASSWORD, &0x83AFu16.to_le_bytes()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(globals.workbook_protection.lock_structure, false);
+        assert_eq!(globals.workbook_protection.lock_windows, true);
+        assert_eq!(globals.workbook_protection.password_hash, Some(0x83AF));
+        assert!(
+            globals
+                .warnings
+                .iter()
+                .any(|w| w.contains("truncated PROTECT record")),
+            "expected truncated-PROTECT warning, got {:?}",
+            globals.warnings
+        );
+    }
+
+    #[test]
     fn parses_globals_date_system_formats_and_xfs_biff8() {
         // 1904 record payload: f1904 = 1.
         let r_1904 = record(RECORD_1904, &[1, 0]);
