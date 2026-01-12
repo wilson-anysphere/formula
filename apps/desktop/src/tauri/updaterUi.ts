@@ -51,6 +51,14 @@ type UpdaterDownloadProgress = {
   contentLength?: number;
   chunk_length?: number;
   content_length?: number;
+  // Tauri v2 updater plugin download events are sent as `{ event, data }` objects.
+  // We intentionally keep this type loose and extract numbers defensively.
+  data?: {
+    chunkLength?: number;
+    contentLength?: number;
+    chunk_length?: number;
+    content_length?: number;
+  };
 };
 
 type UpdaterUpdate = {
@@ -646,6 +654,8 @@ function updateProgress(progress: UpdaterDownloadProgress): void {
     extractNumber(progress?.total) ??
     extractNumber((progress as any)?.contentLength) ??
     extractNumber((progress as any)?.content_length) ??
+    extractNumber((progress as any)?.data?.contentLength) ??
+    extractNumber((progress as any)?.data?.content_length) ??
     null;
   const downloaded =
     extractNumber(progress?.downloaded) ??
@@ -653,7 +663,12 @@ function updateProgress(progress: UpdaterDownloadProgress): void {
     extractNumber((progress as any)?.downloaded_bytes) ??
     extractNumber((progress as any)?.downloadedBytes) ??
     null;
-  const chunk = extractNumber((progress as any)?.chunkLength) ?? extractNumber((progress as any)?.chunk_length) ?? null;
+  const chunk =
+    extractNumber((progress as any)?.chunkLength) ??
+    extractNumber((progress as any)?.chunk_length) ??
+    extractNumber((progress as any)?.data?.chunkLength) ??
+    extractNumber((progress as any)?.data?.chunk_length) ??
+    null;
 
   if (typeof total === "number") progressTotal = total;
   if (typeof downloaded === "number") progressDownloaded = downloaded;
