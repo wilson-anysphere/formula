@@ -107,6 +107,11 @@ Result interpretation (current behavior):
 - The binding implementation currently supports SHA-1 and SHA-256 digests (based on the `DigestInfo`
   algorithm OID). If an unknown digest OID is encountered, binding is reported as
   `VbaSignatureBinding::Unknown`.
+- Current project digest transcript (implementation detail; `compute_vba_project_digest`):
+  1. Enumerate all OLE streams.
+  2. Exclude any `DigitalSignature*` stream/storage.
+  3. Sort remaining stream paths case-insensitively.
+  4. Hash each stream as: `UTF-16LE(path) || 0x0000 || u32_le(len(bytes)) || bytes`.
 - The project digest computation is currently **best-effort** and deterministic (to support stable
   tests and predictable behavior), but may not match Excel's exact MS-OVBA transcript for all
   real-world files (e.g. if Excel hashes decompressed module source, only parts of module streams,
