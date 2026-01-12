@@ -6,6 +6,9 @@ pub fn rels_for_part(part: &str) -> String {
 }
 
 pub fn resolve_target(source_part: &str, target: &str) -> String {
+    // Relationship targets are URIs; some producers include a URI fragment (e.g. `../media/img.png#id`).
+    // OPC part names do not include fragments, so strip them before resolving.
+    let target = target.split('#').next().unwrap_or(target);
     if let Some(target) = target.strip_prefix('/') {
         return normalize(target);
     }
