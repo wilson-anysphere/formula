@@ -1782,6 +1782,48 @@ fn bytecode_backend_and_or_reference_semantics_match_ast() {
 }
 
 #[test]
+fn bytecode_backend_propagates_error_literals_through_and_or() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=AND(TRUE, #DIV/0!)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=OR(FALSE, #DIV/0!)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=AND(FALSE, #DIV/0!)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", "=OR(TRUE, #DIV/0!)")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected all AND/OR formulas to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, 4);
+    assert_eq!(stats.compiled, 4);
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=AND(TRUE, #DIV/0!)", "A1"),
+        ("=OR(FALSE, #DIV/0!)", "A2"),
+        ("=AND(FALSE, #DIV/0!)", "A3"),
+        ("=OR(TRUE, #DIV/0!)", "A4"),
+    ] {
+        assert_eq!(
+            engine.get_cell_value("Sheet1", cell),
+            Value::Error(ErrorKind::Div0)
+        );
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_information_functions_scalar() {
     let mut engine = Engine::new();
 
