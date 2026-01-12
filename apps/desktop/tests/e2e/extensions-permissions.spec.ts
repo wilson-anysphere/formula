@@ -391,7 +391,8 @@ test.describe("Extensions permissions UI", () => {
       await page.getByTestId("open-extensions-panel").click();
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
-      await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
+      await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible();
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
 
       // Grant permissions (ui.commands + network) by running fetchText once.
       await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
@@ -407,7 +408,7 @@ test.describe("Extensions permissions UI", () => {
 
       // Revoke only network and ensure it stays revoked after reload.
       await page.getByTestId(`revoke-permission-${extensionId}-network`).click();
-      await expect(page.getByTestId(`permission-${extensionId}-network`)).toHaveCount(0);
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
 
       await page.reload();
       await waitForDesktopReady(page);
@@ -415,7 +416,7 @@ test.describe("Extensions permissions UI", () => {
       await page.getByTestId("open-extensions-panel").click();
       await expect(page.getByTestId("panel-extensions")).toBeVisible();
 
-      await expect(page.getByTestId(`permission-${extensionId}-network`)).toHaveCount(0);
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
 
       // Network should prompt again (ui.commands should remain granted and not be re-requested).
       await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
@@ -428,7 +429,7 @@ test.describe("Extensions permissions UI", () => {
       await expect(page.getByTestId("extension-permission-network")).toBeVisible();
       await page.getByTestId("extension-permission-deny").click();
       await expect(page.getByTestId("toast-root")).toContainText("Permission denied");
-      await expect(page.getByTestId(`permission-${extensionId}-network`)).toHaveCount(0);
+      await expect(page.getByTestId(`permission-row-${extensionId}-network`)).toContainText("not granted");
     } finally {
       await page.unroute("http://allowed.example/**").catch(() => {});
     }
