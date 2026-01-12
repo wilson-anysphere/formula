@@ -149,7 +149,8 @@ Tauri v2 replaces Tauri v1’s “allowlist” with **capabilities**, defined as
 
 Capabilities are scoped per window. In this repo the main window is labeled `main` (`app.windows[].label` in
 `apps/desktop/src-tauri/tauri.conf.json`). The `main` capability is scoped to that label in
-`apps/desktop/src-tauri/capabilities/main.json` via `"windows": ["main"]`:
+`apps/desktop/src-tauri/tauri.conf.json` via `"capabilities": ["main"]`, and the capability file is scoped to the
+same window label in `apps/desktop/src-tauri/capabilities/main.json` via `"windows": ["main"]`:
 
 ```jsonc
 {
@@ -158,8 +159,8 @@ Capabilities are scoped per window. In this repo the main window is labeled `mai
 }
 ```
 
-Note: the `tauri-build` config schema used in this repo does not currently support window-level opt-in via
-`app.windows[].capabilities` in `tauri.conf.json`. Window scoping happens via the capability file instead.
+Note: keep `app.windows[].capabilities` and the capability file’s `"windows": [...]` scoping in sync so adding a new
+window never implicitly grants it the main capability.
 
 When adding new uses of privileged APIs (e.g. clipboard, dialog, updater, shell, window APIs) or adding new desktop event
 names, update the relevant allowlists in `capabilities/main.json`.
@@ -301,7 +302,7 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
       "csp": "..." // see `apps/desktop/src-tauri/tauri.conf.json` for the full, current CSP
     },
     "windows": [
-      { "label": "main", "title": "Formula", "width": 1280, "height": 800, "dragDropEnabled": true }
+      { "label": "main", "title": "Formula", "width": 1280, "height": 800, "dragDropEnabled": true, "capabilities": ["main"] }
     ]
   },
   "bundle": {
@@ -808,8 +809,9 @@ Capability files scope themselves to window labels via the capability file’s `
 }
 ```
 
-Note: our current `tauri-build` toolchain does **not** support window-level opt-in via `app.windows[].capabilities`
-(it causes a build error). Keep window scoping in the capability file.
+Note: windows must explicitly opt into capabilities via `app.windows[].capabilities` in
+`apps/desktop/src-tauri/tauri.conf.json` (e.g. the main window includes `"capabilities": ["main"]`). Keep this in
+sync with the capability file’s `"windows": [...]` list so capability grants remain explicit.
 ### What `main.json` does
 
 `apps/desktop/src-tauri/capabilities/main.json` is intentionally an explicit allowlist for what the webview is allowed to do.
