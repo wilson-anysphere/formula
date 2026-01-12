@@ -50,14 +50,14 @@ export type EntityValue = {
    *
    * Note: older payloads may use `display`.
    */
-  displayValue: string;
+  displayValue?: string;
   /** Legacy alias for `displayValue` (accepted by formula-model). */
   display?: string;
   properties?: Record<string, CellValueRich>;
 };
 
 export type RecordValue = {
-  fields: Record<string, CellValueRich>;
+  fields?: Record<string, CellValueRich>;
   displayField?: string;
   /** Optional precomputed display string (legacy / fallback). */
   displayValue?: string;
