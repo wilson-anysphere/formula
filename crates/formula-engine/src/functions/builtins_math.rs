@@ -779,22 +779,54 @@ fn sumif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let mut sum = 0.0;
-    for row in 0..rows {
-        for col in 0..cols {
-            let crit_val = criteria_range.get(ctx, row, col);
-            if !criteria.matches(&crit_val) {
-                continue;
+    match (&sum_range, &criteria_range) {
+        (Some(Range2D::Reference(sum_ref)), _) => {
+            for addr in ctx.iter_reference_cells(sum_ref) {
+                let row = (addr.row - sum_ref.start.row) as usize;
+                let col = (addr.col - sum_ref.start.col) as usize;
+                let crit_val = criteria_range.get(ctx, row, col);
+                if !criteria.matches(&crit_val) {
+                    continue;
+                }
+                match ctx.get_cell_value(&sum_ref.sheet_id, addr) {
+                    Value::Number(n) => sum += n,
+                    Value::Error(e) => return Value::Error(e),
+                    _ => {}
+                }
             }
+        }
+        (None, Range2D::Reference(criteria_ref)) => {
+            for addr in ctx.iter_reference_cells(criteria_ref) {
+                let crit_val = ctx.get_cell_value(&criteria_ref.sheet_id, addr);
+                if !criteria.matches(&crit_val) {
+                    continue;
+                }
+                match crit_val {
+                    Value::Number(n) => sum += n,
+                    Value::Error(e) => return Value::Error(e),
+                    _ => {}
+                }
+            }
+        }
+        _ => {
+            for row in 0..rows {
+                for col in 0..cols {
+                    let crit_val = criteria_range.get(ctx, row, col);
+                    if !criteria.matches(&crit_val) {
+                        continue;
+                    }
 
-            let sum_val = match &sum_range {
-                Some(r) => r.get(ctx, row, col),
-                None => crit_val,
-            };
+                    let sum_val = match &sum_range {
+                        Some(r) => r.get(ctx, row, col),
+                        None => crit_val,
+                    };
 
-            match sum_val {
-                Value::Number(n) => sum += n,
-                Value::Error(e) => return Value::Error(e),
-                _ => {}
+                    match sum_val {
+                        Value::Number(n) => sum += n,
+                        Value::Error(e) => return Value::Error(e),
+                        _ => {}
+                    }
+                }
             }
         }
     }
@@ -859,24 +891,46 @@ fn sumifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let mut sum = 0.0;
-    for row in 0..rows {
-        for col in 0..cols {
-            let mut matches = true;
-            for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
-                let v = range.get(ctx, row, col);
-                if !crit.matches(&v) {
-                    matches = false;
-                    break;
+    match &sum_range {
+        Range2D::Reference(sum_ref) => {
+            'cell: for addr in ctx.iter_reference_cells(sum_ref) {
+                let row = (addr.row - sum_ref.start.row) as usize;
+                let col = (addr.col - sum_ref.start.col) as usize;
+                for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                    let v = range.get(ctx, row, col);
+                    if !crit.matches(&v) {
+                        continue 'cell;
+                    }
+                }
+
+                match ctx.get_cell_value(&sum_ref.sheet_id, addr) {
+                    Value::Number(n) => sum += n,
+                    Value::Error(e) => return Value::Error(e),
+                    _ => {}
                 }
             }
-            if !matches {
-                continue;
-            }
+        }
+        _ => {
+            for row in 0..rows {
+                for col in 0..cols {
+                    let mut matches = true;
+                    for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                        let v = range.get(ctx, row, col);
+                        if !crit.matches(&v) {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if !matches {
+                        continue;
+                    }
 
-            match sum_range.get(ctx, row, col) {
-                Value::Number(n) => sum += n,
-                Value::Error(e) => return Value::Error(e),
-                _ => {}
+                    match sum_range.get(ctx, row, col) {
+                        Value::Number(n) => sum += n,
+                        Value::Error(e) => return Value::Error(e),
+                        _ => {}
+                    }
+                }
             }
         }
     }
@@ -936,25 +990,63 @@ fn averageif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let mut sum = 0.0;
     let mut count = 0u64;
-    for row in 0..rows {
-        for col in 0..cols {
-            let crit_val = criteria_range.get(ctx, row, col);
-            if !criteria.matches(&crit_val) {
-                continue;
-            }
-
-            let avg_val = match &average_range {
-                Some(r) => r.get(ctx, row, col),
-                None => crit_val,
-            };
-
-            match avg_val {
-                Value::Number(n) => {
-                    sum += n;
-                    count += 1;
+    match (&average_range, &criteria_range) {
+        (Some(Range2D::Reference(avg_ref)), _) => {
+            for addr in ctx.iter_reference_cells(avg_ref) {
+                let row = (addr.row - avg_ref.start.row) as usize;
+                let col = (addr.col - avg_ref.start.col) as usize;
+                let crit_val = criteria_range.get(ctx, row, col);
+                if !criteria.matches(&crit_val) {
+                    continue;
                 }
-                Value::Error(e) => return Value::Error(e),
-                _ => {}
+                match ctx.get_cell_value(&avg_ref.sheet_id, addr) {
+                    Value::Number(n) => {
+                        sum += n;
+                        count += 1;
+                    }
+                    Value::Error(e) => return Value::Error(e),
+                    _ => {}
+                }
+            }
+        }
+        (None, Range2D::Reference(criteria_ref)) => {
+            for addr in ctx.iter_reference_cells(criteria_ref) {
+                let crit_val = ctx.get_cell_value(&criteria_ref.sheet_id, addr);
+                if !criteria.matches(&crit_val) {
+                    continue;
+                }
+                match crit_val {
+                    Value::Number(n) => {
+                        sum += n;
+                        count += 1;
+                    }
+                    Value::Error(e) => return Value::Error(e),
+                    _ => {}
+                }
+            }
+        }
+        _ => {
+            for row in 0..rows {
+                for col in 0..cols {
+                    let crit_val = criteria_range.get(ctx, row, col);
+                    if !criteria.matches(&crit_val) {
+                        continue;
+                    }
+
+                    let avg_val = match &average_range {
+                        Some(r) => r.get(ctx, row, col),
+                        None => crit_val,
+                    };
+
+                    match avg_val {
+                        Value::Number(n) => {
+                            sum += n;
+                            count += 1;
+                        }
+                        Value::Error(e) => return Value::Error(e),
+                        _ => {}
+                    }
+                }
             }
         }
     }
@@ -1023,27 +1115,52 @@ fn averageifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let mut sum = 0.0;
     let mut count = 0u64;
-    for row in 0..rows {
-        for col in 0..cols {
-            let mut matches = true;
-            for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
-                let v = range.get(ctx, row, col);
-                if !crit.matches(&v) {
-                    matches = false;
-                    break;
+    match &average_range {
+        Range2D::Reference(avg_ref) => {
+            'cell: for addr in ctx.iter_reference_cells(avg_ref) {
+                let row = (addr.row - avg_ref.start.row) as usize;
+                let col = (addr.col - avg_ref.start.col) as usize;
+                for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                    let v = range.get(ctx, row, col);
+                    if !crit.matches(&v) {
+                        continue 'cell;
+                    }
                 }
-            }
-            if !matches {
-                continue;
-            }
 
-            match average_range.get(ctx, row, col) {
-                Value::Number(n) => {
-                    sum += n;
-                    count += 1;
+                match ctx.get_cell_value(&avg_ref.sheet_id, addr) {
+                    Value::Number(n) => {
+                        sum += n;
+                        count += 1;
+                    }
+                    Value::Error(e) => return Value::Error(e),
+                    _ => {}
                 }
-                Value::Error(e) => return Value::Error(e),
-                _ => {}
+            }
+        }
+        _ => {
+            for row in 0..rows {
+                for col in 0..cols {
+                    let mut matches = true;
+                    for (range, crit) in criteria_ranges.iter().zip(criteria.iter()) {
+                        let v = range.get(ctx, row, col);
+                        if !crit.matches(&v) {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if !matches {
+                        continue;
+                    }
+
+                    match average_range.get(ctx, row, col) {
+                        Value::Number(n) => {
+                            sum += n;
+                            count += 1;
+                        }
+                        Value::Error(e) => return Value::Error(e),
+                        _ => {}
+                    }
+                }
             }
         }
     }
