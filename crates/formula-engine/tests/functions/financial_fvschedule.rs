@@ -19,6 +19,18 @@ fn fvschedule_accepts_range_schedule() {
 }
 
 #[test]
+fn fvschedule_accepts_union_schedule() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 0.1);
+    sheet.set("A2", 0.2);
+    sheet.set("B1", 0.3);
+    sheet.set("B2", 0.4);
+
+    // Union references use the `,` operator; in a function argument, it must be parenthesized.
+    assert_number(&sheet.eval("=FVSCHEDULE(100,(A1:A2,B1:B2))"), 240.24);
+}
+
+#[test]
 fn fvschedule_propagates_schedule_errors() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 0.1);
@@ -27,6 +39,19 @@ fn fvschedule_propagates_schedule_errors() {
 
     assert_eq!(
         sheet.eval("=FVSCHEDULE(100,A1:A3)"),
+        Value::Error(ErrorKind::Div0)
+    );
+}
+
+#[test]
+fn fvschedule_propagates_schedule_errors_from_union() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 0.1);
+    sheet.set_formula("A2", "=1/0");
+    sheet.set("B1", 0.2);
+
+    assert_eq!(
+        sheet.eval("=FVSCHEDULE(100,(A1:A2,B1))"),
         Value::Error(ErrorKind::Div0)
     );
 }
@@ -62,4 +87,3 @@ fn fvschedule_coerces_bool_schedule_cells() {
     assert_number(&sheet.eval("=FVSCHEDULE(100,TRUE)"), 200.0);
     assert_number(&sheet.eval("=FVSCHEDULE(100,A1)"), 200.0);
 }
-
