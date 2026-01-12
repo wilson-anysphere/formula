@@ -87,8 +87,16 @@ fn columnar_backing_allows_reading_beyond_excel_row_limit() {
     sheet.set_columnar_table(CellRef::new(EXCEL_MAX_ROWS, 0), table);
 
     assert_eq!(
+        sheet.columnar_range(),
+        Some(Range::new(
+            CellRef::new(EXCEL_MAX_ROWS, 0),
+            CellRef::new(EXCEL_MAX_ROWS + 127, 0)
+        )),
+        "columnar_range should work for tables beyond Excel's row limit"
+    );
+
+    assert_eq!(
         sheet.value(CellRef::new(EXCEL_MAX_ROWS + 5, 0)),
         CellValue::Number(5.0)
     );
 }
-
