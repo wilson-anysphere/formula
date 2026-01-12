@@ -97,6 +97,7 @@ class ComparePartialDatasetsTests(unittest.TestCase):
             self.assertEqual(len(mismatches), 1)
             self.assertEqual(mismatches[0]["caseId"], "case-b")
             self.assertEqual(mismatches[0]["tags"], ["tag-b"])
+            self.assertEqual(mismatches[0]["actual"], {"t": "n", "v": 4})
 
 
 class CompareTagToleranceTests(unittest.TestCase):

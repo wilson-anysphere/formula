@@ -372,6 +372,7 @@ def main() -> int:
         mismatch_reason: str | None = None
         if exp is None:
             mismatch_reason = "missing-expected"
+            actual_value = act.get("result") if isinstance(act, dict) else None
             mismatches.append(
                 {
                     "caseId": case_id,
@@ -379,6 +380,10 @@ def main() -> int:
                     "formula": case.get("formula"),
                     "inputs": [_pretty_input(i) for i in case.get("inputs", [])],
                     "tags": sorted(tag_set),
+                    # When the expected dataset is missing a case (common when new deterministic
+                    # cases are added to cases.json but the pinned dataset wasn't updated yet),
+                    # include the engine-computed value to make patching/regeneration easier.
+                    **({"actual": actual_value} if actual_value is not None else {}),
                 }
             )
             reason_counts[mismatch_reason] = reason_counts.get(mismatch_reason, 0) + 1
