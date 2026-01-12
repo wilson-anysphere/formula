@@ -98,6 +98,7 @@ describe("KeybindingService", () => {
 
     const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
     service.setExtensionKeybindings([
+      { extensionId: "ext", command: "ext.stealEscape", key: "escape", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+c", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+cmd+c", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealPasteSpecial", key: "ctrl+shift+v", mac: null, when: null },
@@ -118,6 +119,19 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealCommentsPanel", key: "ctrl+cmd+shift+m", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "cmd+h", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+cmd+h", mac: null, when: null },
+      // File shortcuts (core UX): Ctrl/Cmd + N/O/S/W/Q.
+      { extensionId: "ext", command: "ext.stealNew", key: "ctrl+n", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealNew", key: "cmd+n", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealOpen", key: "ctrl+o", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealOpen", key: "cmd+o", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealSave", key: "ctrl+s", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealSave", key: "cmd+s", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealSaveAs", key: "ctrl+shift+s", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealSaveAs", key: "cmd+shift+s", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealClose", key: "ctrl+w", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealClose", key: "cmd+w", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealQuit", key: "ctrl+q", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealQuit", key: "cmd+q", mac: null, when: null },
     ]);
 
     // Safety net: even if an extension keybinding for a reserved shortcut slips through filtering,
@@ -134,6 +148,11 @@ describe("KeybindingService", () => {
       weight: 0,
       order: 10000,
     });
+    const escapeEvent = makeKeydownEvent({ key: "Escape" });
+    const escapeHandled = await service.dispatchKeydown(escapeEvent);
+    expect(escapeHandled).toBe(false);
+    expect(escapeEvent.defaultPrevented).toBe(false);
+    expect(extRun).not.toHaveBeenCalled();
 
     const event = makeKeydownEvent({ key: "c", ctrlKey: true });
     const handled = await service.dispatchKeydown(event);
@@ -252,6 +271,67 @@ describe("KeybindingService", () => {
     const handled18 = await service.dispatchKeydown(event18);
     expect(handled18).toBe(false);
     expect(event18.defaultPrevented).toBe(false);
+    // File shortcuts: Ctrl/Cmd + N/O/S/W/Q.
+    const fileEvent1 = makeKeydownEvent({ key: "n", ctrlKey: true });
+    const fileHandled1 = await service.dispatchKeydown(fileEvent1);
+    expect(fileHandled1).toBe(false);
+    expect(fileEvent1.defaultPrevented).toBe(false);
+
+    const fileEvent2 = makeKeydownEvent({ key: "n", metaKey: true });
+    const fileHandled2 = await service.dispatchKeydown(fileEvent2);
+    expect(fileHandled2).toBe(false);
+    expect(fileEvent2.defaultPrevented).toBe(false);
+
+    const fileEvent3 = makeKeydownEvent({ key: "o", ctrlKey: true });
+    const fileHandled3 = await service.dispatchKeydown(fileEvent3);
+    expect(fileHandled3).toBe(false);
+    expect(fileEvent3.defaultPrevented).toBe(false);
+
+    const fileEvent4 = makeKeydownEvent({ key: "o", metaKey: true });
+    const fileHandled4 = await service.dispatchKeydown(fileEvent4);
+    expect(fileHandled4).toBe(false);
+    expect(fileEvent4.defaultPrevented).toBe(false);
+
+    const fileEvent5 = makeKeydownEvent({ key: "s", ctrlKey: true });
+    const fileHandled5 = await service.dispatchKeydown(fileEvent5);
+    expect(fileHandled5).toBe(false);
+    expect(fileEvent5.defaultPrevented).toBe(false);
+
+    const fileEvent6 = makeKeydownEvent({ key: "s", metaKey: true });
+    const fileHandled6 = await service.dispatchKeydown(fileEvent6);
+    expect(fileHandled6).toBe(false);
+    expect(fileEvent6.defaultPrevented).toBe(false);
+
+    const fileEvent7 = makeKeydownEvent({ key: "S", ctrlKey: true, shiftKey: true });
+    const fileHandled7 = await service.dispatchKeydown(fileEvent7);
+    expect(fileHandled7).toBe(false);
+    expect(fileEvent7.defaultPrevented).toBe(false);
+
+    const fileEvent8 = makeKeydownEvent({ key: "S", metaKey: true, shiftKey: true });
+    const fileHandled8 = await service.dispatchKeydown(fileEvent8);
+    expect(fileHandled8).toBe(false);
+    expect(fileEvent8.defaultPrevented).toBe(false);
+
+    const fileEvent9 = makeKeydownEvent({ key: "w", ctrlKey: true });
+    const fileHandled9 = await service.dispatchKeydown(fileEvent9);
+    expect(fileHandled9).toBe(false);
+    expect(fileEvent9.defaultPrevented).toBe(false);
+
+    const fileEvent10 = makeKeydownEvent({ key: "w", metaKey: true });
+    const fileHandled10 = await service.dispatchKeydown(fileEvent10);
+    expect(fileHandled10).toBe(false);
+    expect(fileEvent10.defaultPrevented).toBe(false);
+
+    const fileEvent11 = makeKeydownEvent({ key: "q", ctrlKey: true });
+    const fileHandled11 = await service.dispatchKeydown(fileEvent11);
+    expect(fileHandled11).toBe(false);
+    expect(fileEvent11.defaultPrevented).toBe(false);
+
+    const fileEvent12 = makeKeydownEvent({ key: "q", metaKey: true });
+    const fileHandled12 = await service.dispatchKeydown(fileEvent12);
+    expect(fileHandled12).toBe(false);
+    expect(fileEvent12.defaultPrevented).toBe(false);
+
     expect(extRun).not.toHaveBeenCalled();
   });
 
@@ -261,6 +341,7 @@ describe("KeybindingService", () => {
     const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
 
     service.setExtensionKeybindings([
+      { extensionId: "ext", command: "ext.stealEscape", key: "escape", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCopy", key: "ctrl+c", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealPasteSpecial", key: "ctrl+cmd+shift+v", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealQuickOpen", key: "ctrl+shift+o", mac: null, when: null },
@@ -273,6 +354,18 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealCommentsPanel", key: "ctrl+shift+m", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCommentsPanel", key: "cmd+shift+m", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealCommentsPanel", key: "ctrl+cmd+shift+m", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealNew", key: "ctrl+n", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealNew", key: "cmd+n", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealOpen", key: "ctrl+o", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealOpen", key: "cmd+o", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealSave", key: "ctrl+s", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealSave", key: "cmd+s", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealSaveAs", key: "ctrl+shift+s", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealSaveAs", key: "cmd+shift+s", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealClose", key: "ctrl+w", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealClose", key: "cmd+w", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealQuit", key: "ctrl+q", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealQuit", key: "cmd+q", mac: null, when: null },
       { extensionId: "ext", command: "ext.allowed", key: "ctrl+j", mac: null, when: null },
     ]);
 
@@ -288,6 +381,13 @@ describe("KeybindingService", () => {
     expect(index.get("ext.stealAddComment")).toBeUndefined();
     expect(index.get("ext.stealAIChat")).toBeUndefined();
     expect(index.get("ext.stealCommentsPanel")).toBeUndefined();
+    expect(index.get("ext.stealEscape")).toBeUndefined();
+    expect(index.get("ext.stealNew")).toBeUndefined();
+    expect(index.get("ext.stealOpen")).toBeUndefined();
+    expect(index.get("ext.stealSave")).toBeUndefined();
+    expect(index.get("ext.stealSaveAs")).toBeUndefined();
+    expect(index.get("ext.stealClose")).toBeUndefined();
+    expect(index.get("ext.stealQuit")).toBeUndefined();
   });
 
   it("matches shifted punctuation keybindings via KeyboardEvent.code fallback", async () => {

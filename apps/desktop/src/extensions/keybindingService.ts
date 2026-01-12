@@ -78,6 +78,9 @@ function isInsideKeybindingBarrier(target: EventTarget | null): boolean {
 }
 
 export const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
+  // Core cancellation key (closing dialogs/menus, canceling interactions, etc).
+  // Extensions should never be able to claim this.
+  "escape",
   // Copy/Cut/Paste (core text handling should not be overrideable by extensions).
   "ctrl+c",
   "cmd+c",
@@ -126,6 +129,20 @@ export const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   "cmd+h",
   // Some keyboards emit both ctrl+meta on the same chord.
   "ctrl+cmd+h",
+  // Core file shortcuts (new/open/save/close/quit). Once these are migrated into the
+  // KeybindingService, extensions should never be able to claim them.
+  "ctrl+n",
+  "cmd+n",
+  "ctrl+o",
+  "cmd+o",
+  "ctrl+s",
+  "cmd+s",
+  "ctrl+shift+s",
+  "cmd+shift+s",
+  "ctrl+w",
+  "cmd+w",
+  "ctrl+q",
+  "cmd+q",
 ];
 
 export class KeybindingService {
