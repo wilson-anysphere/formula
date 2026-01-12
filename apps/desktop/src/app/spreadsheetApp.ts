@@ -7833,6 +7833,11 @@ export class SpreadsheetApp {
     const resolved = this.sheetNameResolver?.getSheetIdByName(trimmed);
     if (resolved) return resolved;
 
+    // Allow stable sheet ids to pass through when they are known to the resolver.
+    // This avoids treating real (but currently empty/unmaterialized) sheets as
+    // "unknown" just because the DocumentController hasn't created the sheet yet.
+    if (this.sheetNameResolver?.getSheetNameById(trimmed)) return trimmed;
+
     // Fallback to sheet ids to keep legacy formulas (and test fixtures) working.
     const knownSheets = this.document.getSheetIds();
     return knownSheets.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;

@@ -111,6 +111,11 @@ export class DocumentWorkbookAdapter {
     const resolved = this.sheetNameResolver?.getSheetIdByName?.(trimmed);
     if (typeof resolved === "string" && resolved.trim()) return resolved;
 
+    // Pass through stable ids when the resolver recognizes them (even if the sheet
+    // hasn't been created in the DocumentController yet).
+    const display = this.sheetNameResolver?.getSheetNameById?.(trimmed);
+    if (typeof display === "string" && display.trim()) return trimmed;
+
     // Fallback: allow referring to sheets by id (legacy behavior).
     const ids = typeof this.document.getSheetIds === "function" ? this.document.getSheetIds() : [];
     return ids.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;

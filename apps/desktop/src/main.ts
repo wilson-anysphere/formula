@@ -5412,6 +5412,10 @@ function resolveSheetIdFromName(name: string): string | null {
   const resolved = sheetNameResolver.getSheetIdByName(trimmed);
   if (resolved) return resolved;
 
+  // Allow stable ids to pass through when the sheet metadata store recognizes them
+  // (even if the DocumentController hasn't materialized the sheet yet).
+  if (sheetNameResolver.getSheetNameById(trimmed)) return trimmed;
+
   // Allow addressing sheets by id as a fallback (e.g. older formulas or empty-sheet metadata).
   const needle = trimmed.toLowerCase();
   const docIds = app.getDocument().getSheetIds();
