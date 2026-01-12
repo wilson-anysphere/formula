@@ -262,15 +262,19 @@ cd apps/desktop && xvfb-run --auto-servernum bash ../../scripts/cargo_agent.sh t
 TypeScript ↔ Rust communication:
 
 ```rust
-// Rust side (src-tauri/src/lib.rs)
+// Rust side (e.g. `apps/desktop/src-tauri/src/commands.rs`)
+//
+// SECURITY: never trust the webview. Validate inputs and enforce authorization/scope
+// in Rust before touching filesystem/network/etc.
+//
+// In this repo, commands must also be:
+//  1) registered in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`)
+//  2) allowlisted in `apps/desktop/src-tauri/capabilities/main.json` (`core:allow-invoke`)
+//
 #[tauri::command]
-async fn read_file(path: String) -> Result<Vec<u8>, String> {
-    std::fs::read(&path).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn save_file(path: String, data: Vec<u8>) -> Result<(), String> {
-    std::fs::write(&path, data).map_err(|e| e.to_string())
+fn check_for_updates(app: tauri::AppHandle, source: crate::updater::UpdateCheckSource) -> Result<(), String> {
+    crate::updater::spawn_update_check(&app, source);
+    Ok(())
 }
 ```
 
@@ -280,8 +284,7 @@ type TauriInvoke = (cmd: string, args?: Record<string, unknown>) => Promise<unkn
 const invoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
 if (!invoke) throw new Error("Tauri invoke API not available");
 
-const data = await invoke("read_file", { path: "/path/to/file.xlsx" });
-await invoke("save_file", { path: "/path/to/file.xlsx", data: newData });
+await invoke("check_for_updates", { source: "manual" });
 ```
 
 ---
