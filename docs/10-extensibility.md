@@ -73,7 +73,7 @@ Built-in keys (desktop UI):
 | Key | Type | Meaning |
 | --- | --- | --- |
 | `sheetName` | string | Active sheet **display name**. |
-| `cellHasValue` | boolean | `true` if the **active cell** has a non-empty literal value **or** a formula. |
+| `cellHasValue` | boolean | `true` if the **active cell** has a non-empty literal value **or** a formula. (This does not indicate whether any cell in the overall selection is non-empty.) |
 | `selectionType` | `"cell" \| "range" \| "multi" \| "column" \| "row" \| "all"` | Shape of the current selection. |
 | `hasSelection` | boolean | Convenience key: `true` when the selection is anything other than a single cell (`selectionType != "cell"`). (Row/column/all selections count as “has selection”.) |
 | `isSingleCell` | boolean | Convenience key: `true` when `selectionType == "cell"`. |
