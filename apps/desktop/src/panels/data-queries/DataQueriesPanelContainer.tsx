@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { Query } from "../../../../../packages/power-query/src/model.js";
+import { CredentialManager } from "../../../../../packages/power-query/src/credentials/manager.js";
 import { randomId } from "../../../../../packages/power-query/src/credentials/utils.js";
 import { httpScope, oauth2Scope } from "../../../../../packages/power-query/src/credentials/scopes.js";
 import { normalizeScopes } from "../../../../../packages/power-query/src/oauth2/tokenStore.js";
@@ -71,6 +72,30 @@ function formatTimestamp(ms: number | null | undefined): string {
   return date.toLocaleString();
 }
 
+function sqlScopeKey(scope: any): string {
+  if (!scope || typeof scope !== "object") return "<unknown>";
+  const server = typeof (scope as any).server === "string" ? String((scope as any).server) : "";
+  const database = typeof (scope as any).database === "string" ? String((scope as any).database) : "";
+  const user = typeof (scope as any).user === "string" ? String((scope as any).user) : "";
+  return `${server}|${database}|${user}`;
+}
+
+function inferSqlUser(connection: unknown): string {
+  if (typeof connection === "string") {
+    try {
+      const url = new URL(connection);
+      return url.username || "";
+    } catch {
+      return "";
+    }
+  }
+  if (!connection || typeof connection !== "object" || Array.isArray(connection)) return "";
+  const record = connection as any;
+  if (typeof record.user === "string") return record.user;
+  if (typeof record.username === "string") return record.username;
+  return "";
+}
+
 function createBlankQuery(args: { name?: string } = {}): Query {
   return {
     id: `q_${randomId(8)}`,
@@ -117,6 +142,27 @@ export function DataQueriesPanelContainer(props: Props) {
 
   const credentialStore = service?.credentialStore ?? null;
   const oauth2Manager = service?.oauth2Manager ?? null;
+
+  const sqlCredentialManager = useMemo(() => {
+    if (!credentialStore) return null;
+    try {
+      return new CredentialManager({ store: credentialStore as any });
+    } catch {
+      return null;
+    }
+  }, [credentialStore]);
+
+  const resolveSqlScope = useCallback(
+    (connection: unknown): any | null => {
+      if (!sqlCredentialManager) return null;
+      try {
+        return sqlCredentialManager.resolveScope("sql", { connection });
+      } catch {
+        return null;
+      }
+    },
+    [sqlCredentialManager],
+  );
 
   const [queries, setQueries] = useState<Query[]>(() => service?.getQueries?.() ?? []);
   const [runtimeState, setRuntimeState] = useState<QueryRuntimeState>({});
@@ -346,16 +392,19 @@ export function DataQueriesPanelContainer(props: Props) {
   );
 
   const [oauthSignedInByKey, setOauthSignedInByKey] = useState<Record<string, boolean>>({});
+  const [sqlCredentialPresentByKey, setSqlCredentialPresentByKey] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (!credentialStore) {
       setOauthSignedInByKey({});
+      setSqlCredentialPresentByKey({});
       return;
     }
 
     let cancelled = false;
     const run = async () => {
       const updates: Record<string, boolean> = {};
+      const sqlUpdates: Record<string, boolean> = {};
       for (const query of queries) {
         const source = query.source as any;
         if (source?.type !== "api" || source?.auth?.type !== "oauth2") continue;
@@ -365,14 +414,27 @@ export function DataQueriesPanelContainer(props: Props) {
         const key = `${providerId}:${normalizeScopes(scopes).scopesHash}`;
         updates[key] = await isOAuthSignedIn(providerId, scopes);
       }
+      for (const query of queries) {
+        const source = query.source as any;
+        if (source?.type !== "database") continue;
+        const scope = resolveSqlScope(source.connection);
+        if (!scope) continue;
+        const key = sqlScopeKey(scope);
+        try {
+          sqlUpdates[key] = (await credentialStore.get(scope as any)) != null;
+        } catch {
+          sqlUpdates[key] = false;
+        }
+      }
       if (!cancelled) setOauthSignedInByKey(updates);
+      if (!cancelled) setSqlCredentialPresentByKey(sqlUpdates);
     };
 
     void run();
     return () => {
       cancelled = true;
     };
-  }, [credentialStore, isOAuthSignedIn, queries]);
+  }, [credentialStore, isOAuthSignedIn, queries, resolveSqlScope]);
 
   const signOutOAuth = useCallback(
     async (providerId: string, scopes: string[] | undefined) => {
@@ -425,6 +487,60 @@ export function DataQueriesPanelContainer(props: Props) {
       }
     },
     [credentialStore],
+  );
+
+  const setSqlCredential = useCallback(
+    async (connection: unknown) => {
+      if (!credentialStore) return;
+      if (typeof window === "undefined" || typeof window.prompt !== "function") return;
+      setGlobalError(null);
+
+      const scope = resolveSqlScope(connection);
+      if (!scope) {
+        setGlobalError("Unable to derive a stable credential scope for this database connection.");
+        return;
+      }
+
+      const defaultUser = inferSqlUser(connection);
+      const userValue = window.prompt("Database user (optional)", defaultUser) ?? null;
+      if (userValue == null) return;
+      const user = userValue.trim();
+
+      const passwordValue = window.prompt("Database password", "") ?? null;
+      if (passwordValue == null) return;
+      const password = passwordValue;
+      if (!password.trim()) return;
+
+      try {
+        await credentialStore.set(scope as any, user ? { user, password } : { password });
+        const key = sqlScopeKey(scope);
+        setSqlCredentialPresentByKey((prev) => ({ ...prev, [key]: true }));
+      } catch (err) {
+        setGlobalError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [credentialStore, resolveSqlScope],
+  );
+
+  const clearSqlCredential = useCallback(
+    async (connection: unknown) => {
+      if (!credentialStore) return;
+      setGlobalError(null);
+      const scope = resolveSqlScope(connection);
+      if (!scope) return;
+      const key = sqlScopeKey(scope);
+      try {
+        await credentialStore.delete(scope as any);
+        setSqlCredentialPresentByKey((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      } catch (err) {
+        setGlobalError(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [credentialStore, resolveSqlScope],
   );
 
   const startOAuthSignIn = useCallback(
@@ -688,6 +804,10 @@ export function DataQueriesPanelContainer(props: Props) {
                 const query = queries.find((q) => q.id === row.id) as Query | undefined;
                 const source = query?.source as any;
                 const apiUrl = source?.type === "api" && typeof source?.url === "string" ? String(source.url) : null;
+                const databaseConnection = source?.type === "database" ? source.connection : null;
+                const databaseScope = databaseConnection != null ? resolveSqlScope(databaseConnection) : null;
+                const databaseKey = databaseScope ? sqlScopeKey(databaseScope) : null;
+                const databaseHasCredential = databaseKey ? sqlCredentialPresentByKey[databaseKey] : false;
                 const oauth =
                   source?.type === "api" && source?.auth?.type === "oauth2"
                     ? {
@@ -728,23 +848,42 @@ export function DataQueriesPanelContainer(props: Props) {
                             </button>
                           </div>
                         </div>
-                      ) : apiUrl ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          <div style={{ color: "var(--text-muted)" }}>HTTP headers</div>
-                          <div style={{ display: "flex", gap: 6 }}>
+                       ) : apiUrl ? (
+                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                           <div style={{ color: "var(--text-muted)" }}>HTTP headers</div>
+                           <div style={{ display: "flex", gap: 6 }}>
                             <button type="button" onClick={() => void setHttpHeaderCredential(apiUrl)}>
                               Set…
                             </button>
                             <button type="button" onClick={() => void clearHttpHeaderCredential(apiUrl)}>
-                              Clear
-                            </button>
-                          </div>
-                        </div>
-                      ) : row.authRequired ? (
-                        row.authLabel
-                      ) : (
-                        "—"
-                      )}
+                               Clear
+                             </button>
+                           </div>
+                         </div>
+                       ) : databaseConnection != null ? (
+                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                           <div style={{ color: "var(--text-muted)" }}>{row.authLabel ?? "Database"}</div>
+                           {databaseScope ? (
+                             <div style={{ display: "flex", gap: 6 }}>
+                               {databaseHasCredential ? (
+                                 <button type="button" onClick={() => void clearSqlCredential(databaseConnection)}>
+                                   Clear
+                                 </button>
+                               ) : (
+                                 <button type="button" onClick={() => void setSqlCredential(databaseConnection)}>
+                                   Set…
+                                 </button>
+                               )}
+                             </div>
+                           ) : (
+                             <div style={{ color: "var(--text-muted)" }}>Credentials: managed on refresh</div>
+                           )}
+                         </div>
+                       ) : row.authRequired ? (
+                         row.authLabel
+                       ) : (
+                         "—"
+                       )}
                     </td>
                     <td style={{ padding: 8, fontSize: 12, color: row.errorSummary ? "var(--error)" : "var(--text-muted)" }}>
                       {row.errorSummary ?? "—"}
