@@ -10253,6 +10253,20 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_ifna_does_not_eval_fallback_for_non_na_errors_even_when_volatile() {
+        // `IFNA` should not evaluate its fallback when the first argument is a non-#N/A error.
+        // Use RAND() draw indexing to detect accidental eager evaluation:
+        // - The inner `+ RAND()` is always evaluated (even though the left side is an error),
+        //   and the outer IFERROR fallback returns a subsequent RAND() draw.
+        // - If IFNA eagerly evaluated its fallback RAND(), the visible returned draw would shift.
+        let v = assert_bytecode_eq_ast("=IFERROR(IFNA(1/0, RAND()) + RAND(), RAND())");
+        match v {
+            Value::Number(n) => assert!((0.0..1.0).contains(&n), "got {n}"),
+            other => panic!("expected number, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn bytecode_ifs_short_circuits_later_conditions() {
         assert_bytecode_matches_ast("=IFS(TRUE, 1, 1/0, 2)", Value::Number(1.0));
     }
