@@ -7,8 +7,11 @@ test.describe("tauri open-file integration", () => {
     await page.addInitScript(() => {
       const listeners: Record<string, any> = {};
       const emitted: Array<{ event: string; payload: any }> = [];
+      const callOrder: Array<{ kind: "listen" | "listen-registered" | "emit"; name: string; seq: number }> = [];
+      let seq = 0;
       (window as any).__tauriListeners = listeners;
       (window as any).__tauriEmittedEvents = emitted;
+      (window as any).__tauriCallOrder = callOrder;
 
       (window as any).__TAURI__ = {
         core: {
@@ -67,12 +70,19 @@ test.describe("tauri open-file integration", () => {
         },
         event: {
           listen: async (name: string, handler: any) => {
+            // Tauri's `listen` is async and only resolves once the backend confirms the
+            // handler registration. Simulate that so the test can catch regressions
+            // where we emit `open-file-ready` before the `open-file` listener is ready.
+            callOrder.push({ kind: "listen", name, seq: ++seq });
+            await Promise.resolve();
             listeners[name] = handler;
+            callOrder.push({ kind: "listen-registered", name, seq: ++seq });
             return () => {
               delete listeners[name];
             };
           },
           emit: async (event: string, payload?: any) => {
+            callOrder.push({ kind: "emit", name: event, seq: ++seq });
             emitted.push({ event, payload });
           },
         },
@@ -96,6 +106,18 @@ test.describe("tauri open-file integration", () => {
       Boolean((window as any).__tauriEmittedEvents?.some((entry: any) => entry?.event === "open-file-ready")),
     );
 
+    const ordering = await page.evaluate(() => {
+      const calls = (window as any).__tauriCallOrder as Array<{ kind: string; name: string; seq: number }> | undefined;
+      if (!Array.isArray(calls)) return null;
+      const openFileRegistered = calls.find((c) => c.kind === "listen-registered" && c.name === "open-file")?.seq ?? null;
+      const openFileReadyEmitted = calls.find((c) => c.kind === "emit" && c.name === "open-file-ready")?.seq ?? null;
+      return { openFileRegistered, openFileReadyEmitted };
+    });
+    expect(ordering).not.toBeNull();
+    expect(ordering!.openFileRegistered).not.toBeNull();
+    expect(ordering!.openFileReadyEmitted).not.toBeNull();
+    expect(ordering!.openFileReadyEmitted!).toBeGreaterThan(ordering!.openFileRegistered!);
+
     await page.evaluate(() => {
       (window as any).__tauriListeners["open-file"]({ payload: ["/tmp/fake.xlsx"] });
     });
@@ -112,4 +134,3 @@ test.describe("tauri open-file integration", () => {
     expect(openFileReadyEmitted).toBe(true);
   });
 });
-
