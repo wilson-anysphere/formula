@@ -125,6 +125,12 @@ pub fn eval_ast(
                     | Function::Max
                     | Function::Count => true,
                     Function::CountIf => arg_idx == 0,
+                    Function::SumIf | Function::AverageIf => arg_idx == 0 || arg_idx == 2,
+                    Function::SumIfs
+                    | Function::AverageIfs
+                    | Function::MinIfs
+                    | Function::MaxIfs => arg_idx == 0 || arg_idx % 2 == 1,
+                    Function::CountIfs => arg_idx % 2 == 0,
                     Function::SumProduct => true,
                     Function::VLookup | Function::HLookup | Function::Match => arg_idx == 1,
                     Function::Abs
@@ -200,18 +206,6 @@ fn matches_numeric_criteria(v: f64, criteria: NumericCriteria) -> bool {
         CmpOp::Gt => v > criteria.rhs,
         CmpOp::Ge => v >= criteria.rhs,
     }
-}
-
-fn count_if_f64_blank_as_zero(values: &[f64], criteria: NumericCriteria) -> usize {
-    // COUNTIF treats blank cells as zero for numeric criteria. Column slices represent blanks as
-    // NaN, so normalize before comparison.
-    values
-        .iter()
-        .filter(|v| {
-            let v = if v.is_nan() { 0.0 } else { **v };
-            matches_numeric_criteria(v, criteria)
-        })
-        .count()
 }
 
 fn coerce_countif_value_to_number(v: Value) -> Option<f64> {
@@ -491,11 +485,18 @@ pub fn call_function(
 ) -> Value {
     match func {
         Function::Sum => fn_sum(args, grid, base),
+        Function::SumIf => fn_sumif(args, grid, base, locale),
+        Function::SumIfs => fn_sumifs(args, grid, base, locale),
         Function::Average => fn_average(args, grid, base),
+        Function::AverageIf => fn_averageif(args, grid, base, locale),
+        Function::AverageIfs => fn_averageifs(args, grid, base, locale),
         Function::Min => fn_min(args, grid, base),
+        Function::MinIfs => fn_minifs(args, grid, base, locale),
         Function::Max => fn_max(args, grid, base),
+        Function::MaxIfs => fn_maxifs(args, grid, base, locale),
         Function::Count => fn_count(args, grid, base),
         Function::CountIf => fn_countif(args, grid, base, locale),
+        Function::CountIfs => fn_countifs(args, grid, base, locale),
         Function::SumProduct => fn_sumproduct(args, grid, base),
         Function::VLookup => fn_vlookup(args, grid, base),
         Function::HLookup => fn_hlookup(args, grid, base),
@@ -866,7 +867,7 @@ fn fn_countif(
                 Ok(c) => c,
                 Err(e) => return Value::Error(e),
             },
-            RangeArg::Array(a) => count_if_f64_blank_as_zero(a.as_slice(), numeric),
+            RangeArg::Array(a) => simd::count_if_blank_as_zero_f64(a.as_slice(), numeric),
         };
         return Value::Number(count as f64);
     }
@@ -879,6 +880,1035 @@ fn fn_countif(
         RangeArg::Array(a) => count_if_array_criteria(a, &criteria),
     };
     Value::Number(count as f64)
+}
+
+fn fn_sumif(
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
+    if args.len() != 2 && args.len() != 3 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let criteria_range_ref = match &args[0] {
+        Value::Range(r) => *r,
+        _ => return Value::Error(ErrorKind::Value),
+    };
+    let criteria = match parse_countif_criteria(&args[1], locale) {
+        Ok(c) => c,
+        Err(e) => return Value::Error(e),
+    };
+
+    // Excel treats `SUMIF(range, criteria,)` the same as omitting the optional sum_range arg.
+    let sum_range_ref = match args.get(2) {
+        None => None,
+        Some(Value::Empty) => None,
+        Some(Value::Range(r)) => Some(*r),
+        Some(_) => return Value::Error(ErrorKind::Value),
+    }
+    .unwrap_or(criteria_range_ref);
+
+    let crit_range = criteria_range_ref.resolve(base);
+    let sum_range = sum_range_ref.resolve(base);
+
+    if !range_in_bounds(grid, crit_range) || !range_in_bounds(grid, sum_range) {
+        return Value::Error(ErrorKind::Ref);
+    }
+    if crit_range.rows() != sum_range.rows() || crit_range.cols() != sum_range.cols() {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let rows = crit_range.rows();
+    let cols = crit_range.cols();
+    if rows <= 0 || cols <= 0 {
+        return Value::Number(0.0);
+    }
+
+    if let Some(numeric) = criteria.as_numeric_criteria() {
+        let mut sum = 0.0;
+        for col_off in 0..cols {
+            let crit_col = crit_range.col_start + col_off;
+            let sum_col = sum_range.col_start + col_off;
+
+            if let (Some(crit_slice), Some(sum_slice)) = (
+                grid.column_slice(crit_col, crit_range.row_start, crit_range.row_end),
+                grid.column_slice(sum_col, sum_range.row_start, sum_range.row_end),
+            ) {
+                sum += simd::sum_if_f64(sum_slice, crit_slice, numeric);
+                continue;
+            }
+
+            // Fallback: per-cell scan for this column (needed for blocked rows or missing cache).
+            for row_off in 0..rows {
+                let engine_value = bytecode_value_to_engine(grid.get_value(CellCoord {
+                    row: crit_range.row_start + row_off,
+                    col: crit_col,
+                }));
+                if !criteria.matches(&engine_value) {
+                    continue;
+                }
+                match grid.get_value(CellCoord {
+                    row: sum_range.row_start + row_off,
+                    col: sum_col,
+                }) {
+                    Value::Number(v) => sum += v,
+                    Value::Error(e) => return Value::Error(e),
+                    // SUMIF ignores text/logicals/blanks in references.
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_) => {}
+                }
+            }
+        }
+        return Value::Number(sum);
+    }
+
+    let mut sum = 0.0;
+    for row_off in 0..rows {
+        for col_off in 0..cols {
+            let crit_cell = CellCoord {
+                row: crit_range.row_start + row_off,
+                col: crit_range.col_start + col_off,
+            };
+            let engine_value = bytecode_value_to_engine(grid.get_value(crit_cell));
+            if !criteria.matches(&engine_value) {
+                continue;
+            }
+
+            let sum_cell = CellCoord {
+                row: sum_range.row_start + row_off,
+                col: sum_range.col_start + col_off,
+            };
+            match grid.get_value(sum_cell) {
+                Value::Number(v) => sum += v,
+                Value::Error(e) => return Value::Error(e),
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Empty
+                | Value::Array(_)
+                | Value::Range(_) => {}
+            }
+        }
+    }
+    Value::Number(sum)
+}
+
+fn fn_sumifs(
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
+    if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let sum_range_ref = match &args[0] {
+        Value::Range(r) => *r,
+        _ => return Value::Error(ErrorKind::Value),
+    };
+    let sum_range = sum_range_ref.resolve(base);
+
+    if !range_in_bounds(grid, sum_range) {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    let rows = sum_range.rows();
+    let cols = sum_range.cols();
+    if rows <= 0 || cols <= 0 {
+        return Value::Number(0.0);
+    }
+
+    let mut crit_ranges: Vec<ResolvedRange> = Vec::with_capacity((args.len() - 1) / 2);
+    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+    let mut numeric_crits: Vec<NumericCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+
+    for pair in args[1..].chunks_exact(2) {
+        let range_ref = match &pair[0] {
+            Value::Range(r) => *r,
+            _ => return Value::Error(ErrorKind::Value),
+        };
+        let range = range_ref.resolve(base);
+        if !range_in_bounds(grid, range) {
+            return Value::Error(ErrorKind::Ref);
+        }
+        if range.rows() != rows || range.cols() != cols {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let crit = match parse_countif_criteria(&pair[1], locale) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+        if let Some(nc) = crit.as_numeric_criteria() {
+            numeric_crits.push(nc);
+        } else {
+            numeric_crits.clear();
+        }
+
+        crit_ranges.push(range);
+        crits.push(crit);
+    }
+
+    let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
+
+    let mut sum = 0.0;
+    for col_off in 0..cols {
+        let sum_col = sum_range.col_start + col_off;
+
+        if all_numeric {
+            let sum_slice = grid.column_slice(sum_col, sum_range.row_start, sum_range.row_end);
+            let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
+            for range in &crit_ranges {
+                let col = range.col_start + col_off;
+                let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) else {
+                    crit_slices.clear();
+                    break;
+                };
+                crit_slices.push(slice);
+            }
+
+            if let (Some(sum_slice), true) = (sum_slice, crit_slices.len() == crits.len()) {
+                // All slices are available; do a tight numeric scan.
+                if numeric_crits.len() == 1 {
+                    sum += simd::sum_if_f64(sum_slice, crit_slices[0], numeric_crits[0]);
+                    continue;
+                }
+
+                let len = sum_slice.len();
+                let mut i = 0usize;
+                while i + 4 <= len {
+                    for lane in 0..4 {
+                        let idx = i + lane;
+                        let mut matches = true;
+                        for (slice, crit) in crit_slices.iter().zip(numeric_crits.iter()) {
+                            let mut v = slice[idx];
+                            if v.is_nan() {
+                                v = 0.0;
+                            }
+                            if !matches_numeric_criteria(v, *crit) {
+                                matches = false;
+                                break;
+                            }
+                        }
+                        if !matches {
+                            continue;
+                        }
+                        let v = sum_slice[idx];
+                        if !v.is_nan() {
+                            sum += v;
+                        }
+                    }
+                    i += 4;
+                }
+                for idx in i..len {
+                    let mut matches = true;
+                    for (slice, crit) in crit_slices.iter().zip(numeric_crits.iter()) {
+                        let mut v = slice[idx];
+                        if v.is_nan() {
+                            v = 0.0;
+                        }
+                        if !matches_numeric_criteria(v, *crit) {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if !matches {
+                        continue;
+                    }
+                    let v = sum_slice[idx];
+                    if !v.is_nan() {
+                        sum += v;
+                    }
+                }
+                continue;
+            }
+        }
+
+        // Fallback: per-cell scan for this column.
+        'row: for row_off in 0..rows {
+            for (range, crit) in crit_ranges.iter().zip(crits.iter()) {
+                let cell = CellCoord {
+                    row: range.row_start + row_off,
+                    col: range.col_start + col_off,
+                };
+                let engine_value = bytecode_value_to_engine(grid.get_value(cell));
+                if !crit.matches(&engine_value) {
+                    continue 'row;
+                }
+            }
+
+            match grid.get_value(CellCoord {
+                row: sum_range.row_start + row_off,
+                col: sum_col,
+            }) {
+                Value::Number(v) => sum += v,
+                Value::Error(e) => return Value::Error(e),
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Empty
+                | Value::Array(_)
+                | Value::Range(_) => {}
+            }
+        }
+    }
+
+    Value::Number(sum)
+}
+
+fn fn_countifs(
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
+    if args.len() < 2 || args.len() % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let mut ranges: Vec<ResolvedRange> = Vec::with_capacity(args.len() / 2);
+    let mut criteria: Vec<EngineCriteria> = Vec::with_capacity(args.len() / 2);
+    let mut numeric: Vec<NumericCriteria> = Vec::with_capacity(args.len() / 2);
+
+    for pair in args.chunks_exact(2) {
+        let range_ref = match &pair[0] {
+            Value::Range(r) => *r,
+            _ => return Value::Error(ErrorKind::Value),
+        };
+        let range = range_ref.resolve(base);
+        if !range_in_bounds(grid, range) {
+            return Value::Error(ErrorKind::Ref);
+        }
+
+        let crit = match parse_countif_criteria(&pair[1], locale) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+        if let Some(nc) = crit.as_numeric_criteria() {
+            numeric.push(nc);
+        } else {
+            numeric.clear();
+        }
+
+        ranges.push(range);
+        criteria.push(crit);
+    }
+
+    let (rows, cols) = (ranges[0].rows(), ranges[0].cols());
+    if rows <= 0 || cols <= 0 {
+        return Value::Number(0.0);
+    }
+    for range in &ranges[1..] {
+        if range.rows() != rows || range.cols() != cols {
+            return Value::Error(ErrorKind::Value);
+        }
+    }
+
+    let all_numeric = !numeric.is_empty() && numeric.len() == criteria.len();
+
+    let mut count = 0usize;
+    for col_off in 0..cols {
+        if all_numeric {
+            let mut slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(ranges.len());
+            for range in &ranges {
+                let col = range.col_start + col_off;
+                let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) else {
+                    slices.clear();
+                    break;
+                };
+                slices.push(slice);
+            }
+
+            if slices.len() == ranges.len() {
+                if numeric.len() == 1 {
+                    count += simd::count_if_blank_as_zero_f64(slices[0], numeric[0]);
+                    continue;
+                }
+
+                let len = slices[0].len();
+                let mut i = 0usize;
+                while i + 4 <= len {
+                    for lane in 0..4 {
+                        let idx = i + lane;
+                        let mut matches = true;
+                        for (slice, crit) in slices.iter().zip(numeric.iter()) {
+                            let mut v = slice[idx];
+                            if v.is_nan() {
+                                v = 0.0;
+                            }
+                            if !matches_numeric_criteria(v, *crit) {
+                                matches = false;
+                                break;
+                            }
+                        }
+                        if matches {
+                            count += 1;
+                        }
+                    }
+                    i += 4;
+                }
+                for idx in i..len {
+                    let mut matches = true;
+                    for (slice, crit) in slices.iter().zip(numeric.iter()) {
+                        let mut v = slice[idx];
+                        if v.is_nan() {
+                            v = 0.0;
+                        }
+                        if !matches_numeric_criteria(v, *crit) {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if matches {
+                        count += 1;
+                    }
+                }
+                continue;
+            }
+        }
+
+        // Fallback: per-cell scan for this column.
+        'row: for row_off in 0..rows {
+            for (range, crit) in ranges.iter().zip(criteria.iter()) {
+                let cell = CellCoord {
+                    row: range.row_start + row_off,
+                    col: range.col_start + col_off,
+                };
+                let engine_value = bytecode_value_to_engine(grid.get_value(cell));
+                if !crit.matches(&engine_value) {
+                    continue 'row;
+                }
+            }
+            count += 1;
+        }
+    }
+
+    Value::Number(count as f64)
+}
+
+fn fn_averageif(
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
+    if args.len() != 2 && args.len() != 3 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let criteria_range_ref = match &args[0] {
+        Value::Range(r) => *r,
+        _ => return Value::Error(ErrorKind::Value),
+    };
+    let criteria = match parse_countif_criteria(&args[1], locale) {
+        Ok(c) => c,
+        Err(e) => return Value::Error(e),
+    };
+
+    // Excel treats `AVERAGEIF(range, criteria,)` as omitting the optional average_range.
+    let average_range_ref = match args.get(2) {
+        None => None,
+        Some(Value::Empty) => None,
+        Some(Value::Range(r)) => Some(*r),
+        Some(_) => return Value::Error(ErrorKind::Value),
+    }
+    .unwrap_or(criteria_range_ref);
+
+    let crit_range = criteria_range_ref.resolve(base);
+    let avg_range = average_range_ref.resolve(base);
+
+    if !range_in_bounds(grid, crit_range) || !range_in_bounds(grid, avg_range) {
+        return Value::Error(ErrorKind::Ref);
+    }
+    if crit_range.rows() != avg_range.rows() || crit_range.cols() != avg_range.cols() {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let rows = crit_range.rows();
+    let cols = crit_range.cols();
+    if rows <= 0 || cols <= 0 {
+        return Value::Error(ErrorKind::Div0);
+    }
+
+    if let Some(numeric) = criteria.as_numeric_criteria() {
+        let mut sum = 0.0;
+        let mut count = 0usize;
+        for col_off in 0..cols {
+            let crit_col = crit_range.col_start + col_off;
+            let avg_col = avg_range.col_start + col_off;
+
+            if let (Some(crit_slice), Some(avg_slice)) = (
+                grid.column_slice(crit_col, crit_range.row_start, crit_range.row_end),
+                grid.column_slice(avg_col, avg_range.row_start, avg_range.row_end),
+            ) {
+                let (s, c) = simd::sum_count_if_f64(avg_slice, crit_slice, numeric);
+                sum += s;
+                count += c;
+                continue;
+            }
+
+            for row_off in 0..rows {
+                let engine_value = bytecode_value_to_engine(grid.get_value(CellCoord {
+                    row: crit_range.row_start + row_off,
+                    col: crit_col,
+                }));
+                if !criteria.matches(&engine_value) {
+                    continue;
+                }
+
+                match grid.get_value(CellCoord {
+                    row: avg_range.row_start + row_off,
+                    col: avg_col,
+                }) {
+                    Value::Number(v) => {
+                        sum += v;
+                        count += 1;
+                    }
+                    Value::Error(e) => return Value::Error(e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_) => {}
+                }
+            }
+        }
+
+        if count == 0 {
+            return Value::Error(ErrorKind::Div0);
+        }
+        return Value::Number(sum / count as f64);
+    }
+
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    for row_off in 0..rows {
+        for col_off in 0..cols {
+            let crit_cell = CellCoord {
+                row: crit_range.row_start + row_off,
+                col: crit_range.col_start + col_off,
+            };
+            let engine_value = bytecode_value_to_engine(grid.get_value(crit_cell));
+            if !criteria.matches(&engine_value) {
+                continue;
+            }
+
+            let avg_cell = CellCoord {
+                row: avg_range.row_start + row_off,
+                col: avg_range.col_start + col_off,
+            };
+            match grid.get_value(avg_cell) {
+                Value::Number(v) => {
+                    sum += v;
+                    count += 1;
+                }
+                Value::Error(e) => return Value::Error(e),
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Empty
+                | Value::Array(_)
+                | Value::Range(_) => {}
+            }
+        }
+    }
+
+    if count == 0 {
+        return Value::Error(ErrorKind::Div0);
+    }
+    Value::Number(sum / count as f64)
+}
+
+fn fn_averageifs(
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
+    if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let avg_range_ref = match &args[0] {
+        Value::Range(r) => *r,
+        _ => return Value::Error(ErrorKind::Value),
+    };
+    let avg_range = avg_range_ref.resolve(base);
+    if !range_in_bounds(grid, avg_range) {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    let rows = avg_range.rows();
+    let cols = avg_range.cols();
+    if rows <= 0 || cols <= 0 {
+        return Value::Error(ErrorKind::Div0);
+    }
+
+    let mut crit_ranges: Vec<ResolvedRange> = Vec::with_capacity((args.len() - 1) / 2);
+    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+    let mut numeric_crits: Vec<NumericCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+
+    for pair in args[1..].chunks_exact(2) {
+        let range_ref = match &pair[0] {
+            Value::Range(r) => *r,
+            _ => return Value::Error(ErrorKind::Value),
+        };
+        let range = range_ref.resolve(base);
+        if !range_in_bounds(grid, range) {
+            return Value::Error(ErrorKind::Ref);
+        }
+        if range.rows() != rows || range.cols() != cols {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let crit = match parse_countif_criteria(&pair[1], locale) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+        if let Some(nc) = crit.as_numeric_criteria() {
+            numeric_crits.push(nc);
+        } else {
+            numeric_crits.clear();
+        }
+
+        crit_ranges.push(range);
+        crits.push(crit);
+    }
+
+    let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
+
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    for col_off in 0..cols {
+        let avg_col = avg_range.col_start + col_off;
+
+        if all_numeric {
+            let avg_slice = grid.column_slice(avg_col, avg_range.row_start, avg_range.row_end);
+            let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
+            for range in &crit_ranges {
+                let col = range.col_start + col_off;
+                let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) else {
+                    crit_slices.clear();
+                    break;
+                };
+                crit_slices.push(slice);
+            }
+
+            if let (Some(avg_slice), true) = (avg_slice, crit_slices.len() == crits.len()) {
+                if numeric_crits.len() == 1 {
+                    let (s, c) =
+                        simd::sum_count_if_f64(avg_slice, crit_slices[0], numeric_crits[0]);
+                    sum += s;
+                    count += c;
+                    continue;
+                }
+
+                let len = avg_slice.len();
+                let mut i = 0usize;
+                while i + 4 <= len {
+                    for lane in 0..4 {
+                        let idx = i + lane;
+                        let mut matches = true;
+                        for (slice, crit) in crit_slices.iter().zip(numeric_crits.iter()) {
+                            let mut v = slice[idx];
+                            if v.is_nan() {
+                                v = 0.0;
+                            }
+                            if !matches_numeric_criteria(v, *crit) {
+                                matches = false;
+                                break;
+                            }
+                        }
+                        if !matches {
+                            continue;
+                        }
+                        let v = avg_slice[idx];
+                        if !v.is_nan() {
+                            sum += v;
+                            count += 1;
+                        }
+                    }
+                    i += 4;
+                }
+                for idx in i..len {
+                    let mut matches = true;
+                    for (slice, crit) in crit_slices.iter().zip(numeric_crits.iter()) {
+                        let mut v = slice[idx];
+                        if v.is_nan() {
+                            v = 0.0;
+                        }
+                        if !matches_numeric_criteria(v, *crit) {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if !matches {
+                        continue;
+                    }
+                    let v = avg_slice[idx];
+                    if !v.is_nan() {
+                        sum += v;
+                        count += 1;
+                    }
+                }
+                continue;
+            }
+        }
+
+        // Fallback: per-cell scan for this column.
+        'row: for row_off in 0..rows {
+            for (range, crit) in crit_ranges.iter().zip(crits.iter()) {
+                let cell = CellCoord {
+                    row: range.row_start + row_off,
+                    col: range.col_start + col_off,
+                };
+                let engine_value = bytecode_value_to_engine(grid.get_value(cell));
+                if !crit.matches(&engine_value) {
+                    continue 'row;
+                }
+            }
+
+            match grid.get_value(CellCoord {
+                row: avg_range.row_start + row_off,
+                col: avg_col,
+            }) {
+                Value::Number(v) => {
+                    sum += v;
+                    count += 1;
+                }
+                Value::Error(e) => return Value::Error(e),
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Empty
+                | Value::Array(_)
+                | Value::Range(_) => {}
+            }
+        }
+    }
+
+    if count == 0 {
+        return Value::Error(ErrorKind::Div0);
+    }
+    Value::Number(sum / count as f64)
+}
+
+fn fn_minifs(
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
+    if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let min_range_ref = match &args[0] {
+        Value::Range(r) => *r,
+        _ => return Value::Error(ErrorKind::Value),
+    };
+    let min_range = min_range_ref.resolve(base);
+    if !range_in_bounds(grid, min_range) {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    let rows = min_range.rows();
+    let cols = min_range.cols();
+    if rows <= 0 || cols <= 0 {
+        return Value::Number(0.0);
+    }
+
+    let mut crit_ranges: Vec<ResolvedRange> = Vec::with_capacity((args.len() - 1) / 2);
+    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+    let mut numeric_crits: Vec<NumericCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+
+    for pair in args[1..].chunks_exact(2) {
+        let range_ref = match &pair[0] {
+            Value::Range(r) => *r,
+            _ => return Value::Error(ErrorKind::Value),
+        };
+        let range = range_ref.resolve(base);
+        if !range_in_bounds(grid, range) {
+            return Value::Error(ErrorKind::Ref);
+        }
+        if range.rows() != rows || range.cols() != cols {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let crit = match parse_countif_criteria(&pair[1], locale) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+        if let Some(nc) = crit.as_numeric_criteria() {
+            numeric_crits.push(nc);
+        } else {
+            numeric_crits.clear();
+        }
+
+        crit_ranges.push(range);
+        crits.push(crit);
+    }
+
+    let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
+
+    if all_numeric {
+        // Only use the numeric fast path when all required slices are available (no blocked rows).
+        let mut slices_ok = true;
+        let mut best: Option<f64> = None;
+        for col_off in 0..cols {
+            let min_col = min_range.col_start + col_off;
+            let Some(min_slice) =
+                grid.column_slice(min_col, min_range.row_start, min_range.row_end)
+            else {
+                slices_ok = false;
+                break;
+            };
+
+            let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
+            for range in &crit_ranges {
+                let col = range.col_start + col_off;
+                let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) else {
+                    crit_slices.clear();
+                    break;
+                };
+                crit_slices.push(slice);
+            }
+            if crit_slices.len() != crits.len() {
+                slices_ok = false;
+                break;
+            }
+
+            for idx in 0..min_slice.len() {
+                let mut matches = true;
+                for (slice, crit) in crit_slices.iter().zip(numeric_crits.iter()) {
+                    let mut v = slice[idx];
+                    if v.is_nan() {
+                        v = 0.0;
+                    }
+                    if !matches_numeric_criteria(v, *crit) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if !matches {
+                    continue;
+                }
+                let v = min_slice[idx];
+                if v.is_nan() {
+                    continue;
+                }
+                best = Some(best.map_or(v, |b| b.min(v)));
+            }
+        }
+
+        if slices_ok {
+            return Value::Number(best.unwrap_or(0.0));
+        }
+    }
+
+    // Fallback: row-major scan with stable error propagation.
+    let mut best: Option<f64> = None;
+    let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
+    for row_off in 0..rows {
+        'col: for col_off in 0..cols {
+            for (range, crit) in crit_ranges.iter().zip(crits.iter()) {
+                let cell = CellCoord {
+                    row: range.row_start + row_off,
+                    col: range.col_start + col_off,
+                };
+                let engine_value = bytecode_value_to_engine(grid.get_value(cell));
+                if !crit.matches(&engine_value) {
+                    continue 'col;
+                }
+            }
+
+            let value_cell = CellCoord {
+                row: min_range.row_start + row_off,
+                col: min_range.col_start + col_off,
+            };
+            match grid.get_value(value_cell) {
+                Value::Number(v) => best = Some(best.map_or(v, |b| b.min(v))),
+                Value::Error(e) => match earliest_error {
+                    None => earliest_error = Some((row_off, col_off, e)),
+                    Some((best_row, best_col, _)) => {
+                        if (row_off, col_off) < (best_row, best_col) {
+                            earliest_error = Some((row_off, col_off, e));
+                        }
+                    }
+                },
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Empty
+                | Value::Array(_)
+                | Value::Range(_) => {}
+            }
+        }
+    }
+
+    if let Some((_, _, e)) = earliest_error {
+        return Value::Error(e);
+    }
+    Value::Number(best.unwrap_or(0.0))
+}
+
+fn fn_maxifs(
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
+    if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    let max_range_ref = match &args[0] {
+        Value::Range(r) => *r,
+        _ => return Value::Error(ErrorKind::Value),
+    };
+    let max_range = max_range_ref.resolve(base);
+    if !range_in_bounds(grid, max_range) {
+        return Value::Error(ErrorKind::Ref);
+    }
+
+    let rows = max_range.rows();
+    let cols = max_range.cols();
+    if rows <= 0 || cols <= 0 {
+        return Value::Number(0.0);
+    }
+
+    let mut crit_ranges: Vec<ResolvedRange> = Vec::with_capacity((args.len() - 1) / 2);
+    let mut crits: Vec<EngineCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+    let mut numeric_crits: Vec<NumericCriteria> = Vec::with_capacity((args.len() - 1) / 2);
+
+    for pair in args[1..].chunks_exact(2) {
+        let range_ref = match &pair[0] {
+            Value::Range(r) => *r,
+            _ => return Value::Error(ErrorKind::Value),
+        };
+        let range = range_ref.resolve(base);
+        if !range_in_bounds(grid, range) {
+            return Value::Error(ErrorKind::Ref);
+        }
+        if range.rows() != rows || range.cols() != cols {
+            return Value::Error(ErrorKind::Value);
+        }
+
+        let crit = match parse_countif_criteria(&pair[1], locale) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
+        if let Some(nc) = crit.as_numeric_criteria() {
+            numeric_crits.push(nc);
+        } else {
+            numeric_crits.clear();
+        }
+
+        crit_ranges.push(range);
+        crits.push(crit);
+    }
+
+    let all_numeric = !numeric_crits.is_empty() && numeric_crits.len() == crits.len();
+
+    if all_numeric {
+        // Only use the numeric fast path when all required slices are available (no blocked rows).
+        let mut slices_ok = true;
+        let mut best: Option<f64> = None;
+        for col_off in 0..cols {
+            let max_col = max_range.col_start + col_off;
+            let Some(max_slice) =
+                grid.column_slice(max_col, max_range.row_start, max_range.row_end)
+            else {
+                slices_ok = false;
+                break;
+            };
+
+            let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
+            for range in &crit_ranges {
+                let col = range.col_start + col_off;
+                let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) else {
+                    crit_slices.clear();
+                    break;
+                };
+                crit_slices.push(slice);
+            }
+            if crit_slices.len() != crits.len() {
+                slices_ok = false;
+                break;
+            }
+
+            for idx in 0..max_slice.len() {
+                let mut matches = true;
+                for (slice, crit) in crit_slices.iter().zip(numeric_crits.iter()) {
+                    let mut v = slice[idx];
+                    if v.is_nan() {
+                        v = 0.0;
+                    }
+                    if !matches_numeric_criteria(v, *crit) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if !matches {
+                    continue;
+                }
+                let v = max_slice[idx];
+                if v.is_nan() {
+                    continue;
+                }
+                best = Some(best.map_or(v, |b| b.max(v)));
+            }
+        }
+
+        if slices_ok {
+            return Value::Number(best.unwrap_or(0.0));
+        }
+    }
+
+    // Fallback: row-major scan with stable error propagation.
+    let mut best: Option<f64> = None;
+    let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
+    for row_off in 0..rows {
+        'col: for col_off in 0..cols {
+            for (range, crit) in crit_ranges.iter().zip(crits.iter()) {
+                let cell = CellCoord {
+                    row: range.row_start + row_off,
+                    col: range.col_start + col_off,
+                };
+                let engine_value = bytecode_value_to_engine(grid.get_value(cell));
+                if !crit.matches(&engine_value) {
+                    continue 'col;
+                }
+            }
+
+            let value_cell = CellCoord {
+                row: max_range.row_start + row_off,
+                col: max_range.col_start + col_off,
+            };
+            match grid.get_value(value_cell) {
+                Value::Number(v) => best = Some(best.map_or(v, |b| b.max(v))),
+                Value::Error(e) => match earliest_error {
+                    None => earliest_error = Some((row_off, col_off, e)),
+                    Some((best_row, best_col, _)) => {
+                        if (row_off, col_off) < (best_row, best_col) {
+                            earliest_error = Some((row_off, col_off, e));
+                        }
+                    }
+                },
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Empty
+                | Value::Array(_)
+                | Value::Range(_) => {}
+            }
+        }
+    }
+
+    if let Some((_, _, e)) = earliest_error {
+        return Value::Error(e);
+    }
+    Value::Number(best.unwrap_or(0.0))
 }
 
 fn fn_sumproduct(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
@@ -1660,7 +2690,7 @@ fn count_if_range(
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
-            count += count_if_f64_blank_as_zero(slice, criteria);
+            count += simd::count_if_blank_as_zero_f64(slice, criteria);
         } else {
             for row in range.row_start..=range.row_end {
                 if let Some(v) =

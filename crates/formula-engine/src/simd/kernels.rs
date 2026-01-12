@@ -164,6 +164,144 @@ pub fn count_if_f64(values: &[f64], criteria: NumericCriteria) -> usize {
     count
 }
 
+/// COUNTIF-style numeric criteria evaluation for column slices.
+///
+/// In Excel, blank cells are coerced to `0` for numeric criteria. Column slices represent blanks as
+/// `NaN`, so this kernel normalizes NaNs to `0` before comparison.
+pub fn count_if_blank_as_zero_f64(values: &[f64], criteria: NumericCriteria) -> usize {
+    let mut count = 0usize;
+
+    let mut i = 0usize;
+    while i + 4 <= values.len() {
+        let lanes = [values[i], values[i + 1], values[i + 2], values[i + 3]];
+        for &v in &lanes {
+            let v = if v.is_nan() { 0.0 } else { v };
+            if matches_criteria(v, criteria) {
+                count += 1;
+            }
+        }
+        i += 4;
+    }
+
+    for &v in &values[i..] {
+        let v = if v.is_nan() { 0.0 } else { v };
+        if matches_criteria(v, criteria) {
+            count += 1;
+        }
+    }
+
+    count
+}
+
+/// SUMIF-style numeric criteria evaluation for column slices.
+///
+/// - The criteria range is interpreted with COUNTIF-style coercion where blanks are treated as
+///   `0`.
+/// - The summed values treat NaNs as `0` (Excel's reference semantics ignore non-numeric cells).
+pub fn sum_if_f64(values: &[f64], criteria_values: &[f64], criteria: NumericCriteria) -> f64 {
+    debug_assert_eq!(values.len(), criteria_values.len());
+
+    let mut acc = f64x4::from([0.0; 4]);
+
+    let mut i = 0usize;
+    while i + 4 <= values.len() {
+        let mut lanes = [0.0f64; 4];
+        for lane in 0..4 {
+            let mut crit_v = criteria_values[i + lane];
+            if crit_v.is_nan() {
+                crit_v = 0.0;
+            }
+            if matches_criteria(crit_v, criteria) {
+                let v = values[i + lane];
+                lanes[lane] = if v.is_nan() { 0.0 } else { v };
+            }
+        }
+
+        acc += f64x4::from(lanes);
+        i += 4;
+    }
+
+    let arr = acc.to_array();
+    let mut sum = arr[0] + arr[1] + arr[2] + arr[3];
+
+    for idx in i..values.len() {
+        let mut crit_v = criteria_values[idx];
+        if crit_v.is_nan() {
+            crit_v = 0.0;
+        }
+        if !matches_criteria(crit_v, criteria) {
+            continue;
+        }
+        let v = values[idx];
+        if v.is_nan() {
+            continue;
+        }
+        sum += v;
+    }
+
+    sum
+}
+
+/// AVERAGEIF-style numeric criteria evaluation for column slices.
+///
+/// Returns `(sum, count)` where `count` is the number of numeric (non-NaN) values that satisfied
+/// the criteria.
+pub fn sum_count_if_f64(
+    values: &[f64],
+    criteria_values: &[f64],
+    criteria: NumericCriteria,
+) -> (f64, usize) {
+    debug_assert_eq!(values.len(), criteria_values.len());
+
+    let mut acc = f64x4::from([0.0; 4]);
+    let mut count = 0usize;
+
+    let mut i = 0usize;
+    while i + 4 <= values.len() {
+        let mut lanes = [0.0f64; 4];
+        for lane in 0..4 {
+            let mut crit_v = criteria_values[i + lane];
+            if crit_v.is_nan() {
+                crit_v = 0.0;
+            }
+            if !matches_criteria(crit_v, criteria) {
+                continue;
+            }
+
+            let v = values[i + lane];
+            if v.is_nan() {
+                continue;
+            }
+            lanes[lane] = v;
+            count += 1;
+        }
+
+        acc += f64x4::from(lanes);
+        i += 4;
+    }
+
+    let arr = acc.to_array();
+    let mut sum = arr[0] + arr[1] + arr[2] + arr[3];
+
+    for idx in i..values.len() {
+        let mut crit_v = criteria_values[idx];
+        if crit_v.is_nan() {
+            crit_v = 0.0;
+        }
+        if !matches_criteria(crit_v, criteria) {
+            continue;
+        }
+        let v = values[idx];
+        if v.is_nan() {
+            continue;
+        }
+        sum += v;
+        count += 1;
+    }
+
+    (sum, count)
+}
+
 pub fn sumproduct_ignore_nan_f64(a: &[f64], b: &[f64]) -> f64 {
     debug_assert_eq!(a.len(), b.len());
 
@@ -278,5 +416,27 @@ fn matches_criteria(v: f64, criteria: NumericCriteria) -> bool {
         CmpOp::Le => v <= criteria.rhs,
         CmpOp::Gt => v > criteria.rhs,
         CmpOp::Ge => v >= criteria.rhs,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sum_if_and_count_if_blank_as_zero_match_scalar_logic() {
+        let values = [1.0, f64::NAN, 3.0, 4.0];
+        let crit = [0.0, f64::NAN, 2.0, 0.0];
+        let criteria = NumericCriteria::new(CmpOp::Eq, 0.0);
+
+        // Criteria matches indices 0, 1 (blank treated as 0), and 3.
+        assert_eq!(count_if_blank_as_zero_f64(&crit, criteria), 3);
+
+        // Summed values ignore NaN (treated as 0).
+        assert_eq!(sum_if_f64(&values, &crit, criteria), 1.0 + 0.0 + 4.0);
+
+        let (s, c) = sum_count_if_f64(&values, &crit, criteria);
+        assert_eq!(s, 1.0 + 4.0);
+        assert_eq!(c, 2);
     }
 }

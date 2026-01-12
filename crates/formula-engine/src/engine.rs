@@ -4857,6 +4857,13 @@ fn slice_mode_for_program(program: &bytecode::Program) -> ColumnSliceMode {
             f,
             bytecode::ast::Function::SumProduct
                 | bytecode::ast::Function::CountIf
+                | bytecode::ast::Function::SumIf
+                | bytecode::ast::Function::SumIfs
+                | bytecode::ast::Function::CountIfs
+                | bytecode::ast::Function::AverageIf
+                | bytecode::ast::Function::AverageIfs
+                | bytecode::ast::Function::MinIfs
+                | bytecode::ast::Function::MaxIfs
                 | bytecode::ast::Function::VLookup
                 | bytecode::ast::Function::HLookup
                 | bytecode::ast::Function::Match
@@ -5331,6 +5338,51 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
             | bytecode::ast::Function::Count => args
                 .iter()
                 .all(|arg| bytecode_expr_is_eligible_inner(arg, true)),
+            bytecode::ast::Function::SumIf | bytecode::ast::Function::AverageIf => {
+                if args.len() != 2 && args.len() != 3 {
+                    return false;
+                }
+                let range_ok = matches!(
+                    args[0],
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
+                );
+                let criteria_ok = bytecode_expr_is_eligible_inner(&args[1], false);
+                let sum_range_ok = match args.get(2) {
+                    None => true,
+                    // Excel treats an explicitly missing optional range arg as "omitted".
+                    Some(bytecode::Expr::Literal(bytecode::Value::Empty)) => true,
+                    Some(bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)) => true,
+                    _ => false,
+                };
+
+                range_ok && criteria_ok && sum_range_ok
+            }
+            bytecode::ast::Function::SumIfs
+            | bytecode::ast::Function::AverageIfs
+            | bytecode::ast::Function::MinIfs
+            | bytecode::ast::Function::MaxIfs => {
+                if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+                    return false;
+                }
+                let first_range_ok = matches!(
+                    args[0],
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
+                );
+                if !first_range_ok {
+                    return false;
+                }
+                for pair in args[1..].chunks_exact(2) {
+                    let range_ok = matches!(
+                        pair[0],
+                        bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
+                    );
+                    let criteria_ok = bytecode_expr_is_eligible_inner(&pair[1], false);
+                    if !range_ok || !criteria_ok {
+                        return false;
+                    }
+                }
+                true
+            }
             bytecode::ast::Function::CountIf => {
                 if args.len() != 2 {
                     return false;
@@ -5342,6 +5394,22 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
                 let criteria_ok = bytecode_expr_is_eligible_inner(&args[1], false);
 
                 range_ok && criteria_ok
+            }
+            bytecode::ast::Function::CountIfs => {
+                if args.len() < 2 || args.len() % 2 != 0 {
+                    return false;
+                }
+                for pair in args.chunks_exact(2) {
+                    let range_ok = matches!(
+                        pair[0],
+                        bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
+                    );
+                    let criteria_ok = bytecode_expr_is_eligible_inner(&pair[1], false);
+                    if !range_ok || !criteria_ok {
+                        return false;
+                    }
+                }
+                true
             }
             bytecode::ast::Function::SumProduct => {
                 if args.len() != 2 {

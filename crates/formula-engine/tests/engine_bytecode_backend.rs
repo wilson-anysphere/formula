@@ -5,8 +5,8 @@ use formula_engine::eval::{
 use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::value::NumberLocale;
 use formula_engine::{
-    BytecodeCompileReason, Engine, ErrorKind, ExternalValueProvider, NameDefinition, NameScope,
-    ParseOptions, ReferenceStyle, Value,
+    bytecode, BytecodeCompileReason, Engine, ErrorKind, ExternalValueProvider, NameDefinition,
+    NameScope, ParseOptions, ReferenceStyle, Value,
 };
 use proptest::prelude::*;
 use std::sync::Arc;
@@ -1043,6 +1043,79 @@ fn bytecode_backend_compiles_error_literals() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_conditional_aggregates_numeric_criteria() {
+    let mut engine = Engine::new();
+
+    // Criteria range: numbers + implicit blank.
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "A4", 4.0).unwrap();
+    // A5 left blank
+
+    // Value range.
+    engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 30.0).unwrap();
+    engine.set_cell_value("Sheet1", "B4", 40.0).unwrap();
+    engine.set_cell_value("Sheet1", "B5", 50.0).unwrap();
+
+    // Second criteria range.
+    engine.set_cell_value("Sheet1", "C1", 100.0).unwrap();
+    engine.set_cell_value("Sheet1", "C2", 200.0).unwrap();
+    engine.set_cell_value("Sheet1", "C3", 100.0).unwrap();
+    engine.set_cell_value("Sheet1", "C4", 200.0).unwrap();
+    engine.set_cell_value("Sheet1", "C5", 100.0).unwrap();
+
+    // Each formula should compile to bytecode (new function support).
+    engine
+        .set_cell_formula("Sheet1", "D1", r#"=SUMIF(A1:A5,">2",B1:B5)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D2", r#"=SUMIFS(B1:B5,A1:A5,">2",C1:C5,"=100")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D3", r#"=COUNTIFS(A1:A5,">2",C1:C5,"=100")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D4", r#"=AVERAGEIF(A1:A5,">1",B1:B5)"#)
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "D5",
+            r#"=AVERAGEIFS(B1:B5,A1:A5,">1",C1:C5,"=200")"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D6", r#"=MINIFS(B1:B5,A1:A5,">1",C1:C5,"=200")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "D7", r#"=MAXIFS(B1:B5,A1:A5,">1",C1:C5,"=200")"#)
+        .unwrap();
+    engine
+        // Exercise `<>` numeric criteria (blanks are coerced to 0, so they satisfy `<>2`).
+        .set_cell_formula("Sheet1", "D8", r#"=SUMIF(A1:A5,"<>2",B1:B5)"#)
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 8);
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        (r#"=SUMIF(A1:A5,">2",B1:B5)"#, "D1"),
+        (r#"=SUMIFS(B1:B5,A1:A5,">2",C1:C5,"=100")"#, "D2"),
+        (r#"=COUNTIFS(A1:A5,">2",C1:C5,"=100")"#, "D3"),
+        (r#"=AVERAGEIF(A1:A5,">1",B1:B5)"#, "D4"),
+        (r#"=AVERAGEIFS(B1:B5,A1:A5,">1",C1:C5,"=200")"#, "D5"),
+        (r#"=MINIFS(B1:B5,A1:A5,">1",C1:C5,"=200")"#, "D6"),
+        (r#"=MAXIFS(B1:B5,A1:A5,">1",C1:C5,"=200")"#, "D7"),
+        (r#"=SUMIF(A1:A5,"<>2",B1:B5)"#, "D8"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_propagates_error_literals_through_supported_ops() {
     let mut engine = Engine::new();
     engine.set_cell_formula("Sheet1", "A1", "=#N/A+1").unwrap();
@@ -1073,4 +1146,161 @@ fn bytecode_backend_propagates_error_literals_through_supported_functions() {
         Value::Error(ErrorKind::Div0)
     );
     assert_engine_matches_ast(&engine, "=ABS(#DIV/0!)", "A1");
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_conditional_aggregates_full_criteria_semantics() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", "apple").unwrap();
+    engine.set_cell_value("Sheet1", "A2", "apricot").unwrap();
+    engine.set_cell_value("Sheet1", "A3", "banana").unwrap();
+    engine.set_cell_value("Sheet1", "A4", "*").unwrap();
+    engine.set_cell_value("Sheet1", "A5", "").unwrap(); // empty string counts as blank
+                                                        // A6 left blank (implicit blank)
+    engine
+        .set_cell_value("Sheet1", "A7", Value::Error(ErrorKind::Div0))
+        .unwrap();
+
+    for (row, v) in (1..=7).zip([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]) {
+        engine
+            .set_cell_value("Sheet1", &format!("B{row}"), v)
+            .unwrap();
+    }
+
+    engine
+        .set_cell_formula("Sheet1", "C1", r#"=SUMIF(A1:A7,"ap*",B1:B7)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", r#"=SUMIF(A1:A7,"~*",B1:B7)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C3", r#"=COUNTIFS(A1:A7,"ap*")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C4", r#"=COUNTIFS(A1:A7,"~*")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C5", r#"=SUMIF(A1:A7,"",B1:B7)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C6", r#"=SUMIF(A1:A7,"<>",B1:B7)"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C7", r##"=SUMIF(A1:A7,"#DIV/0!",B1:B7)"##)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C8", r##"=COUNTIFS(A1:A7,"#DIV/0!")"##)
+        .unwrap();
+    engine
+        // Errors in the criteria argument itself must propagate.
+        .set_cell_formula("Sheet1", "C9", r#"=SUMIF(A1:A7,1/0,B1:B7)"#)
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 9);
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        (r#"=SUMIF(A1:A7,"ap*",B1:B7)"#, "C1"),
+        (r#"=SUMIF(A1:A7,"~*",B1:B7)"#, "C2"),
+        (r#"=COUNTIFS(A1:A7,"ap*")"#, "C3"),
+        (r#"=COUNTIFS(A1:A7,"~*")"#, "C4"),
+        (r#"=SUMIF(A1:A7,"",B1:B7)"#, "C5"),
+        (r#"=SUMIF(A1:A7,"<>",B1:B7)"#, "C6"),
+        (r##"=SUMIF(A1:A7,"#DIV/0!",B1:B7)"##, "C7"),
+        (r##"=COUNTIFS(A1:A7,"#DIV/0!")"##, "C8"),
+        (r#"=SUMIF(A1:A7,1/0,B1:B7)"#, "C9"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_conditional_aggregates_locale_criteria_parsing() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+
+    // Numeric criteria parsing (`1,5` in de-DE).
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 1.5).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 30.0).unwrap();
+    engine
+        .set_cell_value("Sheet1", "D1", Value::Text(">1,5".to_string()))
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SUMIF(A1:A3, D1, B1:B3)")
+        .unwrap();
+
+    // Date criteria parsing uses the workbook value locale's date order (DMY for de-DE).
+    let system = engine.date_system();
+    let jan_2 = ymd_to_serial(ExcelDate::new(2020, 1, 2), system).unwrap();
+    let feb_1 = ymd_to_serial(ExcelDate::new(2020, 2, 1), system).unwrap();
+    engine.set_cell_value("Sheet1", "E1", jan_2 as f64).unwrap();
+    engine.set_cell_value("Sheet1", "E2", feb_1 as f64).unwrap();
+    engine.set_cell_value("Sheet1", "F1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "F2", 2.0).unwrap();
+    engine
+        .set_cell_value("Sheet1", "D2", Value::Text(">=1/2/2020".to_string()))
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", "=SUMIF(E1:E2, D2, F1:F2)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 2);
+    engine.recalculate_single_threaded();
+
+    assert_engine_matches_ast(&engine, "=SUMIF(A1:A3, D1, B1:B3)", "C1");
+    assert_engine_matches_ast(&engine, "=SUMIF(E1:E2, D2, F1:F2)", "C2");
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_conditional_aggregates_shape_mismatch_and_out_of_bounds() {
+    // Shape mismatch should surface `#VALUE!`.
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+    engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 30.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", r#"=SUMIFS(B1:B3,A1:A2,">0")"#)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", r#"=SUMIF(A1:A3,">0",B1:B2)"#)
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 2);
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C2"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_engine_matches_ast(&engine, r#"=SUMIFS(B1:B3,A1:A2,">0")"#, "C1");
+    assert_engine_matches_ast(&engine, r#"=SUMIF(A1:A3,">0",B1:B2)"#, "C2");
+
+    // Out-of-bounds ranges should surface `#REF!` in the bytecode runtime (ColumnarGrid bounds).
+    let grid = bytecode::ColumnarGrid::new(2, 2);
+    let expr = bytecode::parse_formula(
+        r#"=SUMIF(A1:A3,">0",B1:B3)"#,
+        bytecode::CellCoord::new(0, 0),
+    )
+    .unwrap();
+    let program = bytecode::Compiler::compile(Arc::from("out_of_bounds"), &expr);
+    let mut vm = bytecode::Vm::with_capacity(16);
+    let v = vm.eval(
+        &program,
+        &grid,
+        bytecode::CellCoord::new(0, 0),
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(v, bytecode::Value::Error(bytecode::ErrorKind::Ref));
 }
