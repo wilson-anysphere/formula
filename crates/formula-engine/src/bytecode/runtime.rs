@@ -317,13 +317,15 @@ fn eval_ast_inner(
                         lexical_scopes.pop();
                         return Value::Error(ErrorKind::Value);
                     };
-                    let value = eval_ast_inner(&pair[1], grid, sheet_id, base, locale, lexical_scopes);
+                    let value =
+                        eval_ast_inner(&pair[1], grid, sheet_id, base, locale, lexical_scopes);
                     lexical_scopes
                         .last_mut()
                         .expect("pushed scope")
                         .insert(name.clone(), value);
                 }
-                let result = eval_ast_inner(&args[last], grid, sheet_id, base, locale, lexical_scopes);
+                let result =
+                    eval_ast_inner(&args[last], grid, sheet_id, base, locale, lexical_scopes);
                 lexical_scopes.pop();
                 return result;
             }
@@ -441,9 +443,17 @@ fn eval_ast_inner(
                     }
 
                     let has_default = (args.len() - 1) % 2 != 0;
-                    let pairs_end = if has_default { args.len() - 1 } else { args.len() };
+                    let pairs_end = if has_default {
+                        args.len() - 1
+                    } else {
+                        args.len()
+                    };
                     let pairs = &args[1..pairs_end];
-                    let default = if has_default { Some(&args[args.len() - 1]) } else { None };
+                    let default = if has_default {
+                        Some(&args[args.len() - 1])
+                    } else {
+                        None
+                    };
 
                     if pairs.len() < 2 || pairs.len() % 2 != 0 {
                         return Value::Error(ErrorKind::Value);
@@ -560,7 +570,14 @@ fn eval_ast_inner(
                     }
                 }
 
-                evaluated.push(eval_ast_inner(arg, grid, sheet_id, base, locale, lexical_scopes));
+                evaluated.push(eval_ast_inner(
+                    arg,
+                    grid,
+                    sheet_id,
+                    base,
+                    locale,
+                    lexical_scopes,
+                ));
             }
             call_function(func, &evaluated, grid, base, locale)
         }
@@ -998,9 +1015,13 @@ fn excel_order(left: &Value, right: &Value) -> Result<Ordering, ErrorKind> {
     if let Value::Error(e) = right {
         return Err(*e);
     }
-    if matches!(left, Value::Array(_) | Value::Range(_) | Value::MultiRange(_))
-        || matches!(right, Value::Array(_) | Value::Range(_) | Value::MultiRange(_))
-    {
+    if matches!(
+        left,
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
+    ) || matches!(
+        right,
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
+    ) {
         return Err(ErrorKind::Value);
     }
 
@@ -1511,9 +1532,17 @@ fn fn_switch(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     }
 
     let has_default = (args.len() - 1) % 2 != 0;
-    let pairs_end = if has_default { args.len() - 1 } else { args.len() };
+    let pairs_end = if has_default {
+        args.len() - 1
+    } else {
+        args.len()
+    };
     let pairs = &args[1..pairs_end];
-    let default = if has_default { Some(&args[args.len() - 1]) } else { None };
+    let default = if has_default {
+        Some(&args[args.len() - 1])
+    } else {
+        None
+    };
 
     if pairs.len() < 2 || pairs.len() % 2 != 0 {
         return Value::Error(ErrorKind::Value);
@@ -1877,7 +1906,8 @@ fn and_multi_range(
     any: &mut bool,
 ) -> Option<ErrorKind> {
     for area in range.areas.iter() {
-        if let Some(e) = and_range_on_sheet(grid, area.sheet, area.range.resolve(base), all_true, any)
+        if let Some(e) =
+            and_range_on_sheet(grid, area.sheet, area.range.resolve(base), all_true, any)
         {
             return Some(e);
         }
@@ -1928,7 +1958,8 @@ fn or_multi_range(
     any: &mut bool,
 ) -> Option<ErrorKind> {
     for area in range.areas.iter() {
-        if let Some(e) = or_range_on_sheet(grid, area.sheet, area.range.resolve(base), any_true, any)
+        if let Some(e) =
+            or_range_on_sheet(grid, area.sheet, area.range.resolve(base), any_true, any)
         {
             return Some(e);
         }
@@ -2887,7 +2918,9 @@ fn fn_countblank(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             Value::Array(a) => {
                 total += a
                     .iter()
-                    .filter(|v| matches!(v, Value::Empty) || matches!(v, Value::Text(s) if s.is_empty()))
+                    .filter(|v| {
+                        matches!(v, Value::Empty) || matches!(v, Value::Text(s) if s.is_empty())
+                    })
                     .count();
             }
             Value::Range(r) => match countblank_range(grid, r.resolve(base)) {
@@ -2908,7 +2941,12 @@ fn fn_countblank(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     Value::Number(total as f64)
 }
 
-fn fn_countif(args: &[Value], grid: &dyn Grid, base: CellCoord, locale: &crate::LocaleConfig) -> Value {
+fn fn_countif(
+    args: &[Value],
+    grid: &dyn Grid,
+    base: CellCoord,
+    locale: &crate::LocaleConfig,
+) -> Value {
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
     }
@@ -3047,8 +3085,9 @@ fn fn_sumif(
                 let crit_slice = grid
                     .column_slice_strict_numeric(crit_col, crit_range.row_start, crit_range.row_end)
                     .unwrap();
-                let sum_slice =
-                    grid.column_slice(sum_col, sum_range.row_start, sum_range.row_end).unwrap();
+                let sum_slice = grid
+                    .column_slice(sum_col, sum_range.row_start, sum_range.row_end)
+                    .unwrap();
                 sum += simd::sum_if_f64(sum_slice, crit_slice, numeric);
             }
             return Value::Number(sum);
@@ -3178,8 +3217,9 @@ fn fn_sumifs(
             let mut sum = 0.0;
             for col_off in 0..cols {
                 let sum_col = sum_range.col_start + col_off;
-                let sum_slice =
-                    grid.column_slice(sum_col, sum_range.row_start, sum_range.row_end).unwrap();
+                let sum_slice = grid
+                    .column_slice(sum_col, sum_range.row_start, sum_range.row_end)
+                    .unwrap();
                 let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
                 for range in &crit_ranges {
                     let col = range.col_start + col_off;
@@ -3485,8 +3525,9 @@ fn fn_averageif(
                 let crit_slice = grid
                     .column_slice_strict_numeric(crit_col, crit_range.row_start, crit_range.row_end)
                     .unwrap();
-                let avg_slice =
-                    grid.column_slice(avg_col, avg_range.row_start, avg_range.row_end).unwrap();
+                let avg_slice = grid
+                    .column_slice(avg_col, avg_range.row_start, avg_range.row_end)
+                    .unwrap();
                 let (s, c) = simd::sum_count_if_f64(avg_slice, crit_slice, numeric);
                 sum += s;
                 count += c;
@@ -3630,8 +3671,9 @@ fn fn_averageifs(
             let mut count = 0usize;
             for col_off in 0..cols {
                 let avg_col = avg_range.col_start + col_off;
-                let avg_slice =
-                    grid.column_slice(avg_col, avg_range.row_start, avg_range.row_end).unwrap();
+                let avg_slice = grid
+                    .column_slice(avg_col, avg_range.row_start, avg_range.row_end)
+                    .unwrap();
                 let mut crit_slices: SmallVec<[&[f64]; 4]> = SmallVec::with_capacity(crits.len());
                 for range in &crit_ranges {
                     let col = range.col_start + col_off;
@@ -3834,7 +3876,8 @@ fn fn_minifs(
             }
 
             if numeric_crits.len() == 1 {
-                if let Some(col_best) = simd::min_if_f64(min_slice, crit_slices[0], numeric_crits[0])
+                if let Some(col_best) =
+                    simd::min_if_f64(min_slice, crit_slices[0], numeric_crits[0])
                 {
                     best = Some(best.map_or(col_best, |b| b.min(col_best)));
                 }
@@ -4129,7 +4172,10 @@ fn fn_vlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
-    if matches!(lookup_value, Value::Array(_) | Value::Range(_) | Value::MultiRange(_)) {
+    if matches!(
+        lookup_value,
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
+    ) {
         return Value::Error(ErrorKind::Spill);
     }
 
@@ -4188,7 +4234,10 @@ fn fn_hlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
-    if matches!(lookup_value, Value::Array(_) | Value::Range(_) | Value::MultiRange(_)) {
+    if matches!(
+        lookup_value,
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
+    ) {
         return Value::Error(ErrorKind::Spill);
     }
 
@@ -4247,7 +4296,10 @@ fn fn_match(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     if let Value::Error(e) = lookup_value {
         return Value::Error(e);
     }
-    if matches!(lookup_value, Value::Array(_) | Value::Range(_) | Value::MultiRange(_)) {
+    if matches!(
+        lookup_value,
+        Value::Array(_) | Value::Range(_) | Value::MultiRange(_)
+    ) {
         return Value::Error(ErrorKind::Spill);
     }
 
@@ -4905,7 +4957,8 @@ fn sum_range_on_sheet(
 
     let mut sum = 0.0;
     for col in range.col_start..=range.col_end {
-        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
+        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
+        {
             sum += simd::sum_ignore_nan_f64(slice);
         } else {
             for row in range.row_start..=range.row_end {
@@ -5034,7 +5087,8 @@ fn sum_count_range_on_sheet(
     let mut sum = 0.0;
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
-        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
+        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
+        {
             let (s, c) = simd::sum_count_ignore_nan_f64(slice);
             sum += s;
             count += c;
@@ -5121,7 +5175,8 @@ fn count_range_on_sheet(
 
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
-        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
+        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
+        {
             count += simd::count_ignore_nan_f64(slice);
         } else {
             for row in range.row_start..=range.row_end {
@@ -5202,12 +5257,9 @@ fn counta_range_on_sheet(
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
         // Same strict-numeric slice requirement as `counta_range`.
-        if let Some(slice) = grid.column_slice_on_sheet_strict_numeric(
-            sheet,
-            col,
-            range.row_start,
-            range.row_end,
-        ) {
+        if let Some(slice) =
+            grid.column_slice_on_sheet_strict_numeric(sheet, col, range.row_start, range.row_end)
+        {
             count += simd::count_ignore_nan_f64(slice);
         } else {
             for row in range.row_start..=range.row_end {
@@ -5290,12 +5342,9 @@ fn countblank_range_on_sheet(
 
     let mut non_blank = 0u64;
     for col in range.col_start..=range.col_end {
-        if let Some(slice) = grid.column_slice_on_sheet_strict_numeric(
-            sheet,
-            col,
-            range.row_start,
-            range.row_end,
-        ) {
+        if let Some(slice) =
+            grid.column_slice_on_sheet_strict_numeric(sheet, col, range.row_start, range.row_end)
+        {
             non_blank += simd::count_ignore_nan_f64(slice) as u64;
         } else {
             for row in range.row_start..=range.row_end {
@@ -5405,26 +5454,26 @@ fn min_range_on_sheet(
 
     let mut out: Option<f64> = None;
     for col in range.col_start..=range.col_end {
-        let col_min =
-            if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
-            {
-                simd::min_ignore_nan_f64(slice)
-            } else {
-                let mut m: Option<f64> = None;
-                for row in range.row_start..=range.row_end {
-                    match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
-                        Value::Number(v) => m = Some(m.map_or(v, |prev| prev.min(v))),
-                        Value::Error(e) => return Err(e),
-                        Value::Bool(_)
-                        | Value::Text(_)
-                        | Value::Empty
-                        | Value::Array(_)
-                        | Value::Range(_)
-                        | Value::MultiRange(_) => {}
-                    }
+        let col_min = if let Some(slice) =
+            grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
+        {
+            simd::min_ignore_nan_f64(slice)
+        } else {
+            let mut m: Option<f64> = None;
+            for row in range.row_start..=range.row_end {
+                match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
+                    Value::Number(v) => m = Some(m.map_or(v, |prev| prev.min(v))),
+                    Value::Error(e) => return Err(e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
                 }
-                m
-            };
+            }
+            m
+        };
         if let Some(m) = col_min {
             out = Some(out.map_or(m, |prev| prev.min(m)));
         }
@@ -5527,26 +5576,26 @@ fn max_range_on_sheet(
 
     let mut out: Option<f64> = None;
     for col in range.col_start..=range.col_end {
-        let col_max =
-            if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
-            {
-                simd::max_ignore_nan_f64(slice)
-            } else {
-                let mut m: Option<f64> = None;
-                for row in range.row_start..=range.row_end {
-                    match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
-                        Value::Number(v) => m = Some(m.map_or(v, |prev| prev.max(v))),
-                        Value::Error(e) => return Err(e),
-                        Value::Bool(_)
-                        | Value::Text(_)
-                        | Value::Empty
-                        | Value::Array(_)
-                        | Value::Range(_)
-                        | Value::MultiRange(_) => {}
-                    }
+        let col_max = if let Some(slice) =
+            grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
+        {
+            simd::max_ignore_nan_f64(slice)
+        } else {
+            let mut m: Option<f64> = None;
+            for row in range.row_start..=range.row_end {
+                match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
+                    Value::Number(v) => m = Some(m.map_or(v, |prev| prev.max(v))),
+                    Value::Error(e) => return Err(e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_)
+                    | Value::MultiRange(_) => {}
                 }
-                m
-            };
+            }
+            m
+        };
         if let Some(m) = col_max {
             out = Some(out.map_or(m, |prev| prev.max(m)));
         }
@@ -5648,12 +5697,9 @@ fn count_if_range_on_sheet(
 
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
-        if let Some(slice) = grid.column_slice_on_sheet_strict_numeric(
-            sheet,
-            col,
-            range.row_start,
-            range.row_end,
-        ) {
+        if let Some(slice) =
+            grid.column_slice_on_sheet_strict_numeric(sheet, col, range.row_start, range.row_end)
+        {
             count += simd::count_if_blank_as_zero_f64(slice, criteria);
         } else {
             for row in range.row_start..=range.row_end {

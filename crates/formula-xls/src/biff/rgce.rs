@@ -927,7 +927,12 @@ fn decode_area_n(
     let col1_abs_field: u16 = ((abs_col1 as u16) & COL_INDEX_MASK) | (col1_field & RELATIVE_MASK);
     let col2_abs_field: u16 = ((abs_col2 as u16) & COL_INDEX_MASK) | (col2_field & RELATIVE_MASK);
 
-    format_area_ref(abs_row1 as u16, col1_abs_field, abs_row2 as u16, col2_abs_field)
+    format_area_ref(
+        abs_row1 as u16,
+        col1_abs_field,
+        abs_row2 as u16,
+        col2_abs_field,
+    )
 }
 
 fn cell_in_bounds(row: i64, col: i64) -> bool {
@@ -1279,7 +1284,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "A1");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1327,7 +1336,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "B2");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1339,7 +1352,7 @@ mod tests {
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
         let base = CellCoord::new(10, 10); // K11
-        // row offset = -2, col offset = +3 => N9.
+                                           // row offset = -2, col offset = +3 => N9.
         let row_raw = (-2i16) as u16;
         let col_field = encode_col_field(3, true, true);
         let rgce = [
@@ -1352,7 +1365,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
         assert_eq!(decoded.text, "N9");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1377,7 +1394,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
         assert_eq!(decoded.text, "#REF!");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1402,7 +1423,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
         assert_eq!(decoded.text, "#REF!");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1427,7 +1452,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
         assert_eq!(decoded.text, "$C7");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1457,7 +1486,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "A1:B2");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1490,7 +1523,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
         assert_eq!(decoded.text, "J10:M12");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1520,7 +1557,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "C3:D4");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1535,7 +1576,11 @@ mod tests {
         let rgce = [0x2A, 0x00, 0x00, 0x00, 0x00];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1550,7 +1595,11 @@ mod tests {
         let rgce = [0x2B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1568,7 +1617,11 @@ mod tests {
         let rgce = [0x3C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1592,7 +1645,11 @@ mod tests {
         ];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1613,7 +1670,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "$1:$1");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1634,7 +1695,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "$A:$A");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1683,7 +1748,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "$1:$1,$A:$A");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1708,7 +1777,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!$1:$1");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_print_titles_parseable("Sheet1", &decoded.text);
     }
 
@@ -1732,7 +1805,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!$A:$A");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_print_titles_parseable("Sheet1", &decoded.text);
     }
 
@@ -1755,19 +1832,23 @@ mod tests {
         rgce.extend_from_slice(&0u16.to_le_bytes()); // rwLast
         rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
         rgce.extend_from_slice(&BIFF8_MAX_COL.to_le_bytes()); // colLast
-        // $A:$A
+                                                              // $A:$A
         rgce.push(0x3B); // PtgArea3d
         rgce.extend_from_slice(&0u16.to_le_bytes()); // ixti
         rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
         rgce.extend_from_slice(&BIFF8_MAX_ROW.to_le_bytes()); // rwLast
         rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
         rgce.extend_from_slice(&0u16.to_le_bytes()); // colLast
-        // Union
+                                                     // Union
         rgce.push(0x10); // PtgUnion
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!$1:$1,Sheet1!$A:$A");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_print_titles_parseable("Sheet1", &decoded.text);
     }
 
@@ -1801,7 +1882,11 @@ mod tests {
         ];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!A1:B2");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_print_area_parseable("Sheet1", &decoded.text);
     }
 
@@ -1829,7 +1914,11 @@ mod tests {
         ];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!A1");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_print_area_parseable("Sheet1", &decoded.text);
     }
 
@@ -1928,7 +2017,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "SUM(1,2)");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1953,7 +2046,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "IF(TRUE,1,2)");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -1976,7 +2073,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "ABS(-1)");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -2002,7 +2103,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "SUM(Sheet1!$A$1,2)");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -2020,7 +2125,11 @@ mod tests {
         let rgce = [0x3Au8, 0, 0, 0, 0, 0, 0];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "'My Sheet'!$A$1");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -2037,7 +2146,11 @@ mod tests {
         let rgce = [0x3Au8, 0, 0, 0, 0, 0, 0];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "'O''Brien'!$A$1");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -2058,7 +2171,11 @@ mod tests {
         let rgce = [0x3Au8, 0, 0, 0, 0, 0, 0];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "'Sheet 1:Sheet 3'!$A$1");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -2083,7 +2200,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "'Sheet 1:Sheet3'!A1:B2");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -2107,14 +2228,22 @@ mod tests {
         let rgce1 = [0x23, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00];
         let decoded1 = decode_biff8_rgce(&rgce1, &ctx);
         assert_eq!(decoded1.text, "MyName");
-        assert!(decoded1.warnings.is_empty(), "warnings={:?}", decoded1.warnings);
+        assert!(
+            decoded1.warnings.is_empty(),
+            "warnings={:?}",
+            decoded1.warnings
+        );
         assert_parseable(&decoded1.text);
 
         // Sheet-scoped name (id=2).
         let rgce2 = [0x23, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00];
         let decoded2 = decode_biff8_rgce(&rgce2, &ctx);
         assert_eq!(decoded2.text, "'Sheet 1'!LocalName");
-        assert!(decoded2.warnings.is_empty(), "warnings={:?}", decoded2.warnings);
+        assert!(
+            decoded2.warnings.is_empty(),
+            "warnings={:?}",
+            decoded2.warnings
+        );
         assert_parseable(&decoded2.text);
     }
 
@@ -2138,7 +2267,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "Sheet1!A1");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -2168,7 +2301,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "'Sheet 1:Sheet 3'!A1:B2");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 
@@ -2195,7 +2332,11 @@ mod tests {
         ];
         let decoded1 = decode_biff8_rgce(&rgce1, &ctx);
         assert_eq!(decoded1.text, "GlobalName");
-        assert!(decoded1.warnings.is_empty(), "warnings={:?}", decoded1.warnings);
+        assert!(
+            decoded1.warnings.is_empty(),
+            "warnings={:?}",
+            decoded1.warnings
+        );
         assert_parseable(&decoded1.text);
 
         let rgce2 = [
@@ -2205,7 +2346,11 @@ mod tests {
         ];
         let decoded2 = decode_biff8_rgce(&rgce2, &ctx);
         assert_eq!(decoded2.text, "Sheet1!LocalName");
-        assert!(decoded2.warnings.is_empty(), "warnings={:?}", decoded2.warnings);
+        assert!(
+            decoded2.warnings.is_empty(),
+            "warnings={:?}",
+            decoded2.warnings
+        );
         assert_parseable(&decoded2.text);
     }
 
@@ -2229,7 +2374,11 @@ mod tests {
 
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "'A1'!A1");
-        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
         assert_parseable(&decoded.text);
     }
 }

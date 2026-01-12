@@ -26,8 +26,6 @@ pub mod charts;
 pub mod comments;
 pub mod embedded_images;
 mod compare;
-mod content_types;
-pub mod conditional_formatting;
 mod formula_text;
 mod macro_repair;
 mod macro_strip;
@@ -35,6 +33,8 @@ mod model_package;
 pub mod openxml;
 mod preserve;
 mod xml;
+mod content_types;
+pub mod conditional_formatting;
 pub mod drawingml;
 pub mod drawings;
 pub mod embedded_cell_images;
@@ -43,17 +43,15 @@ pub mod merge_cells;
 pub mod metadata;
 pub mod minimal;
 pub mod outline;
-pub mod rich_data;
-pub mod theme;
 mod package;
 pub mod patch;
 mod path;
 pub mod pivots;
 pub mod print;
-mod recalc_policy;
 mod read;
 #[cfg(not(target_arch = "wasm32"))]
 mod reader;
+mod recalc_policy;
 mod relationships;
 mod rich_data;
 pub mod shared_strings;
@@ -61,6 +59,7 @@ mod sheet_metadata;
 pub mod streaming;
 pub mod styles;
 pub mod tables;
+pub mod theme;
 #[cfg(feature = "vba")]
 pub mod vba;
 mod workbook;
@@ -98,15 +97,15 @@ pub use pivots::{
         TimelineDefinition, TimelineSelectionState,
     },
     PivotCacheDefinition, PivotCacheDefinitionPart, PivotCacheField, PivotCacheRecordsPart,
-    PivotCacheSourceType, PivotTableDataField, PivotTableDefinition, PivotTableField, PivotTablePart,
-    PivotTableStyleInfo, PreservedPivotParts, RelationshipStub, XlsxPivots,
+    PivotCacheSourceType, PivotTableDataField, PivotTableDefinition, PivotTableField,
+    PivotTablePart, PivotTableStyleInfo, PreservedPivotParts, RelationshipStub, XlsxPivots,
 };
-pub use recalc_policy::RecalcPolicy;
-pub use read::{load_from_bytes, read_workbook_model_from_bytes, read_workbook_model_from_reader};
 #[cfg(not(target_arch = "wasm32"))]
 pub use read::load_from_path;
+pub use read::{load_from_bytes, read_workbook_model_from_bytes, read_workbook_model_from_reader};
 #[cfg(not(target_arch = "wasm32"))]
 pub use reader::{read_workbook, read_workbook_from_reader};
+pub use recalc_policy::RecalcPolicy;
 pub use rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map;
 pub use rich_data::resolve_rich_value_image_targets;
 pub use rich_data::rich_value_structure::{
@@ -120,17 +119,19 @@ pub use sheet_metadata::{
 pub use streaming::{
     patch_xlsx_streaming, patch_xlsx_streaming_with_recalc_policy,
     patch_xlsx_streaming_workbook_cell_patches,
-    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides, PartOverride,
+    patch_xlsx_streaming_workbook_cell_patches_with_part_overrides,
     patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc_policy,
     patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy,
     patch_xlsx_streaming_workbook_cell_patches_with_styles,
-    patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy, StreamingPatchError,
-    strip_vba_project_streaming, WorksheetCellPatch,
+    patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy,
+    strip_vba_project_streaming, PartOverride, StreamingPatchError, WorksheetCellPatch,
 };
 pub use styles::*;
 pub use workbook::ChartExtractionError;
 #[cfg(not(target_arch = "wasm32"))]
-pub use writer::{write_workbook, write_workbook_to_writer, write_workbook_to_writer_with_kind, XlsxWriteError};
+pub use writer::{
+    write_workbook, write_workbook_to_writer, write_workbook_to_writer_with_kind, XlsxWriteError,
+};
 pub use xml::XmlDomError;
 
 use formula_model::rich_text::RichText;
@@ -446,7 +447,10 @@ impl XlsxDocument {
         };
 
         let display = crate::formula_text::normalize_display_formula(&formula_display);
-        if sheet.formula(cell).map(crate::formula_text::normalize_display_formula).as_deref()
+        if sheet
+            .formula(cell)
+            .map(crate::formula_text::normalize_display_formula)
+            .as_deref()
             != Some(display.as_str())
         {
             self.calc_affecting_edits = true;

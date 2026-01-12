@@ -1,27 +1,27 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Cursor, Write};
 
-use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_columnar::{ColumnType as ColumnarType, Value as ColumnarValue};
+use formula_engine::{parse_formula, CellAddr, ParseOptions, SerializeOptions};
 use formula_model::rich_text::{RichText, Underline};
 use formula_model::{
     CellRef, CellValue, ErrorValue, Hyperlink, HyperlinkTarget, Outline, OutlineEntry, Range,
     SheetVisibility, Worksheet, WorksheetId,
 };
-use quick_xml::events::Event;
 use quick_xml::events::attributes::AttrError;
+use quick_xml::events::Event;
 use quick_xml::Reader;
 use quick_xml::Writer;
 use thiserror::Error;
 use zip::write::FileOptions;
 use zip::ZipWriter;
 
+use crate::autofilter::AutoFilterParseError;
 use crate::path::{rels_for_part, resolve_target};
 use crate::recalc_policy::{apply_recalc_policy_to_parts, RecalcPolicyError};
-use crate::sheet_metadata::{parse_sheet_tab_color, write_sheet_tab_color};
 use crate::shared_strings::preserve::SharedStringsEditor;
+use crate::sheet_metadata::{parse_sheet_tab_color, write_sheet_tab_color};
 use crate::styles::XlsxStylesEditor;
-use crate::autofilter::AutoFilterParseError;
 use crate::{CellValueKind, DateSystem, RecalcPolicy, SheetMeta, XlsxDocument, XlsxError};
 
 const WORKBOOK_PART: &str = "xl/workbook.xml";
@@ -103,7 +103,9 @@ fn local_name(name: &[u8]) -> &[u8] {
 }
 
 fn element_prefix(name: &[u8]) -> Option<&[u8]> {
-    name.iter().rposition(|b| *b == b':').map(|idx| &name[..idx])
+    name.iter()
+        .rposition(|b| *b == b':')
+        .map(|idx| &name[..idx])
 }
 
 fn prefixed_tag(prefix: Option<&str>, local: &str) -> String {
@@ -161,7 +163,8 @@ fn plan_sheet_structure(
             .as_deref()
             .and_then(|rid| meta_by_rel_id.get(rid).copied())
             .or_else(|| {
-                sheet.xlsx_sheet_id
+                sheet
+                    .xlsx_sheet_id
                     .and_then(|sid| meta_by_sheet_id.get(&sid).copied())
             })
             .or_else(|| meta_by_ws_id.get(&sheet.id).copied());
@@ -210,7 +213,12 @@ fn plan_sheet_structure(
             .iter()
             .enumerate()
             .filter(|(idx, _)| matched_meta_idxs.contains(idx))
-            .filter_map(|(_, meta)| meta.relationship_id.strip_prefix("rId")?.parse::<u32>().ok())
+            .filter_map(|(_, meta)| {
+                meta.relationship_id
+                    .strip_prefix("rId")?
+                    .parse::<u32>()
+                    .ok()
+            })
             .max()
             .unwrap_or(0)
             + 1
@@ -343,7 +351,11 @@ fn formulas_changed(doc: &XlsxDocument) -> bool {
             .xlsx_rel_id
             .as_deref()
             .and_then(|rid| meta_by_rel_id.get(rid).copied())
-            .or_else(|| sheet.xlsx_sheet_id.and_then(|sid| meta_by_sheet_id.get(&sid).copied()))
+            .or_else(|| {
+                sheet
+                    .xlsx_sheet_id
+                    .and_then(|sid| meta_by_sheet_id.get(&sid).copied())
+            })
             .or_else(|| meta_by_ws_id.get(&sheet.id).copied());
         let Some(idx) = idx else {
             continue;
@@ -355,7 +367,9 @@ fn formulas_changed(doc: &XlsxDocument) -> bool {
             .map(|meta| meta.worksheet_id)
             .unwrap_or(sheet.id);
         workbook_to_meta_sheet_id.insert(sheet.id, meta_sheet_id);
-        meta_to_workbook_sheet_id.entry(meta_sheet_id).or_insert(sheet.id);
+        meta_to_workbook_sheet_id
+            .entry(meta_sheet_id)
+            .or_insert(sheet.id);
     }
 
     let mut shared_formulas_by_sheet: HashMap<WorksheetId, HashMap<u32, SharedFormulaGroup>> =
@@ -476,7 +490,11 @@ fn formula_changed_cells(doc: &XlsxDocument) -> HashSet<(WorksheetId, CellRef)> 
             .xlsx_rel_id
             .as_deref()
             .and_then(|rid| meta_by_rel_id.get(rid).copied())
-            .or_else(|| sheet.xlsx_sheet_id.and_then(|sid| meta_by_sheet_id.get(&sid).copied()))
+            .or_else(|| {
+                sheet
+                    .xlsx_sheet_id
+                    .and_then(|sid| meta_by_sheet_id.get(&sid).copied())
+            })
             .or_else(|| meta_by_ws_id.get(&sheet.id).copied());
         let Some(idx) = idx else {
             continue;
@@ -623,7 +641,10 @@ fn build_parts(
         .flat_map(|sheet| sheet.iter_cells().map(|(_, cell)| cell.style_id))
         .filter(|style_id| *style_id != 0);
     let style_to_xf = styles_editor.ensure_styles_for_style_ids(style_ids, &style_table)?;
-    parts.insert(styles_part_name.clone(), styles_editor.to_styles_xml_bytes());
+    parts.insert(
+        styles_part_name.clone(),
+        styles_editor.to_styles_xml_bytes(),
+    );
 
     // Ensure core relationship/content types metadata exists when we synthesize new
     // parts for existing packages. For existing relationships we preserve IDs by
@@ -660,10 +681,12 @@ fn build_parts(
     );
 
     for sheet_meta in &sheet_plan.sheets {
-        let sheet = doc
-            .workbook
-            .sheet(sheet_meta.worksheet_id)
-            .ok_or_else(|| WriteError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "worksheet not found")))?;
+        let sheet = doc.workbook.sheet(sheet_meta.worksheet_id).ok_or_else(|| {
+            WriteError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "worksheet not found",
+            ))
+        })?;
         let orig = parts.get(&sheet_meta.path).map(|b| b.as_slice());
         let is_new_sheet = orig.is_none();
         let rels_part = rels_for_part(&sheet_meta.path);
@@ -687,12 +710,12 @@ fn build_parts(
                     .map_err(|err| match err {
                         crate::merge_cells::MergeCellsError::Xml(e) => WriteError::Xml(e),
                         crate::merge_cells::MergeCellsError::Attr(e) => WriteError::XmlAttr(e),
-                        crate::merge_cells::MergeCellsError::Utf8(e) => WriteError::Io(
-                            std::io::Error::new(std::io::ErrorKind::InvalidData, e),
-                        ),
-                        crate::merge_cells::MergeCellsError::InvalidRef(r) => WriteError::Io(
-                            std::io::Error::new(std::io::ErrorKind::InvalidData, r),
-                        ),
+                        crate::merge_cells::MergeCellsError::Utf8(e) => {
+                            WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                        }
+                        crate::merge_cells::MergeCellsError::InvalidRef(r) => {
+                            WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, r))
+                        }
                         crate::merge_cells::MergeCellsError::Zip(e) => WriteError::Zip(e),
                         crate::merge_cells::MergeCellsError::Io(e) => WriteError::Io(e),
                     })?;
@@ -899,7 +922,9 @@ fn parse_sheet_view_settings(xml: &str) -> Result<SheetViewSettings, WriteError>
                 in_sheet_view = false;
                 drop(e);
             }
-            Event::Start(e) | Event::Empty(e) if in_sheet_view && e.local_name().as_ref() == b"pane" => {
+            Event::Start(e) | Event::Empty(e)
+                if in_sheet_view && e.local_name().as_ref() == b"pane" =>
+            {
                 let mut state: Option<String> = None;
                 let mut x_split: Option<u32> = None;
                 let mut y_split: Option<u32> = None;
@@ -972,9 +997,7 @@ fn render_sheet_views_section(views: SheetViewSettings, prefix: Option<&str>) ->
     } else {
         "topRight"
     };
-    out.push_str(&format!(
-        r#" activePane="{active_pane}" state="frozen"/>"#
-    ));
+    out.push_str(&format!(r#" activePane="{active_pane}" state="frozen"/>"#));
     out.push_str("</");
     out.push_str(&sheet_view_tag);
     out.push_str("></");
@@ -1001,14 +1024,12 @@ fn update_sheet_views_xml(sheet_xml: &str, views: SheetViewSettings) -> Result<S
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Eof => break,
-            _ if skip_depth > 0 => {
-                match event {
-                    Event::Start(_) => skip_depth += 1,
-                    Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
-                    Event::Empty(_) => {}
-                    _ => {}
-                }
-            }
+            _ if skip_depth > 0 => match event {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::Empty(_) => {}
+                _ => {}
+            },
             Event::Start(ref e) if e.local_name().as_ref() == b"sheetViews" => {
                 replaced = true;
                 if !new_section.is_empty() {
@@ -1051,16 +1072,17 @@ fn update_sheet_views_xml(sheet_xml: &str, views: SheetViewSettings) -> Result<S
         buf.clear();
     }
 
-    String::from_utf8(writer.into_inner()).map_err(|e| {
-        WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-    })
+    String::from_utf8(writer.into_inner())
+        .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
 }
 
 fn parse_xml_bool(val: &str) -> bool {
     val == "1" || val.eq_ignore_ascii_case("true")
 }
 
-fn parse_col_properties(xml: &str) -> Result<BTreeMap<u32, formula_model::ColProperties>, WriteError> {
+fn parse_col_properties(
+    xml: &str,
+) -> Result<BTreeMap<u32, formula_model::ColProperties>, WriteError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
@@ -1102,7 +1124,11 @@ fn parse_col_properties(xml: &str) -> Result<BTreeMap<u32, formula_model::ColPro
                     continue;
                 }
 
-                let width = if custom_width == Some(false) { None } else { width };
+                let width = if custom_width == Some(false) {
+                    None
+                } else {
+                    width
+                };
 
                 for idx_1_based in min..=max {
                     let col = idx_1_based - 1;
@@ -1147,14 +1173,12 @@ fn update_cols_xml(sheet_xml: &str, cols_section: &str) -> Result<String, WriteE
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Eof => break,
-            _ if skip_depth > 0 => {
-                match event {
-                    Event::Start(_) => skip_depth += 1,
-                    Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
-                    Event::Empty(_) => {}
-                    _ => {}
-                }
-            }
+            _ if skip_depth > 0 => match event {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::Empty(_) => {}
+                _ => {}
+            },
             Event::Start(ref e) if e.local_name().as_ref() == b"cols" => {
                 replaced = true;
                 if !cols_section.is_empty() {
@@ -1189,9 +1213,8 @@ fn update_cols_xml(sheet_xml: &str, cols_section: &str) -> Result<String, WriteE
         buf.clear();
     }
 
-    String::from_utf8(writer.into_inner()).map_err(|e| {
-        WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-    })
+    String::from_utf8(writer.into_inner())
+        .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
 }
 
 fn assign_hyperlink_rel_ids(hyperlinks: &[Hyperlink], rels_xml: Option<&str>) -> Vec<Hyperlink> {
@@ -1257,7 +1280,9 @@ fn cmp_hyperlink_target(a: &HyperlinkTarget, b: &HyperlinkTarget) -> std::cmp::O
     }
 
     match (a, b) {
-        (HyperlinkTarget::ExternalUrl { uri: a }, HyperlinkTarget::ExternalUrl { uri: b }) => a.cmp(b),
+        (HyperlinkTarget::ExternalUrl { uri: a }, HyperlinkTarget::ExternalUrl { uri: b }) => {
+            a.cmp(b)
+        }
         (HyperlinkTarget::Email { uri: a }, HyperlinkTarget::Email { uri: b }) => a.cmp(b),
         (
             HyperlinkTarget::Internal {
@@ -1388,7 +1413,8 @@ fn build_shared_strings_xml(
         let mut cells: Vec<(CellRef, &formula_model::Cell)> = sheet.iter_cells().collect();
         cells.sort_by_key(|(r, _)| (r.row, r.col));
         for (cell_ref, cell) in cells {
-            let meta = lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
+            let meta =
+                lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
             let kind = effective_value_kind(meta, cell);
             let CellValueKind::SharedString { .. } = kind else {
                 continue;
@@ -1553,7 +1579,10 @@ fn build_shared_strings_xml(
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
     xml.push_str(r#"<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main""#);
-    xml.push_str(&format!(r#" count="{ref_count}" uniqueCount="{}">"#, table.len()));
+    xml.push_str(&format!(
+        r#" count="{ref_count}" uniqueCount="{}">"#,
+        table.len()
+    ));
     for rich in &table {
         xml.push_str("<si>");
         if rich.runs.is_empty() {
@@ -1688,7 +1717,9 @@ fn write_workbook_xml(
     for sheet_meta in sheets {
         let sheet = doc.workbook.sheet(sheet_meta.worksheet_id);
         let name = sheet.map(|s| s.name.as_str()).unwrap_or("Sheet");
-        let visibility = sheet.map(|s| s.visibility).unwrap_or(SheetVisibility::Visible);
+        let visibility = sheet
+            .map(|s| s.visibility)
+            .unwrap_or(SheetVisibility::Visible);
         xml.push_str("<sheet");
         xml.push_str(&format!(r#" name="{}""#, escape_attr(name)));
         xml.push_str(&format!(r#" sheetId="{}""#, sheet_meta.sheet_id));
@@ -1826,7 +1857,11 @@ fn patch_workbook_xml(
                                     .or_else(|| (new_sheet_len > 0).then_some(0))
                             })
                             .map(|idx| idx.to_string())
-                            .unwrap_or_else(|| attr.unescape_value().map(|v| v.into_owned()).unwrap_or_default())
+                            .unwrap_or_else(|| {
+                                attr.unescape_value()
+                                    .map(|v| v.into_owned())
+                                    .unwrap_or_default()
+                            })
                         }
                         _ => attr.unescape_value()?.into_owned(),
                     };
@@ -1857,7 +1892,11 @@ fn patch_workbook_xml(
                                     .or_else(|| (new_sheet_len > 0).then_some(0))
                             })
                             .map(|idx| idx.to_string())
-                            .unwrap_or_else(|| attr.unescape_value().map(|v| v.into_owned()).unwrap_or_default())
+                            .unwrap_or_else(|| {
+                                attr.unescape_value()
+                                    .map(|v| v.into_owned())
+                                    .unwrap_or_default()
+                            })
                         }
                         _ => attr.unescape_value()?.into_owned(),
                     };
@@ -1892,11 +1931,14 @@ fn patch_workbook_xml(
                 for sheet_meta in sheets {
                     let sheet = doc.workbook.sheet(sheet_meta.worksheet_id);
                     let name = sheet.map(|s| s.name.as_str()).unwrap_or("Sheet");
-                    let visibility = sheet.map(|s| s.visibility).unwrap_or(SheetVisibility::Visible);
+                    let visibility =
+                        sheet.map(|s| s.visibility).unwrap_or(SheetVisibility::Visible);
                     writer.get_mut().extend_from_slice(b"<");
                     writer.get_mut().extend_from_slice(sheet_tag.as_bytes());
                     writer.get_mut().extend_from_slice(b" name=\"");
-                    writer.get_mut().extend_from_slice(escape_attr(name).as_bytes());
+                    writer
+                        .get_mut()
+                        .extend_from_slice(escape_attr(name).as_bytes());
                     writer.get_mut().push(b'"');
                     writer.get_mut().extend_from_slice(b" sheetId=\"");
                     writer
@@ -1944,11 +1986,14 @@ fn patch_workbook_xml(
                 for sheet_meta in sheets {
                     let sheet = doc.workbook.sheet(sheet_meta.worksheet_id);
                     let name = sheet.map(|s| s.name.as_str()).unwrap_or("Sheet");
-                    let visibility = sheet.map(|s| s.visibility).unwrap_or(SheetVisibility::Visible);
+                    let visibility =
+                        sheet.map(|s| s.visibility).unwrap_or(SheetVisibility::Visible);
                     writer.get_mut().extend_from_slice(b"<");
                     writer.get_mut().extend_from_slice(sheet_tag.as_bytes());
                     writer.get_mut().extend_from_slice(b" name=\"");
-                    writer.get_mut().extend_from_slice(escape_attr(name).as_bytes());
+                    writer
+                        .get_mut()
+                        .extend_from_slice(escape_attr(name).as_bytes());
                     writer.get_mut().push(b'"');
                     writer.get_mut().extend_from_slice(b" sheetId=\"");
                     writer
@@ -1996,10 +2041,8 @@ fn patch_workbook_xml(
                 }
 
                 if let Some(old_idx) = local_sheet_id {
-                    if let Some(new_idx) = old_sheet_index_to_new_index
-                        .get(old_idx)
-                        .copied()
-                        .flatten()
+                    if let Some(new_idx) =
+                        old_sheet_index_to_new_index.get(old_idx).copied().flatten()
                     {
                         let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                         writer.get_mut().extend_from_slice(b"<");
@@ -2038,10 +2081,8 @@ fn patch_workbook_xml(
                 }
 
                 if let Some(old_idx) = local_sheet_id {
-                    if let Some(new_idx) = old_sheet_index_to_new_index
-                        .get(old_idx)
-                        .copied()
-                        .flatten()
+                    if let Some(new_idx) =
+                        old_sheet_index_to_new_index.get(old_idx).copied().flatten()
                     {
                         let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                         writer.get_mut().extend_from_slice(b"<");
@@ -2140,17 +2181,23 @@ fn write_calc_pr(
 
     if let Some(calc_id) = &doc.meta.calc_pr.calc_id {
         writer.get_mut().extend_from_slice(b" calcId=\"");
-        writer.get_mut().extend_from_slice(escape_attr(calc_id).as_bytes());
+        writer
+            .get_mut()
+            .extend_from_slice(escape_attr(calc_id).as_bytes());
         writer.get_mut().push(b'"');
     }
     if let Some(calc_mode) = &doc.meta.calc_pr.calc_mode {
         writer.get_mut().extend_from_slice(b" calcMode=\"");
-        writer.get_mut().extend_from_slice(escape_attr(calc_mode).as_bytes());
+        writer
+            .get_mut()
+            .extend_from_slice(escape_attr(calc_mode).as_bytes());
         writer.get_mut().push(b'"');
     }
     if let Some(full) = doc.meta.calc_pr.full_calc_on_load {
         writer.get_mut().extend_from_slice(b" fullCalcOnLoad=\"");
-        writer.get_mut().extend_from_slice(if full { b"1" } else { b"0" });
+        writer
+            .get_mut()
+            .extend_from_slice(if full { b"1" } else { b"0" });
         writer.get_mut().push(b'"');
     }
     writer.get_mut().extend_from_slice(b"/>");
@@ -2179,7 +2226,7 @@ fn write_worksheet_xml(
             changed_formula_cells,
         );
     }
-  
+
     let dimension = dimension::worksheet_dimension_range(sheet).to_string();
     let cols_xml = render_cols(sheet, None);
     let sheet_data_xml = render_sheet_data(
@@ -2245,7 +2292,9 @@ fn patch_worksheet_dimension(
     let mut reader = Reader::from_reader(worksheet_xml);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
-    let mut writer = Writer::new(Vec::with_capacity(worksheet_xml.len() + dimension_ref.len()));
+    let mut writer = Writer::new(Vec::with_capacity(
+        worksheet_xml.len() + dimension_ref.len(),
+    ));
 
     let mut inserted_dimension = false;
     let mut saw_sheet_pr = false;
@@ -2451,13 +2500,17 @@ fn scan_worksheet_xml(original: &[u8]) -> Result<(bool, Option<Range>), WriteErr
                 // potentially-large <sheetData> section just to decide whether to insert one.
                 return Ok((true, None));
             }
-            Event::Start(e) if local_name(e.name().as_ref()) == b"sheetData" => in_sheet_data = true,
+            Event::Start(e) if local_name(e.name().as_ref()) == b"sheetData" => {
+                in_sheet_data = true
+            }
             Event::End(e) if local_name(e.name().as_ref()) == b"sheetData" => in_sheet_data = false,
             Event::Empty(e) if local_name(e.name().as_ref()) == b"sheetData" => {
                 in_sheet_data = false;
                 drop(e);
             }
-            Event::Start(e) | Event::Empty(e) if in_sheet_data && local_name(e.name().as_ref()) == b"c" => {
+            Event::Start(e) | Event::Empty(e)
+                if in_sheet_data && local_name(e.name().as_ref()) == b"c" =>
+            {
                 for attr in e.attributes() {
                     let attr = attr?;
                     if attr.key.as_ref() != b"r" {
@@ -2468,11 +2521,15 @@ fn scan_worksheet_xml(original: &[u8]) -> Result<(bool, Option<Range>), WriteErr
                         continue;
                     };
                     min_cell = Some(match min_cell {
-                        Some(min) => CellRef::new(min.row.min(cell_ref.row), min.col.min(cell_ref.col)),
+                        Some(min) => {
+                            CellRef::new(min.row.min(cell_ref.row), min.col.min(cell_ref.col))
+                        }
                         None => cell_ref,
                     });
                     max_cell = Some(match max_cell {
-                        Some(max) => CellRef::new(max.row.max(cell_ref.row), max.col.max(cell_ref.col)),
+                        Some(max) => {
+                            CellRef::new(max.row.max(cell_ref.row), max.col.max(cell_ref.col))
+                        }
                         None => cell_ref,
                     });
                     break;
@@ -2543,9 +2600,9 @@ fn write_dimension_element(
                 .get_mut()
                 .extend_from_slice(escape_attr(dimension_ref).as_bytes());
         } else {
-            writer.get_mut().extend_from_slice(
-                escape_attr(&attr.unescape_value()?.into_owned()).as_bytes(),
-            );
+            writer
+                .get_mut()
+                .extend_from_slice(escape_attr(&attr.unescape_value()?.into_owned()).as_bytes());
         }
         writer.get_mut().push(b'"');
     }
@@ -2821,8 +2878,8 @@ fn render_sheet_data_columnar(
         let mut cells_xml = String::new();
         let mut wrote_any_cell = false;
 
-        let in_table_row = row_zero >= origin.row
-            && row_zero < origin.row.saturating_add(table_rows as u32);
+        let in_table_row =
+            row_zero >= origin.row && row_zero < origin.row.saturating_add(table_rows as u32);
 
         if in_table_row {
             let row_off = (row_zero - origin.row) as usize;
@@ -3101,7 +3158,8 @@ fn append_cell_xml(
                 meta.t = None;
                 meta.reference = None;
                 meta.shared_index = None;
-                meta.file_text = crate::formula_text::add_xlfn_prefixes(strip_leading_equals(display));
+                meta.file_text =
+                    crate::formula_text::add_xlfn_prefixes(strip_leading_equals(display));
             }
         }
     }
@@ -3283,7 +3341,10 @@ fn infer_value_kind(cell: &formula_model::Cell) -> CellValueKind {
     }
 }
 
-fn effective_value_kind(meta: Option<&crate::CellMeta>, cell: &formula_model::Cell) -> CellValueKind {
+fn effective_value_kind(
+    meta: Option<&crate::CellMeta>,
+    cell: &formula_model::Cell,
+) -> CellValueKind {
     if let Some(meta) = meta {
         if let Some(kind) = meta.value_kind.clone() {
             // Cells with less-common or unknown `t=` attributes require the original `<v>` payload
@@ -3315,8 +3376,14 @@ fn value_kind_compatible(kind: &CellValueKind, value: &CellValue) -> bool {
             | CellValue::Entity(_)
             | CellValue::Record(_),
         ) => true,
-        (CellValueKind::InlineString, CellValue::String(_) | CellValue::Entity(_) | CellValue::Record(_)) => true,
-        (CellValueKind::Str, CellValue::String(_) | CellValue::Entity(_) | CellValue::Record(_)) => true,
+        (
+            CellValueKind::InlineString,
+            CellValue::String(_) | CellValue::Entity(_) | CellValue::Record(_),
+        ) => true,
+        (
+            CellValueKind::Str,
+            CellValue::String(_) | CellValue::Entity(_) | CellValue::Record(_),
+        ) => true,
         _ => false,
     }
 }
@@ -3327,7 +3394,10 @@ struct SharedFormulaGroup {
     ast: formula_engine::Ast,
 }
 
-fn shared_formula_groups(doc: &XlsxDocument, sheet_id: WorksheetId) -> HashMap<u32, SharedFormulaGroup> {
+fn shared_formula_groups(
+    doc: &XlsxDocument,
+    sheet_id: WorksheetId,
+) -> HashMap<u32, SharedFormulaGroup> {
     let mut groups = HashMap::new();
 
     for ((ws_id, cell_ref), meta) in &doc.meta.cell_meta {
@@ -3396,7 +3466,9 @@ fn formula_file_text(meta: &crate::FormulaMeta, display: Option<&str>) -> String
     let display = strip_leading_equals(display);
 
     // Preserve stored file text if the model's display text matches.
-    if !meta.file_text.is_empty() && crate::formula_text::strip_xlfn_prefixes(&meta.file_text) == display {
+    if !meta.file_text.is_empty()
+        && crate::formula_text::strip_xlfn_prefixes(&meta.file_text) == display
+    {
         return strip_leading_equals(&meta.file_text).to_string();
     }
 
@@ -3430,7 +3502,11 @@ fn raw_or_bool(meta: Option<&crate::CellMeta>, b: bool) -> &'static str {
             }
         }
     }
-    if b { "1" } else { "0" }
+    if b {
+        "1"
+    } else {
+        "0"
+    }
 }
 
 fn raw_or_error(meta: Option<&crate::CellMeta>, err: ErrorValue) -> String {
@@ -3577,7 +3653,9 @@ fn generate_minimal_package(sheets: &[SheetMeta]) -> Result<BTreeMap<String, Vec
 fn minimal_workbook_rels_xml(sheets: &[SheetMeta]) -> String {
     let mut xml = String::new();
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
-    xml.push_str(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#);
+    xml.push_str(
+        r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
+    );
 
     for sheet_meta in sheets {
         let target = relationship_target_from_workbook(&sheet_meta.path);
@@ -3588,9 +3666,7 @@ fn minimal_workbook_rels_xml(sheets: &[SheetMeta]) -> String {
         xml.push_str(r#""/>"#);
     }
 
-    let next = next_relationship_id(
-        sheets.iter().map(|s| s.relationship_id.as_str()),
-    );
+    let next = next_relationship_id(sheets.iter().map(|s| s.relationship_id.as_str()));
     xml.push_str(&format!(
         r#"<Relationship Id="rId{next}" Type="{REL_TYPE_STYLES}" Target="styles.xml"/>"#
     ));
@@ -3887,7 +3963,9 @@ fn ensure_workbook_rels_has_relationship(
                 }
                 writer.write_event(Event::Empty(e.to_owned()))?;
             }
-            Event::End(ref e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") => {
+            Event::End(ref e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
+            {
                 let prefix = relationship_prefix.as_deref().or_else(|| {
                     if root_has_default_ns {
                         None
@@ -3999,11 +4077,14 @@ fn patch_workbook_rels_for_sheet_edits(
                 }
             }
             Event::End(ref e)
-                if skipping && local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+                if skipping
+                    && local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
             {
                 skipping = false;
             }
-            Event::End(ref e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") => {
+            Event::End(ref e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
+            {
                 let prefix = relationship_prefix.as_deref().or_else(|| {
                     if root_has_default_ns {
                         None

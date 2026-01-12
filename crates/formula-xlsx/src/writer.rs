@@ -1,5 +1,5 @@
-use crate::tables::{write_table_xml, TABLE_REL_TYPE};
 use crate::styles::StylesPart;
+use crate::tables::{write_table_xml, TABLE_REL_TYPE};
 use crate::WorkbookKind;
 use formula_columnar::{ColumnType as ColumnarType, Value as ColumnarValue};
 use formula_model::{
@@ -35,7 +35,10 @@ pub fn write_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(),
     write_workbook_to_writer_with_kind(workbook, file, kind)
 }
 
-pub fn write_workbook_to_writer<W: Write + Seek>(workbook: &Workbook, writer: W) -> Result<(), XlsxWriteError> {
+pub fn write_workbook_to_writer<W: Write + Seek>(
+    workbook: &Workbook,
+    writer: W,
+) -> Result<(), XlsxWriteError> {
     write_workbook_to_writer_with_kind(workbook, writer, WorkbookKind::Workbook)
 }
 
@@ -50,8 +53,8 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
 
     let shared_strings = build_shared_strings(workbook);
     let mut style_table = workbook.styles.clone();
-    let mut styles_part =
-        StylesPart::parse_or_default(None, &mut style_table).map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
+    let mut styles_part = StylesPart::parse_or_default(None, &mut style_table)
+        .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
     let style_ids = workbook
         .sheets
         .iter()
@@ -116,8 +119,12 @@ pub fn write_workbook_to_writer_with_kind<W: Write + Seek>(
     for (idx, sheet) in workbook.sheets.iter().enumerate() {
         let sheet_number = idx + 1;
         let sheet_path = format!("xl/worksheets/sheet{sheet_number}.xml");
-        let (sheet_xml, sheet_rels) =
-            sheet_xml(sheet, &shared_strings, &table_parts_by_sheet[idx], &style_to_xf)?;
+        let (sheet_xml, sheet_rels) = sheet_xml(
+            sheet,
+            &shared_strings,
+            &table_parts_by_sheet[idx],
+            &style_to_xf,
+        )?;
         zip.start_file(&sheet_path, options)?;
         zip.write_all(sheet_xml.as_bytes())?;
 
@@ -194,7 +201,11 @@ fn calc_pr_xml(workbook: &Workbook) -> String {
 }
 
 fn bool_attr(value: bool) -> &'static str {
-    if value { "1" } else { "0" }
+    if value {
+        "1"
+    } else {
+        "0"
+    }
 }
 
 fn trim_float(value: f64) -> String {
@@ -342,12 +353,14 @@ fn sheet_xml(
 
     let columnar = sheet
         .columnar_table_extent()
-        .and_then(|(origin, rows, cols)| sheet.columnar_table().map(|t| ColumnarInfo {
-            origin,
-            rows,
-            cols,
-            table: t.as_ref(),
-        }));
+        .and_then(|(origin, rows, cols)| {
+            sheet.columnar_table().map(|t| ColumnarInfo {
+                origin,
+                rows,
+                cols,
+                table: t.as_ref(),
+            })
+        });
 
     // Group overlay cells by row for streaming output.
     let mut overlay_by_row: BTreeMap<u32, Vec<(u32, CellRef, &Cell)>> = BTreeMap::new();
@@ -425,8 +438,12 @@ fn sheet_xml(
                         && overlay_cells[overlay_cell_idx].0 == col_idx
                     {
                         let (_col, cell_ref, cell) = overlay_cells[overlay_cell_idx];
-                        row_cells_xml
-                            .push_str(&cell_xml(&cell_ref, cell, shared_strings, style_to_xf));
+                        row_cells_xml.push_str(&cell_xml(
+                            &cell_ref,
+                            cell,
+                            shared_strings,
+                            style_to_xf,
+                        ));
                         overlay_cell_idx += 1;
                         wrote_any_cell = true;
                         continue;
@@ -545,15 +562,21 @@ fn sheet_xml(
         .map(|region| region.range)
         .filter(|range| !range.is_single_cell())
         .collect();
-    merges.sort_by_key(|range| (range.start.row, range.start.col, range.end.row, range.end.col));
+    merges.sort_by_key(|range| {
+        (
+            range.start.row,
+            range.start.col,
+            range.end.row,
+            range.end.col,
+        )
+    });
     if !merges.is_empty() {
         xml = crate::merge_cells::update_worksheet_xml(&xml, &merges)
             .map_err(|e| XlsxWriteError::Invalid(e.to_string()))?;
     }
 
     // Generate a safe set of hyperlink relationship IDs for this sheet.
-    let mut used_rel_ids: HashSet<String> =
-        table_parts.iter().map(|(id, _)| id.clone()).collect();
+    let mut used_rel_ids: HashSet<String> = table_parts.iter().map(|(id, _)| id.clone()).collect();
     let mut next_rel_id = used_rel_ids
         .iter()
         .filter_map(|id| id.strip_prefix("rId")?.parse::<u32>().ok())
@@ -596,7 +619,9 @@ fn sheet_xml(
 
         let id = rel_id.expect("rel id ensured for external hyperlinks");
         link.rel_id = Some(id.clone());
-        target_by_rel_id.entry(id).or_insert_with(|| target.to_string());
+        target_by_rel_id
+            .entry(id)
+            .or_insert_with(|| target.to_string());
     }
 
     if !links.is_empty() {
@@ -635,7 +660,11 @@ fn cell_xml(
     let mut value_xml = String::new();
 
     if cell.style_id != 0 {
-        if let Some(xf_index) = style_to_xf.get(&cell.style_id).copied().filter(|xf| *xf != 0) {
+        if let Some(xf_index) = style_to_xf
+            .get(&cell.style_id)
+            .copied()
+            .filter(|xf| *xf != 0)
+        {
             attrs.push_str(&format!(r#" s="{}""#, xf_index));
         }
     }
@@ -658,11 +687,7 @@ fn cell_xml(
         }
         CellValue::String(s) => {
             attrs.push_str(r#" t="s""#);
-            let idx = shared_strings
-                .index
-                .get(s)
-                .copied()
-                .unwrap_or_default();
+            let idx = shared_strings.index.get(s).copied().unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
         }
         CellValue::Entity(entity) => {
@@ -724,7 +749,11 @@ fn columnar_cell_xml(
         }
         ColumnarValue::String(s) => {
             attrs.push_str(r#" t="s""#);
-            let idx = shared_strings.index.get(s.as_ref()).copied().unwrap_or_default();
+            let idx = shared_strings
+                .index
+                .get(s.as_ref())
+                .copied()
+                .unwrap_or_default();
             value_xml.push_str(&format!(r#"<v>{}</v>"#, idx));
         }
         ColumnarValue::DateTime(v) => {
@@ -839,7 +868,11 @@ fn shared_strings_xml(shared: &SharedStrings) -> String {
     )
 }
 
-fn content_types_xml(workbook: &Workbook, shared_strings: &SharedStrings, kind: WorkbookKind) -> String {
+fn content_types_xml(
+    workbook: &Workbook,
+    shared_strings: &SharedStrings,
+    kind: WorkbookKind,
+) -> String {
     let mut overrides = String::new();
     overrides.push_str(&format!(
         r#"<Override PartName="/xl/workbook.xml" ContentType="{}"/>"#,

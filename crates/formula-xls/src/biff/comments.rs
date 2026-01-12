@@ -106,9 +106,13 @@ pub(crate) fn parse_biff_sheet_notes(
 
         match record.record_id {
             RECORD_NOTE => {
-                if let Some(note) =
-                    parse_note_record(record.data.as_ref(), record.offset, biff, codepage, &mut warnings)
-                {
+                if let Some(note) = parse_note_record(
+                    record.data.as_ref(),
+                    record.offset,
+                    biff,
+                    codepage,
+                    &mut warnings,
+                ) {
                     notes.push(note);
                 }
             }
@@ -144,7 +148,11 @@ pub(crate) fn parse_biff_sheet_notes(
         let Some((obj_id, text)) = texts_by_obj_id
             .get(&note.primary_obj_id)
             .map(|text| (note.primary_obj_id, text))
-            .or_else(|| texts_by_obj_id.get(&note.secondary_obj_id).map(|text| (note.secondary_obj_id, text)))
+            .or_else(|| {
+                texts_by_obj_id
+                    .get(&note.secondary_obj_id)
+                    .map(|text| (note.secondary_obj_id, text))
+            })
         else {
             // No TXO payload for this NOTE record: keep best-effort import going, but skip creating
             // a model comment with missing text.
@@ -374,10 +382,8 @@ fn parse_txo_text_biff5(
         // Best-effort: if the TXO header is malformed, decode the first continuation as text.
         return fallback_decode_first_continue_biff5(record, codepage, warnings);
     }
-    let cch_text = u16::from_le_bytes([
-        first[TXO_TEXT_LEN_OFFSET],
-        first[TXO_TEXT_LEN_OFFSET + 1],
-    ]) as usize;
+    let cch_text =
+        u16::from_le_bytes([first[TXO_TEXT_LEN_OFFSET], first[TXO_TEXT_LEN_OFFSET + 1]]) as usize;
     if cch_text == 0 {
         return Some(String::new());
     }
@@ -433,7 +439,9 @@ fn parse_txo_text_biff5(
             continue;
         }
 
-        if offset == 0 && skip_leading_flag_bytes && matches!(frag.first().copied(), Some(0) | Some(1))
+        if offset == 0
+            && skip_leading_flag_bytes
+            && matches!(frag.first().copied(), Some(0) | Some(1))
         {
             offset = 1;
         }
@@ -446,7 +454,10 @@ fn parse_txo_text_biff5(
 
         let available = frag.len() - offset;
         let take = remaining.min(available);
-        out.push_str(&strings::decode_ansi(codepage, &frag[offset..offset + take]));
+        out.push_str(&strings::decode_ansi(
+            codepage,
+            &frag[offset..offset + take],
+        ));
         remaining -= take;
         offset += take;
         if offset >= frag.len() {
@@ -656,7 +667,10 @@ fn fallback_decode_first_continue(
     let Some(first) = fragments.next() else {
         push_warning(
             warnings,
-            format!("TXO record at offset {} missing CONTINUE fragments", record.offset),
+            format!(
+                "TXO record at offset {} missing CONTINUE fragments",
+                record.offset
+            ),
         );
         return Some(String::new());
     };
@@ -691,7 +705,10 @@ fn fallback_decode_first_continue_biff5(
     let Some(first) = fragments.next() else {
         push_warning(
             warnings,
-            format!("TXO record at offset {} missing CONTINUE fragments", record.offset),
+            format!(
+                "TXO record at offset {} missing CONTINUE fragments",
+                record.offset
+            ),
         );
         return Some(String::new());
     };
@@ -860,14 +877,17 @@ mod tests {
 
     fn txo_with_cch_text(cch_text: u16) -> Vec<u8> {
         let mut payload = vec![0u8; 18];
-        payload[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2].copy_from_slice(&cch_text.to_le_bytes());
+        payload[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2]
+            .copy_from_slice(&cch_text.to_le_bytes());
         record(RECORD_TXO, &payload)
     }
 
     fn txo_with_cch_text_and_cb_runs(cch_text: u16, cb_runs: u16) -> Vec<u8> {
         let mut payload = vec![0u8; 18];
-        payload[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2].copy_from_slice(&cch_text.to_le_bytes());
-        payload[TXO_RUNS_LEN_OFFSET..TXO_RUNS_LEN_OFFSET + 2].copy_from_slice(&cb_runs.to_le_bytes());
+        payload[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2]
+            .copy_from_slice(&cch_text.to_le_bytes());
+        payload[TXO_RUNS_LEN_OFFSET..TXO_RUNS_LEN_OFFSET + 2]
+            .copy_from_slice(&cb_runs.to_le_bytes());
         record(RECORD_TXO, &payload)
     }
 
@@ -962,10 +982,7 @@ mod tests {
 
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
-        assert!(
-            warnings.is_empty(),
-            "unexpected warnings: {warnings:?}"
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         let note = &notes[0];
         assert_eq!(note.cell, CellRef::new(0, 0));
@@ -998,10 +1015,7 @@ mod tests {
 
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1251).expect("parse");
-        assert!(
-            warnings.is_empty(),
-            "unexpected warnings: {warnings:?}"
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].author, "Alice");
         assert_eq!(notes[0].text, "Hi А");
@@ -1027,10 +1041,7 @@ mod tests {
 
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1251).expect("parse");
-        assert!(
-            warnings.is_empty(),
-            "unexpected warnings: {warnings:?}"
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].author, "А");
         assert_eq!(notes[0].text, "Hi");
@@ -1050,10 +1061,7 @@ mod tests {
 
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
-        assert!(
-            warnings.is_empty(),
-            "unexpected warnings: {warnings:?}"
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].author, "Alice");
     }
@@ -1072,10 +1080,7 @@ mod tests {
 
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
-        assert!(
-            warnings.is_empty(),
-            "unexpected warnings: {warnings:?}"
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hello");
     }
@@ -1094,10 +1099,7 @@ mod tests {
 
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
-        assert!(
-            warnings.is_empty(),
-            "unexpected warnings: {warnings:?}"
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hello");
     }
@@ -1121,10 +1123,7 @@ mod tests {
 
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
-        assert!(
-            warnings.is_empty(),
-            "unexpected warnings: {warnings:?}"
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 2);
 
         let mut by_cell: HashMap<CellRef, &BiffNote> = HashMap::new();
@@ -1191,10 +1190,7 @@ mod tests {
 
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
-        assert!(
-            warnings.is_empty(),
-            "unexpected warnings: {warnings:?}"
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hello");
     }
@@ -1307,10 +1303,7 @@ mod tests {
 
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
-        assert!(
-            warnings.is_empty(),
-            "unexpected warnings: {warnings:?}"
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hi");
     }
@@ -1330,10 +1323,7 @@ mod tests {
 
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1251).expect("parse");
-        assert!(
-            warnings.is_empty(),
-            "unexpected warnings: {warnings:?}"
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "\u{0410}");
     }
@@ -1355,10 +1345,7 @@ mod tests {
 
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
-        assert!(
-            warnings.is_empty(),
-            "unexpected warnings: {warnings:?}"
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "ABCDE");
     }
@@ -1434,10 +1421,7 @@ mod tests {
 
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1251).expect("parse");
-        assert!(
-            warnings.is_empty(),
-            "unexpected warnings: {warnings:?}"
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].author, "Alice");
         assert_eq!(notes[0].text, "Hi А");
@@ -1468,10 +1452,7 @@ mod tests {
 
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1251).expect("parse");
-        assert!(
-            warnings.is_empty(),
-            "unexpected warnings: {warnings:?}"
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].author, "Alice");
         assert_eq!(notes[0].text, "Hi А");
@@ -1493,10 +1474,7 @@ mod tests {
 
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
-        assert!(
-            warnings.is_empty(),
-            "unexpected warnings: {warnings:?}"
-        );
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].author, "Alice");
     }

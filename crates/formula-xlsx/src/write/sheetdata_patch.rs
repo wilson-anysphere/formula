@@ -222,7 +222,11 @@ fn patch_sheet_data_contents<R: std::io::BufRead, W: Write>(
                     row_num,
                 )?;
                 let row_bytes = row_writer.into_inner();
-                if has_extra_attrs || keep_due_to_row_props || outcome.wrote_cell || outcome.wrote_other {
+                if has_extra_attrs
+                    || keep_due_to_row_props
+                    || outcome.wrote_cell
+                    || outcome.wrote_other
+                {
                     writer.get_mut().write_all(&row_bytes)?;
                 }
             }
@@ -532,9 +536,10 @@ fn patch_or_copy_cell<W: Write>(
 ) -> Result<bool, WriteError> {
     let original = parse_cell_semantics(doc, sheet_meta, &cell_events, &doc.shared_strings)?;
 
-    let desired = desired_cells.get(*desired_idx).copied().filter(|(r, _)| {
-        r.row + 1 == row_num && r.col + 1 == col_1_based
-    });
+    let desired = desired_cells
+        .get(*desired_idx)
+        .copied()
+        .filter(|(r, _)| r.row + 1 == row_num && r.col + 1 == col_1_based);
 
     match desired {
         Some((_, desired_cell)) => {
@@ -542,8 +547,12 @@ fn patch_or_copy_cell<W: Write>(
             let mut desired_semantics = CellSemantics::from_model(desired_cell, style_to_xf);
             if original.formula.is_none() {
                 if let Some(model_formula) = desired_semantics.formula.as_deref() {
-                    let meta =
-                        super::lookup_cell_meta(doc, cell_meta_sheet_ids, sheet_meta.worksheet_id, cell_ref);
+                    let meta = super::lookup_cell_meta(
+                        doc,
+                        cell_meta_sheet_ids,
+                        sheet_meta.worksheet_id,
+                        cell_ref,
+                    );
                     if let Some(meta_formula) = meta.and_then(|m| m.formula.as_ref()) {
                         let is_shared_follower = meta_formula.t.as_deref() == Some("shared")
                             && meta_formula.reference.is_none()
@@ -551,9 +560,11 @@ fn patch_or_copy_cell<W: Write>(
                             && meta_formula.file_text.is_empty();
                         if is_shared_follower {
                             if let Some(shared_index) = meta_formula.shared_index {
-                                if let Some(expected) =
-                                    super::shared_formula_expected(shared_formulas, shared_index, cell_ref)
-                                {
+                                if let Some(expected) = super::shared_formula_expected(
+                                    shared_formulas,
+                                    shared_index,
+                                    cell_ref,
+                                ) {
                                     if expected == model_formula {
                                         desired_semantics.formula = None;
                                     }
@@ -834,7 +845,8 @@ fn write_updated_cell<W: Write>(
         .map(|start| String::from_utf8_lossy(start.name().as_ref()).into_owned())
         .unwrap_or_else(|| tags.c.clone());
 
-    let tags_prefix = super::element_prefix(tags.c.as_bytes()).and_then(|p| std::str::from_utf8(p).ok());
+    let tags_prefix =
+        super::element_prefix(tags.c.as_bytes()).and_then(|p| std::str::from_utf8(p).ok());
     let cell_prefix =
         super::element_prefix(cell_tag.as_bytes()).and_then(|p| std::str::from_utf8(p).ok());
     let cell_tags = (cell_prefix != tags_prefix).then(|| SheetMlTags::new(cell_prefix));
@@ -862,7 +874,9 @@ fn write_updated_cell<W: Write>(
             match attr.key.as_ref() {
                 b"r" | b"s" | b"t" => {}
                 _ => {
-                    let key = std::str::from_utf8(attr.key.as_ref()).unwrap_or("").to_string();
+                    let key = std::str::from_utf8(attr.key.as_ref())
+                        .unwrap_or("")
+                        .to_string();
                     let value = attr.unescape_value()?.into_owned();
                     preserved_attrs.push((key, value));
                 }
@@ -889,7 +903,9 @@ fn write_updated_cell<W: Write>(
     if let (Some(display), Some(meta)) = (model_formula, formula_meta.as_mut()) {
         if meta.t.as_deref() == Some("shared") && meta.file_text.is_empty() {
             if let Some(shared_index) = meta.shared_index {
-                if let Some(expected) = super::shared_formula_expected(shared_formulas, shared_index, cell_ref) {
+                if let Some(expected) =
+                    super::shared_formula_expected(shared_formulas, shared_index, cell_ref)
+                {
                     if expected == super::strip_leading_equals(display) {
                         preserve_textless_shared = true;
                     } else {
@@ -1216,14 +1232,19 @@ fn collect_full_element<R: std::io::BufRead>(
     Ok(events)
 }
 
-fn write_events<W: Write>(writer: &mut Writer<W>, events: Vec<Event<'static>>) -> Result<(), WriteError> {
+fn write_events<W: Write>(
+    writer: &mut Writer<W>,
+    events: Vec<Event<'static>>,
+) -> Result<(), WriteError> {
     for ev in events {
         writer.write_event(ev)?;
     }
     Ok(())
 }
 
-fn cell_ref_from_cell_events(events: &[Event<'static>]) -> Result<Option<(CellRef, u32)>, WriteError> {
+fn cell_ref_from_cell_events(
+    events: &[Event<'static>],
+) -> Result<Option<(CellRef, u32)>, WriteError> {
     let start = match events.first() {
         Some(Event::Start(e)) => e,
         Some(Event::Empty(e)) => e,

@@ -237,7 +237,12 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_recalc_policy<
     policy_on_formula_change: RecalcPolicy,
 ) -> Result<(), StreamingPatchError> {
     if patches.is_empty() {
-        return patch_xlsx_streaming_with_recalc_policy(input, output, &[], policy_on_formula_change);
+        return patch_xlsx_streaming_with_recalc_policy(
+            input,
+            output,
+            &[],
+            policy_on_formula_change,
+        );
     }
 
     // StyleId patches require rewriting styles.xml; callers should use the style-aware variant.
@@ -440,7 +445,8 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_part_overrides_and_recalc
 
     let mut formula_changed = saw_formula_patch;
     if !formula_changed {
-        formula_changed = streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
+        formula_changed =
+            streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
     }
     let recalc_policy = if formula_changed {
         policy_on_formula_change
@@ -584,8 +590,7 @@ mod macro_strip_streaming {
 
         // Parts referenced by `xl/_rels/vbaProject.bin.rels` (e.g. signature payloads).
         if part_names.contains("xl/_rels/vbaProject.bin.rels") {
-            let rels_bytes =
-                read_zip_part(archive, "xl/_rels/vbaProject.bin.rels", read_cache)?;
+            let rels_bytes = read_zip_part(archive, "xl/_rels/vbaProject.bin.rels", read_cache)?;
             let targets = parse_internal_relationship_targets(&rels_bytes, "xl/vbaProject.bin")?;
             delete.extend(targets);
         }
@@ -640,7 +645,9 @@ mod macro_strip_streaming {
             let rels_bytes = read_zip_part(archive, &rels_part, read_cache)?;
 
             out.extend(parse_relationship_targets_for_ids(
-                &rels_bytes, vml_part, &rel_ids,
+                &rels_bytes,
+                vml_part,
+                &rel_ids,
             )?);
         }
 
@@ -661,7 +668,8 @@ mod macro_strip_streaming {
                 Event::Eof => break,
                 Event::Start(ref e) => {
                     let changes = namespace_context.apply_namespace_decls(e)?;
-                    if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"OLEObject")
+                    if crate::openxml::local_name(e.name().as_ref())
+                        .eq_ignore_ascii_case(b"OLEObject")
                     {
                         collect_relationship_id_attrs(e, &namespace_context, &mut ids)?;
                     }
@@ -669,7 +677,8 @@ mod macro_strip_streaming {
                 }
                 Event::Empty(ref e) => {
                     let changes = namespace_context.apply_namespace_decls(e)?;
-                    if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"OLEObject")
+                    if crate::openxml::local_name(e.name().as_ref())
+                        .eq_ignore_ascii_case(b"OLEObject")
                     {
                         collect_relationship_id_attrs(e, &namespace_context, &mut ids)?;
                     }
@@ -708,7 +717,9 @@ mod macro_strip_streaming {
                         match crate::openxml::local_name(attr.key.as_ref()) {
                             b"Id" => id = Some(attr.unescape_value()?.into_owned()),
                             b"Target" => target = Some(attr.unescape_value()?.into_owned()),
-                            b"TargetMode" => target_mode = Some(attr.unescape_value()?.into_owned()),
+                            b"TargetMode" => {
+                                target_mode = Some(attr.unescape_value()?.into_owned())
+                            }
                             _ => {}
                         }
                     }
@@ -1267,7 +1278,9 @@ mod macro_strip_streaming {
                         let attr = attr?;
                         match crate::openxml::local_name(attr.key.as_ref()) {
                             b"Target" => target = Some(attr.unescape_value()?.into_owned()),
-                            b"TargetMode" => target_mode = Some(attr.unescape_value()?.into_owned()),
+                            b"TargetMode" => {
+                                target_mode = Some(attr.unescape_value()?.into_owned())
+                            }
                             _ => {}
                         }
                     }
@@ -1495,7 +1508,12 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles_and_recalc_policy<
     policy_on_formula_change: RecalcPolicy,
 ) -> Result<(), StreamingPatchError> {
     if patches.is_empty() {
-        return patch_xlsx_streaming_with_recalc_policy(input, output, &[], policy_on_formula_change);
+        return patch_xlsx_streaming_with_recalc_policy(
+            input,
+            output,
+            &[],
+            policy_on_formula_change,
+        );
     }
 
     let mut archive = ZipArchive::new(input)?;
@@ -2191,7 +2209,8 @@ fn scan_worksheet_xml_metadata<R: Read>(
                             max_col_0: cell_ref.col,
                         },
                     });
-                    if target_cells.is_some_and(|targets| targets.contains(&(cell_ref.row, cell_ref.col)))
+                    if target_cells
+                        .is_some_and(|targets| targets.contains(&(cell_ref.row, cell_ref.col)))
                     {
                         found_target_cells.insert((cell_ref.row, cell_ref.col));
                     }
@@ -2317,8 +2336,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             Err(err) => return Err(err.into()),
         };
         let target_cells = non_material_targets_by_part.get(part);
-        let (metadata, found_target_cells) =
-            scan_worksheet_xml_metadata(&mut file, target_cells)?;
+        let (metadata, found_target_cells) = scan_worksheet_xml_metadata(&mut file, target_cells)?;
         worksheet_metadata_by_part.insert(part.clone(), metadata);
         if !found_target_cells.is_empty() {
             existing_non_material_cells_by_part.insert(part.clone(), found_target_cells);
@@ -2337,8 +2355,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
                 filtered.push(patch.clone());
                 continue;
             }
-            if existing_cells
-                .is_some_and(|cells| cells.contains(&(patch.cell.row, patch.cell.col)))
+            if existing_cells.is_some_and(|cells| cells.contains(&(patch.cell.row, patch.cell.col)))
             {
                 filtered.push(patch.clone());
             }
@@ -2445,10 +2462,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
                 if applied_part_overrides.contains(*name) {
                     return false;
                 }
-                matches!(
-                    override_op,
-                    PartOverride::Add(_) | PartOverride::Replace(_)
-                )
+                matches!(override_op, PartOverride::Add(_) | PartOverride::Replace(_))
             })
             .collect();
         to_append.sort_by_key(|(name, _)| *name);
