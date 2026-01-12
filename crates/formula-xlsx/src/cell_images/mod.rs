@@ -18,6 +18,20 @@ type Result<T> = std::result::Result<T, XlsxError>;
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const REL_TYPE_IMAGE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
+/// Best-effort loader for Excel "in-cell" images.
+///
+/// This mirrors the old `cell_images.rs` behavior: missing parts, missing rels, or parse errors
+/// should not prevent the workbook from loading. Successfully parsed image relationships are
+/// loaded into `workbook.images`.
+pub fn load_cell_images_from_parts(parts: &BTreeMap<String, Vec<u8>>, workbook: &mut formula_model::Workbook) {
+    for path in parts.keys() {
+        if !is_cell_images_part(path) {
+            continue;
+        }
+        let _ = parse_cell_images_part(path, parts, workbook);
+    }
+}
+
 /// Parsed workbook-level cell images parts.
 #[derive(Debug, Clone, Default)]
 pub struct CellImages {

@@ -3584,15 +3584,34 @@ pub fn restart_app(app: tauri::AppHandle) {
 // platform dispatch and GTK main-thread requirements.
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn read_clipboard() -> Result<crate::clipboard::ClipboardContent, String> {
-    tauri::async_runtime::spawn_blocking(|| crate::clipboard::read().map_err(|e| e.to_string()))
-        .await
-        .map_err(|e| e.to_string())?
+pub async fn read_clipboard(
+    app: tauri::AppHandle,
+) -> Result<crate::clipboard::ClipboardContent, String> {
+    // Clipboard APIs on macOS call into AppKit. AppKit is not thread-safe, and Tauri
+    // commands can execute on a background thread, so we always dispatch to the main
+    // thread before touching NSPasteboard.
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::Manager as _;
+        return app
+            .run_on_main_thread(crate::clipboard::read)
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        tauri::async_runtime::spawn_blocking(|| crate::clipboard::read().map_err(|e| e.to_string()))
+            .await
+            .map_err(|e| e.to_string())?
+    }
 }
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn write_clipboard(
+    app: tauri::AppHandle,
     text: String,
     html: Option<String>,
     rtf: Option<String>,
@@ -3604,10 +3623,26 @@ pub async fn write_clipboard(
         rtf,
         png_base64: image_png_base64,
     };
-    tauri::async_runtime::spawn_blocking(move || crate::clipboard::write(&payload).map_err(|e| e.to_string()))
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::Manager as _;
+        return app
+            .run_on_main_thread(move || crate::clipboard::write(&payload))
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        tauri::async_runtime::spawn_blocking(move || {
+            crate::clipboard::write(&payload).map_err(|e| e.to_string())
+        })
         .await
         .map_err(|e| e.to_string())?
+    }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
