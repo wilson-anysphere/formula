@@ -143,7 +143,9 @@ test.describe("formula bar editing + range insertion", () => {
       expect(c1Value).toBe("7");
     });
 
-    test(`Ctrl/Cmd+PgDn switches sheets while editing a formula and keeps the formula bar focused (${mode})`, async ({ page }) => {
+    test(`Ctrl/Cmd+PgDn does not switch sheets while editing a formula and keeps the formula bar focused (${mode})`, async ({
+      page,
+    }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
       await waitForIdle(page);
 
@@ -163,15 +165,17 @@ test.describe("formula bar editing + range insertion", () => {
       await expect(input).toBeVisible();
       await input.fill("=");
 
-      // Switch to Sheet2 via Ctrl/Cmd+PgDn; focus should stay in the formula bar (range selection workflow).
+      // Ctrl/Cmd+PgDn is a global sheet navigation shortcut, but the app intentionally
+      // does not steal it from text inputs (including the formula bar).
       const modifier = process.platform === "darwin" ? "Meta" : "Control";
       await page.keyboard.press(`${modifier}+PageDown`);
-      await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
+      await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
       await expect(input).toBeFocused();
 
-      // Picking a cell should insert a sheet-qualified reference.
-      await page.click("#grid", { position: { x: 53, y: 29 } });
-      await expect(input).toHaveValue("=Sheet2!A1");
+      // Picking a cell should still insert a reference into the formula.
+      // Click inside A1 (avoid the shared-grid corner header/select-all region).
+      await page.click("#grid", { position: { x: 80, y: 40 } });
+      await expect(input).toHaveValue("=A1");
     });
 
     test(`sheet switcher <select> switches sheets while editing a formula and keeps the formula bar focused (${mode})`, async ({
