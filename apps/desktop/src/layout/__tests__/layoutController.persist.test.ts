@@ -141,6 +141,42 @@ describe("LayoutController persistence", () => {
     expect(parsed.splitView.panes.secondary.zoom).toBe(4);
   });
 
+  test("setSplitPaneScroll can be applied without persisting/emitting, then flushed with persistNow()", () => {
+    const storage = new MemoryStorage();
+    const keyPrefix = "test.layout";
+    const workspaceManager = new LayoutWorkspaceManager({ storage, keyPrefix });
+    const workbookId = "workbook-split-scroll";
+    const controller = new LayoutController({ workbookId, workspaceManager });
+    const key = `${keyPrefix}.workbook.${encodeURIComponent(workbookId)}.v1`;
+
+    let changeCount = 0;
+    controller.on("change", () => {
+      changeCount += 1;
+    });
+
+    // Seed initial persisted state.
+    controller.setSplitPaneScroll("secondary", { scrollX: 0, scrollY: 0 });
+    const persistedBefore = storage.getItem(key);
+    expect(persistedBefore).not.toBeNull();
+    expect(changeCount).toBe(1);
+
+    controller.setSplitPaneScroll("secondary", { scrollX: 1e13, scrollY: -1e13 }, { persist: false, emit: false });
+    // Should clamp to [-1e12, 1e12] even for silent updates.
+    expect(controller.layout.splitView.panes.secondary.scrollX).toBe(1e12);
+    expect(controller.layout.splitView.panes.secondary.scrollY).toBe(-1e12);
+    expect(storage.getItem(key)).toBe(persistedBefore);
+    expect(changeCount).toBe(1);
+
+    controller.persistNow();
+    expect(changeCount).toBe(1);
+    const after = storage.getItem(key);
+    expect(after).not.toBe(persistedBefore);
+    expect(after).not.toBeNull();
+    const parsed = JSON.parse(after!);
+    expect(parsed.splitView.panes.secondary.scrollX).toBe(1e12);
+    expect(parsed.splitView.panes.secondary.scrollY).toBe(-1e12);
+  });
+
   test("switching workspaces persists pending ephemeral updates before reloading", () => {
     const storage = new MemoryStorage();
     const keyPrefix = "test.layout";
