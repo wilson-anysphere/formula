@@ -375,6 +375,8 @@ cannot reliably resolve relative imports, the browser entrypoint (`manifest.brow
   - Extension HTTP requests (`formula.network.fetch(...)`) are proxied by the browser extension host through the Rust backend
     via `network_fetch`.
   - See [`docs/11-desktop-shell.md`](./11-desktop-shell.md) (“Network strategy”) for details.
+  - Note: because `network_fetch` / `marketplace_*` run in the Rust backend (reqwest), they are not governed by the WebView
+    CSP and can still reach `http:` URLs (useful for local dev servers) even though `connect-src` does not include `http:`.
   - Note: WebSocket connections are not proxied via Tauri IPC. Extension WebSockets are permission-gated in the extension
     worker and are subject to the app CSP (`connect-src`), so the URL must be allowed (notably `wss:` under the default CSP).
 

@@ -116,6 +116,9 @@ Rationale:
 - We also rely on `script-src 'unsafe-eval'` for the scripting sandbox (`new Function`-based evaluation in a Worker).
 - `connect-src` is intentionally restrictive (no `http:`/`ws:`), but allows TLS-only outbound network (`https:` / `wss:`),
   along with same-origin + `blob:`/`data:` URLs.
+  - Note: Rust IPC network (`network_fetch`, `marketplace_*`) is performed by the desktop backend (reqwest) and is not
+    governed by the WebView CSP. Those commands currently allow `http:` URLs (useful for local dev servers) in addition to
+    `https:`.
 
 ### Network strategy (extensions + marketplace)
 

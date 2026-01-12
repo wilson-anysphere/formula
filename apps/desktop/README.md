@@ -125,6 +125,9 @@ The extensions + marketplace runtime prefer using Rust-backed Tauri IPC commands
 
 This avoids relying on browser CORS behavior and keeps network policy centralized (see `docs/11-desktop-shell.md` → “Network strategy”).
 
+Note: Rust IPC network requests are not governed by the WebView CSP. `network_fetch` / `marketplace_*` currently allow
+`http:` URLs as well as `https:` (useful for local dev servers), even though `connect-src` does not include `http:`.
+
 To fetch the assets without starting Vite:
 
 ```bash
