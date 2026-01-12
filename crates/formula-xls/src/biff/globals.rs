@@ -6,7 +6,7 @@ use formula_model::{
     VerticalAlignment, WorkbookProtection, WorkbookWindow, WorkbookWindowState,
 };
 
-use super::{records, strings, BiffVersion};
+use super::{externsheet, records, strings, BiffVersion};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BoundSheetInfo {
@@ -163,7 +163,7 @@ pub(crate) struct BiffWorkbookGlobals {
     pub(crate) active_tab_index: Option<u16>,
     pub(crate) workbook_window: Option<WorkbookWindow>,
     /// BIFF8 `EXTERNSHEET` entries (XTI), used for resolving 3D references (`ixti`) in formulas.
-    pub(crate) extern_sheets: Vec<BiffExternSheetEntry>,
+    pub(crate) extern_sheets: Vec<externsheet::ExternSheetEntry>,
     formats: HashMap<u16, String>,
     palette: Vec<u32>,
     fonts: Vec<BiffFont>,
@@ -211,13 +211,6 @@ struct BiffFont {
     underline: bool,
     strike: bool,
     color_idx: u16,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct BiffExternSheetEntry {
-    pub(crate) i_sup_book: u16,
-    pub(crate) itab_first: u16,
-    pub(crate) itab_last: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1063,38 +1056,13 @@ pub(crate) fn parse_biff_workbook_globals(
             //   repeated cXTI times:
             //     [iSupBook: u16][itabFirst: u16][itabLast: u16]
             RECORD_EXTERNSHEET if biff == BiffVersion::Biff8 => {
-                if data.len() < 2 {
-                    out.warnings.push(format!(
-                        "truncated EXTERNSHEET record at offset {}",
-                        record.offset
-                    ));
-                    continue;
+                let parsed =
+                    externsheet::parse_biff8_externsheet_record_data(data, record.offset);
+                if parsed.entries.iter().any(|e| e.supbook != 0) {
+                    saw_external_supbook = true;
                 }
-                let cxti = u16::from_le_bytes([data[0], data[1]]) as usize;
-                let mut pos = 2usize;
-                for idx in 0..cxti {
-                    if data.len().saturating_sub(pos) < 6 {
-                        out.warnings.push(format!(
-                            "truncated EXTERNSHEET record at offset {} (expected {cxti} XTI entries, got {idx})",
-                            record.offset
-                        ));
-                        break;
-                    }
-                    let i_sup_book = u16::from_le_bytes([data[pos], data[pos + 1]]);
-                    let itab_first = u16::from_le_bytes([data[pos + 2], data[pos + 3]]);
-                    let itab_last = u16::from_le_bytes([data[pos + 4], data[pos + 5]]);
-                    pos += 6;
-
-                    if i_sup_book != 0 {
-                        saw_external_supbook = true;
-                    }
-
-                    out.extern_sheets.push(BiffExternSheetEntry {
-                        i_sup_book,
-                        itab_first,
-                        itab_last,
-                    });
-                }
+                out.extern_sheets.extend(parsed.entries);
+                out.warnings.extend(parsed.warnings);
             }
             // SHEETEXT [MS-XLS 2.4.269]
             //
@@ -2301,13 +2269,13 @@ mod tests {
         assert_eq!(
             globals.extern_sheets,
             vec![
-                BiffExternSheetEntry {
-                    i_sup_book: 0,
+                externsheet::ExternSheetEntry {
+                    supbook: 0,
                     itab_first: 1,
                     itab_last: 1,
                 },
-                BiffExternSheetEntry {
-                    i_sup_book: 0,
+                externsheet::ExternSheetEntry {
+                    supbook: 0,
                     itab_first: 2,
                     itab_last: 3,
                 },
@@ -2338,7 +2306,7 @@ mod tests {
 
         let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8, 1252).expect("parse");
         assert_eq!(globals.extern_sheets.len(), 1);
-        assert_eq!(globals.extern_sheets[0].i_sup_book, 2);
+        assert_eq!(globals.extern_sheets[0].supbook, 2);
         assert!(
             globals
                 .warnings

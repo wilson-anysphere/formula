@@ -92,6 +92,17 @@ pub(crate) fn parse_biff8_externsheet_table(workbook_stream: &[u8]) -> ExternShe
     out
 }
 
+/// Parse the payload bytes of a BIFF8 `EXTERNSHEET` record into an [`ExternSheetTable`].
+///
+/// This is useful for callers that already have the logical record data (e.g. from
+/// [`records::LogicalBiffRecordIter`]) and want to share the same entry decoding + best-effort
+/// warning behavior as [`parse_biff8_externsheet_table`].
+pub(crate) fn parse_biff8_externsheet_record_data(data: &[u8], offset: usize) -> ExternSheetTable {
+    let mut out = ExternSheetTable::default();
+    parse_externsheet_record(&mut out, data, offset);
+    out
+}
+
 fn allows_continuation(record_id: u16) -> bool {
     // EXTERNSHEET can be large and may be split across one or more `CONTINUE` records.
     record_id == RECORD_EXTERNSHEET
