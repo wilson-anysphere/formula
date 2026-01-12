@@ -82,6 +82,22 @@ fn tbill_functions_parse_iso_date_text() {
         )
         .unwrap();
 
+    // Ensure TBILLYIELD uses the same date coercion rules as TBILLPRICE.
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            r#"=TBILLYIELD("2020-01-01","2020-07-01",A1)"#,
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A4",
+            "=TBILLYIELD(DATE(2020,1,1),DATE(2020,7,1),A2)",
+        )
+        .unwrap();
+
     engine
         .set_cell_formula(
             "Sheet1",
@@ -105,9 +121,13 @@ fn tbill_functions_parse_iso_date_text() {
         1e-12,
     );
     assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A3")),
+        assert_number(engine.get_cell_value("Sheet1", "A4")),
+        1e-12,
+    );
+    assert_close(
         assert_number(engine.get_cell_value("Sheet1", "B1")),
         assert_number(engine.get_cell_value("Sheet1", "B2")),
         1e-12,
     );
 }
-
