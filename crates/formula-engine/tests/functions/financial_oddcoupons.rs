@@ -260,6 +260,8 @@ fn odd_coupon_settlement_boundary_behavior() {
         matches!(v, Value::Number(n) if (n - 0.06).abs() <= 1e-6),
         "expected yield ~0.06 for worksheet ODDLYIELD when settlement == last_interest, got {v:?}"
     );
+    // Settlement < last_interest is allowed (regular coupons remain before `last_interest`); ensure
+    // worksheet functions evaluate too.
     let v =
         sheet.eval("=ODDLPRICE(DATE(2022,11,1),DATE(2023,5,15),DATE(2023,1,31),0.05,0.06,100,2,0)");
     assert!(
