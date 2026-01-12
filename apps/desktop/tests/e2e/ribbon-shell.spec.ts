@@ -7,7 +7,7 @@ test.describe("ribbon shell smoke", () => {
     await gotoDesktop(page);
     await waitForDesktopReady(page);
 
-    await expect(page.locator("#titlebar .formula-titlebar")).toBeVisible();
+    await expect(page.getByTestId("titlebar").locator(".formula-titlebar")).toBeVisible();
 
     const ribbon = page.getByTestId("ribbon-root");
     await expect(ribbon).toBeVisible();
