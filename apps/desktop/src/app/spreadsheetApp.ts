@@ -1854,6 +1854,92 @@ export class SpreadsheetApp {
     this.refresh();
   }
 
+  focusFormulaBar(opts: { cursor?: "end" | "all" } = {}): void {
+    this.formulaBar?.focus(opts);
+  }
+
+  setFormulaBarDraft(text: string, opts: { cursorStart?: number; cursorEnd?: number } = {}): void {
+    const bar = this.formulaBar;
+    if (!bar) return;
+
+    // Ensure the formula bar enters editing mode so the view renders the textarea
+    // and keeps its internal model in sync.
+    if (!bar.isEditing()) {
+      this.formulaEditCell = { sheetId: this.sheetId, cell: { ...this.selection.active } };
+      this.syncSharedGridInteractionMode();
+      this.updateEditState();
+      bar.model.beginEdit();
+      bar.textarea.style.display = "block";
+    }
+
+    const textarea = bar.textarea;
+    textarea.value = text;
+    const start = opts.cursorStart ?? text.length;
+    const end = opts.cursorEnd ?? start;
+    textarea.setSelectionRange(start, end);
+    // Drive the existing input listeners so the FormulaBarModel updates and the
+    // highlight/hint UI stays consistent.
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  insertIntoFormulaBar(
+    text: string,
+    opts: { replaceSelection?: boolean; focus?: boolean; cursorOffset?: number } = {}
+  ): void {
+    const bar = this.formulaBar;
+    if (!bar) return;
+
+    const focus = opts.focus ?? true;
+    const replaceSelection = opts.replaceSelection ?? true;
+    const cursorOffset = opts.cursorOffset ?? text.length;
+
+    // If the user isn't already editing the formula bar, treat insertion as a full
+    // replacement (Excel-esque "start editing with this template").
+    if (!bar.isEditing()) {
+      // Avoid relying on the textarea focus handler to begin edit; drive the
+      // FormulaBarModel directly so programmatic insertions work reliably.
+      this.formulaEditCell = { sheetId: this.sheetId, cell: { ...this.selection.active } };
+      this.syncSharedGridInteractionMode();
+      this.updateEditState();
+      bar.model.beginEdit();
+      bar.textarea.style.display = "block";
+
+      const textarea = bar.textarea;
+      textarea.value = text;
+      const cursor = Math.max(0, Math.min(cursorOffset, textarea.value.length));
+      textarea.setSelectionRange(cursor, cursor);
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      if (focus) textarea.focus();
+      return;
+    }
+
+    const textarea = bar.textarea;
+    const current = textarea.value;
+    const selStart = textarea.selectionStart ?? current.length;
+    const selEnd = textarea.selectionEnd ?? current.length;
+
+    const start = Math.max(0, Math.min(Math.min(selStart, selEnd), current.length));
+    const end = Math.max(0, Math.min(Math.max(selStart, selEnd), current.length));
+
+    const insertAt = replaceSelection ? start : end;
+    // When editing an existing formula, callers often want to insert a function
+    // template like `=SUM()` at the caret. Avoid injecting an extra `=` in the
+    // middle of a formula (Excel behavior inserts `SUM()` inside an existing `=` draft).
+    const stripLeadingEquals = current.trimStart().startsWith("=") && insertAt > 0 && text.startsWith("=");
+    const textToInsert = stripLeadingEquals ? text.slice(1) : text;
+    const effectiveCursorOffset = stripLeadingEquals ? Math.max(0, cursorOffset - 1) : cursorOffset;
+
+    const nextValue = replaceSelection
+      ? current.slice(0, start) + textToInsert + current.slice(end)
+      : current.slice(0, insertAt) + textToInsert + current.slice(insertAt);
+
+    textarea.value = nextValue;
+    const cursor = Math.max(0, Math.min(insertAt + effectiveCursorOffset, textarea.value.length));
+    textarea.setSelectionRange(cursor, cursor);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    if (focus) textarea.focus();
+  }
+
   async whenIdle(): Promise<void> {
     // `wasmSyncPromise` and `auditingIdlePromise` are growing promise chains (see `enqueueWasmSync`
     // and `scheduleAuditingUpdate`). While awaiting them, additional work can be appended

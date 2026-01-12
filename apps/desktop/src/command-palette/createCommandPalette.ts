@@ -11,6 +11,7 @@ import {
   type MatchRange,
   type PreparedCommandForFuzzy,
 } from "./fuzzy.js";
+import { searchFunctionResults, type CommandPaletteFunctionResult } from "./commandPaletteSearch.js";
 import { getRecentCommandIdsForDisplay, installCommandRecentsTracker, type StorageLike } from "./recents.js";
 import { searchShortcutCommands } from "./shortcutSearch.js";
 import { formatA1Range, parseGoTo, type GoToParseResult, type GoToWorkbookLookup } from "../../../../packages/search/index.js";
@@ -32,7 +33,7 @@ type GoToSuggestion = {
   parsed: GoToParseResult;
 };
 
-type RenderableItem = { kind: "command"; command: RenderableCommand } | GoToSuggestion;
+type RenderableItem = { kind: "command"; command: RenderableCommand } | GoToSuggestion | CommandPaletteFunctionResult;
 
 export type CreateCommandPaletteOptions = {
   commandRegistry: CommandRegistry;
@@ -73,6 +74,10 @@ export type CreateCommandPaletteOptions = {
    * Defaults to 70ms.
    */
   inputDebounceMs?: number;
+  /**
+   * Optional handler for selecting a spreadsheet function result from the palette.
+   */
+  onSelectFunction?: (name: string) => void;
 };
 
 export type CommandPaletteController = {
@@ -280,6 +285,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     maxResults = 100,
     maxResultsPerGroup = 20,
     inputDebounceMs = 70,
+    onSelectFunction,
   } = options;
 
   const overlay = document.createElement("div");
@@ -512,13 +518,48 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
           })()
         : null;
 
+    const functionResults: CommandPaletteFunctionResult[] =
+      onSelectFunction && !shortcutMode && trimmed !== ""
+        ? searchFunctionResults(trimmed, { limit: Math.min(limits.maxResults, limits.maxResultsPerGroup) })
+        : [];
+
+    const functionsToShow = functionResults.slice(
+      0,
+      Math.min(functionResults.length, limits.maxResultsPerGroup, limits.maxResults),
+    );
+    const commandSlots = Math.max(0, limits.maxResults - functionsToShow.length);
+
+    const limitedGroups = (() => {
+      if (commandSlots >= limits.maxResults) return groups;
+      const out: CommandGroup[] = [];
+      let remaining = commandSlots;
+      for (const group of groups) {
+        if (remaining <= 0) break;
+        const slice = group.commands.slice(0, remaining);
+        if (slice.length === 0) continue;
+        out.push({ label: group.label, commands: slice });
+        remaining -= slice.length;
+      }
+      return out;
+    })();
+
+    const commandCount = limitedGroups.reduce((sum, g) => sum + g.commands.length, 0);
+    const bestCommand = limitedGroups[0]?.commands[0]?.score ?? Number.NEGATIVE_INFINITY;
+    const bestFunction = functionsToShow[0]?.score ?? Number.NEGATIVE_INFINITY;
+    const functionsFirst = bestFunction > bestCommand;
+
     visibleItems = [];
     if (goToSuggestion) visibleItems.push(goToSuggestion);
-    for (const group of groups) {
+
+    if (functionsFirst) visibleItems.push(...functionsToShow);
+
+    for (const group of limitedGroups) {
       for (const cmd of group.commands) {
         visibleItems.push({ kind: "command", command: cmd });
       }
     }
+
+    if (!functionsFirst) visibleItems.push(...functionsToShow);
 
     if (selectedIndex >= visibleItems.length) selectedIndex = Math.max(0, visibleItems.length - 1);
 
@@ -571,89 +612,158 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
       visibleItemEls[0] = li;
     }
 
-    const commandIndexOffset = goToSuggestion ? 1 : 0;
-    let commandOffset = 0;
-    for (const group of groups) {
+    const baseOffset = goToSuggestion ? 1 : 0;
+
+    const renderFunctionRows = (startIndex: number): void => {
+      if (functionsToShow.length === 0) return;
+
       const header = document.createElement("li");
       header.className = "command-palette__group";
-      header.textContent = group.label;
+      header.textContent = "FUNCTIONS";
       header.setAttribute("role", "presentation");
       header.setAttribute("aria-hidden", "true");
       list.appendChild(header);
 
-      for (let i = 0; i < group.commands.length; i += 1) {
-        const cmd = group.commands[i]!;
-        const globalIndex = commandIndexOffset + commandOffset + i;
+      for (let i = 0; i < functionsToShow.length; i += 1) {
+        const fn = functionsToShow[i]!;
+        const globalIndex = startIndex + i;
 
-        let cached = commandRowCache.get(cmd.commandId);
-        if (!cached) {
-          const li = document.createElement("li");
-          li.className = "command-palette__item";
-          li.setAttribute("role", "option");
+        const li = document.createElement("li");
+        li.className = "command-palette__item";
+        li.id = `command-palette-option-${globalIndex}`;
+        li.setAttribute("role", "option");
+        li.setAttribute("aria-selected", globalIndex === selectedIndex ? "true" : "false");
 
-          const main = document.createElement("div");
-          main.className = "command-palette__item-main";
+        const main = document.createElement("div");
+        main.className = "command-palette__item-main";
 
-          const label = document.createElement("div");
-          label.className = "command-palette__item-label";
+        const label = document.createElement("div");
+        label.className = "command-palette__item-label";
+        label.appendChild(renderHighlightedText(fn.name, fn.matchRanges));
+        main.appendChild(label);
 
-          const description = document.createElement("div");
-          description.className = "command-palette__item-description";
-
-          main.appendChild(label);
-          main.appendChild(description);
-
-          const right = document.createElement("div");
-          right.className = "command-palette__item-right";
-
-          const shortcutPill = document.createElement("span");
-          shortcutPill.className = "command-palette__shortcut";
-          right.appendChild(shortcutPill);
-
-          li.appendChild(main);
-          li.appendChild(right);
-
-          li.addEventListener("mousedown", (e) => {
-            // Prevent focus leaving the input before we run the command.
-            e.preventDefault();
-          });
-          li.addEventListener("click", () => {
-            close();
-            executeCommand(cmd.commandId);
-          });
-
-          cached = { li, label, description, right, shortcutPill };
-          commandRowCache.set(cmd.commandId, cached);
-        } else {
-          // Mark as most-recently-used (Map iteration order is insertion order).
-          commandRowCache.delete(cmd.commandId);
-          commandRowCache.set(cmd.commandId, cached);
+        if (fn.signature) {
+          const signature = document.createElement("div");
+          signature.className = "command-palette__item-description";
+          signature.textContent = fn.signature;
+          main.appendChild(signature);
         }
 
-        cached.li.id = `command-palette-option-${globalIndex}`;
-        cached.li.setAttribute("aria-selected", globalIndex === selectedIndex ? "true" : "false");
-        cached.label.replaceChildren(renderHighlightedText(cmd.title, cmd.titleRanges));
-
-        const descriptionText = typeof cmd.description === "string" ? cmd.description.trim() : "";
-        cached.description.textContent = descriptionText;
-        cached.description.hidden = !descriptionText;
-
-        const kbValue = keybindingIndex.get(cmd.commandId);
-        const shortcut =
-          typeof kbValue === "string" ? kbValue : Array.isArray(kbValue) ? (kbValue[0] ?? null) : null;
-        if (shortcut) {
-          cached.shortcutPill.textContent = shortcut;
-          cached.right.hidden = false;
-        } else {
-          cached.shortcutPill.textContent = "";
-          cached.right.hidden = true;
+        if (fn.summary) {
+          const summary = document.createElement("div");
+          summary.className = "command-palette__item-description";
+          summary.textContent = fn.summary;
+          main.appendChild(summary);
         }
 
-        list.appendChild(cached.li);
-        visibleItemEls[globalIndex] = cached.li;
+        li.appendChild(main);
+
+        li.addEventListener("mousedown", (e) => {
+          // Prevent focus leaving the input before we run the command.
+          e.preventDefault();
+        });
+        li.addEventListener("click", () => {
+          close();
+          onSelectFunction?.(fn.name);
+        });
+
+        list.appendChild(li);
+        visibleItemEls[globalIndex] = li;
       }
+    };
 
-      commandOffset += group.commands.length;
+    const renderCommandRows = (startIndex: number): void => {
+      let commandOffset = 0;
+      for (const group of limitedGroups) {
+        const header = document.createElement("li");
+        header.className = "command-palette__group";
+        header.textContent = group.label;
+        header.setAttribute("role", "presentation");
+        header.setAttribute("aria-hidden", "true");
+        list.appendChild(header);
+
+        for (let i = 0; i < group.commands.length; i += 1) {
+          const cmd = group.commands[i]!;
+          const globalIndex = startIndex + commandOffset + i;
+
+          let cached = commandRowCache.get(cmd.commandId);
+          if (!cached) {
+            const li = document.createElement("li");
+            li.className = "command-palette__item";
+            li.setAttribute("role", "option");
+
+            const main = document.createElement("div");
+            main.className = "command-palette__item-main";
+
+            const label = document.createElement("div");
+            label.className = "command-palette__item-label";
+
+            const description = document.createElement("div");
+            description.className = "command-palette__item-description";
+
+            main.appendChild(label);
+            main.appendChild(description);
+
+            const right = document.createElement("div");
+            right.className = "command-palette__item-right";
+
+            const shortcutPill = document.createElement("span");
+            shortcutPill.className = "command-palette__shortcut";
+            right.appendChild(shortcutPill);
+
+            li.appendChild(main);
+            li.appendChild(right);
+
+            li.addEventListener("mousedown", (e) => {
+              // Prevent focus leaving the input before we run the command.
+              e.preventDefault();
+            });
+            li.addEventListener("click", () => {
+              close();
+              executeCommand(cmd.commandId);
+            });
+
+            cached = { li, label, description, right, shortcutPill };
+            commandRowCache.set(cmd.commandId, cached);
+          } else {
+            // Mark as most-recently-used (Map iteration order is insertion order).
+            commandRowCache.delete(cmd.commandId);
+            commandRowCache.set(cmd.commandId, cached);
+          }
+
+          cached.li.id = `command-palette-option-${globalIndex}`;
+          cached.li.setAttribute("aria-selected", globalIndex === selectedIndex ? "true" : "false");
+          cached.label.replaceChildren(renderHighlightedText(cmd.title, cmd.titleRanges));
+
+          const descriptionText = typeof cmd.description === "string" ? cmd.description.trim() : "";
+          cached.description.textContent = descriptionText;
+          cached.description.hidden = !descriptionText;
+
+          const kbValue = keybindingIndex.get(cmd.commandId);
+          const shortcut =
+            typeof kbValue === "string" ? kbValue : Array.isArray(kbValue) ? (kbValue[0] ?? null) : null;
+          if (shortcut) {
+            cached.shortcutPill.textContent = shortcut;
+            cached.right.hidden = false;
+          } else {
+            cached.shortcutPill.textContent = "";
+            cached.right.hidden = true;
+          }
+
+          list.appendChild(cached.li);
+          visibleItemEls[globalIndex] = cached.li;
+        }
+
+        commandOffset += group.commands.length;
+      }
+    };
+
+    if (functionsFirst) {
+      renderFunctionRows(baseOffset);
+      renderCommandRows(baseOffset + functionsToShow.length);
+    } else {
+      renderCommandRows(baseOffset);
+      renderFunctionRows(baseOffset + commandCount);
     }
 
     // Keep selection in view after re-render.
@@ -905,6 +1015,10 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     close();
     if (item.kind === "goTo") {
       goTo?.onGoTo(item.parsed);
+      return;
+    }
+    if (item.kind === "function") {
+      onSelectFunction?.(item.name);
       return;
     }
     executeCommand(item.command.commandId);

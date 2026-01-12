@@ -4811,6 +4811,10 @@ if (
     ensureExtensionsLoaded,
     onCloseFocus: () => app.focus(),
     placeholder: t("commandPalette.placeholder"),
+    onSelectFunction: (name) => {
+      const template = `=${name}()`;
+      app.insertIntoFormulaBar(template, { focus: true, cursorOffset: template.length - 1 });
+    },
     goTo: {
       workbook: app.getSearchWorkbook(),
       getCurrentSheetName: () => app.getCurrentSheetId(),
