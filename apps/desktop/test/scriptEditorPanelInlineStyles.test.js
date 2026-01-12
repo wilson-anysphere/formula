@@ -79,6 +79,9 @@ test("ScriptEditorPanel avoids static inline styles and uses token-based classes
 
   const cssPath = path.join(__dirname, "..", "src", "styles", "script-editor.css");
   const css = fs.readFileSync(cssPath, "utf8");
+  assert.match(css, /\.script-editor\s*\{/);
+  assert.match(css, /\.script-editor__toolbar\s*\{/);
+  assert.match(css, /\.script-editor__run-button\s*\{/);
   assert.match(css, /\.script-editor__editor-host\s*\{/);
   assert.match(css, /\.script-editor__editor-host\s*\{[^}]*\bflex:\s*1\b[^}]*\}/s);
   assert.match(css, /\.script-editor__editor-host\s*\{[^}]*\bmin-height:\s*0\b[^}]*\}/s);
@@ -87,4 +90,9 @@ test("ScriptEditorPanel avoids static inline styles and uses token-based classes
   assert.match(css, /\.script-editor__fallback-editor\s*\{/);
   assert.match(css, /\.script-editor__fallback-editor\s*\{[^}]*ui-monospace[^}]*\}/s);
   assert.match(css, /\.script-editor__fallback-editor\s*\{[^}]*\bresize:\s*none\b[^}]*\}/s);
+
+  // Preserve the console sizing/overflow behavior (important for output visibility).
+  assert.match(css, /\.script-editor__console\s*\{/);
+  assert.match(css, /\.script-editor__console\s*\{[^}]*\bheight:\s*140px\b[^}]*\}/s);
+  assert.match(css, /\.script-editor__console\s*\{[^}]*\boverflow:\s*auto\b[^}]*\}/s);
 });
