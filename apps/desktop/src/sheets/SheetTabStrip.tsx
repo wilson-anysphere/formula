@@ -332,6 +332,7 @@ function SheetTab(props: {
   onDropOnTab: (e: React.DragEvent<HTMLButtonElement>) => void;
 }) {
   const { sheet, active, editing, draftName, renameError } = props;
+  const cancelBlurCommitRef = useRef(false);
 
   return (
     <button
@@ -379,7 +380,13 @@ function SheetTab(props: {
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => props.onDraftNameChange(e.target.value)}
           onFocus={(e) => e.currentTarget.select()}
-          onBlur={() => props.onCommitRename()}
+          onBlur={() => {
+            if (cancelBlurCommitRef.current) {
+              cancelBlurCommitRef.current = false;
+              return;
+            }
+            props.onCommitRename();
+          }}
           onKeyDown={(e) => {
             e.stopPropagation();
             if (e.key === "Enter") {
@@ -388,6 +395,7 @@ function SheetTab(props: {
             }
             if (e.key === "Escape") {
               e.preventDefault();
+              cancelBlurCommitRef.current = true;
               props.onCancelRename();
             }
           }}

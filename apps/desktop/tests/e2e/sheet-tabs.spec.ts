@@ -75,6 +75,40 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("active-value")).toHaveText(`Hello from ${nextSheetId}`);
   });
 
+  test("double-click rename commits on Enter and updates the tab label", async ({ page }) => {
+    await gotoDesktop(page);
+
+    const tab = page.getByTestId("sheet-tab-Sheet1");
+    await expect(tab).toBeVisible();
+
+    await tab.dblclick();
+    const input = tab.locator("input.sheet-tab__input");
+    await expect(input).toBeVisible();
+
+    await input.fill("Renamed");
+    await input.press("Enter");
+
+    await expect(tab).toContainText("Renamed");
+  });
+
+  test("rename cancels on Escape (does not commit via blur)", async ({ page }) => {
+    await gotoDesktop(page);
+
+    const tab = page.getByTestId("sheet-tab-Sheet1");
+    await expect(tab).toBeVisible();
+
+    await tab.dblclick();
+    const input = tab.locator("input.sheet-tab__input");
+    await expect(input).toBeVisible();
+
+    await input.fill("ShouldNotCommit");
+    await input.press("Escape");
+
+    // Give the UI a moment to apply any accidental blur commit.
+    await expect(tab).toContainText("Sheet1");
+    await expect(tab).not.toContainText("ShouldNotCommit");
+  });
+
   test("drag reordering sheet tabs updates Ctrl+PgUp/PgDn navigation order", async ({ page }) => {
     await gotoDesktop(page);
 
