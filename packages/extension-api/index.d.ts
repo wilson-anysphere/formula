@@ -1,5 +1,17 @@
 export type CellValue = string | number | boolean | null;
 
+/**
+ * Menu location ids for `contributes.menus` and `formula.ui.registerContextMenu(...)`.
+ *
+ * Known/reserved locations are documented in `docs/10-extensibility.md`.
+ */
+export type MenuId =
+  | "cell/context"
+  | "row/context"
+  | "column/context"
+  | "corner/context"
+  | (string & {});
+
 export interface Disposable {
   dispose(): void;
 }
@@ -179,7 +191,7 @@ export namespace ui {
   function showMessage(message: string, type?: MessageType): Promise<void>;
   function showInputBox(options: InputBoxOptions): Promise<string | undefined>;
   function showQuickPick<T>(items: QuickPickItem<T>[], options?: QuickPickOptions): Promise<T | undefined>;
-  function registerContextMenu(menuId: string, items: MenuItem[]): Promise<Disposable>;
+  function registerContextMenu(menuId: MenuId, items: MenuItem[]): Promise<Disposable>;
   function createPanel(id: string, options: PanelOptions): Promise<Panel>;
 }
 

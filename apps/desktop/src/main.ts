@@ -87,6 +87,7 @@ import { DesktopExtensionHostManager } from "./extensions/extensionHostManager.j
 import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
 import { ContextKeyService } from "./extensions/contextKeys.js";
 import { resolveMenuItems } from "./extensions/contextMenus.js";
+import { CELL_CONTEXT_MENU_ID } from "./extensions/menuIds.js";
 import { buildContextMenuModel } from "./extensions/contextMenuModel.js";
 import {
   buildCommandKeybindingDisplayIndex,
@@ -3416,7 +3417,10 @@ if (
     // Ensure command labels are available.
     syncContributedCommands();
 
-    const contributed = resolveMenuItems(extensionHostManager.getContributedMenu("cell/context"), contextKeys.asLookup());
+    const contributed = resolveMenuItems(
+      extensionHostManager.getContributedMenu(CELL_CONTEXT_MENU_ID),
+      contextKeys.asLookup(),
+    );
     if (contributed.length > 0) {
       menuItems.push({ type: "separator" });
       const model = buildContextMenuModel(contributed, commandRegistry);
