@@ -1,22 +1,33 @@
-/**
- * Clipboard content returned by the platform provider.
- *
- * Prefer `imagePng` (raw bytes). `pngBase64` is a legacy/internal field kept only for
- * backwards compatibility and is used as a wire format for Tauri IPC.
- */
-export type ClipboardContent = { text?: string; html?: string; rtf?: string; imagePng?: Uint8Array; pngBase64?: string };
+export type ClipboardContent = {
+  text?: string;
+  html?: string;
+  rtf?: string;
+  /**
+   * Raw PNG bytes (JS-facing API).
+   */
+  imagePng?: Uint8Array;
+  /**
+   * @deprecated Legacy/internal field. Prefer `imagePng`.
+   * Base64 is only used as a wire format for Tauri IPC.
+   */
+  pngBase64?: string;
+};
 
-/**
- * Payload written by the platform provider.
- *
- * Prefer `imagePng` (raw bytes). `pngBase64` is a legacy/internal field kept only for
- * backwards compatibility and is used as a wire format for Tauri IPC.
- */
 export type ClipboardWritePayload = {
   text: string;
   html?: string;
   rtf?: string;
-  imagePng?: Uint8Array | Blob;
+  /**
+   * Preferred API for images: raw PNG bytes (JS-facing).
+   *
+   * Accepts common byte containers for convenience; callers should provide a
+   * `Uint8Array` when possible.
+   */
+  imagePng?: Uint8Array | ArrayBuffer | ArrayBufferView | Blob;
+  /**
+   * @deprecated Legacy/internal field. Prefer `imagePng`.
+   * Base64 is only used as a wire format for Tauri IPC.
+   */
   pngBase64?: string;
 };
 export type PasteSpecialMode = "all" | "values" | "formulas" | "formats";
