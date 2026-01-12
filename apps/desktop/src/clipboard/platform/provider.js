@@ -298,6 +298,21 @@ function createTauriClipboardProvider() {
         }
       }
 
+      // 1b) Older desktop builds used a `write_clipboard` command for rich formats.
+      if (!wrote && typeof tauriInvoke === "function") {
+        try {
+          await tauriInvoke("write_clipboard", {
+            text: payload.text,
+            html: payload.html,
+            rtf: payload.rtf,
+            image_png_base64: payload.pngBase64,
+          });
+          wrote = true;
+        } catch {
+          wrote = false;
+        }
+      }
+
       if (!wrote) {
         if (tauriClipboard?.writeText) {
           try {

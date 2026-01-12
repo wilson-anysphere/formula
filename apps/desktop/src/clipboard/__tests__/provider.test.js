@@ -395,8 +395,10 @@ test("clipboard provider", async (t) => {
         __TAURI__: {
           core: {
             async invoke(cmd) {
-              assert.equal(cmd, "clipboard_read");
-              throw new Error("command not found");
+              if (cmd === "clipboard_read" || cmd === "read_clipboard") {
+                throw new Error("command not found");
+              }
+              throw new Error(`Unexpected command: ${cmd}`);
             },
           },
           clipboard: {
@@ -420,6 +422,51 @@ test("clipboard provider", async (t) => {
         const provider = await createClipboardProvider();
         const content = await provider.read();
         assert.deepEqual(content, { text: "tauri text" });
+      }
+    );
+  });
+
+  await t.test("tauri: read falls back to core.invoke('read_clipboard') when clipboard_read is unavailable", async () => {
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd) {
+              if (cmd === "clipboard_read") {
+                throw new Error("command not found");
+              }
+              if (cmd === "read_clipboard") {
+                return { text: "legacy text", html: "legacy html", rtf: "legacy rtf", image_png_base64: "CQgH" };
+              }
+              throw new Error(`Unexpected command: ${cmd}`);
+            },
+          },
+          clipboard: {
+            async readText() {
+              throw new Error("should not call readText when read_clipboard succeeds");
+            },
+          },
+        },
+        navigator: {
+          clipboard: {
+            async read() {
+              throw new Error("permission denied");
+            },
+            async readText() {
+              throw new Error("permission denied");
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, {
+          text: "legacy text",
+          html: "legacy html",
+          rtf: "legacy rtf",
+          pngBase64: "CQgH",
+        });
       }
     );
   });
@@ -499,7 +546,7 @@ test("clipboard provider", async (t) => {
         assert.ok(item instanceof MockClipboardItem);
 
         const keys = Object.keys(item.data).sort();
-        assert.deepEqual(keys, ["text/html", "text/plain", "text/rtf"].sort());
+        assert.deepEqual(keys, ["text/html", "text/plain"].sort());
       }
     );
   });
@@ -513,8 +560,10 @@ test("clipboard provider", async (t) => {
         __TAURI__: {
           core: {
             async invoke(cmd) {
-              assert.equal(cmd, "clipboard_write");
-              throw new Error("command not found");
+              if (cmd === "clipboard_write" || cmd === "write_clipboard") {
+                throw new Error("command not found");
+              }
+              throw new Error(`Unexpected command: ${cmd}`);
             },
           },
           clipboard: {
@@ -529,6 +578,50 @@ test("clipboard provider", async (t) => {
         const provider = await createClipboardProvider();
         await provider.write({ text: "hello", html: "<p>x</p>" });
         assert.deepEqual(writeTextCalls, ["hello"]);
+      }
+    );
+  });
+
+  await t.test("tauri: write falls back to core.invoke('write_clipboard') when clipboard_write is unavailable", async () => {
+    /** @type {any[]} */
+    const invokeCalls = [];
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd, args) {
+              invokeCalls.push([cmd, args]);
+              if (cmd === "clipboard_write") {
+                throw new Error("command not found");
+              }
+              if (cmd === "write_clipboard") {
+                return;
+              }
+              throw new Error(`Unexpected command: ${cmd}`);
+            },
+          },
+          clipboard: {
+            async writeText() {
+              throw new Error("should not call legacy writeText when write_clipboard succeeds");
+            },
+          },
+        },
+        navigator: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: "hello", html: "<p>x</p>", pngBase64: "CQgH" });
+
+        assert.equal(invokeCalls.length, 2);
+        assert.equal(invokeCalls[0][0], "clipboard_write");
+        assert.equal(invokeCalls[1][0], "write_clipboard");
+        assert.deepEqual(invokeCalls[1][1], {
+          text: "hello",
+          html: "<p>x</p>",
+          rtf: undefined,
+          image_png_base64: "CQgH",
+        });
       }
     );
   });
