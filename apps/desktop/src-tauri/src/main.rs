@@ -5,6 +5,7 @@
 
 mod shortcuts;
 mod asset_protocol;
+mod menu;
 mod tray;
 mod updater;
 
@@ -490,6 +491,9 @@ fn main() {
             report_startup_webview_loaded,
             report_startup_tti,
         ])
+        .on_menu_event(|app, event| {
+            menu::on_menu_event(app, event);
+        })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::Resized(_)
             | tauri::WindowEvent::Moved(_)
@@ -715,6 +719,7 @@ fn main() {
             }
 
             tray::init(app)?;
+            menu::init(app)?;
 
             // Register global shortcuts (handled by the frontend via the Tauri plugin).
             shortcuts::register(app.handle())?;

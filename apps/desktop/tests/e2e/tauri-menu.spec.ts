@@ -1,0 +1,122 @@
+import { expect, test } from "@playwright/test";
+
+import { gotoDesktop } from "./helpers";
+
+test.describe("tauri native menu integration", () => {
+  test("menu-open opens a workbook; menu-quit triggers the close flow", async ({ page }) => {
+    await page.addInitScript(() => {
+      const listeners: Record<string, any> = {};
+      (window as any).__tauriListeners = listeners;
+      (window as any).__tauriDialogOpenCalls = 0;
+
+      // Avoid accidental modal prompts blocking the test.
+      window.confirm = () => true;
+
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async (cmd: string, args: any) => {
+            switch (cmd) {
+              case "open_workbook":
+                return {
+                  path: args?.path ?? null,
+                  origin_path: args?.path ?? null,
+                  sheets: [{ id: "Sheet1", name: "Sheet1" }],
+                };
+
+              case "get_sheet_used_range":
+                return { start_row: 0, end_row: 0, start_col: 0, end_col: 0 };
+
+              case "get_range": {
+                const startRow = Number(args?.start_row ?? 0);
+                const endRow = Number(args?.end_row ?? startRow);
+                const startCol = Number(args?.start_col ?? 0);
+                const endCol = Number(args?.end_col ?? startCol);
+                const rows = Math.max(0, endRow - startRow + 1);
+                const cols = Math.max(0, endCol - startCol + 1);
+
+                const values = Array.from({ length: rows }, (_v, r) =>
+                  Array.from({ length: cols }, (_w, c) => {
+                    const row = startRow + r;
+                    const col = startCol + c;
+                    if (row === 0 && col === 0) {
+                      return { value: "Hello", formula: null, display_value: "Hello" };
+                    }
+                    return { value: null, formula: null, display_value: "" };
+                  }),
+                );
+
+                return { values, start_row: startRow, start_col: startCol };
+              }
+
+              case "set_macro_ui_context":
+                return null;
+
+              case "fire_workbook_open":
+                return { ok: true, output: [], updates: [] };
+
+              case "get_macro_security_status":
+                return { has_macros: true, trust: "blocked" };
+
+              case "set_cell":
+              case "set_range":
+              case "save_workbook":
+                return null;
+
+              case "quit_app":
+                (window as any).__tauriClosed = true;
+                return null;
+
+              default:
+                throw new Error(`Unexpected invoke: ${cmd} ${JSON.stringify(args)}`);
+            }
+          },
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            listeners[name] = handler;
+            return () => {
+              delete listeners[name];
+            };
+          },
+          emit: async () => {},
+        },
+        dialog: {
+          open: async () => {
+            (window as any).__tauriDialogOpenCalls += 1;
+            return "/tmp/fake.xlsx";
+          },
+          save: async () => null,
+        },
+        window: {
+          getCurrentWebviewWindow: () => ({
+            hide: async () => {
+              (window as any).__tauriHidden = true;
+            },
+            close: async () => {
+              (window as any).__tauriClosed = true;
+            },
+          }),
+        },
+      };
+    });
+
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["menu-open"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["menu-open"]({ payload: null });
+    });
+
+    await page.waitForFunction(() => (window as any).__tauriDialogOpenCalls === 1);
+    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+    await expect(page.getByTestId("active-value")).toHaveText("Hello");
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["menu-quit"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["menu-quit"]({ payload: null });
+    });
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriClosed));
+  });
+});
+

@@ -4052,6 +4052,111 @@ try {
     });
   });
 
+  // Native menu bar integration (desktop shell emits `menu-*` events).
+  void listen("menu-open", () => {
+    void promptOpenWorkbook().catch((err) => {
+      console.error("Failed to open workbook:", err);
+      window.alert(`Failed to open workbook: ${String(err)}`);
+    });
+  });
+
+  void listen("menu-new", () => {
+    void handleNewWorkbook().catch((err) => {
+      console.error("Failed to create workbook:", err);
+      window.alert(`Failed to create workbook: ${String(err)}`);
+    });
+  });
+
+  void listen("menu-save", () => {
+    void handleSave().catch((err) => {
+      console.error("Failed to save workbook:", err);
+      window.alert(`Failed to save workbook: ${String(err)}`);
+    });
+  });
+
+  void listen("menu-save-as", () => {
+    void handleSaveAs().catch((err) => {
+      console.error("Failed to save workbook:", err);
+      window.alert(`Failed to save workbook: ${String(err)}`);
+    });
+  });
+
+  void listen("menu-close-window", () => {
+    void handleCloseRequest({ quit: false }).catch((err) => {
+      console.error("Failed to close window:", err);
+    });
+  });
+
+  void listen("menu-quit", () => {
+    void handleCloseRequest({ quit: true }).catch((err) => {
+      console.error("Failed to quit app:", err);
+    });
+  });
+
+  const isMac = /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
+  const primaryModifiers = () => ({ ctrlKey: !isMac, metaKey: isMac });
+  const dispatchSpreadsheetShortcut = (key: string, opts: { shift?: boolean; alt?: boolean } = {}) => {
+    const { ctrlKey, metaKey } = primaryModifiers();
+    const e = new KeyboardEvent("keydown", {
+      key,
+      ctrlKey,
+      metaKey,
+      shiftKey: Boolean(opts.shift),
+      altKey: Boolean(opts.alt),
+      bubbles: true,
+      cancelable: true,
+    });
+    gridRootEl.dispatchEvent(e);
+    app.focus();
+  };
+
+  void listen("menu-undo", () => dispatchSpreadsheetShortcut("z"));
+  void listen("menu-redo", () => dispatchSpreadsheetShortcut("z", { shift: true }));
+  void listen("menu-cut", () => dispatchSpreadsheetShortcut("x"));
+  void listen("menu-copy", () => dispatchSpreadsheetShortcut("c"));
+  void listen("menu-paste", () => dispatchSpreadsheetShortcut("v"));
+  void listen("menu-select-all", () => dispatchSpreadsheetShortcut("a"));
+
+  void listen("menu-about", () => {
+    showToast("Formula Desktop", "info");
+  });
+
+  void listen("menu-check-updates", () => {
+    // Keep a stable menu event id; the actual update UX is driven by the
+    // `update-check-*` events emitted by the Rust updater wrapper.
+  });
+
+  void listen("update-check-started", (event) => {
+    const payload = (event as any)?.payload;
+    if (payload?.source !== "manual") return;
+    showToast("Checking for updates…", "info");
+  });
+
+  void listen("update-check-already-running", (event) => {
+    const payload = (event as any)?.payload;
+    if (payload?.source !== "manual") return;
+    showToast("Already checking for updates…", "info");
+  });
+
+  void listen("update-not-available", (event) => {
+    const payload = (event as any)?.payload;
+    if (payload?.source !== "manual") return;
+    showToast("No updates available", "info");
+  });
+
+  void listen("update-check-error", (event) => {
+    const payload = (event as any)?.payload;
+    if (payload?.source !== "manual") return;
+    const msg = typeof payload?.message === "string" ? payload.message : "Unknown error";
+    showToast(`Update check failed: ${msg}`, "error", { timeoutMs: 10_000 });
+  });
+
+  void listen("update-available", (event) => {
+    const payload = (event as any)?.payload;
+    const version = typeof payload?.version === "string" ? payload.version : null;
+    showToast(version ? `Update available: ${version}` : "Update available", "info", { timeoutMs: 10_000 });
+  });
+
   void listen("shortcut-quick-open", () => {
     void promptOpenWorkbook().catch((err) => {
       console.error("Failed to open workbook:", err);
@@ -4162,10 +4267,13 @@ try {
     if (closeInFlight) return;
     closeInFlight = true;
     try {
-      if (quit && queuedInvoke) {
+      // The Rust host runs `Workbook_BeforeClose` when the user clicks the native window close
+      // button (and then emits `close-requested` with any macro-driven updates). Other close
+      // entry points (tray/menu) are handled entirely in the frontend.
+      const shouldRunBeforeCloseMacro = Boolean(queuedInvoke) && (quit || (!quit && !closeToken));
+      if (shouldRunBeforeCloseMacro && queuedInvoke) {
         try {
-          // Best-effort Workbook_BeforeClose when quitting via the tray menu. (Window close
-          // requests fire this event from the Rust host already.)
+          // Best-effort Workbook_BeforeClose for tray/menu close flows (no prompt).
           await fireWorkbookBeforeCloseBestEffort({ app, workbookId, invoke: queuedInvoke, drainBackendSync });
         } catch (err) {
           console.warn("Workbook_BeforeClose event macro failed:", err);
