@@ -379,7 +379,7 @@ fn parse_txo_text_biff5(
     let fragments: Vec<&[u8]> = record.fragments().collect();
     let continues = fragments.get(1..).unwrap_or_default();
     if continues.is_empty() {
-        match parse_txo_cch_text(first, 0) {
+        match parse_txo_cch_text_biff5(first, 0) {
             Some(0) => {}
             Some(cch_text) => {
                 push_warning(
@@ -746,6 +746,13 @@ fn parse_txo_cch_text(header: &[u8], max_chars: usize) -> Option<usize> {
 
     // Last resort: decode as much as we can from the available continuation bytes.
     Some(max_chars)
+}
+
+fn parse_txo_cch_text_biff5(header: &[u8], max_chars: usize) -> Option<usize> {
+    // BIFF5 uses the same TXO `cchText` field conceptually, but the CONTINUE payload is typically
+    // raw 8-bit text bytes (no per-fragment option flags). We can reuse the BIFF8 heuristic logic
+    // as long as `max_chars` is computed as a simple byte count.
+    parse_txo_cch_text(header, max_chars)
 }
 
 fn estimate_max_chars_with_byte_limit(continues: &[&[u8]], byte_limit: usize) -> usize {
