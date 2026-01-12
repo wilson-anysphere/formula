@@ -234,7 +234,7 @@ The AI sidebar is a unified panel - no mode tabs. Just type what you want:
 
 - **⌘K** - Inline edit (from anywhere)
 - **Tab** - Accept AI suggestion (in formula bar)
-- **⌘I** (macOS) / **Ctrl+Shift+A** (Windows/Linux) - Toggle AI sidebar
+- **⇧⌘A** (macOS) / **Ctrl+Shift+A** (Windows/Linux) - Toggle AI sidebar
 - **Agent view** - Separate full-height view for autonomous tasks
 
 ## Keyboard Shortcuts
@@ -260,7 +260,7 @@ The AI sidebar is a unified panel - no mode tabs. Just type what you want:
 | Shortcut | Action |
 |----------|--------|
 | ⌘K | Open AI inline edit |
-| ⌘I (macOS) / Ctrl+Shift+A (Windows/Linux) | Toggle AI sidebar |
+| ⇧⌘A (macOS) / Ctrl+Shift+A (Windows/Linux) | Toggle AI sidebar |
 | Tab | Accept AI suggestion |
 
 ## Mockup Files
