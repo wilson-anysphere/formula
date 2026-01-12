@@ -57,6 +57,7 @@ export function getMarketplaceBaseUrl(options?: {
       return undefined;
     }
   })();
+
   const localValue = tryReadLocalStorage(storage);
   if (localValue) return localValue;
 

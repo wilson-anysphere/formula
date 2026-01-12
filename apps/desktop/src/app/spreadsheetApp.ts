@@ -45,6 +45,7 @@ import {
   engineHydrateFromDocument,
   type EngineClient
 } from "@formula/engine";
+import type { UndoService } from "@formula/collab-undo";
 import { drawCommentIndicator } from "../comments/CommentIndicator";
 import { evaluateFormula, type SpreadsheetValue } from "../spreadsheet/evaluateFormula";
 import { AiCellFunctionEngine } from "../spreadsheet/AiCellFunctionEngine.js";
@@ -382,6 +383,14 @@ export class SpreadsheetApp {
     (changes) => this.applyComputedChanges(changes)
   );
   private readonly document = new DocumentController({ engine: this.engine });
+  /**
+   * In collaborative mode, keyboard undo/redo must use Yjs UndoManager semantics
+   * (see `@formula/collab-undo`) so we never overwrite newer remote edits.
+   *
+   * This service is expected to be created by the CollabSession↔DocumentController
+   * binder integration layer and injected into the app when collaboration is active.
+   */
+  private collabUndoService: UndoService | null = null;
   private readonly searchWorkbook: DocumentWorkbookAdapter;
   private readonly aiCellFunctions: AiCellFunctionEngine;
   private limits: GridLimits;
@@ -1654,12 +1663,33 @@ export class SpreadsheetApp {
 
   getUndoRedoState(): UndoRedoState {
     const editing = this.isEditing();
+    if (this.collabUndoService) {
+      return {
+        canUndo: !editing && this.collabUndoService.canUndo(),
+        canRedo: !editing && this.collabUndoService.canRedo(),
+        // Collab undo/redo is managed by Yjs; DocumentController history labels are not
+        // meaningful in this mode.
+        undoLabel: null,
+        redoLabel: null,
+      };
+    }
     return {
       canUndo: !editing && Boolean(this.document.canUndo),
       canRedo: !editing && Boolean(this.document.canRedo),
       undoLabel: (this.document.undoLabel as string | null) ?? null,
       redoLabel: (this.document.redoLabel as string | null) ?? null,
     };
+  }
+
+  /**
+   * Collaboration integration hook.
+   *
+   * When a CollabSession is bound to this app's DocumentController, the integration
+   * layer should set a collab undo service so keyboard shortcuts use Yjs UndoManager
+   * semantics (local-only undo that never overwrites remote edits).
+   */
+  setCollabUndoService(undoService: UndoService | null): void {
+    this.collabUndoService = undoService;
   }
 
   getSearchWorkbook(): DocumentWorkbookAdapter {
@@ -4279,7 +4309,22 @@ export class SpreadsheetApp {
   }
 
   private applyUndoRedo(kind: "undo" | "redo"): boolean {
-    const did = kind === "undo" ? this.document.undo() : this.document.redo();
+    let did = false;
+    if (this.collabUndoService) {
+      if (kind === "undo") {
+        if (this.collabUndoService.canUndo()) {
+          this.collabUndoService.undo();
+          did = true;
+        }
+      } else {
+        if (this.collabUndoService.canRedo()) {
+          this.collabUndoService.redo();
+          did = true;
+        }
+      }
+    } else {
+      did = kind === "undo" ? this.document.undo() : this.document.redo();
+    }
     if (!did) return false;
 
     this.syncEngineNow();

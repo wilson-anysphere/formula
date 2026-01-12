@@ -62,6 +62,9 @@ importers:
       '@formula/collab-session':
         specifier: workspace:*
         version: link:../../packages/collab/session
+      '@formula/collab-undo':
+        specifier: workspace:*
+        version: link:../../packages/collab/undo
       '@formula/collab-versioning':
         specifier: workspace:*
         version: link:../../packages/collab/versioning
