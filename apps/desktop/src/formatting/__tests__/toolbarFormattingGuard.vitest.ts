@@ -34,7 +34,7 @@ describe("toolbar formatting safety cap", () => {
     expect(toast?.textContent).toMatch(/Selection too large to apply formatting/i);
   });
 
-  it("still applies formatting for enormous rectangular selections (range-run fast path)", () => {
+  it("refuses to apply formatting for enormous rectangular selections", () => {
     const doc = new DocumentController();
     const spy = vi.spyOn(doc, "setRangeFormat");
 
@@ -43,15 +43,16 @@ describe("toolbar formatting safety cap", () => {
     const elapsed = performance.now() - start;
 
     expect(elapsed).toBeLessThan(250);
-    // Large rectangles use a compressed range-run formatting representation and should
-    // be allowed (the safety cap is for per-cell enumeration across many small ranges).
-    expect(applied).toBe(true);
-    expect(spy).toHaveBeenCalled();
-    expect(document.querySelector('[data-testid="toast"]')).toBeNull();
+    expect(applied).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
 
-    // Spot-check that the fill is visible via the effective style accessor (range-run layer).
+    const toast = document.querySelector('[data-testid="toast"]') as HTMLElement | null;
+    expect(toast).not.toBeNull();
+    expect(toast?.dataset.type).toBe("warning");
+    expect(toast?.textContent).toMatch(/Selection too large to apply formatting/i);
+
     const style = doc.getCellFormat("Sheet1", { row: 0, col: 0 }) as any;
-    expect(style?.fill?.fgColor).toBe("#FFFF0000");
+    expect(style?.fill?.fgColor).not.toBe("#FFFF0000");
   });
 
   it("refuses to apply formatting to extremely large full-row selections (row band cap)", () => {
