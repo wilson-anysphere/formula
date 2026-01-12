@@ -31,11 +31,12 @@ Workbooks using images-in-cells are expected to include some/all of the followin
 xl/
 ├── cellimages.xml
 ├── cellimages1.xml (optional; Excel appears to use `cellimages.xml` today, but allow suffixes)
-├── _rels/
-│   └── cellimages.xml.rels
 ├── media/
 │   └── image*.{png,jpg,gif,...}
 ├── metadata.xml
+├── _rels/
+│   ├── cellimages.xml.rels
+│   └── metadata.xml.rels (commonly present when `metadata.xml` references `xl/richData/*`)
 └── richData/
     ├── richValue.xml
     ├── richValueRel.xml
@@ -53,6 +54,8 @@ Notes:
   explicitly implement rich-value editing.
 - `xl/metadata.xml` and the per-cell `c/@vm` + `c/@cm` attributes connect worksheet cells to the rich
   value system.
+- When present, `xl/_rels/metadata.xml.rels` typically connects `xl/metadata.xml` → `xl/richData/*` parts.
+  Formula should preserve these relationships byte-for-byte for safe round-trips.
 
 See also: [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) for a deeper (still
 best-effort) description of the `richValue*` part set and how `richValueRel.xml` is used to resolve
@@ -200,6 +203,17 @@ in a `cellImage` container element:
       </xdr:blipFill>
     </xdr:pic>
   </etc:cellImage>
+</etc:cellImages>
+```
+
+Some producers emit a more lightweight schema where the relationship ID is stored directly on a
+`<cellImage>` element (rather than within a DrawingML `<pic>` subtree). Formula’s `cell_images` parser
+has explicit support for `r:id` on `<cellImage>`:
+
+```xml
+<etc:cellImages xmlns:etc="http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages"
+                xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <etc:cellImage r:id="rId1"/>
 </etc:cellImages>
 ```
 
