@@ -463,6 +463,39 @@ mod tests {
     }
 
     #[test]
+    fn codepage_defaults_to_1252_when_missing() {
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        assert_eq!(parse_biff_codepage(&stream), 1252);
+    }
+
+    #[test]
+    fn codepage_scan_stops_at_next_bof() {
+        // CODEPAGE after the next BOF should be ignored.
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_CODEPAGE, &1251u16.to_le_bytes()),
+        ]
+        .concat();
+        assert_eq!(parse_biff_codepage(&stream), 1252);
+    }
+
+    #[test]
+    fn codepage_uses_first_record() {
+        let stream = [
+            record(RECORD_CODEPAGE, &1251u16.to_le_bytes()),
+            record(RECORD_CODEPAGE, &1252u16.to_le_bytes()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+        assert_eq!(parse_biff_codepage(&stream), 1251);
+    }
+
+    #[test]
     fn boundsheet_scan_stops_at_next_bof_without_eof() {
         // CODEPAGE=1251 (Windows Cyrillic).
         let r_codepage = record(RECORD_CODEPAGE, &1251u16.to_le_bytes());
