@@ -117,7 +117,7 @@ Supported menu locations (desktop UI):
   - Opened via right-click, or keyboard open (Shift+F10 / Menu key).
   - Excel-like behavior: right-clicking a cell outside the current selection moves the active cell/selection to the
     clicked cell before evaluating `when` clauses (so keys like `activeCellA1`/`cellHasValue` reflect the clicked cell).
-  - Extension-contributed items are appended after the built-in clipboard/edit items, separated by a divider.
+  - Extension-contributed items are appended after the built-in menu items, separated by a divider.
   - Extensions are lazy-loaded for performance; the first time you open the context menu, it may populate extension
     items asynchronously and update in-place once loading completes.
   - While the menu is open, the desktop re-evaluates `when` clauses as context keys change (e.g. selection changes),
