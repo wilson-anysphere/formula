@@ -1102,10 +1102,13 @@ export class CanvasGridRenderer {
     this.assertRowIndex(row);
     if (Math.abs(height - this.scroll.rows.defaultSize) < 1e-6) {
       this.rowHeightOverridesBase.delete(row);
+      // Keep runtime axis overrides consistent with the persisted base map; otherwise tiny
+      // floating-point differences can leave a "default-sized" override installed.
+      this.scroll.rows.deleteSize(row);
     } else {
       this.rowHeightOverridesBase.set(row, height / this.zoom);
+      this.scroll.rows.setSize(row, height);
     }
-    this.scroll.rows.setSize(row, height);
     this.onAxisSizeChanged();
   }
 
@@ -1113,10 +1116,13 @@ export class CanvasGridRenderer {
     this.assertColIndex(col);
     if (Math.abs(width - this.scroll.cols.defaultSize) < 1e-6) {
       this.colWidthOverridesBase.delete(col);
+      // Keep runtime axis overrides consistent with the persisted base map; otherwise tiny
+      // floating-point differences can leave a "default-sized" override installed.
+      this.scroll.cols.deleteSize(col);
     } else {
       this.colWidthOverridesBase.set(col, width / this.zoom);
+      this.scroll.cols.setSize(col, width);
     }
-    this.scroll.cols.setSize(col, width);
     this.onAxisSizeChanged();
   }
 
