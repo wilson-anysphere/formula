@@ -4,8 +4,9 @@ use std::io::{Cursor, Write};
 
 use formula_vba::{
     compress_container, compute_vba_project_digest_v3, verify_vba_digital_signature,
-    verify_vba_digital_signature_bound, verify_vba_signature_binding_with_stream_path, DigestAlg,
-    VbaProjectBindingVerification, VbaSignatureBinding, VbaSignatureVerification,
+    verify_vba_digital_signature_bound, verify_vba_project_signature_binding,
+    verify_vba_signature_binding_with_stream_path, DigestAlg, VbaProjectBindingVerification,
+    VbaSignatureBinding, VbaSignatureVerification,
 };
 
 mod signature_test_utils;
@@ -16,7 +17,10 @@ fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
     out.extend_from_slice(data);
 }
 
-fn build_minimal_vba_project_bin_v3(signature_blob: Option<&[u8]>) -> Vec<u8> {
+fn build_minimal_vba_project_bin_v3(
+    signature_blob: Option<&[u8]>,
+    designer_payload: &[u8],
+) -> Vec<u8> {
     let module_source = b"Sub Hello()\r\nEnd Sub\r\n";
     let module_container = compress_container(module_source);
     let userform_source = b"Sub FormHello()\r\nEnd Sub\r\n";
@@ -89,7 +93,8 @@ fn build_minimal_vba_project_bin_v3(signature_blob: Option<&[u8]>) -> Vec<u8> {
         let mut s = ole
             .create_stream("UserForm1/Payload")
             .expect("designer stream");
-        s.write_all(b"ABC").expect("write designer payload");
+        s.write_all(designer_payload)
+            .expect("write designer payload");
     }
 
     if let Some(sig) = signature_blob {
@@ -99,6 +104,19 @@ fn build_minimal_vba_project_bin_v3(signature_blob: Option<&[u8]>) -> Vec<u8> {
         s.write_all(sig).expect("write signature");
     }
 
+    ole.into_inner().into_inner()
+}
+
+fn build_signature_part_ole(signature_stream_payload: &[u8]) -> Vec<u8> {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut s = ole
+            .create_stream("\u{0005}DigitalSignatureExt")
+            .expect("signature stream");
+        s.write_all(signature_stream_payload)
+            .expect("write signature");
+    }
     ole.into_inner().into_inner()
 }
 
@@ -162,7 +180,7 @@ fn build_spc_indirect_data_content_sha256(project_digest: &[u8]) -> Vec<u8> {
 
 #[test]
 fn digital_signature_ext_uses_v3_project_digest_for_binding() {
-    let unsigned = build_minimal_vba_project_bin_v3(None);
+    let unsigned = build_minimal_vba_project_bin_v3(None, b"ABC");
     let digest = compute_vba_project_digest_v3(&unsigned, DigestAlg::Sha256).expect("digest v3");
     assert_eq!(digest.len(), 32, "SHA-256 digest must be 32 bytes");
 
@@ -171,7 +189,7 @@ fn digital_signature_ext_uses_v3_project_digest_for_binding() {
     let mut signature_stream = signed_content.clone();
     signature_stream.extend_from_slice(&pkcs7);
 
-    let signed = build_minimal_vba_project_bin_v3(Some(&signature_stream));
+    let signed = build_minimal_vba_project_bin_v3(Some(&signature_stream), b"ABC");
     let sig = verify_vba_digital_signature(&signed)
         .expect("signature verification should succeed")
         .expect("signature should be present");
@@ -206,4 +224,50 @@ fn digital_signature_ext_uses_v3_project_digest_for_binding() {
         bound.binding,
         VbaProjectBindingVerification::BoundVerified(_)
     ));
+}
+
+#[test]
+fn verify_vba_project_signature_binding_supports_v3_signature_part() {
+    let project_ole = build_minimal_vba_project_bin_v3(None, b"ABC");
+    let digest = compute_vba_project_digest_v3(&project_ole, DigestAlg::Sha256).expect("digest v3");
+
+    let signed_content = build_spc_indirect_data_content_sha256(&digest);
+    let pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&signed_content);
+    let mut signature_stream_payload = signed_content.clone();
+    signature_stream_payload.extend_from_slice(&pkcs7);
+
+    let signature_part = build_signature_part_ole(&signature_stream_payload);
+
+    let binding =
+        verify_vba_project_signature_binding(&project_ole, &signature_part).expect("binding");
+    match binding {
+        VbaProjectBindingVerification::BoundVerified(debug) => {
+            assert_eq!(
+                debug.hash_algorithm_oid.as_deref(),
+                Some("2.16.840.1.101.3.4.2.1")
+            );
+            assert_eq!(debug.hash_algorithm_name.as_deref(), Some("SHA-256"));
+            assert_eq!(debug.signed_digest.as_deref(), Some(digest.as_slice()));
+            assert_eq!(debug.computed_digest.as_deref(), Some(digest.as_slice()));
+        }
+        other => panic!("expected BoundVerified, got {other:?}"),
+    }
+
+    // Tamper with the project bytes (designer payload) and ensure binding mismatch is detected.
+    let tampered_project = build_minimal_vba_project_bin_v3(None, b"ABD");
+    let tampered_digest =
+        compute_vba_project_digest_v3(&tampered_project, DigestAlg::Sha256).expect("digest v3");
+
+    let binding2 =
+        verify_vba_project_signature_binding(&tampered_project, &signature_part).expect("binding");
+    match binding2 {
+        VbaProjectBindingVerification::BoundMismatch(debug) => {
+            assert_eq!(debug.signed_digest.as_deref(), Some(digest.as_slice()));
+            assert_eq!(
+                debug.computed_digest.as_deref(),
+                Some(tampered_digest.as_slice())
+            );
+        }
+        other => panic!("expected BoundMismatch, got {other:?}"),
+    }
 }
