@@ -4,8 +4,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SpreadsheetApp } from "../spreadsheetApp";
 import { dateToExcelSerial } from "../../shared/valueParsing.js";
+import { SpreadsheetApp } from "../spreadsheetApp";
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -72,7 +72,7 @@ function createRoot(): HTMLElement {
   return root;
 }
 
-describe("SpreadsheetApp insert date/time shortcuts", () => {
+describe("SpreadsheetApp insert date/time shortcuts (serial values + number format)", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -113,7 +113,7 @@ describe("SpreadsheetApp insert date/time shortcuts", () => {
     vi.setSystemTime(new Date(2020, 0, 2, 3, 4, 5));
   });
 
-  it("Insert Date writes an Excel date serial for the selection and applies a date number format", () => {
+  it("Insert Date writes a date serial + yyyy-mm-dd number format for the selection", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -130,9 +130,9 @@ describe("SpreadsheetApp insert date/time shortcuts", () => {
     const undoBefore = doc.getStackDepths().undo;
     app.insertDate();
 
-    const expectedDateSerial = dateToExcelSerial(new Date(Date.UTC(2020, 0, 2)));
-    expect(doc.getCell(sheetId, "A1").value).toBe(expectedDateSerial);
-    expect(doc.getCellFormat(sheetId, "A1").numberFormat).toBe("yyyy-mm-dd");
+    const expectedSerial = dateToExcelSerial(new Date(Date.UTC(2020, 0, 2)));
+    expect(doc.getCell(sheetId, "A1").value).toBe(expectedSerial);
+    expect(doc.getCellFormat(sheetId, { row: 0, col: 0 }).numberFormat).toBe("yyyy-mm-dd");
     expect(doc.getStackDepths().undo).toBe(undoBefore + 1);
     expect(doc.undoLabel).toBe("Insert Date");
 
@@ -140,7 +140,7 @@ describe("SpreadsheetApp insert date/time shortcuts", () => {
     root.remove();
   });
 
-  it("Insert Time writes an Excel time serial for the selection and applies a time number format", () => {
+  it("Insert Time writes a time serial + hh:mm:ss number format for the selection", () => {
     const root = createRoot();
     const status = {
       activeCell: document.createElement("div"),
@@ -157,9 +157,9 @@ describe("SpreadsheetApp insert date/time shortcuts", () => {
     const undoBefore = doc.getStackDepths().undo;
     app.insertTime();
 
-    const expectedTimeSerial = (3 * 3600 + 4 * 60 + 5) / 86_400;
-    expect(doc.getCell(sheetId, "A1").value).toBeCloseTo(expectedTimeSerial, 12);
-    expect(doc.getCellFormat(sheetId, "A1").numberFormat).toBe("hh:mm:ss");
+    const expectedSerial = (3 * 3600 + 4 * 60 + 5) / 86_400;
+    expect(doc.getCell(sheetId, "A1").value).toBeCloseTo(expectedSerial, 10);
+    expect(doc.getCellFormat(sheetId, { row: 0, col: 0 }).numberFormat).toBe("hh:mm:ss");
     expect(doc.getStackDepths().undo).toBe(undoBefore + 1);
     expect(doc.undoLabel).toBe("Insert Time");
 

@@ -73,12 +73,22 @@ function createRoot(): HTMLElement {
 }
 
 describe("SpreadsheetApp formatting keyboard shortcuts", () => {
+  let priorGridMode: string | undefined;
+
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+
+    if (priorGridMode === undefined) delete process.env.DESKTOP_GRID_MODE;
+    else process.env.DESKTOP_GRID_MODE = priorGridMode;
   });
 
   beforeEach(() => {
+    priorGridMode = process.env.DESKTOP_GRID_MODE;
+    // Formatting shortcuts are implemented in SpreadsheetApp's legacy grid mode; keep
+    // the tests deterministic by forcing the renderer choice.
+    process.env.DESKTOP_GRID_MODE = "legacy";
+
     document.body.innerHTML = "";
 
     // Needed for showToast(...) if it fires (e.g. safety cap).
