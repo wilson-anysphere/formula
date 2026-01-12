@@ -46,6 +46,9 @@ describe("toolbar formatting safety cap", () => {
     expect(applied).toBe(true);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(document.querySelector('[data-testid="toast"]')).toBeNull();
+
+    const style = doc.getCellFormat("Sheet1", { row: 0, col: 0 }) as any;
+    expect(style?.fill?.fgColor).toBe("#FFFF0000");
   });
 
   it("refuses to apply formatting to an enormous rectangular selection", () => {
@@ -64,6 +67,9 @@ describe("toolbar formatting safety cap", () => {
     expect(toast).not.toBeNull();
     expect(toast?.dataset.type).toBe("warning");
     expect(toast?.textContent).toMatch(/Selection too large to apply formatting/i);
+
+    const style = doc.getCellFormat("Sheet1", { row: 0, col: 0 }) as any;
+    expect(style?.fill?.fgColor).not.toBe("#FFFF0000");
   });
 
   it("refuses to apply formatting to extremely large full-row selections (row band cap)", () => {
