@@ -1559,6 +1559,82 @@ fn project_normalized_data_matches_baseclass_key_case_insensitively_but_preserve
 }
 
 #[test]
+fn project_normalized_data_resolves_designer_storage_using_modulestreamnameunicode_record() {
+    // Regression: BaseClass=... identifies a designer module by MODULENAME, but the corresponding
+    // designer *storage* name can come from MODULESTREAMNAMEUNICODE (0x0032) rather than the ANSI
+    // MODULESTREAMNAME (0x001A). Ensure we use the Unicode record for storage resolution when
+    // present.
+
+    let storage_name = "Форма1";
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    // PROJECT stream refers to the designer module identifier `NiceName`.
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"BaseClass=NiceName\r\n")
+            .expect("write PROJECT");
+    }
+
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        // Minimal decompressed dir stream describing one module record group:
+        // MODULENAME = NiceName
+        // MODULESTREAMNAME = Wrong (intentionally)
+        // MODULESTREAMNAMEUNICODE = storage_name (correct)
+        let dir_decompressed = {
+            let mut out = Vec::new();
+            push_record(&mut out, 0x0003, &1252u16.to_le_bytes()); // PROJECTCODEPAGE
+
+            push_record(&mut out, 0x0019, b"NiceName"); // MODULENAME
+
+            // MODULESTREAMNAME: intentionally wrong MBCS name, with no trailing reserved u16.
+            // When followed immediately by a MODULESTREAMNAMEUNICODE record, `DirStream` treats the
+            // 0x0032 record header as the reserved marker and parses the Unicode tail.
+            push_record(&mut out, 0x001A, b"Wrong");
+
+            let mut unicode_name = utf16le_bytes(storage_name);
+            // Some producers include a trailing UTF-16 NUL; our parser strips it.
+            unicode_name.extend_from_slice(&0u16.to_le_bytes());
+            push_record(&mut out, 0x0032, &unicode_name); // MODULESTREAMNAMEUNICODE
+
+            push_record(&mut out, 0x0021, &3u16.to_le_bytes()); // MODULETYPE (UserForm)
+            out
+        };
+        let dir_container = compress_container(&dir_decompressed);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    // Create only the Unicode-named designer storage (not the wrong ANSI one).
+    ole.create_storage(storage_name)
+        .expect("designer storage");
+    {
+        let mut s = ole
+            .create_stream(format!("{storage_name}/Payload"))
+            .expect("designer stream");
+        s.write_all(b"X").expect("write designer bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = project_normalized_data(&vba_project_bin).expect("ProjectNormalizedData");
+
+    let mut expected_padded = Vec::new();
+    expected_padded.extend_from_slice(b"X");
+    expected_padded.extend(std::iter::repeat_n(0u8, 1022));
+
+    let idx_designer =
+        find_subslice(&normalized, &expected_padded).expect("expected designer bytes");
+    let idx_tokens = find_subslice(&normalized, b"BaseClassNiceName")
+        .expect("expected BaseClass tokens");
+    assert!(
+        idx_designer < idx_tokens,
+        "expected designer bytes to appear before BaseClass property tokens"
+    );
+}
+
+#[test]
 fn project_normalized_data_preserves_designer_storage_element_traversal_order() {
     // Regression test for MS-OVBA `NormalizeDesignerStorage` / `NormalizeStorage` traversal order as
     // used by `ProjectNormalizedData` (MS-OVBA §2.4.2.2 + §2.4.2.6).
