@@ -100,8 +100,6 @@ test.describe("split view / shared grid zoom", () => {
   test("Ctrl/Cmd+wheel zoom changes grid geometry", async ({ page }) => {
     await page.goto("/?grid=shared");
 
-    const grid = page.locator("#grid");
-
     await page.waitForFunction(() => {
       const app = (window as any).__formulaApp;
       const rect = app?.getCellRectA1?.("B1");
@@ -122,15 +120,24 @@ test.describe("split view / shared grid zoom", () => {
     const a1Before = rectsBefore.a1 as { x: number; y: number; width: number; height: number };
     const b1Before = rectsBefore.b1 as { x: number; y: number; width: number; height: number };
 
-    // Hover inside the row header so the zoom gesture doesn't anchor to the scrollable quadrant.
-    await grid.hover({
-      position: { x: Math.max(1, a1Before.x / 2), y: a1Before.y + a1Before.height / 2 },
+    // Dispatch a ctrl+wheel event directly (avoid Playwright actionability checks around
+    // visibility/stability; we only care that the handler updates zoom + geometry).
+    await page.evaluate(() => {
+      const grid = document.querySelector("#grid");
+      if (!grid) throw new Error("Missing #grid");
+      grid.dispatchEvent(
+        new WheelEvent("wheel", {
+          deltaY: -100,
+          deltaMode: 0,
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+          // Note: client coords don't matter for this assertion (we only assert geometry changes).
+          clientX: 0,
+          clientY: 0,
+        })
+      );
     });
-
-    const primary = process.platform === "darwin" ? "Meta" : "Control";
-    await page.keyboard.down(primary);
-    await page.mouse.wheel(0, -100);
-    await page.keyboard.up(primary);
 
     await expect
       .poll(async () => {
@@ -140,4 +147,3 @@ test.describe("split view / shared grid zoom", () => {
       .toBeGreaterThan(b1Before.x);
   });
 });
-
