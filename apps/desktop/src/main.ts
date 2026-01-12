@@ -5839,7 +5839,17 @@ async function openWorkbookFromPath(
     await loadWorkbookIntoDocument(activeWorkbook);
     if (options.notifyExtensions !== false) {
       try {
-        extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path ?? path);
+        // Prefer broadcasting the workbook snapshot as computed by the extension host, which will
+        // incorporate any `spreadsheetApi.getActiveWorkbook()` metadata (name/path) instead of
+        // relying on the host stub's filename inference.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const host = (extensionHostManagerForE2e as any)?.host;
+        if (host && typeof host._getActiveWorkbook === "function" && typeof host._broadcastEvent === "function") {
+          const workbook = await host._getActiveWorkbook();
+          host._broadcastEvent("workbookOpened", { workbook });
+        } else {
+          extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path ?? path);
+        }
       } catch {
         // Ignore extension host errors; workbook open should still succeed.
       }
@@ -6018,7 +6028,14 @@ async function handleNewWorkbook(options: { notifyExtensions?: boolean } = {}): 
     await loadWorkbookIntoDocument(activeWorkbook);
     if (options.notifyExtensions !== false) {
       try {
-        extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const host = (extensionHostManagerForE2e as any)?.host;
+        if (host && typeof host._getActiveWorkbook === "function" && typeof host._broadcastEvent === "function") {
+          const workbook = await host._getActiveWorkbook();
+          host._broadcastEvent("workbookOpened", { workbook });
+        } else {
+          extensionHostManagerForE2e?.host.openWorkbook(activeWorkbook.path ?? activeWorkbook.origin_path);
+        }
       } catch {
         // Ignore extension host errors; new workbook should still succeed.
       }
