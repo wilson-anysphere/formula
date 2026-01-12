@@ -470,7 +470,10 @@ pub fn sumproduct(arrays: &[&[Value]], locale: NumberLocale) -> Result<f64, Erro
     Ok(sum)
 }
 
-fn coerce_sumproduct_number(value: &Value, locale: NumberLocale) -> Result<f64, ErrorKind> {
+pub(crate) fn coerce_sumproduct_number(
+    value: &Value,
+    locale: NumberLocale,
+) -> Result<f64, ErrorKind> {
     match value {
         Value::Number(n) => Ok(*n),
         Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),

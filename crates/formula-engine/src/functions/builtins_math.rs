@@ -988,7 +988,10 @@ inventory::submit! {
 }
 
 fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    fn coerce_candidate_to_number(value: &Value, locale: crate::value::NumberLocale) -> Option<f64> {
+    fn coerce_candidate_to_number(
+        value: &Value,
+        locale: crate::value::NumberLocale,
+    ) -> Option<f64> {
         match value {
             Value::Number(n) => Some(*n),
             Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
@@ -2534,41 +2537,445 @@ inventory::submit! {
 }
 
 fn sumproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    fn arg_to_values(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Vec<Value>, Value> {
+    enum SumproductOperand {
+        Scalar(Value),
+        Array(Vec<Value>),
+        Reference(crate::functions::Reference),
+    }
+
+    impl SumproductOperand {
+        fn len(&self) -> usize {
+            match self {
+                Self::Scalar(_) => 1,
+                Self::Array(values) => values.len(),
+                Self::Reference(r) => {
+                    let rows = r.end.row - r.start.row + 1;
+                    let cols = r.end.col - r.start.col + 1;
+                    (rows as usize).saturating_mul(cols as usize)
+                }
+            }
+        }
+    }
+
+    fn arg_to_operand(
+        ctx: &dyn FunctionContext,
+        arg: ArgValue,
+    ) -> Result<SumproductOperand, Value> {
         match arg {
             ArgValue::Reference(r) => {
                 let r = r.normalized();
                 ctx.record_reference(&r);
-                let rows = r.end.row - r.start.row + 1;
-                let cols = r.end.col - r.start.col + 1;
-                let len = (rows as usize).saturating_mul(cols as usize);
-                let mut values = Vec::with_capacity(len);
-                for addr in r.iter_cells() {
-                    values.push(ctx.get_cell_value(&r.sheet_id, addr));
-                }
-                Ok(values)
+                Ok(SumproductOperand::Reference(r))
             }
             ArgValue::ReferenceUnion(_) => Err(Value::Error(ErrorKind::Value)),
-            ArgValue::Scalar(Value::Array(arr)) => Ok(arr.values),
+            ArgValue::Scalar(Value::Array(arr)) => Ok(SumproductOperand::Array(arr.values)),
             ArgValue::Scalar(Value::Error(e)) => Err(Value::Error(e)),
-            ArgValue::Scalar(v) => Ok(vec![v]),
+            ArgValue::Scalar(v) => Ok(SumproductOperand::Scalar(v)),
         }
     }
 
-    let va = match arg_to_values(ctx, ctx.eval_arg(&args[0])) {
+    // Match Excel-style argument evaluation: process arguments in order so we still record
+    // precedents for earlier reference arguments even if later args are errors.
+    let a = match arg_to_operand(ctx, ctx.eval_arg(&args[0])) {
         Ok(v) => v,
         Err(e) => return e,
     };
-    let vb = match arg_to_values(ctx, ctx.eval_arg(&args[1])) {
+    let b = match arg_to_operand(ctx, ctx.eval_arg(&args[1])) {
         Ok(v) => v,
         Err(e) => return e,
     };
 
-    if va.is_empty() || vb.is_empty() {
+    let len_a = a.len();
+    let len_b = b.len();
+    if len_a == 0 || len_b == 0 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let len = len_a.max(len_b);
+    if (len_a != len && len_a != 1) || (len_b != len && len_b != 1) {
         return Value::Error(ErrorKind::Value);
     }
 
-    match crate::functions::math::sumproduct(&[&va, &vb], ctx.number_locale()) {
+    let locale = ctx.number_locale();
+
+    // Non-reference inputs can use the shared math helper (already SIMD optimized) without extra
+    // allocations.
+    if !matches!(a, SumproductOperand::Reference(_))
+        && !matches!(b, SumproductOperand::Reference(_))
+    {
+        let slice_a: &[Value] = match &a {
+            SumproductOperand::Scalar(v) => std::slice::from_ref(v),
+            SumproductOperand::Array(values) => values,
+            SumproductOperand::Reference(_) => unreachable!(),
+        };
+        let slice_b: &[Value] = match &b {
+            SumproductOperand::Scalar(v) => std::slice::from_ref(v),
+            SumproductOperand::Array(values) => values,
+            SumproductOperand::Reference(_) => unreachable!(),
+        };
+
+        let arrays: [&[Value]; 2] = [slice_a, slice_b];
+        return match crate::functions::math::sumproduct(&arrays, locale) {
+            Ok(v) => Value::Number(v),
+            Err(e) => Value::Error(e),
+        };
+    }
+
+    // Reference inputs can be extremely large (e.g. `A:A`), so avoid materializing `Vec<Value>`
+    // and stream-coerce values into SIMD buffers.
+    const BLOCK: usize = SIMD_AGGREGATE_BLOCK;
+
+    fn flush(sum: &mut f64, buf_a: &[f64], buf_b: &[f64]) {
+        *sum += simd::sumproduct_ignore_nan_f64(buf_a, buf_b);
+    }
+
+    let result = (|| -> Result<f64, ErrorKind> {
+        let mut buf_a = [0.0_f64; BLOCK];
+        let mut buf_b = [0.0_f64; BLOCK];
+        let mut buf_len = 0usize;
+
+        let mut sum = 0.0;
+        let mut saw_nan = false;
+
+        match (a, b) {
+            (SumproductOperand::Reference(ra), SumproductOperand::Reference(rb)) => {
+                if len_a == len && len_b == len {
+                    for (addr_a, addr_b) in ra.iter_cells().zip(rb.iter_cells()) {
+                        let va = ctx.get_cell_value(&ra.sheet_id, addr_a);
+                        let xa = crate::functions::math::coerce_sumproduct_number(&va, locale)?;
+                        let vb = ctx.get_cell_value(&rb.sheet_id, addr_b);
+                        let xb = crate::functions::math::coerce_sumproduct_number(&vb, locale)?;
+
+                        if xa.is_nan() || xb.is_nan() {
+                            saw_nan = true;
+                        }
+
+                        if !saw_nan {
+                            buf_a[buf_len] = xa;
+                            buf_b[buf_len] = xb;
+                            buf_len += 1;
+                            if buf_len == BLOCK {
+                                flush(&mut sum, &buf_a, &buf_b);
+                                buf_len = 0;
+                            }
+                        }
+                    }
+                } else if len_a == 1 && len_b == len {
+                    let addr_a0 = ra.iter_cells().next().expect("len_a validated > 0");
+                    let va0 = ctx.get_cell_value(&ra.sheet_id, addr_a0);
+                    let xa = crate::functions::math::coerce_sumproduct_number(&va0, locale)?;
+                    saw_nan = xa.is_nan();
+
+                    for addr_b in rb.iter_cells() {
+                        let vb = ctx.get_cell_value(&rb.sheet_id, addr_b);
+                        let xb = crate::functions::math::coerce_sumproduct_number(&vb, locale)?;
+
+                        if saw_nan {
+                            continue;
+                        }
+                        if xb.is_nan() {
+                            saw_nan = true;
+                            continue;
+                        }
+
+                        buf_a[buf_len] = xa;
+                        buf_b[buf_len] = xb;
+                        buf_len += 1;
+                        if buf_len == BLOCK {
+                            flush(&mut sum, &buf_a, &buf_b);
+                            buf_len = 0;
+                        }
+                    }
+                } else if len_b == 1 && len_a == len {
+                    let mut iter_a = ra.iter_cells();
+                    let addr_a0 = iter_a.next().expect("len_a validated > 0");
+                    let addr_b0 = rb.iter_cells().next().expect("len_b validated > 0");
+
+                    let va0 = ctx.get_cell_value(&ra.sheet_id, addr_a0);
+                    let xa0 = crate::functions::math::coerce_sumproduct_number(&va0, locale)?;
+                    let vb0 = ctx.get_cell_value(&rb.sheet_id, addr_b0);
+                    let xb = crate::functions::math::coerce_sumproduct_number(&vb0, locale)?;
+
+                    saw_nan = xa0.is_nan() || xb.is_nan();
+                    if !saw_nan {
+                        buf_a[buf_len] = xa0;
+                        buf_b[buf_len] = xb;
+                        buf_len += 1;
+                    }
+
+                    for addr_a in iter_a {
+                        let va = ctx.get_cell_value(&ra.sheet_id, addr_a);
+                        let xa = crate::functions::math::coerce_sumproduct_number(&va, locale)?;
+
+                        if saw_nan {
+                            continue;
+                        }
+                        if xa.is_nan() {
+                            saw_nan = true;
+                            continue;
+                        }
+
+                        buf_a[buf_len] = xa;
+                        buf_b[buf_len] = xb;
+                        buf_len += 1;
+                        if buf_len == BLOCK {
+                            flush(&mut sum, &buf_a, &buf_b);
+                            buf_len = 0;
+                        }
+                    }
+                } else {
+                    unreachable!(
+                        "broadcast validation should have handled all length combinations"
+                    );
+                }
+            }
+            (SumproductOperand::Reference(ra), SumproductOperand::Array(vb)) => {
+                if len_a == len && len_b == len {
+                    for (idx, addr_a) in ra.iter_cells().enumerate() {
+                        let va = ctx.get_cell_value(&ra.sheet_id, addr_a);
+                        let xa = crate::functions::math::coerce_sumproduct_number(&va, locale)?;
+                        let xb =
+                            crate::functions::math::coerce_sumproduct_number(&vb[idx], locale)?;
+
+                        if xa.is_nan() || xb.is_nan() {
+                            saw_nan = true;
+                        }
+                        if !saw_nan {
+                            buf_a[buf_len] = xa;
+                            buf_b[buf_len] = xb;
+                            buf_len += 1;
+                            if buf_len == BLOCK {
+                                flush(&mut sum, &buf_a, &buf_b);
+                                buf_len = 0;
+                            }
+                        }
+                    }
+                } else if len_a == 1 && len_b == len {
+                    let addr_a0 = ra.iter_cells().next().expect("len_a validated > 0");
+                    let va0 = ctx.get_cell_value(&ra.sheet_id, addr_a0);
+                    let xa = crate::functions::math::coerce_sumproduct_number(&va0, locale)?;
+                    saw_nan = xa.is_nan();
+
+                    for vb in &vb {
+                        let xb = crate::functions::math::coerce_sumproduct_number(vb, locale)?;
+                        if saw_nan {
+                            continue;
+                        }
+                        if xb.is_nan() {
+                            saw_nan = true;
+                            continue;
+                        }
+
+                        buf_a[buf_len] = xa;
+                        buf_b[buf_len] = xb;
+                        buf_len += 1;
+                        if buf_len == BLOCK {
+                            flush(&mut sum, &buf_a, &buf_b);
+                            buf_len = 0;
+                        }
+                    }
+                } else if len_b == 1 && len_a == len {
+                    let mut iter_a = ra.iter_cells();
+                    let addr_a0 = iter_a.next().expect("len_a validated > 0");
+                    let va0 = ctx.get_cell_value(&ra.sheet_id, addr_a0);
+                    let xa0 = crate::functions::math::coerce_sumproduct_number(&va0, locale)?;
+                    let xb = crate::functions::math::coerce_sumproduct_number(&vb[0], locale)?;
+
+                    saw_nan = xa0.is_nan() || xb.is_nan();
+                    if !saw_nan {
+                        buf_a[buf_len] = xa0;
+                        buf_b[buf_len] = xb;
+                        buf_len += 1;
+                    }
+
+                    for addr_a in iter_a {
+                        let va = ctx.get_cell_value(&ra.sheet_id, addr_a);
+                        let xa = crate::functions::math::coerce_sumproduct_number(&va, locale)?;
+
+                        if saw_nan {
+                            continue;
+                        }
+                        if xa.is_nan() {
+                            saw_nan = true;
+                            continue;
+                        }
+
+                        buf_a[buf_len] = xa;
+                        buf_b[buf_len] = xb;
+                        buf_len += 1;
+                        if buf_len == BLOCK {
+                            flush(&mut sum, &buf_a, &buf_b);
+                            buf_len = 0;
+                        }
+                    }
+                } else {
+                    unreachable!(
+                        "broadcast validation should have handled all length combinations"
+                    );
+                }
+            }
+            (SumproductOperand::Reference(ra), SumproductOperand::Scalar(vb)) => {
+                let mut iter_a = ra.iter_cells();
+                let addr_a0 = iter_a.next().expect("len_a validated > 0");
+                let va0 = ctx.get_cell_value(&ra.sheet_id, addr_a0);
+                let xa0 = crate::functions::math::coerce_sumproduct_number(&va0, locale)?;
+                let xb = crate::functions::math::coerce_sumproduct_number(&vb, locale)?;
+
+                saw_nan = xa0.is_nan() || xb.is_nan();
+                if !saw_nan {
+                    buf_a[buf_len] = xa0;
+                    buf_b[buf_len] = xb;
+                    buf_len += 1;
+                }
+
+                for addr_a in iter_a {
+                    let va = ctx.get_cell_value(&ra.sheet_id, addr_a);
+                    let xa = crate::functions::math::coerce_sumproduct_number(&va, locale)?;
+
+                    if saw_nan {
+                        continue;
+                    }
+                    if xa.is_nan() {
+                        saw_nan = true;
+                        continue;
+                    }
+
+                    buf_a[buf_len] = xa;
+                    buf_b[buf_len] = xb;
+                    buf_len += 1;
+                    if buf_len == BLOCK {
+                        flush(&mut sum, &buf_a, &buf_b);
+                        buf_len = 0;
+                    }
+                }
+            }
+            (SumproductOperand::Array(va), SumproductOperand::Reference(rb)) => {
+                if len_a == len && len_b == len {
+                    for (idx, addr_b) in rb.iter_cells().enumerate() {
+                        let xa =
+                            crate::functions::math::coerce_sumproduct_number(&va[idx], locale)?;
+                        let vb = ctx.get_cell_value(&rb.sheet_id, addr_b);
+                        let xb = crate::functions::math::coerce_sumproduct_number(&vb, locale)?;
+
+                        if xa.is_nan() || xb.is_nan() {
+                            saw_nan = true;
+                        }
+                        if !saw_nan {
+                            buf_a[buf_len] = xa;
+                            buf_b[buf_len] = xb;
+                            buf_len += 1;
+                            if buf_len == BLOCK {
+                                flush(&mut sum, &buf_a, &buf_b);
+                                buf_len = 0;
+                            }
+                        }
+                    }
+                } else if len_a == 1 && len_b == len {
+                    let xa = crate::functions::math::coerce_sumproduct_number(&va[0], locale)?;
+                    saw_nan = xa.is_nan();
+
+                    for addr_b in rb.iter_cells() {
+                        let vb = ctx.get_cell_value(&rb.sheet_id, addr_b);
+                        let xb = crate::functions::math::coerce_sumproduct_number(&vb, locale)?;
+
+                        if saw_nan {
+                            continue;
+                        }
+                        if xb.is_nan() {
+                            saw_nan = true;
+                            continue;
+                        }
+
+                        buf_a[buf_len] = xa;
+                        buf_b[buf_len] = xb;
+                        buf_len += 1;
+                        if buf_len == BLOCK {
+                            flush(&mut sum, &buf_a, &buf_b);
+                            buf_len = 0;
+                        }
+                    }
+                } else if len_b == 1 && len_a == len {
+                    // Preserve error precedence: for idx=0 we must coerce `va[0]` before the scalar.
+                    let mut iter_b = rb.iter_cells();
+                    let addr_b0 = iter_b.next().expect("len_b validated > 0");
+                    let xa0 = crate::functions::math::coerce_sumproduct_number(&va[0], locale)?;
+                    let vb0 = ctx.get_cell_value(&rb.sheet_id, addr_b0);
+                    let xb = crate::functions::math::coerce_sumproduct_number(&vb0, locale)?;
+
+                    saw_nan = xa0.is_nan() || xb.is_nan();
+                    if !saw_nan {
+                        buf_a[buf_len] = xa0;
+                        buf_b[buf_len] = xb;
+                        buf_len += 1;
+                    }
+
+                    for va in va.into_iter().skip(1) {
+                        let xa = crate::functions::math::coerce_sumproduct_number(&va, locale)?;
+
+                        if saw_nan {
+                            continue;
+                        }
+                        if xa.is_nan() {
+                            saw_nan = true;
+                            continue;
+                        }
+
+                        buf_a[buf_len] = xa;
+                        buf_b[buf_len] = xb;
+                        buf_len += 1;
+                        if buf_len == BLOCK {
+                            flush(&mut sum, &buf_a, &buf_b);
+                            buf_len = 0;
+                        }
+                    }
+                } else {
+                    unreachable!(
+                        "broadcast validation should have handled all length combinations"
+                    );
+                }
+            }
+            (SumproductOperand::Scalar(va), SumproductOperand::Reference(rb)) => {
+                let xa = crate::functions::math::coerce_sumproduct_number(&va, locale)?;
+                saw_nan = xa.is_nan();
+
+                for addr_b in rb.iter_cells() {
+                    let vb = ctx.get_cell_value(&rb.sheet_id, addr_b);
+                    let xb = crate::functions::math::coerce_sumproduct_number(&vb, locale)?;
+
+                    if saw_nan {
+                        continue;
+                    }
+                    if xb.is_nan() {
+                        saw_nan = true;
+                        continue;
+                    }
+
+                    buf_a[buf_len] = xa;
+                    buf_b[buf_len] = xb;
+                    buf_len += 1;
+                    if buf_len == BLOCK {
+                        flush(&mut sum, &buf_a, &buf_b);
+                        buf_len = 0;
+                    }
+                }
+            }
+            (SumproductOperand::Array(_), SumproductOperand::Array(_))
+            | (SumproductOperand::Scalar(_), SumproductOperand::Scalar(_))
+            | (SumproductOperand::Scalar(_), SumproductOperand::Array(_))
+            | (SumproductOperand::Array(_), SumproductOperand::Scalar(_)) => unreachable!(
+                "non-reference cases should have been handled by shared math::sumproduct path"
+            ),
+        }
+
+        if saw_nan {
+            return Ok(f64::NAN);
+        }
+        if buf_len > 0 {
+            flush(&mut sum, &buf_a[..buf_len], &buf_b[..buf_len]);
+        }
+        Ok(sum)
+    })();
+
+    match result {
         Ok(v) => Value::Number(v),
         Err(e) => Value::Error(e),
     }
