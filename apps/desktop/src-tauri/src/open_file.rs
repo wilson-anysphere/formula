@@ -2,7 +2,15 @@ use std::path::{Path, PathBuf};
 
 use url::Url;
 
-const SUPPORTED_EXTENSIONS: &[&str] = &["xlsx", "xls", "xlsm", "xlsb", "csv"];
+const SUPPORTED_EXTENSIONS: &[&str] = &[
+    "xlsx",
+    "xls",
+    "xlsm",
+    "xlsb",
+    "csv",
+    #[cfg(feature = "parquet")]
+    "parquet",
+];
 
 /// Extract supported spreadsheet paths from a process argv list.
 ///
@@ -13,6 +21,7 @@ const SUPPORTED_EXTENSIONS: &[&str] = &["xlsx", "xls", "xlsm", "xlsb", "csv"];
 ///
 /// Normalization rules:
 /// - accepts: `xlsx`, `xls`, `xlsm`, `xlsb`, `csv` (case-insensitive)
+///   - plus `parquet` when compiled with the `parquet` feature
 /// - handles `file://...` URLs (via [`Url::to_file_path`])
 /// - resolves relative paths using `cwd` when provided (falls back to `std::env::current_dir()`)
 /// - ignores args that look like flags (start with `-`)
@@ -120,5 +129,20 @@ mod tests {
 
         assert_eq!(paths, vec![file_path]);
     }
-}
 
+    #[cfg(feature = "parquet")]
+    #[test]
+    fn parquet_extension_is_supported_when_feature_enabled() {
+        let dir = tempdir().unwrap();
+        let cwd = dir.path();
+
+        let argv = vec![
+            "formula-desktop".to_string(),
+            "data.parquet".to_string(),
+            "other.csv".to_string(),
+        ];
+
+        let paths = extract_open_file_paths_from_argv(&argv, Some(cwd));
+        assert_eq!(paths, vec![cwd.join("data.parquet"), cwd.join("other.csv")]);
+    }
+}
