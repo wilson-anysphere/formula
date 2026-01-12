@@ -300,7 +300,7 @@ export function SheetTabStrip({
     // Match the "Add sheet" behavior: if the user is mid-rename and the rename is invalid,
     // keep them in the rename flow instead of navigating away.
     if (editingSheetId) {
-      const ok = commitRename(editingSheetId);
+      const ok = await commitRename(editingSheetId);
       if (!ok) return;
     }
 

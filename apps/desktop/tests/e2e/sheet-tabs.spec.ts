@@ -95,6 +95,15 @@ test.describe("sheet tabs", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet4");
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 4 of 5");
     await expect(page.getByTestId("sheet-tab-Sheet4")).toHaveAttribute("data-active", "true");
+
+    // Sheet activation via the overflow/quick-pick UI should return focus to the grid so
+    // keyboard-driven workflows keep working (Excel-like).
+    await expect
+      .poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id))
+      .toBe("grid");
+
+    await page.keyboard.press("F2");
+    await expect(page.locator("textarea.cell-editor")).toBeVisible();
   });
 
   test("add sheet inserts after the active sheet tab", async ({ page }) => {
