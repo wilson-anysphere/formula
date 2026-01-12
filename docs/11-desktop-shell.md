@@ -16,11 +16,13 @@ This document is a “what’s real in the repo” reference for contributors.
     - Updater dialog + event handling: `apps/desktop/src/tauri/updaterUi.ts`
     - Notifications wrapper: `apps/desktop/src/tauri/notifications.ts`
     - Startup timings listeners: `apps/desktop/src/tauri/startupMetrics.ts`
+  - Clipboard provider + serialization helpers: `apps/desktop/src/clipboard/`
 - **Tauri (Rust):** `apps/desktop/src-tauri/`
   - Tauri config: `apps/desktop/src-tauri/tauri.conf.json`
   - Capabilities (permissions): `apps/desktop/src-tauri/capabilities/main.json`
   - Entry point: `apps/desktop/src-tauri/src/main.rs`
   - IPC commands: `apps/desktop/src-tauri/src/commands.rs`
+  - Clipboard commands + platform implementations: `apps/desktop/src-tauri/src/clipboard/`
   - “Open file” path normalization: `apps/desktop/src-tauri/src/open_file.rs`
   - Filesystem scope helpers: `apps/desktop/src-tauri/src/fs_scope.rs`
   - Custom `asset:` protocol handler (COEP/CORP): `apps/desktop/src-tauri/src/asset_protocol.rs`
@@ -526,6 +528,11 @@ work on both desktop (Tauri) and web.
 Frontend entry point:
 
 - `apps/desktop/src/clipboard/platform/provider.js`
+
+Rust implementation:
+
+- Tauri commands: `apps/desktop/src-tauri/src/clipboard/mod.rs` (`clipboard_read`, `clipboard_write`)
+- Platform backends: `apps/desktop/src-tauri/src/clipboard/platform/*` (delegates into OS-specific modules like `clipboard/macos.rs`)
 
 Provider selection:
 
