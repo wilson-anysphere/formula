@@ -194,8 +194,22 @@ test.describe("dockable panels layout persistence", () => {
     await expect(page.getByTestId("formula-input")).toBeVisible();
     await expect(page.getByTestId("formula-input")).toBeFocused();
 
-    const shortcut = process.platform === "darwin" ? "Meta+I" : "Control+Shift+A";
-    await page.keyboard.press(shortcut);
+    // Dispatch directly to avoid browser-level shortcut interception and ensure we exercise
+    // the app's input-scoping logic deterministically.
+    await page.evaluate((isMac) => {
+      const target = document.activeElement ?? window;
+      target.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: isMac ? "I" : "A",
+          code: isMac ? "KeyI" : "KeyA",
+          metaKey: isMac,
+          ctrlKey: !isMac,
+          shiftKey: !isMac,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, process.platform === "darwin");
     await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
   });
 });
