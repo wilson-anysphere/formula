@@ -251,3 +251,95 @@ fn bytecode_switch_is_lazy_for_unmatched_values() {
     );
     assert_eq!(value, Value::Number(7.0));
 }
+
+#[test]
+fn bytecode_if_is_lazy_for_unused_false_branch() {
+    // IF(TRUE, 7, <unused>) must not evaluate the false branch.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IF(TRUE, 7, A2)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("if_lazy_false_branch"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(7.0));
+}
+
+#[test]
+fn bytecode_iferror_is_lazy_for_unused_fallback() {
+    // IFERROR(<non-error>, <unused>) must not evaluate the fallback.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFERROR(1, A2)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("iferror_lazy_fallback"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(1.0));
+}
+
+#[test]
+fn bytecode_ifna_is_lazy_for_unused_fallback() {
+    // IFNA(<non-#N/A>, <unused>) must not evaluate the fallback.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFNA(1, A2)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("ifna_lazy_fallback"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(1.0));
+}
+
+#[test]
+fn bytecode_switch_is_lazy_for_unused_default() {
+    // SWITCH(1, 1, 7, <unused_default>) must not evaluate the default argument.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=SWITCH(1, 1, 7, A2)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("switch_lazy_default"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Number(7.0));
+}
