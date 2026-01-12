@@ -82,7 +82,8 @@ pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
         if file.is_dir() {
             continue;
         }
-        part_names.insert(file.name().to_string());
+        let name = file.name();
+        part_names.insert(name.strip_prefix('/').unwrap_or(name).to_string());
     }
 
     let content_types_xml = read_zip_part_required(&mut archive, "[Content_Types].xml")?;

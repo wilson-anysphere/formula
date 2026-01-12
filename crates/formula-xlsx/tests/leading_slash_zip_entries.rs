@@ -5,6 +5,9 @@ use formula_xlsx::{
     load_from_bytes, patch_xlsx_streaming, read_workbook_model_from_bytes, worksheet_parts_from_reader,
     WorksheetCellPatch, XlsxPackage,
 };
+use formula_xlsx::print::{read_workbook_print_settings, write_workbook_print_settings, CellRange};
+use formula_xlsx::pivots::preserve_pivot_parts_from_reader;
+use formula_xlsx::drawingml::preserve_drawing_parts_from_reader;
 use zip::write::FileOptions;
 use zip::ZipArchive;
 use zip::ZipWriter;
@@ -56,6 +59,123 @@ fn build_minimal_xlsx_with_leading_slash_entries() -> Vec<u8> {
         workbook_rels,
     );
     add_file(&mut zip, options, "/xl/worksheets/sheet1.xml", worksheet_xml);
+
+    zip.finish().unwrap().into_inner()
+}
+
+fn build_minimal_xlsx_with_leading_slash_pivot_part() -> Vec<u8> {
+    let content_types = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+</Types>"#;
+
+    let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets/>
+</workbook>"#;
+
+    let pivot_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotTableDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options =
+        FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    fn add_file(
+        zip: &mut ZipWriter<Cursor<Vec<u8>>>,
+        options: FileOptions<()>,
+        name: &str,
+        bytes: &[u8],
+    ) {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(bytes).unwrap();
+    }
+
+    add_file(&mut zip, options, "/[Content_Types].xml", content_types);
+    add_file(&mut zip, options, "/xl/workbook.xml", workbook_xml);
+    add_file(
+        &mut zip,
+        options,
+        "/xl/pivotTables/pivotTable1.xml",
+        pivot_xml,
+    );
+
+    zip.finish().unwrap().into_inner()
+}
+
+fn build_minimal_xlsx_with_leading_slash_drawing_part() -> Vec<u8> {
+    let content_types = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+</Types>"#;
+
+    let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+    Target="worksheets/sheet1.xml"/>
+</Relationships>"#;
+
+    let worksheet_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData/>
+  <drawing r:id="rId1"/>
+</worksheet>"#;
+
+    let sheet_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing"
+    Target="../drawings/drawing1.xml"/>
+</Relationships>"#;
+
+    let drawing_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"/>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options =
+        FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    fn add_file(
+        zip: &mut ZipWriter<Cursor<Vec<u8>>>,
+        options: FileOptions<()>,
+        name: &str,
+        bytes: &[u8],
+    ) {
+        zip.start_file(name, options).unwrap();
+        zip.write_all(bytes).unwrap();
+    }
+
+    add_file(&mut zip, options, "/[Content_Types].xml", content_types);
+    add_file(&mut zip, options, "/xl/workbook.xml", workbook_xml);
+    add_file(
+        &mut zip,
+        options,
+        "/xl/_rels/workbook.xml.rels",
+        workbook_rels,
+    );
+    add_file(&mut zip, options, "/xl/worksheets/sheet1.xml", worksheet_xml);
+    add_file(
+        &mut zip,
+        options,
+        "/xl/worksheets/_rels/sheet1.xml.rels",
+        sheet_rels,
+    );
+    add_file(&mut zip, options, "/xl/drawings/drawing1.xml", drawing_xml);
 
     zip.finish().unwrap().into_inner()
 }
@@ -116,5 +236,49 @@ fn streaming_patcher_tolerates_leading_slash_entries() {
     assert!(
         sheet_xml.contains("<v>42</v>") || sheet_xml.contains("<v>42.0</v>"),
         "expected patched worksheet XML to contain cell value 42 (got {sheet_xml:?})"
+    );
+}
+
+#[test]
+fn print_settings_writer_tolerates_leading_slash_entries() {
+    let bytes = build_minimal_xlsx_with_leading_slash_entries();
+    let mut settings = read_workbook_print_settings(&bytes).expect("read print settings");
+    assert_eq!(settings.sheets.len(), 1);
+
+    settings.sheets[0].print_area = Some(vec![CellRange {
+        start_row: 1,
+        end_row: 2,
+        start_col: 1,
+        end_col: 2,
+    }]);
+
+    let rewritten = write_workbook_print_settings(&bytes, &settings).expect("write print settings");
+    let reread = read_workbook_print_settings(&rewritten).expect("re-read print settings");
+    assert_eq!(
+        reread.sheets[0].print_area.as_deref(),
+        settings.sheets[0].print_area.as_deref()
+    );
+}
+
+#[test]
+fn preserve_pivot_parts_from_reader_tolerates_leading_slash_entries() {
+    let bytes = build_minimal_xlsx_with_leading_slash_pivot_part();
+    let preserved = preserve_pivot_parts_from_reader(Cursor::new(bytes)).expect("preserve pivots");
+    assert!(
+        preserved
+            .parts
+            .contains_key("xl/pivotTables/pivotTable1.xml"),
+        "expected preserved pivot parts to include xl/pivotTables/pivotTable1.xml"
+    );
+}
+
+#[test]
+fn preserve_drawing_parts_from_reader_tolerates_leading_slash_entries() {
+    let bytes = build_minimal_xlsx_with_leading_slash_drawing_part();
+    let preserved =
+        preserve_drawing_parts_from_reader(Cursor::new(bytes)).expect("preserve drawings");
+    assert!(
+        preserved.parts.contains_key("xl/drawings/drawing1.xml"),
+        "expected preserved drawing parts to include xl/drawings/drawing1.xml"
     );
 }

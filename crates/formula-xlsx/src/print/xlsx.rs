@@ -144,15 +144,16 @@ pub fn write_workbook_print_settings(
     for i in 0..zip.len() {
         let entry = zip.by_index(i)?;
         let name = entry.name().to_string();
+        let canonical_name = name.strip_prefix('/').unwrap_or(name.as_str());
         if entry.is_dir() {
             out.add_directory(name, options.clone())?;
             continue;
         }
 
-        let replacement = if name == "xl/workbook.xml" {
+        let replacement = if canonical_name == "xl/workbook.xml" {
             Some(updated_workbook_xml.as_slice())
         } else {
-            updated_sheets.get(&name).map(|v| v.as_slice())
+            updated_sheets.get(canonical_name).map(|v| v.as_slice())
         };
 
         if let Some(bytes) = replacement {
