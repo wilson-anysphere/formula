@@ -152,11 +152,7 @@ import {
   setSeedPanelsForExtension,
 } from "./extensions/contributedPanelsSeedStore.js";
 import { builtinKeybindings as builtinKeybindingsCatalog } from "./commands/builtinKeybindings.js";
-import { DLP_ACTION } from "../../../packages/security/dlp/src/actions.js";
-import { maxClassification, DEFAULT_CLASSIFICATION } from "../../../packages/security/dlp/src/classification.js";
 import { DlpViolationError } from "../../../packages/security/dlp/src/errors.js";
-import { evaluatePolicy, DLP_DECISION } from "../../../packages/security/dlp/src/policyEngine.js";
-import { effectiveRangeClassification } from "../../../packages/security/dlp/src/selectors.js";
 
 import sampleHelloManifest from "../../../extensions/sample-hello/package.json";
 import { purgeLegacyDesktopLLMSettings } from "./ai/llm/desktopLLMClient.js";
