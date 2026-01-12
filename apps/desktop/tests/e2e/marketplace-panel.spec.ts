@@ -3,6 +3,21 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop, waitForDesktopReady } from "./helpers";
 
 test.describe("marketplace panel", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      try {
+        localStorage.setItem(
+          "formula.extensionHost.permissions",
+          JSON.stringify({
+            "formula.e2e-events": { storage: true },
+          }),
+        );
+      } catch {
+        // ignore
+      }
+    });
+  });
+
   test("opens from the ribbon (View → Panels)", async ({ page }) => {
     await gotoDesktop(page);
     await waitForDesktopReady(page);

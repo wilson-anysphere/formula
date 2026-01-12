@@ -81,6 +81,15 @@ test.describe("Marketplace base URL configuration", () => {
       await page.addInitScript(({ origin }) => {
         try {
           localStorage.setItem("formula:marketplace:baseUrl", origin);
+          // The built-in `formula.e2e-events` extension activates during startup and writes
+          // event traces into extension storage. Pre-grant its `storage` permission so the
+          // permission prompt doesn't block unrelated marketplace assertions.
+          localStorage.setItem(
+            "formula.extensionHost.permissions",
+            JSON.stringify({
+              "formula.e2e-events": { storage: true },
+            }),
+          );
         } catch {
           // ignore
         }
