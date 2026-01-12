@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::io::{Cursor, Read};
 
+use formula_model::drawings::ImageId;
 use zip::ZipArchive;
 
 /// Validates the `fixtures/xlsx/basic/image-in-cell.xlsx` fixture structure.
@@ -159,5 +160,27 @@ fn image_in_cell_fixture_has_expected_rich_value_parts() {
     assert!(
         rich_value_rels.contains("../media/image2.png"),
         "expected image2.png target in richValueRel.xml.rels"
+    );
+
+    // `load_from_bytes` should opportunistically load RichData-backed in-cell images into
+    // `workbook.images`, even when the workbook does not include `xl/cellimages.xml`.
+    let doc = formula_xlsx::load_from_bytes(&bytes).expect("load xlsx document");
+    let stored_image1 = doc
+        .workbook
+        .images
+        .get(&ImageId::new("image1.png"))
+        .expect("expected workbook.images to contain image1.png");
+    assert_eq!(
+        stored_image1.bytes, image1,
+        "expected workbook.images image1.png bytes to match xl/media/image1.png"
+    );
+    let stored_image2 = doc
+        .workbook
+        .images
+        .get(&ImageId::new("image2.png"))
+        .expect("expected workbook.images to contain image2.png");
+    assert_eq!(
+        stored_image2.bytes, image2,
+        "expected workbook.images image2.png bytes to match xl/media/image2.png"
     );
 }

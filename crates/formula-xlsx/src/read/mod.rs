@@ -12,6 +12,7 @@ use formula_model::{
     normalize_formula_text, Cell, CellRef, CellValue, DefinedNameScope, ErrorValue, Range,
     SheetVisibility, Workbook,
 };
+use formula_model::drawings::{ImageData, ImageId};
 use quick_xml::events::attributes::AttrError;
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -565,6 +566,14 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
     // prevent the workbook from loading.
     let _ = crate::cell_images::CellImages::parse_from_parts(&parts, &mut workbook);
 
+    // Best-effort loader for rich-value-backed images-in-cells that point directly at `xl/media/*`
+    // (without a `xl/cellimages.xml` store part).
+    //
+    // This keeps `workbook.images` populated for real Excel workbooks that use the RichData
+    // pipeline (`xl/metadata.xml` + `xl/richData/*`), even when no DrawingML cell image store part
+    // exists.
+    load_rich_value_images_from_parts(&parts, &mut workbook);
+
     Ok(XlsxDocument {
         workbook,
         parts,
@@ -578,6 +587,48 @@ pub fn load_from_bytes(bytes: &[u8]) -> Result<XlsxDocument, ReadError> {
         },
         calc_affecting_edits: false,
     })
+}
+
+fn load_rich_value_images_from_parts(parts: &BTreeMap<String, Vec<u8>>, workbook: &mut Workbook) {
+    let targets = match crate::rich_data::resolve_rich_value_image_targets(parts) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    for target in targets.into_iter().flatten() {
+        let Some(bytes) = parts.get(&target) else {
+            continue;
+        };
+
+        let image_id = image_id_from_target_path(&target);
+        if workbook.images.get(&image_id).is_some() {
+            continue;
+        }
+
+        let ext = image_id
+            .as_str()
+            .rsplit_once('.')
+            .map(|(_, ext)| ext)
+            .unwrap_or("");
+        let content_type = crate::drawings::content_type_for_extension(ext).to_string();
+
+        workbook.images.insert(
+            image_id,
+            ImageData {
+                bytes: bytes.clone(),
+                content_type: Some(content_type),
+            },
+        );
+    }
+}
+
+fn image_id_from_target_path(target_path: &str) -> ImageId {
+    let file_name = target_path
+        .strip_prefix("xl/media/")
+        .or_else(|| target_path.strip_prefix("media/"))
+        .unwrap_or(target_path)
+        .to_string();
+    ImageId::new(file_name)
 }
 
 fn parse_relationships(bytes: &[u8]) -> Result<RelationshipsInfo, ReadError> {
