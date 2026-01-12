@@ -902,10 +902,25 @@ fn dump_rich_cell_images_by_cell(pkg: &XlsxPackage, out_dir: Option<&Path>) {
         let mut printed_failures = 0usize;
         let max_printed_failures = 10usize;
 
+        // Keep output deterministic for repeated runs / log comparisons.
+        let mut entries: Vec<(&str, CellRef, &formula_xlsx::EmbeddedCellImage)> =
+            Vec::with_capacity(images_by_cell.len());
         for ((worksheet_part, cell), image) in &images_by_cell {
             let sheet = sheet_name_by_part
                 .get(worksheet_part)
-                .unwrap_or(worksheet_part);
+                .map(String::as_str)
+                .unwrap_or(worksheet_part.as_str());
+            entries.push((sheet, *cell, image));
+        }
+        entries.sort_by(|a, b| {
+            let sheet_cmp = a.0.cmp(b.0);
+            if sheet_cmp != std::cmp::Ordering::Equal {
+                return sheet_cmp;
+            }
+            (a.1.row, a.1.col).cmp(&(b.1.row, b.1.col))
+        });
+
+        for (sheet, cell, image) in entries {
             let sheet_sanitized = sanitize_filename_component(sheet);
             let cell_a1 = cell.to_string();
             let bytes = &image.image_bytes;
