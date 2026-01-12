@@ -1,4 +1,4 @@
-import v2Core from "./core/v2-core.js";
+import v2Core from "./core/v2-core.mjs";
 
 const {
   PACKAGE_FORMAT_VERSION,

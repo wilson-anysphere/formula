@@ -1,6 +1,19 @@
 import { expect, test } from "@playwright/test";
+import crypto from "node:crypto";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+const requireFromHere = createRequire(import.meta.url);
+
+// shared/* is CommonJS (shared/package.json sets type=commonjs).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const signingPkg: any = requireFromHere("../../../../shared/crypto/signing.js");
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const extensionPackagePkg: any = requireFromHere("../../../../shared/extension-package/index.js");
+
+const { generateEd25519KeyPair } = signingPkg;
+const { createExtensionPackageV2, readExtensionPackageV2 } = extensionPackagePkg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -206,6 +219,150 @@ test.describe("Content Security Policy (Tauri parity)", () => {
     );
 
     expect(result.sum).toBe(10);
+    expect(result.writes).toEqual([{ row: 2, col: 0, value: 10 }]);
+    expect(result.messages.some((m: any) => String(m.message).includes("Sum: 10"))).toBe(true);
+
+    expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
+  });
+
+  test("WebExtensionManager can install and load a v2 marketplace extension (blob/data module URL) without CSP violations", async ({
+    page
+  }) => {
+    const keys = generateEd25519KeyPair();
+    const extensionDir = path.join(repoRoot, "extensions", "sample-hello");
+    const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+    const pkgSha256 = crypto.createHash("sha256").update(pkgBytes).digest("hex");
+    const pkgSignatureBase64 = readExtensionPackageV2(pkgBytes)?.signature?.signatureBase64 || "";
+    expect(pkgSignatureBase64).toMatch(/\S/);
+
+    const keyDer = crypto.createPublicKey(keys.publicKeyPem).export({ type: "spki", format: "der" });
+    const publisherKeyId = crypto.createHash("sha256").update(keyDer).digest("hex");
+
+    const cspViolations: string[] = [];
+
+    page.on("console", (msg) => {
+      if (msg.type() !== "error" && msg.type() !== "warning") {
+        return;
+      }
+      const text = msg.text();
+      if (/content security policy/i.test(text)) {
+        cspViolations.push(text);
+      }
+    });
+
+    await page.route("**/api/extensions/formula.sample-hello", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: "formula.sample-hello",
+          name: "sample-hello",
+          displayName: "Sample Hello",
+          publisher: "formula",
+          description: "",
+          categories: [],
+          tags: [],
+          screenshots: [],
+          verified: true,
+          featured: false,
+          deprecated: false,
+          blocked: false,
+          malicious: false,
+          downloadCount: 0,
+          latestVersion: "1.0.0",
+          versions: [{ version: "1.0.0", sha256: pkgSha256, uploadedAt: new Date().toISOString(), yanked: false }],
+          readme: "",
+          publisherPublicKeyPem: keys.publicKeyPem,
+          publisherKeys: [{ id: publisherKeyId, publicKeyPem: keys.publicKeyPem, revoked: false }],
+          updatedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString()
+        })
+      });
+    });
+
+    await page.route("**/api/extensions/formula.sample-hello/download/1.0.0", async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.formula.extension-package",
+          "X-Package-Sha256": pkgSha256,
+          "X-Package-Signature": pkgSignatureBase64,
+          "X-Package-Format-Version": "2",
+          "X-Publisher": "formula",
+          "X-Publisher-Key-Id": publisherKeyId
+        },
+        body: pkgBytes
+      });
+    });
+
+    const response = await page.goto("/");
+    const cspHeader = response?.headers()["content-security-policy"];
+    expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
+
+    await expect(page.locator("#grid")).toHaveCount(1);
+
+    const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
+    const managerModuleUrl = viteFsUrl(path.join(repoRoot, "apps/web/src/marketplace/WebExtensionManager.ts"));
+
+    const result = await page.evaluate(
+      async ({ hostModuleUrl, managerModuleUrl }) => {
+        const { BrowserExtensionHost } = await import(hostModuleUrl);
+        const { WebExtensionManager } = await import(managerModuleUrl);
+
+        const writes: Array<{ row: number; col: number; value: unknown }> = [];
+        const cellMap = new Map<string, unknown>();
+
+        const spreadsheetApi = {
+          async getSelection() {
+            return {
+              startRow: 0,
+              startCol: 0,
+              endRow: 1,
+              endCol: 1,
+              values: [
+                [1, 2],
+                [3, 4]
+              ]
+            };
+          },
+          async getCell(row: number, col: number) {
+            const key = `${row},${col}`;
+            return cellMap.has(key) ? cellMap.get(key) : null;
+          },
+          async setCell(row: number, col: number, value: unknown) {
+            const key = `${row},${col}`;
+            cellMap.set(key, value);
+            writes.push({ row, col, value });
+          }
+        };
+
+        const host = new BrowserExtensionHost({
+          engineVersion: "1.0.0",
+          spreadsheetApi,
+          permissionPrompt: async () => true
+        });
+
+        const manager = new WebExtensionManager({ host });
+        await manager.install("formula.sample-hello");
+        const id = await manager.loadInstalled("formula.sample-hello");
+
+        const loadedMainUrl = (manager as any)?._loadedMainUrls?.get(id)?.mainUrl ?? null;
+
+        const sum = await host.executeCommand("sampleHello.sumSelection");
+        const outCell = await spreadsheetApi.getCell(2, 0);
+        const messages = host.getMessages();
+        await manager.dispose();
+        await host.dispose();
+
+        return { id, loadedMainUrl, sum, outCell, writes, messages };
+      },
+      { hostModuleUrl, managerModuleUrl }
+    );
+
+    expect(result.id).toBe("formula.sample-hello");
+    expect(result.loadedMainUrl).toMatch(/^(blob:|data:)/);
+    expect(result.sum).toBe(10);
+    expect(result.outCell).toBe(10);
     expect(result.writes).toEqual([{ row: 2, col: 0, value: 10 }]);
     expect(result.messages.some((m: any) => String(m.message).includes("Sum: 10"))).toBe(true);
 
