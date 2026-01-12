@@ -4195,6 +4195,81 @@ mod tests {
     }
 
     #[test]
+    fn add_sheet_with_explicit_id_rejects_empty_id() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let err = state
+            .add_sheet(
+                "Inserted".to_string(),
+                Some("   ".to_string()),
+                None,
+                None,
+            )
+            .expect_err("expected empty sheet id to be rejected");
+        match err {
+            AppStateError::WhatIf(message) => {
+                assert!(message.contains("sheet id"), "unexpected error: {message}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_sheet_with_explicit_id_rejects_duplicate_id_case_insensitive() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let err = state
+            .add_sheet(
+                "Inserted".to_string(),
+                Some("sHeEt1".to_string()),
+                None,
+                None,
+            )
+            .expect_err("expected duplicate sheet id to be rejected");
+        match err {
+            AppStateError::WhatIf(message) => {
+                assert!(message.contains("duplicate sheet id"), "unexpected error: {message}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn add_sheet_with_explicit_id_rejects_duplicate_name_case_insensitive() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let err = state
+            .add_sheet(
+                "sHeEt1".to_string(),
+                Some("UniqueId".to_string()),
+                None,
+                None,
+            )
+            .expect_err("expected duplicate sheet name to be rejected");
+        match err {
+            AppStateError::WhatIf(message) => {
+                assert!(
+                    message.contains("sheet name already exists"),
+                    "unexpected error: {message}"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
     fn xlsb_provenance_survives_persistent_recovery() {
         let fixture_path = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
