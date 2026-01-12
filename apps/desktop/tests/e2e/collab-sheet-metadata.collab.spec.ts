@@ -234,11 +234,60 @@ test.describe("collaboration: sheet metadata", () => {
         timeout: 30_000,
       });
 
-      // 4) Remove the currently active sheet (Sheet1) and ensure the UI auto-switches.
+      // 4) Hide the currently active sheet (Sheet1) and ensure the UI auto-switches.
       await expect
         .poll(() => pageB.evaluate(() => (window as any).__formulaApp.getCurrentSheetId()))
         .toBe("Sheet1");
 
+      await pageA.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const session = app?.getCollabSession?.() ?? null;
+        if (!session) throw new Error("Missing collab session");
+
+        session.transactLocal(() => {
+          for (let i = 0; i < session.sheets.length; i += 1) {
+            const entry: any = session.sheets.get(i);
+            const id = String(entry?.get?.("id") ?? entry?.id ?? "").trim();
+            if (id !== "Sheet1") continue;
+            entry.set("visibility", "hidden");
+            return;
+          }
+          throw new Error("Sheet1 not found for hide");
+        });
+      });
+
+      await expect(pageB.locator('[data-testid="sheet-tab-Sheet1"]')).toHaveCount(0, { timeout: 30_000 });
+      await expect
+        .poll(() => pageB.evaluate(() => (window as any).__formulaApp.getCurrentSheetId()))
+        .toBe("Sheet2");
+
+      // 5) Unhide Sheet1 and ensure the tab returns (while staying on Sheet2).
+      await pageA.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const session = app?.getCollabSession?.() ?? null;
+        if (!session) throw new Error("Missing collab session");
+
+        session.transactLocal(() => {
+          for (let i = 0; i < session.sheets.length; i += 1) {
+            const entry: any = session.sheets.get(i);
+            const id = String(entry?.get?.("id") ?? entry?.id ?? "").trim();
+            if (id !== "Sheet1") continue;
+            entry.set("visibility", "visible");
+            return;
+          }
+          throw new Error("Sheet1 not found for unhide");
+        });
+      });
+
+      await expect(pageB.getByTestId("sheet-tab-Sheet1")).toBeVisible({ timeout: 30_000 });
+      await expect(pageB.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-tab-color", "#ff0000", {
+        timeout: 30_000,
+      });
+      await expect
+        .poll(() => pageB.evaluate(() => (window as any).__formulaApp.getCurrentSheetId()))
+        .toBe("Sheet2");
+
+      // 6) Remove Sheet1 entirely and ensure the remaining client stays on Sheet2.
       await pageA.evaluate(() => {
         const app = (window as any).__formulaApp;
         const session = app?.getCollabSession?.() ?? null;
@@ -256,6 +305,7 @@ test.describe("collaboration: sheet metadata", () => {
         });
       });
 
+      await expect(pageB.locator('[data-testid="sheet-tab-Sheet1"]')).toHaveCount(0, { timeout: 30_000 });
       await expect
         .poll(() => pageB.evaluate(() => (window as any).__formulaApp.getCurrentSheetId()))
         .toBe("Sheet2");
