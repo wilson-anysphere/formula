@@ -57,6 +57,24 @@
  *    * Sparse row height overrides (base units, zoom=1), keyed by 0-based row index.
  *    *\/
  *   rowHeights?: Record<string, number>,
+ *   /**
+ *    * Default sheet format applied to all cells unless overridden by a row/column/cell format.
+ *    *
+ *    * Stored as a style object (not a style id) so BranchService snapshots are self-contained.
+ *    *\/
+ *   defaultFormat?: JsonObject,
+ *   /**
+ *    * Sparse row format overrides keyed by 0-based row index.
+ *    *
+ *    * Values are style objects (not style ids).
+ *    *\/
+ *   rowFormats?: Record<string, JsonObject>,
+ *   /**
+ *    * Sparse column format overrides keyed by 0-based column index.
+ *    *
+ *    * Values are style objects (not style ids).
+ *    *\/
+ *   colFormats?: Record<string, JsonObject>,
  * }} SheetViewState
  *
  * @typedef {{ id: string, name: string | null, view?: SheetViewState }} SheetMeta

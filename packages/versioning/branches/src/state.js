@@ -36,11 +36,54 @@ function normalizeFrozenCount(value) {
 
 /**
  * @param {any} value
- * @returns {{ frozenRows: number, frozenCols: number, colWidths?: Record<string, number>, rowHeights?: Record<string, number> }}
+ * @returns {{
+ *   frozenRows: number,
+ *   frozenCols: number,
+ *   colWidths?: Record<string, number>,
+ *   rowHeights?: Record<string, number>,
+ *   defaultFormat?: Record<string, any>,
+ *   rowFormats?: Record<string, Record<string, any>>,
+ *   colFormats?: Record<string, Record<string, any>>,
+ * }}
  */
 function normalizeSheetView(value) {
   const frozenRows = normalizeFrozenCount(isRecord(value) ? value.frozenRows : undefined);
   const frozenCols = normalizeFrozenCount(isRecord(value) ? value.frozenCols : undefined);
+
+  const normalizeFormatObject = (raw) => {
+    if (!isRecord(raw)) return null;
+    // Treat empty objects as "no format" so we don't bloat state with meaningless defaults.
+    if (Object.keys(raw).length === 0) return null;
+    return structuredClone(raw);
+  };
+
+  const normalizeFormatOverrides = (raw) => {
+    if (!raw) return null;
+    /** @type {Record<string, any>} */
+    const out = {};
+
+    if (Array.isArray(raw)) {
+      for (const entry of raw) {
+        const index = Array.isArray(entry) ? entry[0] : entry?.index;
+        const format = Array.isArray(entry) ? entry[1] : (entry?.format ?? entry?.style);
+        const idx = Number(index);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        const normalized = normalizeFormatObject(format);
+        if (normalized == null) continue;
+        out[String(idx)] = normalized;
+      }
+    } else if (isRecord(raw)) {
+      for (const [key, format] of Object.entries(raw)) {
+        const idx = Number(key);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        const normalized = normalizeFormatObject(format);
+        if (normalized == null) continue;
+        out[String(idx)] = normalized;
+      }
+    }
+
+    return Object.keys(out).length === 0 ? null : out;
+  };
 
   const normalizeAxisSize = (raw) => {
     const num = Number(raw);
@@ -80,11 +123,18 @@ function normalizeSheetView(value) {
   const colWidths = isRecord(value) ? normalizeAxisOverrides(value.colWidths) : null;
   const rowHeights = isRecord(value) ? normalizeAxisOverrides(value.rowHeights) : null;
 
+  const defaultFormat = isRecord(value) ? normalizeFormatObject(value.defaultFormat) : null;
+  const rowFormats = isRecord(value) ? normalizeFormatOverrides(value.rowFormats) : null;
+  const colFormats = isRecord(value) ? normalizeFormatOverrides(value.colFormats) : null;
+
   return {
     frozenRows,
     frozenCols,
     ...(colWidths ? { colWidths } : {}),
     ...(rowHeights ? { rowHeights } : {}),
+    ...(defaultFormat ? { defaultFormat } : {}),
+    ...(rowFormats ? { rowFormats } : {}),
+    ...(colFormats ? { colFormats } : {}),
   };
 }
 
