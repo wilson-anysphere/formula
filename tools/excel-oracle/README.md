@@ -140,6 +140,15 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
 
 This subset corresponds to the cases tagged `odd_coupon_validation` in the canonical corpus.
 
+To generate only the **odd-coupon boundary** date-equality scenarios (e.g. `issue == settlement`),
+use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 `
+  -CasesPath tools/excel-oracle/odd_coupon_boundary_cases.json `
+  -OutPath  tests/compatibility/excel-oracle/datasets/excel-oracle.json
+```
+
 To regenerate the derived odd-coupon subset corpora (boundary + validation) from the canonical
 corpus, run:
 
