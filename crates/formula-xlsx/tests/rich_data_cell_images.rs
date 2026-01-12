@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::io::{Cursor, Write};
 
 use formula_model::CellRef;
-use formula_xlsx::rich_data::extract_rich_cell_images;
 use formula_xlsx::XlsxPackage;
 
 fn build_rich_image_xlsx(
@@ -218,7 +217,7 @@ fn build_rich_image_xlsx_with_custom_metadata_part() -> Vec<u8> {
 fn extracts_rich_cell_image_bytes_from_vm_chain() {
     let bytes = build_rich_image_xlsx(true, true, false);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
-    let images = extract_rich_cell_images(&pkg).expect("extract images");
+    let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
 
     let mut expected: HashMap<(String, CellRef), Vec<u8>> = HashMap::new();
     expected.insert(
@@ -233,7 +232,7 @@ fn extracts_rich_cell_image_bytes_from_vm_chain() {
 fn missing_metadata_xml_returns_empty_map() {
     let bytes = build_rich_image_xlsx(false, true, false);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
-    let images = extract_rich_cell_images(&pkg).expect("extract images");
+    let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
     assert!(images.is_empty());
 }
 
@@ -241,7 +240,7 @@ fn missing_metadata_xml_returns_empty_map() {
 fn missing_rich_value_rels_returns_empty_map() {
     let bytes = build_rich_image_xlsx(true, false, false);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
-    let images = extract_rich_cell_images(&pkg).expect("extract images");
+    let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
     assert!(images.is_empty());
 }
 
@@ -249,7 +248,7 @@ fn missing_rich_value_rels_returns_empty_map() {
 fn extracts_rich_cell_image_bytes_when_relationship_target_has_fragment() {
     let bytes = build_rich_image_xlsx(true, true, true);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
-    let images = extract_rich_cell_images(&pkg).expect("extract images");
+    let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
 
     let mut expected: HashMap<(String, CellRef), Vec<u8>> = HashMap::new();
     expected.insert(
@@ -264,7 +263,7 @@ fn extracts_rich_cell_image_bytes_when_relationship_target_has_fragment() {
 fn extracts_rich_cell_image_bytes_from_workbook_sheet_metadata_relationship() {
     let bytes = build_rich_image_xlsx_with_custom_metadata_part();
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
-    let images = extract_rich_cell_images(&pkg).expect("extract images");
+    let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
 
     let mut expected: HashMap<(String, CellRef), Vec<u8>> = HashMap::new();
     expected.insert(
@@ -283,7 +282,7 @@ fn rich_data_cell_images_extracts_image_in_cell_richdata_fixture() {
         .unwrap_or_else(|e| panic!("read fixture {}: {e}", fixture_path.display()));
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
 
-    let images = extract_rich_cell_images(&pkg).expect("extract images");
+    let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
 
     let key = ("Sheet1".to_string(), CellRef::from_a1("A1").unwrap());
     let expected = pkg
@@ -308,7 +307,7 @@ fn rich_data_cell_images_extracts_image_in_cell_fixture() {
         .unwrap_or_else(|e| panic!("read fixture {}: {e}", fixture_path.display()));
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
 
-    let images = extract_rich_cell_images(&pkg).expect("extract images");
+    let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
 
     let img1 = pkg
         .part("xl/media/image1.png")

@@ -1,7 +1,6 @@
 use std::io::Write as _;
 
 use formula_model::CellRef;
-use formula_xlsx::rich_data::extract_rich_cell_images;
 use formula_xlsx::XlsxPackage;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipWriter};
@@ -128,7 +127,9 @@ fn rich_value_part_indices_use_numeric_suffix_ordering() {
     ]);
 
     let pkg = XlsxPackage::from_bytes(&xlsx_bytes).expect("parse xlsx bytes");
-    let images = extract_rich_cell_images(&pkg).expect("extract rich cell images");
+    let images = pkg
+        .extract_rich_cell_images_by_cell()
+        .expect("extract rich cell images");
 
     let key = ("Sheet1".to_string(), CellRef::from_a1("A1").unwrap());
     assert_eq!(
@@ -137,4 +138,3 @@ fn rich_value_part_indices_use_numeric_suffix_ordering() {
         "rich value global index should be based on numeric-suffix ordering"
     );
 }
-

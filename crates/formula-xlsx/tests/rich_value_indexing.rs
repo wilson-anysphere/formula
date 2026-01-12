@@ -1,7 +1,6 @@
 use std::io::{Cursor, Write};
 
-use formula_xlsx::rich_data::{ExtractedRichValueImages, RichValueWarning};
-use formula_xlsx::XlsxPackage;
+use formula_xlsx::{ExtractedRichValueImages, RichValueWarning, XlsxPackage};
 
 fn build_package(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
@@ -126,4 +125,3 @@ fn rich_value_indexing_collision_is_deterministic_and_warns() {
         "expected a DuplicateIndex warning, got: {warnings:?}"
     );
 }
-

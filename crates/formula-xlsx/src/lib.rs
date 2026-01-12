@@ -110,6 +110,7 @@ pub use recalc_policy::RecalcPolicy;
 pub use rich_data::{discover_rich_data_part_names, extract_rich_cell_images, RichDataError};
 pub use rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map;
 pub use rich_data::resolve_rich_value_image_targets;
+pub use rich_data::{ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning};
 pub use rich_data::rich_value_structure::{
     parse_rich_value_structure_xml, RichValueStructure, RichValueStructureMember, RichValueStructures,
 };
