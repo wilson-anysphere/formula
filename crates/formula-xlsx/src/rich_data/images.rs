@@ -70,7 +70,11 @@ pub fn resolve_rich_value_image_targets(
         {
             continue;
         }
-        let target = crate::path::resolve_target(RICH_VALUE_REL_XML, &rel.target);
+        let target = strip_fragment(&rel.target);
+        if target.is_empty() {
+            continue;
+        }
+        let target = crate::path::resolve_target(RICH_VALUE_REL_XML, target);
         targets_by_id.insert(rel.id, target);
     }
 
@@ -173,6 +177,13 @@ fn parse_rdrichvaluestructure_local_image_positions(
     Ok(out)
 }
 
+fn strip_fragment(target: &str) -> &str {
+    target
+        .split_once('#')
+        .map(|(base, _)| base)
+        .unwrap_or(target)
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -236,6 +247,45 @@ mod tests {
                 Some("xl/media/image2.jpg".to_string())
             ]
         );
+    }
+
+    #[test]
+    fn resolves_image_targets_strip_uri_fragments() {
+        let rich_value_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv type="0">
+      <v kind="rel">0</v>
+    </rv>
+  </values>
+</rvData>"#;
+
+        let rich_value_rel_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rels>
+    <rel r:id="rId7"/>
+  </rels>
+</rvRel>"#;
+
+        let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId7" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png#fragment"/>
+</Relationships>"#;
+
+        let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        parts.insert("xl/richData/richValue.xml".to_string(), rich_value_xml.to_vec());
+        parts.insert(
+            "xl/richData/richValueRel.xml".to_string(),
+            rich_value_rel_xml.to_vec(),
+        );
+        parts.insert(
+            "xl/richData/_rels/richValueRel.xml.rels".to_string(),
+            rels_xml.to_vec(),
+        );
+
+        let resolved = resolve_rich_value_image_targets(&parts).expect("resolve");
+        assert_eq!(resolved, vec![Some("xl/media/image1.png".to_string())]);
     }
 
     #[test]
