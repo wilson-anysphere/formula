@@ -218,11 +218,11 @@ dialog.page-setup-dialog::backdrop {
 }
 
 .statusbar__debug {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  color: var(--text-secondary);
+  /*
+    Keep debug/test status elements in the DOM for Playwright + SpreadsheetApp bindings,
+    but hide them from the production status bar so the UI matches an Excel-like layout.
+  */
+  display: none;
 }
 
 .statusbar__debug > div {
