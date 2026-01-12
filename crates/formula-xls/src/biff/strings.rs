@@ -95,67 +95,7 @@ pub(crate) fn parse_biff8_short_string(
     }
     let cch = input[0] as usize;
     let flags = input[1];
-    let mut offset = 2usize;
-
-    let richtext_runs = if flags & 0x08 != 0 {
-        if input.len() < offset + 2 {
-            return Err("unexpected end of string".to_string());
-        }
-        let runs = u16::from_le_bytes([input[offset], input[offset + 1]]) as usize;
-        offset += 2;
-        runs
-    } else {
-        0
-    };
-
-    let ext_size = if flags & 0x04 != 0 {
-        if input.len() < offset + 4 {
-            return Err("unexpected end of string".to_string());
-        }
-        let size = u32::from_le_bytes([
-            input[offset],
-            input[offset + 1],
-            input[offset + 2],
-            input[offset + 3],
-        ]) as usize;
-        offset += 4;
-        size
-    } else {
-        0
-    };
-
-    let is_unicode = (flags & 0x01) != 0;
-    let char_bytes = if is_unicode {
-        cch.checked_mul(2)
-            .ok_or_else(|| "string length overflow".to_string())?
-    } else {
-        cch
-    };
-
-    let chars = input
-        .get(offset..offset + char_bytes)
-        .ok_or_else(|| "unexpected end of string".to_string())?;
-    offset += char_bytes;
-
-    let value = if is_unicode {
-        let mut u16s = Vec::with_capacity(cch);
-        for chunk in chars.chunks_exact(2) {
-            u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
-        }
-        String::from_utf16_lossy(&u16s)
-    } else {
-        decode_ansi(codepage, chars)
-    };
-
-    let richtext_bytes = richtext_runs
-        .checked_mul(4)
-        .ok_or_else(|| "rich text run count overflow".to_string())?;
-    if input.len() < offset + richtext_bytes + ext_size {
-        return Err("unexpected end of string".to_string());
-    }
-    offset += richtext_bytes + ext_size;
-
-    Ok((value, offset))
+    parse_biff8_string_payload(input, cch, flags, 2, codepage)
 }
 
 /// BIFF8 `XLUnicodeString` [MS-XLS 2.5.268] (16-bit length).
@@ -169,8 +109,16 @@ pub(crate) fn parse_biff8_unicode_string(
 
     let cch = u16::from_le_bytes([input[0], input[1]]) as usize;
     let flags = input[2];
-    let mut offset = 3usize;
+    parse_biff8_string_payload(input, cch, flags, 3, codepage)
+}
 
+fn parse_biff8_string_payload(
+    input: &[u8],
+    cch: usize,
+    flags: u8,
+    mut offset: usize,
+    codepage: u16,
+) -> Result<(String, usize), String> {
     let richtext_runs = if flags & 0x08 != 0 {
         if input.len() < offset + 2 {
             return Err("unexpected end of string".to_string());
@@ -232,10 +180,7 @@ pub(crate) fn parse_biff8_unicode_string(
     Ok((value, offset))
 }
 
-pub(crate) fn parse_biff5_short_string_best_effort(
-    input: &[u8],
-    codepage: u16,
-) -> Option<String> {
+pub(crate) fn parse_biff5_short_string_best_effort(input: &[u8], codepage: u16) -> Option<String> {
     let (&len, rest) = input.split_first()?;
     let take = (len as usize).min(rest.len());
     Some(decode_ansi(codepage, &rest[..take]))
