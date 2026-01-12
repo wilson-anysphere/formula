@@ -5,6 +5,10 @@ use formula_xlsx::XlsxPackage;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
+const IMAGE1: &[u8] = b"image-1-bytes";
+const IMAGE2: &[u8] = b"image-2-bytes";
+const IMAGE3: &[u8] = b"image-3-bytes";
+
 fn build_zip(parts: &[(&str, &[u8])]) -> Vec<u8> {
     let cursor = std::io::Cursor::new(Vec::new());
     let mut zip = ZipWriter::new(cursor);
@@ -18,8 +22,7 @@ fn build_zip(parts: &[(&str, &[u8])]) -> Vec<u8> {
     zip.finish().expect("finish zip").into_inner()
 }
 
-#[test]
-fn rich_value_part_indices_use_numeric_suffix_ordering() {
+fn build_numeric_suffix_order_fixture(rich_value_part_base: &str) -> Vec<u8> {
     // Minimal workbook with one sheet (Sheet1) and a single vm-mapped cell (A1).
     let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -85,7 +88,7 @@ fn rich_value_part_indices_use_numeric_suffix_ordering() {
     let rich_value10_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
   <rv><v>2</v></rv>
-</rvData>"#;
+ </rvData>"#;
 
     // Relationship index -> rId list.
     let rich_value_rel_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -104,28 +107,31 @@ fn rich_value_part_indices_use_numeric_suffix_ordering() {
   <Relationship Id="rId3" Type="http://example.com/image" Target="../media/image3.png"/>
 </Relationships>"#;
 
-    let image1 = b"image-1-bytes";
-    let image2 = b"image-2-bytes";
-    let image3 = b"image-3-bytes";
+    let rich_value_part = format!("xl/richData/{rich_value_part_base}.xml");
+    let rich_value_part2 = format!("xl/richData/{rich_value_part_base}2.xml");
+    let rich_value_part10 = format!("xl/richData/{rich_value_part_base}10.xml");
 
-    let xlsx_bytes = build_zip(&[
+    build_zip(&[
         ("xl/workbook.xml", workbook_xml),
         ("xl/_rels/workbook.xml.rels", workbook_rels),
         ("xl/worksheets/sheet1.xml", sheet1_xml),
         ("xl/metadata.xml", metadata_xml),
-        ("xl/richData/richValue.xml", rich_value_xml),
-        ("xl/richData/richValue2.xml", rich_value2_xml),
-        ("xl/richData/richValue10.xml", rich_value10_xml),
+        (rich_value_part.as_str(), rich_value_xml),
+        (rich_value_part2.as_str(), rich_value2_xml),
+        (rich_value_part10.as_str(), rich_value10_xml),
         ("xl/richData/richValueRel.xml", rich_value_rel_xml),
         (
             "xl/richData/_rels/richValueRel.xml.rels",
             rich_value_rel_rels_xml,
         ),
-        ("xl/media/image1.png", image1),
-        ("xl/media/image2.png", image2),
-        ("xl/media/image3.png", image3),
-    ]);
+        ("xl/media/image1.png", IMAGE1),
+        ("xl/media/image2.png", IMAGE2),
+        ("xl/media/image3.png", IMAGE3),
+    ])
+}
 
+fn assert_rich_value_part_indices_use_numeric_suffix_ordering(rich_value_part_base: &str) {
+    let xlsx_bytes = build_numeric_suffix_order_fixture(rich_value_part_base);
     let pkg = XlsxPackage::from_bytes(&xlsx_bytes).expect("parse xlsx bytes");
     let images = pkg
         .extract_rich_cell_images_by_cell()
@@ -134,7 +140,17 @@ fn rich_value_part_indices_use_numeric_suffix_ordering() {
     let key = ("Sheet1".to_string(), CellRef::from_a1("A1").unwrap());
     assert_eq!(
         images.get(&key).map(|v| v.as_slice()),
-        Some(image3.as_slice()),
+        Some(IMAGE3),
         "rich value global index should be based on numeric-suffix ordering"
     );
+}
+
+#[test]
+fn rich_value_part_indices_use_numeric_suffix_ordering() {
+    assert_rich_value_part_indices_use_numeric_suffix_ordering("richValue");
+}
+
+#[test]
+fn rich_values_part_indices_use_numeric_suffix_ordering() {
+    assert_rich_value_part_indices_use_numeric_suffix_ordering("richValues");
 }
