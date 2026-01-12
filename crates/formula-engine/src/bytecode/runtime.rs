@@ -8454,6 +8454,41 @@ mod tests {
     }
 
     #[test]
+    fn eval_ast_choose_is_lazy() {
+        #[derive(Clone, Copy)]
+        struct PanicGrid {
+            panic_coord: CellCoord,
+        }
+
+        impl Grid for PanicGrid {
+            fn get_value(&self, coord: CellCoord) -> Value {
+                if coord == self.panic_coord {
+                    panic!("unexpected evaluation of cell {coord:?}");
+                }
+                Value::Empty
+            }
+
+            fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+                None
+            }
+
+            fn bounds(&self) -> (i32, i32) {
+                (10, 10)
+            }
+        }
+
+        let origin = CellCoord::new(0, 0);
+        let expr = crate::bytecode::parse_formula("=CHOOSE(2, A2, 7)", origin).expect("parse");
+        // A2 relative to origin (A1) => (row=1, col=0)
+        let grid = PanicGrid {
+            panic_coord: CellCoord::new(1, 0),
+        };
+
+        let value = eval_ast(&expr, &grid, 0, origin, &crate::LocaleConfig::en_us());
+        assert_eq!(value, Value::Number(7.0));
+    }
+
+    #[test]
     fn range_aggregates_return_ref_for_out_of_bounds_ranges() {
         let grid = ColumnarGrid::new(10, 10);
 
