@@ -3376,18 +3376,21 @@ export class SpreadsheetApp {
   }
 
   insertDate(): void {
+    if (this.isEditing()) return;
     this.insertCurrentDateTimeIntoSelection("date");
     this.refresh();
     this.focus();
   }
 
   insertTime(): void {
+    if (this.isEditing()) return;
     this.insertCurrentDateTimeIntoSelection("time");
     this.refresh();
     this.focus();
   }
 
   autoSum(): void {
+    if (this.isEditing()) return;
     this.autoSumSelection();
     this.refresh();
     this.focus();
