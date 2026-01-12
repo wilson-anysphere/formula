@@ -25,24 +25,49 @@ pub const MAX_SQL_QUERY_CELL_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
 pub const SQL_QUERY_TIMEOUT_MS: u64 = 10_000;
 
 fn sql_query_timeout_ms() -> u64 {
-    std::env::var("FORMULA_SQL_QUERY_TIMEOUT_MS")
+    let default = SQL_QUERY_TIMEOUT_MS;
+    let Some(value) = std::env::var("FORMULA_SQL_QUERY_TIMEOUT_MS")
         .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(SQL_QUERY_TIMEOUT_MS)
+        .and_then(|v| v.parse::<u64>().ok())
+    else {
+        return default;
+    };
+    // Allow relaxing limits only in debug builds; in release we only honor stricter settings.
+    if cfg!(debug_assertions) {
+        value
+    } else {
+        value.min(default)
+    }
 }
 
 fn sql_query_max_bytes() -> usize {
-    std::env::var("FORMULA_SQL_QUERY_MAX_BYTES")
+    let default = MAX_SQL_QUERY_BYTES;
+    let Some(value) = std::env::var("FORMULA_SQL_QUERY_MAX_BYTES")
         .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(MAX_SQL_QUERY_BYTES)
+        .and_then(|v| v.parse::<usize>().ok())
+    else {
+        return default;
+    };
+    if cfg!(debug_assertions) {
+        value
+    } else {
+        value.min(default)
+    }
 }
 
 fn sql_query_max_cell_bytes() -> usize {
-    std::env::var("FORMULA_SQL_QUERY_MAX_CELL_BYTES")
+    let default = MAX_SQL_QUERY_CELL_BYTES;
+    let Some(value) = std::env::var("FORMULA_SQL_QUERY_MAX_CELL_BYTES")
         .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(MAX_SQL_QUERY_CELL_BYTES)
+        .and_then(|v| v.parse::<usize>().ok())
+    else {
+        return default;
+    };
+    if cfg!(debug_assertions) {
+        value
+    } else {
+        value.min(default)
+    }
 }
 
 fn sql_query_timeout_duration() -> Duration {
