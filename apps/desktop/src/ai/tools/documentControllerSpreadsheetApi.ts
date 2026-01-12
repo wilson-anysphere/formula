@@ -564,16 +564,101 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
         return;
       }
 
+      const sheetModel = this.controller.model.sheets.get(range.sheet);
+      const cellMap: Map<string, any> | undefined = sheetModel?.cells;
+      const hasLayeredFormattingWritePath = typeof (this.controller as any).getCellFormat === "function";
+
+      // Cache supported-format projections for styleIds since writeRange might touch thousands of cells (sort_range).
+      const styleIdFormatCache = new Map<number, CellFormat | undefined>();
+      const getFormatForStyleId = (styleId: number): CellFormat | undefined => {
+        if (styleId === 0) return undefined;
+        if (styleIdFormatCache.has(styleId)) return styleIdFormatCache.get(styleId);
+        const style = this.controller.styleTable.get(styleId);
+        const format = styleToCellFormat(style);
+        styleIdFormatCache.set(styleId, format);
+        return format;
+      };
+
+      const inheritedFormatCache = new Map<string, CellFormat | undefined>();
+      const getInheritedFormat = (styleIds: [number, number, number]): CellFormat | undefined => {
+        const [sheetStyleId, rowStyleId, colStyleId] = styleIds;
+        if (sheetStyleId === 0 && rowStyleId === 0 && colStyleId === 0) return undefined;
+        const key = `${sheetStyleId},${rowStyleId},${colStyleId}`;
+        if (inheritedFormatCache.has(key)) return inheritedFormatCache.get(key);
+
+        const sheetFormat = getFormatForStyleId(sheetStyleId);
+        const colFormat = getFormatForStyleId(colStyleId);
+        const rowFormat = getFormatForStyleId(rowStyleId);
+
+        const merged: CellFormat = { ...(sheetFormat ?? {}), ...(colFormat ?? {}), ...(rowFormat ?? {}) };
+        const out = Object.keys(merged).length > 0 ? merged : undefined;
+        inheritedFormatCache.set(key, out);
+        return out;
+      };
+
+      const effectiveFormatCache = new Map<string, CellFormat | undefined>();
+      const getEffectiveFormat = (styleIds: [number, number, number, number]): CellFormat | undefined => {
+        const [sheetStyleId, rowStyleId, colStyleId, cellStyleId] = styleIds;
+        if (sheetStyleId === 0 && rowStyleId === 0 && colStyleId === 0 && cellStyleId === 0) return undefined;
+        const key = `${sheetStyleId},${rowStyleId},${colStyleId},${cellStyleId}`;
+        if (effectiveFormatCache.has(key)) return effectiveFormatCache.get(key);
+
+        const inherited = getInheritedFormat([sheetStyleId, rowStyleId, colStyleId]);
+        const cellFormat = getFormatForStyleId(cellStyleId);
+        const merged: CellFormat = { ...(inherited ?? {}), ...(cellFormat ?? {}) };
+        const out = Object.keys(merged).length > 0 ? merged : undefined;
+        effectiveFormatCache.set(key, out);
+        return out;
+      };
+
       const inputs: any[][] = [];
       for (let r = 0; r < rowCount; r++) {
         const srcRow = cells[r] ?? [];
         const outRow: any[] = [];
         for (let c = 0; c < colCount; c++) {
           const cell = srcRow[c] ?? { value: null };
-          const coord = { row: range.startRow - 1 + r, col: range.startCol - 1 + c };
-          const before = this.controller.getCell(range.sheet, coord);
-          const baseStyle = before.styleId === 0 ? {} : this.controller.styleTable.get(before.styleId);
-          const nextStyle = styleForWrite(baseStyle, cell.format);
+          const row0 = range.startRow - 1 + r;
+          const col0 = range.startCol - 1 + c;
+
+          const cellState = cellMap?.get(`${row0},${col0}`);
+          const cellStyleId = typeof cellState?.styleId === "number" ? cellState.styleId : 0;
+          const baseCellStyle = cellStyleId === 0 ? {} : this.controller.styleTable.get(cellStyleId);
+
+          const styleIds: [number, number, number, number] = hasLayeredFormattingWritePath
+            ? [
+                typeof sheetModel?.defaultStyleId === "number" ? sheetModel.defaultStyleId : 0,
+                typeof sheetModel?.rowStyleIds?.get === "function" ? (sheetModel.rowStyleIds.get(row0) ?? 0) : 0,
+                typeof sheetModel?.colStyleIds?.get === "function" ? (sheetModel.colStyleIds.get(col0) ?? 0) : 0,
+                cellStyleId
+              ]
+            : [0, 0, 0, cellStyleId];
+
+          const inheritedFormat = hasLayeredFormattingWritePath ? getInheritedFormat([styleIds[0], styleIds[1], styleIds[2]]) : undefined;
+          const effectiveFormat = hasLayeredFormattingWritePath ? getEffectiveFormat(styleIds) : getFormatForStyleId(cellStyleId);
+
+          const requestedFormat = cell.format && Object.keys(cell.format).length > 0 ? cell.format : null;
+
+          // Treat per-cell formats as a patch on top of the cell's *effective* formatting, but
+          // only write the minimum set of cell-level overrides required to achieve that result.
+          // This prevents layered defaults (sheet/row/col) from being materialized into per-cell styles.
+          let formatToWrite: CellFormat | null | undefined = null;
+          if (!requestedFormat) {
+            // No format specified for this cell => clear ai-tools supported keys (preserve other style keys).
+            formatToWrite = null;
+          } else {
+            const desiredEffective: CellFormat = { ...(effectiveFormat ?? {}), ...requestedFormat };
+            const override: CellFormat = {};
+            const inherited = inheritedFormat ?? {};
+            for (const key of Object.keys(desiredEffective) as Array<keyof CellFormat>) {
+              const value = desiredEffective[key];
+              if (value === undefined) continue;
+              if ((inherited as any)[key] === value) continue;
+              (override as any)[key] = value;
+            }
+            formatToWrite = Object.keys(override).length > 0 ? override : {};
+          }
+
+          const nextStyle = styleForWrite(baseCellStyle, formatToWrite);
           const input: any = { format: nextStyle };
           if (cell.formula) input.formula = cell.formula;
           else input.value = cell.value ?? null;

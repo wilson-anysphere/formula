@@ -303,6 +303,36 @@ describe("DocumentControllerSpreadsheetApi", () => {
     expect(effectiveAfterClear.border).toBeUndefined();
   });
 
+  it("preserves inherited column formatting when writeRange writes partial per-cell formats (layered formats)", () => {
+    const controller = new DocumentController();
+    // Apply full-column formatting via the layered column style layer.
+    controller.setColFormat("Sheet1", 0, {
+      font: { bold: true },
+      fill: { pattern: "solid", fgColor: "#FFFFFF00" }
+    });
+
+    const sheetModel = controller.model.sheets.get("Sheet1");
+    expect(sheetModel).toBeDefined();
+    // Column-level formatting should not materialize per-cell styleIds.
+    expect(sheetModel!.cells.size).toBe(0);
+    expect(controller.getCell("Sheet1", "A1").styleId).toBe(0);
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    api.writeRange(
+      { sheet: "Sheet1", startRow: 1, startCol: 1, endRow: 2, endCol: 1 },
+      [[{ value: 1, format: { italic: true } }], [{ value: null }]]
+    );
+
+    // Writing A1's style should not materialize formatting into the rest of the column.
+    expect(sheetModel!.cells.size).toBe(1);
+    expect(controller.getCell("Sheet1", "A2").styleId).toBe(0);
+
+    const effectiveA1 = controller.getCellFormat("Sheet1", "A1");
+    expect(effectiveA1.font?.bold).toBe(true);
+    expect(effectiveA1.font?.italic).toBe(true);
+    expect(effectiveA1.fill?.fgColor).toBe("#FFFFFF00");
+  });
+
   it("clears stale formatting when writeRange moves formatted cells (no contamination)", () => {
     const controller = new DocumentController();
     controller.setRangeValues("Sheet1", "A1:B1", [[1, 2]]);
