@@ -36,6 +36,14 @@ Notes:
   and omits `richValueTypes.xml` / `richValueStructure.xml`.
 * For linked data types and richer payloads, Excel is expected to add the supporting “types” and
   “structure” tables; treat their presence as feature-dependent.
+* File naming varies across producers:
+  * “Excel-like” naming: `richValue.xml`, `richValueTypes.xml`, `richValueStructure.xml`
+  * “rdRichValue” naming (observed from `rust_xlsxwriter` output in this repo):
+    * `rdrichvalue.xml`
+    * `rdrichvaluestructure.xml`
+    * `rdRichValueTypes.xml` (note casing)
+  For robust parsing, prefer relationship discovery + local-name matching rather than hardcoding a single
+  filename spelling/casing.
 
 ## Observed “image in cell” fixture (in-repo)
 
@@ -81,6 +89,27 @@ an image-in-cell backed by RichData. Key observations (useful for implementers):
   this file.
 * `[Content_Types].xml` does **not** include overrides for `xl/metadata.xml` or `xl/richData/*` in this fixture;
   it relies on the default `application/xml`. Preserve whatever the source workbook uses.
+
+### Observed “rdRichValue*” naming (rust_xlsxwriter-generated)
+
+This repo also contains a test that generates a “Place in Cell” workbook using `rust_xlsxwriter` and asserts
+the presence of RichData parts:
+
+* `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
+
+The generated workbook uses a different naming convention for the rich value store:
+
+* `xl/richData/rdrichvalue.xml`
+* `xl/richData/rdrichvaluestructure.xml`
+* `xl/richData/rdRichValueTypes.xml` (note casing)
+* `xl/richData/richValueRel.xml` + `xl/richData/_rels/richValueRel.xml.rels`
+
+And the workbook relationships include versioned Microsoft relationship types (partial list, asserted in the test):
+
+* `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` (rdRichValue tables)
+* `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel` (richValueRel table)
+
+Treat these as equivalent to the `richValue*` tables for the purposes of “images in cell” round-trip.
 
 ### Roles (high level)
 
@@ -413,11 +442,15 @@ this element and only include the relationship in `workbook.xml.rels` (observed 
 `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`). Preserve whichever representation the source workbook
 uses.
 
-The richValue relationships are Microsoft-specific. Observed in
-`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`:
+The richValue relationships are Microsoft-specific. Observed in this repo:
 
 * `http://schemas.microsoft.com/office/2017/06/relationships/richValue` → `xl/richData/richValue.xml`
 * `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` → `xl/richData/richValueRel.xml`
+  * Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
+* `http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue` → `xl/richData/rdrichvalue.xml` (and related rdRichValue tables)
+  * Observed (via assertions) in `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
+* `http://schemas.microsoft.com/office/2022/10/relationships/richValueRel` → `xl/richData/richValueRel.xml`
+  * Observed (via assertions) in `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
 
 Likely (not observed in fixtures here, but expected for richer payloads):
 
