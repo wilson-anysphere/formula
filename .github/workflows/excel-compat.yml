@@ -64,7 +64,13 @@ jobs:
 
   excel-oracle:
     needs: conflict-marker-guard
-    runs-on: windows-latest
+    # Validating the engine (against a pinned dataset) does not require Excel and can run on
+    # GitHub-hosted `windows-latest`.
+    #
+    # Generating a real Excel oracle dataset *does* require desktop Excel, which is typically only
+    # available on a self-hosted runner. Route workflow_dispatch runs that need Excel generation to
+    # a runner labeled `self-hosted` + `windows` + `excel` (see tools/excel-oracle/self-hosted-runner.md).
+    runs-on: ${{ fromJSON((github.event_name == 'workflow_dispatch' && (github.event.inputs.mode == 'generate-oracle' || github.event.inputs.oracle_source == 'generate' || hashFiles('tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json') == '')) && '["self-hosted","windows","excel"]' || '["windows-latest"]') }}
     timeout-minutes: 60
     # For push/PR we validate against a pinned dataset (no Excel required).
     # If there is no pinned dataset committed yet, skip the job to avoid failing CI.

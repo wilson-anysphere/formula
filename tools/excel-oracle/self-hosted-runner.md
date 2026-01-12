@@ -13,6 +13,8 @@ GitHub-hosted `windows-latest` runners typically do **not** include Excel, so ge
 
 3) Install the GitHub Actions self-hosted runner for this repo.
    - Recommended: assign labels like `windows`, `excel`, `office`.
+   - The workflow `.github/workflows/excel-compat.yml` routes Excel-generation runs to a runner
+     labeled `self-hosted` + `windows` + `excel`.
 
 4) Run the runner **interactively** (important).
    - Excel COM automation often fails when the runner is installed as a Windows Service because Office expects a user profile + desktop session.
