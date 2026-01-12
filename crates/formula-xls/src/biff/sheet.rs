@@ -33,6 +33,12 @@ const RECORD_MULRK: u16 = 0x00BD;
 const RECORD_MULBLANK: u16 = 0x00BE;
 /// HLINK [MS-XLS 2.4.110]
 const RECORD_HLINK: u16 = 0x01B8;
+/// NOTE [MS-XLS 2.4.161]
+const RECORD_NOTE: u16 = 0x001C;
+/// OBJ [MS-XLS 2.4.178]
+const RECORD_OBJ: u16 = 0x005D;
+/// TXO [MS-XLS 2.4.323]
+const RECORD_TXO: u16 = 0x01B6;
 
 // View/UX records (worksheet substream).
 // - WINDOW2: [MS-XLS 2.4.354]
@@ -705,6 +711,19 @@ pub(crate) struct SheetHyperlinks {
     pub(crate) warnings: Vec<String>,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct SheetNoteComments {
+    pub(crate) comments: Vec<ParsedNoteComment>,
+    pub(crate) warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ParsedNoteComment {
+    pub(crate) cell_ref: CellRef,
+    pub(crate) author: Option<String>,
+    pub(crate) text: String,
+}
+
 // Hyperlink record bits (linkOpts / grbit). These come from the MS-XLS HLINK record spec, but we
 // treat them as best-effort: Excel files in the wild sometimes contain slightly different flag
 // combinations depending on link type.
@@ -774,6 +793,301 @@ pub(crate) fn parse_biff_sheet_hyperlinks(
     }
 
     Ok(out)
+}
+
+/// Scan a worksheet BIFF substream for legacy NOTE/OBJ/TXO cell comments ("notes").
+///
+/// This is a best-effort parser: malformed/incomplete record sequences are skipped and surfaced as
+/// warnings rather than failing the entire import.
+pub(crate) fn parse_biff_sheet_note_comments(
+    workbook_stream: &[u8],
+    start: usize,
+    codepage: u16,
+) -> Result<SheetNoteComments, String> {
+    #[derive(Debug, Clone)]
+    struct NoteMeta {
+        obj_id: u16,
+        cell_ref: CellRef,
+        author: Option<String>,
+    }
+
+    let mut out = SheetNoteComments::default();
+
+    let allows_continuation = |record_id: u16| record_id == RECORD_TXO;
+    let iter =
+        records::LogicalBiffRecordIter::from_offset(workbook_stream, start, allows_continuation)?;
+
+    let mut notes: Vec<NoteMeta> = Vec::new();
+    let mut note_by_obj_id: HashMap<u16, usize> = HashMap::new();
+    let mut text_by_obj_id: HashMap<u16, String> = HashMap::new();
+    let mut pending_obj_id: Option<u16> = None;
+
+    for record in iter {
+        let record = match record {
+            Ok(record) => record,
+            Err(err) => {
+                out.warnings.push(format!("malformed BIFF record: {err}"));
+                break;
+            }
+        };
+
+        // Stop at the next substream BOF so we don't misattribute comments from later sheets.
+        if record.offset != start && records::is_bof_record(record.record_id) {
+            break;
+        }
+
+        match record.record_id {
+            RECORD_NOTE => match parse_note_record(record.data.as_ref(), codepage) {
+                Ok(Some((cell_ref, obj_id, author))) => {
+                    if let Some(existing) = note_by_obj_id.get(&obj_id).copied() {
+                        out.warnings.push(format!(
+                            "duplicate NOTE record for object id {obj_id} (offset {}); overwriting previous NOTE at index {existing}",
+                            record.offset
+                        ));
+                        notes[existing] = NoteMeta {
+                            obj_id,
+                            cell_ref,
+                            author,
+                        };
+                    } else {
+                        note_by_obj_id.insert(obj_id, notes.len());
+                        notes.push(NoteMeta {
+                            obj_id,
+                            cell_ref,
+                            author,
+                        });
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => out.warnings.push(format!(
+                    "failed to parse NOTE record at offset {}: {err}",
+                    record.offset
+                )),
+            },
+            RECORD_OBJ => match parse_obj_record_ftcmo(record.data.as_ref()) {
+                Ok(Some((object_type, object_id))) => {
+                    // BIFF object type 0x0019 corresponds to NOTE (comment) objects.
+                    if object_type == 0x0019 {
+                        if pending_obj_id.replace(object_id).is_some() {
+                            out.warnings.push(format!(
+                                "encountered OBJ record for note object id {object_id} before decoding prior TXO record"
+                            ));
+                        }
+                    } else {
+                        pending_obj_id = None;
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => out.warnings.push(format!(
+                    "failed to parse OBJ record at offset {}: {err}",
+                    record.offset
+                )),
+            },
+            RECORD_TXO => {
+                let Some(obj_id) = pending_obj_id.take() else {
+                    out.warnings.push(format!(
+                        "skipping TXO record at offset {} without preceding OBJ note record",
+                        record.offset
+                    ));
+                    continue;
+                };
+
+                match decode_txo_text(&record, codepage) {
+                    Ok((text, mut warnings)) => {
+                        for warning in warnings.drain(..) {
+                            out.warnings.push(format!(
+                                "failed to fully decode TXO text for object id {obj_id} (offset {}): {warning}",
+                                record.offset
+                            ));
+                        }
+                        text_by_obj_id.insert(obj_id, text);
+                    }
+                    Err(err) => out.warnings.push(format!(
+                        "failed to decode TXO record for object id {obj_id} at offset {}: {err}",
+                        record.offset
+                    )),
+                }
+            }
+            records::RECORD_EOF => break,
+            _ => {}
+        }
+    }
+
+    // Stitch NOTE (anchor/author) + TXO (text) into parsed comments.
+    for note in notes {
+        let Some(text) = text_by_obj_id.get(&note.obj_id).cloned() else {
+            out.warnings.push(format!(
+                "missing TXO record for NOTE object id {} (cell {})",
+                note.obj_id, note.cell_ref
+            ));
+            continue;
+        };
+        out.comments.push(ParsedNoteComment {
+            cell_ref: note.cell_ref,
+            author: note.author,
+            text,
+        });
+    }
+
+    Ok(out)
+}
+
+fn parse_note_record(
+    data: &[u8],
+    codepage: u16,
+) -> Result<Option<(CellRef, u16, Option<String>)>, String> {
+    // NOTE [MS-XLS 2.4.161]
+    // Fixed header: rw (u16), col (u16), grbit (u16), idObj (u16)
+    if data.len() < 8 {
+        return Err("NOTE record too short".to_string());
+    }
+
+    let row = u16::from_le_bytes([data[0], data[1]]) as u32;
+    let col = u16::from_le_bytes([data[2], data[3]]) as u32;
+    if row >= EXCEL_MAX_ROWS || col >= EXCEL_MAX_COLS {
+        return Ok(None);
+    }
+
+    // Some producers appear to swap the `grbit`/`idObj` fields; best-effort pick the non-zero
+    // value that looks like an object id.
+    let field_a = u16::from_le_bytes([data[4], data[5]]);
+    let field_b = u16::from_le_bytes([data[6], data[7]]);
+    let obj_id = if field_b != 0 { field_b } else { field_a };
+
+    let author = if data.len() > 8 {
+        match strings::parse_biff8_short_string(&data[8..], codepage) {
+            Ok((s, _)) => (!s.is_empty()).then_some(s),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    Ok(Some((CellRef::new(row, col), obj_id, author)))
+}
+
+fn parse_obj_record_ftcmo(data: &[u8]) -> Result<Option<(u16, u16)>, String> {
+    // OBJ [MS-XLS 2.4.178] contains a series of subrecords:
+    // [ft: u16][cb: u16][payload: cb bytes] ...
+    const FT_CMO: u16 = 0x0015;
+    const FT_END: u16 = 0x0000;
+
+    let mut pos: usize = 0;
+    while pos + 4 <= data.len() {
+        let ft = u16::from_le_bytes([data[pos], data[pos + 1]]);
+        let cb = u16::from_le_bytes([data[pos + 2], data[pos + 3]]) as usize;
+        pos = pos.saturating_add(4);
+
+        let Some(payload) = data.get(pos..pos + cb) else {
+            return Err(format!("truncated OBJ subrecord ft=0x{ft:04X}"));
+        };
+
+        if ft == FT_CMO {
+            if payload.len() < 4 {
+                return Err("ftCmo subrecord too short".to_string());
+            }
+            let object_type = u16::from_le_bytes([payload[0], payload[1]]);
+            let object_id = u16::from_le_bytes([payload[2], payload[3]]);
+            return Ok(Some((object_type, object_id)));
+        }
+
+        pos = pos.saturating_add(cb);
+        if ft == FT_END {
+            break;
+        }
+    }
+
+    Ok(None)
+}
+
+fn decode_txo_text(
+    record: &records::LogicalBiffRecord<'_>,
+    codepage: u16,
+) -> Result<(String, Vec<String>), String> {
+    // TXO [MS-XLS 2.4.323]
+    // We only decode the plain text. The rich-text formatting runs are ignored.
+    let mut warnings: Vec<String> = Vec::new();
+
+    let first = record.first_fragment();
+    if first.len() < 14 {
+        return Err("TXO record too short".to_string());
+    }
+
+    let cch_text = u16::from_le_bytes([first[6], first[7]]) as usize;
+    let cb_runs = u16::from_le_bytes([first[12], first[13]]) as usize;
+
+    if cch_text == 0 {
+        return Ok((String::new(), warnings));
+    }
+
+    // The continuation area is: [CONTINUE text fragments...][CONTINUE formatting runs...]
+    // `cbRuns` tells us how many bytes at the end belong to formatting runs; strip those so we don't
+    // misinterpret rich-text run bytes as characters when the string is truncated.
+    let first_len = record.fragment_sizes.first().copied().unwrap_or(0);
+    let total = record.data.as_ref();
+    let cont = total.get(first_len..).unwrap_or_default();
+    let text_data_len = if cb_runs <= cont.len() {
+        cont.len().saturating_sub(cb_runs)
+    } else {
+        warnings.push("TXO cbRuns exceeds available CONTINUE data".to_string());
+        cont.len()
+    };
+
+    let mut remaining_chars = cch_text;
+    let mut remaining_text_bytes = text_data_len;
+    let mut out = String::new();
+
+    for fragment in record.fragments().skip(1) {
+        if remaining_chars == 0 || remaining_text_bytes == 0 {
+            break;
+        }
+
+        let slice = if fragment.len() <= remaining_text_bytes {
+            fragment
+        } else {
+            warnings.push("TXO text data ends mid-CONTINUE record".to_string());
+            &fragment[..remaining_text_bytes]
+        };
+        remaining_text_bytes = remaining_text_bytes.saturating_sub(slice.len());
+
+        let Some((&flags, payload)) = slice.split_first() else {
+            continue;
+        };
+        let is_unicode = (flags & 0x01) != 0;
+
+        if is_unicode {
+            let needed = remaining_chars.saturating_mul(2);
+            let mut take = payload.len().min(needed);
+            if take % 2 != 0 {
+                take = take.saturating_sub(1);
+                warnings.push("TXO UTF-16 text chunk ends on odd byte boundary".to_string());
+            }
+            if take == 0 {
+                break;
+            }
+            match decode_utf16le(&payload[..take]) {
+                Ok(s) => out.push_str(&s),
+                Err(err) => {
+                    warnings.push(err);
+                    break;
+                }
+            }
+            remaining_chars = remaining_chars.saturating_sub(take / 2);
+        } else {
+            let take = payload.len().min(remaining_chars);
+            if take == 0 {
+                break;
+            }
+            out.push_str(&strings::decode_ansi(codepage, &payload[..take]));
+            remaining_chars = remaining_chars.saturating_sub(take);
+        }
+    }
+
+    if remaining_chars > 0 {
+        warnings.push(format!("truncated TXO text (missing {remaining_chars} chars)"));
+    }
+
+    Ok((out, warnings))
 }
 
 fn decode_hlink_record(data: &[u8], codepage: u16) -> Result<Option<Hyperlink>, String> {
