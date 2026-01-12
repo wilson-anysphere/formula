@@ -582,6 +582,53 @@ describe("WorkbookContextBuilder", () => {
     expect(pretty.length - ctx1.promptContext.length).toBeGreaterThan(100);
   });
 
+  it("respects a custom tokenEstimator when packing promptContext sections", async () => {
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet1", "A1", [
+      ["Name", "Age"],
+      ["Alice", 30],
+      ["Bob", 40],
+    ]);
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+    const input = {
+      activeSheetId: "Sheet1",
+      selectedRange: { sheetId: "Sheet1", range: { startRow: 0, endRow: 2, startCol: 0, endCol: 1 } },
+    };
+
+    // With the default heuristic estimator, this should fit without trimming.
+    const builderDefault = new WorkbookContextBuilder({
+      workbookId: "wb_estimator_default",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      maxPromptContextTokens: 500,
+    });
+    const ctxDefault = await builderDefault.build(input);
+    expect(ctxDefault.promptContext).not.toContain("trimmed to fit token budget");
+
+    // With a much stricter estimator, the exact same context should be trimmed.
+    const strictEstimator = {
+      estimateTextTokens: (text: string) => text.length * 10,
+      estimateMessageTokens: (_message: any) => 0,
+      estimateMessagesTokens: (_messages: any[]) => 0,
+    };
+    const builderStrict = new WorkbookContextBuilder({
+      workbookId: "wb_estimator_strict",
+      documentController,
+      spreadsheet,
+      ragService: null,
+      mode: "chat",
+      model: "unit-test-model",
+      maxPromptContextTokens: 500,
+      tokenEstimator: strictEstimator as any,
+    });
+    const ctxStrict = await builderStrict.build(input);
+    expect(ctxStrict.promptContext).toContain("trimmed to fit token budget");
+  });
+
   it("reuses cached sheet summaries + blocks when the workbook hasn't changed, and invalidates on content edits", async () => {
     const documentController = new DocumentController();
     documentController.setRangeValues("Sheet1", "A1", [
