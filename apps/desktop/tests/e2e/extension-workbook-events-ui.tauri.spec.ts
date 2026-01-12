@@ -158,7 +158,12 @@ test.describe("extension workbook events (tauri UI flows)", () => {
           context.subscriptions.push(formula.events.onWorkbookOpened((e) => opened.push(e?.workbook?.path ?? null)));
           context.subscriptions.push(formula.events.onBeforeSave((e) => beforeSave.push(e?.workbook?.path ?? null)));
           context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(commandId)}, async () => {
-            return { opened, beforeSave };
+            const wb = await formula.workbook.getActiveWorkbook();
+            return {
+              opened,
+              beforeSave,
+              workbook: { name: wb?.name ?? null, path: wb?.path ?? null }
+            };
           }));
         }
         export default { activate };
@@ -181,7 +186,7 @@ test.describe("extension workbook events (tauri UI flows)", () => {
       const host = mgr.host;
       return host.executeCommand("wbUiEvents.get");
     });
-    expect(initial).toEqual({ opened: [], beforeSave: [] });
+    expect(initial).toEqual({ opened: [], beforeSave: [], workbook: { name: "Workbook", path: null } });
 
     // Trigger menu open -> open_workbook.
     await page.evaluate(() => {
@@ -205,6 +210,6 @@ test.describe("extension workbook events (tauri UI flows)", () => {
 
     expect(events.opened).toContain("/tmp/ui-open.xlsx");
     expect(events.beforeSave).toContain("/tmp/ui-save.xlsx");
+    expect(events.workbook).toEqual({ name: "ui-save.xlsx", path: "/tmp/ui-save.xlsx" });
   });
 });
-
