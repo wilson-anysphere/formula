@@ -76,6 +76,19 @@ describe("tauri/clipboard base64 normalization", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
+  it("writeClipboard omits empty pngBase64 after normalization", async () => {
+    const invoke = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd !== "clipboard_write") throw new Error(`Unexpected invoke: ${cmd}`);
+      expect(args).toEqual({ payload: { text: "hello" } });
+      return null;
+    });
+
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    await writeClipboard({ text: "hello", pngBase64: "data:image/png;base64," });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
   it("writeClipboard falls back to legacy write_clipboard and normalizes base64", async () => {
     const invoke = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
       if (cmd === "clipboard_write") throw new Error("unsupported");

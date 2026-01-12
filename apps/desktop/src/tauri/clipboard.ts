@@ -50,7 +50,7 @@ function getTauriInvoke(): TauriInvoke {
 
 function normalizeBase64String(base64: string): string {
   if (!base64) return "";
-  if (base64.startsWith("data:")) {
+  if (base64.slice(0, 5).toLowerCase() === "data:") {
     const comma = base64.indexOf(",");
     if (comma === -1) return "";
     return base64.slice(comma + 1).trim();
@@ -64,7 +64,7 @@ function estimateBase64Bytes(base64: string): number {
   const isTrimChar = (code: number) => code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d; // space, tab, lf, cr
 
   let start = 0;
-  if (base64.startsWith("data:")) {
+  if (base64.slice(0, 5).toLowerCase() === "data:") {
     const comma = base64.indexOf(",");
     if (comma === -1) return 0;
     start = comma + 1;
@@ -202,7 +202,8 @@ export async function readClipboard(): Promise<ClipboardContent> {
         out.imagePng = bytes;
       } else if (estimate <= MAX_IMAGE_BYTES) {
         // Preserve base64 only when decoding fails (legacy/internal).
-        out.pngBase64 = normalizeBase64String(pngBase64);
+        const normalized = normalizeBase64String(pngBase64);
+        if (normalized) out.pngBase64 = normalized;
       }
     }
   }
@@ -215,10 +216,11 @@ export async function writeClipboard(payload: ClipboardWritePayload): Promise<vo
   const imageBytes = await normalizeImagePngBytes(payload.imagePng);
 
   const pngBase64FromImage = imageBytes ? encodeBytesToBase64(imageBytes) : undefined;
-  const legacyPngBase64 =
+  const legacyPngBase64Raw =
     typeof payload.pngBase64 === "string" && estimateBase64Bytes(payload.pngBase64) <= MAX_IMAGE_BYTES
       ? normalizeBase64String(payload.pngBase64)
       : undefined;
+  const legacyPngBase64 = legacyPngBase64Raw ? legacyPngBase64Raw : undefined;
 
   const pngBase64 = pngBase64FromImage ?? legacyPngBase64;
 
@@ -227,7 +229,7 @@ export async function writeClipboard(payload: ClipboardWritePayload): Promise<vo
   if (typeof payload.text === "string") out.text = payload.text;
   if (typeof payload.html === "string") out.html = payload.html;
   if (typeof payload.rtf === "string") out.rtf = payload.rtf;
-  if (typeof pngBase64 === "string") out.pngBase64 = pngBase64;
+  if (typeof pngBase64 === "string" && pngBase64) out.pngBase64 = pngBase64;
 
   try {
     await invoke("clipboard_write", { payload: out });
