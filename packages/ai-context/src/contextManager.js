@@ -69,7 +69,17 @@ export class ContextManager {
     const rawSheet = params.sheet;
 
     const safeRowCap = 1_000;
-    const valuesForContext = rawSheet.values.slice(0, safeRowCap);
+    // `values` is a 2D JS array. With Excel-scale sheets, full-row/column selections can
+    // explode into multi-million-cell matrices. Keep the context payload bounded so schema
+    // extraction / RAG chunking can't OOM the worker.
+    const safeCellCap = 200_000;
+    const rawValues = Array.isArray(rawSheet?.values) ? rawSheet.values : [];
+    const rowCount = Math.min(rawValues.length, safeRowCap);
+    const safeColCap = rowCount > 0 ? Math.max(1, Math.floor(safeCellCap / rowCount)) : 0;
+    const valuesForContext = rawValues.slice(0, rowCount).map((row) => {
+      if (!Array.isArray(row) || safeColCap === 0) return [];
+      return row.length <= safeColCap ? row.slice() : row.slice(0, safeColCap);
+    });
     let sheetForContext = { ...rawSheet, values: valuesForContext };
 
     let dlpRedactedCells = 0;

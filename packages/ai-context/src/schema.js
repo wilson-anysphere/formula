@@ -1,5 +1,10 @@
 import { isCellEmpty, normalizeRange, parseA1Range, rangeToA1 } from "./a1.js";
 
+// Detecting connected regions in a dense matrix requires an O(rows*cols) visited grid.
+// Cap the scan to avoid catastrophic allocations when callers accidentally pass
+// Excel-scale ranges (1,048,576 x 16,384).
+const DEFAULT_DATA_REGION_SCAN_CELL_LIMIT = 200_000;
+
 /**
  * @typedef {"empty"|"number"|"boolean"|"date"|"string"|"formula"|"mixed"} InferredType
  */
@@ -98,11 +103,32 @@ export function isLikelyHeaderRow(rowValues, nextRowValues) {
 
 /**
  * @param {unknown[][]} values
+ * @param {{ maxCells?: number }} [options]
  * @returns {{ startRow: number, startCol: number, endRow: number, endCol: number }[]}
  */
-export function detectDataRegions(values) {
-  const rowCount = values.length;
-  const colCount = values.reduce((max, row) => Math.max(max, row?.length ?? 0), 0);
+export function detectDataRegions(values, options = {}) {
+  const maxCellsRaw = options.maxCells;
+  const maxCells =
+    typeof maxCellsRaw === "number" && Number.isFinite(maxCellsRaw) && maxCellsRaw > 0
+      ? Math.floor(maxCellsRaw)
+      : DEFAULT_DATA_REGION_SCAN_CELL_LIMIT;
+
+  const rawRowCount = values.length;
+  // Keep rows bounded so the outer loop can't become unbounded (even if the input
+  // matrix is sparse / mostly empty).
+  const rowCount = Math.max(0, Math.min(rawRowCount, maxCells));
+  if (rowCount === 0) return [];
+
+  // Only consider columns present in the scanned prefix of rows.
+  let colCountRaw = 0;
+  for (let r = 0; r < rowCount; r++) {
+    colCountRaw = Math.max(colCountRaw, values[r]?.length ?? 0);
+  }
+  if (colCountRaw === 0) return [];
+
+  // Prefer preserving rows (up to the safe cap) and clamp the column scan so the
+  // visited bitmap stays within `maxCells`.
+  const colCount = Math.max(0, Math.min(colCountRaw, Math.max(1, Math.floor(maxCells / rowCount))));
 
   if (rowCount === 0 || colCount === 0) return [];
 

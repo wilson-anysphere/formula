@@ -59,3 +59,19 @@ test("buildContext: retrieved context is preserved under tight token budgets", a
   assert.match(out.promptContext, /^## retrieved\b/m);
 });
 
+test("buildContext: caps matrix size to avoid Excel-scale allocations", async () => {
+  const cm = new ContextManager({ tokenBudgetTokens: 1_000 });
+
+  // 1,000 rows x 300 cols => 300,000 cells (> 200,000 cap). The ContextManager should
+  // truncate columns so downstream schema + sampling work remains bounded.
+  const values = Array.from({ length: 1_000 }, (_v, r) => {
+    const row = Array.from({ length: 300 }, () => null);
+    row[0] = r;
+    return row;
+  });
+  const sheet = makeSheet(values);
+
+  const out = await cm.buildContext({ sheet, query: "col1", sampleRows: 1 });
+  assert.equal(out.sampledRows.length, 1);
+  assert.equal(out.sampledRows[0].length, 200);
+});
