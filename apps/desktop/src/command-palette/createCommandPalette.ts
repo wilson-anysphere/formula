@@ -3,7 +3,7 @@ import type { ContextKeyService } from "../extensions/contextKeys.js";
 
 import { debounce } from "./debounce.js";
 import { compileFuzzyQuery, fuzzyMatchCommandPrepared, prepareCommandForFuzzy, type MatchRange, type PreparedCommandForFuzzy } from "./fuzzy.js";
-import { readCommandPaletteRecents, recordCommandPaletteRecent } from "./recents.js";
+import { getRecentCommandIdsForDisplay, installCommandRecentsTracker } from "./recents.js";
 import { searchShortcutCommands } from "./shortcutSearch.js";
 
 type RenderableCommand = PreparedCommandForFuzzy<CommandContribution> & {
@@ -273,12 +273,8 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   let commandsCacheDirty = true;
   let cachedCommands: PreparedCommandForFuzzy<CommandContribution>[] = [];
   let extensionLoadTimer: number | null = null;
-  // Track which commands were launched from the palette so we only record those in
-  // palette recents (and only after they successfully execute).
-  const pendingPaletteRecentCounts = new Map<string, number>();
 
   const executeCommand = (commandId: string): void => {
-    pendingPaletteRecentCounts.set(commandId, (pendingPaletteRecentCounts.get(commandId) ?? 0) + 1);
     void commandRegistry.executeCommand(commandId).catch((err) => {
       console.error(`Command failed (${commandId}):`, err);
     });
@@ -335,10 +331,10 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   }
 
   function getRecentsForDisplay(allCommands: Array<{ commandId: string }>): string[] {
-    const ids = readCommandPaletteRecents(localStorage);
-    if (ids.length === 0) return [];
-    const existing = new Set(allCommands.map((cmd) => cmd.commandId));
-    return ids.filter((id) => existing.has(id));
+    return getRecentCommandIdsForDisplay(
+      localStorage,
+      allCommands.map((cmd) => cmd.commandId),
+    );
   }
 
   function renderResults(): void {
@@ -488,13 +484,8 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     renderResults();
   });
 
-  const disposeExecuteSub = commandRegistry.onDidExecuteCommand((evt) => {
-    const count = pendingPaletteRecentCounts.get(evt.commandId);
-    if (!count) return;
-    if (count <= 1) pendingPaletteRecentCounts.delete(evt.commandId);
-    else pendingPaletteRecentCounts.set(evt.commandId, count - 1);
-    if (evt.error) return;
-    recordCommandPaletteRecent(localStorage, evt.commandId);
+  const disposeRecentsTracker = installCommandRecentsTracker(commandRegistry, localStorage, {
+    ignoreCommandIds: ["workbench.showCommandPalette"],
   });
 
   const onOverlayClick = (e: MouseEvent) => {
@@ -562,7 +553,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
       extensionLoadTimer = null;
     }
     disposeRegistrySub();
-    disposeExecuteSub();
+    disposeRecentsTracker();
     overlay.removeEventListener("click", onOverlayClick);
     input.removeEventListener("input", onInput);
     input.removeEventListener("keydown", onInputKeyDown);

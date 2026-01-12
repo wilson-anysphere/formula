@@ -1,7 +1,14 @@
 import { describe, expect, test } from "vitest";
 
 import { fuzzyMatchCommand } from "../fuzzy";
-import { readCommandPaletteRecents, recordCommandPaletteRecent, type StorageLike } from "../recents";
+import {
+  COMMAND_RECENTS_STORAGE_KEY,
+  getRecentCommandIdsForDisplay,
+  installCommandRecentsTracker,
+  readCommandRecents,
+  type StorageLike,
+} from "../recents";
+import { CommandRegistry } from "../../extensions/commandRegistry.js";
 
 class MemoryStorage implements StorageLike {
   private readonly data = new Map<string, string>();
@@ -67,30 +74,52 @@ describe("command-palette/fuzzy", () => {
 });
 
 describe("command-palette/recents", () => {
-  test("serializes recents as a stable, de-duped MRU list", () => {
+  test("executing a command via commandRegistry.executeCommand updates storage", async () => {
     const storage = new MemoryStorage();
+    const commandRegistry = new CommandRegistry();
+    commandRegistry.registerBuiltinCommand("test.command", "Test Command", () => "ok");
 
-    recordCommandPaletteRecent(storage, "a", { limit: 3 });
-    recordCommandPaletteRecent(storage, "b", { limit: 3 });
-    recordCommandPaletteRecent(storage, "a", { limit: 3 });
+    installCommandRecentsTracker(commandRegistry, storage, { now: () => 1234 });
 
-    expect(readCommandPaletteRecents(storage)).toEqual(["a", "b"]);
+    await commandRegistry.executeCommand("test.command");
+
+    expect(readCommandRecents(storage)).toEqual([{ commandId: "test.command", lastUsedMs: 1234, count: 1 }]);
   });
 
-  test("enforces the configured limit", () => {
+  test("removed commands are filtered out", () => {
     const storage = new MemoryStorage();
+    storage.setItem(
+      COMMAND_RECENTS_STORAGE_KEY,
+      JSON.stringify([
+        { commandId: "cmd.missing", lastUsedMs: 2, count: 1 },
+        { commandId: "cmd.exists", lastUsedMs: 1, count: 3 },
+      ]),
+    );
 
-    recordCommandPaletteRecent(storage, "a", { limit: 2 });
-    recordCommandPaletteRecent(storage, "b", { limit: 2 });
-    recordCommandPaletteRecent(storage, "c", { limit: 2 });
-
-    expect(readCommandPaletteRecents(storage)).toEqual(["c", "b"]);
+    expect(getRecentCommandIdsForDisplay(storage, ["cmd.exists"], { limit: 10 })).toEqual(["cmd.exists"]);
   });
 
-  test("treats invalid stored JSON as empty", () => {
+  test("cap size is enforced", async () => {
     const storage = new MemoryStorage();
-    storage.setItem("formula.commandPalette.recents", "{not json");
+    const commandRegistry = new CommandRegistry();
+    for (const id of ["cmd.a", "cmd.b", "cmd.c", "cmd.d"]) {
+      commandRegistry.registerBuiltinCommand(id, id, () => undefined);
+    }
 
-    expect(readCommandPaletteRecents(storage)).toEqual([]);
+    let nowMs = 1000;
+    installCommandRecentsTracker(commandRegistry, storage, {
+      maxEntries: 3,
+      now: () => {
+        nowMs += 1;
+        return nowMs;
+      },
+    });
+
+    await commandRegistry.executeCommand("cmd.a");
+    await commandRegistry.executeCommand("cmd.b");
+    await commandRegistry.executeCommand("cmd.c");
+    await commandRegistry.executeCommand("cmd.d");
+
+    expect(readCommandRecents(storage).map((entry) => entry.commandId)).toEqual(["cmd.d", "cmd.c", "cmd.b"]);
   });
 });
