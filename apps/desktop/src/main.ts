@@ -112,6 +112,7 @@ import { installKeyboardContextKeys } from "./keyboard/installKeyboardContextKey
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
 import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
+import { registerWorkbenchFileCommands } from "./commands/registerWorkbenchFileCommands.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
 import { ContextMenu, type ContextMenuItem } from "./menus/contextMenu.js";
@@ -4236,6 +4237,20 @@ if (
   type GridArea = "cell" | "rowHeader" | "colHeader" | "corner";
   let currentGridArea: GridArea = "cell";
 
+  // Track whether a text-input-like element is currently focused so "global" keybindings
+  // (file/menu commands, command palette, etc.) can opt out via when-clauses.
+  const syncTextInputFocusContextKey = () => {
+    try {
+      contextKeys.set("textInputFocus", isTextInputTarget(document.activeElement));
+    } catch {
+      // Best-effort: if focus probing fails, treat as not focused.
+      contextKeys.set("textInputFocus", false);
+    }
+  };
+  syncTextInputFocusContextKey();
+  window.addEventListener("focusin", syncTextInputFocusContextKey, true);
+  window.addEventListener("focusout", () => queueMicrotask(syncTextInputFocusContextKey), true);
+
   let lastSelection: SelectionState | null = null;
 
   const updateContextKeysInternal = (selection?: SelectionState | null) => {
@@ -7212,6 +7227,72 @@ commandRegistry.registerBuiltinCommand(
 function showDesktopOnlyToast(message: string): void {
   showToast(`Desktop-only: ${message}`);
 }
+
+registerWorkbenchFileCommands({
+  commandRegistry,
+  handlers: {
+    newWorkbook: () => {
+      if (!tauriBackend) {
+        showDesktopOnlyToast("Creating new workbooks is available in the desktop app.");
+        return;
+      }
+      void handleNewWorkbook().catch((err) => {
+        console.error("Failed to create workbook:", err);
+        showToast(`Failed to create workbook: ${String(err)}`, "error");
+      });
+    },
+    openWorkbook: () => {
+      if (!tauriBackend) {
+        showDesktopOnlyToast("Opening workbooks is available in the desktop app.");
+        return;
+      }
+      void promptOpenWorkbook().catch((err) => {
+        console.error("Failed to open workbook:", err);
+        showToast(`Failed to open workbook: ${String(err)}`, "error");
+      });
+    },
+    saveWorkbook: () => {
+      if (!tauriBackend) {
+        showDesktopOnlyToast("Saving workbooks is available in the desktop app.");
+        return;
+      }
+      void handleSave().catch((err) => {
+        console.error("Failed to save workbook:", err);
+        showToast(`Failed to save workbook: ${String(err)}`, "error");
+      });
+    },
+    saveWorkbookAs: () => {
+      if (!tauriBackend) {
+        showDesktopOnlyToast("Save As is available in the desktop app.");
+        return;
+      }
+      void handleSaveAs().catch((err) => {
+        console.error("Failed to save workbook:", err);
+        showToast(`Failed to save workbook: ${String(err)}`, "error");
+      });
+    },
+    closeWorkbook: () => {
+      if (!handleCloseRequestForRibbon) {
+        showDesktopOnlyToast("Closing windows is available in the desktop app.");
+        return;
+      }
+      void handleCloseRequestForRibbon({ quit: false }).catch((err) => {
+        console.error("Failed to close window:", err);
+        showToast(`Failed to close window: ${String(err)}`, "error");
+      });
+    },
+    quit: () => {
+      if (!handleCloseRequestForRibbon) {
+        showDesktopOnlyToast("Quitting is available in the desktop app.");
+        return;
+      }
+      void handleCloseRequestForRibbon({ quit: true }).catch((err) => {
+        console.error("Failed to quit app:", err);
+        showToast(`Failed to quit app: ${String(err)}`, "error");
+      });
+    },
+  },
+});
 
 function getTauriInvokeForPrint(): TauriInvoke | null {
   const invoke =
@@ -10848,64 +10929,6 @@ try {
     const payload = (event as any)?.payload;
     const token = typeof payload?.token === "string" ? String(payload.token) : undefined;
     await handleCloseRequest({ quit: false, beforeCloseUpdates: payload?.updates, closeToken: token });
-  });
-
-  window.addEventListener("keydown", (e) => {
-    const primary = e.ctrlKey || e.metaKey;
-    if (!primary) return;
-
-    const keyLower = e.key.toLowerCase();
-    const shift = e.shiftKey;
-
-    if (!shift && keyLower === "n") {
-      e.preventDefault();
-      void handleNewWorkbook().catch((err) => {
-        console.error("Failed to create workbook:", err);
-        void nativeDialogs.alert(`Failed to create workbook: ${String(err)}`);
-      });
-      return;
-    }
-
-    if (!shift && keyLower === "o") {
-      e.preventDefault();
-      void promptOpenWorkbook().catch((err) => {
-        console.error("Failed to open workbook:", err);
-        void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
-      });
-      return;
-    }
-
-    if (!shift && keyLower === "w") {
-      e.preventDefault();
-      void handleCloseRequest({ quit: false }).catch((err) => {
-        console.error("Failed to close window:", err);
-      });
-      return;
-    }
-
-    if (!shift && keyLower === "q") {
-      e.preventDefault();
-      void requestAppQuit().catch((err) => {
-        console.error("Failed to quit app:", err);
-      });
-      return;
-    }
-
-    if (keyLower === "s") {
-      if (shift) {
-        e.preventDefault();
-        void handleSaveAs().catch((err) => {
-          console.error("Failed to save workbook:", err);
-          void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
-        });
-        return;
-      }
-      e.preventDefault();
-      void handleSave().catch((err) => {
-        console.error("Failed to save workbook:", err);
-        void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
-      });
-    }
   });
 } catch {
   // Not running under Tauri; desktop host integration is unavailable.

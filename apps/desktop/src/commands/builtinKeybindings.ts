@@ -21,6 +21,43 @@ const WHEN_COMMAND_PALETTE_CLOSED = "workbench.commandPaletteOpen == false";
  */
 export const builtinKeybindings: BuiltinKeybinding[] = [
   {
+    command: "workbench.newWorkbook",
+    key: "ctrl+n",
+    mac: "cmd+n",
+    // Avoid stealing common text editing shortcuts from focused inputs/editors.
+    when: "!textInputFocus",
+  },
+  {
+    command: "workbench.openWorkbook",
+    key: "ctrl+o",
+    mac: "cmd+o",
+    when: "!textInputFocus",
+  },
+  {
+    command: "workbench.saveWorkbook",
+    key: "ctrl+s",
+    mac: "cmd+s",
+    when: "!textInputFocus",
+  },
+  {
+    command: "workbench.saveWorkbookAs",
+    key: "ctrl+shift+s",
+    mac: "cmd+shift+s",
+    when: "!textInputFocus",
+  },
+  {
+    command: "workbench.closeWorkbook",
+    key: "ctrl+w",
+    mac: "cmd+w",
+    when: "!textInputFocus",
+  },
+  {
+    command: "workbench.quit",
+    key: "ctrl+q",
+    mac: "cmd+q",
+    when: "!textInputFocus",
+  },
+  {
     command: "edit.undo",
     key: "ctrl+z",
     mac: "cmd+z",
