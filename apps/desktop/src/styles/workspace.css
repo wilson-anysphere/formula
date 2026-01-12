@@ -131,12 +131,14 @@
 }
 
 .dock-panel__tab {
+  flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: 8px;
   padding: 4px 8px;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
+  user-select: none;
   white-space: nowrap;
   font-size: 12px;
   line-height: 16px;
@@ -166,11 +168,13 @@
   display: flex;
   gap: 4px;
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .dock-panel__control {
   width: 28px;
   height: 28px;
+  flex: 0 0 auto;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0;
