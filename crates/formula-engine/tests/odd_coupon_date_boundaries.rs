@@ -39,7 +39,9 @@ fn oddfyield_allows_settlement_equal_first_coupon() {
 
 #[test]
 fn oddfprice_allows_first_coupon_equal_maturity() {
-    let v = eval_formula("=ODDFPRICE(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)");
+    let v = eval_formula(
+        "=ODDFPRICE(DATE(2020,3,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
+    );
     assert!(matches!(v, Value::Number(n) if n.is_finite()));
 }
 
@@ -51,19 +53,24 @@ fn oddfyield_allows_first_coupon_equal_maturity() {
 
 #[test]
 fn oddfprice_rejects_issue_equal_first_coupon() {
-    let v = eval_formula("=ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,7,1),DATE(2020,7,1),0.05,0.04,100,2,0)");
+    let v = eval_formula(
+        "=ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,7,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
+    );
     assert_eq!(v, Value::Error(ErrorKind::Num));
 }
 
 #[test]
 fn oddfyield_rejects_issue_equal_first_coupon() {
-    let v = eval_formula("=ODDFYIELD(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,7,1),DATE(2020,7,1),0.05,99,100,2,0)");
+    let v = eval_formula(
+        "=ODDFYIELD(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,7,1),DATE(2020,7,1),0.05,99,100,2,0)",
+    );
     assert_eq!(v, Value::Error(ErrorKind::Num));
 }
 
 #[test]
 fn oddlprice_allows_settlement_equal_last_interest() {
-    let v = eval_formula("=ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,0.04,100,2,0)");
+    let v =
+        eval_formula("=ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2024,7,1),0.05,0.04,100,2,0)");
     assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
 }
 
@@ -75,12 +82,14 @@ fn oddlyield_allows_settlement_equal_last_interest() {
 
 #[test]
 fn oddlprice_rejects_last_interest_equal_maturity() {
-    let v = eval_formula("=ODDLPRICE(DATE(2025,1,1),DATE(2025,1,1),DATE(2025,1,1),0.05,0.04,100,2,0)");
+    let v =
+        eval_formula("=ODDLPRICE(DATE(2025,1,1),DATE(2025,1,1),DATE(2025,1,1),0.05,0.04,100,2,0)");
     assert_eq!(v, Value::Error(ErrorKind::Num));
 }
 
 #[test]
 fn oddlyield_rejects_last_interest_equal_maturity() {
-    let v = eval_formula("=ODDLYIELD(DATE(2025,1,1),DATE(2025,1,1),DATE(2025,1,1),0.05,99,100,2,0)");
+    let v =
+        eval_formula("=ODDLYIELD(DATE(2025,1,1),DATE(2025,1,1),DATE(2025,1,1),0.05,99,100,2,0)");
     assert_eq!(v, Value::Error(ErrorKind::Num));
 }

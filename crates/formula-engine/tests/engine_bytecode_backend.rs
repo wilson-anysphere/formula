@@ -5298,7 +5298,9 @@ fn bytecode_backend_xor_array_semantics_match_ast() {
         .set_cell_formula("Sheet1", "A1", "=XOR({TRUE,FALSE,TRUE})")
         .unwrap();
     // Text values inside arrays are ignored (unlike scalar text args, which coerce).
-    engine.set_cell_formula("Sheet1", "A2", "=XOR({\"TRUE\"})").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=XOR({\"TRUE\"})")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "A3", "=XOR({\"TRUE\",0,1,\"x\"})")
         .unwrap();
@@ -5334,7 +5336,9 @@ fn bytecode_backend_and_array_semantics_match_ast() {
         .set_cell_formula("Sheet1", "A1", "=AND({TRUE,FALSE,TRUE})")
         .unwrap();
     // Text values inside arrays are ignored (unlike scalar text args, which error).
-    engine.set_cell_formula("Sheet1", "A2", "=AND({\"TRUE\"})").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=AND({\"TRUE\"})")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "A3", "=AND({\"TRUE\",0,1,\"x\"})")
         .unwrap();
@@ -5369,7 +5373,9 @@ fn bytecode_backend_or_array_semantics_match_ast() {
         .set_cell_formula("Sheet1", "A1", "=OR({TRUE,FALSE,TRUE})")
         .unwrap();
     // Text values inside arrays are ignored (unlike scalar text args, which error).
-    engine.set_cell_formula("Sheet1", "A2", "=OR({\"TRUE\"})").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=OR({\"TRUE\"})")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "A3", "=OR({\"TRUE\",0,1,\"x\"})")
         .unwrap();
@@ -6879,6 +6885,87 @@ fn bytecode_backend_matches_ast_for_conditional_aggregates_numeric_criteria() {
         (r#"=MAXIFS(B1:B5,A1:A5,">1",C1:C5,"=200")"#, "D7"),
         (r#"=SUMIF(A1:A5,"<>2",B1:B5)"#, "D8"),
     ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_conditional_aggregates_over_array_literals() {
+    let mut engine = Engine::new();
+
+    // Populate some sheet values so we can cover mixed range+array cases too (A1:D1 and A2:D2 are
+    // 1x4 horizontal ranges to match `{...}` array literals).
+    for (cell, value) in [
+        ("A1", 1.0),
+        ("B1", 2.0),
+        ("C1", 3.0),
+        ("D1", 4.0),
+        ("A2", 10.0),
+        ("B2", 20.0),
+        ("C2", 30.0),
+        ("D2", 40.0),
+    ] {
+        engine.set_cell_value("Sheet1", cell, value).unwrap();
+    }
+
+    let cases = [
+        (
+            "E1",
+            r#"=SUMIF({1,2,3,4},">2",{10,20,30,40})"#,
+            Value::Number(70.0),
+        ),
+        (
+            "E2",
+            r#"=SUMIFS({10,20,30,40},{"A","A","B","B"},"A",{1,2,3,4},">1")"#,
+            Value::Number(20.0),
+        ),
+        (
+            "E3",
+            r#"=COUNTIFS({"A","A","B","B"},"A",{1,2,3,4},">1")"#,
+            Value::Number(1.0),
+        ),
+        (
+            "E4",
+            r#"=AVERAGEIF({1,2,3,4},">2",{10,20,30,40})"#,
+            Value::Number(35.0),
+        ),
+        (
+            "E5",
+            r#"=AVERAGEIFS({10,20,30,40},{"A","A","B","B"},"A",{1,2,3,4},">1")"#,
+            Value::Number(20.0),
+        ),
+        (
+            "E6",
+            r#"=MAXIFS({10,20,30,40},{1,2,3,4},">2")"#,
+            Value::Number(40.0),
+        ),
+        (
+            "E7",
+            r#"=MINIFS({10,20,30,40},{1,2,3,4},">2")"#,
+            Value::Number(30.0),
+        ),
+        // Mixed range+array cases.
+        (
+            "E8",
+            r#"=SUMIF(A1:D1,">2",{10,20,30,40})"#,
+            Value::Number(70.0),
+        ),
+        ("E9", r#"=SUMIF({1,2,3,4},">2",A2:D2)"#, Value::Number(70.0)),
+    ];
+
+    for (cell, formula, _) in &cases {
+        engine.set_cell_formula("Sheet1", cell, formula).unwrap();
+    }
+
+    assert_eq!(engine.bytecode_program_count(), cases.len());
+    engine.recalculate_single_threaded();
+
+    for (cell, formula, expected) in &cases {
+        assert_eq!(
+            engine.get_cell_value("Sheet1", cell),
+            expected.clone(),
+            "mismatched value for {cell}: {formula}"
+        );
         assert_engine_matches_ast(&engine, formula, cell);
     }
 }
