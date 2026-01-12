@@ -79,6 +79,17 @@ pub(crate) fn parse_text_datetime(text: &str, value_locale: ValueLocaleConfig) -
             if let Ok(date) = NaiveDate::parse_from_str(s, "%m/%d/%Y") {
                 return Some(date.and_hms_opt(0, 0, 0)?);
             }
+
+            // Hyphen-separated MDY.
+            if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%m-%d-%Y %H:%M:%S") {
+                return Some(dt);
+            }
+            if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%m-%d-%Y %H:%M") {
+                return Some(dt);
+            }
+            if let Ok(date) = NaiveDate::parse_from_str(s, "%m-%d-%Y") {
+                return Some(date.and_hms_opt(0, 0, 0)?);
+            }
         }
         DateOrder::DMY => {
             if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d/%m/%Y %H:%M:%S") {
@@ -99,6 +110,17 @@ pub(crate) fn parse_text_datetime(text: &str, value_locale: ValueLocaleConfig) -
                 return Some(dt);
             }
             if let Ok(date) = NaiveDate::parse_from_str(s, "%d.%m.%Y") {
+                return Some(date.and_hms_opt(0, 0, 0)?);
+            }
+
+            // Hyphen-separated DMY.
+            if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d-%m-%Y %H:%M:%S") {
+                return Some(dt);
+            }
+            if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%d-%m-%Y %H:%M") {
+                return Some(dt);
+            }
+            if let Ok(date) = NaiveDate::parse_from_str(s, "%d-%m-%Y") {
                 return Some(date.and_hms_opt(0, 0, 0)?);
             }
         }
