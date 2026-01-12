@@ -26,6 +26,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use tauri::http::header::{HeaderName, HeaderValue};
+use tauri::http::{Response, StatusCode};
 use tauri::{Emitter, Listener, Manager, State};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_notification::NotificationExt;
@@ -51,7 +53,7 @@ static CLOSE_REQUEST_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 // - shortcut-quick-open, shortcut-command-palette
 // - menu-open, menu-new, menu-save, menu-save-as, menu-export-pdf, menu-close-window, menu-quit,
 //   menu-undo, menu-redo, menu-cut, menu-copy, menu-paste, menu-paste-special, menu-select-all,
-//   menu-zoom-in, menu-zoom-out, menu-zoom-reset, menu-about, menu-check-updates
+//   menu-zoom-in, menu-zoom-out, menu-zoom-reset, menu-about, menu-check-updates, menu-open-release-page
 // - startup:window-visible, startup:webview-loaded, startup:tti, startup:metrics
 // - update-check-started, update-check-already-running, update-not-available, update-check-error, update-available
 // - oauth-redirect
@@ -64,6 +66,33 @@ const OPEN_FILE_EVENT: &str = "open-file";
 const OPEN_FILE_READY_EVENT: &str = "open-file-ready";
 const OAUTH_REDIRECT_EVENT: &str = "oauth-redirect";
 const OAUTH_REDIRECT_READY_EVENT: &str = "oauth-redirect-ready";
+
+// Cross-origin isolation headers required for `globalThis.crossOriginIsolated === true`.
+//
+// We set these on the `tauri://` protocol responses in production builds so Chromium enables
+// `SharedArrayBuffer` (required by Pyodide's worker backend).
+const CROSS_ORIGIN_OPENER_POLICY: HeaderName =
+    HeaderName::from_static("cross-origin-opener-policy");
+const CROSS_ORIGIN_EMBEDDER_POLICY: HeaderName =
+    HeaderName::from_static("cross-origin-embedder-policy");
+
+fn apply_cross_origin_isolation_headers(response: &mut Response<Vec<u8>>) {
+    let headers = response.headers_mut();
+    headers.insert(
+        CROSS_ORIGIN_OPENER_POLICY,
+        HeaderValue::from_static("same-origin"),
+    );
+    headers.insert(
+        CROSS_ORIGIN_EMBEDDER_POLICY,
+        HeaderValue::from_static("require-corp"),
+    );
+}
+
+#[derive(Debug, Default)]
+struct OpenFileState {
+    ready: bool,
+    pending_paths: Vec<String>,
+}
 type SharedOpenFileState = Arc<Mutex<OpenFileState>>;
 
 #[derive(Debug, Default)]
@@ -732,6 +761,48 @@ fn main() {
         // Override Tauri's default `asset:` protocol handler to attach COEP-friendly headers.
         // See `asset_protocol.rs` for details.
         .register_uri_scheme_protocol("asset", asset_protocol::handler)
+        // In production builds, the webview loads `frontendDist` via Tauri's custom
+        // asset protocol (`tauri://...`). Unlike the Vite dev/preview servers, those
+        // responses don't include COOP/COEP headers by default, which prevents
+        // `globalThis.crossOriginIsolated` from becoming true and disables
+        // `SharedArrayBuffer` in Chromium.
+        //
+        // Inject COOP/COEP headers into the `tauri://` protocol responses so we can use
+        // `SharedArrayBuffer` (required by Pyodide).
+        //
+        // Note: Tauri's internal asset protocol handler is not a stable public API, so we
+        // implement a minimal handler using the public `AssetResolver`.
+        .register_uri_scheme_protocol("tauri", |_ctx, request| {
+            let path = request.uri().path().to_string();
+
+            match _ctx.app_handle().asset_resolver().get(path) {
+                Some(asset) => {
+                    let mut builder = Response::builder()
+                        .status(StatusCode::OK)
+                        .header(tauri::http::header::CONTENT_TYPE, asset.mime_type);
+
+                    if let Some(csp) = asset.csp_header {
+                        builder = builder.header("Content-Security-Policy", csp);
+                    }
+
+                    let mut response = builder.body(asset.bytes).unwrap_or_else(|_| {
+                        Response::builder()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .header(tauri::http::header::CONTENT_TYPE, "text/plain")
+                            .body(b"failed to build tauri asset response".to_vec())
+                            .expect("build error response")
+                    });
+
+                    apply_cross_origin_isolation_headers(&mut response);
+                    response
+                }
+                None => Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .header(tauri::http::header::CONTENT_TYPE, "text/plain")
+                    .body(b"asset not found".to_vec())
+                    .expect("build not-found response"),
+            }
+        })
         // Core platform plugins used by the frontend (dialog, clipboard, shell).
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -781,6 +852,12 @@ fn main() {
         // We avoid `core:default` and instead grant only the plugin APIs the frontend uses
         // (events, dialogs, window ops, clipboard (plain text), updater, ...) in
         // `src-tauri/capabilities/main.json`, scoped to the `main` window.
+        //
+        // Any new `#[tauri::command]` must be:
+        //  1) Implemented in Rust (typically `src/commands.rs`, but may live elsewhere)
+        //  2) Registered here in `generate_handler![...]`
+        //  3) Added to the explicit JS invoke allowlist in
+        //     `src-tauri/permissions/allow-invoke.json` (`allow-invoke` permission)
         //
         // Note: we intentionally do not grant the JS shell plugin API (`shell:allow-open`);
         // external URL opening goes through the `open_external_url` Rust command which enforces a
@@ -1058,14 +1135,13 @@ fn main() {
                     shared_array_buffer: bool,
                     worker_ok: bool,
                 }
-
+ 
                 window.listen("coi-check-result", |event| {
                     let payload = event.payload();
                     if payload.trim().is_empty() {
                         eprintln!("[formula][coi-check] missing payload");
                         std::process::exit(2);
                     }
-
                     let parsed: CrossOriginIsolationCheckResult =
                         match serde_json::from_str(payload) {
                             Ok(parsed) => parsed,
@@ -1307,10 +1383,10 @@ fn main() {
         .expect("error while building tauri application");
 
     app.run(|_app_handle, event| match event {
-        // macOS: when the app is already running and the user opens a file via Finder,
+        // macOS/iOS: when the app is already running and the user opens a file via the OS,
         // the running instance receives an "open documents" event. Route it through the
-        // same open-file pipeline.
-        #[cfg(target_os = "macos")]
+        // same open-file pipeline used by argv / single-instance callbacks.
+        #[cfg(any(target_os = "macos", target_os = "ios"))]
         tauri::RunEvent::Opened { urls, .. } => {
             let classified = opened_urls::classify_opened_urls(&urls);
             handle_oauth_redirect_request(_app_handle, classified.oauth_redirects);

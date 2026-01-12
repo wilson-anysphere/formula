@@ -5,6 +5,7 @@
   "local": true,
   "windows": ["main"],
   "permissions": [
+    "allow-invoke",
     {
       "identifier": "core:event:allow-listen",
       "allow": [
@@ -37,6 +38,10 @@
         { "event": "menu-about" },
         { "event": "menu-check-updates" },
         { "event": "menu-open-release-page" },
+        { "event": "startup:window-visible" },
+        { "event": "startup:webview-loaded" },
+        { "event": "startup:tti" },
+        { "event": "startup:metrics" },
         { "event": "update-check-started" },
         { "event": "update-check-already-running" },
         { "event": "update-not-available" },
@@ -46,10 +51,6 @@
         { "event": "update-download-progress" },
         { "event": "update-downloaded" },
         { "event": "update-download-error" },
-        { "event": "startup:window-visible" },
-        { "event": "startup:webview-loaded" },
-        { "event": "startup:tti" },
-        { "event": "startup:metrics" },
         { "event": "oauth-redirect" }
       ]
     },

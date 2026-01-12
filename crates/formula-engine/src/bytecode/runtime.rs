@@ -3394,9 +3394,7 @@ fn xor_array(a: &ArrayValue, acc: &mut bool) -> Option<ErrorKind> {
             // Historical behavior: the engine used NaN as a blank sentinel for dense numeric arrays.
             // Keep ignoring NaNs so older array materializations still behave like blanks.
             Value::Number(n) if n.is_nan() => {}
-            Value::Number(n) => {
-                *acc ^= *n != 0.0;
-            }
+            Value::Number(n) => *acc ^= *n != 0.0,
             Value::Bool(b) => *acc ^= *b,
             // Text and blanks in arrays are ignored (same as references).
             Value::Text(_)

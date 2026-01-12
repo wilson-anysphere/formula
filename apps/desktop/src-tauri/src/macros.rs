@@ -91,6 +91,7 @@ pub enum MacroHostError {
 pub struct MacroHost {
     vba_project_hash: Option<u64>,
     project: Option<formula_vba::VBAProject>,
+    combined_source: Option<String>,
     procedure_module: HashMap<String, String>,
     runtime_context: MacroRuntimeContext,
     #[cfg(test)]
@@ -111,6 +112,7 @@ impl MacroHost {
     pub fn invalidate(&mut self) {
         self.vba_project_hash = None;
         self.project = None;
+        self.combined_source = None;
         self.procedure_module.clear();
         self.runtime_context = MacroRuntimeContext::default();
         #[cfg(test)]
@@ -139,6 +141,7 @@ impl MacroHost {
         if hash != self.vba_project_hash {
             self.vba_project_hash = hash;
             self.project = None;
+            self.combined_source = None;
             self.procedure_module.clear();
             self.runtime_context = MacroRuntimeContext::default();
             #[cfg(test)]
@@ -165,6 +168,31 @@ impl MacroHost {
         Ok(())
     }
 
+    fn ensure_sources_loaded(&mut self, workbook: &Workbook) -> Result<(), MacroHostError> {
+        self.ensure_project_loaded(workbook)?;
+        if workbook.vba_project_bin.is_none() {
+            return Ok(());
+        }
+        if self.combined_source.is_some() {
+            return Ok(());
+        }
+
+        let project = self
+            .project
+            .as_ref()
+            .ok_or_else(|| MacroHostError::Runtime("missing VBA project".to_string()))?;
+
+        self.combined_source = Some(
+            project
+                .modules
+                .iter()
+                .map(|m| m.code.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+        );
+
+        Ok(())
+    }
     pub fn project(
         &mut self,
         workbook: &Workbook,
@@ -177,31 +205,16 @@ impl MacroHost {
         &mut self,
         workbook: &Workbook,
     ) -> Result<Option<formula_vba_runtime::VbaProgram>, MacroHostError> {
-        self.ensure_project_loaded(workbook)?;
-        if workbook.vba_project_bin.is_none() {
+        self.ensure_sources_loaded(workbook)?;
+        let Some(source) = self.combined_source.as_deref() else {
             return Ok(None);
-        }
-
-        let project = self
-            .project
-            .as_ref()
-            .ok_or_else(|| MacroHostError::Runtime("missing VBA project".to_string()))?;
-
-        let combined = project
-            .modules
-            .iter()
-            .map(|m| m.code.as_str())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-
-        let program = formula_vba_runtime::parse_program(&combined)
+        };
+        let program = formula_vba_runtime::parse_program(source)
             .map_err(|e| MacroHostError::ProgramParse(e.to_string()))?;
-
         #[cfg(test)]
         {
             self.program_compile_count = self.program_compile_count.saturating_add(1);
         }
-
         Ok(Some(program))
     }
 
