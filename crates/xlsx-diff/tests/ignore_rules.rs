@@ -371,21 +371,59 @@ fn cli_exit_code_honors_fail_on_with_only_warning_diffs() {
     std::fs::write(&original_path, expected_zip).unwrap();
     std::fs::write(&modified_path, actual_zip).unwrap();
 
-    let status = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
         .arg(&original_path)
         .arg(&modified_path)
         .arg("--fail-on")
         .arg("critical")
-        .status()
+        .output()
         .unwrap();
-    assert!(status.success(), "expected exit 0, got {status:?}");
+    assert!(
+        output.status.success(),
+        "expected exit 0, got {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-    let status = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
         .arg(&original_path)
         .arg(&modified_path)
         .arg("--fail-on")
         .arg("warning")
-        .status()
+        .output()
         .unwrap();
-    assert!(!status.success(), "expected non-zero exit, got {status:?}");
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit, got {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn cli_rejects_invalid_ignore_glob_pattern() {
+    let empty_zip = zip_bytes(&[]);
+    let tempdir = tempfile::tempdir().unwrap();
+    let original_path = tempdir.path().join("original.xlsx");
+    let modified_path = tempdir.path().join("modified.xlsx");
+    std::fs::write(&original_path, &empty_zip).unwrap();
+    std::fs::write(&modified_path, &empty_zip).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_xlsx_diff"))
+        .arg(&original_path)
+        .arg(&modified_path)
+        .arg("--ignore-glob")
+        .arg("[")
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit, got {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
