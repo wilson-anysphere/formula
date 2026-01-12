@@ -137,24 +137,27 @@ pub fn write_workbook_print_settings(
     let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
 
     for i in 0..zip.len() {
-        let mut entry = zip.by_index(i)?;
+        let entry = zip.by_index(i)?;
         let name = entry.name().to_string();
         if entry.is_dir() {
             out.add_directory(name, options.clone())?;
             continue;
         }
 
-        let mut data = Vec::new();
-        entry.read_to_end(&mut data)?;
-
         let replacement = if name == "xl/workbook.xml" {
-            Some(updated_workbook_xml.clone())
+            Some(updated_workbook_xml.as_slice())
         } else {
-            updated_sheets.get(&name).cloned()
+            updated_sheets.get(&name).map(|v| v.as_slice())
         };
 
-        out.start_file(name, options.clone())?;
-        out.write_all(replacement.as_deref().unwrap_or(&data))?;
+        if let Some(bytes) = replacement {
+            out.start_file(name, options.clone())?;
+            out.write_all(bytes)?;
+        } else {
+            // Preserve unchanged parts byte-for-byte (avoid decompression/recompression of large
+            // binary assets like images).
+            out.raw_copy_file(entry)?;
+        }
     }
 
     Ok(out.finish()?.into_inner())
