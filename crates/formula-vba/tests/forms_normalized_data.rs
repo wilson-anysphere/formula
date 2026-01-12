@@ -377,6 +377,47 @@ fn forms_normalized_data_uses_project_stream_baseclass_order_and_ignores_unliste
 }
 
 #[test]
+fn forms_normalized_data_ignores_baseclass_lines_after_project_section_headers() {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
+
+    // BaseClass lines after `[Workspace]` should not be treated as designer module declarations.
+    // MS-OVBA stores designer module properties in the `ProjectProperties` section, which ends at
+    // the first section header.
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"BaseClass=FormA\r\n[Workspace]\r\nBaseClass=FormB\r\n")
+            .expect("write PROJECT");
+    }
+    ole.create_storage("VBA").expect("create VBA storage");
+    {
+        let dir_container = build_dir_stream(&[("FormA", "FormA"), ("FormB", "FormB")]);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    ole.create_storage("FormA").expect("create FormA storage");
+    ole.create_storage("FormB").expect("create FormB storage");
+    {
+        let mut s = ole.create_stream("FormA/Data").expect("FormA stream");
+        s.write_all(b"A").expect("write A");
+    }
+    {
+        let mut s = ole.create_stream("FormB/Data").expect("FormB stream");
+        s.write_all(b"B").expect("write B");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = forms_normalized_data(&vba_project_bin).expect("compute FormsNormalizedData");
+
+    // Only FormA is referenced before `[Workspace]`.
+    let mut expected = Vec::new();
+    expected.extend_from_slice(b"A");
+    expected.extend(std::iter::repeat(0u8).take(1022));
+    assert_eq!(normalized, expected);
+}
+
+#[test]
 fn forms_normalized_data_empty_stream_contributes_no_bytes() {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");

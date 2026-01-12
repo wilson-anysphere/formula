@@ -111,6 +111,13 @@ fn parse_project_designer_modules(
     let (cow, _, _) = encoding.decode(project_stream_bytes);
     let mut out = Vec::new();
     for line in crate::split_crlf_lines(cow.as_ref()) {
+        // `ProjectDesignerModule` properties live in the `ProjectProperties` section of the
+        // `PROJECT` stream (MS-OVBA §2.3.1). Stop scanning when we reach a section header such as
+        // `[Host Extender Info]` or `[Workspace]` so we don't accidentally treat later sections as
+        // designer module declarations.
+        if line.starts_with('[') && line.ends_with(']') {
+            break;
+        }
         let Some((key, rest)) = line.split_once('=') else {
             continue;
         };
