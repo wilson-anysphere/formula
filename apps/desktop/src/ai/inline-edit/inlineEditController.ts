@@ -5,9 +5,6 @@ import type { Range } from "../../selection/types";
 import { PreviewEngine, runChatWithToolsAudited } from "../../../../../packages/ai-tools/src/index.js";
 import { SpreadsheetLLMToolExecutor } from "../../../../../packages/ai-tools/src/llm/integration.js";
 
-import { createLLMClient } from "../../../../../packages/llm/src/createLLMClient.js";
-import { loadDesktopLLMConfig } from "../llm/settings.js";
-
 import type { AIAuditStore } from "../../../../../packages/ai-audit/src/store.js";
 
 import { DLP_ACTION } from "../../../../../packages/security/dlp/src/actions.js";
@@ -25,6 +22,7 @@ import { createHeuristicTokenEstimator, estimateToolDefinitionTokens } from "../
 import { trimMessagesToBudget } from "../../../../../packages/ai-context/src/trimMessagesToBudget.js";
 import { getDefaultReserveForOutputTokens, getModeContextWindowTokens } from "../contextBudget.js";
 import { WorkbookContextBuilder, type WorkbookSchemaProvider } from "../context/WorkbookContextBuilder.js";
+import { getDesktopLLMClient, getDesktopModel } from "../llm/desktopLLMClient.js";
 
 export interface InlineEditLLMClient {
   chat: (request: any) => Promise<any>;
@@ -98,14 +96,8 @@ export class InlineEditController {
 
   private async runInlineEdit(params: { sheetId: string; range: Range; prompt: string }): Promise<void> {
     if (this.isRunning) return;
-    const client = this.options.llmClient ?? createDefaultInlineEditClient({ model: this.options.model });
-    const model = this.options.model ?? (client as any)?.model ?? "gpt-4o-mini";
-    if (!client) {
-      this.overlay.showError(
-        "AI client is not configured. Open the AI panel to choose a provider and configure API credentials."
-      );
-      return;
-    }
+    const client = this.options.llmClient ?? getDesktopLLMClient();
+    const model = this.options.model ?? (client as any)?.model ?? getDesktopModel();
 
     this.isRunning = true;
     const abortController = new AbortController();
@@ -337,17 +329,6 @@ function createSessionId(): string {
     return (globalThis.crypto as any).randomUUID();
   }
   return `inline-edit-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function createDefaultInlineEditClient(opts: { model?: string } = {}): InlineEditLLMClient | null {
-  const baseConfig = loadDesktopLLMConfig();
-  if (!baseConfig) return null;
-  const config = opts.model ? ({ ...baseConfig, model: opts.model } as any) : baseConfig;
-  try {
-    return createLLMClient(config as any) as any;
-  } catch {
-    return null;
-  }
 }
 
 function createAbortError(): Error {
