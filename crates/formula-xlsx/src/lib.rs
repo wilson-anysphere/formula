@@ -369,12 +369,15 @@ impl XlsxDocument {
         let Some(sheet) = self.workbook.sheet_mut(sheet_id) else {
             return false;
         };
+        // Treat absent cells as equivalent to `CellValue::Empty` when detecting value changes. This
+        // lets callers round-trip metadata-only cells (e.g. `c/@vm`) without losing those
+        // attributes when they set the value to empty.
         let old_value = sheet
             .cell(cell)
             .map(|record| record.value.clone())
             .unwrap_or(CellValue::Empty);
         let value_changed = old_value != value;
- 
+
         // `vm="..."` is a SpreadsheetML value-metadata pointer (typically into `xl/metadata*.xml`).
         // If the cached value changes we can't update the corresponding metadata records, so drop
         // `vm` to avoid leaving dangling rich-data references.
