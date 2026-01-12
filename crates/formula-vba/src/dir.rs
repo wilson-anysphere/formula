@@ -176,6 +176,7 @@ impl DirStream {
                             m.stream_name =
                                 decode_unicode_bytes(&decompressed[unicode_start..unicode_end]);
                         }
+                        expect_stream_name_unicode = false;
                         offset = unicode_end;
                         continue;
                     }
@@ -186,6 +187,13 @@ impl DirStream {
                 let data = &decompressed[name_start..name_end];
                 if let Some(m) = current_module.as_mut() {
                     m.stream_name = decode_bytes(trim_reserved_u16(data), encoding);
+                    // Some `VBA/dir` layouts provide a Unicode stream-name record immediately after
+                    // MODULESTREAMNAME (either MODULESTREAMNAMEUNICODE (0x0032) or, in some files,
+                    // record id 0x0048). Preserve the pre-existing behavior by tracking that
+                    // expectation here.
+                    expect_stream_name_unicode = true;
+                } else {
+                    expect_stream_name_unicode = false;
                 }
                 offset = name_end;
                 continue;
