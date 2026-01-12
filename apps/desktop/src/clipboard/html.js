@@ -42,8 +42,8 @@ function decodeHtmlEntities(text) {
 function normalizeClipboardHtml(html) {
   if (typeof html !== "string") return "";
 
-  // Some producers include trailing null terminators.
-  const input = html.replace(/\u0000+$/g, "");
+  // Some producers include null padding/terminators.
+  const input = html.replace(/^\u0000+/, "").replace(/\u0000+$/, "");
 
   const findStartOfMarkup = (s) => {
     const doctype = s.search(/<!doctype/i);
@@ -78,6 +78,49 @@ function normalizeClipboardHtml(html) {
   const startFragment = getOffset("StartFragment");
   const endFragment = getOffset("EndFragment");
 
+  // CF_HTML offsets are byte offsets from the start of the payload. Prefer byte slicing
+  // when possible, but fall back to string slicing when offsets are missing/incorrect.
+  /** @type {Uint8Array | null} */
+  let cachedUtf8Bytes = null;
+  /** @type {TextDecoder | null} */
+  let cachedUtf8Decoder = null;
+
+  const getUtf8Bytes = () => {
+    if (cachedUtf8Bytes) return cachedUtf8Bytes;
+    if (typeof TextEncoder === "undefined") return null;
+    try {
+      cachedUtf8Bytes = new TextEncoder().encode(input);
+      return cachedUtf8Bytes;
+    } catch {
+      return null;
+    }
+  };
+
+  const getUtf8Decoder = () => {
+    if (cachedUtf8Decoder) return cachedUtf8Decoder;
+    if (typeof TextDecoder === "undefined") return null;
+    try {
+      cachedUtf8Decoder = new TextDecoder("utf-8", { fatal: false });
+      return cachedUtf8Decoder;
+    } catch {
+      return null;
+    }
+  };
+
+  const safeByteSlice = (start, end) => {
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+    if (start < 0 || end <= start) return null;
+    const bytes = getUtf8Bytes();
+    const decoder = getUtf8Decoder();
+    if (!bytes || !decoder) return null;
+    if (end > bytes.length) return null;
+    try {
+      return decoder.decode(bytes.slice(start, end));
+    } catch {
+      return null;
+    }
+  };
+
   const safeSlice = (start, end) => {
     if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
     if (start < 0 || end <= start || end > input.length) return null;
@@ -87,7 +130,13 @@ function normalizeClipboardHtml(html) {
   const containsCompleteTable = (s) => /<table\b[\s\S]*?<\/table>/i.test(s);
 
   // Prefer fragment offsets when they look sane, but fall back to StartHTML/EndHTML.
-  for (const candidate of [safeSlice(startFragment, endFragment), safeSlice(startHtml, endHtml)]) {
+  // Try byte slicing first (CF_HTML spec), then string slicing as a fallback.
+  for (const candidate of [
+    safeByteSlice(startFragment, endFragment),
+    safeByteSlice(startHtml, endHtml),
+    safeSlice(startFragment, endFragment),
+    safeSlice(startHtml, endHtml),
+  ]) {
     if (!candidate) continue;
     const stripped = stripToMarkup(candidate);
     // Offsets can be "valid" but still wrong (e.g. truncated). Only accept them when they
@@ -294,8 +343,9 @@ export function serializeCellGridToHtml(grid) {
  * @returns {CellGrid | null}
  */
 export function parseHtmlToCellGrid(html) {
-  if (typeof DOMParser !== "undefined") return parseHtmlToCellGridDom(html);
-  return parseHtmlToCellGridFallback(html);
+  const normalized = normalizeClipboardHtml(html);
+  if (typeof DOMParser !== "undefined") return parseHtmlToCellGridDom(normalized);
+  return parseHtmlToCellGridFallback(normalized);
 }
 
 /**
@@ -304,7 +354,6 @@ export function parseHtmlToCellGrid(html) {
  * @returns {CellGrid | null}
  */
 function parseHtmlToCellGridDom(html) {
-  html = normalizeClipboardHtml(html);
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
   const table = doc.querySelector("table");
@@ -370,7 +419,6 @@ function parseHtmlToCellGridDom(html) {
  * @returns {CellGrid | null}
  */
 function parseHtmlToCellGridFallback(html) {
-  html = normalizeClipboardHtml(html);
   const tableMatch = /<table\b[\s\S]*?<\/table>/i.exec(html);
   if (!tableMatch) return null;
 
