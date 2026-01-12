@@ -48,6 +48,25 @@ fn der_octet_string(bytes: &[u8]) -> Vec<u8> {
     der_tlv(0x04, bytes)
 }
 
+fn der_integer_u32(n: u32) -> Vec<u8> {
+    // Minimal DER INTEGER encoding for a non-negative u32.
+    if n == 0 {
+        return vec![0x02, 0x01, 0x00];
+    }
+    let mut bytes = Vec::new();
+    let mut tmp = n;
+    while tmp > 0 {
+        bytes.push((tmp & 0xFF) as u8);
+        tmp >>= 8;
+    }
+    bytes.reverse();
+    // Ensure the integer is interpreted as positive by prefixing 0x00 when the high bit is set.
+    if bytes.first().is_some_and(|b| b & 0x80 != 0) {
+        bytes.insert(0, 0x00);
+    }
+    der_tlv(0x02, &bytes)
+}
+
 fn der_null() -> Vec<u8> {
     vec![0x05, 0x00]
 }
@@ -62,6 +81,12 @@ fn build_sig_data_v1_serialized_with_source_hash(source_hash: &[u8]) -> Vec<u8> 
     out
 }
 
+fn build_sig_data_v1_serialized_asn1(source_hash: &[u8]) -> Vec<u8> {
+    // Minimal ASN.1-ish SigDataV1Serialized payload. Real-world `SigDataV1Serialized` is a
+    // serialized structure, but some producers may embed it as ASN.1.
+    der_sequence(&[der_integer_u32(1), der_octet_string(source_hash)])
+}
+
 fn build_spc_indirect_data_content_v2(source_hash: &[u8]) -> Vec<u8> {
     // Minimal SpcIndirectDataContentV2-like payload:
     // SEQUENCE { data ANY, sigData OCTET STRING }
@@ -72,6 +97,11 @@ fn build_spc_indirect_data_content_v2(source_hash: &[u8]) -> Vec<u8> {
     let data = der_null();
     let sig_data = build_sig_data_v1_serialized_with_source_hash(source_hash);
     der_sequence(&[data, der_octet_string(&sig_data)])
+}
+
+fn build_spc_indirect_data_content_v2_with_sigdata_element(sigdata_element: Vec<u8>) -> Vec<u8> {
+    let data = der_null();
+    der_sequence(&[data, sigdata_element])
 }
 
 #[test]
@@ -99,6 +129,35 @@ fn extracts_signed_digest_from_spc_indirect_data_content_v2_source_hash() {
         .expect("signature stream present");
 
     let got = extract_vba_signature_signed_digest(&signature_stream)
+        .expect("extract digest")
+        .expect("digest present");
+    assert_eq!(got.digest_algorithm_oid, "1.2.840.113549.2.5");
+    assert_eq!(got.digest, source_hash);
+}
+
+#[test]
+fn extracts_signed_digest_from_spc_indirect_data_content_v2_sigdata_as_asn1_sequence() {
+    let source_hash = (0u8..16).collect::<Vec<_>>();
+    let sigdata = build_sig_data_v1_serialized_asn1(&source_hash);
+    let spc_v2 = build_spc_indirect_data_content_v2_with_sigdata_element(sigdata);
+
+    let pkcs7 = make_pkcs7_signed_message(&spc_v2);
+    let got = extract_vba_signature_signed_digest(&pkcs7)
+        .expect("extract digest")
+        .expect("digest present");
+    assert_eq!(got.digest_algorithm_oid, "1.2.840.113549.2.5");
+    assert_eq!(got.digest, source_hash);
+}
+
+#[test]
+fn extracts_signed_digest_from_spc_indirect_data_content_v2_sigdata_as_octet_wrapped_asn1() {
+    let source_hash = (0u8..16).collect::<Vec<_>>();
+    let sigdata_asn1 = build_sig_data_v1_serialized_asn1(&source_hash);
+    let spc_v2 =
+        build_spc_indirect_data_content_v2_with_sigdata_element(der_octet_string(&sigdata_asn1));
+
+    let pkcs7 = make_pkcs7_signed_message(&spc_v2);
+    let got = extract_vba_signature_signed_digest(&pkcs7)
         .expect("extract digest")
         .expect("digest present");
     assert_eq!(got.digest_algorithm_oid, "1.2.840.113549.2.5");
