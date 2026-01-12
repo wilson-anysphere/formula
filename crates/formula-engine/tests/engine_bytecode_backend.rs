@@ -1075,6 +1075,25 @@ fn bytecode_backend_choose_is_scalar_safe_for_concat() {
 }
 
 #[test]
+fn bytecode_backend_choose_is_scalar_safe_for_abs() {
+    // When CHOOSE is used in a scalar-only context (e.g. ABS), the selected value must behave like
+    // a scalar value (not a reference/range). Otherwise ABS would treat it as a spill attempt.
+    //
+    // Also verify the bytecode backend keeps CHOOSE lazy in this scalar context: the unselected
+    // `1/0` branch must not be evaluated.
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", -5.0).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ABS(CHOOSE(1, A1, 1/0))")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(5.0));
+    assert_engine_matches_ast(&engine, "=ABS(CHOOSE(1, A1, 1/0))", "B1");
+}
+
+#[test]
 fn bytecode_backend_let_supports_range_bindings_when_consumed_by_sum() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
