@@ -2876,6 +2876,8 @@ if (
       secondaryGridView = null;
       stopPrimarySplitPanePersistence();
       primaryPaneViewportRestored = false;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__formulaSecondaryGrid = null;
       flushSplitPanePersist();
       gridRoot.dataset.splitActive = "false";
       gridSecondaryEl.dataset.splitActive = "false";
@@ -2892,6 +2894,7 @@ if (
       const pane = split.panes.secondary;
       const initialScroll = { scrollX: pane.scrollX ?? 0, scrollY: pane.scrollY ?? 0 };
       const initialZoom = pane.zoom ?? 1;
+      const getSecondarySheetId = () => layoutController.layout.splitView.panes.secondary.sheetId ?? app.getCurrentSheetId();
 
       // Use the same DocumentController / computed value cache as the primary grid so
       // the secondary pane stays live with edits and formula recalculation.
@@ -2904,11 +2907,11 @@ if (
         container: gridSecondaryEl,
         provider: (app as any).sharedProvider ?? undefined,
         document: app.getDocument(),
-        getSheetId: () => app.getCurrentSheetId(),
+        getSheetId: getSecondarySheetId,
         rowCount,
         colCount,
         showFormulas: () => app.getShowFormulas(),
-        getComputedValue: (cell) => app.getCellComputedValueForSheet(app.getCurrentSheetId(), cell),
+        getComputedValue: (cell) => app.getCellComputedValueForSheet(getSecondarySheetId(), cell),
         onRequestRefresh: () => app.refresh(),
         onSelectionChange: () => syncPrimarySelectionFromSecondary(),
         onSelectionRangeChange: () => syncPrimarySelectionFromSecondary(),
@@ -2955,6 +2958,10 @@ if (
       // while already editing a formula).
       syncSecondaryGridInteractionMode();
     }
+ 
+    // Expose for Playwright (secondary pane autofill).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__formulaSecondaryGrid = secondaryGridView.grid;
     const active = split.activePane ?? "primary";
     gridRoot.dataset.splitActive = active === "primary" ? "true" : "false";
     gridSecondaryEl.dataset.splitActive = active === "secondary" ? "true" : "false";

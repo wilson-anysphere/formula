@@ -1,5 +1,7 @@
-import type { CellRange, GridAxisSizeChange } from "@formula/grid";
+import type { CellRange, CellRange as GridCellRange, FillCommitEvent, GridAxisSizeChange } from "@formula/grid";
+import type { CellRange as FillEngineRange } from "@formula/fill-engine";
 import type { DocumentController } from "../../document/documentController.js";
+import { applyFillCommitToDocumentController } from "../../fill/applyFillCommit";
 import { CellEditorOverlay } from "../../editor/cellEditorOverlay.js";
 import { DesktopSharedGrid, type DesktopSharedGridCallbacks } from "../shared/desktopSharedGrid.js";
 import { DocumentCellProvider } from "../shared/documentCellProvider.js";
@@ -42,6 +44,7 @@ export class SecondaryGridView {
 
   private readonly document: DocumentController;
   private readonly getSheetId: () => string;
+  private readonly getComputedValue: (cell: { row: number; col: number }) => string | number | boolean | null;
   private readonly onRequestRefresh?: () => void;
   private readonly headerRows = 1;
   private readonly headerCols = 1;
@@ -96,6 +99,7 @@ export class SecondaryGridView {
     this.container = options.container;
     this.document = options.document;
     this.getSheetId = options.getSheetId;
+    this.getComputedValue = options.getComputedValue;
     this.persistScroll = options.persistScroll;
     this.persistZoom = options.persistZoom;
     this.persistDebounceMs = options.persistDebounceMs ?? 150;
@@ -221,6 +225,10 @@ export class SecondaryGridView {
         onRequestCellEdit: (request) => {
           this.openEditor(request);
           externalCallbacks.onRequestCellEdit?.(request);
+        },
+        onFillCommit: (event) => {
+          this.onFillCommit(event);
+          void externalCallbacks.onFillCommit?.(event);
         },
       }
     });
@@ -547,6 +555,38 @@ export class SecondaryGridView {
     } else {
       this.document.setRowHeight(sheetId, docRow, baseSize, { label });
     }
+  }
+
+  private onFillCommit(event: FillCommitEvent): void {
+    const sheetId = this.getSheetId();
+    const { sourceRange, targetRange, mode } = event;
+
+    const toFillRange = (range: GridCellRange): FillEngineRange | null => {
+      const startRow = Math.max(0, range.startRow - this.headerRows);
+      const endRow = Math.max(0, range.endRow - this.headerRows);
+      const startCol = Math.max(0, range.startCol - this.headerCols);
+      const endCol = Math.max(0, range.endCol - this.headerCols);
+      if (endRow <= startRow || endCol <= startCol) return null;
+      return { startRow, endRow, startCol, endCol };
+    };
+
+    const source = toFillRange(sourceRange);
+    const target = toFillRange(targetRange);
+    if (!source || !target) return;
+
+    applyFillCommitToDocumentController({
+      document: this.document,
+      sheetId,
+      sourceRange: source,
+      targetRange: target,
+      mode,
+      getCellComputedValue: (row, col) => this.getComputedValue({ row, col }) as any,
+    });
+
+    // Ensure the secondary pane repaints immediately after the mutation. The primary
+    // pane observes DocumentController changes via its shared provider.
+    this.onRequestRefresh?.();
+    this.grid.renderer.requestRender();
   }
 
   private schedulePersistScroll(scroll: ScrollState): void {

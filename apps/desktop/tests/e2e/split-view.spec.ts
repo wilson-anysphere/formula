@@ -40,6 +40,17 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
   }
 }
 
+async function dragFromTo(
+  page: import("@playwright/test").Page,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): Promise<void> {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y);
+  await page.mouse.up();
+}
+
 test.describe("split view", () => {
   const LAYOUT_KEY = "formula.layout.workbook.local-workbook.v1";
 
@@ -833,5 +844,65 @@ test.describe("split view / shared grid zoom", () => {
     const after = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("B1"));
     if (!after) throw new Error("Missing B1 rect after resize");
     expect(after.x).toBeGreaterThan(before.x + 30);
+  });
+
+  test("fill handle drag works in the secondary pane", async ({ page }) => {
+    await page.goto("/?grid=shared");
+    await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
+
+    await page.getByTestId("split-vertical").click();
+    await page.waitForFunction(() => Boolean((window as any).__formulaSecondaryGrid), undefined, { timeout: 10_000 });
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      const doc = app.getDocument();
+
+      // Seed a simple numeric series so fill-mode "series" produces predictable results.
+      doc.setCellValue(sheetId, "A1", 1);
+      doc.setCellValue(sheetId, "A2", 2);
+
+      const grid = (window as any).__formulaSecondaryGrid;
+      // Select A1:A2 (grid coordinates include headers at row/col 0).
+      grid.setSelectionRanges(
+        [
+          {
+            startRow: 1,
+            endRow: 3,
+            startCol: 1,
+            endCol: 2,
+          },
+        ],
+        { activeCell: { row: 2, col: 1 } },
+      );
+    });
+    await waitForIdle(page);
+
+    const secondaryBox = await page.locator("#grid-secondary").boundingBox();
+    expect(secondaryBox).not.toBeNull();
+
+    await page.waitForFunction(() => Boolean((window as any).__formulaSecondaryGrid?.renderer?.getFillHandleRect?.()));
+
+    const handle = await page.evaluate(() => (window as any).__formulaSecondaryGrid.renderer.getFillHandleRect());
+    expect(handle).not.toBeNull();
+
+    const a3Rect = await page.evaluate(() => (window as any).__formulaSecondaryGrid.getCellRect(3, 1));
+    expect(a3Rect).not.toBeNull();
+
+    await dragFromTo(
+      page,
+      {
+        x: secondaryBox!.x + handle!.x + handle!.width / 2,
+        y: secondaryBox!.y + handle!.y + handle!.height / 2,
+      },
+      {
+        x: secondaryBox!.x + a3Rect!.x + a3Rect!.width / 2,
+        y: secondaryBox!.y + a3Rect!.y + a3Rect!.height / 2,
+      },
+    );
+    await waitForIdle(page);
+
+    const a3 = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A3"));
+    expect(a3).toBe("3");
   });
 });
