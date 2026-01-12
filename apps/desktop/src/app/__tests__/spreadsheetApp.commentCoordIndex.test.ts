@@ -22,6 +22,8 @@ describe("SpreadsheetApp.reindexCommentCells", () => {
     (app as any).commentMetaByCoord = new Map<number, { resolved: boolean }>();
     (app as any).commentPreviewByCoord = new Map<number, string>();
     (app as any).commentThreadsByCellRef = new Map<string, any[]>();
+    (app as any).commentIndexVersion = 0;
+    (app as any).lastHoveredCommentIndexVersion = -1;
     (app as any).commentManager = { listAll: () => comments };
 
     const invalidateAll = vi.fn();
@@ -54,6 +56,8 @@ describe("SpreadsheetApp.reindexCommentCells", () => {
     (app as any).commentMetaByCoord = new Map<number, { resolved: boolean }>();
     (app as any).commentPreviewByCoord = new Map<number, string>();
     (app as any).commentThreadsByCellRef = new Map<string, any[]>();
+    (app as any).commentIndexVersion = 0;
+    (app as any).lastHoveredCommentIndexVersion = -1;
     (app as any).commentManager = { listAll: () => comments };
 
     const invalidateAll = vi.fn();
@@ -80,6 +84,8 @@ describe("SpreadsheetApp.reindexCommentCells", () => {
     (app as any).commentMetaByCoord = new Map<number, { resolved: boolean }>();
     (app as any).commentPreviewByCoord = new Map<number, string>();
     (app as any).commentThreadsByCellRef = new Map<string, any[]>();
+    (app as any).commentIndexVersion = 0;
+    (app as any).lastHoveredCommentIndexVersion = -1;
     (app as any).commentManager = { listAll: () => comments };
 
     const invalidateAll = vi.fn();

@@ -589,7 +589,9 @@ export class SpreadsheetApp {
   private commentCells = new Set<string>();
   private commentsPanelVisible = false;
   private stopCommentPersistence: (() => void) | null = null;
+  private commentIndexVersion = 0;
   private lastHoveredCommentCellKey: number | null = null;
+  private lastHoveredCommentIndexVersion = -1;
   private sharedHoverCellKey: number | null = null;
   private sharedHoverCellRect: { x: number; y: number; width: number; height: number } | null = null;
   private sharedHoverCellHasComment = false;
@@ -3204,6 +3206,7 @@ export class SpreadsheetApp {
 
       if (
         this.lastHoveredCommentCellKey === cellKey &&
+        this.lastHoveredCommentIndexVersion === this.commentIndexVersion &&
         this.commentTooltip.classList.contains("comment-tooltip--visible")
       ) {
         return;
@@ -3217,6 +3220,7 @@ export class SpreadsheetApp {
       }
 
       this.lastHoveredCommentCellKey = cellKey;
+      this.lastHoveredCommentIndexVersion = this.commentIndexVersion;
       this.commentTooltip.textContent = preview;
       this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
       this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
@@ -3259,11 +3263,13 @@ export class SpreadsheetApp {
 
     if (
       this.lastHoveredCommentCellKey === cellKey &&
+      this.lastHoveredCommentIndexVersion === this.commentIndexVersion &&
       this.commentTooltip.classList.contains("comment-tooltip--visible")
     ) {
       return;
     }
     this.lastHoveredCommentCellKey = cellKey;
+    this.lastHoveredCommentIndexVersion = this.commentIndexVersion;
     this.commentTooltip.textContent = preview;
     this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
     this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
@@ -3635,6 +3641,7 @@ export class SpreadsheetApp {
     }
 
     this.lastHoveredCommentCellKey = null;
+    this.lastHoveredCommentIndexVersion = -1;
     this.commentTooltip.classList.remove("comment-tooltip--visible");
   }
 
@@ -3686,6 +3693,8 @@ export class SpreadsheetApp {
         this.commentPreviewByCoord.set(coordKey, comment.content ?? "");
       }
     }
+
+    this.commentIndexVersion += 1;
 
     // The shared renderer caches cell metadata, so comment indicator updates require a provider invalidation.
     this.sharedProvider?.invalidateAll();
