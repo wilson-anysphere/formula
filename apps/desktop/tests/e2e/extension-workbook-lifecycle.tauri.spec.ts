@@ -364,6 +364,146 @@ test.describe("extension workbook lifecycle (tauri)", () => {
     );
   });
 
+  test("UI Ctrl+N creates a new workbook and clears the previous workbook path", async ({ page }) => {
+    await page.addInitScript(() => {
+      const listeners: Record<string, any> = {};
+      const invokes: Array<{ cmd: string; args: any }> = [];
+
+      (window as any).__tauriListeners = listeners;
+      (window as any).__tauriInvokes = invokes;
+
+      (window as any).__TAURI__ = {
+        core: {
+          invoke: async (cmd: string, args: any) => {
+            invokes.push({ cmd, args });
+            switch (cmd) {
+              case "new_workbook":
+                return {
+                  path: null,
+                  origin_path: null,
+                  sheets: [{ id: "Sheet1", name: "Sheet1" }],
+                };
+
+              case "open_workbook":
+                return {
+                  path: args?.path ?? null,
+                  origin_path: args?.path ?? null,
+                  sheets: [{ id: "Sheet1", name: "Sheet1" }],
+                };
+
+              case "get_sheet_used_range":
+                return { start_row: 0, end_row: 0, start_col: 0, end_col: 0 };
+
+              case "get_range": {
+                const startRow = Number(args?.start_row ?? 0);
+                const endRow = Number(args?.end_row ?? startRow);
+                const startCol = Number(args?.start_col ?? 0);
+                const endCol = Number(args?.end_col ?? startCol);
+                const rows = Math.max(0, endRow - startRow + 1);
+                const cols = Math.max(0, endCol - startCol + 1);
+                const values = Array.from({ length: rows }, () =>
+                  Array.from({ length: cols }, () => ({ value: null, formula: null, display_value: "" })),
+                );
+                return { values, start_row: startRow, start_col: startCol };
+              }
+
+              case "list_defined_names":
+                return [];
+              case "list_tables":
+                return [];
+              case "get_workbook_theme_palette":
+                return null;
+
+              case "get_macro_security_status":
+                return { has_macros: false, trust: "trusted_always" };
+              case "set_macro_ui_context":
+                return null;
+              case "fire_workbook_open":
+                return { ok: true, output: [], updates: [] };
+
+              case "set_cell":
+              case "set_range":
+              case "save_workbook":
+              case "mark_saved":
+                return null;
+
+              default:
+                // Best-effort: ignore unknown commands so unrelated UI features don't
+                // break this test when new backend calls are introduced.
+                return null;
+            }
+          },
+        },
+        event: {
+          listen: async (name: string, handler: any) => {
+            listeners[name] = handler;
+            return () => {
+              delete listeners[name];
+            };
+          },
+          emit: async () => {},
+        },
+        dialog: {
+          open: async () => "/tmp/ui-opened.xlsx",
+          save: async () => null,
+        },
+        window: {
+          getCurrentWebviewWindow: () => ({
+            hide: async () => {
+              (window as any).__tauriHidden = true;
+            },
+            close: async () => {
+              (window as any).__tauriClosed = true;
+            },
+          }),
+        },
+      };
+    });
+
+    await gotoDesktop(page);
+    await page.waitForFunction(() => Boolean((window as any).__formulaExtensionHost), undefined, { timeout: 30_000 });
+
+    // Ctrl+O triggers the UI "Open workbook" flow (promptOpenWorkbook -> openWorkbookFromPath).
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "o", ctrlKey: true }));
+    });
+
+    await page.waitForFunction(
+      async () => {
+        const host: any = (window as any).__formulaExtensionHost;
+        if (!host || typeof host._getActiveWorkbook !== "function") return false;
+        const wb = await host._getActiveWorkbook();
+        return wb?.path === "/tmp/ui-opened.xlsx";
+      },
+      undefined,
+      { timeout: 10_000 },
+    );
+
+    // Ctrl+N triggers the UI "New workbook" flow (handleNewWorkbook).
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "n", ctrlKey: true }));
+    });
+
+    // Regression check: when the new workbook is unsaved (path=null), the extension host should
+    // clear any previously-stored path instead of falling back to the old one.
+    await page.waitForFunction(
+      async () => {
+        const host: any = (window as any).__formulaExtensionHost;
+        if (!host || typeof host._getActiveWorkbook !== "function") return false;
+        const wb = await host._getActiveWorkbook();
+        return wb?.path == null;
+      },
+      undefined,
+      { timeout: 10_000 },
+    );
+
+    const invokes = await page.evaluate(() => (window as any).__tauriInvokes);
+    expect(invokes.some((entry: any) => entry?.cmd === "open_workbook" && entry?.args?.path === "/tmp/ui-opened.xlsx")).toBe(
+      true,
+    );
+    expect(invokes.some((entry: any) => entry?.cmd === "new_workbook")).toBe(true);
+  });
+
   test("workbook.save delegates to save_workbook when the workbook has a path", async ({ page }) => {
     await page.addInitScript(() => {
       const listeners: Record<string, any> = {};
