@@ -8380,6 +8380,55 @@ mod tests {
     use super::*;
     use crate::bytecode::ColumnarGrid;
 
+    struct SparsePanicGrid {
+        bounds: (i32, i32),
+        cells: Vec<(CellCoord, Value)>,
+        cells_by_sheet: std::collections::HashMap<usize, Vec<(CellCoord, Value)>>,
+    }
+
+    impl Grid for SparsePanicGrid {
+        fn get_value(&self, _coord: CellCoord) -> Value {
+            panic!("unexpected get_value call (expected sparse iteration)");
+        }
+
+        fn get_value_on_sheet(&self, _sheet: usize, _coord: CellCoord) -> Value {
+            panic!("unexpected get_value_on_sheet call (expected sparse iteration)");
+        }
+
+        fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+            None
+        }
+
+        fn column_slice_on_sheet(
+            &self,
+            _sheet: usize,
+            _col: i32,
+            _row_start: i32,
+            _row_end: i32,
+        ) -> Option<&[f64]> {
+            None
+        }
+
+        fn iter_cells(&self) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
+            Some(Box::new(self.cells.iter().cloned()))
+        }
+
+        fn iter_cells_on_sheet(
+            &self,
+            sheet: usize,
+        ) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
+            Some(Box::new(self.cells_by_sheet.get(&sheet)?.iter().cloned()))
+        }
+
+        fn bounds(&self) -> (i32, i32) {
+            self.bounds
+        }
+
+        fn bounds_on_sheet(&self, _sheet: usize) -> (i32, i32) {
+            self.bounds
+        }
+    }
+
     #[test]
     fn range_aggregates_return_ref_for_out_of_bounds_ranges() {
         let grid = ColumnarGrid::new(10, 10);
@@ -8403,6 +8452,110 @@ mod tests {
         assert_eq!(max_range(&grid, range), Err(ErrorKind::Ref));
 
         assert_eq!(sumproduct_range(&grid, range, range), Err(ErrorKind::Ref));
+    }
+
+    #[test]
+    fn and_range_ignores_missing_in_sparse_refs() {
+        let row_end = BYTECODE_SPARSE_RANGE_ROW_THRESHOLD; // rows() == threshold + 1
+        let range = ResolvedRange {
+            row_start: 0,
+            row_end,
+            col_start: 0,
+            col_end: 0,
+        };
+
+        let grid = SparsePanicGrid {
+            bounds: (row_end + 1, 1),
+            cells: vec![(CellCoord { row: 0, col: 0 }, Value::Missing)],
+            cells_by_sheet: std::collections::HashMap::new(),
+        };
+
+        let mut all_true = true;
+        let mut any = false;
+        assert_eq!(and_range(&grid, range, &mut all_true, &mut any), None);
+        assert_eq!(all_true, true);
+        assert_eq!(any, false);
+    }
+
+    #[test]
+    fn or_range_ignores_missing_in_sparse_refs() {
+        let row_end = BYTECODE_SPARSE_RANGE_ROW_THRESHOLD; // rows() == threshold + 1
+        let range = ResolvedRange {
+            row_start: 0,
+            row_end,
+            col_start: 0,
+            col_end: 0,
+        };
+
+        let grid = SparsePanicGrid {
+            bounds: (row_end + 1, 1),
+            cells: vec![(CellCoord { row: 0, col: 0 }, Value::Missing)],
+            cells_by_sheet: std::collections::HashMap::new(),
+        };
+
+        let mut any_true = false;
+        let mut any = false;
+        assert_eq!(or_range(&grid, range, &mut any_true, &mut any), None);
+        assert_eq!(any_true, false);
+        assert_eq!(any, false);
+    }
+
+    #[test]
+    fn and_range_on_sheet_ignores_missing_in_sparse_refs() {
+        let row_end = BYTECODE_SPARSE_RANGE_ROW_THRESHOLD; // rows() == threshold + 1
+        let range = ResolvedRange {
+            row_start: 0,
+            row_end,
+            col_start: 0,
+            col_end: 0,
+        };
+
+        let grid = SparsePanicGrid {
+            bounds: (row_end + 1, 1),
+            cells: Vec::new(),
+            cells_by_sheet: std::collections::HashMap::from([(
+                0,
+                vec![(CellCoord { row: 0, col: 0 }, Value::Missing)],
+            )]),
+        };
+
+        let mut all_true = true;
+        let mut any = false;
+        assert_eq!(
+            and_range_on_sheet(&grid, 0, range, &mut all_true, &mut any),
+            None
+        );
+        assert_eq!(all_true, true);
+        assert_eq!(any, false);
+    }
+
+    #[test]
+    fn or_range_on_sheet_ignores_missing_in_sparse_refs() {
+        let row_end = BYTECODE_SPARSE_RANGE_ROW_THRESHOLD; // rows() == threshold + 1
+        let range = ResolvedRange {
+            row_start: 0,
+            row_end,
+            col_start: 0,
+            col_end: 0,
+        };
+
+        let grid = SparsePanicGrid {
+            bounds: (row_end + 1, 1),
+            cells: Vec::new(),
+            cells_by_sheet: std::collections::HashMap::from([(
+                0,
+                vec![(CellCoord { row: 0, col: 0 }, Value::Missing)],
+            )]),
+        };
+
+        let mut any_true = false;
+        let mut any = false;
+        assert_eq!(
+            or_range_on_sheet(&grid, 0, range, &mut any_true, &mut any),
+            None
+        );
+        assert_eq!(any_true, false);
+        assert_eq!(any, false);
     }
 
     #[test]
