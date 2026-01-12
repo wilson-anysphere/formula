@@ -88,6 +88,10 @@ impl Compiler {
         //
         // Lower single-cell references to a range so the runtime can apply reference semantics.
         let treat_cell_as_range = match func {
+            // AND/OR have the same reference-vs-scalar semantics as the aggregate functions:
+            // a direct cell reference argument is treated as a reference, not a scalar, so blanks
+            // and text values in the referenced cell are ignored.
+            Function::And | Function::Or => true,
             Function::Sum | Function::Average | Function::Min | Function::Max | Function::Count => {
                 true
             }
@@ -99,7 +103,13 @@ impl Compiler {
             Function::CountIfs => arg_idx % 2 == 0,
             Function::SumProduct => true,
             Function::VLookup | Function::HLookup | Function::Match => arg_idx == 1,
-            Function::Abs
+            Function::If
+            | Function::IfError
+            | Function::IfNa
+            | Function::IsError
+            | Function::IsNa
+            | Function::Na
+            | Function::Abs
             | Function::Int
             | Function::Round
             | Function::RoundUp

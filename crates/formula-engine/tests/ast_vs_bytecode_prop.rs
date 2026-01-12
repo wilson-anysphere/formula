@@ -70,6 +70,10 @@ fn arb_literal() -> impl Strategy<Value = Expr> {
     prop_oneof![
         (-1000i32..=1000).prop_map(|v| Expr::Literal(Value::Number(v as f64))),
         any::<bool>().prop_map(|b| Expr::Literal(Value::Bool(b))),
+        Just(Expr::FuncCall {
+            func: Function::Na,
+            args: vec![],
+        }),
     ]
 }
 
@@ -99,6 +103,46 @@ fn arb_expr(base: CellCoord, rows: i32, cols: i32) -> impl Strategy<Value = Expr
                     op: BinaryOp::Mul,
                     left: Box::new(l),
                     right: Box::new(r),
+                }),
+                // IF(cond, t, f)
+                (inner.clone(), inner.clone(), inner.clone()).prop_map(|(c, t, f)| Expr::FuncCall {
+                    func: Function::If,
+                    args: vec![c, t, f],
+                }),
+                // IF(cond, t)
+                (inner.clone(), inner.clone()).prop_map(|(c, t)| Expr::FuncCall {
+                    func: Function::If,
+                    args: vec![c, t],
+                }),
+                // AND(a, b)
+                (inner.clone(), inner.clone()).prop_map(|(a, b)| Expr::FuncCall {
+                    func: Function::And,
+                    args: vec![a, b],
+                }),
+                // OR(a, b)
+                (inner.clone(), inner.clone()).prop_map(|(a, b)| Expr::FuncCall {
+                    func: Function::Or,
+                    args: vec![a, b],
+                }),
+                // IFERROR(a, b)
+                (inner.clone(), inner.clone()).prop_map(|(a, b)| Expr::FuncCall {
+                    func: Function::IfError,
+                    args: vec![a, b],
+                }),
+                // IFNA(a, b)
+                (inner.clone(), inner.clone()).prop_map(|(a, b)| Expr::FuncCall {
+                    func: Function::IfNa,
+                    args: vec![a, b],
+                }),
+                // ISERROR(a)
+                inner.clone().prop_map(|a| Expr::FuncCall {
+                    func: Function::IsError,
+                    args: vec![a],
+                }),
+                // ISNA(a)
+                inner.clone().prop_map(|a| Expr::FuncCall {
+                    func: Function::IsNa,
+                    args: vec![a],
                 }),
                 // SUM(range)
                 arb_rect_range_ref(base, rows, cols).prop_map(|r| Expr::FuncCall {

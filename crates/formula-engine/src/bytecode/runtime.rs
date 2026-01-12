@@ -118,6 +118,9 @@ pub fn eval_ast(
             let mut evaluated: SmallVec<[Value; 8]> = SmallVec::with_capacity(args.len());
             for (arg_idx, arg) in args.iter().enumerate() {
                 let treat_cell_as_range = match func {
+                    // AND/OR treat direct cell references as references (like aggregates), so text
+                    // and blank values in referenced cells are ignored.
+                    Function::And | Function::Or => true,
                     // See `Compiler::compile_func_arg` for the rationale.
                     Function::Sum
                     | Function::Average
@@ -133,7 +136,13 @@ pub fn eval_ast(
                     Function::CountIfs => arg_idx % 2 == 0,
                     Function::SumProduct => true,
                     Function::VLookup | Function::HLookup | Function::Match => arg_idx == 1,
-                    Function::Abs
+                    Function::If
+                    | Function::IfError
+                    | Function::IfNa
+                    | Function::IsError
+                    | Function::IsNa
+                    | Function::Na
+                    | Function::Abs
                     | Function::Int
                     | Function::Round
                     | Function::RoundUp
@@ -484,6 +493,14 @@ pub fn call_function(
     locale: &crate::LocaleConfig,
 ) -> Value {
     match func {
+        Function::If => fn_if(args),
+        Function::And => fn_and(args, grid, base),
+        Function::Or => fn_or(args, grid, base),
+        Function::IfError => fn_iferror(args),
+        Function::IfNa => fn_ifna(args),
+        Function::IsError => fn_iserror(args),
+        Function::IsNa => fn_isna(args),
+        Function::Na => fn_na(args),
         Function::Sum => fn_sum(args, grid, base),
         Function::SumIf => fn_sumif(args, grid, base, locale),
         Function::SumIfs => fn_sumifs(args, grid, base, locale),
@@ -654,6 +671,251 @@ fn fn_not(args: &[Value]) -> Value {
         Ok(b) => Value::Bool(!b),
         Err(e) => Value::Error(e),
     }
+}
+
+fn fn_if(args: &[Value]) -> Value {
+    if args.len() < 2 || args.len() > 3 {
+        return Value::Error(ErrorKind::Value);
+    }
+    let cond = match coerce_to_bool(args[0].clone()) {
+        Ok(b) => b,
+        Err(e) => return Value::Error(e),
+    };
+    if cond {
+        args[1].clone()
+    } else if args.len() >= 3 {
+        args[2].clone()
+    } else {
+        // Engine behavior: missing false branch defaults to FALSE (not blank).
+        Value::Bool(false)
+    }
+}
+
+fn fn_iferror(args: &[Value]) -> Value {
+    if args.len() != 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+    if matches!(args[0], Value::Error(_)) {
+        args[1].clone()
+    } else {
+        args[0].clone()
+    }
+}
+
+fn fn_ifna(args: &[Value]) -> Value {
+    if args.len() != 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+    if matches!(args[0], Value::Error(ErrorKind::NA)) {
+        args[1].clone()
+    } else {
+        args[0].clone()
+    }
+}
+
+fn fn_iserror(args: &[Value]) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    Value::Bool(matches!(args[0], Value::Error(_)))
+}
+
+fn fn_isna(args: &[Value]) -> Value {
+    if args.len() != 1 {
+        return Value::Error(ErrorKind::Value);
+    }
+    Value::Bool(matches!(args[0], Value::Error(ErrorKind::NA)))
+}
+
+fn fn_na(args: &[Value]) -> Value {
+    if !args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+    Value::Error(ErrorKind::NA)
+}
+
+fn fn_and(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+    let mut all_true = true;
+    let mut any = false;
+
+    for arg in args {
+        let err = match arg {
+            Value::Range(r) => and_range(grid, r.resolve(base), &mut all_true, &mut any),
+            Value::Array(a) => and_array(a, &mut all_true, &mut any),
+            other => and_scalar(other, &mut all_true, &mut any),
+        };
+        if let Some(e) = err {
+            return Value::Error(e);
+        }
+    }
+
+    if !any {
+        Value::Bool(true)
+    } else {
+        Value::Bool(all_true)
+    }
+}
+
+fn fn_or(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+    let mut any_true = false;
+    let mut any = false;
+
+    for arg in args {
+        let err = match arg {
+            Value::Range(r) => or_range(grid, r.resolve(base), &mut any_true, &mut any),
+            Value::Array(a) => or_array(a, &mut any_true, &mut any),
+            other => or_scalar(other, &mut any_true, &mut any),
+        };
+        if let Some(e) = err {
+            return Value::Error(e);
+        }
+    }
+
+    if !any {
+        Value::Bool(false)
+    } else {
+        Value::Bool(any_true)
+    }
+}
+
+fn and_scalar(v: &Value, all_true: &mut bool, any: &mut bool) -> Option<ErrorKind> {
+    match v {
+        Value::Error(e) => Some(*e),
+        Value::Number(n) => {
+            *any = true;
+            if *n == 0.0 {
+                *all_true = false;
+            }
+            None
+        }
+        Value::Bool(b) => {
+            *any = true;
+            if !*b {
+                *all_true = false;
+            }
+            None
+        }
+        Value::Empty => None,
+        Value::Text(_) => Some(ErrorKind::Value),
+        // Ranges/arrays are handled by the caller.
+        Value::Array(_) | Value::Range(_) => Some(ErrorKind::Spill),
+    }
+}
+
+fn or_scalar(v: &Value, any_true: &mut bool, any: &mut bool) -> Option<ErrorKind> {
+    match v {
+        Value::Error(e) => Some(*e),
+        Value::Number(n) => {
+            *any = true;
+            if *n != 0.0 {
+                *any_true = true;
+            }
+            None
+        }
+        Value::Bool(b) => {
+            *any = true;
+            if *b {
+                *any_true = true;
+            }
+            None
+        }
+        Value::Empty => None,
+        Value::Text(_) => Some(ErrorKind::Value),
+        // Ranges/arrays are handled by the caller.
+        Value::Array(_) | Value::Range(_) => Some(ErrorKind::Spill),
+    }
+}
+
+fn and_array(a: &ArrayValue, all_true: &mut bool, any: &mut bool) -> Option<ErrorKind> {
+    for n in &a.values {
+        if n.is_nan() {
+            continue;
+        }
+        *any = true;
+        if *n == 0.0 {
+            *all_true = false;
+        }
+    }
+    None
+}
+
+fn or_array(a: &ArrayValue, any_true: &mut bool, any: &mut bool) -> Option<ErrorKind> {
+    for n in &a.values {
+        if n.is_nan() {
+            continue;
+        }
+        *any = true;
+        if *n != 0.0 {
+            *any_true = true;
+        }
+    }
+    None
+}
+
+fn and_range(
+    grid: &dyn Grid,
+    range: ResolvedRange,
+    all_true: &mut bool,
+    any: &mut bool,
+) -> Option<ErrorKind> {
+    for row in range.row_start..=range.row_end {
+        for col in range.col_start..=range.col_end {
+            match grid.get_value(CellCoord { row, col }) {
+                Value::Error(e) => return Some(e),
+                Value::Number(n) => {
+                    *any = true;
+                    if n == 0.0 {
+                        *all_true = false;
+                    }
+                }
+                Value::Bool(b) => {
+                    *any = true;
+                    if !b {
+                        *all_true = false;
+                    }
+                }
+                // Text/blanks in references are ignored.
+                Value::Text(_) | Value::Empty | Value::Array(_) | Value::Range(_) => {}
+            }
+        }
+    }
+    None
+}
+
+fn or_range(
+    grid: &dyn Grid,
+    range: ResolvedRange,
+    any_true: &mut bool,
+    any: &mut bool,
+) -> Option<ErrorKind> {
+    for row in range.row_start..=range.row_end {
+        for col in range.col_start..=range.col_end {
+            match grid.get_value(CellCoord { row, col }) {
+                Value::Error(e) => return Some(e),
+                Value::Number(n) => {
+                    *any = true;
+                    if n != 0.0 {
+                        *any_true = true;
+                    }
+                }
+                Value::Bool(b) => {
+                    *any = true;
+                    if b {
+                        *any_true = true;
+                    }
+                }
+                // Text/blanks in references are ignored.
+                Value::Text(_) | Value::Empty | Value::Array(_) | Value::Range(_) => {}
+            }
+        }
+    }
+    None
 }
 
 fn format_number_general(n: f64) -> String {

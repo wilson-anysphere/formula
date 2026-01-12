@@ -729,6 +729,99 @@ fn bytecode_backend_matches_ast_for_vlookup_and_hlookup() {
     }
 }
 
+#[test]
+fn bytecode_backend_matches_ast_for_common_logical_error_functions() {
+    let mut engine = Engine::new();
+
+    // IF lazy error propagation.
+    engine
+        .set_cell_formula("Sheet1", "B1", "=IF(FALSE, 1/0, 1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=IF(TRUE, \"x\", 1/0)")
+        .unwrap();
+
+    // IFERROR / IFNA.
+    engine
+        .set_cell_formula("Sheet1", "B3", "=IFERROR(1, 1/0)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B4", "=IFERROR(1/0, 7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B5", "=IFNA(NA(), 7)")
+        .unwrap();
+
+    // Error helpers.
+    engine.set_cell_formula("Sheet1", "B6", "=NA()").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B7", "=ISERROR(1/0)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B8", "=ISNA(NA())")
+        .unwrap();
+
+    assert_eq!(
+        engine.bytecode_program_count(),
+        8,
+        "expected all formulas to compile to bytecode"
+    );
+
+    engine.recalculate_single_threaded();
+
+    for (formula, cell) in [
+        ("=IF(FALSE, 1/0, 1)", "B1"),
+        ("=IF(TRUE, \"x\", 1/0)", "B2"),
+        ("=IFERROR(1, 1/0)", "B3"),
+        ("=IFERROR(1/0, 7)", "B4"),
+        ("=IFNA(NA(), 7)", "B5"),
+        ("=NA()", "B6"),
+        ("=ISERROR(1/0)", "B7"),
+        ("=ISNA(NA())", "B8"),
+    ] {
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
+fn bytecode_backend_and_or_reference_semantics_match_ast() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=AND(A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=OR(A1)")
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    let cases: &[(Option<Value>, Value, Value)] = &[
+        // Blank and text in *references* are ignored.
+        (None, Value::Bool(true), Value::Bool(false)),
+        (Some(Value::Text("hello".to_string())), Value::Bool(true), Value::Bool(false)),
+        // Numbers/bools are included.
+        (Some(Value::Number(0.0)), Value::Bool(false), Value::Bool(false)),
+        (Some(Value::Number(2.0)), Value::Bool(true), Value::Bool(true)),
+        (Some(Value::Bool(false)), Value::Bool(false), Value::Bool(false)),
+        (Some(Value::Bool(true)), Value::Bool(true), Value::Bool(true)),
+    ];
+
+    for (a1, expected_and, expected_or) in cases {
+        match a1 {
+            None => engine.clear_cell("Sheet1", "A1").unwrap(),
+            Some(v) => engine.set_cell_value("Sheet1", "A1", v.clone()).unwrap(),
+        };
+
+        engine.recalculate_single_threaded();
+
+        assert_eq!(engine.get_cell_value("Sheet1", "B1"), *expected_and);
+        assert_eq!(engine.get_cell_value("Sheet1", "B2"), *expected_or);
+        assert_engine_matches_ast(&engine, "=AND(A1)", "B1");
+        assert_engine_matches_ast(&engine, "=OR(A1)", "B2");
+    }
+}
+
 proptest! {
     #![proptest_config(ProptestConfig { cases: 32, .. ProptestConfig::default() })]
     #[test]
@@ -736,7 +829,7 @@ proptest! {
         a in -1000f64..1000f64,
         b in -1000f64..1000f64,
         digits in -6i32..6i32,
-        choice in 0u8..14u8,
+        choice in 0u8..20u8,
     ) {
         let formula = match choice {
             0 => "=A1+B1".to_string(),
@@ -753,6 +846,12 @@ proptest! {
             11 => "=SIGN(A1)".to_string(),
             12 => "=A1&B1".to_string(),
             13 => "=A1%".to_string(),
+            14 => "=IF(A1>0, A1/B1, 1)".to_string(),
+            15 => "=IFERROR(A1/B1, 7)".to_string(),
+            16 => "=IFNA(NA(), A1)".to_string(),
+            17 => "=AND(A1, B1)".to_string(),
+            18 => "=OR(A1, B1)".to_string(),
+            19 => "=ISERROR(A1/B1)".to_string(),
             _ => unreachable!(),
         };
 

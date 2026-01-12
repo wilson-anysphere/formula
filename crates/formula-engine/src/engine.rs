@@ -5612,6 +5612,34 @@ fn bytecode_expr_is_eligible_inner(expr: &bytecode::Expr, allow_range: bool) -> 
                 && bytecode_expr_is_eligible_inner(right, false)
         }
         bytecode::Expr::FuncCall { func, args } => match func {
+            bytecode::ast::Function::If => {
+                if args.len() < 2 || args.len() > 3 {
+                    return false;
+                }
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false))
+            }
+            bytecode::ast::Function::And | bytecode::ast::Function::Or => {
+                if args.is_empty() {
+                    return false;
+                }
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, true))
+            }
+            bytecode::ast::Function::IfError | bytecode::ast::Function::IfNa => {
+                if args.len() != 2 {
+                    return false;
+                }
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false))
+            }
+            bytecode::ast::Function::IsError | bytecode::ast::Function::IsNa => {
+                if args.len() != 1 {
+                    return false;
+                }
+                bytecode_expr_is_eligible_inner(&args[0], false)
+            }
+            bytecode::ast::Function::Na => args.is_empty(),
             bytecode::ast::Function::Sum
             | bytecode::ast::Function::Average
             | bytecode::ast::Function::Min

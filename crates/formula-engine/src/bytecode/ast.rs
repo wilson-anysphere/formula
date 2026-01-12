@@ -25,6 +25,14 @@ pub enum BinaryOp {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Function {
+    If,
+    And,
+    Or,
+    IfError,
+    IfNa,
+    IsError,
+    IsNa,
+    Na,
     Sum,
     SumIf,
     SumIfs,
@@ -59,6 +67,14 @@ impl Function {
         let upper = name.to_ascii_uppercase();
         let base = upper.strip_prefix("_XLFN.").unwrap_or(upper.as_str());
         match base {
+            "IF" => Function::If,
+            "AND" => Function::And,
+            "OR" => Function::Or,
+            "IFERROR" => Function::IfError,
+            "IFNA" => Function::IfNa,
+            "ISERROR" => Function::IsError,
+            "ISNA" => Function::IsNa,
+            "NA" => Function::Na,
             "SUM" => Function::Sum,
             "SUMIF" => Function::SumIf,
             "SUMIFS" => Function::SumIfs,
@@ -91,6 +107,14 @@ impl Function {
 
     pub fn name(&self) -> &str {
         match self {
+            Function::If => "IF",
+            Function::And => "AND",
+            Function::Or => "OR",
+            Function::IfError => "IFERROR",
+            Function::IfNa => "IFNA",
+            Function::IsError => "ISERROR",
+            Function::IsNa => "ISNA",
+            Function::Na => "NA",
             Function::Sum => "SUM",
             Function::SumIf => "SUMIF",
             Function::SumIfs => "SUMIFS",
