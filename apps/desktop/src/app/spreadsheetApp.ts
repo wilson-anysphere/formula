@@ -3146,12 +3146,24 @@ export class SpreadsheetApp {
 
     if (this.auditingMode === "off") return;
 
-    const clipRect = {
-      x: this.rowHeaderWidth,
-      y: this.colHeaderHeight,
-      width: this.viewportWidth(),
-      height: this.viewportHeight(),
-    };
+    const clipRect = this.sharedGrid
+      ? (() => {
+          const viewport = this.sharedGrid.renderer.scroll.getViewportState();
+          const headerWidth = Math.max(0, this.sharedGrid.renderer.getColWidth(0));
+          const headerHeight = Math.max(0, this.sharedGrid.renderer.getRowHeight(0));
+          return {
+            x: headerWidth,
+            y: headerHeight,
+            width: Math.max(0, viewport.width - headerWidth),
+            height: Math.max(0, viewport.height - headerHeight),
+          };
+        })()
+      : {
+          x: this.rowHeaderWidth,
+          y: this.colHeaderHeight,
+          width: this.viewportWidth(),
+          height: this.viewportHeight(),
+        };
 
     this.auditingCtx.save();
     this.auditingCtx.beginPath();
