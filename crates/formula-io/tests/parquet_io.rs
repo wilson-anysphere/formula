@@ -121,3 +121,25 @@ fn parquet_import_sanitizes_sheet_name_from_file_stem() {
         .sheet_by_name(&expected)
         .expect("expected worksheet name to be sanitized from file stem");
 }
+
+#[test]
+fn parquet_import_invalid_sheet_name_falls_back_to_sheet1() {
+    let parquet_path = parquet_fixture_path("simple.parquet");
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    // Use a filename stem that becomes empty after sheet-name sanitization.
+    // `[` and `]` are invalid in Excel sheet names but valid on common filesystems.
+    let bad_path = dir.path().join("[].parquet");
+    std::fs::copy(&parquet_path, &bad_path).expect("copy parquet fixture");
+
+    let wb = open_workbook(&bad_path).expect("open parquet workbook");
+    let model = match wb {
+        Workbook::Model(model) => model,
+        other => panic!("expected Workbook::Model, got {other:?}"),
+    };
+
+    assert_eq!(sanitize_sheet_name("[]"), "Sheet1");
+    model
+        .sheet_by_name("Sheet1")
+        .expect("expected worksheet to fall back to Sheet1");
+}
