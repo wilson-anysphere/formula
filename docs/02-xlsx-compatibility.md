@@ -388,7 +388,8 @@ Representative (synthetic) shapes (element names/namespaces vary across Excel ve
 `xl/richData/richValueRel.xml`:
 
 ```xml
-<richValueRels xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
+<!-- Root name and namespace are version-dependent; this is one observed variant. -->
+<richValueRels xmlns="http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel"
                xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <!-- slot 0 -->
   <rel r:id="rId1"/>
@@ -407,7 +408,9 @@ Representative (synthetic) shapes (element names/namespaces vary across Excel ve
 
 ##### 4) `[Content_Types].xml` overrides
 
-Workbooks that include in-cell images typically include overrides like:
+Some workbooks include explicit overrides for the extra metadata/richData parts (observed in
+`fixtures/xlsx/basic/image-in-cell.xlsx`; other files can rely on the default
+`<Default Extension="xml" ContentType="application/xml"/>` instead):
 
 ```xml
 <Override PartName="/xl/metadata.xml"
@@ -418,9 +421,9 @@ Workbooks that include in-cell images typically include overrides like:
 <Override PartName="/xl/richData/rdrichvaluestructure.xml"
           ContentType="application/vnd.ms-excel.rdrichvaluestructure+xml"/>
 <Override PartName="/xl/richData/rdRichValueTypes.xml"
-          ContentType="application/vnd.ms-excel.rdRichValueTypes+xml"/>
+          ContentType="application/vnd.ms-excel.rdrichvaluetypes+xml"/>
 <Override PartName="/xl/richData/richValueRel.xml"
-          ContentType="application/vnd.ms-excel.richValueRel+xml"/>
+          ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
 ```
 
 For the unprefixed `richValue*.xml` naming variant, content types are typically similar (preserve whatever the source workbook uses):
