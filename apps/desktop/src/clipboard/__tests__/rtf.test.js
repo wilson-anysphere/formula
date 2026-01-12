@@ -51,6 +51,13 @@ test("clipboard RTF escapes unicode using \\\\uN? sequences", () => {
   assert.ok((rtf.match(/\\u-?\d+\?/g) ?? []).length >= 3);
 });
 
+test("clipboard RTF escapes special characters and newlines", () => {
+  const rtf = serializeCellGridToRtf([[{ value: "a\\b{c}\nd\t" }]]);
+
+  // Backslash, braces, newline->\line, tab->\tab
+  assert.match(rtf, /a\\\\b\\\{c\\\}\\line d\\tab\b/);
+});
+
 test("serializeCellGridToClipboardPayload includes rtf", () => {
   const payload = serializeCellGridToClipboardPayload([[{ value: "X" }]]);
   assert.equal(typeof payload.rtf, "string");
