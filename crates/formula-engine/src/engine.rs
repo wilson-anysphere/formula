@@ -2565,8 +2565,16 @@ impl Engine {
             col: key.addr.col as i32,
         };
         let mut resolve_sheet = |name: &str| self.workbook.sheet_id(name);
-        let expr = bytecode::lower_canonical_expr(expr, origin_ast, key.sheet, &mut resolve_sheet)
-            .map_err(BytecodeCompileReason::LowerError)?;
+        let rewritten =
+            rewrite_defined_name_constants_for_bytecode(expr, key.sheet, &self.workbook);
+        let expr_to_lower = rewritten.as_ref().unwrap_or(expr);
+        let expr = bytecode::lower_canonical_expr(
+            expr_to_lower,
+            origin_ast,
+            key.sheet,
+            &mut resolve_sheet,
+        )
+        .map_err(BytecodeCompileReason::LowerError)?;
         if !bytecode_expr_is_eligible(&expr) {
             return Err(BytecodeCompileReason::IneligibleExpr);
         }
@@ -2757,11 +2765,12 @@ impl Engine {
             .collect();
 
         for key in cells {
-            let Some(ast) = self
-                .workbook
-                .get_cell(key)
-                .and_then(|c| c.compiled.as_ref().map(|compiled| compiled.ast().clone()))
-            else {
+            let Some((ast, formula)) = self.workbook.get_cell(key).and_then(|c| {
+                Some((
+                    c.compiled.as_ref()?.ast().clone(),
+                    c.formula.as_ref()?.clone(),
+                ))
+            }) else {
                 continue;
             };
 
@@ -2788,7 +2797,45 @@ impl Engine {
             let deps = CellDeps::new(calc_vec).volatile(volatile);
             self.calc_graph.update_cell_dependencies(cell_id, deps);
 
+            // Name definition changes can affect bytecode eligibility (and for constant inlining,
+            // even the literal value baked into the program), so rebuild the compiled variant.
+            let (compiled_formula, bytecode_compile_reason) = {
+                let origin = crate::CellAddr::new(key.addr.row, key.addr.col);
+                let parsed = crate::parse_formula(
+                    &formula,
+                    crate::ParseOptions {
+                        locale: crate::LocaleConfig::en_us(),
+                        reference_style: crate::ReferenceStyle::A1,
+                        normalize_relative_to: Some(origin),
+                    },
+                );
+
+                match parsed {
+                    Ok(parsed) => match self.try_compile_bytecode(
+                        &parsed.expr,
+                        key,
+                        volatile,
+                        thread_safe,
+                    ) {
+                        Ok(program) => (
+                            CompiledFormula::Bytecode(BytecodeFormula {
+                                ast: ast.clone(),
+                                program,
+                            }),
+                            None,
+                        ),
+                        Err(reason) => (CompiledFormula::Ast(ast.clone()), Some(reason)),
+                    },
+                    Err(_) => (
+                        CompiledFormula::Ast(ast.clone()),
+                        Some(BytecodeCompileReason::IneligibleExpr),
+                    ),
+                }
+            };
+
             let cell = self.workbook.get_or_create_cell_mut(key);
+            cell.compiled = Some(compiled_formula);
+            cell.bytecode_compile_reason = bytecode_compile_reason;
             cell.volatile = volatile;
             cell.thread_safe = thread_safe;
             cell.dynamic_deps = dynamic_deps;
@@ -4203,6 +4250,173 @@ fn resolve_defined_name<'a>(
         .get(sheet_id)
         .and_then(|s| s.names.get(name_key))
         .or_else(|| workbook.names.get(name_key))
+}
+
+/// Rewrite `expr` by inlining workbook/sheet-scoped constant defined names as literal values.
+///
+/// This is only intended for bytecode compilation. AST evaluation should continue to
+/// resolve names dynamically at runtime so defined-name changes are observable.
+///
+/// The rewrite is deliberately conservative: it skips inlining when the formula contains
+/// LET/LAMBDA constructs because those introduce lexical bindings that can shadow defined
+/// names.
+fn rewrite_defined_name_constants_for_bytecode(
+    expr: &crate::Expr,
+    current_sheet: SheetId,
+    workbook: &Workbook,
+) -> Option<crate::Expr> {
+    fn contains_let_or_lambda(expr: &crate::Expr) -> bool {
+        match expr {
+            crate::Expr::FunctionCall(call) => {
+                if matches!(call.name.name_upper.as_str(), "LET" | "LAMBDA") {
+                    return true;
+                }
+                call.args.iter().any(contains_let_or_lambda)
+            }
+            crate::Expr::Call(call) => {
+                // Calls are only possible with LAMBDA values (directly or indirectly), and can
+                // interact with lexical scope. Conservatively skip inlining.
+                contains_let_or_lambda(&call.callee) || call.args.iter().any(contains_let_or_lambda)
+            }
+            crate::Expr::Unary(u) => contains_let_or_lambda(&u.expr),
+            crate::Expr::Postfix(p) => contains_let_or_lambda(&p.expr),
+            crate::Expr::Binary(b) => {
+                contains_let_or_lambda(&b.left) || contains_let_or_lambda(&b.right)
+            }
+            crate::Expr::Array(arr) => arr
+                .rows
+                .iter()
+                .flatten()
+                .any(|el| contains_let_or_lambda(el)),
+            _ => false,
+        }
+    }
+
+    if contains_let_or_lambda(expr) {
+        return None;
+    }
+
+    fn value_to_bytecode_literal_expr(value: &Value) -> Option<crate::Expr> {
+        match value {
+            Value::Number(n) if n.is_finite() => Some(crate::Expr::Number(n.to_string())),
+            Value::Number(_) => None,
+            Value::Text(s) => Some(crate::Expr::String(s.clone())),
+            Value::Bool(b) => Some(crate::Expr::Boolean(*b)),
+            Value::Blank => Some(crate::Expr::Missing),
+            // Bytecode lowering currently does not support error literals (see `bytecode::lower`).
+            Value::Error(_)
+            | Value::Reference(_)
+            | Value::ReferenceUnion(_)
+            | Value::Array(_)
+            | Value::Lambda(_)
+            | Value::Spill { .. } => None,
+        }
+    }
+
+    fn inline_name_ref(
+        nref: &crate::NameRef,
+        current_sheet: SheetId,
+        workbook: &Workbook,
+    ) -> Option<crate::Expr> {
+        // Bytecode can't interact with external workbooks and we don't maintain an external
+        // defined-name map, so never inline external prefixes.
+        if nref.workbook.is_some() {
+            return None;
+        }
+
+        let sheet_id = match nref.sheet.as_ref() {
+            None => current_sheet,
+            Some(sheet_ref) => {
+                let sheet_name = sheet_ref.as_single_sheet()?;
+                workbook.sheet_id(sheet_name)?
+            }
+        };
+
+        let name_key = normalize_defined_name(&nref.name);
+        if name_key.is_empty() {
+            return None;
+        }
+        let def = resolve_defined_name(workbook, sheet_id, &name_key)?;
+        match &def.definition {
+            NameDefinition::Constant(v) => value_to_bytecode_literal_expr(v),
+            NameDefinition::Reference(_) | NameDefinition::Formula(_) => None,
+        }
+    }
+
+    fn rewrite_inner(
+        expr: &crate::Expr,
+        current_sheet: SheetId,
+        workbook: &Workbook,
+    ) -> Option<crate::Expr> {
+        match expr {
+            crate::Expr::NameRef(nref) => inline_name_ref(nref, current_sheet, workbook),
+            crate::Expr::FunctionCall(call) => {
+                if matches!(
+                    bytecode::ast::Function::from_name(&call.name.name_upper),
+                    bytecode::ast::Function::Unknown(_)
+                ) {
+                    return None;
+                }
+                let mut args: Option<Vec<crate::Expr>> = None;
+                for (idx, arg) in call.args.iter().enumerate() {
+                    if let Some(rewritten) = rewrite_inner(arg, current_sheet, workbook) {
+                        let vec = args.get_or_insert_with(|| {
+                            let mut out = Vec::with_capacity(call.args.len());
+                            out.extend(call.args[..idx].iter().cloned());
+                            out
+                        });
+                        vec.push(rewritten);
+                    } else if let Some(vec) = args.as_mut() {
+                        vec.push(arg.clone());
+                    }
+                }
+                args.map(|args| {
+                    crate::Expr::FunctionCall(crate::FunctionCall {
+                        name: call.name.clone(),
+                        args,
+                    })
+                })
+            }
+            crate::Expr::Call(_) => None,
+            crate::Expr::Unary(u) => match u.op {
+                crate::UnaryOp::ImplicitIntersection => None,
+                _ => rewrite_inner(&u.expr, current_sheet, workbook).map(|inner| {
+                    crate::Expr::Unary(crate::UnaryExpr {
+                        op: u.op,
+                        expr: Box::new(inner),
+                    })
+                }),
+            },
+            crate::Expr::Postfix(_) => None,
+            crate::Expr::Binary(b) => {
+                if matches!(
+                    b.op,
+                    crate::BinaryOp::Union | crate::BinaryOp::Intersect | crate::BinaryOp::Concat
+                ) {
+                    return None;
+                }
+                let left = rewrite_inner(&b.left, current_sheet, workbook);
+                let right = rewrite_inner(&b.right, current_sheet, workbook);
+                (left.is_some() || right.is_some()).then_some(crate::Expr::Binary(crate::BinaryExpr {
+                    op: b.op,
+                    left: Box::new(left.unwrap_or_else(|| (*b.left).clone())),
+                    right: Box::new(right.unwrap_or_else(|| (*b.right).clone())),
+                }))
+            }
+            crate::Expr::Array(_) => None,
+            crate::Expr::Number(_)
+            | crate::Expr::String(_)
+            | crate::Expr::Boolean(_)
+            | crate::Expr::Error(_)
+            | crate::Expr::CellRef(_)
+            | crate::Expr::ColRef(_)
+            | crate::Expr::RowRef(_)
+            | crate::Expr::StructuredRef(_)
+            | crate::Expr::Missing => None,
+        }
+    }
+
+    rewrite_inner(expr, current_sheet, workbook)
 }
 
 pub trait ExternalValueProvider: Send + Sync {

@@ -4,7 +4,10 @@ use formula_engine::eval::{
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::value::NumberLocale;
-use formula_engine::{BytecodeCompileReason, Engine, ErrorKind, ExternalValueProvider, Value};
+use formula_engine::{
+    BytecodeCompileReason, Engine, ErrorKind, ExternalValueProvider, NameDefinition, NameScope,
+    Value,
+};
 use proptest::prelude::*;
 use std::sync::Arc;
 
@@ -637,4 +640,88 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
         ),
         "unexpected A4 bytecode compile reason: {a4_reason:?}"
     );
+}
+
+#[test]
+fn bytecode_backend_inlines_constant_defined_names() {
+    let mut engine_bc = Engine::new();
+    engine_bc
+        .define_name(
+            "RATE",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(0.1)),
+        )
+        .unwrap();
+    engine_bc.set_cell_formula("Sheet1", "A1", "=RATE*2").unwrap();
+    engine_bc.recalculate_single_threaded();
+
+    assert_eq!(engine_bc.bytecode_program_count(), 1);
+    assert_eq!(engine_bc.get_cell_value("Sheet1", "A1"), Value::Number(0.2));
+
+    let mut engine_ast = Engine::new();
+    engine_ast.set_bytecode_enabled(false);
+    engine_ast
+        .define_name(
+            "RATE",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(0.1)),
+        )
+        .unwrap();
+    engine_ast.set_cell_formula("Sheet1", "A1", "=RATE*2").unwrap();
+    engine_ast.recalculate_single_threaded();
+
+    assert_eq!(
+        engine_bc.get_cell_value("Sheet1", "A1"),
+        engine_ast.get_cell_value("Sheet1", "A1")
+    );
+}
+
+#[test]
+fn bytecode_backend_does_not_inline_reference_defined_names() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 0.1).unwrap();
+    engine
+        .define_name(
+            "RATE",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!A1".to_string()),
+        )
+        .unwrap();
+
+    engine.set_cell_formula("Sheet1", "B1", "=RATE*2").unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(0.2));
+    // NameRef is not supported by bytecode lowering and reference names should not be inlined.
+    assert_eq!(engine.bytecode_program_count(), 0);
+}
+
+#[test]
+fn bytecode_backend_recompiles_when_constant_defined_name_changes() {
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "RATE",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(0.1)),
+        )
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=RATE*2").unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(0.2));
+
+    engine
+        .define_name(
+            "RATE",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(0.2)),
+        )
+        .unwrap();
+    assert!(engine.is_dirty("Sheet1", "A1"));
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(0.4));
+    assert!(engine.bytecode_program_count() >= 2);
 }
