@@ -816,7 +816,7 @@ Stores a **vector/table** of `r:id` strings. The *index* into this vector is wha
 
 Three root/namespace variants are observed in-repo:
 
-1) `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (`richValueRel` root, `…/2017/richdata2`):
+1) `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (**synthetic**; `richValueRel` root, `…/2017/richdata2`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -828,7 +828,7 @@ Three root/namespace variants are observed in-repo:
 </richValueRel>
 ```
 
-2) `fixtures/xlsx/rich-data/images-in-cell.xlsx` (`rvRel` root, `…/2017/richdata`, with a `<rels>` wrapper):
+2) `fixtures/xlsx/rich-data/images-in-cell.xlsx` (**real Excel**; `rvRel` root, `…/2017/richdata`, with a `<rels>` wrapper):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -841,7 +841,7 @@ Three root/namespace variants are observed in-repo:
 </rvRel>
 ```
 
-3) `fixtures/xlsx/basic/image-in-cell.xlsx` (`richValueRels` root, `…/2022/richvaluerel`):
+3) `fixtures/xlsx/basic/image-in-cell.xlsx` (**real Excel**; `richValueRels` root, `…/2022/richvaluerel`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -879,7 +879,7 @@ Stores the actual rich value instances. Each instance references a type (and/or 
 
 Two variants are observed in-repo:
 
-1) `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (minimal `t="image"` payload referencing relationship slot `0`):
+1) `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (**synthetic**; minimal `t="image"` payload referencing relationship slot `0`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -892,7 +892,7 @@ Two variants are observed in-repo:
 </rvData>
 ```
 
-2) `fixtures/xlsx/rich-data/images-in-cell.xlsx` (typed payload referencing relationship slot `0`):
+2) `fixtures/xlsx/rich-data/images-in-cell.xlsx` (**real Excel**; typed payload referencing relationship slot `0`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
