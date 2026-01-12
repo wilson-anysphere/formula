@@ -779,6 +779,8 @@ Implementation notes (see `packages/collab/conflicts/src/formula-conflict-monito
   Concurrent value-vs-formula edits (including formula clears) surface as a
   `"content"` conflict that lets the user choose between the literal value and
   the formula.
+- `remoteUserId` in conflict payloads is best-effort and may be an empty string
+  when the writer does not update `modifiedBy` (legacy/edge clients).
 
 ```typescript
 class FormulaConflictResolver {

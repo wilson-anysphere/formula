@@ -109,8 +109,13 @@ test("CollabSession formula conflict monitor detects true offline concurrent edi
 });
 
 test("CollabSession formula conflict monitor still detects conflicts after recreating the session (restart)", async () => {
+  // For concurrent map-entry overwrites, Yjs deterministically breaks ties using
+  // clientID (higher wins). Ensure the remote writer wins so the restarted
+  // session detects the conflict.
   const docA = new Y.Doc();
+  docA.clientID = 1;
   const docB = new Y.Doc();
+  docB.clientID = 2;
   let disconnect = connectDocs(docA, docB);
 
   /** @type {Array<any>} */

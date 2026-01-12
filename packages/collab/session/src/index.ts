@@ -401,13 +401,16 @@ export interface CollabSessionOptions {
    * When enabled, the session monitors formula updates for true conflicts
    * (offline/concurrent same-cell edits) and surfaces them via `onConflict`.
    *
-   * In `"formula+value"` mode, the monitor also detects concurrent value edits and
-   * formula-vs-value "content" conflicts (e.g. one user writes a formula while
-   * another concurrently writes a literal value).
+    * In `"formula+value"` mode, the monitor also detects concurrent value edits and
+    * formula-vs-value "content" conflicts (e.g. one user writes a formula while
+    * another concurrently writes a literal value).
    *
-   * Note: `"formula+value"` overlaps with `cellValueConflicts` (both can surface
-   * value conflicts). Prefer one or the other to avoid duplicated/confusing UX.
-   */
+    * Note: `"formula+value"` overlaps with `cellValueConflicts` (both can surface
+    * value conflicts). Prefer one or the other to avoid duplicated/confusing UX.
+    *
+    * Note: `remoteUserId` in emitted conflicts is best-effort and may be an empty
+    * string when the writer does not update `modifiedBy` (legacy/edge clients).
+    */
   formulaConflicts?: {
     localUserId: string;
     onConflict: (conflict: FormulaConflict) => void;

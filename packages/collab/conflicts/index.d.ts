@@ -10,6 +10,12 @@ export type FormulaConflict =
       cellKey: string;
       localFormula: string;
       remoteFormula: string;
+      /**
+       * Best-effort id of the remote user who overwrote the local change.
+       *
+       * May be an empty string when unavailable (e.g. legacy writers that do not
+       * update the cell's `modifiedBy` field).
+       */
       remoteUserId: string;
       detectedAt: number;
       localPreview?: any;
@@ -22,6 +28,12 @@ export type FormulaConflict =
       cellKey: string;
       localValue: any;
       remoteValue: any;
+      /**
+       * Best-effort id of the remote user who overwrote the local change.
+       *
+       * May be an empty string when unavailable (e.g. legacy writers that do not
+       * update the cell's `modifiedBy` field).
+       */
       remoteUserId: string;
       detectedAt: number;
     }
@@ -32,6 +44,12 @@ export type FormulaConflict =
       cellKey: string;
       local: CellContentChoice;
       remote: CellContentChoice;
+      /**
+       * Best-effort id of the remote user who overwrote the local change.
+       *
+       * May be an empty string when unavailable (e.g. legacy writers that do not
+       * update the cell's `modifiedBy` field).
+       */
       remoteUserId: string;
       detectedAt: number;
     };
@@ -43,6 +61,12 @@ export interface CellConflict {
   field: "value";
   localValue: any;
   remoteValue: any;
+  /**
+   * Best-effort id of the remote user who overwrote the local change.
+   *
+   * May be an empty string when unavailable (e.g. legacy writers that do not
+   * update the cell's `modifiedBy` field).
+   */
   remoteUserId: string;
   detectedAt: number;
 }
