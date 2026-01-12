@@ -9,10 +9,17 @@ describe("WorkbookSheetStore", () => {
       { id: "s2", name: "Sheet2", visibility: "visible" },
     ]);
 
-    expect(() => store.rename("s1", "   ")).toThrow(/empty/i);
+    expect(() => store.rename("s1", "   ")).toThrow(/blank/i);
     expect(() => store.rename("s1", "A".repeat(32))).toThrow(/31/);
-    expect(() => store.rename("s1", "Bad:Name")).toThrow(/cannot contain/i);
-    expect(() => store.rename("s2", "sheet1")).toThrow(/duplicate/i);
+    expect(() => store.rename("s1", "Bad:Name")).toThrow(/invalid character/i);
+    expect(() => store.rename("s2", "sheet1")).toThrow(/already exists/i);
+
+    expect(() => store.rename("s1", "'Budget")).toThrow(/apostrophe/i);
+    expect(() => store.rename("s1", "Budget'")).toThrow(/apostrophe/i);
+
+    // 🙂 is outside the BMP (2 UTF-16 code units). Excel's 31-char limit is in UTF-16 code units.
+    expect(() => store.rename("s1", `${"a".repeat(29)}🙂`)).not.toThrow();
+    expect(() => store.rename("s1", `${"a".repeat(30)}🙂`)).toThrow(/31/);
   });
 
   it("selects the next available default sheet name (case-insensitive)", () => {
@@ -70,4 +77,3 @@ describe("WorkbookSheetStore", () => {
     expect(store.resolveIdByName("missing")).toBeUndefined();
   });
 });
-

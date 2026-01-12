@@ -1,3 +1,9 @@
+import {
+  EXCEL_MAX_SHEET_NAME_LEN,
+  INVALID_SHEET_NAME_CHARACTERS,
+  getSheetNameValidationErrorMessage,
+} from "@formula/workbook-backend";
+
 export type SheetVisibility = "visible" | "hidden" | "veryHidden";
 
 // Keep in sync with `apps/desktop/src/workbook/workbook.ts`.
@@ -29,9 +35,20 @@ export type SheetMeta = {
   tabColor?: TabColor;
 };
 
-export const SHEET_NAME_MAX_LENGTH = 31;
-export const SHEET_NAME_FORBIDDEN_CHARS = [":", "\\", "/", "?", "*", "[", "]"] as const;
+export const SHEET_NAME_MAX_LENGTH = EXCEL_MAX_SHEET_NAME_LEN;
+export const SHEET_NAME_FORBIDDEN_CHARS = INVALID_SHEET_NAME_CHARACTERS;
 export const SHEET_NAME_FORBIDDEN_CHARS_REGEX = /[:\\\/\?\*\[\]]/;
+
+function normalizeSheetNameForCaseInsensitiveCompare(name: string): string {
+  // Match backend workbook uniqueness semantics:
+  // - Unicode NFKC normalization
+  // - Unicode uppercasing
+  try {
+    return name.normalize("NFKC").toUpperCase();
+  } catch {
+    return name.toUpperCase();
+  }
+}
 
 /**
  * Trim the proposed sheet name (Excel does this) and return the normalized value.
@@ -59,19 +76,12 @@ export function validateSheetName(
   },
 ): string {
   const normalized = normalizeSheetName(name);
-  if (!normalized) throw new Error("Sheet name cannot be empty");
-  if (normalized.length > SHEET_NAME_MAX_LENGTH) {
-    throw new Error(`Sheet name cannot exceed ${SHEET_NAME_MAX_LENGTH} characters`);
-  }
-  if (SHEET_NAME_FORBIDDEN_CHARS_REGEX.test(normalized)) {
-    throw new Error(`Sheet name cannot contain: ${SHEET_NAME_FORBIDDEN_CHARS.join(" ")}`);
-  }
+  const existingNames = opts.sheets
+    .filter((sheet) => !(opts.ignoreId && sheet.id === opts.ignoreId))
+    .map((sheet) => sheet.name);
 
-  const candidateCi = normalized.toLowerCase();
-  for (const sheet of opts.sheets) {
-    if (opts.ignoreId && sheet.id === opts.ignoreId) continue;
-    if (sheet.name.toLowerCase() === candidateCi) throw new Error("Duplicate sheet name");
-  }
+  const err = getSheetNameValidationErrorMessage(normalized, { existingNames });
+  if (err) throw new Error(err);
 
   return normalized;
 }
@@ -81,10 +91,10 @@ export function validateSheetName(
  * available number (case-insensitive compare).
  */
 export function generateDefaultSheetName(sheets: ReadonlyArray<Pick<SheetMeta, "name">>): string {
-  const existing = new Set(sheets.map((s) => s.name.toLowerCase()));
+  const existing = new Set(sheets.map((s) => normalizeSheetNameForCaseInsensitiveCompare(s.name)));
   for (let n = 1; ; n += 1) {
     const candidate = `Sheet${n}`;
-    if (!existing.has(candidate.toLowerCase())) return candidate;
+    if (!existing.has(normalizeSheetNameForCaseInsensitiveCompare(candidate))) return candidate;
   }
 }
 
@@ -163,8 +173,8 @@ export class WorkbookSheetStore {
   resolveIdByName(name: string): string | undefined {
     const normalized = normalizeSheetName(name);
     if (!normalized) return undefined;
-    const targetCi = normalized.toLowerCase();
-    return this.sheets.find((s) => s.name.toLowerCase() === targetCi)?.id;
+    const targetCi = normalizeSheetNameForCaseInsensitiveCompare(normalized);
+    return this.sheets.find((s) => normalizeSheetNameForCaseInsensitiveCompare(s.name) === targetCi)?.id;
   }
 
   addAfter(activeId: string, input: { id: string; name?: string }): SheetMeta {
