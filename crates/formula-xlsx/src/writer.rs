@@ -790,30 +790,6 @@ fn record_display_string(record: &formula_model::RecordValue) -> String {
     record.to_string()
 }
 
-fn cell_value_to_plain_string(value: &CellValue) -> Option<String> {
-    match value {
-        CellValue::Empty => Some(String::new()),
-        CellValue::String(s) => Some(s.clone()),
-        CellValue::RichText(rich) => Some(rich.text.clone()),
-        CellValue::Number(n) => Some(n.to_string()),
-        CellValue::Boolean(b) => Some(if *b { "TRUE" } else { "FALSE" }.to_string()),
-        CellValue::Error(e) => Some(e.as_str().to_string()),
-        CellValue::Entity(entity) => Some(entity.display_value.clone()),
-        CellValue::Record(record) => Some(record_display_string(record)),
-        CellValue::Array(_) | CellValue::Spill(_) => None,
-    }
-}
-
-fn cell_value_to_shared_string_text(value: &CellValue) -> Option<String> {
-    match value {
-        CellValue::String(s) => Some(s.clone()),
-        CellValue::RichText(rich) => Some(rich.text.clone()),
-        CellValue::Entity(entity) => Some(entity.display_value.clone()),
-        CellValue::Record(record) => Some(record_display_string(record)),
-        _ => None,
-    }
-}
-
 fn build_shared_strings(workbook: &Workbook) -> SharedStrings {
     let mut values: Vec<String> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
