@@ -87,6 +87,17 @@
 //!
 //! `C * (D/E) * (A/D) == C * (A/E)`.
 //!
+//! **Yield domain (Excel semantics)**
+//!
+//! Excel’s bond functions model discounting using the per-period base:
+//!
+//! ```text
+//! g = 1 + (yld / frequency)
+//! ```
+//!
+//! This means that yields can be negative (even below -100%) as long as `g > 0`, i.e. `yld > -frequency`.
+//! At the exact boundary `yld == -frequency`, the discount base becomes 0 and Excel returns `#DIV/0!`.
+//! 
 //! ---
 //!
 //! ## Coupon date schedule and EOM stepping
