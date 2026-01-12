@@ -38,6 +38,38 @@ function createInMemoryLocalStorage(): Storage {
 }
 
 describe("runAgentTask (agent mode orchestrator)", () => {
+  it("invokes onWorkbookContextBuildStats when provided", async () => {
+    const documentController = new DocumentController();
+    documentController.setCellValue("Sheet1", { row: 0, col: 0 }, "seed");
+
+    const llmClient = {
+      chat: vi.fn(async () => ({ message: { role: "assistant", content: "done" }, usage: { promptTokens: 1, completionTokens: 1 } })),
+    };
+
+    const onWorkbookContextBuildStats = vi.fn();
+    const auditStore = new MemoryAIAuditStore();
+    const result = await runAgentTask({
+      goal: "Reply done.",
+      workbookId: "wb_agent_stats_hook",
+      documentController,
+      llmClient: llmClient as any,
+      auditStore,
+      maxIterations: 2,
+      maxDurationMs: 10_000,
+      model: "unit-test-model",
+      onWorkbookContextBuildStats,
+    });
+
+    expect(result.status).toBe("complete");
+    expect(result.final).toBe("done");
+
+    expect(onWorkbookContextBuildStats).toHaveBeenCalledTimes(1);
+    const stats = onWorkbookContextBuildStats.mock.calls[0]![0];
+    expect(stats.mode).toBe("agent");
+    expect(stats.model).toBe("unit-test-model");
+    expect(stats.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
   it("does not re-index workbook RAG when workbook has not changed", async () => {
     const documentController = new DocumentController();
     documentController.setCellValue("Sheet1", { row: 0, col: 0 }, "seed");
