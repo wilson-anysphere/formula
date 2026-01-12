@@ -29,6 +29,19 @@ describe("clipboardPasteContext", () => {
     expect(nextContext).toEqual(initialContext);
   });
 
+  it("normalizes rtf line endings + trailing whitespace when detecting internal pastes", () => {
+    const initialContext = {
+      range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
+      payload: { text: "A", html: "<table><tr><td>A</td></tr></table>", rtf: "{\\rtf1\\ansi A}\r\n" },
+      cells: [[{ value: "A", formula: null, styleId: 0 }]],
+    };
+
+    const { isInternalPaste, nextContext } = reconcileClipboardCopyContextForPaste(initialContext, { rtf: "{\\rtf1\\ansi A}\n\n" });
+
+    expect(isInternalPaste).toBe(true);
+    expect(nextContext).toEqual(initialContext);
+  });
+
   it("treats rtf-only clipboard reads as internal when extracted text matches the last internal plain-text payload", () => {
     const initialContext = {
       range: { startRow: 0, endRow: 0, startCol: 0, endCol: 1 },
