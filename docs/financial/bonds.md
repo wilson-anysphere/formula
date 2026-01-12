@@ -199,11 +199,10 @@ This definition matches the needs of `PRICE`/`YIELD`/`DURATION` where “remaini
    models `E` as a fixed `360/frequency` coupon period and defines `DSC = E - A` (so `A + DSC = E` for any
    settlement date within the coupon period).
 - basis `4` (European 30/360): `A` is computed via `DAYS360(..., TRUE)`. `E` is modeled as a fixed
-  `360/frequency` coupon period and Excel defines `DSC = E - A` (so `A + DSC = E` for any settlement date
-  within the coupon period).
+  `360/frequency` coupon period (like basis `0`), and Excel defines `DSC = E - A` (so `A + DSC = E`
+  for any settlement date within the coupon period).
   - This means `E` can intentionally diverge from `DAYS360(PCD, NCD, TRUE)` for some February/EOM schedules.
-  - Since `DSC` is defined as `E - A`, it can also diverge from `DAYS360(settlement, NCD, TRUE)`
-    in those schedules.
+  - Since `DSC` is defined as `E - A`, it can also diverge from `DAYS360(settlement, NCD, TRUE)` in those schedules.
 - basis `1`/`2`/`3`: `DSC = NCD - settlement` (actual days).
 
 ### Computing `E` (days in coupon period)
