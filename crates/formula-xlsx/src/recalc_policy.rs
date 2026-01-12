@@ -509,6 +509,32 @@ mod tests {
     }
 
     #[test]
+    fn workbook_xml_force_full_calc_on_load_prefers_workbook_element_prefix_when_multiple_prefixes_bind_spreadsheetml(
+    ) {
+        // Some producers declare multiple prefixes for SpreadsheetML. When we need to insert a
+        // missing `<calcPr/>`, we should use the prefix that matches the `<workbook>` element.
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+            xmlns:y="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+</x:workbook>
+"#;
+
+        let updated =
+            workbook_xml_force_full_calc_on_load(workbook_xml.as_bytes()).expect("patch workbook");
+        let updated = std::str::from_utf8(&updated).expect("utf8 workbook");
+
+        assert!(
+            updated.contains("<x:calcPr"),
+            "expected inserted calcPr to use the workbook element prefix, got: {updated}"
+        );
+        assert!(
+            !updated.contains("<y:calcPr"),
+            "expected calcPr not to use an unrelated SpreadsheetML prefix, got: {updated}"
+        );
+        assert!(updated.contains(r#"fullCalcOnLoad="1""#));
+    }
+
+    #[test]
     fn workbook_rels_remove_calc_chain_preserves_other_relationships_and_prefixes() {
         let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <r:Relationships xmlns:r="http://schemas.openxmlformats.org/package/2006/relationships">

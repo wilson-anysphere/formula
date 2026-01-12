@@ -121,10 +121,19 @@ pub(crate) fn workbook_xml_namespaces_from_workbook_start(
         .map(|idx| &name[..idx])
         .map(|bytes| String::from_utf8_lossy(bytes).into_owned());
 
-    let spreadsheetml_prefix = if spreadsheetml_is_default {
+    // Prefer the prefix used by the `<workbook>` element itself when present.
+    //
+    // Some producers declare multiple prefixes bound to the SpreadsheetML namespace
+    // (`xmlns:x="…/main" xmlns:y="…/main"`). When we synthesize new SpreadsheetML elements (e.g.
+    // `<calcPr/>`, `<workbookPr/>`) we want to follow the file's established style by using the
+    // same prefix as `<workbook>` (if it's prefixed), rather than whichever `xmlns:*` declaration
+    // happened to appear last.
+    let spreadsheetml_prefix = if element_prefix.is_some() {
+        element_prefix
+    } else if spreadsheetml_is_default {
         None
     } else {
-        spreadsheetml_prefix_decl.or(element_prefix)
+        spreadsheetml_prefix_decl
     };
 
     Ok(WorkbookXmlNamespaces {
