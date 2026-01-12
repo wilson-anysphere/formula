@@ -7648,7 +7648,7 @@ export class SpreadsheetApp {
     } catch (err) {
       if (err instanceof DlpViolationError) {
         try {
-          showToast(err.message || "Copy blocked by data loss prevention policy.", "error");
+          showToast(err.message || "Copy blocked by data loss prevention policy.", "warning");
         } catch {
           // `showToast` requires a #toast-root; unit tests don't always include it.
         }
@@ -7858,7 +7858,7 @@ export class SpreadsheetApp {
     } catch (err) {
       if (err instanceof DlpViolationError) {
         try {
-          showToast(err.message || "Cut blocked by data loss prevention policy.", "error");
+          showToast(err.message || "Cut blocked by data loss prevention policy.", "warning");
         } catch {
           // Best-effort: if the toast UI isn't mounted, don't crash clipboard actions.
         }
