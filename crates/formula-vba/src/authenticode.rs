@@ -662,11 +662,21 @@ fn extract_source_hash_from_sig_data_v1_serialized_asn1(
         let alg_content = slice_constructed_contents(first_rest, first_len)?;
         if parse_oid(alg_content).is_ok() {
             cur = skip_element(cur)?;
-            if !cur.is_empty() && !is_eoc(cur) {
-                let (hash, _after) = parse_octet_string(cur)?;
-                if hash.len() == 16 {
-                    return Ok(Some(hash));
+
+            // Prefer the common direct-field encoding where `sourceHash` is the next element.
+            if let Ok((tag, _len, _rest)) = parse_tag_and_length(cur) {
+                if tag.class == Asn1Class::Universal && tag.number == 4 {
+                    let (hash, _after) = parse_octet_string(cur)?;
+                    if hash.len() == 16 {
+                        return Ok(Some(hash));
+                    }
                 }
+            }
+
+            // Fallback: scan for an embedded 16-byte OCTET STRING once we've established the
+            // AlgorithmIdentifier marker. Avoid scanning when we don't have *any* SigData markers.
+            if let Some(hash) = scan_asn1_for_octet_string_len(cur, 16)? {
+                return Ok(Some(hash));
             }
         }
     }
