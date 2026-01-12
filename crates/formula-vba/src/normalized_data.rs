@@ -108,6 +108,13 @@ fn parse_project_designer_modules(
     project_stream_bytes: &[u8],
     encoding: &'static Encoding,
 ) -> Vec<String> {
+    // Some producers include a UTF-8 BOM at the start of the PROJECT stream. The MS-OVBA parsing
+    // logic treats the stream as plain text; strip the BOM bytes so they don't interfere with
+    // parsing property names like `BaseClass=...`.
+    let project_stream_bytes = project_stream_bytes
+        .strip_prefix(&[0xEF, 0xBB, 0xBF])
+        .unwrap_or(project_stream_bytes);
+
     let (cow, _, _) = encoding.decode(project_stream_bytes);
     let mut out = Vec::new();
     for line in crate::split_crlf_lines(cow.as_ref()) {

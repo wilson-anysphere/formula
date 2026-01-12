@@ -565,6 +565,43 @@ fn forms_normalized_data_uses_project_stream_baseclass_order_and_ignores_unliste
 }
 
 #[test]
+fn forms_normalized_data_handles_project_stream_utf8_bom_prefix() {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
+
+    // PROJECT stream with a UTF-8 BOM at the start (seen in some real-world files).
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(&[0xEF, 0xBB, 0xBF]).expect("write bom");
+        s.write_all(b"BaseClass=NiceName\r\n")
+            .expect("write PROJECT");
+    }
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let dir_container = build_dir_stream(&[("NiceName", "UserForm1")]);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    ole.create_storage("UserForm1")
+        .expect("create designer storage");
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Payload")
+            .expect("create stream");
+        s.write_all(b"ABC").expect("write stream bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = forms_normalized_data(&vba_project_bin).expect("compute FormsNormalizedData");
+
+    let mut expected = Vec::new();
+    expected.extend_from_slice(b"ABC");
+    expected.extend(std::iter::repeat_n(0u8, 1020));
+    assert_eq!(normalized, expected);
+}
+
+#[test]
 fn forms_normalized_data_ignores_baseclass_lines_after_project_section_headers() {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
