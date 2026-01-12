@@ -796,6 +796,20 @@ declare namespace formula {
 }
 ```
 
+#### Clipboard + DLP (Data Loss Prevention)
+
+In desktop builds with DLP enabled, `formula.clipboard.writeText(...)` may be **blocked** by your organization’s policy.
+
+To minimize false positives, the host enforces clipboard policy based on the spreadsheet data your extension actually
+*read* during the current session:
+
+- Any successful calls to `cells.getSelection`, `cells.getRange`, or `cells.getCell` will “taint” the accessed ranges.
+- Before allowing `clipboard.writeText`, the host evaluates DLP policy over those tainted ranges.
+- If any tainted range is classified above the allowed threshold (e.g. `Restricted`), the clipboard write throws.
+
+Writing arbitrary text to the clipboard **without reading any spreadsheet cells** does not taint any ranges and should
+not be blocked by DLP.
+
 ### Custom Functions API
 
 ```typescript
