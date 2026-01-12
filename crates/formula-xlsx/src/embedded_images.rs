@@ -486,21 +486,75 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
         // rich values). By streaming-scan filtering first, we avoid parsing `CellRef` for every
         // plain cell in large sheets.
         //
-        // Excel has been observed to encode worksheet `c/@vm` as both:
-        // - 1-based indices into `xl/metadata.xml` `<valueMetadata>` `<bk>` records (typical), and
-        // - 0-based indices (seen in some workbooks/fixtures).
+        // Excel typically stores worksheet `c/@vm` as a 1-based index into `xl/metadata.xml`
+        // `<valueMetadata>` `<bk>` records, but some producers have been observed to use 0-based
+        // indices instead.
         //
-        // We keep the metadata mapping in its canonical 1-based form and infer whether a sheet is
-        // 0-based by checking for any `vm="0"` cells. This avoids ambiguous key collisions that
-        // occur if we try to store both 0- and 1-based mappings in the same map when multiple
-        // images/records exist.
+        // The metadata parser returns a canonical 1-based `vm -> richValue` mapping. To tolerate
+        // 0-based worksheets we choose a per-worksheet offset (0 or 1) that yields the most
+        // successfully-resolved images. If the result is ambiguous, we still treat `vm="0"` as
+        // strong evidence of 0-based indexing.
         let vm_offset: u32 =
-            if !vm_to_rich_value_index.is_empty()
-                && cells_with_metadata.iter().any(|(_, vm, _)| *vm == Some(0))
-            {
-                1
-            } else {
+            if vm_to_rich_value_index.is_empty() || cells_with_metadata.is_empty() {
                 0
+            } else {
+                let has_vm_zero = cells_with_metadata.iter().any(|(_, vm, _)| *vm == Some(0));
+                let mut resolved_offset_0 = 0usize;
+                let mut resolved_offset_1 = 0usize;
+
+                let resolves_image = |vm_raw: u32, offset: u32| -> bool {
+                    let vm = vm_raw.saturating_add(offset);
+                    let Some(rich_value_index) = vm_to_rich_value_index.get(&vm).copied() else {
+                        return false;
+                    };
+
+                    let local_image_identifier =
+                        if let Some(rich_value) = rich_values.get(&rich_value_index) {
+                            Some(rich_value.local_image_identifier)
+                        } else {
+                            rich_value_rel_indices
+                                .get(rich_value_index as usize)
+                                .copied()
+                                .flatten()
+                                .and_then(|idx| u32::try_from(idx).ok())
+                        };
+                    let Some(local_image_identifier) = local_image_identifier else {
+                        return false;
+                    };
+
+                    let Some(rid) =
+                        local_image_identifier_to_rid.get(local_image_identifier as usize)
+                    else {
+                        return false;
+                    };
+                    let Some(target) = rid_to_target.get(rid) else {
+                        return false;
+                    };
+
+                    pkg.part(target).is_some()
+                };
+
+                for (_cell, vm, _cm) in &cells_with_metadata {
+                    let Some(vm) = *vm else {
+                        continue;
+                    };
+                    if resolves_image(vm, 0) {
+                        resolved_offset_0 += 1;
+                    }
+                    if resolves_image(vm, 1) {
+                        resolved_offset_1 += 1;
+                    }
+                }
+
+                if resolved_offset_1 > resolved_offset_0 {
+                    1
+                } else if resolved_offset_0 > resolved_offset_1 {
+                    0
+                } else if has_vm_zero {
+                    1
+                } else {
+                    0
+                }
             };
 
         for (cell, vm, _cm) in cells_with_metadata {
