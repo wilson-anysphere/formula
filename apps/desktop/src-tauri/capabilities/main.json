@@ -111,7 +111,25 @@
         { "event": "update-check-already-running" },
         { "event": "update-not-available" },
         { "event": "update-check-error" },
-        { "event": "update-available" }
+        { "event": "update-available" },
+        { "event": "menu-new" },
+        { "event": "menu-open" },
+        { "event": "menu-save" },
+        { "event": "menu-save-as" },
+        { "event": "menu-export-pdf" },
+        { "event": "menu-close-window" },
+        { "event": "menu-quit" },
+        { "event": "menu-undo" },
+        { "event": "menu-redo" },
+        { "event": "menu-cut" },
+        { "event": "menu-copy" },
+        { "event": "menu-paste" },
+        { "event": "menu-select-all" },
+        { "event": "menu-zoom-in" },
+        { "event": "menu-zoom-out" },
+        { "event": "menu-zoom-reset" },
+        { "event": "menu-about" },
+        { "event": "menu-check-updates" }
       ]
     },
     {

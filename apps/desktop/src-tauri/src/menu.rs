@@ -5,6 +5,7 @@ pub const ITEM_NEW: &str = "menu-new";
 pub const ITEM_OPEN: &str = "menu-open";
 pub const ITEM_SAVE: &str = "menu-save";
 pub const ITEM_SAVE_AS: &str = "menu-save-as";
+pub const ITEM_EXPORT_PDF: &str = "menu-export-pdf";
 pub const ITEM_CLOSE_WINDOW: &str = "menu-close-window";
 pub const ITEM_QUIT: &str = "menu-quit";
 pub const ITEM_UNDO: &str = "menu-undo";
@@ -15,6 +16,9 @@ pub const ITEM_PASTE: &str = "menu-paste";
 pub const ITEM_SELECT_ALL: &str = "menu-select-all";
 pub const ITEM_ABOUT: &str = "menu-about";
 pub const ITEM_CHECK_UPDATES: &str = "menu-check-updates";
+pub const ITEM_ZOOM_IN: &str = "menu-zoom-in";
+pub const ITEM_ZOOM_OUT: &str = "menu-zoom-out";
+pub const ITEM_ZOOM_RESET: &str = "menu-zoom-reset";
 
 #[cfg(debug_assertions)]
 pub const ITEM_RELOAD: &str = "menu-reload";
@@ -47,6 +51,10 @@ pub fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             show_main_window(app);
             let _ = app.emit(ITEM_SAVE_AS, ());
         }
+        ITEM_EXPORT_PDF => {
+            show_main_window(app);
+            let _ = app.emit(ITEM_EXPORT_PDF, ());
+        }
         ITEM_CLOSE_WINDOW => {
             show_main_window(app);
             let _ = app.emit(ITEM_CLOSE_WINDOW, ());
@@ -78,6 +86,18 @@ pub fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         ITEM_SELECT_ALL => {
             show_main_window(app);
             let _ = app.emit(ITEM_SELECT_ALL, ());
+        }
+        ITEM_ZOOM_IN => {
+            show_main_window(app);
+            let _ = app.emit(ITEM_ZOOM_IN, ());
+        }
+        ITEM_ZOOM_OUT => {
+            show_main_window(app);
+            let _ = app.emit(ITEM_ZOOM_OUT, ());
+        }
+        ITEM_ZOOM_RESET => {
+            show_main_window(app);
+            let _ = app.emit(ITEM_ZOOM_RESET, ());
         }
         ITEM_ABOUT => {
             show_main_window(app);
@@ -122,6 +142,7 @@ fn build_menu(handle: &AppHandle) -> tauri::Result<Menu> {
         true,
         Some("CmdOrCtrl+Shift+S"),
     )?;
+    let export_pdf = MenuItem::with_id(handle, ITEM_EXPORT_PDF, "Export PDF…", true, None::<&str>)?;
     let close_window = MenuItem::with_id(
         handle,
         ITEM_CLOSE_WINDOW,
@@ -151,6 +172,10 @@ fn build_menu(handle: &AppHandle) -> tauri::Result<Menu> {
         Some("CmdOrCtrl+A"),
     )?;
 
+    let zoom_in = MenuItem::with_id(handle, ITEM_ZOOM_IN, "Zoom In", true, None::<&str>)?;
+    let zoom_out = MenuItem::with_id(handle, ITEM_ZOOM_OUT, "Zoom Out", true, None::<&str>)?;
+    let zoom_reset = MenuItem::with_id(handle, ITEM_ZOOM_RESET, "Actual Size", true, None::<&str>)?;
+
     let about_label = format!("About {app_name}");
     let about = MenuItem::with_id(handle, ITEM_ABOUT, about_label, true, None::<&str>)?;
     let check_updates = MenuItem::with_id(
@@ -163,6 +188,8 @@ fn build_menu(handle: &AppHandle) -> tauri::Result<Menu> {
 
     let sep_file_1 = PredefinedMenuItem::separator(handle)?;
     let sep_file_2 = PredefinedMenuItem::separator(handle)?;
+    #[cfg(not(target_os = "macos"))]
+    let sep_file_3 = PredefinedMenuItem::separator(handle)?;
     let sep_edit_1 = PredefinedMenuItem::separator(handle)?;
     let sep_edit_2 = PredefinedMenuItem::separator(handle)?;
 
@@ -179,6 +206,7 @@ fn build_menu(handle: &AppHandle) -> tauri::Result<Menu> {
                     &sep_file_1,
                     &save,
                     &save_as,
+                    &export_pdf,
                     &sep_file_2,
                     &close_window,
                 ],
@@ -197,8 +225,10 @@ fn build_menu(handle: &AppHandle) -> tauri::Result<Menu> {
                     &sep_file_1,
                     &save,
                     &save_as,
+                    &export_pdf,
                     &sep_file_2,
                     &close_window,
+                    &sep_file_3,
                     &quit,
                 ],
             )?
@@ -234,18 +264,26 @@ fn build_menu(handle: &AppHandle) -> tauri::Result<Menu> {
                 Some("CmdOrCtrl+Alt+I"),
             )?;
             let sep_view = PredefinedMenuItem::separator(handle)?;
+            let sep_zoom = PredefinedMenuItem::separator(handle)?;
             Submenu::with_items(
                 handle,
                 "View",
                 true,
-                &[&reload, &sep_view, &toggle_devtools],
+                &[
+                    &reload,
+                    &sep_view,
+                    &zoom_in,
+                    &zoom_out,
+                    &zoom_reset,
+                    &sep_zoom,
+                    &toggle_devtools,
+                ],
             )?
         }
 
         #[cfg(not(debug_assertions))]
         {
-            // View menu is currently empty in release builds (devtools/reload are dev-only).
-            Submenu::with_items(handle, "View", true, &[])?
+            Submenu::with_items(handle, "View", true, &[&zoom_in, &zoom_out, &zoom_reset])?
         }
     };
 

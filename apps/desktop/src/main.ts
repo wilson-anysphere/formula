@@ -5735,28 +5735,35 @@ try {
   void listen("menu-open", () => {
     void promptOpenWorkbook().catch((err) => {
       console.error("Failed to open workbook:", err);
-      window.alert(`Failed to open workbook: ${String(err)}`);
+      void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
     });
   });
 
   void listen("menu-new", () => {
     void handleNewWorkbook().catch((err) => {
       console.error("Failed to create workbook:", err);
-      window.alert(`Failed to create workbook: ${String(err)}`);
+      void nativeDialogs.alert(`Failed to create workbook: ${String(err)}`);
     });
   });
 
   void listen("menu-save", () => {
     void handleSave().catch((err) => {
       console.error("Failed to save workbook:", err);
-      window.alert(`Failed to save workbook: ${String(err)}`);
+      void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
     });
   });
 
   void listen("menu-save-as", () => {
     void handleSaveAs().catch((err) => {
       console.error("Failed to save workbook:", err);
-      window.alert(`Failed to save workbook: ${String(err)}`);
+      void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
+    });
+  });
+
+  void listen("menu-export-pdf", () => {
+    void handleRibbonExportPdf().catch((err) => {
+      console.error("Failed to export PDF:", err);
+      showToast(`Failed to export PDF: ${String(err)}`, "error");
     });
   });
 
@@ -5795,6 +5802,26 @@ try {
   void listen("menu-copy", () => dispatchSpreadsheetShortcut("c"));
   void listen("menu-paste", () => dispatchSpreadsheetShortcut("v"));
   void listen("menu-select-all", () => dispatchSpreadsheetShortcut("a"));
+
+  const zoomStepPercent = 10;
+  const applyMenuZoom = (nextPercent: number) => {
+    if (!app.supportsZoom()) return;
+    if (!Number.isFinite(nextPercent) || nextPercent <= 0) return;
+    const clamped = Math.min(500, Math.max(10, Math.round(nextPercent)));
+    app.setZoom(clamped / 100);
+    syncZoomControl();
+    app.focus();
+  };
+
+  void listen("menu-zoom-in", () => {
+    applyMenuZoom(Math.round(app.getZoom() * 100) + zoomStepPercent);
+  });
+  void listen("menu-zoom-out", () => {
+    applyMenuZoom(Math.round(app.getZoom() * 100) - zoomStepPercent);
+  });
+  void listen("menu-zoom-reset", () => {
+    applyMenuZoom(100);
+  });
 
   void listen("menu-about", () => {
     showToast("Formula Desktop", "info");
