@@ -172,7 +172,26 @@ unsafe fn tiff_to_png_bytes(tiff: &[u8]) -> Result<Vec<u8>, ClipboardError> {
         ));
     }
 
-    Ok(nsdata_to_vec(png_data, usize::MAX))
+    let len: usize = objc2::msg_send![png_data, length];
+    if len == 0 {
+        return Err(ClipboardError::OperationFailed(
+            "converted PNG was empty".to_string(),
+        ));
+    }
+    if len > MAX_IMAGE_BYTES {
+        return Err(ClipboardError::OperationFailed(format!(
+            "converted PNG exceeds maximum size ({MAX_IMAGE_BYTES} bytes)"
+        )));
+    }
+
+    let bytes = nsdata_to_vec(png_data, MAX_IMAGE_BYTES);
+    if bytes.is_empty() {
+        return Err(ClipboardError::OperationFailed(
+            "failed to copy converted PNG bytes".to_string(),
+        ));
+    }
+
+    Ok(bytes)
 }
 
 unsafe fn png_to_tiff_bytes(png: &[u8]) -> Result<Vec<u8>, ClipboardError> {
@@ -195,7 +214,26 @@ unsafe fn png_to_tiff_bytes(png: &[u8]) -> Result<Vec<u8>, ClipboardError> {
         ));
     }
 
-    Ok(nsdata_to_vec(tiff_data, usize::MAX))
+    let len: usize = objc2::msg_send![tiff_data, length];
+    if len == 0 {
+        return Err(ClipboardError::OperationFailed(
+            "converted TIFF was empty".to_string(),
+        ));
+    }
+    if len > MAX_IMAGE_BYTES {
+        return Err(ClipboardError::OperationFailed(format!(
+            "converted TIFF exceeds maximum size ({MAX_IMAGE_BYTES} bytes)"
+        )));
+    }
+
+    let bytes = nsdata_to_vec(tiff_data, MAX_IMAGE_BYTES);
+    if bytes.is_empty() {
+        return Err(ClipboardError::OperationFailed(
+            "failed to copy converted TIFF bytes".to_string(),
+        ));
+    }
+
+    Ok(bytes)
 }
 
 pub fn read() -> Result<ClipboardContent, ClipboardError> {
@@ -427,7 +465,10 @@ mod tests {
             }
 
             let (tx, rx) = mpsc::channel();
-            let ctx = Box::new(Ctx { f: Some(Box::new(f)), tx });
+            let ctx = Box::new(Ctx {
+                f: Some(Box::new(f)),
+                tx,
+            });
             dispatch_sync_f(
                 dispatch_get_main_queue(),
                 Box::into_raw(ctx) as *mut c_void,
@@ -448,8 +489,10 @@ mod tests {
                 .unwrap();
             let dims_before = png_dimensions(&png).expect("valid png");
 
-            let tiff = autoreleasepool(|_| unsafe { png_to_tiff_bytes(&png) }).expect("png -> tiff");
-            let png2 = autoreleasepool(|_| unsafe { tiff_to_png_bytes(&tiff) }).expect("tiff -> png");
+            let tiff =
+                autoreleasepool(|_| unsafe { png_to_tiff_bytes(&png) }).expect("png -> tiff");
+            let png2 =
+                autoreleasepool(|_| unsafe { tiff_to_png_bytes(&tiff) }).expect("tiff -> png");
             let dims_after = png_dimensions(&png2).expect("valid png output");
 
             assert_eq!(dims_before, dims_after);
