@@ -12,8 +12,10 @@ describe("DocumentCellProvider formatting integration", () => {
     const docRows = 200;
     const docCols = 10;
 
-    // Apply layered formatting to column A.
-    doc.setColFormat("Sheet1", 0, {
+    // Apply formatting to a full-height column range. DocumentController should treat
+    // this as a column formatting layer update (not per-cell deltas).
+    const EXCEL_MAX_ROW = 1_048_576 - 1;
+    doc.setRangeFormat("Sheet1", { start: { row: 0, col: 0 }, end: { row: EXCEL_MAX_ROW, col: 0 } }, {
       fill: { pattern: "solid", fgColor: "#FFFFFF00" },
       font: { bold: true, color: "#FF00FF00", size: 12, name: "Arial" },
       alignment: { horizontal: "right", wrapText: true }
@@ -162,7 +164,10 @@ describe("DocumentCellProvider formatting integration", () => {
     const updates: any[] = [];
     const unsubscribe = provider.subscribe((update) => updates.push(update));
 
-    doc.setRowFormat("Sheet1", 10, { font: { bold: true } });
+    // Format a full-height column; this should emit format-layer-only deltas (no per-cell deltas)
+    // and trigger a redraw for that column across all visible rows.
+    const EXCEL_MAX_ROW = 1_048_576 - 1;
+    doc.setRangeFormat("Sheet1", { start: { row: 0, col: 0 }, end: { row: EXCEL_MAX_ROW, col: 0 } }, { font: { bold: true } });
 
     unsubscribe();
 
@@ -170,10 +175,10 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(updates[0]).toEqual({
       type: "cells",
       range: {
-        startRow: headerRows + 10,
-        endRow: headerRows + 11,
+        startRow: headerRows,
+        endRow: headerRows + docRows,
         startCol: headerCols,
-        endCol: headerCols + docCols
+        endCol: headerCols + 1
       }
     });
   });
