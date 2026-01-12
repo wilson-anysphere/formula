@@ -64,7 +64,11 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
         setCollabVersioning(null);
         const mod = await import("@formula/collab-versioning");
         if (disposed) return;
-        instance = mod.createCollabVersioning({ session });
+        const localPresence = session.presence?.localPresence ?? null;
+        instance = mod.createCollabVersioning({
+          session,
+          user: localPresence ? { userId: localPresence.id, userName: localPresence.name } : undefined,
+        });
         setCollabVersioning(instance);
       } catch (e) {
         if (disposed) return;
@@ -205,7 +209,10 @@ function CollabVersionHistoryPanel({ session }: { session: CollabSession }) {
 }
 
 function CollabBranchManagerPanel({ session }: { session: CollabSession }) {
-  const actor = useMemo<BranchActor>(() => ({ userId: "desktop", role: "owner" }), []);
+  const actor = useMemo<BranchActor>(() => {
+    const userId = session.presence?.localPresence?.id ?? "desktop";
+    return { userId, role: "owner" };
+  }, [session]);
   const docId = session.doc.guid;
 
   const store = useMemo(() => new YjsBranchStore({ ydoc: session.doc }), [session]);
