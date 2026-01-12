@@ -23,9 +23,25 @@ fn build_oshared_digsig_blob(valid_pkcs7: &[u8]) -> Vec<u8> {
     //
     // This ensures we exercise deterministic DigSigBlob parsing (offset-based) instead of relying
     // on the heuristic scan-for-0x30 fallback.
+    // Corrupt the signature bytes while keeping the overall ASN.1 shape parseable.
+    //
+    // For BER-indefinite encodings (e.g. OpenSSL `cms -stream` output) the PKCS#7 blob can end with
+    // multiple `0x00 0x00` EOC terminators. Flipping the *last* byte would break the EOC and cause
+    // the blob to become unparseable (defeating the purpose of this test, which is to ensure our
+    // locator prefers the DigSigBlob offset rather than heuristic scanning).
+    //
+    // Instead, flip the last non-zero byte, which is typically inside the signature value.
     let mut invalid_pkcs7 = valid_pkcs7.to_vec();
-    let last = invalid_pkcs7.len().saturating_sub(1);
-    invalid_pkcs7[last] ^= 0xFF;
+    if let Some((idx, _)) = invalid_pkcs7
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|&(_i, &b)| b != 0)
+    {
+        invalid_pkcs7[idx] ^= 0xFF;
+    } else if let Some(first) = invalid_pkcs7.get_mut(0) {
+        *first ^= 0xFF;
+    }
 
     let digsig_blob_header_len = 8usize; // cb + serializedPointer
     // DigSigInfoSerialized is 9 DWORDs total in MS-OSHARED:
@@ -105,6 +121,21 @@ fn pkcs7_signature_wrapped_in_oshared_digsig_blob_is_verified() {
         "expected signer subject to mention test CN, got: {:?}",
         sig.signer_subject
     );
+}
+
+#[test]
+fn ber_indefinite_pkcs7_signature_wrapped_in_oshared_digsig_blob_is_verified() {
+    // This fixture is a CMS/PKCS#7 SignedData blob emitted by OpenSSL with `cms -stream`, which
+    // uses BER indefinite-length encodings.
+    let pkcs7 = include_bytes!("fixtures/cms_indefinite.der");
+    let blob = build_oshared_digsig_blob(pkcs7);
+    let vba = build_vba_project_bin_with_signature(Some(&blob));
+
+    let sig = verify_vba_digital_signature(&vba)
+        .expect("signature inspection should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
 }
 
 #[test]
