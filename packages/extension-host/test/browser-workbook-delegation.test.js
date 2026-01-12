@@ -1056,3 +1056,84 @@ test("BrowserExtensionHost: api_error preserves name/code for non-Error throws",
   assert.equal(apiError?.name, "AbortError");
   assert.equal(typeof apiError?.code, "string");
 });
+
+test("BrowserExtensionHost: getActiveWorkbook derives name from path when the host omits workbook.name", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  const sheets = [{ id: "sheet1", name: "Sheet1" }];
+  const activeSheet = sheets[0];
+
+  /** @type {any} */
+  let apiResult;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "api_result" && msg.id === "req1") {
+          apiResult = msg.result;
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async getActiveWorkbook() {
+        return { path: "/tmp/opened.xlsx" };
+      },
+      listSheets() {
+        return sheets;
+      },
+      getActiveSheet() {
+        return activeSheet;
+      },
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-name-from-path";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-name-from-path/",
+    mainUrl: "memory://workbook-name-from-path/main.mjs",
+    manifest: {
+      name: "workbook-name-from-path",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: [],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "getActiveWorkbook",
+    args: [],
+  });
+
+  await done;
+
+  assert.equal(apiResult?.path, "/tmp/opened.xlsx");
+  assert.equal(apiResult?.name, "opened.xlsx");
+});

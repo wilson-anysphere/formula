@@ -624,11 +624,15 @@ class BrowserExtensionHost {
           const next = { ...this._workbook };
           // `Workbook.name` is required by the API contract, but treat empty/missing values
           // as "no update" to preserve a stable snapshot in partially-implemented hosts.
+          let nameSet = false;
           try {
             if (Object.prototype.hasOwnProperty.call(workbook, "name")) {
               const rawName = workbook.name;
               const trimmed = rawName == null ? "" : String(rawName).trim();
-              if (trimmed) next.name = trimmed;
+              if (trimmed) {
+                next.name = trimmed;
+                nameSet = true;
+              }
             }
           } catch {
             // ignore
@@ -646,7 +650,14 @@ class BrowserExtensionHost {
                 next.path = null;
               } else {
                 const str = String(rawPath);
-                next.path = str.trim().length > 0 ? str : null;
+                const trimmed = str.trim();
+                next.path = trimmed.length > 0 ? str : null;
+                if (!nameSet && trimmed.length > 0) {
+                  // Best-effort: if the host omits `name` but provides a file path,
+                  // derive the workbook name from the basename.
+                  next.name = trimmed.split(/[/\\]/).pop() ?? trimmed;
+                  nameSet = true;
+                }
               }
             }
           } catch {
@@ -2800,13 +2811,17 @@ class BrowserExtensionHost {
         if (!wb || typeof wb !== "object") return;
 
         const next = { ...this._workbook };
+        let nameSet = false;
 
         // Merge name/path using the same semantics as `_getActiveWorkbook`.
         try {
           if (Object.prototype.hasOwnProperty.call(wb, "name")) {
             const rawName = wb.name;
             const trimmed = rawName == null ? "" : String(rawName).trim();
-            if (trimmed) next.name = trimmed;
+            if (trimmed) {
+              next.name = trimmed;
+              nameSet = true;
+            }
           }
         } catch {
           // ignore
@@ -2821,7 +2836,12 @@ class BrowserExtensionHost {
               next.path = null;
             } else {
               const str = String(rawPath);
-              next.path = str.trim().length > 0 ? str : null;
+              const trimmed = str.trim();
+              next.path = trimmed.length > 0 ? str : null;
+              if (!nameSet && trimmed.length > 0) {
+                next.name = trimmed.split(/[/\\]/).pop() ?? trimmed;
+                nameSet = true;
+              }
             }
           }
         } catch {
