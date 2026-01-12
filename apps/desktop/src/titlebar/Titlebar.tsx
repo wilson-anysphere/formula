@@ -198,12 +198,19 @@ export function Titlebar({
         data-testid="titlebar-drag-region"
         onDoubleClick={windowControls?.onToggleMaximize}
       >
-        <div className="formula-titlebar__titles" data-testid="titlebar-titles">
-          <span className="formula-titlebar__app-name" data-testid="titlebar-app-name">
+        <div className="formula-titlebar__titles" data-tauri-drag-region data-testid="titlebar-titles">
+          {/* Tauri drag regions are computed per-element; apply the attribute to the nested
+              title spans so dragging works even when the pointer is over the text nodes. */}
+          <span className="formula-titlebar__app-name" data-tauri-drag-region data-testid="titlebar-app-name">
             {appName}
           </span>
           {normalizedDocumentName.trim().length > 0 ? (
-            <span className="formula-titlebar__document-name" title={normalizedDocumentName} data-testid="titlebar-document-name">
+            <span
+              className="formula-titlebar__document-name"
+              title={normalizedDocumentName}
+              data-tauri-drag-region
+              data-testid="titlebar-document-name"
+            >
               {normalizedDocumentName}
             </span>
           ) : null}
