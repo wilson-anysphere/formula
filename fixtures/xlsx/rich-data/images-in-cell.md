@@ -9,6 +9,8 @@ See also:
 - [`docs/20-images-in-cells.md`](../../../docs/20-images-in-cells.md)
 - [`docs/20-images-in-cells-richdata.md`](../../../docs/20-images-in-cells-richdata.md)
 - [`docs/20-xlsx-rich-data.md`](../../../docs/20-xlsx-rich-data.md)
+- Related real Excel fixture (different on-disk shape): `fixtures/xlsx/basic/image-in-cell.xlsx` (uses the
+  `rdRichValue*` variant and does not include `xl/cellimages.xml`; see `fixtures/xlsx/basic/image-in-cell.md`).
 
 ## Provenance: confirm this file was saved by Excel
 
@@ -217,4 +219,3 @@ xl/worksheets/sheet1.xml  cell <c r="A1" vm="1">
 (Additionally present)
 xl/cellimages.xml -> xl/_rels/cellimages.xml.rels -> xl/media/image1.png
 ```
-
