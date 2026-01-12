@@ -71,6 +71,23 @@ describe("extractVerifiableClaims", () => {
     ]);
   });
 
+  it("parses currency-prefixed numbers", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "Total for range Sheet1!B1:B2 = $1,200.",
+      userText: ""
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "sum",
+        reference: "Sheet1!B1:B2",
+        expected: 1200,
+        source: "Total for range Sheet1!B1:B2 = $1,200"
+      }
+    ]);
+  });
+
   it("extracts cell value claims", () => {
     const claims = extractVerifiableClaims({
       assistantText: "Sheet1!C5 is 10.",

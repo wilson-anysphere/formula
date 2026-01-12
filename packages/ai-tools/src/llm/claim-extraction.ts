@@ -51,7 +51,7 @@ const A1_CELL_REFERENCE_PATTERN = `(?:(?:${SHEET_NAME_PATTERN})!\\s*)?${CELL_PAT
 // - scientific notation ("1e-3")
 // - optional percent suffix ("10%")
 // - optional parentheses for negative formatting ("(1,234)")
-const NUMBER_CORE_PATTERN = "[-+]?(?:\\d+(?:,\\d{3})*(?:\\.\\d+)?|\\.\\d+)(?:e[-+]?\\d+)?%?";
+const NUMBER_CORE_PATTERN = "[-+]?(?:[€£$])?(?:\\d+(?:,\\d{3})*(?:\\.\\d+)?|\\.\\d+)(?:e[-+]?\\d+)?%?";
 const NUMBER_PATTERN = `(?:${NUMBER_CORE_PATTERN}|\\(${NUMBER_CORE_PATTERN}\\))`;
 
 const KEYWORD_TO_MEASURE: Record<string, SpreadsheetClaimMeasure> = {
@@ -366,7 +366,7 @@ function parseNumberToken(token: string): number | null {
 
   // Common spreadsheet formatting: currency symbols. We intentionally keep this
   // conservative (single leading symbol) to avoid over-matching.
-  raw = raw.replace(/^[€£$]/, "");
+  raw = raw.replace(/^([-+])?[€£$]/, (_match, sign: string | undefined) => sign ?? "");
 
   const isPercent = raw.endsWith("%");
   const normalized = raw.replace(/,/g, "").replace(/%$/, "");
