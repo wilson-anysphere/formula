@@ -4493,6 +4493,17 @@ fn rewrite_structured_refs_for_bytecode(
         })
     }
 
+    fn this_row_cell_ref(col: u32) -> crate::Expr {
+        crate::Expr::CellRef(crate::CellRef {
+            workbook: None,
+            sheet: None,
+            // Structured refs like `[@Col]` should keep referring to the same *column*, even if the
+            // formula is moved horizontally, but should follow the current row.
+            col: crate::Coord::A1 { index: col, abs: true },
+            row: crate::Coord::Offset(0),
+        })
+    }
+
     match expr {
         crate::Expr::StructuredRef(r) => {
             // External workbook structured references are accepted syntactically but not supported.
@@ -4529,6 +4540,29 @@ fn rewrite_structured_refs_for_bytecode(
             };
             if *sheet_id != origin_sheet {
                 return None;
+            }
+
+            // `[@Col]`/`Table1[@Col]` depends on the current row, so represent it as a row-relative
+            // reference (row offset = 0) with an absolute column coordinate. This keeps the
+            // compiled bytecode program reusable across table rows, while still producing the
+            // correct row-dependent behavior at runtime.
+            if matches!(
+                sref.item,
+                Some(crate::structured_refs::StructuredRefItem::ThisRow)
+            ) {
+                if start.row != origin_cell.row || end.row != origin_cell.row {
+                    return None;
+                }
+
+                if start == end {
+                    return Some(this_row_cell_ref(start.col));
+                }
+
+                return Some(crate::Expr::Binary(crate::BinaryExpr {
+                    op: crate::BinaryOp::Range,
+                    left: Box::new(this_row_cell_ref(start.col)),
+                    right: Box::new(this_row_cell_ref(end.col)),
+                }));
             }
 
             if start == end {
