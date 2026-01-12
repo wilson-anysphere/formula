@@ -13,7 +13,7 @@ export class CursorTabCompletionClient {
    * }} [options]
    */
   constructor(options = {}) {
-    this.baseUrl = (options.baseUrl ?? "").replace(/\/$/, "");
+    this.endpointUrl = resolveTabCompletionEndpoint(options.baseUrl);
     // Node 18+ provides global fetch. Allow injection for tests.
     // eslint-disable-next-line no-undef
     this.fetchImpl = options.fetchImpl ?? fetch;
@@ -36,9 +36,12 @@ export class CursorTabCompletionClient {
       Number.isFinite(timeoutMs) && timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
 
     try {
-      const res = await this.fetchImpl(joinUrl(this.baseUrl, "/api/ai/tab-completion"), {
+      const res = await this.fetchImpl(this.endpointUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
+        // Cursor authentication is handled by the session (cookies). When the
+        // backend is cross-origin, this requires CORS support + credentials.
+        credentials: "include",
         body: JSON.stringify({ input, cursorPosition, cellA1 }),
         signal: controller.signal,
       });
@@ -72,10 +75,20 @@ async function readJsonOrText(res) {
   }
 }
 
+function resolveTabCompletionEndpoint(baseUrl) {
+  const raw = (baseUrl ?? "").toString().trim();
+  if (!raw) return "/api/ai/tab-completion";
+
+  const trimmed = raw.replace(/\/$/, "");
+  // Allow callers to pass a fully qualified endpoint (common for tests/dev).
+  if (/(^|\/)tab-completion$/.test(trimmed)) return trimmed;
+
+  return joinUrl(trimmed, "/api/ai/tab-completion");
+}
+
 function joinUrl(baseUrl, path) {
   if (!baseUrl) return path;
   const base = baseUrl.replace(/\/$/, "");
   const suffix = path.startsWith("/") ? path : `/${path}`;
   return `${base}${suffix}`;
 }
-

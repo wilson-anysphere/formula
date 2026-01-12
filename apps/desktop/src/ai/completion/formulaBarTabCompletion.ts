@@ -71,7 +71,8 @@ export class FormulaBarTabCompletionController {
     };
     this.#schemaProvider = schemaProvider;
 
-    const completionClient = opts.completionClient ?? new CursorTabCompletionClient();
+    const completionClient =
+      opts.completionClient ?? createCursorTabCompletionClientFromEnv() ?? new CursorTabCompletionClient();
     this.#completion = new TabCompletionEngine({
       completionClient,
       schemaProvider,
@@ -207,6 +208,46 @@ export class FormulaBarTabCompletionController {
         this.#formulaBar.setAiSuggestion(null);
       });
   }
+}
+
+function createCursorTabCompletionClientFromEnv(): CursorTabCompletionClient | null {
+  const viteUrl = readViteEnv("VITE_CURSOR_AI_COMPLETION_URL");
+  const nodeUrl = readNodeEnv("CURSOR_AI_COMPLETION_URL");
+  const raw = viteUrl ?? nodeUrl;
+  if (!raw) return null;
+
+  try {
+    return new CursorTabCompletionClient({ baseUrl: raw, timeoutMs: 100 });
+  } catch {
+    return null;
+  }
+}
+
+function readViteEnv(key: string): string | null {
+  try {
+    const env = (import.meta as any)?.env;
+    const value = env?.[key];
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function readNodeEnv(key: string): string | null {
+  try {
+    const value = (globalThis as any).process?.env?.[key];
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
 }
 
 function createPreviewEvaluator(params: {
