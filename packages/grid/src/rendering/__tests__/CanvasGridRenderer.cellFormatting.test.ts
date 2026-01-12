@@ -697,6 +697,83 @@ describe("CanvasGridRenderer cell formatting primitives", () => {
     ).toBe(false);
   });
 
+  it("prefers double borders over solid borders when widths tie", () => {
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row !== 0) return null;
+        if (col === 0) {
+          return {
+            row,
+            col,
+            value: null,
+            style: {
+              borders: {
+                right: { width: 3, style: "solid", color: "rgb(255,0,0)" }
+              }
+            }
+          };
+        }
+        if (col === 1) {
+          return {
+            row,
+            col,
+            value: null,
+            style: {
+              borders: {
+                left: { width: 3, style: "double", color: "rgb(0,0,255)" }
+              }
+            }
+          };
+        }
+        return null;
+      }
+    };
+
+    const gridCalls: Array<[string, ...any[]]> = [];
+    const contentCalls: Array<[string, ...any[]]> = [];
+    const selectionCalls: Array<[string, ...any[]]> = [];
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+    contexts.set(gridCanvas, createRecording2dContext({ canvas: gridCanvas, calls: gridCalls }));
+    contexts.set(contentCanvas, createRecording2dContext({ canvas: contentCanvas, calls: contentCalls }));
+    contexts.set(selectionCanvas, createRecording2dContext({ canvas: selectionCanvas, calls: selectionCalls }));
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const fallback = createRecording2dContext({ canvas: this, calls: [] });
+      contexts.set(this, fallback);
+      return fallback;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 2, colCount: 2 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(400, 120, 1);
+    renderer.renderImmediately();
+
+    // Double border with totalWidth=3 should render with per-line width=1, two parallel segments on the shared edge.
+    const segments = segmentsForStroke(
+      gridCalls,
+      (state) =>
+        state.strokeStyle === "rgb(0,0,255)" &&
+        Math.abs(state.lineWidth - 1) < 1e-6 &&
+        state.lineDash.length === 0 &&
+        state.lineCap === "butt"
+    );
+    expect(segments).toHaveLength(2);
+
+    const xs = [...new Set(segments.map((s) => s.x1))].sort((a, b) => a - b);
+    // Shared edge between col 0 and col 1 is at x=100px (default col width), offset by +/-1, crisp aligned for 1px strokes.
+    expect(xs).toEqual([99.5, 101.5]);
+
+    // Ensure the solid red border did not win the shared edge.
+    expect(gridCalls.some((call) => call[0] === "stroke" && call[1]?.strokeStyle === "rgb(255,0,0)")).toBe(false);
+  });
+
   it("resolves equal-width conflicts deterministically (prefers right/bottom borders)", () => {
     const provider: CellProvider = {
       getCell: (row, col) => {
