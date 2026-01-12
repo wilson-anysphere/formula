@@ -52,6 +52,8 @@ SMOKE_INCLUDE_TAGS = [
     "SORT",
     "UNIQUE",
     "ISERROR",
+    # Thai deterministic localization functions (BAHTTEXT/THAI*/ROUNDBAHT*).
+    "thai",
     # Exercise small-but-important date validation boundary conditions (e.g. odd-coupon bonds where
     # settlement == coupon date) without pulling in the full financial corpus.
     "boundary",
@@ -82,6 +84,8 @@ P0_INCLUDE_TAGS = [
     # Common info/conversion semantics (ensure p0 is a strict superset of smoke).
     "info",
     "coercion",
+    # Thai deterministic localization functions (BAHTTEXT/THAI*/ROUNDBAHT*).
+    "thai",
 ]
 
 _TIER_TO_INCLUDE_TAGS: dict[str, list[str]] = {
