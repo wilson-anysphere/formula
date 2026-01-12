@@ -427,29 +427,29 @@ export function startWorkbookSync(args: {
 
     const backendOriginated = source === "macro" || source === "python" || source === "pivot" || source === "backend";
 
+    if (source === "applyState") {
+      // `applyState` replaces the entire DocumentController snapshot. It is used for state restores
+      // (version restore/collab state sync/etc) and must be treated as an external update:
+      // - Do not mirror sheet structure/metadata changes back to the backend.
+      // - Do not echo per-cell deltas back via set_cell/set_range (these can include huge sparse clears).
+      // - Refresh our local sheet snapshot after the controller finishes applying the snapshot so
+      //   subsequent *user* edits are scoped to the correct sheet ids.
+      pendingCellEdits.clear();
+      pendingSheetActions.length = 0;
+      queueMicrotask(() => {
+        if (stopped) return;
+        const snap = captureSheetSnapshot(args.document);
+        if (snap) sheetMirror = snap;
+      });
+      return;
+    }
+
     // Queue sheet structure/metadata updates (DocumentController-driven). Historically the desktop UI
     // persisted sheet tab operations directly via `invoke(...)` calls in main.ts. That approach can
     // easily drift out of sync with the DocumentController undo/redo stack, so we now treat the
     // DocumentController sheet deltas as the single source of truth and mirror them to the backend
     // here (while still ignoring changes that originated in the backend itself).
-    if (source === "applyState") {
-      // `applyState` replaces the entire DocumentController snapshot. It can create/delete sheets
-      // without emitting sheetMetaDeltas/sheetOrderDelta, so reconcile against a post-applyState
-      // snapshot in a microtask (after the controller finishes removing deleted sheets).
-      //
-      // Treat this as a reset boundary: pending backend sync for the old document state is no longer
-      // meaningful, so drop any queued edits and reconcile to the new snapshot.
-      pendingCellEdits.clear();
-      pendingSheetActions.length = 0;
-
-      queueMicrotask(() => {
-        if (stopped) return;
-        const snap = captureSheetSnapshot(args.document);
-        if (!snap) return;
-        pendingSheetActions.push({ kind: "applyState", snapshot: snap });
-        scheduleFlush();
-      });
-    } else if (hasSheetMetaDeltas || hasSheetOrderDelta) {
+    if (hasSheetMetaDeltas || hasSheetOrderDelta) {
       if (backendOriginated) {
         // Backend already performed these operations. Track them in the mirror so future
         // applyState reconciliations start from the correct baseline.
