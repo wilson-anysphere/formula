@@ -141,8 +141,9 @@ High-level extraction steps:
      - a hash algorithm identifier (OID)
      - the digest bytes
 
-That `(hash_oid, digest_bytes)` pair is the “signed digest” we use to bind a VBA signature to a
-specific VBA project.
+That `(hash_oid, digest_bytes)` pair is the “signed digest” we extract from the signature. For VBA
+project binding, we compare the **digest bytes** against a freshly computed MD5 Content Hash / Agile
+Content Hash; the algorithm OID is treated as informational (debug/display) only.
 
 ### Relevant ASN.1 shapes (high level)
 
