@@ -3,6 +3,9 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop, waitForDesktopReady } from "./helpers";
 
 test.describe("shared grid zoom persistence", () => {
+  // This test reloads the desktop shell multiple times; give it extra headroom on slower CI runners.
+  test.describe.configure({ timeout: 120_000 });
+
   test("persists zoom across reloads", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
 
