@@ -1,7 +1,9 @@
 # Excel Oracle compatibility tests
 
-This directory contains the **case corpus** and **pinned Excel results** used to
-continuously validate `crates/formula-engine` against real Excel behavior.
+This directory contains the **case corpus** and a **pinned results dataset** used to
+continuously validate `crates/formula-engine` against an Excel oracle dataset.
+The pinned dataset may be produced by real Excel or may be a synthetic CI baseline;
+check the dataset `source.note` field for details.
 
 ## Quick start (one command)
 
