@@ -1,4 +1,4 @@
-use crate::{XlsxError, XlsxPackage};
+use crate::{path, XlsxError, XlsxPackage};
 
 /// Discover Rich Data part names referenced by `xl/metadata.xml`.
 ///
@@ -21,7 +21,16 @@ pub fn discover_rich_data_part_names(pkg: &XlsxPackage) -> Result<Vec<String>, X
     let relationships = crate::openxml::parse_relationships(rels_bytes)?;
     let mut out = Vec::new();
     for rel in relationships {
-        let target = crate::openxml::resolve_target("xl/metadata.xml", &rel.target);
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
+
+        // Relationship targets are URIs and may include fragments; resolve to an OPC part name.
+        let target = path::resolve_target("xl/metadata.xml", &rel.target);
         if !target.starts_with("xl/richData/") {
             continue;
         }
@@ -105,5 +114,22 @@ mod tests {
 
         let discovered = discover_rich_data_part_names(&pkg).expect("discover rich data");
         assert_eq!(discovered, vec!["xl/richData/present.xml".to_string()]);
+    }
+
+    #[test]
+    fn ignores_external_relationships_even_when_target_exists() {
+        let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="urn:example:rich-data" Target="richData/rd1.xml" TargetMode="External"/>
+</Relationships>"#;
+
+        let pkg = build_package(&[
+            ("xl/metadata.xml", br#"<metadata/>"#),
+            ("xl/_rels/metadata.xml.rels", rels),
+            ("xl/richData/rd1.xml", br#"<rd/>"#),
+        ]);
+
+        let discovered = discover_rich_data_part_names(&pkg).expect("discover rich data");
+        assert!(discovered.is_empty());
     }
 }
