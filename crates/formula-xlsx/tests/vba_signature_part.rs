@@ -547,6 +547,58 @@ fn verify_signature_part_binding_matches_vba_project_bin_for_v3_digest_when_sign
 }
 
 #[test]
+fn verify_signature_part_binding_matches_vba_project_bin_for_v3_digest_when_signature_ext_digsig_blob_wrapped(
+) {
+    let vba_project_bin = build_minimal_vba_project_bin(b"Sub Hello()\r\nEnd Sub\r\n");
+    let digest =
+        compute_vba_project_digest_v3(&vba_project_bin, DigestAlg::Sha256).expect("digest v3");
+    assert_eq!(digest.len(), 32, "SHA-256 digest must be 32 bytes");
+    let spc = make_spc_indirect_data_content_sha256(&digest);
+
+    let pkcs7 = make_pkcs7_signed_message(&spc);
+    let wrapped = build_oshared_digsig_blob(&pkcs7);
+    let signature_part =
+        build_ole_with_streams(&[("\u{0005}DigitalSignatureExt", wrapped.as_slice())]);
+
+    let xlsm_bytes = build_xlsm_zip(&vba_project_bin, &signature_part);
+    let pkg = XlsxPackage::from_bytes(&xlsm_bytes).expect("read xlsm");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("verify signature")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+}
+
+#[test]
+fn verify_signature_part_binding_matches_vba_project_bin_for_v3_digest_when_signature_ext_wordsig_blob_wrapped(
+) {
+    let vba_project_bin = build_minimal_vba_project_bin(b"Sub Hello()\r\nEnd Sub\r\n");
+    let digest =
+        compute_vba_project_digest_v3(&vba_project_bin, DigestAlg::Sha256).expect("digest v3");
+    assert_eq!(digest.len(), 32, "SHA-256 digest must be 32 bytes");
+    let spc = make_spc_indirect_data_content_sha256(&digest);
+
+    let pkcs7 = make_pkcs7_signed_message(&spc);
+    let wrapped = build_oshared_wordsig_blob(&pkcs7);
+    let signature_part =
+        build_ole_with_streams(&[("\u{0005}DigitalSignatureExt", wrapped.as_slice())]);
+
+    let xlsm_bytes = build_xlsm_zip(&vba_project_bin, &signature_part);
+    let pkg = XlsxPackage::from_bytes(&xlsm_bytes).expect("read xlsm");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("verify signature")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+}
+
+#[test]
 fn verify_signature_part_binding_detects_tampered_vba_project_bin() {
     let vba_project_bin = build_minimal_vba_project_bin(b"Sub Hello()\r\nEnd Sub\r\n");
     let digest = compute_vba_project_digest(&vba_project_bin, DigestAlg::Md5)
