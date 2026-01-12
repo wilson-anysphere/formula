@@ -630,7 +630,23 @@ fn normalize_key(s: &str) -> String {
 }
 
 pub(crate) fn display_supbook_name(raw: &str) -> String {
-    raw.rsplit(['/', '\\']).next().unwrap_or(raw).to_string()
+    // SUPBOOK values are often file paths. For formula rendering we want a best-effort workbook
+    // *basename* without path separators.
+    //
+    // Some producers also store the workbook in brackets (e.g. `C:\tmp\[Book.xlsx]`) or wrap the
+    // entire path in brackets (`[C:\tmp\Book.xlsx]`). Normalize these cases so we can safely
+    // produce `[Book]Sheet` prefixes for external workbook references.
+    let without_nuls = raw.replace('\0', "");
+    let basename = without_nuls
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(&without_nuls);
+    let trimmed = basename.trim();
+
+    let mut inner = trimmed;
+    inner = inner.strip_prefix('[').unwrap_or(inner);
+    inner = inner.strip_suffix(']').unwrap_or(inner);
+    inner.to_string()
 }
 
 fn quote_excel_quoted_ident(raw: &str) -> String {
@@ -747,5 +763,18 @@ mod tests {
 
         // Chooses smallest (supbook, name_index) match and smallest ixti pointing at that supbook.
         assert_eq!(ctx.namex_function_ref("myfunc"), Some((2u16, 1u16)));
+    }
+
+    #[test]
+    fn display_supbook_name_strips_paths_brackets_and_nuls() {
+        assert_eq!(
+            display_supbook_name("C:\\tmp\\[Book2.xlsb]\u{0000}"),
+            "Book2.xlsb"
+        );
+        assert_eq!(
+            display_supbook_name("[C:\\tmp\\Book2.xlsb]\u{0000}"),
+            "Book2.xlsb"
+        );
+        assert_eq!(display_supbook_name("[Book2.xlsb]"), "Book2.xlsb");
     }
 }
