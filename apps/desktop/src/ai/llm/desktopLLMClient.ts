@@ -84,7 +84,6 @@ export function purgeLegacyDesktopLLMSettings(): void {
   }
 
   // Best-effort: remove every legacy "formula llm" key, including provider + per-provider settings.
-  // Best-effort: remove every legacy "formula llm" key, including provider + per-provider settings.
   try {
     const keysToRemove: string[] = [];
     const length = storage.length;
@@ -107,9 +106,9 @@ export function purgeLegacyDesktopLLMSettings(): void {
       try {
         storage.removeItem(key);
       } catch {
-        // ignore
-      }
-    }
+  // ignore
+  }
+}
   } catch {
     // ignore
   }
@@ -121,7 +120,17 @@ export function purgeLegacyDesktopLLMSettings(): void {
  * All inference is routed through the Cursor backend (no provider selection or API keys).
  */
 export function getDesktopLLMClient(): LLMClient {
-  if (!cachedClient) cachedClient = createLLMClient();
+  if (!cachedClient) {
+    // One-time best-effort cleanup: older desktop builds persisted provider/API keys
+    // and local-model toggles in localStorage. Those settings are no longer used;
+    // purge them on first AI use so stale secrets/flags aren't left behind.
+    try {
+      purgeLegacyDesktopLLMSettings();
+    } catch {
+      // ignore
+    }
+    cachedClient = createLLMClient();
+  }
   return cachedClient;
 }
 
