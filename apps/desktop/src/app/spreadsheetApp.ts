@@ -3808,7 +3808,9 @@ export class SpreadsheetApp {
 
     for (const comment of this.commentManager.listAll()) {
       const rawCellRef = comment.cellRef;
-      const bang = rawCellRef.indexOf("!");
+      // Use the last `!` so sheet-qualified refs with `!` in the sheet id (unlikely but possible)
+      // still parse correctly.
+      const bang = rawCellRef.lastIndexOf("!");
       const sheetIdFromRef = bang >= 0 ? rawCellRef.slice(0, bang) : null;
       const a1Raw = bang >= 0 ? rawCellRef.slice(bang + 1) : rawCellRef;
       const a1IsPlain = A1_CELL_REF_RE.test(a1Raw);
