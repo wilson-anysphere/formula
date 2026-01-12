@@ -67,6 +67,7 @@ function installTauriStubForTests(
           case "set_macro_ui_context":
           case "fire_workbook_open":
           case "mark_saved":
+          case "move_sheet":
           case "set_cell":
           case "set_range":
           case "save_workbook":
@@ -164,6 +165,73 @@ test.describe("tauri workbook integration", () => {
 
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
     await expect(switcher.locator("option")).toHaveText(["Sheet1", "Sheet2", "Sheet3"]);
+  });
+
+  test("drag reordering visible tabs calls move_sheet with absolute indices (including hidden sheets)", async ({ page }) => {
+    await page.addInitScript(installTauriStubForTests, {
+      sheets: [
+        { id: "Sheet1", name: "Sheet1", visibility: "visible" },
+        { id: "Sheet2", name: "Sheet2", visibility: "hidden" },
+        { id: "Sheet3", name: "Sheet3", visibility: "visible" },
+        { id: "Sheet4", name: "Sheet4", visibility: "visible" },
+      ],
+    });
+
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => Boolean((window as any).__tauriListeners?.["file-dropped"]));
+    await page.evaluate(() => {
+      (window as any).__tauriListeners["file-dropped"]({ payload: ["/tmp/fake.xlsx"] });
+    });
+
+    await page.waitForFunction(async () => (await (window as any).__formulaApp.getCellValueA1("A1")) === "Hello");
+
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
+    await expect(page.getByTestId("sheet-tab-Sheet3")).toBeVisible();
+    await expect(page.getByTestId("sheet-tab-Sheet4")).toBeVisible();
+
+    // Drag Sheet4 before Sheet3 (Sheet2 is hidden but should still affect the absolute index).
+    // Use a synthetic drop event for determinism (Playwright drag/drop can be flaky in the desktop shell).
+    await page.evaluate(() => {
+      const target = document.querySelector('[data-testid="sheet-tab-Sheet3"]') as HTMLElement | null;
+      if (!target) throw new Error("Missing sheet-tab-Sheet3");
+
+      const rect = target.getBoundingClientRect();
+      const dt = new DataTransfer();
+      dt.setData("text/plain", "Sheet4");
+
+      const drop = new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 1,
+        clientY: rect.top + rect.height / 2,
+      });
+      Object.defineProperty(drop, "dataTransfer", { value: dt });
+      target.dispatchEvent(drop);
+    });
+
+    // Visible order should now be: [Sheet1, Sheet4, Sheet3] (Sheet2 remains hidden).
+    await expect.poll(() =>
+      page.evaluate(() =>
+        Array.from(document.querySelectorAll("#sheet-tabs .sheet-tabs [data-sheet-id]"))
+          .map((el) => (el as HTMLElement).getAttribute("data-sheet-id"))
+          .filter(Boolean),
+      ),
+    ).toEqual(["Sheet1", "Sheet4", "Sheet3"]);
+
+    // Ensure the backend was called with the full-workbook insertion index:
+    // [Sheet1, Sheet2(hidden), Sheet3, Sheet4] -> move Sheet4 before Sheet3 => to_index === 2.
+    await page.waitForFunction(
+      () => (window as any).__tauriInvokeCalls?.some?.((call: any) => call?.cmd === "move_sheet"),
+      undefined,
+      { timeout: 5_000 },
+    );
+    const moveCall = await page.evaluate(() => {
+      const calls = (window as any).__tauriInvokeCalls ?? [];
+      return calls.find((call: any) => call?.cmd === "move_sheet") ?? null;
+    });
+    expect(moveCall?.args).toEqual({ sheet_id: "Sheet4", to_index: 2 });
   });
 
   test("veryHidden sheets are excluded and not offered in the unhide menu", async ({ page }) => {
