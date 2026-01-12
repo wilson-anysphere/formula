@@ -61,6 +61,9 @@ The report prints:
 - FTAB non-empty name count (from `crates/formula-biff/src/ftab.rs`)
 - Approximate count of FTAB names missing from the catalog
 
+Note: FTAB includes many legacy XLM/macro-only functions and reserved slots; the “missing from
+catalog” number is **not** a direct “worksheet function parity” percentage.
+
 ### Example output
 
 ```text
@@ -110,12 +113,15 @@ In this repo the requirement is tracked here:
 
 Relevant implementation areas (where this is/will be enforced):
 
-- Dependency graph implementation:
+- Dependency graph enforcement (limit + fallback):
   [`crates/formula-engine/src/graph/dependency_graph.rs`](../crates/formula-engine/src/graph/dependency_graph.rs)
-- Engine recalculation loop:
-  [`crates/formula-engine/src/engine.rs`](../crates/formula-engine/src/engine.rs)
-- Scaling/regression coverage:
-  [`crates/formula-engine/tests/graph_stress.rs`](../crates/formula-engine/tests/graph_stress.rs)
+  - `DependencyGraph::DEFAULT_DIRTY_MARK_LIMIT` (65,536)
+  - `DependencyGraph::mark_dirty` falls back to “full recalc” by marking all formula cells dirty when
+    propagation exceeds the limit
+- Regression tests:
+  [`crates/formula-engine/tests/graph_dirty_mark_limit.rs`](../crates/formula-engine/tests/graph_dirty_mark_limit.rs)
+  (plus general scaling tests like
+  [`crates/formula-engine/tests/graph_stress.rs`](../crates/formula-engine/tests/graph_stress.rs))
 
 Note: The parity report script above focuses on **function coverage**. The dependency threshold is a
 separate (performance/behavior) parity requirement.
