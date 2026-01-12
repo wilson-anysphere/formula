@@ -65,7 +65,10 @@ test("sandbox: blocks disallowed Node builtin modules (including subpaths)", asy
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
-    permissionPrompt: async () => true
+    permissionPrompt: async () => true,
+    // Worker thread startup can be slow when node:test runs files in parallel.
+    // Keep this generous so the test exercises sandboxed require() behavior rather than flaking.
+    activationTimeoutMs: 20_000
   });
 
   t.after(async () => {
@@ -264,7 +267,9 @@ module.exports = { activate };
       engineVersion: "1.0.0",
       permissionsStoragePath: path.join(root, "permissions.json"),
       extensionStoragePath: path.join(root, "storage.json"),
-      permissionPrompt: async () => true
+      permissionPrompt: async () => true,
+      // Worker thread startup can be slow under heavy CI load; avoid flaking on activation.
+      activationTimeoutMs: 20_000
     });
 
     try {
