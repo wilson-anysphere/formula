@@ -278,4 +278,82 @@ describe("PreviewEngine", () => {
     expect(chartCalls).toHaveLength(1);
     expect(chartCalls[0]?.data_range).toBe("Sheet2!A1:B3");
   });
+
+  it("requires approval for large formatting edits even when the cell-level diff is empty (tool-reported counts)", async () => {
+    // Some spreadsheet backends store formatting in layered defaults / range runs without
+    // materializing per-cell entries. PreviewEngine should still require approval based on
+    // tool-reported cell counts.
+    class FormattingLayerWorkbook implements SpreadsheetApi {
+      private readonly inner: InMemoryWorkbook;
+      readonly formattingOps: Array<{ range: any; format: any }> = [];
+
+      constructor(inner?: InMemoryWorkbook, ops?: Array<{ range: any; format: any }>) {
+        this.inner = inner ?? new InMemoryWorkbook(["Sheet1"]);
+        if (ops) this.formattingOps.push(...ops);
+      }
+
+      clone(): SpreadsheetApi {
+        return new FormattingLayerWorkbook(this.inner.clone() as InMemoryWorkbook, this.formattingOps.slice());
+      }
+
+      listSheets(): string[] {
+        return this.inner.listSheets();
+      }
+
+      listNonEmptyCells(sheet?: string) {
+        return this.inner.listNonEmptyCells(sheet);
+      }
+
+      getCell(address: any) {
+        return this.inner.getCell(address);
+      }
+
+      setCell(address: any, cell: any) {
+        return this.inner.setCell(address, cell);
+      }
+
+      readRange(range: any) {
+        return this.inner.readRange(range);
+      }
+
+      writeRange(range: any, cells: any) {
+        return this.inner.writeRange(range, cells);
+      }
+
+      applyFormatting(range: any, format: any): number {
+        // Record the op but do not materialize cells.
+        this.formattingOps.push({ range, format });
+        const rows = Math.max(0, range.endRow - range.startRow + 1);
+        const cols = Math.max(0, range.endCol - range.startCol + 1);
+        return rows * cols;
+      }
+
+      getLastUsedRow(sheet: string): number {
+        return this.inner.getLastUsedRow(sheet);
+      }
+    }
+
+    const workbook = new FormattingLayerWorkbook();
+    const previewEngine = new PreviewEngine();
+
+    const preview = await previewEngine.generatePreview(
+      [
+        {
+          name: "apply_formatting",
+          parameters: { range: "Sheet1!A1:A1048576", format: { bold: true } }
+        }
+      ],
+      workbook
+    );
+
+    // Diff should miss the edit because formatting isn't stored as per-cell entries.
+    expect(preview.summary.total_changes).toBe(0);
+    expect(preview.requires_approval).toBe(true);
+    expect(preview.approval_reasons).toContain("Large edit (1048576 cells)");
+    expect(preview.warnings.some((w) => /diff may be incomplete/i.test(w))).toBe(true);
+
+    // Ensure preview simulation didn't mutate the live workbook.
+    expect(workbook.listNonEmptyCells()).toEqual([]);
+    expect(workbook.formattingOps).toEqual([]);
+  });
 });
