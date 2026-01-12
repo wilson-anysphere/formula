@@ -2542,6 +2542,20 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
     let (shared_strings_part, shared_string_indices, shared_strings_updated) =
         plan_shared_strings(archive, patches_by_part, pre_read_parts)?;
 
+    // Most streaming patching use-cases want to preserve `vm`/`cm` attributes on existing cells to
+    // avoid accidentally dropping RichData references (e.g. images-in-cell).
+    //
+    // Some callers patch incomplete workbook packages missing `[Content_Types].xml` but still
+    // containing `xl/workbook.xml`. In that mode, we drop `vm` when the cached value changes to
+    // avoid leaving a dangling value-metadata pointer.
+    //
+    // NOTE: `patch_xlsx_streaming_workbook_cell_patches*` pre-reads `xl/workbook.xml`; keep its
+    // default behavior (preserve `vm`) even when `[Content_Types].xml` is absent.
+    let workbook_pre_read = pre_read_parts.contains_key("xl/workbook.xml");
+    let workbook_present = workbook_pre_read || zip_part_exists(archive, "xl/workbook.xml")?;
+    let content_types_present = zip_part_exists(archive, "[Content_Types].xml")?;
+    let drop_vm_on_value_change = !workbook_pre_read && workbook_present && !content_types_present;
+
     let mut non_material_targets_by_part: HashMap<String, HashSet<(u32, u32)>> = HashMap::new();
     for (part, patches) in patches_by_part {
         let mut targets = HashSet::new();
@@ -2652,6 +2666,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
                 patches,
                 indices,
                 worksheet_meta,
+                drop_vm_on_value_change,
                 recalc_policy,
             )?;
         } else if let Some(bytes) = updated_parts.get(canonical_name) {
@@ -3032,6 +3047,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     patches: &[WorksheetCellPatch],
     shared_string_indices: Option<&HashMap<(u32, u32), u32>>,
     worksheet_meta: WorksheetXmlMetadata,
+    drop_vm_on_value_change: bool,
     recalc_policy: RecalcPolicy,
 ) -> Result<(), StreamingPatchError> {
     let patch_bounds = bounds_for_patches(patches);
@@ -3364,6 +3380,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                         e,
                         &cell_ref,
                         &patch,
+                        drop_vm_on_value_change,
                     )?;
                 } else {
                     writer.write_event(Event::Start(e.to_owned()))?;
@@ -3687,6 +3704,7 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     cell_start: &BytesStart<'_>,
     cell_ref: &CellRef,
     patch: &CellPatchInternal,
+    drop_vm_on_value_change: bool,
 ) -> Result<(), StreamingPatchError> {
     let patch_formula = match patch.formula.as_deref() {
         Some(formula) if formula_is_material(Some(formula)) => Some(formula),
@@ -3727,9 +3745,14 @@ fn patch_existing_cell<R: BufRead, W: Write>(
     // Excel uses `vm="..."` to point into `xl/metadata.xml` value metadata (rich values / in-cell
     // images).
     //
-    // We preserve `vm` for most rich-data cells. The one case where we drop it is when the
-    // **original** cell is an embedded-image placeholder represented as an error cell with a
-    // `#VALUE!` cached value, and the patch edits the cell away from that placeholder value.
+    // For most rich-data cells, we preserve `vm` across patches so the rich metadata stays
+    // attached to the cell.
+    //
+    // There are two cases where we drop `vm`:
+    // - The original cell is an embedded-image placeholder represented as an error cell with a
+    //   `#VALUE!` cached value, and the patch edits the cell away from that placeholder value.
+    // - When patching an incomplete workbook package (see `drop_vm_on_value_change`), drop `vm`
+    //   when the cached value changes away from the rich-value placeholder semantics.
     let existing_value_is_value_error = if existing_t.as_deref() == Some("e") {
         extract_cell_v_text(&inner_events)?.is_some_and(|v| v.trim() == "#VALUE!")
     } else {
@@ -3740,7 +3763,18 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         CellValue::Error(formula_model::ErrorValue::Value)
     );
     let clear_cached_value = patch.clear_cached_value && patch_formula.is_some();
-    let drop_vm = has_vm && existing_value_is_value_error && !patch_value_is_value_error;
+    let value_changed = if drop_vm_on_value_change && has_vm && !patch_value_is_value_error {
+        !cell_value_semantics_eq(
+            existing_t.as_deref(),
+            &inner_events,
+            &patch.value,
+            patch.shared_string_idx,
+        )?
+    } else {
+        false
+    };
+    let drop_vm = has_vm
+        && ((existing_value_is_value_error && !patch_value_is_value_error) || value_changed);
 
     let mut c = BytesStart::new(cell_tag.as_str());
     let mut has_r = false;

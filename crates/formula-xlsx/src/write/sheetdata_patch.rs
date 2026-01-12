@@ -580,15 +580,15 @@ fn patch_or_copy_cell<W: Write>(
                 write_events(writer, cell_events)?;
             } else {
                 // `vm="..."` is a value-metadata pointer into `xl/metadata.xml` (rich values /
-                // images-in-cell). For most rich-data cells, we want to preserve `vm` so the rich
-                // metadata stays attached to the cell even when we rewrite the `<c>` element.
+                // images-in-cell).
                 //
-                // Exception: embedded in-cell images are commonly represented as an error cell
-                // with a `#VALUE!` placeholder value. When editing away from that placeholder
-                // representation, drop `vm` so we don't leave an image placeholder pointing at
-                // stale rich-data metadata.
-                let preserve_vm = !matches!(original.value, CellValue::Error(ErrorValue::Value))
-                    || matches!(desired_semantics.value, CellValue::Error(ErrorValue::Value));
+                // We can only safely preserve `vm` when the cell's cached value is unchanged (or
+                // still uses the rich-data placeholder value, e.g. `#VALUE!` for in-cell images).
+                // Otherwise we'd be leaving a dangling metadata pointer that no longer matches the
+                // cell value.
+                let value_changed = original.value != desired_semantics.value;
+                let preserve_vm =
+                    !value_changed || matches!(desired_semantics.value, CellValue::Error(ErrorValue::Value));
                 write_updated_cell(
                     doc,
                     sheet_meta,
@@ -1005,31 +1005,39 @@ fn write_updated_cell<W: Write>(
             CellValueKind::Other { t } => c_start.push_attribute(("t", t.as_str())),
         }
     }
-    // `vm="..."` is a SpreadsheetML value-metadata pointer (typically into `xl/metadata*.xml`).
+    // `vm="..."` is a SpreadsheetML value-metadata pointer (typically into `xl/metadata.xml`).
     //
-    // We preserve `vm` for most rich-data cells so the rich metadata stays attached to the cell
-    // even when we rewrite the `<c>` element.
+    // This is used by Excel rich values (linked data types, in-cell images, etc). When patching
+    // worksheet XML, drop `vm` when the cell's cached value changes away from rich-value placeholder
+    // semantics, to avoid leaving dangling metadata pointers.
     //
-    // The only case where we drop it is when the original cell used the embedded-image placeholder
-    // representation (`t="e"` and cached `#VALUE!`) and the caller edited the cell away from that
-    // placeholder.
-    if preserve_vm {
+    // If the caller explicitly overrides the `vm` value in `CellMeta`, prefer it over what we saw
+    // in the original `<c>` element.
+    let original_vm = preserved_attrs
+        .iter()
+        .find(|(k, _)| k == "vm")
+        .map(|(_, v)| v.as_str());
+    let meta_vm_override = meta_vm
+        .as_deref()
+        .is_some_and(|vm| !original_has_vm || Some(vm) != original_vm);
+    let drop_vm = original_has_vm && !preserve_vm && !meta_vm_override;
+
+    if meta_vm_override {
+        if let Some(vm) = meta_vm.as_deref() {
+            c_start.push_attribute(("vm", vm));
+        }
+    } else if !original_has_vm {
         if let Some(vm) = meta_vm.as_deref() {
             c_start.push_attribute(("vm", vm));
         }
     }
-    // Preserve the original `vm` attribute unless:
-    // - the caller is editing away from the embedded-image placeholder representation, or
-    // - `CellMeta` specifies a `vm` attribute value that should override the one stored on the
-    //   original `<c>` element.
-    let drop_vm = original_has_vm && (!preserve_vm || meta_vm.is_some());
     if !original_has_cm {
         if let Some(cm) = meta_cm.as_deref() {
             c_start.push_attribute(("cm", cm));
         }
     }
     for (k, v) in &preserved_attrs {
-        if k == "vm" && drop_vm {
+        if k == "vm" && (drop_vm || meta_vm_override) {
             continue;
         }
         c_start.push_attribute((k.as_str(), v.as_str()));
