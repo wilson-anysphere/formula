@@ -95,6 +95,19 @@ function normalizeClipboardHtml(html) {
     if (containsCompleteTable(stripped)) return stripped;
   }
 
+  // If offsets are missing/incorrect, CF_HTML payloads often include fragment comment markers.
+  // Use them as a best-effort way to isolate the correct table when multiple tables are present.
+  const startMarker = /<!--\s*StartFragment\s*-->/i.exec(input);
+  if (startMarker) {
+    const afterStart = startMarker.index + startMarker[0].length;
+    const endMarker = /<!--\s*EndFragment\s*-->/i.exec(input.slice(afterStart));
+    if (endMarker) {
+      const fragment = input.slice(afterStart, afterStart + endMarker.index);
+      const stripped = stripToMarkup(fragment);
+      if (containsCompleteTable(stripped)) return stripped;
+    }
+  }
+
   // Offsets missing or incorrect; fall back to heuristics on the full payload.
   return stripToMarkup(input);
 }
