@@ -277,6 +277,18 @@ fn excel_images_in_cells_fixture_roundtrip_preserves_richdata_parts_and_vm_attri
             Some(expected_vm),
             "expected {cell} to preserve vm=\"{expected_vm}\", got:\n{sheet1_xml}"
         );
+
+        if cell == "B1" {
+            let f = node
+                .children()
+                .find(|n| n.is_element() && n.tag_name().name() == "f")
+                .expect("expected B1 to retain <f> formula element");
+            assert_eq!(
+                f.text(),
+                Some("_xlfn.IMAGE(\"https://example.com/image.png\")"),
+                "expected B1 to retain its IMAGE() formula, got:\n{sheet1_xml}"
+            );
+        }
     }
 
     // Verify workbook relationships still advertise the richData + cellImages parts.
