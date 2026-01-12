@@ -124,7 +124,8 @@ sheetN.xml: <c vm="VM_INDEX">…</c>
     `crates/formula-xlsx/tests/rich_value_part_numeric_suffix_order.rs`.
   - Open question (Excel): the exact ordering rules Excel uses when multiple parts exist (lexicographic vs numeric suffix). Treat the writer as
     “preserve existing parts” and avoid renumbering unless the mapping is rebuilt holistically.
-- Image references inside `<rv>` appear to use an **integer relationship-slot index** (not an `rId` string directly). That slot index points into the ordered `<rel>` list in `richValueRel.xml`.
+- In this repo’s images-in-cell fixtures, image references inside `<rv>` use an **integer relationship-slot index**
+  (not an `rId` string directly). That slot index points into the ordered `<rel>` list in `richValueRel.xml`.
 
 ---
 
@@ -502,7 +503,8 @@ Even before full rich-data editing is implemented, round-trip compatibility need
   rich-value placeholder semantics (until Formula implements rich-value editing).
 - Preserve `xl/metadata.xml` **byte-for-byte** if we don’t understand/edit it (same strategy as charts).
 - Preserve all `xl/richData/*` parts (including additional, not-yet-modeled parts Excel may emit).
-- Preserve **relationship ordering** inside `richValueRel.xml` because rich values appear to reference relationships by **slot index**, not by `rId` string.
+- Preserve **relationship ordering** inside `richValueRel.xml` because rich values reference relationships by
+  **slot index**, not by `rId` string.
 
 ---
 
