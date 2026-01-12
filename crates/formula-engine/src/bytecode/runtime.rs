@@ -277,7 +277,15 @@ pub fn eval_ast(
     let mut lexical_scopes: Vec<HashMap<Arc<str>, Value>> = Vec::new();
     // Match `Vm::eval`: top-level range references should deref dynamically (spill) instead of
     // remaining as a reference value.
-    let v = eval_ast_inner(expr, grid, sheet_id, base, locale, &mut lexical_scopes);
+    let v = eval_ast_inner(
+        expr,
+        grid,
+        sheet_id,
+        base,
+        locale,
+        &mut lexical_scopes,
+        false,
+    );
     deref_value_dynamic(v, grid, base)
 }
 
@@ -288,34 +296,67 @@ fn eval_ast_inner(
     base: CellCoord,
     locale: &crate::LocaleConfig,
     lexical_scopes: &mut Vec<HashMap<Arc<str>, Value>>,
+    allow_range: bool,
 ) -> Value {
     match expr {
-        Expr::Literal(v) => v.clone(),
-        Expr::CellRef(r) => grid.get_value(r.resolve(base)),
+        Expr::Literal(v) => match v {
+            // `Value::Missing` is used during lowering as a placeholder for syntactically blank
+            // arguments (e.g. `ADDRESS(1,1,,FALSE)`), but it must not be allowed to propagate as a
+            // general runtime value (e.g. via `IF(FALSE,1,)`).
+            //
+            // Treat literal `Missing` as a normal blank value during expression evaluation.
+            // Call sites that are evaluating *direct* function arguments should preserve Missing so
+            // functions can distinguish omitted arguments from blank cell values.
+            Value::Missing => Value::Empty,
+            other => other.clone(),
+        },
+        Expr::CellRef(r) => {
+            if allow_range {
+                Value::Range(RangeRef::new(*r, *r))
+            } else {
+                grid.get_value(r.resolve(base))
+            }
+        }
         Expr::RangeRef(r) => Value::Range(*r),
         Expr::MultiRangeRef(r) => Value::MultiRange(r.clone()),
         Expr::SpillRange(inner) => {
-            let v = eval_ast_inner(inner, grid, sheet_id, base, locale, lexical_scopes);
+            // The spill-range operator (`expr#`) evaluates its operand in a "reference context"
+            // (i.e. it must preserve references rather than implicitly intersecting them).
+            let v = eval_ast_inner(inner, grid, sheet_id, base, locale, lexical_scopes, true);
             apply_spill_range(v, grid, sheet_id, base)
         }
         Expr::NameRef(name) => {
             for scope in lexical_scopes.iter().rev() {
                 if let Some(v) = scope.get(name) {
-                    return v.clone();
+                    let v = v.clone();
+                    // LET binding values are evaluated in "argument mode" (may preserve references).
+                    // When a reference value is used in a scalar context, apply implicit intersection
+                    // for single-cell references to match VM semantics.
+                    if !allow_range && matches!(&v, Value::Range(r) if r.start == r.end) {
+                        return apply_implicit_intersection(v, grid, base);
+                    }
+                    return v;
                 }
             }
             Value::Error(ErrorKind::Name)
         }
         Expr::Unary { op, expr } => {
-            let v = eval_ast_inner(expr, grid, sheet_id, base, locale, lexical_scopes);
+            let v = match op {
+                UnaryOp::ImplicitIntersection => {
+                    eval_ast_inner(expr, grid, sheet_id, base, locale, lexical_scopes, true)
+                }
+                UnaryOp::Plus | UnaryOp::Neg => {
+                    eval_ast_inner(expr, grid, sheet_id, base, locale, lexical_scopes, false)
+                }
+            };
             match op {
                 UnaryOp::ImplicitIntersection => apply_implicit_intersection(v, grid, base),
                 _ => apply_unary(*op, v, grid, base),
             }
         }
         Expr::Binary { op, left, right } => {
-            let l = eval_ast_inner(left, grid, sheet_id, base, locale, lexical_scopes);
-            let r = eval_ast_inner(right, grid, sheet_id, base, locale, lexical_scopes);
+            let l = eval_ast_inner(left, grid, sheet_id, base, locale, lexical_scopes, false);
+            let r = eval_ast_inner(right, grid, sheet_id, base, locale, lexical_scopes, false);
             apply_binary(*op, l, r, grid, base)
         }
         Expr::FuncCall { func, args } => {
@@ -331,15 +372,30 @@ fn eval_ast_inner(
                         lexical_scopes.pop();
                         return Value::Error(ErrorKind::Value);
                     };
-                    let value =
-                        eval_ast_inner(&pair[1], grid, sheet_id, base, locale, lexical_scopes);
+                    // LET binding values are evaluated in "argument mode" (may preserve references).
+                    let value = eval_ast_inner(
+                        &pair[1],
+                        grid,
+                        sheet_id,
+                        base,
+                        locale,
+                        lexical_scopes,
+                        true,
+                    );
                     lexical_scopes
                         .last_mut()
                         .expect("pushed scope")
                         .insert(name.clone(), value);
                 }
-                let result =
-                    eval_ast_inner(&args[last], grid, sheet_id, base, locale, lexical_scopes);
+                let result = eval_ast_inner(
+                    &args[last],
+                    grid,
+                    sheet_id,
+                    base,
+                    locale,
+                    lexical_scopes,
+                    allow_range,
+                );
                 lexical_scopes.pop();
                 return result;
             }
@@ -352,8 +408,15 @@ fn eval_ast_inner(
                     if args.len() < 2 || args.len() > 3 {
                         return Value::Error(ErrorKind::Value);
                     }
-                    let cond_val =
-                        eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);
+                    let cond_val = eval_ast_inner(
+                        &args[0],
+                        grid,
+                        sheet_id,
+                        base,
+                        locale,
+                        lexical_scopes,
+                        false,
+                    );
                     // Match the bytecode VM: dereference single-cell ranges before coercing to bool
                     // so expressions like `IF(CHOOSE(1, A1, FALSE), ...)` behave like `IF(A1, ...)`.
                     let cond_val = deref_value_dynamic(cond_val, grid, base);
@@ -369,6 +432,7 @@ fn eval_ast_inner(
                             base,
                             locale,
                             lexical_scopes,
+                            false,
                         );
                     }
                     if args.len() == 3 {
@@ -379,6 +443,7 @@ fn eval_ast_inner(
                             base,
                             locale,
                             lexical_scopes,
+                            false,
                         );
                     }
                     // Engine behavior: missing false branch defaults to FALSE (not blank).
@@ -388,8 +453,15 @@ fn eval_ast_inner(
                     if args.len() < 2 {
                         return Value::Error(ErrorKind::Value);
                     }
-                    let idx_val =
-                        eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);
+                    let idx_val = eval_ast_inner(
+                        &args[0],
+                        grid,
+                        sheet_id,
+                        base,
+                        locale,
+                        lexical_scopes,
+                        false,
+                    );
                     let idx = match coerce_to_i64(&idx_val) {
                         Ok(i) => i,
                         Err(e) => return Value::Error(e),
@@ -405,14 +477,19 @@ fn eval_ast_inner(
                     if idx_usize >= args.len() {
                         return Value::Error(ErrorKind::Value);
                     }
-                    // Evaluate the selected branch in "argument mode", matching the bytecode
-                    // compiler and main evaluator: direct cell references are preserved as
-                    // references so consumers like SUM can apply range semantics.
                     let choice_expr = &args[idx_usize];
-                    return match choice_expr {
-                        Expr::CellRef(r) => Value::Range(RangeRef::new(*r, *r)),
-                        other => eval_ast_inner(other, grid, sheet_id, base, locale, lexical_scopes),
-                    };
+                    // CHOOSE's value arguments may need to preserve references depending on
+                    // surrounding context (e.g. `SUM(CHOOSE(1, A1, B1))`), so propagate
+                    // `allow_range` to the selected branch.
+                    return eval_ast_inner(
+                        choice_expr,
+                        grid,
+                        sheet_id,
+                        base,
+                        locale,
+                        lexical_scopes,
+                        allow_range,
+                    );
                 }
                 Function::Ifs => {
                     if args.len() % 2 != 0 {
@@ -423,8 +500,15 @@ fn eval_ast_inner(
                     }
 
                     for pair in args.chunks_exact(2) {
-                        let cond_val =
-                            eval_ast_inner(&pair[0], grid, sheet_id, base, locale, lexical_scopes);
+                        let cond_val = eval_ast_inner(
+                            &pair[0],
+                            grid,
+                            sheet_id,
+                            base,
+                            locale,
+                            lexical_scopes,
+                            false,
+                        );
                         let cond_val = deref_value_dynamic(cond_val, grid, base);
                         let cond = match coerce_to_bool(&cond_val) {
                             Ok(b) => b,
@@ -438,6 +522,7 @@ fn eval_ast_inner(
                                 base,
                                 locale,
                                 lexical_scopes,
+                                false,
                             );
                         }
                     }
@@ -447,8 +532,15 @@ fn eval_ast_inner(
                     if args.len() != 2 {
                         return Value::Error(ErrorKind::Value);
                     }
-                    let first =
-                        eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);
+                    let first = eval_ast_inner(
+                        &args[0],
+                        grid,
+                        sheet_id,
+                        base,
+                        locale,
+                        lexical_scopes,
+                        false,
+                    );
                     if matches!(first, Value::Error(_)) {
                         return eval_ast_inner(
                             &args[1],
@@ -457,6 +549,7 @@ fn eval_ast_inner(
                             base,
                             locale,
                             lexical_scopes,
+                            false,
                         );
                     }
                     return first;
@@ -465,8 +558,15 @@ fn eval_ast_inner(
                     if args.len() != 2 {
                         return Value::Error(ErrorKind::Value);
                     }
-                    let first =
-                        eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);
+                    let first = eval_ast_inner(
+                        &args[0],
+                        grid,
+                        sheet_id,
+                        base,
+                        locale,
+                        lexical_scopes,
+                        false,
+                    );
                     if matches!(first, Value::Error(ErrorKind::NA)) {
                         return eval_ast_inner(
                             &args[1],
@@ -475,6 +575,7 @@ fn eval_ast_inner(
                             base,
                             locale,
                             lexical_scopes,
+                            false,
                         );
                     }
                     return first;
@@ -484,8 +585,15 @@ fn eval_ast_inner(
                         return Value::Error(ErrorKind::Value);
                     }
 
-                    let expr_val =
-                        eval_ast_inner(&args[0], grid, sheet_id, base, locale, lexical_scopes);
+                    let expr_val = eval_ast_inner(
+                        &args[0],
+                        grid,
+                        sheet_id,
+                        base,
+                        locale,
+                        lexical_scopes,
+                        false,
+                    );
                     if let Value::Error(e) = expr_val {
                         return Value::Error(e);
                     }
@@ -508,8 +616,15 @@ fn eval_ast_inner(
                     }
 
                     for pair in pairs.chunks_exact(2) {
-                        let case_val =
-                            eval_ast_inner(&pair[0], grid, sheet_id, base, locale, lexical_scopes);
+                        let case_val = eval_ast_inner(
+                            &pair[0],
+                            grid,
+                            sheet_id,
+                            base,
+                            locale,
+                            lexical_scopes,
+                            false,
+                        );
                         if let Value::Error(e) = case_val {
                             return Value::Error(e);
                         }
@@ -524,6 +639,7 @@ fn eval_ast_inner(
                                     base,
                                     locale,
                                     lexical_scopes,
+                                    false,
                                 );
                             }
                             Value::Bool(false) => continue,
@@ -540,6 +656,7 @@ fn eval_ast_inner(
                             base,
                             locale,
                             lexical_scopes,
+                            false,
                         );
                     }
                     return Value::Error(ErrorKind::NA);
@@ -550,13 +667,24 @@ fn eval_ast_inner(
             // Evaluate arguments first (AST evaluation).
             let mut evaluated: SmallVec<[Value; 8]> = SmallVec::with_capacity(args.len());
             for (arg_idx, arg) in args.iter().enumerate() {
-                let treat_cell_as_range = match func {
-                    // AND/OR treat direct cell references as scalars (Excel semantics).
-                    Function::And | Function::Or => false,
-                    // XOR uses reference semantics for direct cell references (matching the
-                    // evaluator).
+                // Preserve `Missing` for *direct* blank arguments so functions can distinguish a
+                // syntactically omitted argument from a blank cell value.
+                if matches!(arg, Expr::Literal(Value::Missing)) {
+                    evaluated.push(Value::Missing);
+                    continue;
+                }
+
+                // See `Compiler::compile_func_arg` for the rationale: certain functions treat a
+                // single-cell reference passed directly as an argument as a range/reference value,
+                // not a scalar.
+                let allow_range = match func {
+                    // AND/OR accept range arguments (which ignore text-like values), but direct
+                    // *cell* references are treated as scalar arguments (so text-like values
+                    // produce #VALUE!).
+                    Function::And | Function::Or => true,
+                    // XOR uses reference semantics for direct cell references (like ranges),
+                    // matching the evaluator.
                     Function::Xor => true,
-                    // See `Compiler::compile_func_arg` for the rationale.
                     Function::Sum
                     | Function::Average
                     | Function::Min
@@ -576,76 +704,16 @@ fn eval_ast_inner(
                     Function::XMatch => arg_idx == 1,
                     Function::XLookup => arg_idx == 1 || arg_idx == 2,
                     Function::Row | Function::Column | Function::Rows | Function::Columns => true,
-                    Function::If
-                    | Function::Choose
-                    | Function::Ifs
-                    | Function::IfError
-                    | Function::IfNa
-                    | Function::IsError
-                    | Function::IsNa
-                    | Function::Na
-                    | Function::Switch
-                    | Function::Let
-                    | Function::Abs
-                    | Function::Int
-                    | Function::Round
-                    | Function::RoundUp
-                    | Function::RoundDown
-                    | Function::Mod
-                    | Function::Sign
-                    | Function::Db
-                    | Function::Vdb
-                    | Function::CoupDayBs
-                    | Function::CoupDays
-                    | Function::CoupDaysNc
-                    | Function::CoupNcd
-                    | Function::CoupNum
-                    | Function::CoupPcd
-                    | Function::Price
-                    | Function::Yield
-                    | Function::Duration
-                    | Function::MDuration
-                    | Function::Accrint
-                    | Function::Accrintm
-                    | Function::Disc
-                    | Function::PriceDisc
-                    | Function::YieldDisc
-                    | Function::Intrate
-                    | Function::Received
-                    | Function::PriceMat
-                    | Function::YieldMat
-                    | Function::TbillEq
-                    | Function::TbillPrice
-                    | Function::TbillYield
-                    | Function::OddFPrice
-                    | Function::OddFYield
-                    | Function::OddLPrice
-                    | Function::OddLYield
-                    | Function::Concat
-                    | Function::Rand
-                    | Function::RandBetween
-                    | Function::Not
-                    | Function::IsBlank
-                    | Function::IsNumber
-                    | Function::IsText
-                    | Function::IsLogical
-                    | Function::IsErr
-                    | Function::Type
-                    | Function::ErrorType
-                    | Function::N
-                    | Function::T
-                    | Function::Now
-                    | Function::Today
-                    | Function::Address
-                    | Function::Unknown(_) => false,
+                    _ => false,
                 };
 
-                if treat_cell_as_range {
-                    if let Expr::CellRef(r) = arg {
-                        evaluated.push(Value::Range(RangeRef::new(*r, *r)));
-                        continue;
-                    }
-                }
+                let allow_range = if matches!(func, Function::And | Function::Or)
+                    && matches!(arg, Expr::CellRef(_))
+                {
+                    false
+                } else {
+                    allow_range
+                };
 
                 evaluated.push(eval_ast_inner(
                     arg,
@@ -654,6 +722,7 @@ fn eval_ast_inner(
                     base,
                     locale,
                     lexical_scopes,
+                    allow_range,
                 ));
             }
             call_function(func, &evaluated, grid, base, locale)
@@ -4988,63 +5057,144 @@ fn fn_sumif(
 
     // Fast path: range-only SUMIF (existing optimized implementation).
     if matches!(args[0], Value::Range(_))
-        && matches!(args.get(2), None | Some(Value::Missing) | Some(Value::Range(_)))
+        && matches!(
+            args.get(2),
+            None | Some(Value::Missing) | Some(Value::Range(_))
+        )
     {
-    let criteria_range_ref = match &args[0] {
-        Value::Range(r) => *r,
-        _ => return Value::Error(ErrorKind::Value),
-    };
-    let criteria = match parse_countif_criteria(&args[1], locale) {
-        Ok(c) => c,
-        Err(e) => return Value::Error(e),
-    };
+        let criteria_range_ref = match &args[0] {
+            Value::Range(r) => *r,
+            _ => return Value::Error(ErrorKind::Value),
+        };
+        let criteria = match parse_countif_criteria(&args[1], locale) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
 
-    // Excel treats `SUMIF(range, criteria,)` the same as omitting the optional sum_range arg.
-    let sum_range_ref = match args.get(2) {
-        None => None,
-        Some(Value::Missing) => None,
-        Some(Value::Range(r)) => Some(*r),
-        Some(_) => return Value::Error(ErrorKind::Value),
-    }
-    .unwrap_or(criteria_range_ref);
+        // Excel treats `SUMIF(range, criteria,)` the same as omitting the optional sum_range arg.
+        let sum_range_ref = match args.get(2) {
+            None => None,
+            Some(Value::Missing) => None,
+            Some(Value::Range(r)) => Some(*r),
+            Some(_) => return Value::Error(ErrorKind::Value),
+        }
+        .unwrap_or(criteria_range_ref);
 
-    let crit_range = criteria_range_ref.resolve(base);
-    let sum_range = sum_range_ref.resolve(base);
+        let crit_range = criteria_range_ref.resolve(base);
+        let sum_range = sum_range_ref.resolve(base);
 
-    if !range_in_bounds(grid, crit_range) || !range_in_bounds(grid, sum_range) {
-        return Value::Error(ErrorKind::Ref);
-    }
-    if crit_range.rows() != sum_range.rows() || crit_range.cols() != sum_range.cols() {
-        return Value::Error(ErrorKind::Value);
-    }
+        if !range_in_bounds(grid, crit_range) || !range_in_bounds(grid, sum_range) {
+            return Value::Error(ErrorKind::Ref);
+        }
+        if crit_range.rows() != sum_range.rows() || crit_range.cols() != sum_range.cols() {
+            return Value::Error(ErrorKind::Value);
+        }
 
-    let rows = crit_range.rows();
-    let cols = crit_range.cols();
-    if rows <= 0 || cols <= 0 {
-        return Value::Number(0.0);
-    }
+        let rows = crit_range.rows();
+        let cols = crit_range.cols();
+        if rows <= 0 || cols <= 0 {
+            return Value::Number(0.0);
+        }
 
-    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
-        if let Some(iter) = grid.iter_cells() {
-            let row_delta = crit_range.row_start - sum_range.row_start;
-            let col_delta = crit_range.col_start - sum_range.col_start;
-            let mut sum = 0.0;
-            let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
-            for (coord, v) in iter {
-                if !coord_in_range(coord, sum_range) {
-                    continue;
+        if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+            if let Some(iter) = grid.iter_cells() {
+                let row_delta = crit_range.row_start - sum_range.row_start;
+                let col_delta = crit_range.col_start - sum_range.col_start;
+                let mut sum = 0.0;
+                let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
+                for (coord, v) in iter {
+                    if !coord_in_range(coord, sum_range) {
+                        continue;
+                    }
+                    let crit_cell = CellCoord {
+                        row: coord.row + row_delta,
+                        col: coord.col + col_delta,
+                    };
+                    let engine_value = bytecode_value_to_engine(grid.get_value(crit_cell));
+                    if !criteria.matches(&engine_value) {
+                        continue;
+                    }
+                    match v {
+                        Value::Number(n) => sum += n,
+                        Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
+                        Value::Bool(_)
+                        | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
+                        | Value::Empty
+                        | Value::Missing
+                        | Value::Array(_)
+                        | Value::Range(_)
+                        | Value::MultiRange(_) => {}
+                    }
                 }
+                if let Some((_, _, e)) = earliest_error {
+                    return Value::Error(e);
+                }
+                return Value::Number(sum);
+            }
+        }
+
+        if let Some(numeric) = criteria.as_numeric_criteria() {
+            // Only use the numeric SIMD fast path when *all* required slices are available across the
+            // full range. When any slice is missing (blocked rows, errors, etc.) we fall back to the
+            // generic row-major scan so error precedence matches the AST evaluator.
+            let mut slices_ok = true;
+            for col_off in 0..cols {
+                let crit_col = crit_range.col_start + col_off;
+                let sum_col = sum_range.col_start + col_off;
+                if grid
+                    .column_slice_strict_numeric(crit_col, crit_range.row_start, crit_range.row_end)
+                    .is_none()
+                    || grid
+                        .column_slice(sum_col, sum_range.row_start, sum_range.row_end)
+                        .is_none()
+                {
+                    slices_ok = false;
+                    break;
+                }
+            }
+
+            if slices_ok {
+                let mut sum = 0.0;
+                for col_off in 0..cols {
+                    let crit_col = crit_range.col_start + col_off;
+                    let sum_col = sum_range.col_start + col_off;
+                    let crit_slice = grid
+                        .column_slice_strict_numeric(
+                            crit_col,
+                            crit_range.row_start,
+                            crit_range.row_end,
+                        )
+                        .unwrap();
+                    let sum_slice = grid
+                        .column_slice(sum_col, sum_range.row_start, sum_range.row_end)
+                        .unwrap();
+                    sum += simd::sum_if_f64(sum_slice, crit_slice, numeric);
+                }
+                return Value::Number(sum);
+            }
+        }
+
+        let mut sum = 0.0;
+        for row_off in 0..rows {
+            for col_off in 0..cols {
                 let crit_cell = CellCoord {
-                    row: coord.row + row_delta,
-                    col: coord.col + col_delta,
+                    row: crit_range.row_start + row_off,
+                    col: crit_range.col_start + col_off,
                 };
                 let engine_value = bytecode_value_to_engine(grid.get_value(crit_cell));
                 if !criteria.matches(&engine_value) {
                     continue;
                 }
-                match v {
-                    Value::Number(n) => sum += n,
-                    Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
+
+                let sum_cell = CellCoord {
+                    row: sum_range.row_start + row_off,
+                    col: sum_range.col_start + col_off,
+                };
+                match grid.get_value(sum_cell) {
+                    Value::Number(v) => sum += v,
+                    Value::Error(e) => return Value::Error(e),
                     Value::Bool(_)
                     | Value::Text(_)
                     | Value::Entity(_)
@@ -5056,82 +5206,8 @@ fn fn_sumif(
                     | Value::MultiRange(_) => {}
                 }
             }
-            if let Some((_, _, e)) = earliest_error {
-                return Value::Error(e);
-            }
-            return Value::Number(sum);
         }
-    }
-
-    if let Some(numeric) = criteria.as_numeric_criteria() {
-        // Only use the numeric SIMD fast path when *all* required slices are available across the
-        // full range. When any slice is missing (blocked rows, errors, etc.) we fall back to the
-        // generic row-major scan so error precedence matches the AST evaluator.
-        let mut slices_ok = true;
-        for col_off in 0..cols {
-            let crit_col = crit_range.col_start + col_off;
-            let sum_col = sum_range.col_start + col_off;
-            if grid
-                .column_slice_strict_numeric(crit_col, crit_range.row_start, crit_range.row_end)
-                .is_none()
-                || grid
-                    .column_slice(sum_col, sum_range.row_start, sum_range.row_end)
-                    .is_none()
-            {
-                slices_ok = false;
-                break;
-            }
-        }
-
-        if slices_ok {
-            let mut sum = 0.0;
-            for col_off in 0..cols {
-                let crit_col = crit_range.col_start + col_off;
-                let sum_col = sum_range.col_start + col_off;
-                let crit_slice = grid
-                    .column_slice_strict_numeric(crit_col, crit_range.row_start, crit_range.row_end)
-                    .unwrap();
-                let sum_slice = grid
-                    .column_slice(sum_col, sum_range.row_start, sum_range.row_end)
-                    .unwrap();
-                sum += simd::sum_if_f64(sum_slice, crit_slice, numeric);
-            }
-            return Value::Number(sum);
-        }
-    }
-
-    let mut sum = 0.0;
-    for row_off in 0..rows {
-        for col_off in 0..cols {
-            let crit_cell = CellCoord {
-                row: crit_range.row_start + row_off,
-                col: crit_range.col_start + col_off,
-            };
-            let engine_value = bytecode_value_to_engine(grid.get_value(crit_cell));
-            if !criteria.matches(&engine_value) {
-                continue;
-            }
-
-            let sum_cell = CellCoord {
-                row: sum_range.row_start + row_off,
-                col: sum_range.col_start + col_off,
-            };
-            match grid.get_value(sum_cell) {
-                Value::Number(v) => sum += v,
-                Value::Error(e) => return Value::Error(e),
-                Value::Bool(_)
-                | Value::Text(_)
-                | Value::Entity(_)
-                | Value::Record(_)
-                | Value::Empty
-                | Value::Missing
-                | Value::Array(_)
-                | Value::Range(_)
-                | Value::MultiRange(_) => {}
-            }
-        }
-    }
-    return Value::Number(sum);
+        return Value::Number(sum);
     }
 
     // Generic path: support array arguments and mixed array/range cases (matching the AST
@@ -5785,11 +5861,7 @@ fn countifs_with_array_ranges(
                     row: r.row_start + row_off as i32,
                     col: r.col_start + col_off as i32,
                 }),
-                CriteriaRange::Array(a) => a
-                    .values
-                    .get(idx)
-                    .cloned()
-                    .unwrap_or(Value::Empty),
+                CriteriaRange::Array(a) => a.values.get(idx).cloned().unwrap_or(Value::Empty),
             };
             let engine_value = bytecode_value_to_engine(v);
             if !crit.matches(&engine_value) {
@@ -5818,67 +5890,163 @@ fn fn_averageif(
 
     // Fast path: range-only AVERAGEIF (existing optimized implementation).
     if matches!(args[0], Value::Range(_))
-        && matches!(args.get(2), None | Some(Value::Missing) | Some(Value::Range(_)))
+        && matches!(
+            args.get(2),
+            None | Some(Value::Missing) | Some(Value::Range(_))
+        )
     {
-    let criteria_range_ref = match &args[0] {
-        Value::Range(r) => *r,
-        _ => return Value::Error(ErrorKind::Value),
-    };
-    let criteria = match parse_countif_criteria(&args[1], locale) {
-        Ok(c) => c,
-        Err(e) => return Value::Error(e),
-    };
+        let criteria_range_ref = match &args[0] {
+            Value::Range(r) => *r,
+            _ => return Value::Error(ErrorKind::Value),
+        };
+        let criteria = match parse_countif_criteria(&args[1], locale) {
+            Ok(c) => c,
+            Err(e) => return Value::Error(e),
+        };
 
-    // Excel treats `AVERAGEIF(range, criteria,)` as omitting the optional average_range.
-    let average_range_ref = match args.get(2) {
-        None => None,
-        Some(Value::Missing) => None,
-        Some(Value::Range(r)) => Some(*r),
-        Some(_) => return Value::Error(ErrorKind::Value),
-    }
-    .unwrap_or(criteria_range_ref);
+        // Excel treats `AVERAGEIF(range, criteria,)` as omitting the optional average_range.
+        let average_range_ref = match args.get(2) {
+            None => None,
+            Some(Value::Missing) => None,
+            Some(Value::Range(r)) => Some(*r),
+            Some(_) => return Value::Error(ErrorKind::Value),
+        }
+        .unwrap_or(criteria_range_ref);
 
-    let crit_range = criteria_range_ref.resolve(base);
-    let avg_range = average_range_ref.resolve(base);
+        let crit_range = criteria_range_ref.resolve(base);
+        let avg_range = average_range_ref.resolve(base);
 
-    if !range_in_bounds(grid, crit_range) || !range_in_bounds(grid, avg_range) {
-        return Value::Error(ErrorKind::Ref);
-    }
-    if crit_range.rows() != avg_range.rows() || crit_range.cols() != avg_range.cols() {
-        return Value::Error(ErrorKind::Value);
-    }
+        if !range_in_bounds(grid, crit_range) || !range_in_bounds(grid, avg_range) {
+            return Value::Error(ErrorKind::Ref);
+        }
+        if crit_range.rows() != avg_range.rows() || crit_range.cols() != avg_range.cols() {
+            return Value::Error(ErrorKind::Value);
+        }
 
-    let rows = crit_range.rows();
-    let cols = crit_range.cols();
-    if rows <= 0 || cols <= 0 {
-        return Value::Error(ErrorKind::Div0);
-    }
+        let rows = crit_range.rows();
+        let cols = crit_range.cols();
+        if rows <= 0 || cols <= 0 {
+            return Value::Error(ErrorKind::Div0);
+        }
 
-    if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
-        if let Some(iter) = grid.iter_cells() {
-            let row_delta = crit_range.row_start - avg_range.row_start;
-            let col_delta = crit_range.col_start - avg_range.col_start;
-            let mut sum = 0.0;
-            let mut count = 0usize;
-            let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
-            for (coord, v) in iter {
-                if !coord_in_range(coord, avg_range) {
-                    continue;
+        if rows > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+            if let Some(iter) = grid.iter_cells() {
+                let row_delta = crit_range.row_start - avg_range.row_start;
+                let col_delta = crit_range.col_start - avg_range.col_start;
+                let mut sum = 0.0;
+                let mut count = 0usize;
+                let mut earliest_error: Option<(i32, i32, ErrorKind)> = None;
+                for (coord, v) in iter {
+                    if !coord_in_range(coord, avg_range) {
+                        continue;
+                    }
+                    let crit_cell = CellCoord {
+                        row: coord.row + row_delta,
+                        col: coord.col + col_delta,
+                    };
+                    let engine_value = bytecode_value_to_engine(grid.get_value(crit_cell));
+                    if !criteria.matches(&engine_value) {
+                        continue;
+                    }
+                    match v {
+                        Value::Number(n) => {
+                            sum += n;
+                            count += 1;
+                        }
+                        Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
+                        Value::Bool(_)
+                        | Value::Text(_)
+                        | Value::Entity(_)
+                        | Value::Record(_)
+                        | Value::Empty
+                        | Value::Missing
+                        | Value::Array(_)
+                        | Value::Range(_)
+                        | Value::MultiRange(_) => {}
+                    }
                 }
+
+                if let Some((_, _, e)) = earliest_error {
+                    return Value::Error(e);
+                }
+                if count == 0 {
+                    return Value::Error(ErrorKind::Div0);
+                }
+                return Value::Number(sum / count as f64);
+            }
+        }
+
+        if let Some(numeric) = criteria.as_numeric_criteria() {
+            // Only use the numeric SIMD fast path when *all* required slices are available across the
+            // full range. When any slice is missing (blocked rows, errors, etc.) we fall back to the
+            // generic row-major scan so error precedence matches the AST evaluator.
+            let mut slices_ok = true;
+            for col_off in 0..cols {
+                let crit_col = crit_range.col_start + col_off;
+                let avg_col = avg_range.col_start + col_off;
+                if grid
+                    .column_slice_strict_numeric(crit_col, crit_range.row_start, crit_range.row_end)
+                    .is_none()
+                    || grid
+                        .column_slice(avg_col, avg_range.row_start, avg_range.row_end)
+                        .is_none()
+                {
+                    slices_ok = false;
+                    break;
+                }
+            }
+
+            if slices_ok {
+                let mut sum = 0.0;
+                let mut count = 0usize;
+                for col_off in 0..cols {
+                    let crit_col = crit_range.col_start + col_off;
+                    let avg_col = avg_range.col_start + col_off;
+                    let crit_slice = grid
+                        .column_slice_strict_numeric(
+                            crit_col,
+                            crit_range.row_start,
+                            crit_range.row_end,
+                        )
+                        .unwrap();
+                    let avg_slice = grid
+                        .column_slice(avg_col, avg_range.row_start, avg_range.row_end)
+                        .unwrap();
+                    let (s, c) = simd::sum_count_if_f64(avg_slice, crit_slice, numeric);
+                    sum += s;
+                    count += c;
+                }
+
+                if count == 0 {
+                    return Value::Error(ErrorKind::Div0);
+                }
+                return Value::Number(sum / count as f64);
+            }
+        }
+
+        let mut sum = 0.0;
+        let mut count = 0usize;
+        for row_off in 0..rows {
+            for col_off in 0..cols {
                 let crit_cell = CellCoord {
-                    row: coord.row + row_delta,
-                    col: coord.col + col_delta,
+                    row: crit_range.row_start + row_off,
+                    col: crit_range.col_start + col_off,
                 };
                 let engine_value = bytecode_value_to_engine(grid.get_value(crit_cell));
                 if !criteria.matches(&engine_value) {
                     continue;
                 }
-                match v {
-                    Value::Number(n) => {
-                        sum += n;
+
+                let avg_cell = CellCoord {
+                    row: avg_range.row_start + row_off,
+                    col: avg_range.col_start + col_off,
+                };
+                match grid.get_value(avg_cell) {
+                    Value::Number(v) => {
+                        sum += v;
                         count += 1;
                     }
-                    Value::Error(e) => record_error_row_major(&mut earliest_error, coord, e),
+                    Value::Error(e) => return Value::Error(e),
                     Value::Bool(_)
                     | Value::Text(_)
                     | Value::Entity(_)
@@ -5890,101 +6058,12 @@ fn fn_averageif(
                     | Value::MultiRange(_) => {}
                 }
             }
-
-            if let Some((_, _, e)) = earliest_error {
-                return Value::Error(e);
-            }
-            if count == 0 {
-                return Value::Error(ErrorKind::Div0);
-            }
-            return Value::Number(sum / count as f64);
-        }
-    }
-
-    if let Some(numeric) = criteria.as_numeric_criteria() {
-        // Only use the numeric SIMD fast path when *all* required slices are available across the
-        // full range. When any slice is missing (blocked rows, errors, etc.) we fall back to the
-        // generic row-major scan so error precedence matches the AST evaluator.
-        let mut slices_ok = true;
-        for col_off in 0..cols {
-            let crit_col = crit_range.col_start + col_off;
-            let avg_col = avg_range.col_start + col_off;
-            if grid
-                .column_slice_strict_numeric(crit_col, crit_range.row_start, crit_range.row_end)
-                .is_none()
-                || grid
-                    .column_slice(avg_col, avg_range.row_start, avg_range.row_end)
-                    .is_none()
-            {
-                slices_ok = false;
-                break;
-            }
         }
 
-        if slices_ok {
-            let mut sum = 0.0;
-            let mut count = 0usize;
-            for col_off in 0..cols {
-                let crit_col = crit_range.col_start + col_off;
-                let avg_col = avg_range.col_start + col_off;
-                let crit_slice = grid
-                    .column_slice_strict_numeric(crit_col, crit_range.row_start, crit_range.row_end)
-                    .unwrap();
-                let avg_slice = grid
-                    .column_slice(avg_col, avg_range.row_start, avg_range.row_end)
-                    .unwrap();
-                let (s, c) = simd::sum_count_if_f64(avg_slice, crit_slice, numeric);
-                sum += s;
-                count += c;
-            }
-
-            if count == 0 {
-                return Value::Error(ErrorKind::Div0);
-            }
-            return Value::Number(sum / count as f64);
+        if count == 0 {
+            return Value::Error(ErrorKind::Div0);
         }
-    }
-
-    let mut sum = 0.0;
-    let mut count = 0usize;
-    for row_off in 0..rows {
-        for col_off in 0..cols {
-            let crit_cell = CellCoord {
-                row: crit_range.row_start + row_off,
-                col: crit_range.col_start + col_off,
-            };
-            let engine_value = bytecode_value_to_engine(grid.get_value(crit_cell));
-            if !criteria.matches(&engine_value) {
-                continue;
-            }
-
-            let avg_cell = CellCoord {
-                row: avg_range.row_start + row_off,
-                col: avg_range.col_start + col_off,
-            };
-            match grid.get_value(avg_cell) {
-                Value::Number(v) => {
-                    sum += v;
-                    count += 1;
-                }
-                Value::Error(e) => return Value::Error(e),
-                Value::Bool(_)
-                | Value::Text(_)
-                | Value::Entity(_)
-                | Value::Record(_)
-                | Value::Empty
-                | Value::Missing
-                | Value::Array(_)
-                | Value::Range(_)
-                | Value::MultiRange(_) => {}
-            }
-        }
-    }
-
-    if count == 0 {
-        return Value::Error(ErrorKind::Div0);
-    }
-    return Value::Number(sum / count as f64);
+        return Value::Number(sum / count as f64);
     }
 
     // Generic path: support array arguments and mixed array/range cases.
@@ -7020,7 +7099,11 @@ fn fn_sumproduct(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             let cols = cols_i32 as usize;
             let mut col_slices = Vec::with_capacity(cols);
             for col in range.col_start..=range.col_end {
-                col_slices.push(grid.column_slice_strict_numeric(col, range.row_start, range.row_end));
+                col_slices.push(grid.column_slice_strict_numeric(
+                    col,
+                    range.row_start,
+                    range.row_end,
+                ));
             }
             Ok(Self {
                 grid,
