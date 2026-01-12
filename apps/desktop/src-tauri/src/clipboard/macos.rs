@@ -14,7 +14,9 @@ use objc2::runtime::AnyObject;
 
 use std::ffi::{c_void, CStr};
 
-use super::{ClipboardContent, ClipboardError, ClipboardWritePayload};
+use super::{
+    ClipboardContent, ClipboardError, ClipboardWritePayload, MAX_IMAGE_BYTES, MAX_RICH_TEXT_BYTES,
+};
 
 // Ensure the framework crates are linked (and silence `unused_crate_dependencies`).
 use objc2_app_kit as _;
@@ -91,23 +93,32 @@ unsafe fn pasteboard_string_for_type(pasteboard: *mut AnyObject, ty: &AnyObject)
     nsstring_to_rust_string(ns_str)
 }
 
-unsafe fn nsdata_to_vec(data: *mut AnyObject) -> Vec<u8> {
+unsafe fn nsdata_to_vec(data: *mut AnyObject, max_bytes: usize) -> Vec<u8> {
     // -[NSData bytes], -[NSData length]
     let bytes_ptr: *const c_void = objc2::msg_send![data, bytes];
     let len: usize = objc2::msg_send![data, length];
-    if bytes_ptr.is_null() || len == 0 {
+    if bytes_ptr.is_null() || len == 0 || len > max_bytes {
         return Vec::new();
     }
     std::slice::from_raw_parts(bytes_ptr as *const u8, len).to_vec()
 }
 
-unsafe fn pasteboard_data_for_type(pasteboard: *mut AnyObject, ty: &AnyObject) -> Option<Vec<u8>> {
+unsafe fn pasteboard_data_for_type(
+    pasteboard: *mut AnyObject,
+    ty: &AnyObject,
+    max_bytes: usize,
+) -> Option<Vec<u8>> {
     // -[NSPasteboard dataForType:]
     let data: *mut AnyObject = objc2::msg_send![pasteboard, dataForType: ty];
     if data.is_null() {
         return None;
     }
-    Some(nsdata_to_vec(data))
+    let bytes = nsdata_to_vec(data, max_bytes);
+    if bytes.is_empty() {
+        None
+    } else {
+        Some(bytes)
+    }
 }
 
 pub fn read() -> Result<ClipboardContent, ClipboardError> {
@@ -129,19 +140,19 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         let ty_png = nsstring_from_str(TYPE_PNG)?;
 
         let text = pasteboard_string_for_type(pasteboard, &*ty_string).or_else(|| {
-            pasteboard_data_for_type(pasteboard, &*ty_string)
+            pasteboard_data_for_type(pasteboard, &*ty_string, usize::MAX)
                 .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         });
 
         let html = pasteboard_string_for_type(pasteboard, &*ty_html).or_else(|| {
-            pasteboard_data_for_type(pasteboard, &*ty_html)
+            pasteboard_data_for_type(pasteboard, &*ty_html, MAX_RICH_TEXT_BYTES)
                 .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         });
 
-        let rtf = pasteboard_data_for_type(pasteboard, &*ty_rtf)
+        let rtf = pasteboard_data_for_type(pasteboard, &*ty_rtf, MAX_RICH_TEXT_BYTES)
             .map(|bytes| String::from_utf8_lossy(&bytes).into_owned());
 
-        let png_base64 = pasteboard_data_for_type(pasteboard, &*ty_png)
+        let png_base64 = pasteboard_data_for_type(pasteboard, &*ty_png, MAX_IMAGE_BYTES)
             .filter(|bytes| !bytes.is_empty())
             .map(|bytes| STANDARD.encode(bytes));
 

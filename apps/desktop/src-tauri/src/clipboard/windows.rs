@@ -13,7 +13,9 @@ use windows::Win32::System::Memory::{
 
 use super::cf_html::{build_cf_html_payload, extract_cf_html_fragment_best_effort};
 use super::windows_dib::{dibv5_to_png, png_to_dibv5};
-use super::{ClipboardContent, ClipboardError, ClipboardWritePayload};
+use super::{
+    ClipboardContent, ClipboardError, ClipboardWritePayload, MAX_IMAGE_BYTES, MAX_RICH_TEXT_BYTES,
+};
 
 // Built-in clipboard formats that we use directly. Keeping these as numeric constants avoids
 // needing Win32 System Ole bindings just for format IDs.
@@ -64,7 +66,10 @@ fn register_format(name: &str) -> Result<u32, ClipboardError> {
     Ok(id)
 }
 
-fn try_get_clipboard_bytes(format: u32) -> Result<Option<Vec<u8>>, ClipboardError> {
+fn try_get_clipboard_bytes(
+    format: u32,
+    max_bytes: usize,
+) -> Result<Option<Vec<u8>>, ClipboardError> {
     let handle = match unsafe { GetClipboardData(format) } {
         Ok(handle) => handle,
         Err(_) => return Ok(None),
@@ -74,6 +79,9 @@ fn try_get_clipboard_bytes(format: u32) -> Result<Option<Vec<u8>>, ClipboardErro
     let hglobal = HGLOBAL(handle.0);
     let size = unsafe { GlobalSize(hglobal) };
     if size == 0 {
+        return Ok(None);
+    }
+    if size > max_bytes {
         return Ok(None);
     }
 
@@ -190,11 +198,11 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
 
     let text = try_get_unicode_text()?;
 
-    let html = try_get_clipboard_bytes(format_html)?
+    let html = try_get_clipboard_bytes(format_html, MAX_RICH_TEXT_BYTES)?
         .map(|bytes| extract_cf_html_fragment_best_effort(&bytes))
         .filter(|s| !s.is_empty());
 
-    let rtf = try_get_clipboard_bytes(format_rtf)?
+    let rtf = try_get_clipboard_bytes(format_rtf, MAX_RICH_TEXT_BYTES)?
         .map(|bytes| {
             String::from_utf8_lossy(&bytes)
                 .trim_end_matches('\0')
@@ -202,18 +210,20 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         })
         .filter(|s| !s.is_empty());
 
-    let mut png_base64 = if let Some(png_bytes) = try_get_clipboard_bytes(format_png)? {
+    const MAX_DIB_BYTES: usize = 4 * MAX_IMAGE_BYTES; // allow larger uncompressed DIBs before converting to PNG
+
+    let mut png_base64 = if let Some(png_bytes) = try_get_clipboard_bytes(format_png, MAX_IMAGE_BYTES)? {
         Some(STANDARD.encode(png_bytes))
     } else if let Some(format) = format_image_png {
-        try_get_clipboard_bytes(format)?.map(|bytes| STANDARD.encode(bytes))
-    } else if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIBV5)? {
+        try_get_clipboard_bytes(format, MAX_IMAGE_BYTES)?.map(|bytes| STANDARD.encode(bytes))
+    } else if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIBV5, MAX_DIB_BYTES)? {
         dibv5_to_png(&dib_bytes).ok().map(|png| STANDARD.encode(png))
     } else {
         None
     };
 
     if png_base64.is_none() {
-        if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIB)? {
+        if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIB, MAX_DIB_BYTES)? {
             png_base64 = dibv5_to_png(&dib_bytes).ok().map(|png| STANDARD.encode(png));
         }
     }
