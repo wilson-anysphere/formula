@@ -1721,6 +1721,16 @@ fn resolve_part_name_from_relationship(source_part: &str, target: &str) -> Strin
     // Some writers use absolute targets with a leading `/`.
     let target_is_absolute = target.starts_with('/');
     target = target.trim_start_matches('/').to_string();
+    // Relationship targets are URIs; internal targets may include a fragment (e.g. `foo.bin#bar`).
+    // OPC part names do not include fragments, so strip them before resolving.
+    let target = target
+        .split_once('#')
+        .map(|(base, _)| base)
+        .unwrap_or(target.as_str());
+    if target.is_empty() {
+        // A target of just `#fragment` refers to the source part itself.
+        return source_part;
+    }
 
     if target_is_absolute {
         return normalize_zip_part_name(&target);
@@ -1743,6 +1753,12 @@ fn rels_part_name_for_part(part_name: &str) -> String {
 }
 
 fn normalize_zip_part_name(part_name: &str) -> String {
+    // Relationship targets are URIs; internal targets may include a fragment (e.g. `foo.bin#bar`).
+    // OPC part names do not include fragments, so strip them before normalizing.
+    let part_name = part_name
+        .split_once('#')
+        .map(|(base, _)| base)
+        .unwrap_or(part_name);
     let part_name = part_name.replace('\\', "/");
     let part_name = part_name.trim_start_matches('/');
     let mut out: Vec<&str> = Vec::new();
@@ -1756,6 +1772,30 @@ fn normalize_zip_part_name(part_name: &str) -> String {
         }
     }
     out.join("/")
+}
+
+#[cfg(test)]
+mod relationship_target_tests {
+    use super::resolve_part_name_from_relationship;
+
+    #[test]
+    fn strips_uri_fragments_from_relationship_targets() {
+        assert_eq!(
+            resolve_part_name_from_relationship(
+                "xl/worksheets/sheet1.bin",
+                "../tables/table1.xml#frag"
+            ),
+            "xl/tables/table1.xml"
+        );
+    }
+
+    #[test]
+    fn fragment_only_relationship_targets_resolve_to_source_part() {
+        assert_eq!(
+            resolve_part_name_from_relationship("xl/worksheets/sheet1.bin", "#frag"),
+            "xl/worksheets/sheet1.bin"
+        );
+    }
 }
 
 fn find_zip_entry_case_insensitive<R: Read + Seek>(
