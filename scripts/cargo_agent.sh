@@ -119,6 +119,40 @@ fi
 subcommand="$1"
 shift
 
+# Backwards-compat: the desktop Tauri crate was renamed from `formula-desktop-tauri` to `desktop`.
+# Some task harnesses / scripts may still invoke `cargo test -p formula-desktop-tauri`.
+# Rewrite those invocations so the wrapper continues to work across the rename.
+remapped_args=()
+expect_pkg_name=false
+for arg in "$@"; do
+  if [[ "${expect_pkg_name}" == "true" ]]; then
+    if [[ "${arg}" == "formula-desktop-tauri" ]]; then
+      remapped_args+=("desktop")
+    else
+      remapped_args+=("${arg}")
+    fi
+    expect_pkg_name=false
+    continue
+  fi
+
+  case "${arg}" in
+    -p|--package)
+      remapped_args+=("${arg}")
+      expect_pkg_name=true
+      ;;
+    -p=formula-desktop-tauri)
+      remapped_args+=("-p=desktop")
+      ;;
+    --package=formula-desktop-tauri)
+      remapped_args+=("--package=desktop")
+      ;;
+    *)
+      remapped_args+=("${arg}")
+      ;;
+  esac
+done
+set -- "${remapped_args[@]}"
+
 # For test runs, cap RUST_TEST_THREADS to avoid spawning hundreds of threads
 if [[ "${subcommand}" == "test" && -z "${RUST_TEST_THREADS:-}" ]]; then
   rust_test_threads="${FORMULA_RUST_TEST_THREADS:-}"
