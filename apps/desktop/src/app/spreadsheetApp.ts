@@ -1434,7 +1434,9 @@ export class SpreadsheetApp {
 
       const presence = this.collabSession.presence;
       if (presence) {
-        const defaultPresenceColor = resolveCssVar("--accent", { fallback: "blue" });
+        const defaultPresenceColor = resolveCssVar("--formula-grid-remote-presence-default", {
+          fallback: resolveCssVar("--accent", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) }),
+        });
         // Publish local selection state.
         this.collabSelectionUnsubscribe = this.subscribeSelection((selection) => {
           presence.setCursor({ row: selection.active.row, col: selection.active.col });
@@ -1443,9 +1445,6 @@ export class SpreadsheetApp {
 
         // Render remote presences.
         this.collabPresenceUnsubscribe = presence.subscribe((presences: any[]) => {
-          const defaultPresenceColor = resolveCssVar("--formula-grid-remote-presence-default", {
-            fallback: resolveCssVar("--accent", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) }),
-          });
           this.remotePresences = (Array.isArray(presences) ? presences : []).map((p) => {
             const cursor =
               p?.cursor && typeof p.cursor.row === "number" && typeof p.cursor.col === "number"
