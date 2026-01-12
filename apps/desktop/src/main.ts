@@ -8226,12 +8226,21 @@ try {
   // or the call will fail with a permissions error.
   //
   // Canonical desktop event names (keep in sync with the allowlist):
-  // - Rust -> JS (`listen`): close-prep, close-requested, open-file, file-dropped, oauth-redirect,
-  //   tray-*, shortcut-*, menu-*,
-  //   startup:window-visible, startup:webview-loaded, startup:tti, startup:metrics,
-  //   update-check-started, update-check-already-running, update-not-available, update-check-error, update-available
-  // - JS -> Rust (`emit`): open-file-ready, oauth-redirect-ready, close-prep-done, close-handled,
-  //   coi-check-result, updater-ui-ready
+  // Rust -> JS (`listen`):
+  // - close-prep, close-requested
+  // - open-file, file-dropped
+  // - tray-open, tray-new, tray-quit
+  // - shortcut-quick-open, shortcut-command-palette
+  // - menu-open, menu-new, menu-save, menu-save-as, menu-export-pdf, menu-close-window, menu-quit,
+  //   menu-undo, menu-redo, menu-cut, menu-copy, menu-paste, menu-paste-special, menu-select-all,
+  //   menu-zoom-in, menu-zoom-out, menu-zoom-reset, menu-about, menu-check-updates
+  // - startup:window-visible, startup:webview-loaded, startup:tti, startup:metrics
+  // - update-check-started, update-check-already-running, update-not-available, update-check-error, update-available
+  // - oauth-redirect
+  // JS -> Rust (`emit`):
+  // - open-file-ready, oauth-redirect-ready
+  // - close-prep-done, close-handled
+  // - updater-ui-ready, coi-check-result
   const listen = getTauriListen();
   const emit = getTauriEmit();
   let pendingOpenFiles: Promise<void> = Promise.resolve();
