@@ -113,6 +113,45 @@ test("cursor AI policy guard scans scripts/ directory by default", async () => {
   }
 });
 
+test("cursor AI policy guard scans shared/ directory by default", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-shared-dir-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "shared/example.js", 'const x = "OpenAI";\n');
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans extensions/ directory by default", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-extensions-dir-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "extensions/example/dist/extension.js", 'const x = "OpenAI";\n');
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans python/ directory by default", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-python-dir-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "python/example.py", 'provider = "OpenAI"\n');
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard scans .github/workflows by default", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-github-dir-fail-"));
   try {

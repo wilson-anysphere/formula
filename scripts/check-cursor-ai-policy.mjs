@@ -275,7 +275,14 @@ async function walkDir(absoluteDir, rootDir, onFile) {
       if (shouldExcludeRootRelativePath(rel)) continue;
 
       if (entry.isDirectory()) {
-        if (SKIP_DIR_NAMES.has(entry.name) || entry.name.startsWith(".tmp")) continue;
+        if (entry.name.startsWith(".tmp")) continue;
+        if (SKIP_DIR_NAMES.has(entry.name)) {
+          // Extensions ship their built bundles (under `extensions/**/dist/`) so
+          // integration tests and marketplace packaging can run without an extra
+          // build step. Scan those committed dist assets for policy violations.
+          const normalized = rel.split(path.sep).join("/");
+          if (!(entry.name === "dist" && normalized.startsWith("extensions/"))) continue;
+        }
         stack.push({ dir: fullPath });
         continue;
       }
