@@ -46,12 +46,12 @@ pub mod patch;
 mod path;
 pub mod pivots;
 pub mod print;
+pub mod rich_data;
 mod recalc_policy;
 mod read;
 #[cfg(not(target_arch = "wasm32"))]
 mod reader;
 mod relationships;
-pub mod rich_data;
 pub mod shared_strings;
 mod sheet_metadata;
 pub mod streaming;
