@@ -8,8 +8,9 @@ mod preserve;
 pub mod style;
 
 pub use preserve::{
-    PreservedChartSheet, PreservedDrawingParts, PreservedSheetDrawings, PreservedSheetOleObjects,
-    PreservedSheetPicture, SheetDrawingRelationship, SheetRelationshipStub,
+    PreservedChartSheet, PreservedDrawingParts, PreservedSheetControls, PreservedSheetDrawingHF,
+    PreservedSheetDrawings, PreservedSheetOleObjects, PreservedSheetPicture,
+    SheetDrawingRelationship, SheetRelationshipStub, SheetRelationshipStubWithType,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

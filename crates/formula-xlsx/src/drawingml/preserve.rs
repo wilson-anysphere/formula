@@ -63,6 +63,38 @@ pub struct PreservedSheetOleObjects {
     pub ole_object_rels: Vec<SheetRelationshipStub>,
 }
 
+/// Relationship metadata required by a preserved worksheet fragment.
+///
+/// Unlike [`SheetRelationshipStub`], this includes the relationship `Type` attribute so fragments
+/// like `<controls>` / `<drawingHF>` (and any nested `r:*` attributes) can be re-attached without
+/// guessing the relationship kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SheetRelationshipStubWithType {
+    pub rel_id: String,
+    pub type_: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreservedSheetControls {
+    pub sheet_index: usize,
+    pub sheet_id: Option<u32>,
+    /// The `<controls>` subtree from the worksheet XML (outer XML).
+    pub controls_xml: Vec<u8>,
+    /// Relationships from the worksheet `.rels` required by `<controls>`.
+    pub control_rels: Vec<SheetRelationshipStubWithType>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreservedSheetDrawingHF {
+    pub sheet_index: usize,
+    pub sheet_id: Option<u32>,
+    /// The `<drawingHF>` element from the worksheet XML (outer XML).
+    pub drawing_hf_xml: Vec<u8>,
+    /// Relationships from the worksheet `.rels` required by `<drawingHF>`.
+    pub drawing_hf_rels: Vec<SheetRelationshipStubWithType>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreservedChartSheet {
     pub sheet_index: usize,
@@ -87,6 +119,8 @@ pub struct PreservedDrawingParts {
     pub sheet_drawings: BTreeMap<String, PreservedSheetDrawings>,
     pub sheet_pictures: BTreeMap<String, PreservedSheetPicture>,
     pub sheet_ole_objects: BTreeMap<String, PreservedSheetOleObjects>,
+    pub sheet_controls: BTreeMap<String, PreservedSheetControls>,
+    pub sheet_drawing_hfs: BTreeMap<String, PreservedSheetDrawingHF>,
     pub chart_sheets: BTreeMap<String, PreservedChartSheet>,
 }
 
@@ -96,6 +130,8 @@ impl PreservedDrawingParts {
             && self.sheet_drawings.values().all(|v| v.drawings.is_empty())
             && self.sheet_pictures.is_empty()
             && self.sheet_ole_objects.is_empty()
+            && self.sheet_controls.is_empty()
+            && self.sheet_drawing_hfs.is_empty()
             && self.chart_sheets.is_empty()
     }
 }
@@ -117,6 +153,8 @@ impl XlsxPackage {
         let mut sheet_drawings: BTreeMap<String, PreservedSheetDrawings> = BTreeMap::new();
         let mut sheet_pictures: BTreeMap<String, PreservedSheetPicture> = BTreeMap::new();
         let mut sheet_ole_objects: BTreeMap<String, PreservedSheetOleObjects> = BTreeMap::new();
+        let mut sheet_controls: BTreeMap<String, PreservedSheetControls> = BTreeMap::new();
+        let mut sheet_drawing_hfs: BTreeMap<String, PreservedSheetDrawingHF> = BTreeMap::new();
 
         for sheet in sheets {
             let sheet_rels_part = rels_for_part(&sheet.part_name);
@@ -187,7 +225,24 @@ impl XlsxPackage {
                 (sheet_xml_str.as_bytes()[node.range()].to_vec(), rids)
             });
 
-            if drawing_rids.is_empty() && picture.is_none() && ole_objects.is_none() {
+            let controls_node = doc
+                .descendants()
+                .find(|n| n.is_element() && n.tag_name().name() == "controls");
+            let controls =
+                controls_node.map(|node| (sheet_xml_str.as_bytes()[node.range()].to_vec(), extract_relationship_ids(node)));
+
+            let drawing_hf_node = doc
+                .descendants()
+                .find(|n| n.is_element() && n.tag_name().name() == "drawingHF");
+            let drawing_hf = drawing_hf_node
+                .map(|node| (sheet_xml_str.as_bytes()[node.range()].to_vec(), extract_relationship_ids(node)));
+
+            if drawing_rids.is_empty()
+                && picture.is_none()
+                && ole_objects.is_none()
+                && controls.is_none()
+                && drawing_hf.is_none()
+            {
                 continue;
             }
 
@@ -269,6 +324,66 @@ impl XlsxPackage {
                     }
                 }
             }
+
+            if let Some((controls_xml, rids)) = controls {
+                let mut rels = Vec::new();
+                let mut missing_rel = false;
+                for rid in &rids {
+                    match rel_map.get(rid) {
+                        Some(rel) => rels.push(SheetRelationshipStubWithType {
+                            rel_id: rid.clone(),
+                            type_: rel.type_.clone(),
+                            target: rel.target.clone(),
+                        }),
+                        None => {
+                            missing_rel = true;
+                            break;
+                        }
+                    }
+                }
+
+                if !missing_rel {
+                    sheet_controls.insert(
+                        sheet.name.clone(),
+                        PreservedSheetControls {
+                            sheet_index: sheet.index,
+                            sheet_id: sheet.sheet_id,
+                            controls_xml,
+                            control_rels: rels,
+                        },
+                    );
+                }
+            }
+
+            if let Some((drawing_hf_xml, rids)) = drawing_hf {
+                let mut rels = Vec::new();
+                let mut missing_rel = false;
+                for rid in &rids {
+                    match rel_map.get(rid) {
+                        Some(rel) => rels.push(SheetRelationshipStubWithType {
+                            rel_id: rid.clone(),
+                            type_: rel.type_.clone(),
+                            target: rel.target.clone(),
+                        }),
+                        None => {
+                            missing_rel = true;
+                            break;
+                        }
+                    }
+                }
+
+                if !missing_rel {
+                    sheet_drawing_hfs.insert(
+                        sheet.name.clone(),
+                        PreservedSheetDrawingHF {
+                            sheet_index: sheet.index,
+                            sheet_id: sheet.sheet_id,
+                            drawing_hf_xml,
+                            drawing_hf_rels: rels,
+                        },
+                    );
+                }
+            }
         }
 
         let parts = collect_transitive_related_parts(self, root_parts.into_iter())?;
@@ -279,6 +394,8 @@ impl XlsxPackage {
             sheet_drawings,
             sheet_pictures,
             sheet_ole_objects,
+            sheet_controls,
+            sheet_drawing_hfs,
             chart_sheets,
         })
     }
@@ -343,6 +460,64 @@ impl XlsxPackage {
                 sheet_xml,
                 &sheet.part_name,
                 &preserved_sheet.drawings,
+                &rid_map,
+            )?;
+            self.set_part(sheet.part_name.clone(), updated_sheet_xml);
+        }
+
+        for (sheet_name, preserved_sheet) in &preserved.sheet_drawing_hfs {
+            let Some(sheet) =
+                match_sheet_by_name_or_index(&sheets, sheet_name, preserved_sheet.sheet_index)
+            else {
+                continue;
+            };
+
+            let Some(sheet_xml) = self.part(&sheet.part_name) else {
+                continue;
+            };
+            let sheet_xml = sheet_xml.to_vec();
+
+            let sheet_xml_str = std::str::from_utf8(&sheet_xml)
+                .map_err(|e| ChartExtractionError::XmlNonUtf8(sheet.part_name.clone(), e))?;
+            if sheet_xml_str.contains("<drawingHF") {
+                continue;
+            }
+
+            let mut rels_by_type: BTreeMap<String, Vec<RelationshipStub>> = BTreeMap::new();
+            for rel in &preserved_sheet.drawing_hf_rels {
+                rels_by_type
+                    .entry(rel.type_.clone())
+                    .or_default()
+                    .push(RelationshipStub {
+                        rel_id: rel.rel_id.clone(),
+                        target: rel.target.clone(),
+                    });
+            }
+
+            let sheet_rels_part = rels_for_part(&sheet.part_name);
+            let mut rels_xml = self.part(&sheet_rels_part).map(|b| b.to_vec());
+            let mut rid_map: HashMap<String, String> = HashMap::new();
+            for (rel_type, rels) in rels_by_type {
+                let (updated_rels, map) = ensure_rels_has_relationships(
+                    rels_xml.as_deref(),
+                    &sheet_rels_part,
+                    &sheet.part_name,
+                    &rel_type,
+                    &rels,
+                )?;
+                rels_xml = Some(updated_rels);
+                rid_map.extend(map);
+            }
+            if let Some(updated_rels) = rels_xml {
+                if !preserved_sheet.drawing_hf_rels.is_empty() {
+                    self.set_part(sheet_rels_part, updated_rels);
+                }
+            }
+
+            let updated_sheet_xml = ensure_sheet_xml_has_drawing_hf(
+                &sheet_xml,
+                &sheet.part_name,
+                &preserved_sheet.drawing_hf_xml,
                 &rid_map,
             )?;
             self.set_part(sheet.part_name.clone(), updated_sheet_xml);
@@ -429,6 +604,64 @@ impl XlsxPackage {
                 &sheet_xml,
                 &sheet.part_name,
                 &preserved_sheet.ole_objects_xml,
+                &rid_map,
+            )?;
+            self.set_part(sheet.part_name.clone(), updated_sheet_xml);
+        }
+
+        for (sheet_name, preserved_sheet) in &preserved.sheet_controls {
+            let Some(sheet) =
+                match_sheet_by_name_or_index(&sheets, sheet_name, preserved_sheet.sheet_index)
+            else {
+                continue;
+            };
+
+            let Some(sheet_xml) = self.part(&sheet.part_name) else {
+                continue;
+            };
+            let sheet_xml = sheet_xml.to_vec();
+
+            let sheet_xml_str = std::str::from_utf8(&sheet_xml)
+                .map_err(|e| ChartExtractionError::XmlNonUtf8(sheet.part_name.clone(), e))?;
+            if sheet_xml_str.contains("<controls") {
+                continue;
+            }
+
+            let mut rels_by_type: BTreeMap<String, Vec<RelationshipStub>> = BTreeMap::new();
+            for rel in &preserved_sheet.control_rels {
+                rels_by_type
+                    .entry(rel.type_.clone())
+                    .or_default()
+                    .push(RelationshipStub {
+                        rel_id: rel.rel_id.clone(),
+                        target: rel.target.clone(),
+                    });
+            }
+
+            let sheet_rels_part = rels_for_part(&sheet.part_name);
+            let mut rels_xml = self.part(&sheet_rels_part).map(|b| b.to_vec());
+            let mut rid_map: HashMap<String, String> = HashMap::new();
+            for (rel_type, rels) in rels_by_type {
+                let (updated_rels, map) = ensure_rels_has_relationships(
+                    rels_xml.as_deref(),
+                    &sheet_rels_part,
+                    &sheet.part_name,
+                    &rel_type,
+                    &rels,
+                )?;
+                rels_xml = Some(updated_rels);
+                rid_map.extend(map);
+            }
+            if let Some(updated_rels) = rels_xml {
+                if !preserved_sheet.control_rels.is_empty() {
+                    self.set_part(sheet_rels_part, updated_rels);
+                }
+            }
+
+            let updated_sheet_xml = ensure_sheet_xml_has_controls(
+                &sheet_xml,
+                &sheet.part_name,
+                &preserved_sheet.controls_xml,
                 &rid_map,
             )?;
             self.set_part(sheet.part_name.clone(), updated_sheet_xml);
@@ -526,6 +759,35 @@ fn is_drawing_adjacent_relationship(rel_type: &str, resolved_target: &str) -> bo
 
     PREFIXES.iter().any(|prefix| resolved_target.starts_with(prefix))
 }
+
+fn extract_relationship_ids(node: roxmltree::Node<'_, '_>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+
+    for element in node.descendants().filter(|n| n.is_element()) {
+        for attr in element.attributes() {
+            // Common case: `r:id`, `r:embed`, etc.
+            if attr.namespace() == Some(REL_NS) {
+                let value = attr.value().to_string();
+                if seen.insert(value.clone()) {
+                    out.push(value);
+                }
+                continue;
+            }
+
+            // Fallback for producers that emit unprefixed `id="rId*"` attributes.
+            if attr.name() == "id" && attr.value().starts_with("rId") {
+                let value = attr.value().to_string();
+                if seen.insert(value.clone()) {
+                    out.push(value);
+                }
+            }
+        }
+    }
+
+    out
+}
+
 fn ensure_sheet_xml_has_drawings(
     sheet_xml: &[u8],
     part_name: &str,
@@ -664,7 +926,7 @@ fn ensure_sheet_xml_has_picture(
     let mut xml = xml_str.to_string();
     xml.insert_str(insert_idx, &picture_str);
 
-    if picture_str.contains("r:id") && !root_start_has_r_namespace(&xml, root_start, part_name)? {
+    if picture_str.contains("r:") && !root_start_has_r_namespace(&xml, root_start, part_name)? {
         xml = add_r_namespace_to_root(&xml, root_start, part_name)?;
     }
 
@@ -736,7 +998,151 @@ fn ensure_sheet_xml_has_ole_objects(
     let mut xml = xml_str.to_string();
     xml.insert_str(insert_idx, &ole_str);
 
-    if ole_str.contains("r:id") && !root_start_has_r_namespace(&xml, root_start, part_name)? {
+    if ole_str.contains("r:") && !root_start_has_r_namespace(&xml, root_start, part_name)? {
+        xml = add_r_namespace_to_root(&xml, root_start, part_name)?;
+    }
+
+    Ok(xml.into_bytes())
+}
+
+fn ensure_sheet_xml_has_controls(
+    sheet_xml: &[u8],
+    part_name: &str,
+    controls_xml: &[u8],
+    rid_map: &HashMap<String, String>,
+) -> Result<Vec<u8>, ChartExtractionError> {
+    if controls_xml.is_empty() {
+        return Ok(sheet_xml.to_vec());
+    }
+
+    let controls_str = std::str::from_utf8(controls_xml)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8("controls".to_string(), e))?;
+    let controls_str = remap_relationship_ids(controls_str, rid_map);
+
+    let xml_str = std::str::from_utf8(sheet_xml)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
+
+    let doc =
+        Document::parse(xml_str).map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let root = doc.root_element();
+    let root_name = root.tag_name().name();
+    let root_start = root.range().start;
+    let root_prefix = element_prefix_at(xml_str, root_start);
+    if root_name != "worksheet" {
+        return Err(ChartExtractionError::XmlStructure(format!(
+            "{part_name}: expected <worksheet>, found <{root_name}>"
+        )));
+    }
+
+    if root
+        .descendants()
+        .any(|n| n.is_element() && n.tag_name().name() == "controls")
+    {
+        return Ok(sheet_xml.to_vec());
+    }
+
+    let root_qname = crate::xml::prefixed_tag(root_prefix, root_name);
+    let close_tag = format!("</{root_qname}>");
+    let close_idx = xml_str.rfind(&close_tag).ok_or_else(|| {
+        ChartExtractionError::XmlStructure(format!("{part_name}: missing {close_tag}"))
+    })?;
+
+    let sheet_data_end = root
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "sheetData")
+        .map(|n| n.range().end)
+        .unwrap_or(0);
+
+    let insert_idx = root
+        .children()
+        .find(|n| {
+            n.is_element() && matches!(n.tag_name().name(), "webPublishItems" | "tableParts" | "extLst")
+        })
+        .map(|n| n.range().start)
+        .unwrap_or(close_idx)
+        .max(sheet_data_end)
+        .min(close_idx);
+
+    let mut xml = xml_str.to_string();
+    xml.insert_str(insert_idx, &controls_str);
+
+    if controls_str.contains("r:")
+        && !root_start_has_r_namespace(&xml, root_start, part_name)?
+    {
+        xml = add_r_namespace_to_root(&xml, root_start, part_name)?;
+    }
+
+    Ok(xml.into_bytes())
+}
+
+fn ensure_sheet_xml_has_drawing_hf(
+    sheet_xml: &[u8],
+    part_name: &str,
+    drawing_hf_xml: &[u8],
+    rid_map: &HashMap<String, String>,
+) -> Result<Vec<u8>, ChartExtractionError> {
+    if drawing_hf_xml.is_empty() {
+        return Ok(sheet_xml.to_vec());
+    }
+
+    let drawing_hf_str = std::str::from_utf8(drawing_hf_xml)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8("drawingHF".to_string(), e))?;
+    let drawing_hf_str = remap_relationship_ids(drawing_hf_str, rid_map);
+
+    let xml_str = std::str::from_utf8(sheet_xml)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?;
+
+    let doc =
+        Document::parse(xml_str).map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let root = doc.root_element();
+    let root_name = root.tag_name().name();
+    let root_start = root.range().start;
+    let root_prefix = element_prefix_at(xml_str, root_start);
+    if root_name != "worksheet" {
+        return Err(ChartExtractionError::XmlStructure(format!(
+            "{part_name}: expected <worksheet>, found <{root_name}>"
+        )));
+    }
+
+    if root
+        .descendants()
+        .any(|n| n.is_element() && n.tag_name().name() == "drawingHF")
+    {
+        return Ok(sheet_xml.to_vec());
+    }
+
+    let root_qname = crate::xml::prefixed_tag(root_prefix, root_name);
+    let close_tag = format!("</{root_qname}>");
+    let close_idx = xml_str.rfind(&close_tag).ok_or_else(|| {
+        ChartExtractionError::XmlStructure(format!("{part_name}: missing {close_tag}"))
+    })?;
+
+    let sheet_data_end = root
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "sheetData")
+        .map(|n| n.range().end)
+        .unwrap_or(0);
+
+    let insert_idx = root
+        .children()
+        .find(|n| {
+            n.is_element()
+                && matches!(
+                    n.tag_name().name(),
+                    "picture" | "oleObjects" | "controls" | "webPublishItems" | "tableParts" | "extLst"
+                )
+        })
+        .map(|n| n.range().start)
+        .unwrap_or(close_idx)
+        .max(sheet_data_end)
+        .min(close_idx);
+
+    let mut xml = xml_str.to_string();
+    xml.insert_str(insert_idx, &drawing_hf_str);
+
+    if drawing_hf_str.contains("r:")
+        && !root_start_has_r_namespace(&xml, root_start, part_name)?
+    {
         xml = add_r_namespace_to_root(&xml, root_start, part_name)?;
     }
 
@@ -748,7 +1154,16 @@ fn remap_relationship_ids(fragment: &str, rid_map: &HashMap<String, String>) -> 
         return fragment.to_string();
     }
 
-    let patterns: [(&str, char); 4] = [("r:id=\"", '"'), ("r:id='", '\''), ("id=\"", '"'), ("id='", '\'')];
+    let patterns: [(&str, char); 8] = [
+        ("r:id=\"", '"'),
+        ("r:id='", '\''),
+        ("r:embed=\"", '"'),
+        ("r:embed='", '\''),
+        ("r:link=\"", '"'),
+        ("r:link='", '\''),
+        ("id=\"", '"'),
+        ("id='", '\''),
+    ];
     let mut out = String::with_capacity(fragment.len());
     let mut cursor = 0usize;
 
@@ -879,6 +1294,58 @@ mod tests {
         assert!(
             !updated_str.contains("<drawing"),
             "should not introduce unprefixed <drawing> tags in prefix-only worksheets, got:\n{updated_str}"
+        );
+    }
+
+    #[test]
+    fn inserts_controls_after_sheet_data_and_adds_r_namespace() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"/></sheetData><extLst><ext/></extLst></worksheet>"#;
+        let controls = br#"<controls><control r:id="rId1"/></controls>"#;
+        let updated = ensure_sheet_xml_has_controls(
+            xml,
+            "xl/worksheets/sheet1.xml",
+            controls,
+            &HashMap::new(),
+        )
+        .expect("insert controls");
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        let sheet_data_end = updated_str.find("</sheetData>").unwrap() + "</sheetData>".len();
+        let controls_pos = updated_str.find("<controls").unwrap();
+        let ext_pos = updated_str.find("<extLst").unwrap();
+        assert!(
+            controls_pos >= sheet_data_end && controls_pos < ext_pos,
+            "controls should be inserted after sheetData and before extLst, got:\n{updated_str}"
+        );
+        assert!(
+            updated_str.contains("xmlns:r="),
+            "expected xmlns:r to be added when inserting r:* attributes, got:\n{updated_str}"
+        );
+    }
+
+    #[test]
+    fn inserts_drawing_hf_before_picture_and_after_sheet_data() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData><row r="1"/></sheetData><picture r:id="rId9"/><extLst><ext/></extLst></worksheet>"#;
+        let drawing_hf = br#"<drawingHF r:id="rId7"/>"#;
+        let updated = ensure_sheet_xml_has_drawing_hf(
+            xml,
+            "xl/worksheets/sheet1.xml",
+            drawing_hf,
+            &HashMap::new(),
+        )
+        .expect("insert drawingHF");
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        let sheet_data_end = updated_str.find("</sheetData>").unwrap() + "</sheetData>".len();
+        let drawing_hf_pos = updated_str.find("<drawingHF").unwrap();
+        let picture_pos = updated_str.find("<picture").unwrap();
+        assert!(
+            drawing_hf_pos >= sheet_data_end && drawing_hf_pos < picture_pos,
+            "drawingHF should be inserted after sheetData and before picture, got:\n{updated_str}"
+        );
+        assert!(
+            updated_str.contains("xmlns:r="),
+            "expected xmlns:r to be added when inserting r:* attributes, got:\n{updated_str}"
         );
     }
 }
