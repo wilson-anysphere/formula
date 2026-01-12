@@ -197,4 +197,3 @@ describe("Tauri capabilities", () => {
     expect(Array.from(allowlistedCommands).sort()).toEqual(Array.from(invokedCommands).sort());
   });
 });
-
