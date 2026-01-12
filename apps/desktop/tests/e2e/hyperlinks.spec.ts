@@ -10,21 +10,21 @@ test.describe("external hyperlink opening", () => {
   const GRID_MODES = ["legacy", "shared"] as const;
 
   for (const mode of GRID_MODES) {
-    test(`Ctrl/Cmd+click URL cell uses the Tauri shell plugin (no webview navigation) (${mode})`, async ({ page }) => {
+    test(`Ctrl/Cmd+click URL cell opens via the desktop Rust shell command (no webview navigation) (${mode})`, async ({
+      page,
+    }) => {
       await gotoDesktop(page, `/?grid=${mode}`);
       await waitForIdle(page);
 
       await page.evaluate(() => {
-        (window as any).__shellOpenCalls = [];
+        (window as any).__invokeCalls = [];
         (window as any).__windowOpenCalls = [];
 
         (window as any).__TAURI__ = {
-          plugin: {
-            shell: {
-              open: (url: string) => {
-                (window as any).__shellOpenCalls.push(url);
-                return Promise.resolve();
-              },
+          core: {
+            invoke: (cmd: string, args: any) => {
+              (window as any).__invokeCalls.push([cmd, args]);
+              return Promise.resolve();
             },
           },
         };
@@ -53,33 +53,31 @@ test.describe("external hyperlink opening", () => {
         modifiers: [modifier],
       });
 
-      await page.waitForFunction(() => (window as any).__shellOpenCalls?.length === 1);
+      await page.waitForFunction(() => (window as any).__invokeCalls?.length === 1);
 
-      const [shellCalls, windowCalls] = await Promise.all([
-        page.evaluate(() => (window as any).__shellOpenCalls),
+      const [invokeCalls, windowCalls] = await Promise.all([
+        page.evaluate(() => (window as any).__invokeCalls),
         page.evaluate(() => (window as any).__windowOpenCalls),
       ]);
 
-      expect(shellCalls).toEqual(["https://example.com"]);
+      expect(invokeCalls).toEqual([["open_external_url", { url: "https://example.com" }]]);
       expect(windowCalls).toEqual([]);
     });
   }
 
-  test("clicking an <a href> uses the Tauri shell plugin (no webview navigation)", async ({ page }) => {
+  test("clicking an <a href> opens via the desktop Rust shell command (no webview navigation)", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
 
     await page.evaluate(() => {
-      (window as any).__shellOpenCalls = [];
+      (window as any).__invokeCalls = [];
       (window as any).__windowOpenCalls = [];
 
       (window as any).__TAURI__ = {
-        plugin: {
-          shell: {
-            open: (url: string) => {
-              (window as any).__shellOpenCalls.push(url);
-              return Promise.resolve();
-            },
+        core: {
+          invoke: (cmd: string, args: any) => {
+            (window as any).__invokeCalls.push([cmd, args]);
+            return Promise.resolve();
           },
         },
       };
@@ -101,33 +99,32 @@ test.describe("external hyperlink opening", () => {
     const urlBefore = page.url();
 
     await page.click("#e2e-external-anchor");
-    await page.waitForFunction(() => (window as any).__shellOpenCalls?.length === 1);
+    await page.waitForFunction(() => (window as any).__invokeCalls?.length === 1);
 
-    const [shellCalls, windowCalls, urlAfter] = await Promise.all([
-      page.evaluate(() => (window as any).__shellOpenCalls),
+    const [invokeCalls, windowCalls, urlAfter] = await Promise.all([
+      page.evaluate(() => (window as any).__invokeCalls),
       page.evaluate(() => (window as any).__windowOpenCalls),
       page.url(),
     ]);
 
-    expect(shellCalls).toHaveLength(1);
-    expect(shellCalls[0]).toMatch(/^https:\/\/example\.com\/?$/);
+    expect(invokeCalls).toHaveLength(1);
+    expect(invokeCalls[0][0]).toBe("open_external_url");
+    expect(invokeCalls[0][1]?.url).toMatch(/^https:\/\/example\.com\/?$/);
     expect(windowCalls).toEqual([]);
     expect(urlAfter).toBe(urlBefore);
   });
 
-  test("middle-clicking an <a href> uses the Tauri shell plugin (auxclick)", async ({ page }) => {
+  test("middle-clicking an <a href> opens via the desktop Rust shell command (auxclick)", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
 
     await page.evaluate(() => {
-      (window as any).__shellOpenCalls = [];
+      (window as any).__invokeCalls = [];
       (window as any).__TAURI__ = {
-        plugin: {
-          shell: {
-            open: (url: string) => {
-              (window as any).__shellOpenCalls.push(url);
-              return Promise.resolve();
-            },
+        core: {
+          invoke: (cmd: string, args: any) => {
+            (window as any).__invokeCalls.push([cmd, args]);
+            return Promise.resolve();
           },
         },
       };
@@ -140,26 +137,25 @@ test.describe("external hyperlink opening", () => {
     });
 
     await page.click("#e2e-external-anchor-middle", { button: "middle" });
-    await page.waitForFunction(() => (window as any).__shellOpenCalls?.length === 1);
+    await page.waitForFunction(() => (window as any).__invokeCalls?.length === 1);
 
-    const shellCalls = await page.evaluate(() => (window as any).__shellOpenCalls);
-    expect(shellCalls).toHaveLength(1);
-    expect(shellCalls[0]).toMatch(/^https:\/\/example\.com\/?$/);
+    const invokeCalls = await page.evaluate(() => (window as any).__invokeCalls);
+    expect(invokeCalls).toHaveLength(1);
+    expect(invokeCalls[0][0]).toBe("open_external_url");
+    expect(invokeCalls[0][1]?.url).toMatch(/^https:\/\/example\.com\/?$/);
   });
 
-  test("blocked protocols (javascript:) are never opened via shell", async ({ page }) => {
+  test("blocked protocols (javascript:) are never opened", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
 
     await page.evaluate(() => {
-      (window as any).__shellOpenCalls = [];
+      (window as any).__invokeCalls = [];
       (window as any).__TAURI__ = {
-        plugin: {
-          shell: {
-            open: (url: string) => {
-              (window as any).__shellOpenCalls.push(url);
-              return Promise.resolve();
-            },
+        core: {
+          invoke: (cmd: string, args: any) => {
+            (window as any).__invokeCalls.push([cmd, args]);
+            return Promise.resolve();
           },
         },
       };
@@ -175,7 +171,7 @@ test.describe("external hyperlink opening", () => {
     await page.click("#e2e-external-anchor-js");
 
     const [shellCalls, urlAfter] = await Promise.all([
-      page.evaluate(() => (window as any).__shellOpenCalls),
+      page.evaluate(() => (window as any).__invokeCalls),
       page.url(),
     ]);
 
@@ -183,19 +179,17 @@ test.describe("external hyperlink opening", () => {
     expect(urlAfter).toBe(urlBefore);
   });
 
-  test("blocked protocols (data:) are never opened via shell", async ({ page }) => {
+  test("blocked protocols (data:) are never opened", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
 
     await page.evaluate(() => {
-      (window as any).__shellOpenCalls = [];
+      (window as any).__invokeCalls = [];
       (window as any).__TAURI__ = {
-        plugin: {
-          shell: {
-            open: (url: string) => {
-              (window as any).__shellOpenCalls.push(url);
-              return Promise.resolve();
-            },
+        core: {
+          invoke: (cmd: string, args: any) => {
+            (window as any).__invokeCalls.push([cmd, args]);
+            return Promise.resolve();
           },
         },
       };
@@ -211,7 +205,7 @@ test.describe("external hyperlink opening", () => {
     await page.click("#e2e-external-anchor-data");
 
     const [shellCalls, urlAfter] = await Promise.all([
-      page.evaluate(() => (window as any).__shellOpenCalls),
+      page.evaluate(() => (window as any).__invokeCalls),
       page.url(),
     ]);
 
@@ -219,12 +213,12 @@ test.describe("external hyperlink opening", () => {
     expect(urlAfter).toBe(urlBefore);
   });
 
-  test("untrusted protocols prompt and can be canceled", async ({ page }) => {
+  test("untrusted protocols (ftp:) are blocked in Tauri builds (no prompt)", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
 
     await page.evaluate(() => {
-      (window as any).__shellOpenCalls = [];
+      (window as any).__invokeCalls = [];
       (window as any).__confirmCalls = [];
 
       window.confirm = (message?: string) => {
@@ -233,12 +227,10 @@ test.describe("external hyperlink opening", () => {
       };
 
       (window as any).__TAURI__ = {
-        plugin: {
-          shell: {
-            open: (url: string) => {
-              (window as any).__shellOpenCalls.push(url);
-              return Promise.resolve();
-            },
+        core: {
+          invoke: (cmd: string, args: any) => {
+            (window as any).__invokeCalls.push([cmd, args]);
+            return Promise.resolve();
           },
         },
       };
@@ -253,25 +245,27 @@ test.describe("external hyperlink opening", () => {
     const urlBefore = page.url();
     await page.click("#e2e-external-anchor-ftp-cancel");
 
-    await page.waitForFunction(() => (window as any).__confirmCalls?.length === 1);
+    // In desktop/Tauri builds, only http/https/mailto are allowed; untrusted protocols are blocked
+    // at the Rust boundary so we should not prompt.
+    await page.waitForTimeout(50);
 
     const [shellCalls, confirmCalls, urlAfter] = await Promise.all([
-      page.evaluate(() => (window as any).__shellOpenCalls),
+      page.evaluate(() => (window as any).__invokeCalls),
       page.evaluate(() => (window as any).__confirmCalls),
       page.url(),
     ]);
 
-    expect(confirmCalls).toHaveLength(1);
+    expect(confirmCalls).toEqual([]);
     expect(shellCalls).toEqual([]);
     expect(urlAfter).toBe(urlBefore);
   });
 
-  test("untrusted protocols prompt and open via shell when confirmed", async ({ page }) => {
+  test("untrusted protocols (ftp:) do not call invoke in Tauri builds (no prompt)", async ({ page }) => {
     await gotoDesktop(page);
     await waitForIdle(page);
 
     await page.evaluate(() => {
-      (window as any).__shellOpenCalls = [];
+      (window as any).__invokeCalls = [];
       (window as any).__confirmCalls = [];
 
       window.confirm = (message?: string) => {
@@ -280,12 +274,10 @@ test.describe("external hyperlink opening", () => {
       };
 
       (window as any).__TAURI__ = {
-        plugin: {
-          shell: {
-            open: (url: string) => {
-              (window as any).__shellOpenCalls.push(url);
-              return Promise.resolve();
-            },
+        core: {
+          invoke: (cmd: string, args: any) => {
+            (window as any).__invokeCalls.push([cmd, args]);
+            return Promise.resolve();
           },
         },
       };
@@ -299,16 +291,16 @@ test.describe("external hyperlink opening", () => {
 
     const urlBefore = page.url();
     await page.click("#e2e-external-anchor-ftp-ok");
-    await page.waitForFunction(() => (window as any).__shellOpenCalls?.length === 1);
+    await page.waitForTimeout(50);
 
-    const [shellCalls, confirmCalls, urlAfter] = await Promise.all([
-      page.evaluate(() => (window as any).__shellOpenCalls),
+    const [invokeCalls, confirmCalls, urlAfter] = await Promise.all([
+      page.evaluate(() => (window as any).__invokeCalls),
       page.evaluate(() => (window as any).__confirmCalls),
       page.url(),
     ]);
 
-    expect(confirmCalls).toHaveLength(1);
-    expect(shellCalls).toEqual(["ftp://example.com/resource"]);
+    expect(confirmCalls).toEqual([]);
+    expect(invokeCalls).toEqual([]);
     expect(urlAfter).toBe(urlBefore);
   });
 });
