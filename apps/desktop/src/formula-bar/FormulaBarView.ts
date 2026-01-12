@@ -1,6 +1,6 @@
 import { FormulaBarModel, type FormulaBarAiSuggestion } from "./FormulaBarModel.js";
 import { parseA1Range, type RangeAddress } from "../spreadsheet/a1.js";
-import type { FormulaReferenceRange } from "@formula/spreadsheet-frontend";
+import { toggleA1AbsoluteAtCursor, type FormulaReferenceRange } from "@formula/spreadsheet-frontend";
 
 export interface FormulaBarViewCallbacks {
   onBeginEdit?: (activeCellAddress: string) => void;
@@ -259,6 +259,22 @@ export class FormulaBarView {
 
   #onKeyDown(e: KeyboardEvent): void {
     if (!this.model.isEditing) return;
+
+    if (e.key === "F4" && this.model.draft.trim().startsWith("=")) {
+      e.preventDefault();
+      const start = this.textarea.selectionStart ?? this.textarea.value.length;
+      const end = this.textarea.selectionEnd ?? this.textarea.value.length;
+      const toggled = toggleA1AbsoluteAtCursor(this.textarea.value, start, end);
+      if (toggled) {
+        this.textarea.value = toggled.text;
+        this.textarea.setSelectionRange(toggled.cursorStart, toggled.cursorEnd);
+        this.model.updateDraft(toggled.text, toggled.cursorStart, toggled.cursorEnd);
+        this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(toggled.cursorStart, toggled.cursorEnd);
+        this.#render({ preserveTextareaValue: true });
+        this.#emitOverlays();
+      }
+      return;
+    }
 
     if (e.key === "Tab") {
       const accepted = this.model.acceptAiSuggestion();

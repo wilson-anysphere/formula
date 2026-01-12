@@ -1,5 +1,6 @@
 import type { CellCoord } from "../selection/types";
 import type { Rect } from "../selection/renderer";
+import { toggleA1AbsoluteAtCursor } from "@formula/spreadsheet-frontend";
 
 export type EditorCommitReason = "enter" | "tab";
 
@@ -112,6 +113,20 @@ export class CellEditorOverlay {
 
   private onKeyDown(e: KeyboardEvent): void {
     if (!this.editingCell) return;
+
+    if (e.key === "F4" && this.element.value.trim().startsWith("=")) {
+      e.preventDefault();
+      e.stopPropagation();
+      const start = this.element.selectionStart ?? this.element.value.length;
+      const end = this.element.selectionEnd ?? this.element.value.length;
+      const toggled = toggleA1AbsoluteAtCursor(this.element.value, start, end);
+      if (toggled) {
+        this.element.value = toggled.text;
+        this.element.setSelectionRange(toggled.cursorStart, toggled.cursorEnd);
+        this.adjustSize();
+      }
+      return;
+    }
 
     if (e.key === "Escape") {
       e.preventDefault();
