@@ -21,8 +21,9 @@ use std::path::{Path, PathBuf};
 
 use calamine::{open_workbook, Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
-    normalize_formula_text, CellRef, CellValue, ErrorValue, HyperlinkTarget, Range, SheetVisibility,
-    Style, TabColor, Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS, EXCEL_MAX_SHEET_NAME_LEN,
+    normalize_formula_text, CellRef, CellValue, Comment, CommentAuthor, CommentKind, ErrorValue,
+    HyperlinkTarget, Range, SheetVisibility, Style, TabColor, Workbook, EXCEL_MAX_COLS,
+    EXCEL_MAX_ROWS, EXCEL_MAX_SHEET_NAME_LEN,
 };
 use thiserror::Error;
 
@@ -187,14 +188,16 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
     let mut row_col_props: Option<Vec<biff::SheetRowColProperties>> = None;
     let mut cell_xf_indices: Option<Vec<HashMap<CellRef, u16>>> = None;
     let mut cell_xf_parse_failed: Option<Vec<bool>> = None;
+    let mut biff_version: Option<biff::BiffVersion> = None;
     let mut biff_codepage: Option<u16> = None;
 
     if let Some(workbook_stream) = workbook_stream.as_deref() {
-        let biff_version = biff::detect_biff_version(workbook_stream);
+        let detected_biff_version = biff::detect_biff_version(workbook_stream);
+        biff_version = Some(detected_biff_version);
         let codepage = biff::parse_biff_codepage(workbook_stream);
         biff_codepage = Some(codepage);
 
-        match biff::parse_biff_workbook_globals(workbook_stream, biff_version, codepage) {
+        match biff::parse_biff_workbook_globals(workbook_stream, detected_biff_version, codepage) {
             Ok(mut globals) => {
                 out.date_system = globals.date_system;
                 if let Some(mode) = globals.calculation_mode {
@@ -241,7 +244,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             ))),
         }
 
-        match biff::parse_biff_bound_sheets(workbook_stream, biff_version, codepage) {
+        match biff::parse_biff_bound_sheets(workbook_stream, detected_biff_version, codepage) {
             Ok(sheets) => biff_sheets = Some(sheets),
             Err(err) => warnings.push(ImportWarning::new(format!(
                 "failed to import `.xls` sheet metadata: {err}"
@@ -627,6 +630,55 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                         }
                         Err(err) => warnings.push(ImportWarning::new(format!(
                             "failed to import `.xls` hyperlinks for sheet `{sheet_name}`: {err}"
+                        ))),
+                    }
+                }
+            }
+        }
+
+        // Extract legacy cell comments ("notes") encoded via NOTE/OBJ/TXO records in the sheet
+        // BIFF substream.
+        if let (Some(workbook_stream), Some(codepage), Some(biff_version), Some(biff_idx)) = (
+            workbook_stream.as_deref(),
+            biff_codepage,
+            biff_version,
+            biff_idx,
+        ) {
+            if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
+                if sheet_info.offset >= workbook_stream.len() {
+                    warnings.push(ImportWarning::new(format!(
+                        "failed to import `.xls` note comments for sheet `{sheet_name}`: out-of-bounds stream offset {}",
+                        sheet_info.offset
+                    )));
+                } else {
+                    match biff::comments::parse_biff_sheet_notes(
+                        workbook_stream,
+                        sheet_info.offset,
+                        biff_version,
+                        codepage,
+                    ) {
+                        Ok(notes) => {
+                            for note in notes {
+                                let comment = Comment {
+                                    kind: CommentKind::Note,
+                                    content: note.text,
+                                    author: CommentAuthor {
+                                        name: note.author,
+                                        ..Default::default()
+                                    },
+                                    ..Default::default()
+                                };
+
+                                if let Err(err) = sheet.add_comment(note.cell, comment) {
+                                    warnings.push(ImportWarning::new(format!(
+                                        "failed to import `.xls` note comment for sheet `{sheet_name}` at {}: {err}",
+                                        note.cell.to_a1()
+                                    )));
+                                }
+                            }
+                        }
+                        Err(err) => warnings.push(ImportWarning::new(format!(
+                            "failed to import `.xls` note comments for sheet `{sheet_name}`: {err}"
                         ))),
                     }
                 }
