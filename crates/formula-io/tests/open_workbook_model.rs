@@ -311,6 +311,67 @@ fn open_workbook_model_csv() {
 }
 
 #[test]
+fn open_workbook_model_sniffs_csv_with_wrong_extension() {
+    let csv_bytes = b"col1,col2\n1,hello\n2,world\n";
+
+    let mut tmp = tempfile::Builder::new()
+        .prefix("data_wrong_ext_")
+        .suffix(".xlsx")
+        .tempfile()
+        .expect("tempfile");
+    tmp.write_all(csv_bytes).expect("write tempfile");
+
+    let workbook = formula_io::open_workbook_model(tmp.path()).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+
+    let sheet_name = workbook.sheets[0].name.clone();
+    let sheet = workbook
+        .sheet_by_name(&sheet_name)
+        .expect("sheet missing");
+
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value_a1("A2").unwrap(), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value_a1("B2").unwrap(),
+        CellValue::String("world".to_string())
+    );
+}
+
+#[test]
+fn open_workbook_model_sniffs_extensionless_csv() {
+    let csv_bytes = b"col1,col2\n1,hello\n2,world\n";
+
+    let mut tmp = tempfile::Builder::new()
+        .prefix("data_no_ext_")
+        .tempfile()
+        .expect("tempfile");
+    tmp.write_all(csv_bytes).expect("write tempfile");
+
+    let workbook = formula_io::open_workbook_model(tmp.path()).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+
+    let sheet_name = workbook.sheets[0].name.clone();
+    let sheet = workbook
+        .sheet_by_name(&sheet_name)
+        .expect("sheet missing");
+
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value_a1("A2").unwrap(), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value_a1("B2").unwrap(),
+        CellValue::String("world".to_string())
+    );
+}
+
+#[test]
 fn open_workbook_model_csv_decodes_windows1252() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let path = tmp.path().join("data.csv");

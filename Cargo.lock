@@ -1965,6 +1965,7 @@ name = "formula-io"
 version = "0.1.0"
 dependencies = [
  "cfb 0.10.0",
+ "encoding_rs",
  "formula-columnar",
  "formula-format",
  "formula-model",

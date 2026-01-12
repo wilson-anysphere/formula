@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 cfb = "0.10"
+encoding_rs = "0.8"
 formula-format = { path = "../formula-format" }
 formula-model = { path = "../formula-model" }
 formula-columnar = { path = "../formula-columnar", optional = true, features = ["arrow"] }

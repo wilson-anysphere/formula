@@ -213,6 +213,57 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
     Ok(WorkbookFormat::Unknown)
 }
 
+fn looks_like_text_csv(sample: &[u8]) -> bool {
+    use encoding_rs::WINDOWS_1252;
+
+    // Empty input is valid for "text-ness"; downstream CSV import will produce a more specific
+    // error (`CsvImportError::EmptyInput`) if needed.
+    if sample.is_empty() {
+        return true;
+    }
+
+    // Reject obvious binary: NUL bytes or disallowed control characters.
+    //
+    // Allow only common whitespace controls used by text formats.
+    for &b in sample {
+        if b == 0 {
+            return false;
+        }
+        if b < 0x20 && !matches!(b, b'\t' | b'\n' | b'\r') {
+            return false;
+        }
+        if b == 0x7F {
+            return false;
+        }
+    }
+
+    // Fast path: valid UTF-8 with no disallowed control bytes.
+    if std::str::from_utf8(sample).is_ok() {
+        return true;
+    }
+
+    // If it's not UTF-8, only treat it as text if it still has a reasonable amount of ASCII
+    // (prevents misclassifying arbitrary binary blobs that happen to avoid NUL bytes).
+    let ascii_like = sample
+        .iter()
+        .filter(|&&b| matches!(b, b'\t' | b'\n' | b'\r') || (0x20..=0x7E).contains(&b))
+        .count();
+    if ascii_like * 2 < sample.len() {
+        // <50% ASCII-ish bytes.
+        return false;
+    }
+
+    // Best-effort: Windows-1252 (common Excel behavior on Windows for CSV). Reject if decoding
+    // yields replacement or control characters.
+    let (decoded, had_errors) = WINDOWS_1252.decode_without_bom_handling(sample);
+    if had_errors {
+        return false;
+    }
+    !decoded.chars().any(|c| {
+        c == '\u{FFFD}' || (c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
+    })
+}
+
 fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
     use std::fs::File;
     use std::io::{Read, Seek, SeekFrom};
@@ -332,6 +383,28 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
                     WorkbookFormat::Xlsx
                 });
             }
+        }
+    } else {
+        // If it's neither an OLE compound file nor a ZIP/OPC package, fall back to treating it as
+        // CSV when it looks like plain text. This supports:
+        // - extensionless CSV files
+        // - CSV files renamed to `.xlsx`/`.xls`/etc.
+        //
+        // Keep this conservative: only classify as CSV when a small prefix looks like text.
+        const TEXT_SNIFF_LEN: usize = 8 * 1024;
+        let mut prefix = Vec::with_capacity(TEXT_SNIFF_LEN.min(n));
+        prefix.extend_from_slice(&header[..n]);
+        if prefix.len() < TEXT_SNIFF_LEN {
+            let mut buf = vec![0u8; TEXT_SNIFF_LEN - prefix.len()];
+            let m = file.read(&mut buf).map_err(|source| Error::OpenIo {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            prefix.extend_from_slice(&buf[..m]);
+        }
+
+        if looks_like_text_csv(&prefix) {
+            return Ok(WorkbookFormat::Csv);
         }
     }
 
