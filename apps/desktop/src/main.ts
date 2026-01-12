@@ -6075,9 +6075,18 @@ function normalizeSheetList(info: WorkbookInfo): { id: string; name: string }[] 
     .filter((s) => s.id.trim() !== "");
 }
 
+function isCollabModeActive(): boolean {
+  try {
+    return typeof (app as any).getCollabSession === "function" && Boolean((app as any).getCollabSession());
+  } catch {
+    return false;
+  }
+}
+
 async function confirmDiscardDirtyState(actionLabel: string): Promise<boolean> {
   const doc = app.getDocument();
   if (!doc.isDirty) return true;
+  if (isCollabModeActive()) return true;
   return nativeDialogs.confirm(`You have unsaved changes. Discard them and ${actionLabel}?`);
 }
 
@@ -7336,7 +7345,7 @@ try {
       }
 
       const doc = app.getDocument();
-      if (doc.isDirty) {
+      if (doc.isDirty && !isCollabModeActive()) {
         const discard = await nativeDialogs.confirm(t("prompt.unsavedChangesDiscardConfirm"));
         if (!discard) return;
       }
