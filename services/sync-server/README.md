@@ -291,6 +291,9 @@ Notable metrics (prefix `sync_server_`):
 
 Limits are enforced both at the `ws` server (`maxPayload`) and defensively in message handlers.
 
+Websocket compression (`permessage-deflate`) is disabled by default as defense-in-depth against
+compression bombs.
+
 ## Optional HTTPS/WSS mode
 
 If you deploy without a reverse proxy and want the server to terminate TLS itself, set:
