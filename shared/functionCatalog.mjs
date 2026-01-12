@@ -580,6 +580,26 @@ export default {
       ]
     },
     {
+      "name": "CUMIPMT",
+      "min_args": 6,
+      "max_args": 6,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
+      "name": "CUMPRINC",
+      "min_args": 6,
+      "max_args": 6,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "DATE",
       "min_args": 3,
       "max_args": 3,

@@ -151,6 +151,53 @@ fn evaluates_cashflow_financial_functions() {
 }
 
 #[test]
+fn evaluates_amortization_financial_functions() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=CUMIPMT(0.09/12, 30*12, 125000, 13, 24, 0)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=CUMPRINC(0.09/12, 30*12, 125000, 13, 24, 0)")
+        .unwrap();
+    // Coercion: text numbers should be accepted.
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            r#"=CUMIPMT("0.0075","360","125000","13","24","0")"#,
+        )
+        .unwrap();
+    // Non-finite numbers should produce #NUM.
+    engine.set_cell_value("Sheet1", "B1", f64::INFINITY).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", "=CUMIPMT(B1, 360, 125000, 13, 24, 0)")
+        .unwrap();
+
+    engine.recalculate();
+
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A1")),
+        -11_135.232130750843,
+        1e-10,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A2")),
+        -934.107123420897,
+        1e-10,
+    );
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A3")),
+        -11_135.232130750843,
+        1e-10,
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A4"),
+        Value::Error(ErrorKind::Num)
+    );
+}
+
+#[test]
 fn xirr_xnpv_length_mismatch_returns_num_error() {
     let mut engine = Engine::new();
 

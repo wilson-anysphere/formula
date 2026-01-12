@@ -14,6 +14,7 @@ mod financial_accrint;
 mod financial_bonds_date_system;
 mod financial_dates;
 mod financial_depreciation;
+mod financial_amortization;
 mod financial_depreciation_ext;
 mod financial_bonds_invariants;
 mod financial_odd_coupon;

@@ -1,6 +1,8 @@
 mod accrued_interest;
+mod amortization;
 mod builtins;
 mod builtins_accrint;
+mod builtins_amortization;
 mod builtins_depreciation_ext;
 mod builtins_french_depreciation;
 mod builtins_securities;
@@ -16,6 +18,7 @@ mod securities;
 mod time_value;
 
 pub use accrued_interest::{accrint, accrintm};
+pub use amortization::{cumipmt, cumprinc};
 pub use cashflows::{irr, mirr, npv, xirr, xnpv};
 pub use depreciation::{db, ddb, sln, syd, vdb};
 pub use duration::pduration;

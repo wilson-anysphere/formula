@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T07:13:27.52055896Z",
+  "generatedAt": "2026-01-12T07:18:34.230134202Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "316561a4c49c225ee4e12f4825b527c4a0035be3cac08e6efe273f74281a2f23",
-    "count": 1510
+    "sha256": "fcddbeeb36049ae52011874573d20745f5f4099796c485fef40753f504f87339",
+    "count": 1512
   },
   "results": [
     {
@@ -14038,6 +14038,26 @@
       },
       "address": "C1",
       "displayText": "-117.46446708884959"
+    },
+    {
+      "caseId": "cumipmt_7b688e6aba5d",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": -11135.232130750843
+      },
+      "address": "C1",
+      "displayText": "-11135.232130750843"
+    },
+    {
+      "caseId": "cumprinc_3a2d9b48d667",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": -934.107123420897
+      },
+      "address": "C1",
+      "displayText": "-934.107123420897"
     },
     {
       "caseId": "nper_962c8cc8727b",

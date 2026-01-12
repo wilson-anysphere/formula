@@ -30384,6 +30384,28 @@
       "id": "ppmt_6383c52512c2"
     },
     {
+      "formula": "=CUMIPMT(0.09/12, 30*12, 125000, 13, 24, 0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "CUMIPMT"
+      ],
+      "description": "Excel docs amortization accumulation example",
+      "id": "cumipmt_7b688e6aba5d"
+    },
+    {
+      "formula": "=CUMPRINC(0.09/12, 30*12, 125000, 13, 24, 0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "CUMPRINC"
+      ],
+      "description": "Excel docs amortization accumulation example",
+      "id": "cumprinc_3a2d9b48d667"
+    },
+    {
       "formula": "=NPER(0, -10, 100)",
       "outputCell": "C1",
       "inputs": [],

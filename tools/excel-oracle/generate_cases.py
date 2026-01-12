@@ -1640,6 +1640,20 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="ipmt", tags=["financial", "IPMT"], formula="=IPMT(0.05, 10, 10, 1000, 0, 1)")
     _add_case(cases, prefix="ppmt", tags=["financial", "PPMT"], formula="=PPMT(0.05, 1, 10, 1000)")
     _add_case(cases, prefix="ppmt", tags=["financial", "PPMT"], formula="=PPMT(0.05, 10, 10, 1000, 0, 1)")
+    _add_case(
+        cases,
+        prefix="cumipmt",
+        tags=["financial", "CUMIPMT"],
+        formula="=CUMIPMT(0.09/12, 30*12, 125000, 13, 24, 0)",
+        description="Excel docs amortization accumulation example",
+    )
+    _add_case(
+        cases,
+        prefix="cumprinc",
+        tags=["financial", "CUMPRINC"],
+        formula="=CUMPRINC(0.09/12, 30*12, 125000, 13, 24, 0)",
+        description="Excel docs amortization accumulation example",
+    )
     _add_case(cases, prefix="nper", tags=["financial", "NPER"], formula="=NPER(0, -10, 100)")
     _add_case(cases, prefix="nper", tags=["financial", "NPER"], formula="=NPER(0.05, -100, 1000)")
     _add_case(cases, prefix="rate", tags=["financial", "RATE"], formula="=RATE(10, -100, 1000)")

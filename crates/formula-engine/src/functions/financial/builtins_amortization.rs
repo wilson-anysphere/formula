@@ -1,0 +1,132 @@
+use crate::error::{ExcelError, ExcelResult};
+use crate::eval::CompiledExpr;
+use crate::functions::{ArraySupport, FunctionContext, FunctionSpec};
+use crate::functions::{ThreadSafety, ValueType, Volatility};
+use crate::value::{ErrorKind, Value};
+
+fn excel_result_number(res: ExcelResult<f64>) -> Value {
+    match res {
+        Ok(n) => Value::Number(n),
+        Err(e) => Value::Error(match e {
+            ExcelError::Div0 => ErrorKind::Div0,
+            ExcelError::Value => ErrorKind::Value,
+            ExcelError::Num => ErrorKind::Num,
+        }),
+    }
+}
+
+fn eval_number_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<f64, ErrorKind> {
+    let v = ctx.eval_scalar(expr);
+    match v {
+        Value::Error(e) => Err(e),
+        other => {
+            let n = other.coerce_to_number_with_ctx(ctx)?;
+            if n.is_finite() {
+                Ok(n)
+            } else {
+                Err(ErrorKind::Num)
+            }
+        }
+    }
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "CUMIPMT",
+        min_args: 6,
+        max_args: 6,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number],
+        implementation: cumipmt_fn,
+    }
+}
+
+fn cumipmt_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let rate = match eval_number_arg(ctx, &args[0]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let nper = match eval_number_arg(ctx, &args[1]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let pv = match eval_number_arg(ctx, &args[2]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let start_period = match eval_number_arg(ctx, &args[3]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let end_period = match eval_number_arg(ctx, &args[4]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let typ = match eval_number_arg(ctx, &args[5]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(super::amortization::cumipmt(
+        rate,
+        nper,
+        pv,
+        start_period,
+        end_period,
+        typ,
+    ))
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "CUMPRINC",
+        min_args: 6,
+        max_args: 6,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::ThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[ValueType::Number],
+        implementation: cumprinc_fn,
+    }
+}
+
+fn cumprinc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
+    let rate = match eval_number_arg(ctx, &args[0]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let nper = match eval_number_arg(ctx, &args[1]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let pv = match eval_number_arg(ctx, &args[2]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let start_period = match eval_number_arg(ctx, &args[3]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let end_period = match eval_number_arg(ctx, &args[4]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let typ = match eval_number_arg(ctx, &args[5]) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+
+    excel_result_number(super::amortization::cumprinc(
+        rate,
+        nper,
+        pv,
+        start_period,
+        end_period,
+        typ,
+    ))
+}
+
