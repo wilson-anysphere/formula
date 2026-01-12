@@ -41,6 +41,10 @@ esac
 # Default to disabling any configured wrapper unless the user explicitly overrides it in the env.
 export RUSTC_WRAPPER="${RUSTC_WRAPPER:-}"
 export RUSTC_WORKSPACE_WRAPPER="${RUSTC_WORKSPACE_WRAPPER:-}"
+# Cargo can also read wrapper config via `CARGO_BUILD_RUSTC_WRAPPER` env vars; set them explicitly
+# so a global config doesn't unexpectedly re-enable a flaky wrapper when `RUSTC_WRAPPER` is unset.
+export CARGO_BUILD_RUSTC_WRAPPER="${CARGO_BUILD_RUSTC_WRAPPER:-${RUSTC_WRAPPER}}"
+export CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER="${CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER:-${RUSTC_WORKSPACE_WRAPPER}}"
 
 REPORT_DIR="${REPORT_DIR:-security-report}"
 ALLOWLIST_CARGO="security/allowlist/cargo-audit.txt"
