@@ -7,16 +7,15 @@ test.describe("ribbon shell smoke", () => {
     await gotoDesktop(page);
     await waitForDesktopReady(page);
 
-    await expect(page.getByTestId("titlebar")).toBeVisible();
+    await expect(page.locator("#titlebar .formula-titlebar")).toBeVisible();
 
-    const ribbon = page.getByTestId("ribbon");
+    const ribbon = page.getByTestId("ribbon-root");
     await expect(ribbon).toBeVisible();
 
-    // Ensure the AI panel toggle has been migrated into the ribbon container.
-    const openAiPanel = ribbon.getByTestId("open-ai-panel");
-    await expect(openAiPanel).toBeVisible();
-    await openAiPanel.click();
+    // Ensure the AI panel toggle is available in the desktop shell.
+    const toggleAiChatPanel = page.getByTestId("open-panel-ai-chat");
+    await expect(toggleAiChatPanel).toBeVisible();
+    await toggleAiChatPanel.click();
     await expect(page.getByTestId("dock-right").getByTestId("panel-aiChat")).toBeVisible();
   });
 });
-
