@@ -214,6 +214,74 @@ test("yjs update inspection: parent-info copy case is resolved", () => {
   clientDoc.destroy();
 });
 
+test("yjs update inspection: parent-info copy from store (origin points into server store) is resolved", () => {
+  const serverDoc = new Y.Doc();
+  serverDoc.getMap("versions").set("v1", 1);
+
+  const clientDoc = new Y.Doc();
+  Y.applyUpdate(clientDoc, Y.encodeStateAsUpdate(serverDoc));
+
+  clientDoc.getMap("versions").set("v1", 2);
+
+  const update = Y.encodeStateAsUpdate(clientDoc, Y.encodeStateVector(serverDoc));
+
+  const decoded = Y.decodeUpdate(update);
+  assert.equal(decoded.structs.length, 1);
+  assert.equal((decoded.structs[0] as any).parent, null);
+  assert.equal(Buffer.from(update).includes(Buffer.from("versions")), false);
+
+  const res = inspectUpdate({
+    ydoc: serverDoc,
+    update,
+    reservedRootNames,
+    reservedRootPrefixes,
+    maxTouches: 10,
+  });
+
+  assert.equal(res.touchesReserved, true);
+  assert.ok(
+    res.touches.some((t) => t.root === "versions" && t.keyPath.length >= 1 && t.keyPath[0] === "v1")
+  );
+
+  serverDoc.destroy();
+  clientDoc.destroy();
+});
+
+test("yjs update inspection: origin id inside a struct range is resolved (binary search)", () => {
+  const serverDoc = new Y.Doc();
+  const txt = new Y.Text();
+  txt.insert(0, "hello"); // length 5 (one Item struct range)
+  serverDoc.getMap("versions").set("v1", txt);
+
+  const clientDoc = new Y.Doc();
+  Y.applyUpdate(clientDoc, Y.encodeStateAsUpdate(serverDoc));
+
+  const txtClient = clientDoc.getMap("versions").get("v1") as Y.Text;
+  txtClient.insert(txtClient.length, "!");
+
+  const update = Y.encodeStateAsUpdate(clientDoc, Y.encodeStateVector(serverDoc));
+
+  // The origin id typically points to the last character ID (inside the existing struct range),
+  // and the update does not include the root string.
+  assert.equal(Buffer.from(update).includes(Buffer.from("versions")), false);
+
+  const res = inspectUpdate({
+    ydoc: serverDoc,
+    update,
+    reservedRootNames,
+    reservedRootPrefixes,
+    maxTouches: 10,
+  });
+
+  assert.equal(res.touchesReserved, true);
+  assert.ok(
+    res.touches.some((t) => t.root === "versions" && t.keyPath.length >= 1 && t.keyPath[0] === "v1")
+  );
+
+  serverDoc.destroy();
+  clientDoc.destroy();
+});
+
 test("yjs update inspection: delete-only update (delete set) is inspected", () => {
   const serverDoc = new Y.Doc();
   serverDoc.getMap("versionsMeta").set("order", "abc");
@@ -264,6 +332,32 @@ test("yjs update inspection: reserved root prefix is matched", () => {
 
   assert.equal(res.touchesReserved, true);
   assert.ok(res.touches.some((t) => t.kind === "insert" && t.root === "branching:main"));
+
+  serverDoc.destroy();
+  clientDoc.destroy();
+});
+
+test("yjs update inspection: prefix match works even when root name is only derivable from store", () => {
+  const serverDoc = new Y.Doc();
+  serverDoc.getMap("branching:main").set("x", 1);
+
+  const clientDoc = new Y.Doc();
+  Y.applyUpdate(clientDoc, Y.encodeStateAsUpdate(serverDoc));
+
+  clientDoc.getMap("branching:main").set("x", 2);
+  const update = Y.encodeStateAsUpdate(clientDoc, Y.encodeStateVector(serverDoc));
+  assert.equal(Buffer.from(update).includes(Buffer.from("branching:main")), false);
+
+  const res = inspectUpdate({
+    ydoc: serverDoc,
+    update,
+    reservedRootNames,
+    reservedRootPrefixes,
+    maxTouches: 10,
+  });
+
+  assert.equal(res.touchesReserved, true);
+  assert.ok(res.touches.some((t) => t.root === "branching:main"));
 
   serverDoc.destroy();
   clientDoc.destroy();
