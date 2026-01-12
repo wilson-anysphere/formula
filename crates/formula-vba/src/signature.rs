@@ -30,9 +30,12 @@ pub struct VbaSignerCertificateInfo {
 
 /// Result of inspecting a VBA project's OLE structure for a digital signature.
 ///
-/// Excel stores the VBA project signature in one of the `\u{0005}DigitalSignature*`
-/// streams (see MS-OVBA). The stream contents are typically an Authenticode-like
-/// PKCS#7/CMS structure that embeds the signing certificate.
+/// Excel stores the VBA project signature in one of the `\u{0005}DigitalSignature*` streams.
+///
+/// The stream contents are typically an Authenticode-like PKCS#7/CMS structure that embeds the
+/// signing certificate and a signed digest binding the signature to the VBA project's OLE streams.
+/// MS-OVBA specifies the digest computation ("Contents Hash" §2.4.2), but does not normatively
+/// specify the stream naming/precedence rules between the `DigitalSignature*` variants.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VbaDigitalSignature {
     /// OLE stream path the signature was loaded from.
@@ -607,14 +610,18 @@ fn is_signature_component(component: &str) -> bool {
 fn signature_path_rank(path: &str) -> u8 {
     // Lower = higher priority.
     //
-    // MS-OVBA defines three possible signature streams that can appear in a VBA project storage:
-    // - "\x05DigitalSignature"     (legacy; SHA-1 era)
-    // - "\x05DigitalSignatureEx"   (extended; SHA-2 era)
-    // - "\x05DigitalSignatureExt"  (extension; newest format)
+    // Excel stores the VBA project signature in one of three `\x05DigitalSignature*` streams:
+    // - "\x05DigitalSignature"     (legacy; older Office versions)
+    // - "\x05DigitalSignatureEx"   (extended; newer Office versions, used for SHA-2-era signatures)
+    // - "\x05DigitalSignatureExt"  (extension; newest variant)
     //
-    // When more than one exists, Office apps (including Excel) prefer the newest stream.
+    // When multiple signature streams are present, Excel prefers the newest stream name.
     //
-    // Spec: MS-OVBA "Project Signature" streams (§2.3.4.1–2.3.4.3).
+    // Note: MS-OVBA specifies how a VBA project's digest is computed (see "Contents Hash"
+    // §2.4.2 and "Project Integrity Verification" §4.1), but it does not normatively specify the
+    // on-disk stream name precedence between the `DigitalSignature*` streams. This ordering is
+    // based on observed Office/Excel behavior and existing files produced by different Office
+    // versions.
     // https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
     path.split('/')
         .map(|component| {
