@@ -7,6 +7,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MacroBackend, MacroCellUpdate } from "../types";
 import { renderMacroRunner } from "../dom_ui";
 
+async function waitForElement<T extends Element>(selector: string, timeoutMs = 1_000): Promise<T> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const el = document.querySelector(selector) as T | null;
+    if (el) return el;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`Timed out waiting for element: ${selector}`);
+}
+
 describe("renderMacroRunner", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -60,7 +70,6 @@ describe("renderMacroRunner", () => {
 
   it("renders Trust Center blocked state and blocked errors", async () => {
     vi.stubGlobal("confirm", vi.fn(() => true));
-    vi.stubGlobal("prompt", vi.fn(() => "trusted_once"));
 
     const backend: MacroBackend = {
       listMacros: vi.fn(async (_workbookId: string) => [{ id: "macro-1", name: "Macro1", language: "vba" as const }]),
@@ -96,7 +105,14 @@ describe("renderMacroRunner", () => {
     expect(banner?.textContent).toContain("Macros blocked by Trust Center");
 
     const runButton = container.querySelectorAll("button")[1];
-    await (runButton as any).onclick?.();
+    const runPromise = (runButton as any).onclick?.();
+
+    const qp = await waitForElement<HTMLDialogElement>('dialog[data-testid="quick-pick"]');
+    const trustOnce = qp.querySelector<HTMLButtonElement>('[data-testid="quick-pick-item-1"]');
+    expect(trustOnce).toBeTruthy();
+    trustOnce?.click();
+
+    await runPromise;
 
     const output = container.querySelector("pre");
     expect(output?.textContent).toContain("Blocked by Trust Center (not_trusted)");
