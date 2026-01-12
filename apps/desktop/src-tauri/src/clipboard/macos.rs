@@ -323,7 +323,7 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
 
         // Prefer PNG when present, but fall back to TIFF (converted to PNG) for interoperability
         // with macOS apps that primarily put `public.tiff` on the pasteboard.
-        let png_base64 = pasteboard_data_for_type(pasteboard, &*ty_png, MAX_PNG_BYTES)
+        let image_png_base64 = pasteboard_data_for_type(pasteboard, &*ty_png, MAX_PNG_BYTES)
             .map(|bytes| STANDARD.encode(&bytes))
             .or_else(|| {
                 let tiff = pasteboard_data_for_type(pasteboard, &*ty_tiff, MAX_PNG_BYTES)?;
@@ -335,7 +335,7 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
             text,
             html,
             rtf,
-            png_base64,
+            image_png_base64,
         })
     })
 }
@@ -344,14 +344,14 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
     ensure_main_thread()?;
 
     let png_bytes = payload
-        .png_base64
+        .image_png_base64
         .as_deref()
         .map(normalize_base64_str)
         .filter(|s| !s.is_empty())
         .map(|s| {
             STANDARD
                 .decode(s)
-                .map_err(|e| ClipboardError::InvalidPayload(format!("invalid pngBase64: {e}")))
+                .map_err(|e| ClipboardError::InvalidPayload(format!("invalid png base64: {e}")))
         })
         .transpose()?;
 

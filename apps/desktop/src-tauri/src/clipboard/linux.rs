@@ -251,7 +251,7 @@ fn bytes_to_utf8(bytes: &[u8]) -> Option<String> {
                         MAX_TEXT_BYTES,
                     ),
                 };
-                let png_base64 = match targets.as_deref() {
+                let image_png_base64 = match targets.as_deref() {
                     Some(targets) => choose_best_target(targets, &["image/png"])
                         .and_then(|t| wait_for_bytes_base64(clipboard, t, MAX_PNG_BYTES)),
                     None => wait_for_bytes_base64(clipboard, "image/png", MAX_PNG_BYTES),
@@ -271,7 +271,7 @@ fn bytes_to_utf8(bytes: &[u8]) -> Option<String> {
                     text,
                     html,
                     rtf,
-                    png_base64,
+                    image_png_base64,
                 }
             };
 
@@ -285,7 +285,7 @@ fn bytes_to_utf8(bytes: &[u8]) -> Option<String> {
                 content.text.as_deref(),
                 content.html.as_deref(),
                 content.rtf.as_deref(),
-                content.png_base64.as_deref(),
+                content.image_png_base64.as_deref(),
             );
             if !has_usable_data && clipboard_fallback::should_attempt_primary_selection_from_env() {
                 let primary = gtk::Clipboard::get(&gdk::SELECTION_PRIMARY);
@@ -303,14 +303,14 @@ fn bytes_to_utf8(bytes: &[u8]) -> Option<String> {
         let html = payload.html.clone().map(Arc::new);
         let rtf = payload.rtf.clone().map(Arc::new);
         let png_bytes = payload
-            .png_base64
+            .image_png_base64
             .as_deref()
             .map(normalize_base64_str)
             .filter(|s| !s.is_empty())
             .map(|s| {
                 STANDARD
                     .decode(s)
-                    .map_err(|e| ClipboardError::InvalidPayload(format!("invalid pngBase64: {e}")))
+                    .map_err(|e| ClipboardError::InvalidPayload(format!("invalid png base64: {e}")))
             })
             .transpose()?
             .map(Arc::new);

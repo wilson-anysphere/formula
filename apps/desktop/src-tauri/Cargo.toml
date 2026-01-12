@@ -38,6 +38,11 @@ desktop = [
     "dep:gdk",
     "dep:glib",
     "dep:gdk-pixbuf",
+    # Native rich clipboard integrations (macOS/Windows).
+    "dep:objc2",
+    "dep:objc2-app-kit",
+    "dep:objc2-foundation",
+    "dep:windows",
     # Desktop builds should be able to open `.parquet` files out of the box.
     "parquet",
 ]
@@ -108,12 +113,12 @@ glib = { version = "0.18", optional = true }
 gdk-pixbuf = { version = "0.18", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6.3"
-objc2-app-kit = "0.3.2"
-objc2-foundation = "0.3.2"
+objc2 = { version = "0.6.3", optional = true }
+objc2-app-kit = { version = "0.3.2", optional = true }
+objc2-foundation = { version = "0.3.2", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = [
+windows = { version = "0.61", optional = true, features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_System_DataExchange",

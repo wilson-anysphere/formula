@@ -284,21 +284,21 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
     }
     let rtf = rtf.and_then(|s| string_within_limit(s, MAX_TEXT_BYTES));
 
-    let mut png_base64 = format_png
+    let mut image_png_base64 = format_png
         .and_then(|format| try_get_clipboard_bytes(format, MAX_PNG_BYTES).ok().flatten())
         .map(|png_bytes| STANDARD.encode(png_bytes));
 
-    if png_base64.is_none() {
+    if image_png_base64.is_none() {
         if let Some(format) = format_image_png {
-            png_base64 = try_get_clipboard_bytes(format, MAX_PNG_BYTES)
+            image_png_base64 = try_get_clipboard_bytes(format, MAX_PNG_BYTES)
                 .ok()
                 .flatten()
                 .map(|bytes| STANDARD.encode(bytes));
         }
     }
 
-    if png_base64.is_none() {
-        png_base64 = try_get_clipboard_bytes(CF_DIBV5, MAX_DIB_BYTES)
+    if image_png_base64.is_none() {
+        image_png_base64 = try_get_clipboard_bytes(CF_DIBV5, MAX_DIB_BYTES)
             .ok()
             .flatten()
             .and_then(|dib_bytes| dibv5_to_png(&dib_bytes).ok())
@@ -306,9 +306,9 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
             .map(|png| STANDARD.encode(png));
     }
 
-    if png_base64.is_none() {
+    if image_png_base64.is_none() {
         if let Some(dib_bytes) = try_get_clipboard_bytes(CF_DIB, MAX_DIB_BYTES).ok().flatten() {
-            png_base64 = dibv5_to_png(&dib_bytes)
+            image_png_base64 = dibv5_to_png(&dib_bytes)
                 .ok()
                 .filter(|png| png.len() <= MAX_PNG_BYTES)
                 .map(|png| STANDARD.encode(png));
@@ -319,7 +319,7 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
         text,
         html,
         rtf,
-        png_base64,
+        image_png_base64,
     })
 }
 
@@ -345,14 +345,14 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         .map(|s| s.as_bytes().to_vec());
 
     let png_bytes = payload
-        .png_base64
+        .image_png_base64
         .as_deref()
         .map(normalize_base64_str)
         .filter(|s| !s.is_empty())
         .map(|s| {
             STANDARD
                 .decode(s)
-                .map_err(|e| ClipboardError::InvalidPayload(format!("invalid pngBase64: {e}")))
+                .map_err(|e| ClipboardError::InvalidPayload(format!("invalid png base64: {e}")))
         })
         .transpose()?;
 

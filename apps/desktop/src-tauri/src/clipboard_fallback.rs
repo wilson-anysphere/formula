@@ -4,9 +4,9 @@ pub(crate) fn has_usable_clipboard_data(
     text: Option<&str>,
     html: Option<&str>,
     rtf: Option<&str>,
-    png_base64: Option<&str>,
+    image_png_base64: Option<&str>,
 ) -> bool {
-    [text, html, rtf, png_base64]
+    [text, html, rtf, image_png_base64]
         .into_iter()
         .any(|v| matches!(v, Some(s) if !s.is_empty()))
 }

@@ -78,7 +78,7 @@ fn estimate_base64_decoded_len(base64: &str) -> Option<usize> {
 
 #[cfg(any(target_os = "windows", test))]
 mod windows_dib;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "desktop"))]
 mod windows;
 
 // Keep the GTK-backed Linux clipboard implementation behind the `desktop` feature for production
@@ -87,7 +87,7 @@ mod windows;
 #[cfg(all(target_os = "linux", any(feature = "desktop", test)))]
 mod linux;
 
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "desktop"))]
 mod macos;
 
 /// Returns `true` if a payload of `len` bytes is within the provided limit.
@@ -117,7 +117,6 @@ pub fn bytes_to_base64_within_limit(bytes: &[u8], max_bytes: usize) -> Option<St
 /// (e.g. plain text + HTML + RTF + PNG) so downstream paste handlers can pick the
 /// richest available format.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct ClipboardContent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -126,13 +125,12 @@ pub struct ClipboardContent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rtf: Option<String>,
     /// PNG bytes encoded as base64.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub png_base64: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "png_base64", alias = "pngBase64")]
+    pub image_png_base64: Option<String>,
 }
 
 /// Payload written to the OS clipboard.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct ClipboardWritePayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
@@ -141,8 +139,8 @@ pub struct ClipboardWritePayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rtf: Option<String>,
     /// PNG bytes encoded as base64.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub png_base64: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "png_base64", alias = "pngBase64")]
+    pub image_png_base64: Option<String>,
 }
 
 impl ClipboardWritePayload {
@@ -152,14 +150,14 @@ impl ClipboardWritePayload {
         max_image_bytes: usize,
     ) -> Result<(), ClipboardError> {
         let has_png = self
-            .png_base64
+            .image_png_base64
             .as_deref()
             .map(normalize_base64_str)
             .is_some_and(|s| !s.is_empty());
 
         if self.text.is_none() && self.html.is_none() && self.rtf.is_none() && !has_png {
             return Err(ClipboardError::InvalidPayload(
-                "must include at least one of text, html, rtf, pngBase64".to_string(),
+                "must include at least one of text, html, rtf, image_png_base64".to_string(),
             ));
         }
 
@@ -182,8 +180,9 @@ impl ClipboardWritePayload {
         }
 
         if has_png {
-            let decoded_len = estimate_base64_decoded_len(self.png_base64.as_deref().unwrap_or(""))
-                .unwrap_or(usize::MAX);
+            let decoded_len =
+                estimate_base64_decoded_len(self.image_png_base64.as_deref().unwrap_or(""))
+                    .unwrap_or(usize::MAX);
             if decoded_len > max_image_bytes {
                 return Err(ClipboardError::InvalidPayload(format!(
                     "pngBase64 exceeds maximum size ({decoded_len} > {max_image_bytes} bytes)"
@@ -224,16 +223,16 @@ fn sanitize_clipboard_content_with_limits(
     if matches!(content.rtf, Some(ref s) if s.as_bytes().len() > max_rich_text_bytes) {
         content.rtf = None;
     }
-    if let Some(ref s) = content.png_base64 {
+    if let Some(ref s) = content.image_png_base64 {
         let decoded_len = estimate_base64_decoded_len(s).unwrap_or(usize::MAX);
         // Normalize legacy `data:*;base64,...` prefixes so callers see consistent wire format.
         let normalized = normalize_base64_str(s);
         if decoded_len > max_image_bytes {
-            content.png_base64 = None;
+            content.image_png_base64 = None;
         } else if normalized.is_empty() {
-            content.png_base64 = None;
+            content.image_png_base64 = None;
         } else if normalized.len() != s.len() {
-            content.png_base64 = Some(normalized.to_string());
+            content.image_png_base64 = Some(normalized.to_string());
         }
     }
 
@@ -351,14 +350,14 @@ mod tests {
             text: Some("hello".to_string()),
             html: Some("123456".to_string()),      // 6 bytes
             rtf: Some("123456".to_string()),       // 6 bytes
-            png_base64: Some("AAAA".to_string()),  // 3 decoded bytes
+            image_png_base64: Some("AAAA".to_string()), // 3 decoded bytes
         };
 
         let sanitized = sanitize_clipboard_content_with_limits(content, 5, 2);
         assert_eq!(sanitized.text, Some("hello".to_string()));
         assert_eq!(sanitized.html, None);
         assert_eq!(sanitized.rtf, None);
-        assert_eq!(sanitized.png_base64, None);
+        assert_eq!(sanitized.image_png_base64, None);
     }
 
     #[test]
@@ -367,7 +366,7 @@ mod tests {
             text: Some("hello".to_string()),
             html: Some("12345".to_string()),     // 5 bytes
             rtf: Some("12345".to_string()),      // 5 bytes
-            png_base64: Some("AA==".to_string()), // 1 decoded byte
+            image_png_base64: Some("AA==".to_string()), // 1 decoded byte
         };
 
         let sanitized = sanitize_clipboard_content_with_limits(content.clone(), 5, 2);
@@ -380,11 +379,11 @@ mod tests {
             text: None,
             html: None,
             rtf: None,
-            png_base64: Some("data:image/png;base64,AAAA".to_string()),
+            image_png_base64: Some("data:image/png;base64,AAAA".to_string()),
         };
 
         let sanitized = sanitize_clipboard_content_with_limits(content, 5, 10);
-        assert_eq!(sanitized.png_base64, Some("AAAA".to_string()));
+        assert_eq!(sanitized.image_png_base64, Some("AAAA".to_string()));
     }
 
     #[test]
@@ -393,7 +392,7 @@ mod tests {
             text: Some("hello".to_string()),
             html: Some("x".repeat(MAX_TEXT_BYTES + 1)),
             rtf: None,
-            png_base64: None,
+            image_png_base64: None,
         };
 
         let err = payload.validate().expect_err("expected size check to fail");
@@ -409,7 +408,7 @@ mod tests {
             text: Some("hello".to_string()),
             html: None,
             rtf: Some("x".repeat(MAX_TEXT_BYTES + 1)),
-            png_base64: None,
+            image_png_base64: None,
         };
 
         let err = payload.validate().expect_err("expected size check to fail");
@@ -426,7 +425,7 @@ mod tests {
             html: None,
             rtf: None,
             // "AAAA" decodes to 3 bytes.
-            png_base64: Some("AAAA".to_string()),
+            image_png_base64: Some("AAAA".to_string()),
         };
 
         let err = payload
@@ -444,7 +443,7 @@ mod tests {
             text: None,
             html: None,
             rtf: None,
-            png_base64: Some("data:image/png;base64,".to_string()),
+            image_png_base64: Some("data:image/png;base64,".to_string()),
         };
 
         let err = payload.validate().expect_err("expected validation to fail");

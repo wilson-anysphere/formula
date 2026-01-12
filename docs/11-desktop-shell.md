@@ -713,9 +713,9 @@ Notes:
 
 Tauri wire contract (internal, used only for `__TAURI__.core.invoke`):
 
-- Read: `invoke("clipboard_read")` → `{ text?: string, html?: string, rtf?: string, pngBase64?: string }`
-- Write: `invoke("clipboard_write", { payload: { text?, html?, rtf?, pngBase64? } })` → `void`
-- Legacy read fallback: `invoke("read_clipboard")` → `{ text?: string, html?: string, rtf?: string, pngBase64?: string }`
+- Read: `invoke("clipboard_read")` → `{ text?: string, html?: string, rtf?: string, image_png_base64?: string }`
+- Write: `invoke("clipboard_write", { payload: { text?, html?, rtf?, image_png_base64? } })` → `void`
+- Legacy read fallback: `invoke("read_clipboard")` → `{ text?: string, html?: string, rtf?: string, image_png_base64?: string }`
 - Legacy write fallback: `invoke("write_clipboard", { text, html?, rtf?, image_png_base64? })` → `void`
 
 Provider return shape:
@@ -726,7 +726,8 @@ Provider return shape:
 Image wire format:
 
 - JS-facing APIs use **raw PNG bytes** (`imagePng: Uint8Array`).
-- Over Tauri IPC, PNG bytes are transported as `pngBase64` (**raw base64**, no `data:image/png;base64,` prefix).
+- Over Tauri IPC, PNG bytes are transported as a base64 string (**raw base64**, no `data:image/png;base64,` prefix).
+  - The canonical key for this repo is `image_png_base64`, but the frontend provider also tolerates legacy aliases (`pngBase64`, `png_base64`) from older builds / bridges.
 - The platform provider (`apps/desktop/src/clipboard/platform/provider.js`) is responsible for converting base64 ↔ bytes when crossing the IPC boundary.
 
 Known platform limitations:
