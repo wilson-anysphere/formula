@@ -202,7 +202,24 @@ pub fn clipboard_write(app: tauri::AppHandle, payload: ClipboardWritePayload) ->
 
 #[cfg(test)]
 mod tests {
-    use super::{ClipboardError, ClipboardWritePayload, MAX_RICH_TEXT_BYTES};
+    use super::{
+        estimate_base64_decoded_len, ClipboardError, ClipboardWritePayload, MAX_RICH_TEXT_BYTES,
+    };
+
+    #[test]
+    fn estimate_base64_decoded_len_handles_padding() {
+        assert_eq!(estimate_base64_decoded_len(""), Some(0));
+        assert_eq!(estimate_base64_decoded_len("Zg=="), Some(1)); // "f"
+        assert_eq!(estimate_base64_decoded_len("Zm8="), Some(2)); // "fo"
+        assert_eq!(estimate_base64_decoded_len("Zm9v"), Some(3)); // "foo"
+        assert_eq!(estimate_base64_decoded_len("AAAA"), Some(3));
+    }
+
+    #[test]
+    fn estimate_base64_decoded_len_is_conservative_for_malformed_lengths() {
+        // Not a multiple of 4: use an upper bound (and let base64 decode validation reject it later).
+        assert_eq!(estimate_base64_decoded_len("Zg"), Some(3));
+    }
 
     #[test]
     fn validate_rejects_oversized_html() {
