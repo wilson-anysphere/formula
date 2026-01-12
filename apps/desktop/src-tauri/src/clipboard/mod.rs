@@ -466,7 +466,7 @@ mod tests {
             text: None,
             html: None,
             rtf: None,
-            png_base64: Some("data:image/png;base64".to_string()),
+            image_png_base64: Some("data:image/png;base64".to_string()),
         };
 
         let err = payload.validate().expect_err("expected validation to fail");
