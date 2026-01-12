@@ -1397,10 +1397,9 @@ impl AppState {
                 sheet.visibility = visibility;
             }
 
-            // Sheet visibility is workbook.xml metadata. The patch-based save path only patches
-            // worksheet cell XML, so drop origin bytes to force regeneration from storage on the
-            // next save/export.
-            workbook.origin_xlsx_bytes = None;
+            // Sheet visibility is workbook.xml metadata. Our patch-based XLSX save path can
+            // rewrite this, but XLSB round-trip saves cannot update workbook metadata. Drop XLSB
+            // provenance so subsequent saves use the XLSX path.
             workbook.origin_xlsb_path = None;
         }
 
@@ -1509,10 +1508,9 @@ impl AppState {
                 sheet.tab_color = tab_color;
             }
 
-            // Tab color lives in worksheet metadata (`sheetPr/tabColor`). The patch-based save path
-            // only patches worksheet cell XML, so drop origin bytes to force regeneration from
-            // storage on the next save/export.
-            workbook.origin_xlsx_bytes = None;
+            // Tab color lives in worksheet metadata (`sheetPr/tabColor`). Our patch-based XLSX save
+            // path can rewrite this, but XLSB round-trip saves cannot update worksheet metadata.
+            // Drop XLSB provenance so subsequent saves use the XLSX path.
             workbook.origin_xlsb_path = None;
         }
 
@@ -5500,6 +5498,7 @@ mod tests {
     #[test]
     fn sheet_metadata_round_trips_through_patch_based_save() {
         use formula_model::{SheetVisibility, TabColor};
+        use formula_xlsx::XlsxPackage;
 
         let mut model = formula_model::Workbook::new();
         let _ = model.add_sheet("Sheet1").expect("add sheet");
@@ -5509,10 +5508,19 @@ mod tests {
 
         let mut buf = std::io::Cursor::new(Vec::new());
         formula_xlsx::write_workbook_to_writer(&model, &mut buf).expect("write xlsx bytes");
+        let mut base_bytes = buf.into_inner();
+
+        // Add an unknown part to the XLSX container. Patch-based saves should preserve this part,
+        // while the full regeneration path would drop it.
+        const CUSTOM_PART: &str = "xl/formula-custom-part.xml";
+        let custom_payload = b"<custom>Hello</custom>".to_vec();
+        let mut pkg = XlsxPackage::from_bytes(&base_bytes).expect("parse xlsx package");
+        pkg.set_part(CUSTOM_PART, custom_payload.clone());
+        base_bytes = pkg.write_to_bytes().expect("repack xlsx");
 
         let tmp = tempfile::tempdir().expect("temp dir");
         let xlsx_path = tmp.path().join("base.xlsx");
-        std::fs::write(&xlsx_path, buf.into_inner()).expect("write xlsx file");
+        std::fs::write(&xlsx_path, base_bytes).expect("write xlsx file");
 
         let workbook = read_xlsx_blocking(&xlsx_path).expect("read xlsx workbook");
         let mut state = AppState::new();
@@ -5525,9 +5533,27 @@ mod tests {
             .set_sheet_tab_color("Sheet2", Some(TabColor::rgb("FF00FF00")))
             .expect("set tab color");
 
+        // Sheet metadata edits should not clear `origin_xlsx_bytes` (otherwise we'd lose unknown
+        // parts and fall back to the slower/less-faithful regeneration save path).
+        assert!(
+            state
+                .get_workbook()
+                .expect("workbook")
+                .origin_xlsx_bytes
+                .is_some()
+        );
+
         let out_path = tmp.path().join("saved.xlsx");
         let workbook = state.get_workbook().expect("workbook").clone();
         let saved_bytes = write_xlsx_blocking(&out_path, &workbook).expect("save xlsx");
+
+        let preserved_custom = formula_xlsx::read_part_from_reader(
+            std::io::Cursor::new(saved_bytes.as_ref()),
+            CUSTOM_PART,
+        )
+        .expect("read custom part")
+        .expect("expected custom part to be preserved");
+        assert_eq!(preserved_custom, custom_payload);
 
         let reparsed = formula_xlsx::read_workbook_from_reader(std::io::Cursor::new(
             saved_bytes.as_ref(),
