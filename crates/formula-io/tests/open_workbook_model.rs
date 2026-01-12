@@ -466,6 +466,20 @@ fn open_workbook_model_csv_strips_utf8_bom() {
 }
 
 #[test]
+fn open_workbook_model_csv_honors_excel_sep_directive() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let path = tmp.path().join("sep.csv");
+
+    std::fs::write(&path, "sep=;\na;b\n1;2\n").expect("write csv");
+
+    let workbook = formula_io::open_workbook_model(&path).expect("open csv workbook model");
+    let sheet = workbook.sheet_by_name("sep").expect("sheet missing");
+
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(sheet.value_a1("B1").unwrap(), CellValue::Number(2.0));
+}
+
+#[test]
 fn open_workbook_model_rejects_unknown_binary() {
     let mut tmp = tempfile::Builder::new()
         .prefix("binary_")
