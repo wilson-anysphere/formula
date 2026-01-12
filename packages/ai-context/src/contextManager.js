@@ -220,14 +220,15 @@ export class ContextManager {
    * @param {{
    *   workbook: any,
    *   query: string,
-   *   attachments?: Attachment[],
-   *   topK?: number,
-   *   skipIndexing?: boolean,
-   *   dlp?: {
-   *     documentId: string,
-   *     policy: any,
-   *     classificationRecords?: Array<{ selector: any, classification: any }>,
-   *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
+  *   attachments?: Attachment[],
+  *   topK?: number,
+  *   skipIndexing?: boolean,
+  *   skipIndexingWithDlp?: boolean,
+  *   dlp?: {
+  *     documentId: string,
+  *     policy: any,
+  *     classificationRecords?: Array<{ selector: any, classification: any }>,
+  *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
    *     includeRestrictedContent?: boolean,
    *     auditLogger?: { log(event: any): void }
    *   }
@@ -282,7 +283,9 @@ export class ContextManager {
     //
     // Safety: if DLP enforcement is enabled for this build, indexing must still run so
     // chunk redaction can be applied before embedding and persistence.
-    const shouldIndex = (params.skipIndexing ?? false) !== true || Boolean(dlp);
+    const skipIndexing = (params.skipIndexing ?? false) === true;
+    const skipIndexingWithDlp = (params.skipIndexingWithDlp ?? false) === true;
+    const shouldIndex = !skipIndexing || (Boolean(dlp) && !skipIndexingWithDlp);
 
     const indexStats = shouldIndex
       ? await indexWorkbook({
@@ -635,22 +638,26 @@ export class ContextManager {
    *   spreadsheet: any,
    *   workbookId: string,
    *   query: string,
-   *   attachments?: Attachment[],
-   *   topK?: number,
-   *   skipIndexing?: boolean,
-   *   dlp?: {
-   *     documentId: string,
-   *     policy: any,
-   *     classificationRecords?: Array<{ selector: any, classification: any }>,
-   *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
+  *   attachments?: Attachment[],
+  *   topK?: number,
+  *   skipIndexing?: boolean,
+  *   skipIndexingWithDlp?: boolean,
+  *   dlp?: {
+  *     documentId: string,
+  *     policy: any,
+  *     classificationRecords?: Array<{ selector: any, classification: any }>,
+  *     classificationStore?: { list(documentId: string): Array<{ selector: any, classification: any }> },
    *     includeRestrictedContent?: boolean,
    *     auditLogger?: { log(event: any): void }
    *   }
    * }} params
    */
   async buildWorkbookContextFromSpreadsheetApi(params) {
+    const skipIndexing = (params.skipIndexing ?? false) === true;
+    const skipIndexingWithDlp = (params.skipIndexingWithDlp ?? false) === true;
+
     const workbook =
-      (params.skipIndexing ?? false) === true && !params.dlp
+      skipIndexing && (!params.dlp || skipIndexingWithDlp)
         ? {
             id: params.workbookId,
             sheets: (params.spreadsheet?.listSheets?.() ?? []).map((name) => ({ name, cells: new Map() })),
@@ -667,6 +674,7 @@ export class ContextManager {
       topK: params.topK,
       dlp: params.dlp,
       skipIndexing: params.skipIndexing,
+      skipIndexingWithDlp: params.skipIndexingWithDlp,
     });
   }
 }

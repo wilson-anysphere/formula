@@ -41,6 +41,7 @@ export class ContextManager {
     attachments?: Attachment[];
     topK?: number;
     skipIndexing?: boolean;
+    skipIndexingWithDlp?: boolean;
     dlp?: any;
   }): Promise<{ indexStats: any; retrieved: any[]; promptContext: string }>;
 
@@ -51,6 +52,7 @@ export class ContextManager {
     attachments?: Attachment[];
     topK?: number;
     skipIndexing?: boolean;
+    skipIndexingWithDlp?: boolean;
     dlp?: any;
   }): Promise<{ indexStats: any; retrieved: any[]; promptContext: string }>;
 }

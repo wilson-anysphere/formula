@@ -17,6 +17,7 @@ import { LocalPolicyStore } from "../../../../../../packages/security/dlp/src/po
 import { createAiChatOrchestrator } from "../orchestrator.js";
 import { ChartStore } from "../../../charts/chartStore";
 import { createDesktopRagService } from "../../rag/ragService.js";
+import { DocumentControllerSpreadsheetApi } from "../../tools/documentControllerSpreadsheetApi.js";
 
 import { getAiDlpAuditLogger, resetAiDlpAuditLoggerForTests } from "../../dlp/aiDlp.js";
 
@@ -168,6 +169,184 @@ describe("ai chat orchestrator", () => {
 
     expect(indexWorkbookSpy).toHaveBeenCalledTimes(2);
     await ragService.dispose();
+  });
+
+  it("does not rescan workbook RAG when DLP is enabled and inputs have not changed", async () => {
+    const storage = createInMemoryLocalStorage();
+    const original = (globalThis as any).localStorage;
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    const listNonEmptyCellsSpy = vi.spyOn(DocumentControllerSpreadsheetApi.prototype as any, "listNonEmptyCells");
+    try {
+      storage.clear();
+
+      const workbookId = "wb_dlp_rag_incremental";
+
+      const policyStore = new LocalPolicyStore({ storage: storage as any });
+      policyStore.setDocumentPolicy(workbookId, {
+        version: 1,
+        allowDocumentOverrides: true,
+        rules: {
+          [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+            maxAllowed: "Confidential",
+            allowRestrictedContent: false,
+            redactDisallowed: true,
+          },
+        },
+      });
+
+      // Ensure the classification store is present (even when empty) so
+      // `maybeGetAiCloudDlpOptions` returns DLP options.
+      new LocalClassificationStore({ storage: storage as any });
+
+      const controller = new DocumentController();
+      seed2x2(controller);
+
+      const embedder = new HashEmbedder({ dimension: 32 });
+      const vectorStore = new InMemoryVectorStore({ dimension: 32 });
+      const contextManager = new ContextManager({
+        tokenBudgetTokens: 800,
+        workbookRag: { vectorStore, embedder, topK: 3 },
+      });
+
+      const ragService = createDesktopRagService({
+        documentController: controller,
+        workbookId,
+        createRag: async () =>
+          ({
+            vectorStore,
+            embedder,
+            contextManager,
+            // Not used when DLP is enabled, but required by DesktopRagService's contract.
+            indexWorkbook: async () => ({ totalChunks: 0, upserted: 0, skipped: 0, deleted: 0 }),
+          }) as any,
+      });
+
+      const llmClient = {
+        chat: vi.fn(async () => ({ message: { role: "assistant", content: "ok" }, usage: { promptTokens: 1, completionTokens: 1 } })),
+      };
+
+      const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_dlp_rag_incremental" });
+
+      const orchestrator = createAiChatOrchestrator({
+        documentController: controller,
+        workbookId,
+        llmClient: llmClient as any,
+        model: "mock-model",
+        getActiveSheetId: () => "Sheet1",
+        auditStore,
+        sessionId: "session_dlp_rag_incremental",
+        ragService,
+        previewOptions: { approval_cell_threshold: 0 },
+      });
+
+      await orchestrator.sendMessage({ text: "Hello", history: [] });
+      await orchestrator.sendMessage({ text: "Hello again", history: [] });
+
+      // RAG scanning is driven by `workbookFromSpreadsheetApi` which calls
+      // SpreadsheetApi.listNonEmptyCells once per sheet. With DLP enabled we should
+      // still hit it only once when nothing changes.
+      expect(listNonEmptyCellsSpy).toHaveBeenCalledTimes(1);
+
+      await ragService.dispose();
+    } finally {
+      listNonEmptyCellsSpy.mockRestore();
+      if (original === undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).localStorage;
+      } else {
+        Object.defineProperty(globalThis, "localStorage", { configurable: true, value: original });
+      }
+    }
+  });
+
+  it("re-scans workbook RAG when DLP inputs change (policy/classifications) even if the workbook is unchanged", async () => {
+    const storage = createInMemoryLocalStorage();
+    const original = (globalThis as any).localStorage;
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    const listNonEmptyCellsSpy = vi.spyOn(DocumentControllerSpreadsheetApi.prototype as any, "listNonEmptyCells");
+    try {
+      storage.clear();
+
+      const workbookId = "wb_dlp_rag_reindex_on_dlp_change";
+
+      const policyStore = new LocalPolicyStore({ storage: storage as any });
+      policyStore.setDocumentPolicy(workbookId, {
+        version: 1,
+        allowDocumentOverrides: true,
+        rules: {
+          [DLP_ACTION.AI_CLOUD_PROCESSING]: {
+            maxAllowed: "Confidential",
+            allowRestrictedContent: false,
+            redactDisallowed: true,
+          },
+        },
+      });
+
+      const classificationStore = new LocalClassificationStore({ storage: storage as any });
+
+      const controller = new DocumentController();
+      seed2x2(controller);
+
+      const embedder = new HashEmbedder({ dimension: 32 });
+      const vectorStore = new InMemoryVectorStore({ dimension: 32 });
+      const contextManager = new ContextManager({
+        tokenBudgetTokens: 800,
+        workbookRag: { vectorStore, embedder, topK: 3 },
+      });
+
+      const ragService = createDesktopRagService({
+        documentController: controller,
+        workbookId,
+        createRag: async () =>
+          ({
+            vectorStore,
+            embedder,
+            contextManager,
+            indexWorkbook: async () => ({ totalChunks: 0, upserted: 0, skipped: 0, deleted: 0 }),
+          }) as any,
+      });
+
+      const llmClient = {
+        chat: vi.fn(async () => ({ message: { role: "assistant", content: "ok" }, usage: { promptTokens: 1, completionTokens: 1 } })),
+      };
+
+      const auditStore = new LocalStorageAIAuditStore({ key: "test_audit_dlp_rag_reindex_on_dlp_change" });
+
+      const orchestrator = createAiChatOrchestrator({
+        documentController: controller,
+        workbookId,
+        llmClient: llmClient as any,
+        model: "mock-model",
+        getActiveSheetId: () => "Sheet1",
+        auditStore,
+        sessionId: "session_dlp_rag_reindex_on_dlp_change",
+        ragService,
+        previewOptions: { approval_cell_threshold: 0 },
+      });
+
+      await orchestrator.sendMessage({ text: "Hello", history: [] });
+
+      // Mutate DLP inputs: add a (still-allowed) classification record.
+      classificationStore.upsert(
+        workbookId,
+        { scope: "cell", documentId: workbookId, sheetId: "Sheet1", row: 0, col: 0 },
+        { level: CLASSIFICATION_LEVEL.CONFIDENTIAL, labels: ["test"] },
+      );
+
+      await orchestrator.sendMessage({ text: "Hello again", history: [] });
+
+      expect(listNonEmptyCellsSpy).toHaveBeenCalledTimes(2);
+
+      await ragService.dispose();
+    } finally {
+      listNonEmptyCellsSpy.mockRestore();
+      if (original === undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+        delete (globalThis as any).localStorage;
+      } else {
+        Object.defineProperty(globalThis, "localStorage", { configurable: true, value: original });
+      }
+    }
   });
 
   it("blocks before calling the LLM when DLP policy forbids cloud AI processing", async () => {

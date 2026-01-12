@@ -1,11 +1,13 @@
 import type { DocumentController } from "../../document/documentController.js";
 
 import { ContextManager } from "../../../../../packages/ai-context/src/contextManager.js";
+import { stableJsonStringify } from "../../../../../packages/ai-context/src/tokenBudget.js";
 import {
   HashEmbedder,
   LocalStorageBinaryStorage,
   workbookFromSpreadsheetApi,
 } from "../../../../../packages/ai-rag/src/index.js";
+import { DlpViolationError } from "../../../../../packages/security/dlp/src/errors.js";
 
 import { createDesktopRag } from "./index.js";
 
@@ -60,6 +62,36 @@ export interface DesktopRagServiceOptions {
 }
 
 type DesktopRag = Awaited<ReturnType<typeof createDesktopRag>>;
+
+function normalizeClassificationRecordsForCacheKey(
+  records: unknown,
+): Array<{ selector: unknown; classification: unknown }> {
+  const list = Array.isArray(records) ? records : [];
+  const normalized = list.map((record) => ({
+    selector: (record as any)?.selector ?? null,
+    classification: (record as any)?.classification ?? null,
+  }));
+
+  // Make the cache key stable even if callers return records in different orders.
+  const keyed = normalized.map((r) => ({ key: stableJsonStringify(r), value: r }));
+  keyed.sort((a, b) => a.key.localeCompare(b.key));
+  return keyed.map((r) => r.value);
+}
+
+function dlpCacheKeyFor(params: { dlp: any }): string {
+  const dlp = params.dlp;
+  if (!dlp) return "dlp:none";
+
+  const includeRestrictedContent = Boolean(dlp?.includeRestrictedContent ?? false);
+  const classificationRecords =
+    dlp?.classificationRecords ?? dlp?.classificationStore?.list?.(dlp?.documentId) ?? [];
+
+  return stableJsonStringify({
+    includeRestrictedContent,
+    policy: dlp?.policy ?? null,
+    classificationRecords: normalizeClassificationRecordsForCacheKey(classificationRecords),
+  });
+}
 
 export interface DesktopRagService {
   getContextManager(): Promise<ContextManager>;
@@ -126,6 +158,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
 
   let documentVersion = 0;
   let indexedVersion: number | null = null;
+  let indexedDlpKey: string | null = null;
   let indexPromise: Promise<unknown> | null = null;
   let lastIndexStats: unknown = null;
 
@@ -184,6 +217,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
 
       lastIndexStats = await rag.indexWorkbook(workbook, { sampleRows: options.sampleRows } as any);
       indexedVersion = versionToIndex;
+      indexedDlpKey = null;
     })();
 
     indexPromise = run;
@@ -215,20 +249,76 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
 
     const rag = await getRag();
 
-    // If DLP is enabled, ContextManager forces indexing so it can apply redaction
-    // before embedding/persisting content. In that mode we don't try to manage
-    // indexing externally (avoid double-indexing).
-    const canSkipIndexing = !params.dlp;
-    if (canSkipIndexing) await ensureIndexed(params.spreadsheet);
+    const hasDlp = Boolean(params.dlp);
+
+    // Non-DLP mode: we manage incremental indexing externally and always run
+    // ContextManager in "cheap" mode to avoid workbook scans.
+    if (!hasDlp) {
+      await ensureIndexed(params.spreadsheet);
+
+      const ctx = await rag.contextManager.buildWorkbookContextFromSpreadsheetApi({
+        ...params,
+        skipIndexing: true,
+      } as any);
+
+      // Preserve last index stats for callers that want to surface them even when
+      // buildWorkbookContextFromSpreadsheetApi is in "cheap" mode.
+      if (ctx && ctx.indexStats == null) ctx.indexStats = lastIndexStats;
+      return ctx;
+    }
+
+    // DLP mode: only skip workbook scans when both the workbook version AND the DLP inputs
+    // (policy/classifications/includeRestrictedContent) match the last indexed state.
+    const dlpKey = dlpCacheKeyFor({ dlp: params.dlp });
+
+    // Avoid concurrent re-indexing (multiple chat messages, tool loops, etc).
+    if (indexPromise) await indexPromise;
+
+    const currentVersion = documentVersion;
+    const shouldIndex = indexedVersion !== currentVersion || indexedDlpKey !== dlpKey;
+
+    if (shouldIndex) {
+      const run = (async () => {
+        const versionToIndex = documentVersion;
+        try {
+          const ctx = await rag.contextManager.buildWorkbookContextFromSpreadsheetApi({
+            ...params,
+            // DLP-safe full path: force a rescan/index so we can apply redaction before embedding.
+            skipIndexing: false,
+          } as any);
+          lastIndexStats = ctx?.indexStats ?? lastIndexStats;
+          indexedVersion = versionToIndex;
+          indexedDlpKey = dlpKey;
+          return ctx;
+        } catch (error) {
+          // If DLP blocks cloud AI processing, ContextManager throws after indexing so we can
+          // prevent sending anything to the LLM. In that case we can still treat the index
+          // as up-to-date, which avoids expensive rescans on repeated blocked requests.
+          if (error instanceof DlpViolationError) {
+            indexedVersion = versionToIndex;
+            indexedDlpKey = dlpKey;
+          }
+          throw error;
+        }
+      })();
+
+      indexPromise = run;
+      try {
+        const ctx = await run;
+        if (ctx && ctx.indexStats == null) ctx.indexStats = lastIndexStats;
+        return ctx;
+      } finally {
+        if (indexPromise === run) indexPromise = null;
+      }
+    }
 
     const ctx = await rag.contextManager.buildWorkbookContextFromSpreadsheetApi({
       ...params,
-      // When the index is already up to date, avoid re-scanning the workbook for cells.
-      skipIndexing: canSkipIndexing,
+      // When the DLP index is already up to date, avoid re-scanning the workbook for cells.
+      skipIndexing: true,
+      skipIndexingWithDlp: true,
     } as any);
 
-    // Preserve last index stats for callers that want to surface them even when
-    // buildWorkbookContextFromSpreadsheetApi is in "cheap" mode.
     if (ctx && ctx.indexStats == null) ctx.indexStats = lastIndexStats;
     return ctx;
   }
