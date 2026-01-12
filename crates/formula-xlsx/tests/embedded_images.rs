@@ -40,6 +40,26 @@ const RDRICHVALUE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone
 </rvData>
 "#;
 
+const RDRICHVALUE_STRUCTURE_XML_REORDERED: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvStructures xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata" count="1">
+  <s t="_localImage">
+    <k n="CalcOrigin" t="i"/>
+    <k n="_rvRel:LocalImageIdentifier" t="i"/>
+    <k n="Text" t="s"/>
+  </s>
+</rvStructures>
+"#;
+
+const RDRICHVALUE_XML_REORDERED: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <rv s="0">
+    <v>6</v>
+    <v>0</v>
+    <v>Reordered alt text</v>
+  </rv>
+</rvData>
+"#;
+
 const RICH_VALUE_REL_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <richValueRel xmlns="http://schemas.microsoft.com/office/2022/10/spreadsheetml/richvaluerelationships"
               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -193,4 +213,70 @@ fn skips_rich_value_relationships_that_are_not_images() {
         images.is_empty(),
         "expected extractor to ignore non-image relationship types"
     );
+}
+
+#[test]
+fn uses_rdrichvaluestructure_to_locate_local_image_identifier_and_alt_text() {
+    let png_bytes = STANDARD
+        .decode(PNG_1X1_TRANSPARENT_B64)
+        .expect("decode png base64");
+
+    let mut workbook = Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet.write_number(1, 1, 1.0).unwrap(); // B2
+    let xlsx_bytes = workbook.save_to_buffer().unwrap();
+
+    let mut pkg = XlsxPackage::from_bytes(&xlsx_bytes).unwrap();
+
+    // Patch the worksheet cell to include the `vm` attribute expected by Excel's rich value schema.
+    let sheet_part = "xl/worksheets/sheet1.xml";
+    let mut sheet_xml = String::from_utf8(pkg.part(sheet_part).unwrap().to_vec()).unwrap();
+    sheet_xml = sheet_xml.replacen(r#"r="B2""#, r#"r="B2" vm="1""#, 1);
+    pkg.set_part(sheet_part, sheet_xml.into_bytes());
+
+    // Add the rich value parts + image payload.
+    pkg.set_part("xl/metadata.xml", METADATA_XML.as_bytes().to_vec());
+    pkg.set_part(
+        "xl/richData/rdrichvalue.xml",
+        RDRICHVALUE_XML_REORDERED.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/rdrichvaluestructure.xml",
+        RDRICHVALUE_STRUCTURE_XML_REORDERED.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/richValueRel.xml",
+        RICH_VALUE_REL_XML.as_bytes().to_vec(),
+    );
+    pkg.set_part(
+        "xl/richData/_rels/richValueRel.xml.rels",
+        RICH_VALUE_REL_RELS_XML.as_bytes().to_vec(),
+    );
+    pkg.set_part("xl/media/image1.png", png_bytes.clone());
+
+    // Wire up the workbook relationships to the new parts (they are discovered via `workbook.xml.rels`).
+    let rels_part = "xl/_rels/workbook.xml.rels";
+    let mut rels_xml = String::from_utf8(pkg.part(rels_part).unwrap().to_vec()).unwrap();
+    let insert_idx = rels_xml
+        .rfind("</Relationships>")
+        .expect("closing Relationships tag");
+    rels_xml.insert_str(
+        insert_idx,
+        r#"
+  <Relationship Id="rId1000" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata" Target="metadata.xml"/>
+  <Relationship Id="rId1001" Type="http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue" Target="richData/rdrichvalue.xml"/>
+  <Relationship Id="rId1002" Type="http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure" Target="richData/rdrichvaluestructure.xml"/>
+  <Relationship Id="rId1003" Type="http://schemas.microsoft.com/office/2022/10/relationships/richValueRel" Target="richData/richValueRel.xml"/>
+"#,
+    );
+    pkg.set_part(rels_part, rels_xml.into_bytes());
+
+    // Round-trip through ZIP writer to ensure the extractor works on a real package.
+    let bytes = pkg.write_to_bytes().unwrap();
+    let pkg = XlsxPackage::from_bytes(&bytes).unwrap();
+
+    let images = extract_embedded_images(&pkg).unwrap();
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].bytes, png_bytes);
+    assert_eq!(images[0].alt_text.as_deref(), Some("Reordered alt text"));
 }

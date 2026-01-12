@@ -13,6 +13,8 @@ const REL_TYPE_SHEET_METADATA: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata";
 const REL_TYPE_RD_RICH_VALUE: &str =
     "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValue";
+const REL_TYPE_RD_RICH_VALUE_STRUCTURE: &str =
+    "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure";
 const REL_TYPE_RICH_VALUE_REL: &str =
     "http://schemas.microsoft.com/office/2022/10/relationships/richValueRel";
 const REL_TYPE_IMAGE: &str =
@@ -42,6 +44,13 @@ struct RichValueImage {
     alt_text: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+struct LocalImageStructurePositions {
+    local_image_identifier: Option<usize>,
+    calc_origin: Option<usize>,
+    text: Option<usize>,
+}
+
 /// Extract embedded images-in-cells ("Place in Cell") using the `vm` + `metadata.xml` + `xl/richData/*`
 /// schema.
 ///
@@ -57,6 +66,7 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
     let relationships = openxml::parse_relationships(workbook_rels_xml)?;
     let mut metadata_part: Option<String> = None;
     let mut rdrichvalue_part: Option<String> = None;
+    let mut rdrichvaluestructure_part: Option<String> = None;
     let mut rich_value_rel_part: Option<String> = None;
 
     for rel in relationships {
@@ -67,6 +77,13 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
         {
             let target = path::resolve_target("xl/workbook.xml", &rel.target);
             rdrichvalue_part = Some(target);
+        } else if rdrichvaluestructure_part.is_none()
+            && rel
+                .type_uri
+                .eq_ignore_ascii_case(REL_TYPE_RD_RICH_VALUE_STRUCTURE)
+        {
+            let target = path::resolve_target("xl/workbook.xml", &rel.target);
+            rdrichvaluestructure_part = Some(target);
         } else if rich_value_rel_part.is_none()
             && rel.type_uri.eq_ignore_ascii_case(REL_TYPE_RICH_VALUE_REL)
         {
@@ -83,11 +100,19 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
         None => HashMap::new(),
     };
 
+    let local_image_structure_positions = match rdrichvaluestructure_part
+        .as_deref()
+        .and_then(|part| pkg.part(part).map(|bytes| (part, bytes)))
+    {
+        Some((_part, bytes)) => Some(parse_local_image_structure_positions(bytes)?),
+        None => None,
+    };
+
     let rich_values = match rdrichvalue_part
         .as_deref()
         .and_then(|part| pkg.part(part).map(|bytes| (part, bytes)))
     {
-        Some((_part, bytes)) => parse_rdrichvalue(bytes)?,
+        Some((_part, bytes)) => parse_rdrichvalue(bytes, local_image_structure_positions.as_deref())?,
         None => HashMap::new(),
     };
 
@@ -352,10 +377,10 @@ fn parse_vm_to_rich_value_index(xml: &[u8]) -> Result<HashMap<u32, u32>, XlsxErr
     let mut vm_to_rich_value_index: HashMap<u32, u32> = HashMap::new();
     for (bk_idx, rc_records) in value_bk_rc_records.iter().enumerate() {
         // Excel emits `rc/@t` (metadata type index) as either 0-based *or* 1-based depending on
-        // version/producer. Prefer the 0-based index we derived while parsing `metadataTypes`, but
-        // also accept the 1-based equivalent so we can resolve real Excel files.
-        let xlr_type_index_0 = xlr_type_index;
-        let xlr_type_index_1 = xlr_type_index.saturating_add(1);
+        // version/producer. We derive a 1-based index from the `<metadataTypes>` list, so accept
+        // both the exact value and its 0-based equivalent.
+        let xlr_type_index_0 = xlr_type_index.saturating_sub(1);
+        let xlr_type_index_1 = xlr_type_index;
         let Some(future_idx) = rc_records.iter().find_map(|(t, v)| {
             (*t == xlr_type_index_0 || *t == xlr_type_index_1).then_some(*v)
         }) else {
@@ -373,7 +398,108 @@ fn parse_vm_to_rich_value_index(xml: &[u8]) -> Result<HashMap<u32, u32>, XlsxErr
     Ok(vm_to_rich_value_index)
 }
 
-fn parse_rdrichvalue(xml: &[u8]) -> Result<HashMap<u32, RichValueImage>, XlsxError> {
+fn parse_local_image_structure_positions(
+    xml: &[u8],
+) -> Result<Vec<Option<LocalImageStructurePositions>>, XlsxError> {
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+
+    let mut in_s = false;
+    let mut current_is_local_image = false;
+    let mut current_key_idx = 0usize;
+    let mut current_positions = LocalImageStructurePositions::default();
+
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"s") => {
+                in_s = true;
+                current_is_local_image = false;
+                current_key_idx = 0;
+                current_positions = LocalImageStructurePositions::default();
+
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"t") {
+                        let v = attr.unescape_value()?.into_owned();
+                        let local = v.rsplit(':').next().unwrap_or(v.as_str());
+                        current_is_local_image = local.trim().eq_ignore_ascii_case("_localImage");
+                        break;
+                    }
+                }
+            }
+            Event::Empty(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"s") => {
+                // Empty `<s/>` structure with no keys.
+                let mut is_local_image = false;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"t") {
+                        let v = attr.unescape_value()?.into_owned();
+                        let local = v.rsplit(':').next().unwrap_or(v.as_str());
+                        is_local_image = local.trim().eq_ignore_ascii_case("_localImage");
+                        break;
+                    }
+                }
+                out.push(is_local_image.then_some(LocalImageStructurePositions::default()));
+                in_s = false;
+            }
+            Event::End(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"s") => {
+                if in_s {
+                    out.push(current_is_local_image.then_some(std::mem::take(
+                        &mut current_positions,
+                    )));
+                }
+                in_s = false;
+                current_is_local_image = false;
+                current_key_idx = 0;
+            }
+            Event::Start(e) | Event::Empty(e)
+                if in_s && e.local_name().as_ref().eq_ignore_ascii_case(b"k") =>
+            {
+                if current_is_local_image {
+                    let mut key_name: Option<String> = None;
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"n") {
+                            key_name = Some(attr.unescape_value()?.into_owned());
+                            break;
+                        }
+                    }
+
+                    if let Some(key_name) = key_name {
+                        let local = key_name.rsplit(':').next().unwrap_or(key_name.as_str());
+                        if local.eq_ignore_ascii_case("LocalImageIdentifier") {
+                            if current_positions.local_image_identifier.is_none() {
+                                current_positions.local_image_identifier = Some(current_key_idx);
+                            }
+                        } else if local.eq_ignore_ascii_case("CalcOrigin") {
+                            if current_positions.calc_origin.is_none() {
+                                current_positions.calc_origin = Some(current_key_idx);
+                            }
+                        } else if local.eq_ignore_ascii_case("Text") {
+                            if current_positions.text.is_none() {
+                                current_positions.text = Some(current_key_idx);
+                            }
+                        }
+                    }
+                }
+                current_key_idx = current_key_idx.saturating_add(1);
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(out)
+}
+
+fn parse_rdrichvalue(
+    xml: &[u8],
+    structure_positions: Option<&[Option<LocalImageStructurePositions>]>,
+) -> Result<HashMap<u32, RichValueImage>, XlsxError> {
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(true);
 
@@ -382,6 +508,7 @@ fn parse_rdrichvalue(xml: &[u8]) -> Result<HashMap<u32, RichValueImage>, XlsxErr
     let mut in_v = false;
     let mut current_v_text = String::new();
     let mut current_values: Vec<String> = Vec::new();
+    let mut current_structure_index: Option<usize> = None;
     let mut rich_value_index: u32 = 0;
     let mut out: HashMap<u32, RichValueImage> = HashMap::new();
 
@@ -393,12 +520,23 @@ fn parse_rdrichvalue(xml: &[u8]) -> Result<HashMap<u32, RichValueImage>, XlsxErr
                 in_v = false;
                 current_v_text.clear();
                 current_values.clear();
+                current_structure_index = None;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    if openxml::local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"s") {
+                        current_structure_index = attr
+                            .unescape_value()?
+                            .parse::<usize>()
+                            .ok();
+                    }
+                }
             }
             Event::Empty(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"rv") => {
                 // Empty rv elements aren't expected for local images.
                 in_rv = false;
                 in_v = false;
                 current_v_text.clear();
+                current_structure_index = None;
                 rich_value_index = rich_value_index.saturating_add(1);
             }
             Event::End(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"rv") => {
@@ -406,16 +544,56 @@ fn parse_rdrichvalue(xml: &[u8]) -> Result<HashMap<u32, RichValueImage>, XlsxErr
                 in_v = false;
                 current_v_text.clear();
 
-                let local_image_identifier = current_values
-                    .get(0)
+                let mut structure: Option<&LocalImageStructurePositions> = None;
+                let mut known_non_local = false;
+                if let (Some(structs), Some(idx)) = (structure_positions, current_structure_index) {
+                    match structs.get(idx) {
+                        Some(Some(pos)) => structure = Some(pos),
+                        Some(None) => known_non_local = true,
+                        None => {}
+                    }
+                }
+
+                if known_non_local {
+                    // This rich value record doesn't correspond to a `_localImage` structure.
+                    // Skip it rather than attempting to interpret positional values.
+                    current_structure_index = None;
+                    rich_value_index = rich_value_index.saturating_add(1);
+                    continue;
+                }
+
+                let mut local_image_identifier = structure
+                    .and_then(|s| s.local_image_identifier)
+                    .and_then(|idx| current_values.get(idx))
                     .and_then(|v| v.trim().parse::<u32>().ok());
-                let calc_origin = current_values
-                    .get(1)
+                let mut calc_origin = structure
+                    .and_then(|s| s.calc_origin)
+                    .and_then(|idx| current_values.get(idx))
                     .and_then(|v| v.trim().parse::<u32>().ok());
-                let alt_text = current_values
-                    .get(2)
+
+                let mut alt_text = structure
+                    .and_then(|s| s.text)
+                    .and_then(|idx| current_values.get(idx))
                     .map(|v| v.trim().to_string())
                     .filter(|v| !v.is_empty());
+
+                // Fallback parsing if structure metadata is missing or incomplete.
+                if local_image_identifier.is_none() {
+                    local_image_identifier = current_values
+                        .get(0)
+                        .and_then(|v| v.trim().parse::<u32>().ok());
+                }
+                if calc_origin.is_none() {
+                    calc_origin = current_values
+                        .get(1)
+                        .and_then(|v| v.trim().parse::<u32>().ok());
+                }
+                if alt_text.is_none() && structure.is_none() {
+                    alt_text = current_values
+                        .get(2)
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty());
+                }
 
                 if let (Some(local_image_identifier), Some(calc_origin)) =
                     (local_image_identifier, calc_origin)
@@ -430,6 +608,7 @@ fn parse_rdrichvalue(xml: &[u8]) -> Result<HashMap<u32, RichValueImage>, XlsxErr
                     );
                 }
 
+                current_structure_index = None;
                 rich_value_index = rich_value_index.saturating_add(1);
             }
             Event::Start(e) if in_rv && e.local_name().as_ref().eq_ignore_ascii_case(b"v") => {
