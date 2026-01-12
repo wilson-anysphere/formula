@@ -3007,6 +3007,8 @@ mountRibbon(ribbonRoot, {
       const preset = commandId.slice(fillColorPrefix.length);
       const argb = (() => {
         switch (preset) {
+          case "lightGray":
+            return ["#", "FF", "D9D9D9"].join("");
           case "yellow":
             return ["#", "FF", "FFFF00"].join("");
           case "blue":
@@ -3020,7 +3022,7 @@ mountRibbon(ribbonRoot, {
         }
       })();
 
-      if (preset === "none") {
+      if (preset === "none" || preset === "noFill") {
         applyToSelection("Fill color", (sheetId, ranges) => {
           for (const range of ranges) {
             doc.setRangeFormat(sheetId, range, { fill: null }, { label: "Fill color" });
@@ -3064,6 +3066,41 @@ mountRibbon(ribbonRoot, {
 
       if (argb) {
         applyToSelection("Font color", (sheetId, ranges) => setFontColor(doc, sheetId, ranges, argb));
+      }
+      return;
+    }
+
+    const clearPrefix = "home.font.clearFormatting.";
+    if (commandId.startsWith(clearPrefix)) {
+      const kind = commandId.slice(clearPrefix.length);
+      if (kind === "clearFormats") {
+        applyToSelection("Clear formats", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, null, { label: "Clear formats" });
+          }
+        });
+        return;
+      }
+      if (kind === "clearContents") {
+        applyToSelection("Clear contents", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.clearRange(sheetId, range, { label: "Clear contents" });
+          }
+        });
+        return;
+      }
+      if (kind === "clearAll") {
+        applyToSelection(
+          "Clear all",
+          (sheetId, ranges) => {
+            for (const range of ranges) {
+              doc.clearRange(sheetId, range, { label: "Clear all" });
+              doc.setRangeFormat(sheetId, range, null, { label: "Clear all" });
+            }
+          },
+          { forceBatch: true },
+        );
+        return;
       }
       return;
     }
