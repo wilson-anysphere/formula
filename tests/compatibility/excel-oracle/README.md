@@ -74,6 +74,12 @@ oracle dataset is generated.
 `compat_gate.py` supports tier presets so you can run progressively larger
 Excel-compatibility checks without hand-editing `--include-tag` lists.
 
+The authoritative preset definitions live in `tools/excel-oracle/compat_gate.py`
+as `SMOKE_INCLUDE_TAGS` / `P0_INCLUDE_TAGS`.
+
+Note: include-tag filtering uses **OR semantics** (a case is included if it has
+*any* of the include tags).
+
 ### Smoke (default, CI-friendly)
 
 Runs a small, high-signal slice of the corpus (fast).
