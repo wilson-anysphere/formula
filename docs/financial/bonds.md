@@ -87,6 +87,9 @@ The following should be finite (`is_finite`) and within Excel-like domains:
 - `price` (for `YIELD`): must be `> 0` (or `#NUM!`).
 - `yield` (for `PRICE`/`DURATION`/`MDURATION`): must keep the per-period discount factor positive:
   - Let `d = 1 + yld / f`. Require `d > 0` (otherwise PV is undefined → `#NUM!`).
+  - Excel-style error mapping:
+    - `d == 0` → `#DIV/0!`
+    - `d < 0` → `#NUM!`
 
 ---
 
@@ -310,7 +313,7 @@ Signature (Excel): `PRICE(settlement, maturity, rate, yld, redemption, frequency
 - `N = COUPNUM(...)`
 - `A`, `DSC`, `E` per basis
 - Per-period yield: `k = yld / f`
-- Discount base: `d = 1 + k` (must be `> 0`)
+- Discount base: `d = 1 + k` (must be `> 0`; `d == 0` → `#DIV/0!`, `d < 0` → `#NUM!`)
 - Fractional periods to next coupon: `t0 = DSC / E`
 
 > Note: `t0` is a count of **coupon periods**, not years.
@@ -378,7 +381,10 @@ Yield must keep discount base positive:
 
 - `d(y) = 1 + y / f > 0`
 
-If `d(y) <= 0` at any point in evaluation or derivative, treat as non-evaluable (Newton step fails → `#NUM!`).
+If `d(y) <= 0` at any point in evaluation or derivative, treat as non-evaluable:
+
+- `d(y) == 0` → `#DIV/0!`
+- `d(y) < 0` → `#NUM!`
 
 ### Analytic derivative (recommended)
 
