@@ -50,7 +50,7 @@ function injectWebviewCsp(html: string): string {
       // Ignore.
     }
     try {
-      // If a global is present and configurable, attempt to lock it down to `undefined` so it
+      // If a global is present and configurable, attempt to lock it down to undefined so it
       // can't be re-populated later in the page lifecycle.
       Object.defineProperty(window, key, {
         value: undefined,
