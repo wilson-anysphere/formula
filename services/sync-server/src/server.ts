@@ -1069,6 +1069,8 @@ export function createSyncServer(
       }
 
       if (pathname.startsWith("/internal/")) {
+        res.setHeader("cache-control", "no-store");
+
         if (!config.internalAdminToken) {
           sendJson(res, 404, { error: "not_found" });
           return;
@@ -1090,7 +1092,6 @@ export function createSyncServer(
         }
 
         if (req.method === "GET" && pathname === "/internal/metrics") {
-          res.setHeader("cache-control", "no-store");
           const body = await metrics.metricsText();
           sendText(res, 200, body, metrics.registry.contentType);
           return;
@@ -1111,7 +1112,6 @@ export function createSyncServer(
             .sort((a, b) => b.connections - a.connections)
             .slice(0, 10);
 
-          res.setHeader("cache-control", "no-store");
           sendJson(res, 200, {
             ok: true,
             persistence: {
