@@ -3,7 +3,10 @@ use std::path::Path;
 
 use formula_model::drawings::ImageId;
 use formula_model::{CellRef, CellValue};
-use formula_xlsx::{load_from_bytes, parse_value_metadata_vm_to_rich_value_index_map};
+use formula_xlsx::{
+    extract_embedded_images, load_from_bytes, parse_value_metadata_vm_to_rich_value_index_map,
+    XlsxPackage,
+};
 use zip::ZipArchive;
 
 fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
@@ -43,6 +46,18 @@ fn real_excel_images_in_cell_roundtrip_preserves_richdata_and_loads_media(
     let fixture_path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/xlsx/rich-data/images-in-cell.xlsx");
     let fixture_bytes = std::fs::read(&fixture_path)?;
+
+    // Ensure the embedded-image extractor can resolve the in-cell image for this real Excel file.
+    let pkg = XlsxPackage::from_bytes(&fixture_bytes)?;
+    let embedded = extract_embedded_images(&pkg)?;
+    assert_eq!(embedded.len(), 1, "expected one embedded in-cell image");
+    assert_eq!(embedded[0].sheet_part, "xl/worksheets/sheet1.xml");
+    assert_eq!(embedded[0].cell, CellRef::from_a1("A1")?);
+    assert_eq!(embedded[0].image_target, "xl/media/image1.png");
+    assert_eq!(
+        embedded[0].bytes,
+        zip_part(&fixture_bytes, "xl/media/image1.png")
+    );
 
     let app_xml = String::from_utf8(zip_part(&fixture_bytes, "docProps/app.xml"))?;
     assert!(
