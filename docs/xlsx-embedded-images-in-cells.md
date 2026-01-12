@@ -61,7 +61,7 @@ This schema uses multiple indices; the most important ones are:
 |------:|----------------|---------|-----------------------------|
 | `c/@vm` | `xl/worksheets/sheetN.xml` | Selects a record in `xl/metadata.xml/valueMetadata` | **Ambiguous base** (0- or 1-based). Preserve and resolve via `metadata.xml`. |
 | `rc/@t` | `xl/metadata.xml` (`valueMetadata/bk/rc`) | Index into `metadataTypes` (`XLRICHVALUE`) | Appears **1-based** (`t="1"`) in the Excel-generated fixtures in this repo, but other workbooks/tests have been observed to use **0-based** indexing; treat as ambiguous. |
-| `rc/@v` | `xl/metadata.xml` (`valueMetadata/bk/rc`) | Index into `futureMetadata name="XLRICHVALUE"` `bk` list | Appears **0-based**. |
+| `rc/@v` | `xl/metadata.xml` (`valueMetadata/bk/rc`) | Index into `futureMetadata name="XLRICHVALUE"` `bk` list | Appears **0-based** in the Excel fixtures in this repo; other indexing schemes (including 1-based) may exist in the wild/tests. |
 | `xlrd:rvb/@i` | `xl/metadata.xml` (`futureMetadata/XLRICHVALUE` extension) | Index into `xl/richData/rdrichvalue.xml` `<rv>` list | **0-based** rich value index. |
 | `_rvRel:LocalImageIdentifier` | `xl/richData/rdrichvalue.xml` | Relationship-slot index | The relationship slot index is carried by the `<v>` corresponding to the `_rvRel:LocalImageIdentifier` key in `rdrichvaluestructure.xml` (do not assume it is always the first `<v>`; in the observed `_localImage` structure it is first because of the key order). |
 | `rel/@r:id` | `xl/richData/richValueRel.xml` | Relationship ID string | Resolve via `.rels` by matching `Id="..."` (not by element order). |
