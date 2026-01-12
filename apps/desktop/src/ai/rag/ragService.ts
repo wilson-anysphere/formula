@@ -4,42 +4,19 @@ import { ContextManager } from "../../../../../packages/ai-context/src/contextMa
 import {
   HashEmbedder,
   LocalStorageBinaryStorage,
-  OllamaEmbedder,
-  OpenAIEmbedder,
   workbookFromSpreadsheetApi,
 } from "../../../../../packages/ai-rag/src/index.js";
 
 import { createDesktopRag } from "./index.js";
 
-export type DesktopRagEmbedderConfig =
-  | {
-      type?: "hash";
-      /**
-       * Hash embeddings are deterministic and offline. Dimension controls the vector
-       * size stored in SQLite (higher = more storage, marginally better recall).
-       */
-      dimension?: number;
-    }
-  | {
-      type: "openai";
-      apiKey: string;
-      model: string;
-      baseUrl?: string;
-      /**
-       * Optional override when using uncommon embedding models.
-       * When omitted, known OpenAI embedding models are mapped automatically.
-       */
-      dimension?: number;
-    }
-  | {
-      type: "ollama";
-      model: string;
-      host?: string;
-      /**
-       * Required for SQLite stores (Ollama models vary).
-       */
-      dimension: number;
-    };
+export type DesktopRagEmbedderConfig = {
+  type?: "hash";
+  /**
+   * Hash embeddings are deterministic and offline. Dimension controls the vector
+   * size stored in SQLite (higher = more storage, marginally better recall).
+   */
+  dimension?: number;
+};
 
 export interface DesktopRagServiceOptions {
   documentController: DocumentController;
@@ -95,60 +72,22 @@ export interface DesktopRagService {
   dispose(): Promise<void>;
 }
 
-function openAiEmbeddingDimension(model: string): number | null {
-  // Known OpenAI embedding models (dimension must match the SQLite store).
-  // https://platform.openai.com/docs/guides/embeddings
-  switch (model) {
-    case "text-embedding-3-small":
-      return 1536;
-    case "text-embedding-3-large":
-      return 3072;
-    case "text-embedding-ada-002":
-      return 1536;
-    default:
-      return null;
-  }
-}
-
-function embedderIdentity(config: DesktopRagEmbedderConfig | undefined, dimension: number): string {
-  if (config?.type === "openai") return `openai-${config.model}`;
-  if (config?.type === "ollama") return `ollama-${config.model}`;
+function embedderIdentity(dimension: number): string {
   return dimension === 384 ? "hash" : `hash-${dimension}`;
 }
 
 function storageNamespaceForEmbedder(params: {
   baseNamespace: string;
-  embedderConfig: DesktopRagEmbedderConfig | undefined;
   dimension: number;
 }): string {
   // Preserve the legacy namespace for the default (hash, 384) embedder.
-  const id = embedderIdentity(params.embedderConfig, params.dimension);
+  const id = embedderIdentity(params.dimension);
   if (id === "hash") return params.baseNamespace;
   return `${params.baseNamespace}:${id}`;
 }
 
 function resolveEmbedder(config: DesktopRagEmbedderConfig | undefined): { embedder: any; dimension: number } {
-  if (config?.type === "openai") {
-    const dimension = config.dimension ?? openAiEmbeddingDimension(config.model);
-    if (!dimension) {
-      throw new Error(
-        `Desktop RAG: OpenAI embedder requires a known embedding model dimension (model="${config.model}"). Provide embedder.dimension.`,
-      );
-    }
-    return {
-      embedder: new OpenAIEmbedder({ apiKey: config.apiKey, model: config.model, baseUrl: config.baseUrl }),
-      dimension,
-    };
-  }
-
-  if (config?.type === "ollama") {
-    return {
-      embedder: new OllamaEmbedder({ model: config.model, host: config.host, dimension: config.dimension }),
-      dimension: config.dimension,
-    };
-  }
-
-  const dimension = config?.dimension ?? 384;
+  const dimension = config?.type && config.type !== "hash" ? 384 : (config?.dimension ?? 384);
   return { embedder: new HashEmbedder({ dimension }), dimension };
 }
 
@@ -165,7 +104,6 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
 
   const storageNamespace = storageNamespaceForEmbedder({
     baseNamespace: options.storageNamespace ?? "formula.desktop.rag.sqlite",
-    embedderConfig: options.embedder,
     dimension,
   });
 
