@@ -35,6 +35,19 @@ describe("Tauri capabilities", () => {
 
     const permissions = capability.permissions as unknown[];
 
+    const allowInvoke = permissions.find(
+      (permission) =>
+        Boolean(permission) && typeof permission === "object" && (permission as Record<string, unknown>).identifier === "core:allow-invoke",
+    );
+    expect(allowInvoke).toBeTruthy();
+    const allowedCommands = (allowInvoke as Record<string, unknown>).allow;
+    expect(Array.isArray(allowedCommands)).toBe(true);
+
+    const commands = allowedCommands as unknown[];
+    // The updater restart flow calls `restart_app` when available, falling back to `quit_app`.
+    expect(commands).toContain("restart_app");
+    expect(commands).toContain("quit_app");
+
     expect(permissions).toContain("updater:allow-check");
     expect(permissions).toContain("updater:allow-download");
     expect(permissions).toContain("updater:allow-install");
