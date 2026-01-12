@@ -295,8 +295,20 @@ fn parse_biff8_name_record(
 
 fn builtin_name_to_string(id: u8) -> String {
     match id {
+        // Built-in name ids from [MS-XLS] 2.5.114 (Lbl.chKey when fBuiltin is set).
+        0x00 => "_xlnm.Consolidate_Area".to_string(),
+        0x01 => "_xlnm.Auto_Open".to_string(),
+        0x02 => "_xlnm.Auto_Close".to_string(),
+        0x03 => "_xlnm.Extract".to_string(),
+        0x04 => "_xlnm.Database".to_string(),
+        0x05 => "_xlnm.Criteria".to_string(),
         0x06 => formula_model::XLNM_PRINT_AREA.to_string(),
         0x07 => formula_model::XLNM_PRINT_TITLES.to_string(),
+        0x08 => "_xlnm.Recorder".to_string(),
+        0x09 => "_xlnm.Data_Form".to_string(),
+        0x0A => "_xlnm.Auto_Activate".to_string(),
+        0x0B => "_xlnm.Auto_Deactivate".to_string(),
+        0x0C => "_xlnm.Sheet_Title".to_string(),
         0x0D => formula_model::XLNM_FILTER_DATABASE.to_string(),
         other => {
             log::warn!("unsupported BIFF8 built-in NAME id 0x{other:02X}");
@@ -1424,6 +1436,37 @@ mod tests {
         assert_eq!(parsed.names[3].name, "_xlnm.Builtin_0xFF");
         assert_eq!(parsed.names[3].builtin_id, Some(0xFF));
 
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+    }
+
+    #[test]
+    fn maps_common_builtin_name_ids() {
+        // Auto_Open (0x01) should map to its Excel-visible name.
+        let id = 0x01u8;
+        let expected = "_xlnm.Auto_Open";
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&NAME_FLAG_BUILTIN.to_le_bytes());
+        header.push(b'X'); // chKey (keyboard shortcut; should not affect built-in id)
+        header.push(1); // cch (built-in id length)
+        header.extend_from_slice(&0u16.to_le_bytes()); // cce (empty formula)
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        header.extend_from_slice(&[0, 0, 0, 0]); // no optional strings
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, vec![id]].concat()),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed =
+            parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
+        assert_eq!(parsed.names.len(), 1);
+        assert_eq!(parsed.names[0].name, expected);
+        assert_eq!(parsed.names[0].builtin_id, Some(id));
+        assert_eq!(parsed.names[0].refers_to, "");
         assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
 
