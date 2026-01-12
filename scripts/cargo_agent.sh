@@ -152,6 +152,10 @@ if [[ -z "${RAYON_NUM_THREADS:-}" ]]; then
   if [[ -z "${rayon_threads}" ]]; then
     rayon_threads="${jobs}"
   fi
+  if ! [[ "${rayon_threads}" =~ ^[0-9]+$ ]] || [[ "${rayon_threads}" -lt 1 ]]; then
+    echo "cargo_agent: invalid FORMULA_RAYON_NUM_THREADS=${rayon_threads} (expected integer >= 1)" >&2
+    exit 2
+  fi
   export RAYON_NUM_THREADS="${rayon_threads}"
 fi
 
@@ -378,6 +382,12 @@ fi
 # unavailable") failures on multi-agent hosts when multiple test binaries run concurrently.
 if [[ "${subcommand}" == "test" && -z "${RUST_TEST_THREADS:-}" ]]; then
   rust_test_threads="${FORMULA_RUST_TEST_THREADS:-}"
+  if [[ -n "${rust_test_threads}" ]]; then
+    if ! [[ "${rust_test_threads}" =~ ^[0-9]+$ ]] || [[ "${rust_test_threads}" -lt 1 ]]; then
+      echo "cargo_agent: invalid FORMULA_RUST_TEST_THREADS=${rust_test_threads} (expected integer >= 1)" >&2
+      exit 2
+    fi
+  fi
   if [[ -z "${rust_test_threads}" ]]; then
     rust_test_threads=$(( nproc_val < 16 ? nproc_val : 16 ))
 

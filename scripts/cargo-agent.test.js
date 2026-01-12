@@ -191,3 +191,45 @@ test(
     assert.ok(stderr.includes('rayon=1'), stderr);
   },
 );
+
+test(
+  'cargo_agent rejects invalid FORMULA_RAYON_NUM_THREADS',
+  { skip: !hasBash || !hasCargo },
+  () => {
+    const proc = spawnSync(
+      'bash',
+      [
+        '-lc',
+        'unset RAYON_NUM_THREADS && export FORMULA_RAYON_NUM_THREADS=not-a-number && bash scripts/cargo_agent.sh check -h',
+      ],
+      { encoding: 'utf8', cwd: repoRoot },
+    );
+    if (proc.error) throw proc.error;
+    assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_RAYON_NUM_THREADS');
+    assert.ok(
+      proc.stderr.includes('invalid FORMULA_RAYON_NUM_THREADS'),
+      `expected stderr to mention invalid FORMULA_RAYON_NUM_THREADS, got:\n${proc.stderr}`,
+    );
+  },
+);
+
+test(
+  'cargo_agent rejects invalid FORMULA_RUST_TEST_THREADS',
+  { skip: !hasBash || !hasCargo },
+  () => {
+    const proc = spawnSync(
+      'bash',
+      [
+        '-lc',
+        'unset RUST_TEST_THREADS FORMULA_RUST_TEST_THREADS && export FORMULA_RUST_TEST_THREADS=0 && bash scripts/cargo_agent.sh test -h',
+      ],
+      { encoding: 'utf8', cwd: repoRoot },
+    );
+    if (proc.error) throw proc.error;
+    assert.notEqual(proc.status, 0, 'expected non-zero exit for invalid FORMULA_RUST_TEST_THREADS');
+    assert.ok(
+      proc.stderr.includes('invalid FORMULA_RUST_TEST_THREADS'),
+      `expected stderr to mention invalid FORMULA_RUST_TEST_THREADS, got:\n${proc.stderr}`,
+    );
+  },
+);
