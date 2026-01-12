@@ -2428,6 +2428,105 @@ fn bytecode_backend_inlines_constant_defined_names() {
 }
 
 #[test]
+fn bytecode_backend_inlines_constant_defined_names_case_insensitive_and_recompiles() {
+    // Exercise case-insensitive name matching and ensure bytecode programs are recompiled when
+    // a constant defined name changes (since the constant is inlined into the bytecode AST).
+    let mut engine_bc = Engine::new();
+    engine_bc
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(2.0)),
+        )
+        .unwrap();
+    engine_bc.set_cell_formula("Sheet1", "A1", "=x+1").unwrap();
+    assert_eq!(engine_bc.bytecode_program_count(), 1);
+    engine_bc.recalculate_single_threaded();
+    assert_eq!(engine_bc.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
+
+    let mut engine_ast = Engine::new();
+    engine_ast.set_bytecode_enabled(false);
+    engine_ast
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(2.0)),
+        )
+        .unwrap();
+    engine_ast.set_cell_formula("Sheet1", "A1", "=x+1").unwrap();
+    engine_ast.recalculate_single_threaded();
+    assert_eq!(
+        engine_bc.get_cell_value("Sheet1", "A1"),
+        engine_ast.get_cell_value("Sheet1", "A1")
+    );
+
+    engine_bc
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(10.0)),
+        )
+        .unwrap();
+    assert!(engine_bc.is_dirty("Sheet1", "A1"));
+    engine_bc.recalculate_single_threaded();
+    assert_eq!(engine_bc.get_cell_value("Sheet1", "A1"), Value::Number(11.0));
+    assert!(
+        engine_bc.bytecode_program_count() >= 2,
+        "expected name change to trigger bytecode recompilation"
+    );
+
+    engine_ast
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(10.0)),
+        )
+        .unwrap();
+    engine_ast.recalculate_single_threaded();
+    assert_eq!(
+        engine_bc.get_cell_value("Sheet1", "A1"),
+        engine_ast.get_cell_value("Sheet1", "A1")
+    );
+}
+
+#[test]
+fn bytecode_backend_inlines_sheet_scoped_constant_defined_names() {
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(1.0)),
+        )
+        .unwrap();
+    engine
+        .define_name(
+            "X",
+            NameScope::Sheet("Sheet1"),
+            NameDefinition::Constant(Value::Number(2.0)),
+        )
+        .unwrap();
+    engine
+        .define_name(
+            "X",
+            NameScope::Sheet("Sheet2"),
+            NameDefinition::Constant(Value::Number(3.0)),
+        )
+        .unwrap();
+
+    engine.set_cell_formula("Sheet1", "A1", "=x+1").unwrap();
+    engine.set_cell_formula("Sheet2", "A1", "=X+1").unwrap();
+
+    // The sheet-scoped names should be resolved and inlined to different literals, producing
+    // distinct bytecode programs.
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet2", "A1"), Value::Number(4.0));
+}
+
+#[test]
 fn bytecode_backend_inlines_constant_defined_name_error_values() {
     let mut engine = Engine::new();
     engine
