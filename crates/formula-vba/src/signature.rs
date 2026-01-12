@@ -7,9 +7,6 @@ use crate::{
     project_digest::{compute_vba_project_digest, compute_vba_project_digest_v3, DigestAlg},
     OleError, OleFile,
 };
-
-#[cfg(not(target_arch = "wasm32"))]
-use crate::project_digest::compute_vba_project_digest;
 use md5::{Digest as _, Md5};
 
 /// Identifies which `\x05DigitalSignature*` stream/storage variant a signature was loaded from.
