@@ -75,11 +75,10 @@ In Chromium/WebView2, that requires a **cross-origin isolated** browsing context
 How this is (currently) handled in the repo:
 
 - **Dev / preview (Vite):** `apps/desktop/vite.config.ts` sets COOP/COEP headers on dev/preview responses.
-- **Packaged Tauri builds:** `apps/desktop/src-tauri/src/main.rs` wraps Tauri’s built-in asset protocol handler
-  (`tauri://...`) via `register_uri_scheme_protocol("tauri", ...)` and injects COOP/COEP headers into the
-  response. (This mirrors the headers used by the Vite dev server.)
-  - As a backstop, the UI logs an error and shows a long-lived toast in production if isolation is missing (see
-    `warnIfMissingCrossOriginIsolationInTauriProd()` in `apps/desktop/src/main.ts`).
+- **Packaged Tauri builds:** COOP/COEP are set via `app.security.headers` in `apps/desktop/src-tauri/tauri.conf.json`,
+  which Tauri applies to its built-in `tauri://…` protocol responses.
+  If this is missing in a production desktop build, the UI logs an error and shows a long-lived toast (see
+  `warnIfMissingCrossOriginIsolationInTauriProd()` in `apps/desktop/src/main.ts`).
 
 Quick verification guidance lives in `apps/desktop/README.md` (“Production/Tauri: `crossOriginIsolated` check”),
 including an automated smoke check:
@@ -147,7 +146,6 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
   - `tauri_plugin_global_shortcut` (registers accelerators + emits app events)
   - `tauri_plugin_updater` (update checks)
   - `tauri_plugin_single_instance` (forward argv/cwd from subsequent launches into the running instance)
-- A production-only wrapper around Tauri’s built-in asset protocol to inject COOP/COEP headers for cross-origin isolation.
 - `invoke_handler(...)` mapping commands in `commands.rs`
 - window/tray event forwarding to the frontend via `app.emit(...)` / `window.emit(...)`
 

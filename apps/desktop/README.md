@@ -16,8 +16,8 @@ This app’s Vite dev/preview servers are configured to enable that:
 - `Cross-Origin-Opener-Policy: same-origin`
 - `Cross-Origin-Embedder-Policy: require-corp`
 
-For packaged (production) Tauri builds, the same headers must also be added to the
-Tauri asset/custom protocol responses — see `docs/11-desktop-shell.md` (cross-origin isolation section).
+For packaged (production) Tauri builds, the same headers are configured via
+`app.security.headers` in `apps/desktop/src-tauri/tauri.conf.json` (see `docs/11-desktop-shell.md`).
 
 Additionally, Pyodide assets are self-hosted under the same origin at:
 
