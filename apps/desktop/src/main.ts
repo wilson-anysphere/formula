@@ -446,6 +446,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "home.alignment.alignLeft": formatState.align === "left",
       "home.alignment.center": formatState.align === "center",
       "home.alignment.alignRight": formatState.align === "right",
+      "view.show.showFormulas": app.getShowFormulas(),
+      "view.show.performanceStats": Boolean((app.getGridPerfStats() as any)?.enabled),
     };
 
     const nextKey = JSON.stringify(pressedOverrides);
@@ -457,6 +459,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
 
 app.subscribeSelection(() => scheduleRibbonSelectionFormatStateUpdate());
 app.getDocument().on("change", () => scheduleRibbonSelectionFormatStateUpdate());
+window.addEventListener("formula:view-changed", () => scheduleRibbonSelectionFormatStateUpdate());
 scheduleRibbonSelectionFormatStateUpdate();
 
 openComments.addEventListener("click", () => app.toggleCommentsPanel());
@@ -2709,6 +2712,14 @@ async function handleRibbonExportPdf(): Promise<void> {
 mountRibbon(ribbonRoot, {
   onToggle: (commandId, pressed) => {
     switch (commandId) {
+      case "view.show.showFormulas":
+        app.toggleShowFormulas();
+        app.focus();
+        return;
+      case "view.show.performanceStats":
+        app.setGridPerfStatsEnabled(pressed);
+        app.focus();
+        return;
       case "home.font.bold":
         applyToSelection("Bold", (sheetId, ranges) => toggleBold(app.getDocument(), sheetId, ranges, { next: pressed }));
         return;

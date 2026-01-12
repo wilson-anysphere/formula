@@ -91,6 +91,10 @@
   min-height: 62px;
 }
 
+.ribbon__tabpanel[hidden] {
+  display: none;
+}
+
 .ribbon-group {
   flex: 0 0 auto;
   display: flex;

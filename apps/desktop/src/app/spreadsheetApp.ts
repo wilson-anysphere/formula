@@ -1011,6 +1011,13 @@ export class SpreadsheetApp {
     this.editState = this.isEditing();
   }
 
+  private dispatchViewChanged(): void {
+    // Used by the Ribbon to sync pressed state for view toggles (e.g. when toggled
+    // via keyboard shortcuts).
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("formula:view-changed"));
+  }
+
   destroy(): void {
     this.disposed = true;
     this.domAbort.abort();
@@ -1253,6 +1260,22 @@ export class SpreadsheetApp {
     this.sharedGrid.scrollTo(scroll.x, scroll.y);
   }
 
+  getShowFormulas(): boolean {
+    return this.showFormulas;
+  }
+
+  setShowFormulas(enabled: boolean): void {
+    if (enabled === this.showFormulas) return;
+    this.showFormulas = enabled;
+    this.sharedProvider?.invalidateAll();
+    this.refresh();
+    this.dispatchViewChanged();
+  }
+
+  toggleShowFormulas(): void {
+    this.setShowFormulas(!this.showFormulas);
+  }
+
   /**
    * Test-only helper: returns the viewport-relative rect for a cell address.
    */
@@ -1281,6 +1304,7 @@ export class SpreadsheetApp {
 
   setGridPerfStatsEnabled(enabled: boolean): void {
     this.sharedGrid?.setPerfStatsEnabled(enabled);
+    this.dispatchViewChanged();
   }
 
   getFrozen(): { frozenRows: number; frozenCols: number } {
@@ -3371,9 +3395,7 @@ export class SpreadsheetApp {
     }
 
     e.preventDefault();
-    this.showFormulas = !this.showFormulas;
-    this.sharedProvider?.invalidateAll();
-    this.refresh();
+    this.toggleShowFormulas();
     return true;
   }
 
