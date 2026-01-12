@@ -1063,8 +1063,9 @@ impl AppState {
                 }
             }
 
-            self.macro_host.sync_with_workbook(workbook);
-            self.macro_host.set_runtime_context(new_ctx);
+            let macro_host = &mut self.macro_host;
+            macro_host.sync_with_workbook(workbook);
+            macro_host.set_runtime_context(new_ctx);
         }
 
         // Sheet order affects some Excel semantics (e.g. 3D references like `Sheet1:Sheet3!A1`).

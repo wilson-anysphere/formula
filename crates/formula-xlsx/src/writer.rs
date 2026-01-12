@@ -6,6 +6,7 @@ use formula_model::{
     normalize_formula_text, Cell, CellRef, CellValue, DateSystem, DefinedNameScope, Hyperlink,
     HyperlinkTarget, Outline, Range, SheetVisibility, Workbook, Worksheet,
 };
+use formula_fs::{atomic_write_with_path, AtomicWriteError};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{Seek, Write};
@@ -25,14 +26,20 @@ pub enum XlsxWriteError {
 
 pub fn write_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), XlsxWriteError> {
     let path = path.as_ref();
-    let file = File::create(path)?;
     let ext = path
         .extension()
         .and_then(|s| s.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
     let kind = WorkbookKind::from_extension(&ext).unwrap_or(WorkbookKind::Workbook);
-    write_workbook_to_writer_with_kind(workbook, file, kind)
+    atomic_write_with_path(path, |tmp_path| {
+        let file = File::create(tmp_path)?;
+        write_workbook_to_writer_with_kind(workbook, file, kind)
+    })
+    .map_err(|err| match err {
+        AtomicWriteError::Io(err) => XlsxWriteError::Io(err),
+        AtomicWriteError::Writer(err) => err,
+    })
 }
 
 pub fn write_workbook_to_writer<W: Write + Seek>(

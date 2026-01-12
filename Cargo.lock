@@ -2288,6 +2288,7 @@ dependencies = [
  "formula-columnar",
  "formula-engine",
  "formula-format",
+ "formula-fs",
  "formula-model",
  "formula-vba",
  "insta",
