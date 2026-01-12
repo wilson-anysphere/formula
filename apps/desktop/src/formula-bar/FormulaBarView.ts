@@ -317,17 +317,35 @@ export class FormulaBarView {
 
     if (e.key === "F4" && this.model.draft.trim().startsWith("=")) {
       e.preventDefault();
-      const start = this.textarea.selectionStart ?? this.textarea.value.length;
-      const end = this.textarea.selectionEnd ?? this.textarea.value.length;
-      const toggled = toggleA1AbsoluteAtCursor(this.textarea.value, start, end);
-      if (toggled) {
-        this.textarea.value = toggled.text;
-        this.textarea.setSelectionRange(toggled.cursorStart, toggled.cursorEnd);
-        this.model.updateDraft(toggled.text, toggled.cursorStart, toggled.cursorEnd);
-        this.#selectedReferenceIndex = this.#inferSelectedReferenceIndex(toggled.cursorStart, toggled.cursorEnd);
-        this.#render({ preserveTextareaValue: true });
-        this.#emitOverlays();
-      }
+
+      const prevText = this.textarea.value;
+      const cursorStart = this.textarea.selectionStart ?? prevText.length;
+      const cursorEnd = this.textarea.selectionEnd ?? prevText.length;
+
+      // Ensure model-derived reference metadata is current for the F4 operation
+      // (the selection may have changed without triggering our keyup/select listeners yet).
+      this.model.updateDraft(prevText, cursorStart, cursorEnd);
+
+      const activeIndex = this.model.activeReferenceIndex();
+      const active = activeIndex == null ? null : this.model.coloredReferences()[activeIndex] ?? null;
+      if (!active) return;
+
+      const toggled = toggleA1AbsoluteAtCursor(prevText, cursorStart, cursorEnd);
+      if (!toggled) return;
+
+      // Excel UX: after toggling, keep the full reference token selected so repeated
+      // F4 presses continue cycling the same reference.
+      const delta = toggled.text.length - prevText.length;
+      const oldTokenLen = active.end - active.start;
+      const nextStart = active.start;
+      const nextEnd = Math.max(nextStart, Math.min(nextStart + oldTokenLen + delta, toggled.text.length));
+
+      this.textarea.value = toggled.text;
+      this.textarea.setSelectionRange(nextStart, nextEnd);
+      this.model.updateDraft(toggled.text, nextStart, nextEnd);
+      this.#selectedReferenceIndex = activeIndex;
+      this.#render({ preserveTextareaValue: true });
+      this.#emitOverlays();
       return;
     }
 
