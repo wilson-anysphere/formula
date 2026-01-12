@@ -105,6 +105,9 @@ Tauri v2 permissions are granted via **capabilities**:
 - `apps/desktop/src-tauri/capabilities/*.json`
 - the main window is labeled `main` and opts into the `main` capability via `app.windows[].capabilities: ["main"]` in `apps/desktop/src-tauri/tauri.conf.json`
 
+Note: this repo’s current Tauri config schema does **not** support window-level opt-in via
+`app.windows[].capabilities`. Scope capabilities using the capability file’s `"windows"` patterns.
+
 Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the full allowlists):
 
 ```jsonc
