@@ -100,4 +100,36 @@ describe("LayoutController persistence", () => {
     expect(parsed.splitView.panes.secondary.scrollX).toBe(7);
     expect(parsed.splitView.panes.secondary.scrollY).toBe(8);
   });
+
+  test("deleteWorkspace for a different workspace persists pending ephemeral updates before reload", () => {
+    const storage = new MemoryStorage();
+    const keyPrefix = "test.layout";
+    const workspaceManager = new LayoutWorkspaceManager({ storage, keyPrefix });
+    const workbookId = "workbook-4";
+    const controller = new LayoutController({ workbookId, workspaceManager });
+
+    const defaultKey = `${keyPrefix}.workbook.${encodeURIComponent(workbookId)}.v1`;
+
+    // Seed initial persisted state in the default workspace.
+    controller.setSplitPaneScroll("secondary", { scrollX: 0, scrollY: 0 });
+    const persistedBefore = storage.getItem(defaultKey);
+    expect(persistedBefore).not.toBeNull();
+
+    // Create a second workspace we can delete (without switching away from default).
+    controller.saveWorkspace("analysis");
+
+    // Apply an ephemeral update to the default workspace.
+    controller.setSplitPaneScroll("secondary", { scrollX: 9, scrollY: 10 }, { persist: false });
+    expect(storage.getItem(defaultKey)).toBe(persistedBefore);
+
+    // Deleting a non-active workspace triggers a reload; ensure we flush pending updates first.
+    controller.deleteWorkspace("analysis");
+
+    const after = storage.getItem(defaultKey);
+    expect(after).not.toBeNull();
+    expect(after).not.toBe(persistedBefore);
+    const parsed = JSON.parse(after!);
+    expect(parsed.splitView.panes.secondary.scrollX).toBe(9);
+    expect(parsed.splitView.panes.secondary.scrollY).toBe(10);
+  });
 });
