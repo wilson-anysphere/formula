@@ -454,6 +454,34 @@ fn bytecode_backend_let_shadows_defined_name_constants() {
 }
 
 #[test]
+fn bytecode_backend_let_shadows_defined_name_static_refs() {
+    // Defined names that point at static references (cell/range) are inlined during bytecode
+    // compilation to improve eligibility. LET locals must still shadow those defined names.
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 100.0).unwrap();
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!$A$1".to_string()),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=LET(x, 1, X+1)")
+        .unwrap();
+
+    // This formula should still be bytecode-eligible: `X` inside the LET body refers to the local
+    // binding (not the defined name), so inlining the defined name must not rewrite it.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(2.0));
+    assert_engine_matches_ast(&engine, "=LET(x, 1, X+1)", "B1");
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_let_rebinding_same_name() {
     let mut engine = Engine::new();
 
