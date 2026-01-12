@@ -15,6 +15,14 @@ pub use formula_xlsx as xlsx;
 
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 const PARQUET_MAGIC: [u8; 4] = *b"PAR1";
+// BIFF record ids for legacy `.xls` encryption detection.
+//
+// Presence of `FILEPASS` in the workbook globals substream indicates the workbook stream is
+// encrypted/password-protected.
+const BIFF_RECORD_FILEPASS: u16 = 0x002F;
+const BIFF_RECORD_EOF: u16 = 0x000A;
+const BIFF_RECORD_BOF_BIFF8: u16 = 0x0809;
+const BIFF_RECORD_BOF_BIFF5: u16 = 0x0009;
 
 // Maximum bytes to inspect for text/CSV sniffing.
 const TEXT_SNIFF_LEN: usize = 16 * 1024;
@@ -267,6 +275,11 @@ pub fn detect_workbook_format(path: impl AsRef<Path>) -> Result<WorkbookFormat, 
                     path: path.to_path_buf(),
                 });
             }
+            if ole_workbook_has_biff_filepass_record(&mut ole) {
+                return Err(Error::EncryptedWorkbook {
+                    path: path.to_path_buf(),
+                });
+            }
         }
         return Ok(WorkbookFormat::Xls);
     }
@@ -410,6 +423,11 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
         if let Ok(mut ole) = cfb::CompoundFile::open(file) {
             if stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage")
             {
+                return Err(Error::EncryptedWorkbook {
+                    path: path.to_path_buf(),
+                });
+            }
+            if ole_workbook_has_biff_filepass_record(&mut ole) {
                 return Err(Error::EncryptedWorkbook {
                     path: path.to_path_buf(),
                 });
@@ -607,6 +625,77 @@ fn stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
     }
     let with_leading_slash = format!("/{name}");
     ole.open_stream(&with_leading_slash).is_ok()
+}
+
+fn ole_workbook_has_biff_filepass_record<R: std::io::Read + std::io::Write + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+) -> bool {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+
+    let mut stream = None;
+    for candidate in ["Workbook", "/Workbook", "Book", "/Book"] {
+        if let Ok(s) = ole.open_stream(candidate) {
+            stream = Some(s);
+            break;
+        }
+    }
+    let mut stream = match stream {
+        Some(s) => s,
+        None => return false,
+    };
+
+    // Best-effort scan over BIFF records in the workbook globals substream.
+    //
+    // This is intentionally minimal and defensive:
+    // - stop at the first `EOF`
+    // - stop at the next `BOF` after the first record (indicates the next substream; some truncated
+    //   files omit the expected `EOF`)
+    // - stop after a small byte budget to avoid scanning huge streams during format detection
+    let mut first_record = true;
+    let mut scanned: usize = 0;
+    const MAX_SCAN_BYTES: usize = 4 * 1024 * 1024; // 4MiB should comfortably cover workbook globals headers
+
+    loop {
+        let mut header = [0u8; 4];
+        if stream.read_exact(&mut header).is_err() {
+            return false;
+        }
+        scanned = scanned.saturating_add(4);
+
+        let record_id = u16::from_le_bytes([header[0], header[1]]);
+        let len = u16::from_le_bytes([header[2], header[3]]) as usize;
+
+        if record_id == BIFF_RECORD_FILEPASS {
+            return true;
+        }
+        if record_id == BIFF_RECORD_EOF {
+            break;
+        }
+        if !first_record && matches!(record_id, BIFF_RECORD_BOF_BIFF8 | BIFF_RECORD_BOF_BIFF5) {
+            break;
+        }
+        first_record = false;
+
+        // Skip record payload bytes.
+        if stream.seek(SeekFrom::Current(len as i64)).is_err() {
+            // Fallback when seeking isn't supported: read + discard.
+            let mut remaining = len;
+            let mut buf = [0u8; 4096];
+            while remaining > 0 {
+                let to_read = remaining.min(buf.len());
+                if stream.read_exact(&mut buf[..to_read]).is_err() {
+                    return false;
+                }
+                remaining -= to_read;
+            }
+        }
+        scanned = scanned.saturating_add(len);
+        if scanned >= MAX_SCAN_BYTES {
+            break;
+        }
+    }
+
+    false
 }
 
 /// Open a spreadsheet workbook based on file extension.

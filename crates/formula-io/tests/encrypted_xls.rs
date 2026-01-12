@@ -1,6 +1,6 @@
 use std::io::{Cursor, Write};
 
-use formula_io::{open_workbook, open_workbook_model, Error};
+use formula_io::{detect_workbook_format, open_workbook, open_workbook_model, Error};
 
 fn record(record_id: u16, payload: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(4 + payload.len());
@@ -48,6 +48,12 @@ fn errors_on_encrypted_xls_filepass() {
         let path = tmp.path().join(filename);
         std::fs::write(&path, &bytes).expect("write encrypted xls fixture");
 
+        let err = detect_workbook_format(&path).expect_err("expected encrypted workbook to error");
+        assert!(
+            matches!(err, Error::EncryptedWorkbook { .. }),
+            "expected Error::EncryptedWorkbook, got {err:?}"
+        );
+
         let err = open_workbook(&path).expect_err("expected encrypted workbook to error");
         assert!(
             matches!(err, Error::EncryptedWorkbook { .. }),
@@ -66,4 +72,3 @@ fn errors_on_encrypted_xls_filepass() {
         );
     }
 }
-
