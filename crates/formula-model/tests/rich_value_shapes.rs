@@ -161,6 +161,31 @@ fn record_json_without_display_value_deserializes_and_uses_display_field_for_dis
 }
 
 #[test]
+fn record_display_field_is_case_insensitive() {
+    let json = r#"
+    {
+      "type": "record",
+      "value": {
+        "fields": {
+          "Name": { "type": "string", "value": "Ada" }
+        },
+        "displayField": "name"
+      }
+    }
+    "#;
+
+    let value: CellValue = serde_json::from_str(json).unwrap();
+    let options = FormatOptions::default();
+    let display = format_cell_display(&value, None, &options);
+    assert_eq!(display.text, "Ada");
+
+    match &value {
+        CellValue::Record(record) => assert_eq!(record.to_string(), "Ada"),
+        other => panic!("expected record, got {other:?}"),
+    }
+}
+
+#[test]
 fn record_json_display_field_can_point_to_entity() {
     let json = r#"
     {

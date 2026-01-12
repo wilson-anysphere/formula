@@ -6,6 +6,24 @@ use crate::{CellRef, ErrorValue};
 use std::collections::BTreeMap;
 use std::fmt;
 
+fn eq_case_insensitive(a: &str, b: &str) -> bool {
+    if a.is_ascii() && b.is_ascii() {
+        return a.eq_ignore_ascii_case(b);
+    }
+    a.chars()
+        .flat_map(|c| c.to_uppercase())
+        .eq(b.chars().flat_map(|c| c.to_uppercase()))
+}
+
+fn map_get_case_insensitive<'a, V>(map: &'a BTreeMap<String, V>, key: &str) -> Option<&'a V> {
+    if let Some(value) = map.get(key) {
+        return Some(value);
+    }
+    map.iter()
+        .find(|(k, _)| eq_case_insensitive(k, key))
+        .map(|(_, v)| v)
+}
+
 /// Versioned, JSON-friendly representation of a cell value.
 ///
 /// The enum uses an explicit `{type, value}` tagged layout for stable IPC.
@@ -211,9 +229,13 @@ impl RecordValue {
         self
     }
 
+    pub(crate) fn get_field_case_insensitive(&self, field: &str) -> Option<&CellValue> {
+        map_get_case_insensitive(&self.fields, field)
+    }
+
     fn display_text(&self) -> Option<String> {
         let field = self.display_field.as_deref()?;
-        let value = self.fields.get(field)?;
+        let value = self.get_field_case_insensitive(field)?;
         match value {
             CellValue::Empty => Some(String::new()),
             CellValue::String(s) => Some(s.clone()),
@@ -393,6 +415,19 @@ mod tests {
         }))
         .expect("deserialize record");
         assert_eq!(record.display_field.as_deref(), Some("Name"));
+        assert_eq!(record.to_string(), "Alice");
+    }
+
+    #[test]
+    fn record_display_field_matches_case_insensitively() {
+        let record: RecordValue = serde_json::from_value(json!({
+            "displayField": "name",
+            "fields": {
+                "Name": { "type": "string", "value": "Alice" }
+            }
+        }))
+        .expect("deserialize record");
+        assert_eq!(record.display_field.as_deref(), Some("name"));
         assert_eq!(record.to_string(), "Alice");
     }
 }

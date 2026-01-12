@@ -32,7 +32,7 @@ pub fn format_cell_display(
             let display = record
                 .display_field
                 .as_deref()
-                .and_then(|field| record.fields.get(field))
+                .and_then(|field| record.get_field_case_insensitive(field))
                 .and_then(|value| match value {
                     CellValue::Empty => Some(""),
                     CellValue::String(s) => Some(s.as_str()),
