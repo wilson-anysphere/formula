@@ -107,12 +107,12 @@ This document tracks every Excel feature and our implementation status. Features
 | ADDRESS | ⬜ | |
 | AREAS | ⬜ | |
 | CHOOSE | ✅ | Supports arrays and range unions |
-| CHOOSECOLS | ⬜ | Dynamic array |
-| CHOOSEROWS | ⬜ | Dynamic array |
+| CHOOSECOLS | ✅ | Dynamic array |
+| CHOOSEROWS | ✅ | Dynamic array |
 | COLUMN | ⬜ | |
 | COLUMNS | ⬜ | |
-| DROP | ⬜ | Dynamic array |
-| EXPAND | ⬜ | Dynamic array |
+| DROP | ✅ | Dynamic array |
+| EXPAND | ✅ | Dynamic array |
 | FILTER | ⬜ | Dynamic array, critical |
 | FORMULATEXT | ⬜ | |
 | GETPIVOTDATA | ✅ | MVP: supports tabular pivot outputs (limited layouts) |
@@ -129,7 +129,7 @@ This document tracks every Excel feature and our implementation status. Features
 | RTD | ⬜ | Real-time data |
 | SORT | ⬜ | Dynamic array |
 | SORTBY | ⬜ | Dynamic array |
-| TAKE | ⬜ | Dynamic array |
+| TAKE | ✅ | Dynamic array |
 | TOCOL | ⬜ | Dynamic array |
 | TOROW | ⬜ | Dynamic array |
 | TRANSPOSE | ⬜ | |
