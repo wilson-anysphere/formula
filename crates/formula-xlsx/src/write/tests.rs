@@ -122,6 +122,38 @@ fn ensure_content_types_default_idempotent() {
 }
 
 #[test]
+fn ensure_content_types_default_noops_when_content_types_part_missing() {
+    let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    ensure_content_types_default(&mut parts, "png", "image/png").expect("no-op");
+    assert!(
+        !parts.contains_key("[Content_Types].xml"),
+        "helper must not synthesize [Content_Types].xml when missing"
+    );
+}
+
+#[test]
+fn ensure_content_types_default_does_not_false_positive_on_extension_substrings() {
+    let ct_xml = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+        r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">"#,
+        r#"<Default Extension="xpng" ContentType="application/x-xpng"/>"#,
+        r#"</Types>"#
+    );
+
+    let mut parts = BTreeMap::new();
+    parts.insert("[Content_Types].xml".to_string(), ct_xml.as_bytes().to_vec());
+
+    ensure_content_types_default(&mut parts, "png", "image/png").expect("insert png default");
+
+    let updated = std::str::from_utf8(parts.get("[Content_Types].xml").unwrap()).unwrap();
+    assert!(
+        updated.contains(r#"<Default Extension="png" ContentType="image/png"/>"#),
+        "expected png default entry to be inserted when only xpng exists"
+    );
+    assert_eq!(updated.matches(r#"Extension="png""#).count(), 1);
+}
+
+#[test]
 fn ensure_content_types_default_preserves_prefix_only_content_types() {
     let ct_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
