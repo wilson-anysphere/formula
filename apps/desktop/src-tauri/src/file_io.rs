@@ -263,6 +263,9 @@ pub struct Workbook {
     /// re-open the source package and write back using `formula-xlsb`'s lossless OPC writer.
     pub origin_xlsb_path: Option<String>,
     pub vba_project_bin: Option<Vec<u8>>,
+    /// Optional VBA project signature payload stored as a separate OPC part
+    /// (`xl/vbaProjectSignature.bin`) in some macro-enabled workbooks.
+    pub vba_project_signature_bin: Option<Vec<u8>>,
     /// Stable identifier used for macro trust decisions (hash of workbook identity + `vbaProject.bin`).
     pub macro_fingerprint: Option<String>,
     pub preserved_drawing_parts: Option<PreservedDrawingParts>,
@@ -300,6 +303,7 @@ impl Workbook {
             power_query_xml: None,
             origin_xlsb_path: None,
             vba_project_bin: None,
+            vba_project_signature_bin: None,
             macro_fingerprint: None,
             preserved_drawing_parts: None,
             preserved_pivot_parts: None,
@@ -557,6 +561,7 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
         power_query_xml: None,
         origin_xlsb_path: None,
         vba_project_bin: None,
+        vba_project_signature_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
         preserved_pivot_parts: None,
@@ -578,6 +583,12 @@ fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
     out.vba_project_bin = formula_xlsx::read_part_from_reader(
         Cursor::new(origin_xlsx_bytes.as_ref()),
         "xl/vbaProject.bin",
+    )
+    .ok()
+    .flatten();
+    out.vba_project_signature_bin = formula_xlsx::read_part_from_reader(
+        Cursor::new(origin_xlsx_bytes.as_ref()),
+        "xl/vbaProjectSignature.bin",
     )
     .ok()
     .flatten();
@@ -690,6 +701,7 @@ fn read_xls_blocking(path: &Path) -> anyhow::Result<Workbook> {
         power_query_xml: None,
         origin_xlsb_path: None,
         vba_project_bin: None,
+        vba_project_signature_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
         preserved_pivot_parts: None,
@@ -904,6 +916,7 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         power_query_xml: None,
         origin_xlsb_path: None,
         vba_project_bin: None,
+        vba_project_signature_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
         preserved_pivot_parts: None,
@@ -1159,6 +1172,7 @@ pub fn read_csv_blocking(path: &Path) -> anyhow::Result<Workbook> {
         power_query_xml: None,
         origin_xlsb_path: None,
         vba_project_bin: None,
+        vba_project_signature_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
         preserved_pivot_parts: None,
@@ -1196,6 +1210,7 @@ pub fn read_parquet_blocking(path: &Path) -> anyhow::Result<Workbook> {
         power_query_xml: None,
         origin_xlsb_path: None,
         vba_project_bin: None,
+        vba_project_signature_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
         preserved_pivot_parts: None,
@@ -1232,6 +1247,7 @@ fn read_xlsb_blocking(path: &Path) -> anyhow::Result<Workbook> {
         power_query_xml: None,
         origin_xlsb_path: Some(path.to_string_lossy().to_string()),
         vba_project_bin: None,
+        vba_project_signature_bin: None,
         macro_fingerprint: None,
         preserved_drawing_parts: None,
         preserved_pivot_parts: None,
@@ -1908,6 +1924,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         && extension
             .as_deref()
             .is_some_and(|ext| is_macro_enabled_xlsx_extension(ext));
+    let wants_vba_signature = wants_vba && workbook.vba_project_signature_bin.is_some();
     let wants_preserved_drawings = workbook.preserved_drawing_parts.is_some();
     let wants_preserved_pivots = workbook.preserved_pivot_parts.is_some();
     let needs_date_system_update = extension
@@ -1929,6 +1946,15 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             pkg.set_part(
                 "xl/vbaProject.bin",
                 workbook.vba_project_bin.clone().expect("checked is_some"),
+            );
+        }
+        if wants_vba_signature {
+            pkg.set_part(
+                "xl/vbaProjectSignature.bin",
+                workbook
+                    .vba_project_signature_bin
+                    .clone()
+                    .expect("checked is_some"),
             );
         }
 

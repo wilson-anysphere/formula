@@ -421,3 +421,66 @@ async fn export_xlam_enforces_addin_content_type() {
         "expected add-in workbook content type, got:\n{ct}"
     );
 }
+
+#[tokio::test]
+async fn export_preserves_vba_project_signature_part_when_present() {
+    use formula_xlsx::WorkbookKind;
+
+    let tmp_dir = tempfile::tempdir().expect("temp dir");
+    let db_path = tmp_dir.path().join("autosave.sqlite");
+
+    // Start from a real XLSM fixture so the workbook model contains a VBA project.
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../fixtures/xlsx/macros/basic.xlsm");
+    let bytes = std::fs::read(&fixture).expect("read fixture bytes");
+
+    // Inject a fake `xl/vbaProjectSignature.bin` part so we can validate it round-trips through
+    // the storage-based export path.
+    let signature_bytes = b"fake-vba-project-signature".to_vec();
+    let mut pkg = formula_xlsx::XlsxPackage::from_bytes(&bytes).expect("parse fixture package");
+    pkg.set_part("xl/vbaProjectSignature.bin", signature_bytes.clone());
+    let signed_bytes = pkg.write_to_bytes().expect("write signed package bytes");
+
+    let signed_path = tmp_dir.path().join("signed.xlsm");
+    std::fs::write(&signed_path, &signed_bytes).expect("write signed xlsm");
+
+    let workbook = read_xlsx_blocking(&signed_path).expect("read signed workbook");
+    assert_eq!(
+        workbook.vba_project_signature_bin.as_deref(),
+        Some(signature_bytes.as_slice()),
+        "expected read_xlsx_blocking to preserve xl/vbaProjectSignature.bin"
+    );
+
+    let mut state = AppState::new();
+    state
+        .load_workbook_persistent(workbook, WorkbookPersistenceLocation::OnDisk(db_path.clone()))
+        .expect("load persistent workbook");
+
+    state
+        .autosave_manager()
+        .expect("autosave")
+        .flush()
+        .await
+        .expect("flush autosave");
+
+    let export_storage = state.persistent_storage().expect("storage handle");
+    let export_id = state.persistent_workbook_id().expect("workbook id");
+    let export_meta = state.get_workbook().expect("workbook").clone();
+
+    let out_path = tmp_dir.path().join("export.xltm");
+    let out_bytes =
+        write_xlsx_from_storage(&export_storage, export_id, &export_meta, &out_path).expect("export");
+
+    let out_pkg = formula_xlsx::XlsxPackage::from_bytes(out_bytes.as_ref()).expect("parse output");
+    assert_eq!(
+        out_pkg.vba_project_signature_bin(),
+        Some(signature_bytes.as_slice()),
+        "expected storage export to preserve xl/vbaProjectSignature.bin"
+    );
+
+    let ct = std::str::from_utf8(out_pkg.part("[Content_Types].xml").expect("content types")).unwrap();
+    assert!(
+        ct.contains(WorkbookKind::MacroEnabledTemplate.workbook_content_type()),
+        "expected .xltm workbook content type, got:\n{ct}"
+    );
+}

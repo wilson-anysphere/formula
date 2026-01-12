@@ -1009,6 +1009,7 @@ impl AppState {
             recovered.power_query_xml = workbook.power_query_xml.clone();
             recovered.original_power_query_xml = workbook.original_power_query_xml.clone();
             recovered.vba_project_bin = workbook.vba_project_bin.clone();
+            recovered.vba_project_signature_bin = workbook.vba_project_signature_bin.clone();
             recovered.macro_fingerprint = workbook.macro_fingerprint.clone();
             recovered.preserved_drawing_parts = workbook.preserved_drawing_parts.clone();
             recovered.preserved_pivot_parts = workbook.preserved_pivot_parts.clone();

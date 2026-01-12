@@ -373,6 +373,8 @@ pub fn write_xlsx_from_storage(
         .unwrap_or(formula_xlsx::WorkbookKind::Workbook);
 
     let wants_vba = workbook_meta.vba_project_bin.is_some() && workbook_kind.is_macro_enabled();
+    let wants_vba_signature =
+        wants_vba && workbook_meta.vba_project_signature_bin.is_some();
     let wants_preserved_drawings = workbook_meta.preserved_drawing_parts.is_some();
     let wants_preserved_pivots = workbook_meta.preserved_pivot_parts.is_some();
     let wants_power_query = workbook_meta.power_query_xml.is_some();
@@ -399,6 +401,15 @@ pub fn write_xlsx_from_storage(
                 "xl/vbaProject.bin",
                 workbook_meta
                     .vba_project_bin
+                    .clone()
+                    .expect("checked is_some"),
+            );
+        }
+        if wants_vba_signature {
+            pkg.set_part(
+                "xl/vbaProjectSignature.bin",
+                workbook_meta
+                    .vba_project_signature_bin
                     .clone()
                     .expect("checked is_some"),
             );
