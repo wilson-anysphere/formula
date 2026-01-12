@@ -99,4 +99,37 @@ describe("SpreadsheetApp.reindexCommentCells", () => {
     // A1-keyed maps should normalize away $ markers.
     expect((app as any).commentThreadsByCellRef.get("A1")).toHaveLength(1);
   });
+
+  it("indexes only the active sheet in collab mode (sheet-qualified refs)", () => {
+    const comments = [
+      { cellRef: "Sheet1!A1", resolved: false, content: "S1" },
+      { cellRef: "Sheet2!A1", resolved: true, content: "S2" },
+    ];
+
+    const app = Object.create(SpreadsheetApp.prototype) as SpreadsheetApp;
+    (app as any).sheetId = "Sheet1";
+    (app as any).collabMode = true;
+    (app as any).commentCells = new Set<string>();
+    (app as any).commentMeta = new Map<string, { resolved: boolean }>();
+    (app as any).commentMetaByCoord = new Map<number, { resolved: boolean }>();
+    (app as any).commentPreviewByCoord = new Map<number, string>();
+    (app as any).commentThreadsByCellRef = new Map<string, any[]>();
+    (app as any).commentIndexVersion = 0;
+    (app as any).lastHoveredCommentIndexVersion = -1;
+    (app as any).commentManager = { listAll: () => comments };
+
+    const invalidateAll = vi.fn();
+    (app as any).sharedProvider = { invalidateAll };
+
+    (app as any).reindexCommentCells();
+
+    // Both sheets appear in the A1-keyed thread index for comments panel lookups.
+    expect((app as any).commentThreadsByCellRef.get("Sheet1!A1")).toHaveLength(1);
+    expect((app as any).commentThreadsByCellRef.get("Sheet2!A1")).toHaveLength(1);
+
+    // Coord indexes are used for fast rendering/tooltips and are scoped to the active sheet.
+    expect((app as any).commentMetaByCoord.size).toBe(1);
+    expect((app as any).commentMetaByCoord.get(0)).toEqual({ resolved: false });
+    expect((app as any).commentPreviewByCoord.get(0)).toBe("S1");
+  });
 });
