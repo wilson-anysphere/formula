@@ -32,6 +32,17 @@ full engine run:
   target/debug/formula-excel-oracle --cases tests/compatibility/excel-oracle/cases.json \\
     --out /tmp/new-results.json --include-tag thai
   python tools/excel-oracle/update_pinned_dataset.py --merge-results /tmp/new-results.json --no-engine
+
+If you have **real Excel** results for a subset of cases and want to overwrite the synthetic
+baseline values in the pinned dataset (keeping the rest of the corpus intact):
+
+  powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 `
+    -CasesPath tools/excel-oracle/odd_coupon_long_stub_cases.json `
+    -OutPath /tmp/excel-odd-coupon.json
+  python tools/excel-oracle/update_pinned_dataset.py \
+    --merge-results /tmp/excel-odd-coupon.json \
+    --overwrite-existing \
+    --no-engine
 """
 
 from __future__ import annotations
@@ -122,6 +133,7 @@ def update_pinned_dataset(
     engine_bin: Path | None,
     run_engine_for_missing: bool,
     force_engine: bool = False,
+    overwrite_existing: bool = False,
 ) -> tuple[int, int]:
     """
     Update `pinned_path` in-place.
@@ -170,6 +182,7 @@ def update_pinned_dataset(
 
     filtered_results: list[dict[str, Any]] = []
     seen: set[str] = set()
+    index_by_case_id: dict[str, int] = {}
     for r in _iter_result_entries(pinned_payload):
         cid = r.get("caseId")
         if not isinstance(cid, str):
@@ -179,6 +192,7 @@ def update_pinned_dataset(
         if cid in seen:
             continue
         seen.add(cid)
+        index_by_case_id[cid] = len(filtered_results)
         filtered_results.append(r)
 
     missing = set(case_ids.difference(seen))
@@ -191,13 +205,23 @@ def update_pinned_dataset(
             cid = r.get("caseId")
             if not isinstance(cid, str):
                 continue
-            if cid not in missing:
+            if cid not in case_ids:
                 continue
-            if cid in seen:
+            if cid in missing:
+                seen.add(cid)
+                missing.remove(cid)
+                index_by_case_id[cid] = len(filtered_results)
+                filtered_results.append(r)
                 continue
-            seen.add(cid)
-            missing.remove(cid)
-            filtered_results.append(r)
+
+            # Optional: allow merge-results to overwrite existing pinned results. This is useful
+            # when gradually replacing a synthetic baseline with real Excel results for a subset
+            # of cases (e.g. financial edge cases).
+            if overwrite_existing and cid in seen:
+                idx = index_by_case_id.get(cid)
+                if idx is not None and 0 <= idx < len(filtered_results):
+                    filtered_results[idx] = r
+                continue
 
     # If still missing, optionally run the engine on a temp corpus containing only missing cases.
     if missing and run_engine_for_missing:
@@ -277,6 +301,15 @@ def main() -> int:
         ),
     )
     p.add_argument(
+        "--overwrite-existing",
+        action="store_true",
+        help=(
+            "When merging --merge-results, overwrite existing case results in the pinned dataset "
+            "(default: only fill missing cases). Useful for patching a synthetic baseline with "
+            "real Excel results for specific case IDs."
+        ),
+    )
+    p.add_argument(
         "--no-engine",
         action="store_true",
         help="Do not run formula-excel-oracle. Require --merge-results to cover all missing cases.",
@@ -320,6 +353,7 @@ def main() -> int:
         engine_bin=engine_bin,
         run_engine_for_missing=not args.no_engine,
         force_engine=args.force_engine,
+        overwrite_existing=args.overwrite_existing,
     )
 
     if missing_before == 0:

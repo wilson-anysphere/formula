@@ -189,6 +189,17 @@ You can instead update the pinned dataset incrementally to fill in only the miss
 python tools/excel-oracle/update_pinned_dataset.py
 ```
 
+If you generated **real Excel** results for a subset of cases and want to overwrite the synthetic
+baseline values in the pinned dataset (while keeping the rest of the corpus unchanged), pass
+`--merge-results` and `--overwrite-existing`:
+
+```bash
+python tools/excel-oracle/update_pinned_dataset.py \
+  --merge-results /path/to/excel-results.json \
+  --overwrite-existing \
+  --no-engine
+```
+
 This script preserves existing results, updates the `caseSet.sha256`/`caseSet.count` metadata, and
 only evaluates missing cases via `crates/formula-excel-oracle`.
 
