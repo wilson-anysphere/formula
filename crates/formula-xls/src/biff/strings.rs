@@ -480,6 +480,39 @@ mod tests {
     }
 
     #[test]
+    fn parses_biff8_unicode_string_continued_across_fragments_unicode() {
+        let s = "AB";
+
+        // First fragment contains the header and the first UTF-16LE code unit.
+        let mut frag1 = Vec::new();
+        frag1.extend_from_slice(&(s.len() as u16).to_le_bytes());
+        frag1.push(0x01); // flags (unicode)
+        frag1.extend_from_slice(&[b'A', 0x00]);
+
+        // Continuation fragment begins with option flags byte (fHighByte), then remaining UTF-16LE bytes.
+        let frag2 = [0x01, b'B', 0x00];
+
+        let fragments: [&[u8]; 2] = [&frag1, &frag2];
+        let out = parse_biff8_unicode_string_continued(&fragments, 0, 1252).expect("parse");
+        assert_eq!(out, s);
+    }
+
+    #[test]
+    fn continued_unicode_string_errors_on_mid_character_split() {
+        // cch=1, unicode.
+        let mut frag1 = Vec::new();
+        frag1.extend_from_slice(&1u16.to_le_bytes());
+        frag1.push(0x01); // flags (unicode)
+        frag1.push(b'A'); // only 1 byte of the 2-byte code unit
+
+        let frag2 = [0x01, 0x00]; // cont_flags + remaining byte
+
+        let fragments: [&[u8]; 2] = [&frag1, &frag2];
+        let err = parse_biff8_unicode_string_continued(&fragments, 0, 1252).unwrap_err();
+        assert_eq!(err, "string continuation split mid-character");
+    }
+
+    #[test]
     fn parses_biff8_short_string_compressed_uses_codepage() {
         // BIFF8 ShortXLUnicodeString with `fHighByte=0` stores 8-bit bytes encoded using the
         // workbook code page (CODEPAGE record). In Windows-1251, 0xC0 is Cyrillic 'А' (U+0410).
