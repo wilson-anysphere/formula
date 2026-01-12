@@ -61,6 +61,8 @@ fn rgce_encode_structured_ref_is_unsupported() {
         "Table1[Col]",
         "[@Col]",
         "@Table1[Col]",
+        "Table1[Col]+1",
+        "SUM(Table1[Col])",
         "Table1[#All]",
         "Table1[[#Headers],[Col]]",
     ] {
