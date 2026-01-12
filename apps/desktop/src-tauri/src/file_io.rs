@@ -1778,6 +1778,58 @@ mod tests {
     }
 
     #[test]
+    fn reads_xlsb_populates_defined_names() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures_metadata/defined-names.xlsb"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read xlsb workbook");
+
+        assert!(
+            workbook.defined_names.iter().any(|n| n.name == "ZedName"),
+            "expected defined name ZedName, got: {:?}",
+            workbook
+                .defined_names
+                .iter()
+                .map(|n| n.name.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            workbook.defined_names.iter().any(|n| n.name == "LocalName"),
+            "expected defined name LocalName, got: {:?}",
+            workbook
+                .defined_names
+                .iter()
+                .map(|n| n.name.as_str())
+                .collect::<Vec<_>>()
+        );
+
+        let zed = workbook
+            .defined_names
+            .iter()
+            .find(|n| n.name == "ZedName")
+            .expect("ZedName exists");
+        assert_eq!(zed.refers_to, "Sheet1!$B$1");
+        assert!(zed.sheet_id.is_none(), "expected ZedName to be workbook-scoped");
+
+        let local = workbook
+            .defined_names
+            .iter()
+            .find(|n| n.name == "LocalName")
+            .expect("LocalName exists");
+        assert_eq!(local.refers_to, "Sheet1!$A$1");
+        assert_eq!(local.sheet_id.as_deref(), Some("Sheet1"));
+
+        let hidden = workbook
+            .defined_names
+            .iter()
+            .find(|n| n.name == "HiddenName")
+            .expect("HiddenName exists");
+        assert!(hidden.hidden);
+        assert_eq!(hidden.refers_to, "Sheet1!$A$1:$B$2");
+    }
+
+    #[test]
     fn xlsb_roundtrip_save_as_is_lossless() {
         let fixture_path = Path::new(concat!(
             env!("CARGO_MANIFEST_DIR"),
