@@ -420,9 +420,13 @@ impl<'a> CompileCtx<'a> {
             // a direct cell reference argument is treated as a reference, not a scalar, so blanks
             // and text values in the referenced cell are ignored.
             Function::And | Function::Or => true,
-            Function::Sum | Function::Average | Function::Min | Function::Max | Function::Count => {
-                true
-            }
+            Function::Sum
+            | Function::Average
+            | Function::Min
+            | Function::Max
+            | Function::Count
+            | Function::CountA
+            | Function::CountBlank => true,
             Function::CountIf => arg_idx == 0,
             Function::SumIf | Function::AverageIf => arg_idx == 0 || arg_idx == 2,
             Function::SumIfs | Function::AverageIfs | Function::MinIfs | Function::MaxIfs => {

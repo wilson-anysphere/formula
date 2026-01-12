@@ -5735,6 +5735,8 @@ fn slice_mode_for_program(program: &bytecode::Program) -> ColumnSliceMode {
                 | bytecode::ast::Function::AverageIfs
                 | bytecode::ast::Function::MinIfs
                 | bytecode::ast::Function::MaxIfs
+                | bytecode::ast::Function::CountA
+                | bytecode::ast::Function::CountBlank
         )
     }) {
         ColumnSliceMode::StrictNumeric
@@ -6564,7 +6566,9 @@ fn bytecode_expr_is_eligible_inner(
             | bytecode::ast::Function::Average
             | bytecode::ast::Function::Min
             | bytecode::ast::Function::Max
-            | bytecode::ast::Function::Count => args
+            | bytecode::ast::Function::Count
+            | bytecode::ast::Function::CountA
+            | bytecode::ast::Function::CountBlank => args
                 .iter()
                 .all(|arg| bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes)),
             bytecode::ast::Function::SumIf | bytecode::ast::Function::AverageIf => {

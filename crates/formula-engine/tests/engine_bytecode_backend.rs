@@ -664,6 +664,71 @@ fn bytecode_backend_supports_3d_sheet_span_references() {
 }
 
 #[test]
+fn bytecode_backend_matches_ast_for_counta_and_countblank() {
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    // A2 left blank
+    engine.set_cell_value("Sheet1", "A3", "").unwrap(); // empty string
+    engine.set_cell_value("Sheet1", "A4", "hello").unwrap();
+    engine.set_cell_value("Sheet1", "A5", true).unwrap();
+    engine
+        .set_cell_value("Sheet1", "A6", Value::Error(ErrorKind::Div0))
+        .unwrap();
+    engine.set_cell_value("Sheet1", "A7", 0.0).unwrap();
+    // A8 left blank
+    engine.set_cell_value("Sheet1", "A9", "0").unwrap();
+    engine.set_cell_value("Sheet1", "A10", 2.0).unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=COUNTA(A1:A10)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=COUNTBLANK(A1:A10)")
+        .unwrap();
+
+    // Ensure the formulas compile to bytecode instead of falling back to AST evaluation.
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(8.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(3.0));
+    assert_engine_matches_ast(&engine, "=COUNTA(A1:A10)", "B1");
+    assert_engine_matches_ast(&engine, "=COUNTBLANK(A1:A10)", "B2");
+}
+
+#[test]
+fn bytecode_backend_counta_and_countblank_respect_non_numeric_reference_cells() {
+    // If the bytecode backend incorrectly treats non-numeric reference values as NaN via column
+    // slices, COUNTA/COUNTBLANK will miscount. This test ensures we fall back to per-cell scanning
+    // when a referenced range contains text/bools.
+    let mut engine = Engine::new();
+
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", "x").unwrap();
+    engine.set_cell_value("Sheet1", "A3", true).unwrap();
+    engine.set_cell_value("Sheet1", "A4", "").unwrap(); // empty string: non-blank for COUNTA, blank for COUNTBLANK
+    // A5 left blank
+
+    engine
+        .set_cell_formula("Sheet1", "B1", "=COUNTA(A1:A5)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=COUNTBLANK(A1:A5)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 2);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(2.0));
+    assert_engine_matches_ast(&engine, "=COUNTA(A1:A5)", "B1");
+    assert_engine_matches_ast(&engine, "=COUNTBLANK(A1:A5)", "B2");
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_countif_grouped_numeric_criteria() {
     let mut engine = Engine::new();
     engine

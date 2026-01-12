@@ -278,7 +278,9 @@ fn eval_ast_inner(
                     | Function::Average
                     | Function::Min
                     | Function::Max
-                    | Function::Count => true,
+                    | Function::Count
+                    | Function::CountA
+                    | Function::CountBlank => true,
                     Function::CountIf => arg_idx == 0,
                     Function::SumIf | Function::AverageIf => arg_idx == 0 || arg_idx == 2,
                     Function::SumIfs
@@ -676,6 +678,8 @@ pub fn call_function(
         Function::Max => fn_max(args, grid, base),
         Function::MaxIfs => fn_maxifs(args, grid, base, locale),
         Function::Count => fn_count(args, grid, base),
+        Function::CountA => fn_counta(args, grid, base),
+        Function::CountBlank => fn_countblank(args, grid, base),
         Function::CountIf => fn_countif(args, grid, base, locale),
         Function::CountIfs => fn_countifs(args, grid, base, locale),
         Function::SumProduct => fn_sumproduct(args, grid, base),
@@ -1418,12 +1422,66 @@ fn fn_count(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
     Value::Number(count as f64)
 }
 
-fn fn_countif(
-    args: &[Value],
-    grid: &dyn Grid,
-    base: CellCoord,
-    locale: &crate::LocaleConfig,
-) -> Value {
+fn fn_counta(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    let mut total = 0usize;
+    for arg in args {
+        match arg {
+            // Scalars.
+            Value::Empty => {}
+            Value::Number(_) | Value::Bool(_) | Value::Text(_) | Value::Error(_) => total += 1,
+            // Arrays are numeric-only in the bytecode runtime (NaN = blank/non-numeric).
+            Value::Array(a) => total += simd::count_ignore_nan_f64(&a.values),
+            // References scan the grid.
+            Value::Range(r) => match counta_range(grid, r.resolve(base)) {
+                Ok(c) => total += c,
+                Err(e) => return Value::Error(e),
+            },
+            Value::MultiRange(r) => {
+                for area in r.areas.iter() {
+                    match counta_range_on_sheet(grid, area.sheet, area.range.resolve(base)) {
+                        Ok(c) => total += c,
+                        Err(e) => return Value::Error(e),
+                    }
+                }
+            }
+        }
+    }
+    Value::Number(total as f64)
+}
+
+fn fn_countblank(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+    let mut total = 0usize;
+    for arg in args {
+        match arg {
+            Value::Empty => total += 1,
+            Value::Text(s) if s.is_empty() => total += 1,
+            Value::Array(a) => {
+                total += a
+                    .len()
+                    .saturating_sub(simd::count_ignore_nan_f64(a.as_slice()));
+            }
+            Value::Range(r) => match countblank_range(grid, r.resolve(base)) {
+                Ok(c) => total += c,
+                Err(e) => return Value::Error(e),
+            },
+            Value::MultiRange(r) => {
+                for area in r.areas.iter() {
+                    match countblank_range_on_sheet(grid, area.sheet, area.range.resolve(base)) {
+                        Ok(c) => total += c,
+                        Err(e) => return Value::Error(e),
+                    }
+                }
+            }
+            Value::Number(_) | Value::Bool(_) | Value::Text(_) | Value::Error(_) => {}
+        }
+    }
+    Value::Number(total as f64)
+}
+
+fn fn_countif(args: &[Value], grid: &dyn Grid, base: CellCoord, locale: &crate::LocaleConfig) -> Value {
     if args.len() != 2 {
         return Value::Error(ErrorKind::Value);
     }
@@ -3505,6 +3563,139 @@ fn count_range_on_sheet(
         }
     }
     Ok(count)
+}
+
+fn counta_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, ErrorKind> {
+    if !range_in_bounds(grid, range) {
+        return Err(ErrorKind::Ref);
+    }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut count = 0usize;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                if !matches!(v, Value::Empty) {
+                    count += 1;
+                }
+            }
+            return Ok(count);
+        }
+    }
+
+    let mut count = 0usize;
+    for col in range.col_start..=range.col_end {
+        // Fast path: numeric-only columns (NaN = blank/non-numeric). This is only correct when
+        // slices are *strict numeric*; otherwise non-numeric values would appear as NaN and be
+        // miscounted. The engine selects strict slice mode for COUNTA/COUNTBLANK programs.
+        if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
+            count += simd::count_ignore_nan_f64(slice);
+        } else {
+            for row in range.row_start..=range.row_end {
+                if !matches!(grid.get_value(CellCoord { row, col }), Value::Empty) {
+                    count += 1;
+                }
+            }
+        }
+    }
+    Ok(count)
+}
+
+fn counta_range_on_sheet(
+    grid: &dyn Grid,
+    sheet: usize,
+    range: ResolvedRange,
+) -> Result<usize, ErrorKind> {
+    if !range_in_bounds_on_sheet(grid, sheet, range) {
+        return Err(ErrorKind::Ref);
+    }
+
+    let mut count = 0usize;
+    for col in range.col_start..=range.col_end {
+        // Same strict-numeric slice requirement as `counta_range`.
+        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
+            count += simd::count_ignore_nan_f64(slice);
+        } else {
+            for row in range.row_start..=range.row_end {
+                if !matches!(
+                    grid.get_value_on_sheet(sheet, CellCoord { row, col }),
+                    Value::Empty
+                ) {
+                    count += 1;
+                }
+            }
+        }
+    }
+    Ok(count)
+}
+
+fn countblank_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, ErrorKind> {
+    if !range_in_bounds(grid, range) {
+        return Err(ErrorKind::Ref);
+    }
+
+    let size = (range.rows() as u64).saturating_mul(range.cols() as u64);
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut non_blank = 0u64;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                if !matches!(v, Value::Empty) && !matches!(v, Value::Text(ref s) if s.is_empty()) {
+                    non_blank += 1;
+                }
+            }
+            return Ok(size.saturating_sub(non_blank) as usize);
+        }
+    }
+
+    let mut non_blank = 0u64;
+    for col in range.col_start..=range.col_end {
+        if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
+            non_blank += simd::count_ignore_nan_f64(slice) as u64;
+        } else {
+            for row in range.row_start..=range.row_end {
+                let v = grid.get_value(CellCoord { row, col });
+                if !matches!(v, Value::Empty) && !matches!(v, Value::Text(ref s) if s.is_empty()) {
+                    non_blank += 1;
+                }
+            }
+        }
+    }
+
+    Ok(size.saturating_sub(non_blank) as usize)
+}
+
+fn countblank_range_on_sheet(
+    grid: &dyn Grid,
+    sheet: usize,
+    range: ResolvedRange,
+) -> Result<usize, ErrorKind> {
+    if !range_in_bounds_on_sheet(grid, sheet, range) {
+        return Err(ErrorKind::Ref);
+    }
+
+    let size = (range.rows() as u64).saturating_mul(range.cols() as u64);
+
+    let mut non_blank = 0u64;
+    for col in range.col_start..=range.col_end {
+        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end) {
+            non_blank += simd::count_ignore_nan_f64(slice) as u64;
+        } else {
+            for row in range.row_start..=range.row_end {
+                let v = grid.get_value_on_sheet(sheet, CellCoord { row, col });
+                if !matches!(v, Value::Empty) && !matches!(v, Value::Text(ref s) if s.is_empty()) {
+                    non_blank += 1;
+                }
+            }
+        }
+    }
+
+    Ok(size.saturating_sub(non_blank) as usize)
 }
 
 fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, ErrorKind> {
