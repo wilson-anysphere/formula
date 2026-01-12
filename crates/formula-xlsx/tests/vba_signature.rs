@@ -6,6 +6,9 @@ use base64::{engine::general_purpose, Engine as _};
 use formula_vba::VbaSignatureVerification;
 use formula_xlsx::XlsxPackage;
 
+mod vba_signature_test_utils;
+use vba_signature_test_utils::build_vba_signature_ole;
+
 const TEST_PKCS7_DER_B64: &str = concat!(
     "MIIExQYJKoZIhvcNAQcCoIIEtjCCBLICAQExDTALBglghkgBZQMEAgEwHwYJKoZIhvcNAQcBoBIEEGZv",
     "cm11bGEtdmJhLXRlc3SgggMbMIIDFzCCAf+gAwIBAgIUQZEa3yk9CWWcytfnuDxC4+5iaPUwDQYJKoZI",
@@ -29,20 +32,6 @@ const TEST_PKCS7_DER_B64: &str = concat!(
     "YHUxTdVu92MSJWBzPmdR6M2/isqmgSqun0vE1kR/IbARZbtB6OsSzxE3rziwlHxoelDRsfyPnmi8TsNt",
     "hH5fWBntXXgwtszAsTVMK92tz4Fz0Q19pg==",
 );
-
-fn build_vba_project_bin_with_signature(signature_der: &[u8]) -> Vec<u8> {
-    let cursor = Cursor::new(Vec::new());
-    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
-    {
-        let mut stream = ole
-            .create_stream("\u{0005}DigitalSignature")
-            .expect("create signature stream");
-        stream
-            .write_all(signature_der)
-            .expect("write signature bytes");
-    }
-    ole.into_inner().into_inner()
-}
 
 fn build_zip_with_vba_project_bin(vba_project_bin: &[u8]) -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
@@ -76,7 +65,7 @@ fn verify_vba_digital_signature_reports_verified_on_native_targets() {
     let pkcs7_der = general_purpose::STANDARD
         .decode(TEST_PKCS7_DER_B64)
         .expect("base64 decode pkcs7");
-    let vba_project_bin = build_vba_project_bin_with_signature(&pkcs7_der);
+    let vba_project_bin = build_vba_signature_ole(&pkcs7_der);
     let zip_bytes = build_zip_with_vba_project_bin(&vba_project_bin);
 
     let pkg = XlsxPackage::from_bytes(&zip_bytes).expect("read package");
