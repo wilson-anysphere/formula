@@ -153,7 +153,7 @@ fn accrint_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let calc_method = if matches!(calc_method, Value::Blank) {
-        true
+        false
     } else {
         match coerce_to_bool_finite(ctx, &calc_method) {
             Ok(v) => v,
@@ -230,4 +230,3 @@ fn datevalue_from_value(
         }
     }
 }
-

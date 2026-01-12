@@ -32,6 +32,7 @@ fn accrint_settlement_before_first_interest_short_first_coupon() {
     // Under 30/360, days(issue->settlement)=60 and days(period)=180, coupon=50.
     // Interest = 50 * 60/180 = 16.666666...
     let expected = 50.0 * (60.0 / 180.0);
+    // `calc_method` omitted defaults to FALSE (accrue from issue).
     assert_number(
         &sheet.eval("=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,4,15),0.1,1000,2,0)"),
         expected,
@@ -39,23 +40,17 @@ fn accrint_settlement_before_first_interest_short_first_coupon() {
 }
 
 #[test]
-fn accrint_calc_method_true_vs_false_differs_after_first_interest() {
+fn accrint_calc_method_is_ignored_after_first_interest() {
     let mut sheet = TestSheet::new();
 
     // Settlement is after the first interest date.
-    //
-    // calc_method omitted (default TRUE): counts interest from issue -> settlement,
-    // spanning two coupon periods (short first period + partial next period).
+    // Excel accrues from the previous coupon date (PCD) regardless of calc_method.
     assert_number(
         &sheet.eval("=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,8,15),0.1,1000,2,0)"),
-        50.0,
+        25.0,
     );
-
-    // calc_method FALSE: counts interest only from the last coupon date (2020-05-15) -> settlement.
     assert_number(
-        &sheet.eval(
-            "=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,8,15),0.1,1000,2,0,FALSE)",
-        ),
+        &sheet.eval("=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,8,15),0.1,1000,2,0,TRUE)"),
         25.0,
     );
 }
@@ -82,6 +77,31 @@ fn accrint_supports_basis_variants() {
 }
 
 #[test]
+fn accrint_calc_method_affects_only_stub_period_before_first_interest() {
+    let mut sheet = TestSheet::new();
+
+    // Settlement is before first interest date (still in the issue stub period).
+    // Under calc_method=FALSE, accrue from issue; under calc_method=TRUE, accrue from the start of the
+    // regular coupon period (PCD).
+    //
+    // For this schedule: issue=2020-02-15, first_interest=2020-05-15, frequency=2:
+    // PCD = 2019-11-15, E = 180 (30/360), C = 50.
+    //
+    // A(issue->settlement) = 60, A(PCD->settlement) = 150.
+    let from_issue = 50.0 * (60.0 / 180.0);
+    let from_pcd = 50.0 * (150.0 / 180.0);
+
+    assert_number(
+        &sheet.eval("=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,4,15),0.1,1000,2,0,FALSE)"),
+        from_issue,
+    );
+    assert_number(
+        &sheet.eval("=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,4,15),0.1,1000,2,0,TRUE)"),
+        from_pcd,
+    );
+}
+
+#[test]
 fn accrint_errors_on_invalid_inputs() {
     let mut sheet = TestSheet::new();
 
@@ -102,4 +122,3 @@ fn accrint_errors_on_invalid_inputs() {
         Value::Error(ErrorKind::Num)
     );
 }
-
