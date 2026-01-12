@@ -77,8 +77,13 @@ describe("Tauri capabilities", () => {
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
     const allowInvokePath = path.join(root, "apps/desktop/src-tauri/permissions/allow-invoke.json");
-    const allowInvoke = JSON.parse(readFileSync(allowInvokePath, "utf8")) as any;
-    const allow = allowInvoke?.permission?.[0]?.commands?.allow;
+    const allowInvokeFile = JSON.parse(readFileSync(allowInvokePath, "utf8")) as any;
+    expect(Array.isArray(allowInvokeFile?.permission)).toBe(true);
+
+    const allowInvokeEntry = (allowInvokeFile.permission as any[]).find((p) => p?.identifier === "allow-invoke") as any;
+    expect(allowInvokeEntry).toBeTruthy();
+
+    const allow = allowInvokeEntry?.commands?.allow;
 
     expect(Array.isArray(allow)).toBe(true);
     expect(allow.length).toBeGreaterThan(0);
