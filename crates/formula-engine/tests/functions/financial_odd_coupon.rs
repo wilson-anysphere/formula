@@ -3595,6 +3595,19 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
     let redemption = 100.0;
     let frequency = 2;
 
+    // Guard: ensure this scenario actually distinguishes "European DAYS360 between coupon dates"
+    // from the modeled coupon-period length `E = 360/frequency` for basis=4.
+    //
+    // last_interest is EOM Feb 28, so the EOM-pinned prior coupon date is Aug 31.
+    // DAYS360_EU(Aug 31, Feb 28) = 178 != 180 (=360/frequency).
+    let months_per_period = 12 / frequency;
+    let eom = is_end_of_month(last_interest, system);
+    assert!(eom, "expected last_interest to be EOM for this scenario");
+    let prev_coupon = coupon_date_with_eom(last_interest, -months_per_period, eom, system);
+    let days360_eu =
+        date_time::days360(prev_coupon, last_interest, true, system).unwrap() as f64;
+    assert_close(days360_eu, 178.0, 0.0);
+
     for basis in [0, 4] {
         let expected = oddl_price_excel_model(
             settlement,
