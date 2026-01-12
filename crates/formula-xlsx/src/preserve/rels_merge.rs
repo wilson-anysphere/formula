@@ -4,7 +4,7 @@ use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::{Reader as XmlReader, Writer as XmlWriter};
 
 use crate::path::resolve_target;
-use crate::relationships::{parse_relationships, Relationship, Relationships};
+use crate::relationships::{parse_relationships, Relationship, Relationships, PACKAGE_REL_NS};
 use crate::workbook::ChartExtractionError;
 
 /// Minimal metadata needed to re-attach preserved relationships.
@@ -25,13 +25,12 @@ pub(crate) fn ensure_rels_has_relationships(
         return Ok((rels_xml.unwrap_or_default().to_vec(), HashMap::new()));
     }
 
-    let mut xml = match rels_xml {
-        Some(bytes) => std::str::from_utf8(bytes)
-            .map_err(|e| ChartExtractionError::XmlNonUtf8(part_name.to_string(), e))?
-            .to_string(),
-        None => String::from(
-            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n</Relationships>\n",
-        ),
+    let mut xml_bytes: Vec<u8> = match rels_xml {
+        Some(bytes) => bytes.to_vec(),
+        None => format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"{PACKAGE_REL_NS}\">\n</Relationships>\n"
+        )
+        .into_bytes(),
     };
 
     let existing_rels = match rels_xml {
@@ -94,13 +93,10 @@ pub(crate) fn ensure_rels_has_relationships(
     }
 
     if !to_insert.is_empty() {
-        xml = String::from_utf8(
-            insert_relationships_before_close(xml.as_bytes(), part_name, &to_insert)?,
-        )
-        .map_err(|e| ChartExtractionError::XmlStructure(format!("{part_name}: {e}")))?;
+        xml_bytes = insert_relationships_before_close(&xml_bytes, part_name, &to_insert)?;
     }
 
-    Ok((xml.into_bytes(), id_map))
+    Ok((xml_bytes, id_map))
 }
 
 fn insert_relationships_before_close(
@@ -334,5 +330,43 @@ mod tests {
             .find(|n| n.is_element() && n.tag_name().name() == "Relationship" && n.attribute("Id") == Some("rId1"))
             .expect("inserted relationship");
         assert_eq!(inserted.tag_name().namespace(), Some(PACKAGE_REL_NS));
+    }
+
+    #[test]
+    fn ensure_rels_conflicting_rid_allocates_new_id_and_returns_map() {
+        // Note: the close tag contains whitespace (`</Relationships >`) which used to break the
+        // naive string search used by relationship insertion.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="typeA" Target="worksheets/sheet2.xml"/>
+</Relationships >"#;
+
+        let (updated, id_map) = ensure_rels_has_relationships(
+            Some(xml),
+            "xl/_rels/workbook.xml.rels",
+            "xl/workbook.xml",
+            "typeB",
+            &[RelationshipStub {
+                rel_id: "rId1".to_string(),
+                target: "worksheets/sheet1.xml".to_string(),
+            }],
+        )
+        .expect("insert rel");
+
+        assert_eq!(
+            id_map.get("rId1").map(String::as_str),
+            Some("rId2"),
+            "expected rId1 to be remapped due to conflict, got map: {id_map:?}"
+        );
+
+        let rels =
+            parse_relationships(&updated, "xl/_rels/workbook.xml.rels").expect("parse rels");
+        assert_eq!(rels.len(), 2);
+        assert!(rels.iter().any(|r| {
+            r.id == "rId1" && r.type_ == "typeA" && r.target == "worksheets/sheet2.xml"
+        }));
+        assert!(rels.iter().any(|r| {
+            r.id == "rId2" && r.type_ == "typeB" && r.target == "worksheets/sheet1.xml"
+        }));
     }
 }
