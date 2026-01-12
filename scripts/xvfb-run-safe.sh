@@ -54,10 +54,29 @@ find_display() {
   echo "99"  # Fallback
 }
 
-# Check if we already have a display
-if [ -n "$DISPLAY" ] && xdpyinfo >/dev/null 2>&1; then
-  # Display already available, just run the command
-  exec "$@"
+# Check if we already have a usable display.
+#
+# In CI/headless environments it is common for $DISPLAY to be set but unusable, so be conservative
+# and require `xdpyinfo` to succeed before trusting it.
+#
+# On developer machines, `xdpyinfo` may not be installed even when a working X/Wayland display is
+# available. In that case, prefer running the command directly rather than requiring Xvfb.
+if [ -n "${DISPLAY:-}" ]; then
+  if command -v xdpyinfo >/dev/null 2>&1; then
+    if xdpyinfo >/dev/null 2>&1; then
+      exec "$@"
+    fi
+  else
+    if [ -z "${CI:-}" ]; then
+      exec "$@"
+    fi
+  fi
+fi
+
+if ! command -v Xvfb >/dev/null 2>&1; then
+  echo "xvfb-run-safe: Xvfb is not installed and no usable DISPLAY was detected." >&2
+  echo "xvfb-run-safe: Install Xvfb (e.g. apt-get install xvfb) or run with a working DISPLAY." >&2
+  exit 1
 fi
 
 # Find available display
