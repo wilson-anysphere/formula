@@ -250,20 +250,36 @@ test(
   async () => {
     const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-git-grep-fail-"));
     try {
-      // Ensure we cross the `GIT_GREP_MIN_FILES` threshold so the policy guard uses
-      // its git-grep fast path (as it does in the real repo).
-      const extraFileCount = 199;
-      const manyDir = path.join(tmpRoot, "packages", "example", "src", "many");
-      await fs.mkdir(manyDir, { recursive: true });
-      for (let i = 0; i < extraFileCount; i += 1) {
-        await fs.writeFile(path.join(manyDir, `file-${i}.js`), "export const x = 1;\n", "utf8");
-      }
       await writeFixtureFile(tmpRoot, "packages/example/src/index.js", 'const provider = "OpenAI";\n');
 
       const init = spawnSync("git", ["init"], { cwd: tmpRoot, encoding: "utf8" });
       assert.equal(init.status, 0, init.stderr);
-      const add = spawnSync("git", ["add", "."], { cwd: tmpRoot, encoding: "utf8" });
+      const add = spawnSync("git", ["add", "packages/example/src/index.js"], { cwd: tmpRoot, encoding: "utf8" });
       assert.equal(add.status, 0, add.stderr);
+
+      // Add enough extra tracked entries to cross the `GIT_GREP_MIN_FILES` threshold so the policy guard uses
+      // its git-grep fast path (as it does in the real repo). Use `git update-index --index-info` so we don't
+      // have to physically create hundreds of files on disk.
+      const extraFileCount = 199;
+      const blobProc = spawnSync("git", ["hash-object", "-w", "--stdin"], {
+        cwd: tmpRoot,
+        encoding: "utf8",
+        input: "export const x = 1;\n",
+      });
+      assert.equal(blobProc.status, 0, blobProc.stderr);
+      const blobSha = String(blobProc.stdout || "").trim();
+      assert.ok(blobSha.length > 0);
+
+      let indexInfo = "";
+      for (let i = 0; i < extraFileCount; i += 1) {
+        indexInfo += `100644 ${blobSha} 0\tpackages/example/src/many/file-${i}.js\n`;
+      }
+      const indexInfoProc = spawnSync("git", ["update-index", "--index-info"], {
+        cwd: tmpRoot,
+        encoding: "utf8",
+        input: indexInfo,
+      });
+      assert.equal(indexInfoProc.status, 0, indexInfoProc.stderr);
 
       const result = await runPolicyApi(tmpRoot, { maxViolations: 1 });
       assert.equal(result.ok, false);
@@ -428,22 +444,38 @@ test(
   async () => {
     const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-git-large-symlink-fail-"));
     try {
-      // Ensure we cross the `GIT_GREP_MIN_FILES` threshold so the policy guard uses
-      // its git-grep fast path (as it does in the real repo).
-      const extraFileCount = 199;
-      const manyDir = path.join(tmpRoot, "packages", "example", "src", "many");
-      await fs.mkdir(manyDir, { recursive: true });
-      for (let i = 0; i < extraFileCount; i += 1) {
-        await fs.writeFile(path.join(manyDir, `file-${i}.js`), "export const x = 1;\n", "utf8");
-      }
-
       const linkPath = path.join(tmpRoot, "packages", "example", "src", "link");
+      await fs.mkdir(path.dirname(linkPath), { recursive: true });
       await fs.symlink("does-not-exist", linkPath);
 
       const init = spawnSync("git", ["init"], { cwd: tmpRoot, encoding: "utf8" });
       assert.equal(init.status, 0, init.stderr);
-      const add = spawnSync("git", ["add", "."], { cwd: tmpRoot, encoding: "utf8" });
-      assert.equal(add.status, 0, add.stderr);
+      const addSymlink = spawnSync("git", ["add", "packages/example/src/link"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(addSymlink.status, 0, addSymlink.stderr);
+
+      // Add enough extra tracked entries to cross the `GIT_GREP_MIN_FILES` threshold so the policy guard uses
+      // its git-grep fast path (as it does in the real repo). Use `git update-index --index-info` so we don't
+      // have to physically create hundreds of files on disk.
+      const extraFileCount = 198;
+      const blobProc = spawnSync("git", ["hash-object", "-w", "--stdin"], {
+        cwd: tmpRoot,
+        encoding: "utf8",
+        input: "export const x = 1;\n",
+      });
+      assert.equal(blobProc.status, 0, blobProc.stderr);
+      const blobSha = String(blobProc.stdout || "").trim();
+      assert.ok(blobSha.length > 0);
+
+      let indexInfo = "";
+      for (let i = 0; i < extraFileCount; i += 1) {
+        indexInfo += `100644 ${blobSha} 0\tpackages/example/src/many/file-${i}.js\n`;
+      }
+      const indexInfoProc = spawnSync("git", ["update-index", "--index-info"], {
+        cwd: tmpRoot,
+        encoding: "utf8",
+        input: indexInfo,
+      });
+      assert.equal(indexInfoProc.status, 0, indexInfoProc.stderr);
 
       // Also add a submodule gitlink entry to ensure the large-repo git-grep path still
       // rejects submodules without relying on filesystem traversal.
