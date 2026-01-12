@@ -21,7 +21,6 @@ Build the computational heart of Formula: the formula parser, dependency graph, 
 | Crate | Purpose |
 |-------|---------|
 | `crates/formula-engine` | Formula parser, evaluator, dependency graph, 500+ functions |
-| `crates/formula-core` | Core types shared across crates |
 | `crates/formula-model` | Workbook/sheet/cell data structures |
 | `crates/formula-columnar` | VertiPaq-style columnar compression for large datasets |
 | `crates/formula-dax` | DAX-like calculated columns and measures |

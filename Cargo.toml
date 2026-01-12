@@ -20,6 +20,5 @@ members = [
   "crates/formula-xlsx",
   "crates/xlsb-diff",
   "crates/xlsx-diff",
-  "crates/formula-core",
   "crates/formula-wasm",
 ]

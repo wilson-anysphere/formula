@@ -1890,15 +1890,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "formula-core"
-version = "0.1.0"
-dependencies = [
- "pretty_assertions",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "formula-corpus-triage"
 version = "0.1.0"
 dependencies = [
