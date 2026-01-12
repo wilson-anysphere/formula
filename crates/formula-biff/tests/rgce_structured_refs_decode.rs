@@ -124,6 +124,15 @@ fn decodes_structured_ref_value_class_headers_single_does_not_add_implicit_inter
 }
 
 #[test]
+fn decodes_structured_ref_value_class_totals_single_does_not_add_implicit_intersection() {
+    // Totals+single column resolves to a single cell, so value-class should not force '@'.
+    let rgce = ptg_list(1, 0x0008, 2, 2, 0x38);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[[#Totals],[Column2]]");
+    assert_eq!(normalize(&text), normalize("Table1[[#Totals],[Column2]]"));
+}
+
+#[test]
 fn decodes_structured_ref_value_class_this_row_single_does_not_add_implicit_intersection() {
     // This-row+single column resolves to a single cell.
     let rgce = ptg_list(1, 0x0010, 2, 2, 0x38);
@@ -140,6 +149,38 @@ fn decodes_structured_ref_value_class_this_row_all_columns_adds_implicit_interse
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "@[@]");
     assert_eq!(normalize(&text), normalize("@[@]"));
+}
+
+#[test]
+fn decodes_structured_ref_value_class_headers_all_columns_adds_implicit_intersection() {
+    let rgce = ptg_list(1, 0x0002, 0, 0, 0x38);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "@Table1[#Headers]");
+    assert_eq!(normalize(&text), normalize("@Table1[#Headers]"));
+}
+
+#[test]
+fn decodes_structured_ref_value_class_totals_all_columns_adds_implicit_intersection() {
+    let rgce = ptg_list(1, 0x0008, 0, 0, 0x38);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "@Table1[#Totals]");
+    assert_eq!(normalize(&text), normalize("@Table1[#Totals]"));
+}
+
+#[test]
+fn decodes_structured_ref_value_class_all_adds_implicit_intersection() {
+    let rgce = ptg_list(1, 0x0001, 0, 0, 0x38);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "@Table1[#All]");
+    assert_eq!(normalize(&text), normalize("@Table1[#All]"));
+}
+
+#[test]
+fn decodes_structured_ref_value_class_data_adds_implicit_intersection() {
+    let rgce = ptg_list(1, 0x0004, 0, 0, 0x38);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "@Table1[#Data]");
+    assert_eq!(normalize(&text), normalize("@Table1[#Data]"));
 }
 
 #[test]
