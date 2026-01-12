@@ -1734,6 +1734,9 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
         : {
             // In web/demo builds we do not have access to the desktop print/export backend.
             "pageLayout.pageSetup.pageSetupDialog": true,
+            "pageLayout.pageSetup.margins": true,
+            "pageLayout.pageSetup.orientation": true,
+            "pageLayout.pageSetup.size": true,
             "pageLayout.pageSetup.printArea": true,
             "pageLayout.printArea.setPrintArea": true,
             "pageLayout.printArea.clearPrintArea": true,
@@ -6890,6 +6893,23 @@ async function handleRibbonPageSetup(): Promise<void> {
   }
 }
 
+async function handleRibbonUpdatePageSetup(patch: (current: PageSetup) => PageSetup): Promise<void> {
+  const invoke = getTauriInvokeForPrint();
+  if (!invoke) return;
+
+  try {
+    const sheetId = app.getCurrentSheetId();
+    const settings = await invoke("get_sheet_print_settings", { sheet_id: sheetId });
+    const current = pageSetupFromTauri((settings as any)?.page_setup);
+    const next = patch(current);
+    await invoke("set_sheet_page_setup", { sheet_id: sheetId, page_setup: pageSetupToTauri(next) });
+    app.focus();
+  } catch (err) {
+    console.error("Failed to update page setup:", err);
+    showToast(`Failed to update page setup: ${String(err)}`, "error");
+  }
+}
+
 async function handleRibbonSetPrintArea(): Promise<void> {
   const invoke = getTauriInvokeForPrint();
   if (!invoke) return;
@@ -8393,6 +8413,42 @@ mountRibbon(ribbonReactRoot, {
         showDialogAndFocus(goToDialog);
         return;
       case "pageLayout.pageSetup.pageSetupDialog":
+        void handleRibbonPageSetup();
+        return;
+      case "pageLayout.pageSetup.margins.normal":
+        void handleRibbonUpdatePageSetup((current) => ({
+          ...current,
+          margins: { ...current.margins, left: 0.7, right: 0.7, top: 0.75, bottom: 0.75 },
+        }));
+        return;
+      case "pageLayout.pageSetup.margins.wide":
+        void handleRibbonUpdatePageSetup((current) => ({
+          ...current,
+          margins: { ...current.margins, left: 1, right: 1, top: 1, bottom: 1 },
+        }));
+        return;
+      case "pageLayout.pageSetup.margins.narrow":
+        void handleRibbonUpdatePageSetup((current) => ({
+          ...current,
+          margins: { ...current.margins, left: 0.25, right: 0.25, top: 0.75, bottom: 0.75 },
+        }));
+        return;
+      case "pageLayout.pageSetup.margins.custom":
+        void handleRibbonPageSetup();
+        return;
+      case "pageLayout.pageSetup.orientation.portrait":
+        void handleRibbonUpdatePageSetup((current) => ({ ...current, orientation: "portrait" }));
+        return;
+      case "pageLayout.pageSetup.orientation.landscape":
+        void handleRibbonUpdatePageSetup((current) => ({ ...current, orientation: "landscape" }));
+        return;
+      case "pageLayout.pageSetup.size.letter":
+        void handleRibbonUpdatePageSetup((current) => ({ ...current, paperSize: 1 }));
+        return;
+      case "pageLayout.pageSetup.size.a4":
+        void handleRibbonUpdatePageSetup((current) => ({ ...current, paperSize: 9 }));
+        return;
+      case "pageLayout.pageSetup.size.more":
         void handleRibbonPageSetup();
         return;
       case "pageLayout.printArea.setPrintArea":
