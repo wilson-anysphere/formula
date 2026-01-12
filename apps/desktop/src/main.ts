@@ -2924,13 +2924,34 @@ if (
 
   let extensionPanelBridge: ExtensionPanelBridge | null = null;
 
+  type ExtensionClipboardSelectionContext = {
+    sheetId: string;
+    startRow: number;
+    startCol: number;
+    endRow: number;
+    endCol: number;
+    timestampMs: number;
+  };
+
   // Extensions can read selection values via `formula.cells.getSelection()` and then write arbitrary
   // text to the system clipboard via `formula.clipboard.writeText()`. SpreadsheetApp's copy/cut
   // handlers already enforce clipboard-copy DLP, but extensions would otherwise bypass it.
   //
-  // DLP enforcement for extension clipboard writes:
-  // - clipboardApi.writeText: conservative guard using the current UI selection (active-cell fallback).
-  // - clipboardWriteGuard: blocks writes after an extension has read tainted ranges (host-level tracking).
+  // Track the last selection returned to extensions and enforce clipboard-copy DLP on clipboard writes
+  // that occur shortly afterwards.
+  const extensionClipboardDlp = createDesktopDlpContext({ documentId: workbookId });
+  let lastExtensionSelection: ExtensionClipboardSelectionContext | null = null;
+
+  const clearLastExtensionSelection = () => {
+    lastExtensionSelection = null;
+  };
+
+  const recordLastExtensionSelection = (
+    sheetId: string,
+    range: { startRow: number; startCol: number; endRow: number; endCol: number },
+  ) => {
+    lastExtensionSelection = { sheetId, ...range, timestampMs: Date.now() };
+  };
 
   const normalizeSelectionRange = (range: { startRow: number; startCol: number; endRow: number; endCol: number }) => {
     const startRow = Math.min(range.startRow, range.endRow);
@@ -3189,6 +3210,7 @@ if (
       const range = normalizeSelectionRange(
         app.getSelectionRanges()[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
       );
+      recordLastExtensionSelection(sheetId, range);
       const values: Array<Array<string | number | boolean | null>> = [];
       for (let r = range.startRow; r <= range.endRow; r++) {
         const row: Array<string | number | boolean | null> = [];
@@ -3320,70 +3342,23 @@ if (
         return text ?? "";
       },
       writeText: async (text: string) => {
-        const sheetId = app.getCurrentSheetId();
-        const selection = app.getSelectionRanges()[0];
-        const active = app.getActiveCell();
-        const range: Range =
-          selection ?? { startRow: active.row, endRow: active.row, startCol: active.col, endCol: active.col };
-
-        const dlpRange = {
-          start: { row: range.startRow, col: range.startCol },
-          end: { row: range.endRow, col: range.endCol },
-        };
-
-        try {
-          const dlp = createDesktopDlpContext({ documentId: workbookId });
+        if (lastExtensionSelection && Date.now() - lastExtensionSelection.timestampMs <= 2000) {
           enforceClipboardCopy({
-            documentId: dlp.documentId,
-            sheetId,
-            range: dlpRange,
-            classificationStore: dlp.classificationStore,
-            policy: dlp.policy,
+            documentId: extensionClipboardDlp.documentId,
+            sheetId: lastExtensionSelection.sheetId,
+            range: {
+              start: { row: lastExtensionSelection.startRow, col: lastExtensionSelection.startCol },
+              end: { row: lastExtensionSelection.endRow, col: lastExtensionSelection.endCol },
+            },
+            classificationStore: extensionClipboardDlp.classificationStore,
+            policy: extensionClipboardDlp.policy,
           });
-        } catch (err: any) {
-          if (err?.name === "DlpViolationError") {
-            const message = String(err?.message ?? err);
-            try {
-              showToast(message, "error");
-            } catch {
-              // ignore
-            }
-            throw new Error(message);
-          }
-          throw err;
         }
 
         const provider = await clipboardProviderPromise;
         await provider.write({ text: String(text ?? "") });
+        clearLastExtensionSelection();
       },
-    },
-    clipboardWriteGuard: async ({ taintedRanges }) => {
-      if (!Array.isArray(taintedRanges) || taintedRanges.length === 0) return;
-
-      const dlp = createDesktopDlpContext({ documentId: workbookId });
-
-      for (const range of taintedRanges) {
-        try {
-          enforceClipboardCopy({
-            documentId: dlp.documentId,
-            sheetId: range.sheetId,
-            range: {
-              start: { row: range.startRow, col: range.startCol },
-              end: { row: range.endRow, col: range.endCol },
-            },
-            classificationStore: dlp.classificationStore,
-            policy: dlp.policy,
-          });
-        } catch (err) {
-          const message = String((err as any)?.message ?? err ?? "Clipboard write blocked by policy.");
-          try {
-            showToast(message, "error");
-          } catch {
-            // ignore - toast root may be missing in some test harnesses
-          }
-          throw err;
-        }
-      }
     },
     uiApi: {
       showMessage: async (message: string, type?: string) => {
