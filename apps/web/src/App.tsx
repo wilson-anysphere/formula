@@ -161,6 +161,15 @@ function EngineDemoApp() {
 
   const goToWorkbook = useMemo<GoToWorkbookLookup>(
     () => ({
+      getSheet: (name: string) => {
+        const trimmed = String(name ?? "").trim();
+        const candidates = ["Sheet1", "Sheet2"];
+        const resolved = candidates.find((s) => s.toLowerCase() === trimmed.toLowerCase());
+        if (!resolved) {
+          throw new Error(`Unknown sheet: ${name}`);
+        }
+        return { name: resolved };
+      },
       getTable: () => null,
       getName: () => null,
     }),
