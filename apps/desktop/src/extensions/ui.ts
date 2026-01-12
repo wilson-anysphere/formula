@@ -1,5 +1,11 @@
 export type MessageType = "info" | "warning" | "error";
 
+let extensionsUiDialogTitleId = 0;
+function nextExtensionsUiDialogTitleId(kind: "input-box" | "quick-pick"): string {
+  extensionsUiDialogTitleId += 1;
+  return `extensions-ui-${kind}-title-${extensionsUiDialogTitleId}`;
+}
+
 function ensureToastRoot(): HTMLElement {
   const root = document.getElementById("toast-root");
   if (!root) {
@@ -39,6 +45,8 @@ export async function showInputBox(options: InputBoxOptions = {}): Promise<strin
   const title = document.createElement("div");
   title.className = "dialog__title";
   title.textContent = options.prompt ?? "Input";
+  title.id = nextExtensionsUiDialogTitleId("input-box");
+  dialog.setAttribute("aria-labelledby", title.id);
 
   const input = document.createElement("input");
   input.type = "text";
@@ -117,6 +125,8 @@ export async function showQuickPick<T>(
   const title = document.createElement("div");
   title.className = "dialog__title";
   title.textContent = options.placeHolder ?? "Select an item";
+  title.id = nextExtensionsUiDialogTitleId("quick-pick");
+  dialog.setAttribute("aria-labelledby", title.id);
 
   const list = document.createElement("div");
   list.className = "quick-pick__list";
