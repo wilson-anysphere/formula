@@ -220,12 +220,11 @@ variant shapes are documented further below.
 #### XML namespace + structure (observed)
 
 - Root element local name: `<cellImages>`
-- Confirmed in fixtures:
-  - `fixtures/xlsx/basic/cell-images.xlsx`:
-    - namespace: `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
-  - `fixtures/xlsx/basic/cellimages.xlsx`:
-    - namespace: `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
-- Other observed namespace variants (tests/synthetic inputs; treat as opaque and preserve):
+- Confirmed in the real Excel fixture `fixtures/xlsx/rich-data/images-in-cell.xlsx`:
+  - namespace: `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
+- Also observed in synthetic fixtures/tests (treat as opaque and preserve):
+  - `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main` (synthetic fixture `fixtures/xlsx/basic/cell-images.xlsx`)
+  - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages` (synthetic fixture `fixtures/xlsx/basic/cellimages.xlsx`)
   - `http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages`
   - `http://schemas.microsoft.com/office/spreadsheetml/2020/07/main`
   - `http://schemas.microsoft.com/office/spreadsheetml/2019/11/main`
@@ -256,7 +255,7 @@ variant shapes are documented further below.
 - Relationship type for “workbook → `cellImages*.xml` / `cellimages*.xml`” discovery (Microsoft extension; **variable**):
   - Confirmed in the real Excel fixture [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx):
     - `http://schemas.microsoft.com/office/2019/relationships/cellimages`
-  - Confirmed in in-repo fixtures/tests:
+  - Observed in synthetic fixtures/tests:
     - `http://schemas.microsoft.com/office/2023/02/relationships/cellImage`
     - `http://schemas.microsoft.com/office/2022/relationships/cellImages`
   - Observed variants in tests/synthetic inputs:
