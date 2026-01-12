@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // Include an explicit `.ts` import specifier so the repo's node:test runner can
-// automatically skip this suite when `--experimental-strip-types` is not available.
+// automatically skip this suite when TypeScript execution isn't available.
 import {
   InMemoryWorkbook,
   TOOL_REGISTRY,
@@ -14,7 +14,7 @@ import {
   validateToolCall,
 } from "../src/index.ts";
 
-test("ai-tools TS sources are importable under Node ESM (strip-types)", () => {
+test("ai-tools TS sources are importable under Node ESM when executing TS sources directly", () => {
   assert.equal(typeof ToolExecutor, "function");
   assert.equal(typeof InMemoryWorkbook, "function");
 
