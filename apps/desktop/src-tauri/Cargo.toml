@@ -80,7 +80,6 @@ tauri-plugin-notification = { version = "2", optional = true }
 tauri-plugin-shell = { version = "2", optional = true }
 tauri-plugin-updater = { version = "2.9", optional = true }
 thiserror = "1.0"
-tempfile = "3.10"
 http-range = { version = "0.1", optional = true }
 percent-encoding = { version = "2", optional = true }
 zip = { version = "2.1", default-features = false, features = ["deflate"] }
