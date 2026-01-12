@@ -27,6 +27,14 @@ describe("toggleA1AbsoluteAtCursor", () => {
     expect(step4?.cursorEnd).toBe(3);
   });
 
+  it("treats the end of a reference token as being inside the token", () => {
+    const res = toggleA1AbsoluteAtCursor("=A1", 3, 3);
+    expect(res?.text).toBe("=$A$1");
+    // Caret should stay at the end of the token after expansion.
+    expect(res?.cursorStart).toBe(5);
+    expect(res?.cursorEnd).toBe(5);
+  });
+
   it("cycles a range ref and applies the mode to both endpoints", () => {
     const input = "=SUM(A1:B2)";
     // Caret inside the range (before "B").
@@ -50,5 +58,9 @@ describe("toggleA1AbsoluteAtCursor", () => {
     expect(res?.text).toBe("=$A$1");
     expect(res?.cursorStart).toBe(1);
     expect(res?.cursorEnd).toBe(5);
+  });
+
+  it("returns null when the selection is not contained within a reference token", () => {
+    expect(toggleA1AbsoluteAtCursor("=A1+B1", 1, 4)).toBeNull();
   });
 });
