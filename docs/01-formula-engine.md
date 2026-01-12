@@ -73,7 +73,7 @@ The formula engine is the computational heart of the spreadsheet. It must parse,
 | ERROR | `#VALUE!`, `#REF!`, `#N/A` | All 7 Excel error types |
 | CELL_REF | `A1`, `$A$1`, `A$1`, `$A1` | Absolute/relative markers |
 | RANGE_REF | `A1:B10`, `A:A`, `1:1` | Full column/row references |
-| SHEET_REF | `Sheet1!A1`, `'Sheet Name'!A1` | Quoted for special chars |
+| SHEET_REF | `Sheet1!A1`, `Sheet1:Sheet3!A1`, `'Sheet Name'!A1`, `'Sheet 1:Sheet 3'!A1` | Includes 3D sheet spans; quoted for special chars |
 | EXTERNAL_REF | `[Book.xlsx]Sheet!A1` | External workbook references |
 | STRUCTURED_REF | `[@Column]`, `Table1[Column]` | Table references |
 | NAMED_RANGE | `MyRange`, `_xlnm.Print_Area` | Named references |
@@ -123,7 +123,11 @@ unary       = ("-"|"+") base ;
 primary     = number | string | boolean | error | reference | function_call | "(" expression ")" | array_literal ;
 function_call = function_name "(" [arg_list] ")" ;
 arg_list    = expression ("," expression)* ;
-reference   = cell_ref | range_ref | named_ref | structured_ref ;
+ // Sheet prefixes may qualify any reference (cells, ranges, structured refs, names):
+ //   Sheet1!A1
+ //   Sheet1:Sheet3!A1   // 3D sheet span (workbook sheet order)
+ //   [Book.xlsx]Sheet1!A1
+ reference   = [sheet_prefix] (cell_ref | range_ref | named_ref | structured_ref) ;
 array_literal = "{" array_row (";" array_row)* "}" ;
 array_row   = array_element ("," array_element)* ;
 array_element = number | string | boolean | error ;
@@ -165,7 +169,9 @@ interface CellRefNode {
   col: number;        // 0-indexed  
   rowAbsolute: boolean;
   colAbsolute: boolean;
-  sheet?: string;     // undefined = current sheet
+  // undefined = current sheet.
+  // When present, may be a single sheet name or a 3D span (`Sheet1:Sheet3!A1`).
+  sheet?: string | { start: string; end: string };
   workbook?: string;  // undefined = current workbook
 }
 
