@@ -670,6 +670,10 @@ Capability files list which window labels they apply to via `"windows": [...]` (
   - `shell:allow-open`
   - `updater:allow-check`, `updater:allow-download`, `updater:allow-install`
 
+Note: the Tauri clipboard plugin permissions above only cover the legacy **plain-text** clipboard helpers
+(`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats (HTML/RTF/PNG) are handled via
+custom Rust IPC commands (`clipboard_read` / `clipboard_write`) and must be added to the `core:allow-invoke` list.
+
 High-level contents (see the file for the exhaustive list):
 
 - `core:default` enables the `__TAURI__.core.invoke` bridge; `core:allow-invoke` restricts which command names can be invoked from the webview.
