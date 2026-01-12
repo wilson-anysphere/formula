@@ -16,8 +16,8 @@ use crate::recalc_policy::{
 };
 use crate::shared_strings::preserve::SharedStringsEditor;
 use crate::styles::XlsxStylesEditor;
-use crate::{parse_workbook_sheets, CellPatch, WorkbookCellPatches};
 use crate::RecalcPolicy;
+use crate::{parse_workbook_sheets, CellPatch, WorkbookCellPatches};
 
 const REL_TYPE_STYLES: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
@@ -127,7 +127,8 @@ pub fn patch_xlsx_streaming<R: Read + Seek, W: Write + Seek>(
     let mut archive = ZipArchive::new(input)?;
     let mut formula_changed = cell_patches.iter().any(|p| p.formula.is_some());
     if !formula_changed {
-        formula_changed = streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
+        formula_changed =
+            streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
     }
     let recalc_policy = if formula_changed {
         // Match `XlsxPackage::apply_cell_patches` default: dropping calcChain and requesting a full
@@ -203,11 +204,8 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
         if sheet_patches.is_empty() {
             continue;
         }
-        let worksheet_part = resolve_worksheet_part_for_selector(
-            sheet_selector,
-            &workbook_sheets,
-            &rel_targets,
-        )?;
+        let worksheet_part =
+            resolve_worksheet_part_for_selector(sheet_selector, &workbook_sheets, &rel_targets)?;
 
         for (cell_ref, patch) in sheet_patches.iter() {
             let (value, formula) = match patch {
@@ -232,7 +230,8 @@ pub fn patch_xlsx_streaming_workbook_cell_patches<R: Read + Seek, W: Write + See
 
     let mut formula_changed = saw_formula_patch;
     if !formula_changed {
-        formula_changed = streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
+        formula_changed =
+            streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
     }
     let recalc_policy = if formula_changed {
         RecalcPolicy::default()
@@ -330,11 +329,8 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles<R: Read + Seek, W:
         if sheet_patches.is_empty() {
             continue;
         }
-        let worksheet_part = resolve_worksheet_part_for_selector(
-            sheet_selector,
-            &workbook_sheets,
-            &rel_targets,
-        )?;
+        let worksheet_part =
+            resolve_worksheet_part_for_selector(sheet_selector, &workbook_sheets, &rel_targets)?;
 
         for (cell_ref, patch) in sheet_patches.iter() {
             let (value, formula) = match patch {
@@ -376,7 +372,8 @@ pub fn patch_xlsx_streaming_workbook_cell_patches_with_styles<R: Read + Seek, W:
 
     let mut formula_changed = saw_formula_patch;
     if !formula_changed {
-        formula_changed = streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
+        formula_changed =
+            streaming_patches_remove_existing_formulas(&mut archive, &patches_by_part)?;
     }
     let recalc_policy = if formula_changed {
         RecalcPolicy::default()
@@ -413,15 +410,9 @@ fn resolve_worksheet_part_for_selector(
         .iter()
         .find(|s| s.name.eq_ignore_ascii_case(selector))
     {
-        return rel_targets
-            .get(&sheet.rel_id)
-            .cloned()
-            .ok_or_else(|| {
-                crate::XlsxError::Invalid(format!(
-                    "missing worksheet relationship for {}",
-                    sheet.name
-                ))
-            });
+        return rel_targets.get(&sheet.rel_id).cloned().ok_or_else(|| {
+            crate::XlsxError::Invalid(format!("missing worksheet relationship for {}", sheet.name))
+        });
     }
 
     // RelId selector: if no sheet name matches, treat the key as a workbook relationship Id.
@@ -567,7 +558,11 @@ fn plan_shared_strings<R: Read + Seek>(
     }
 
     let updated_shared_strings = shared_strings.write_if_dirty()?;
-    Ok((Some(shared_strings_part), indices_by_part, updated_shared_strings))
+    Ok((
+        Some(shared_strings_part),
+        indices_by_part,
+        updated_shared_strings,
+    ))
 }
 
 fn resolve_shared_strings_part_name<R: Read + Seek>(
@@ -764,10 +759,14 @@ fn scan_worksheet_shared_string_indices<R: Read>(
                     }
                 }
             }
-            Event::Start(ref e) if current_target.is_some() && local_name(e.name().as_ref()) == b"v" => {
+            Event::Start(ref e)
+                if current_target.is_some() && local_name(e.name().as_ref()) == b"v" =>
+            {
                 in_v = true;
             }
-            Event::End(ref e) if current_target.is_some() && local_name(e.name().as_ref()) == b"v" => {
+            Event::End(ref e)
+                if current_target.is_some() && local_name(e.name().as_ref()) == b"v" =>
+            {
                 in_v = false;
             }
             Event::Text(e) if in_v && current_target.is_some() => {
@@ -775,7 +774,9 @@ fn scan_worksheet_shared_string_indices<R: Read>(
                     current_idx = e.unescape()?.trim().parse::<u32>().ok();
                 }
             }
-            Event::End(ref e) if current_target.is_some() && local_name(e.name().as_ref()) == b"c" => {
+            Event::End(ref e)
+                if current_target.is_some() && local_name(e.name().as_ref()) == b"c" =>
+            {
                 let coord = current_target.take().unwrap();
                 out.insert(coord, current_idx);
                 current_t = None;
@@ -1378,6 +1379,7 @@ struct CellPatchInternal {
     formula: Option<String>,
     xf_index: Option<u32>,
     shared_string_idx: Option<u32>,
+    material_for_insertion: bool,
 }
 
 struct RowState {
@@ -1410,8 +1412,9 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
     for patch in patches {
         let row_1 = patch.cell.row + 1;
         let col_0 = patch.cell.col;
-        let shared_string_idx = shared_string_indices
-            .and_then(|m| m.get(&(patch.cell.row, patch.cell.col)).copied());
+        let shared_string_idx =
+            shared_string_indices.and_then(|m| m.get(&(patch.cell.row, patch.cell.col)).copied());
+        let material_for_insertion = patch_is_material_for_insertion(patch);
         patches_by_row
             .entry(row_1)
             .or_default()
@@ -1422,6 +1425,7 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 formula: patch.formula.clone(),
                 xf_index: patch.xf_index,
                 shared_string_idx,
+                material_for_insertion,
             });
     }
     for row_patches in patches_by_row.values_mut() {
@@ -1592,7 +1596,12 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 while let Some((&next_row, _)) = patches_by_row.iter().next() {
                     if next_row < row_1 {
                         let pending = patches_by_row.remove(&next_row).unwrap_or_default();
-                        write_inserted_row(&mut writer, next_row, &pending, sheet_prefix.as_deref())?;
+                        write_inserted_row(
+                            &mut writer,
+                            next_row,
+                            &pending,
+                            sheet_prefix.as_deref(),
+                        )?;
                     } else {
                         break;
                     }
@@ -1625,7 +1634,12 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 while let Some((&next_row, _)) = patches_by_row.iter().next() {
                     if next_row < row_1 {
                         let pending = patches_by_row.remove(&next_row).unwrap_or_default();
-                        write_inserted_row(&mut writer, next_row, &pending, sheet_prefix.as_deref())?;
+                        write_inserted_row(
+                            &mut writer,
+                            next_row,
+                            &pending,
+                            sheet_prefix.as_deref(),
+                        )?;
                     } else {
                         break;
                     }
@@ -1633,20 +1647,25 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
 
                 if let Some(mut pending) = patches_by_row.remove(&row_1) {
                     pending.sort_by_key(|p| p.col_0);
-                    let updated_row = updated_row_spans_element(e, &pending)?;
-                    // Expand `<row/>` into `<row>...</row>` and insert cells.
-                    let row_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                    let row_prefix_owned = element_prefix(e.name().as_ref())
-                        .and_then(|p| std::str::from_utf8(p).ok())
-                        .map(|s| s.to_string());
-                    let row_prefix = row_prefix_owned.as_deref().or(sheet_prefix.as_deref());
-                    if let Some(updated) = updated_row {
-                        writer.write_event(Event::Start(updated))?;
+                    if pending.iter().any(|p| p.material_for_insertion) {
+                        let updated_row = updated_row_spans_element(e, &pending)?;
+                        // Expand `<row/>` into `<row>...</row>` and insert cells.
+                        let row_tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                        let row_prefix_owned = element_prefix(e.name().as_ref())
+                            .and_then(|p| std::str::from_utf8(p).ok())
+                            .map(|s| s.to_string());
+                        let row_prefix = row_prefix_owned.as_deref().or(sheet_prefix.as_deref());
+                        if let Some(updated) = updated_row {
+                            writer.write_event(Event::Start(updated))?;
+                        } else {
+                            writer.write_event(Event::Start(e.to_owned()))?;
+                        }
+                        write_inserted_cells(&mut writer, &pending, row_prefix)?;
+                        writer.write_event(Event::End(BytesEnd::new(row_tag.as_str())))?;
                     } else {
-                        writer.write_event(Event::Start(e.to_owned()))?;
+                        // No material patches; preserve the empty row unchanged.
+                        writer.write_event(Event::Empty(e.to_owned()))?;
                     }
-                    write_inserted_cells(&mut writer, &pending, row_prefix)?;
-                    writer.write_event(Event::End(BytesEnd::new(row_tag.as_str())))?;
                 } else {
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 }
@@ -1662,7 +1681,9 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
 
             // Inside a row that needs patching, intercept cell events.
             Event::Start(ref e)
-                if in_sheet_data && row_state.is_some() && local_name(e.name().as_ref()) == b"c" =>
+                if in_sheet_data
+                    && row_state.is_some()
+                    && local_name(e.name().as_ref()) == b"c" =>
             {
                 let state = row_state.as_mut().expect("row_state just checked");
                 let (cell_ref, col_0) = parse_cell_ref_and_col(e)?;
@@ -1685,7 +1706,9 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 }
             }
             Event::Empty(ref e)
-                if in_sheet_data && row_state.is_some() && local_name(e.name().as_ref()) == b"c" =>
+                if in_sheet_data
+                    && row_state.is_some()
+                    && local_name(e.name().as_ref()) == b"c" =>
             {
                 let state = row_state.as_mut().expect("row_state just checked");
                 let (cell_ref, col_0) = parse_cell_ref_and_col(e)?;
@@ -1706,7 +1729,10 @@ pub(crate) fn patch_worksheet_xml_streaming<R: Read, W: Write>(
                 }
             }
             Event::End(ref e)
-                if in_sheet_data && row_state.is_some() && in_cell && local_name(e.name().as_ref()) == b"c" =>
+                if in_sheet_data
+                    && row_state.is_some()
+                    && in_cell
+                    && local_name(e.name().as_ref()) == b"c" =>
             {
                 in_cell = false;
                 writer.write_event(Event::End(e.to_owned()))?;
@@ -1779,7 +1805,7 @@ fn parse_cell_ref_and_col(e: &BytesStart<'_>) -> Result<(CellRef, u32), Streamin
 }
 
 fn spans_for_patches(patches: &[CellPatchInternal]) -> Option<(u32, u32)> {
-    let mut iter = patches.iter();
+    let mut iter = patches.iter().filter(|p| p.material_for_insertion);
     let first = iter.next()?;
     let mut min_col_1 = first.col_0 + 1;
     let mut max_col_1 = first.col_0 + 1;
@@ -1874,13 +1900,15 @@ fn write_inserted_row<W: Write>(
     patches: &[CellPatchInternal],
     prefix: Option<&str>,
 ) -> Result<(), StreamingPatchError> {
+    if !patches.iter().any(|p| p.material_for_insertion) {
+        return Ok(());
+    }
     let row_tag = prefixed_tag(prefix, "row");
     let mut row = BytesStart::new(row_tag.as_str());
     let row_num = row_1.to_string();
     row.push_attribute(("r", row_num.as_str()));
-    let spans = spans_for_patches(patches).map(|(min_col_1, max_col_1)| {
-        format_row_spans(min_col_1, max_col_1)
-    });
+    let spans = spans_for_patches(patches)
+        .map(|(min_col_1, max_col_1)| format_row_spans(min_col_1, max_col_1));
     if let Some(spans) = spans.as_deref() {
         row.push_attribute(("spans", spans));
     }
@@ -1896,6 +1924,9 @@ fn write_inserted_cells<W: Write>(
     prefix: Option<&str>,
 ) -> Result<(), StreamingPatchError> {
     for patch in patches {
+        if !patch.material_for_insertion {
+            continue;
+        }
         let cell_ref = CellRef::new(patch.row_1 - 1, patch.col_0);
         write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix)?;
     }
@@ -1912,6 +1943,9 @@ fn write_remaining_row_cells<W: Write>(
         return Ok(());
     }
     for patch in &pending[next_idx..] {
+        if !patch.material_for_insertion {
+            continue;
+        }
         let cell_ref = CellRef::new(patch.row_1 - 1, patch.col_0);
         write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix)?;
     }
@@ -1926,8 +1960,10 @@ fn insert_pending_before_cell<W: Write>(
 ) -> Result<(), StreamingPatchError> {
     while let Some(patch) = state.pending.get(state.next_idx) {
         if patch.col_0 < col_0 {
-            let cell_ref = CellRef::new(state.row_1 - 1, patch.col_0);
-            write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix)?;
+            if patch.material_for_insertion {
+                let cell_ref = CellRef::new(state.row_1 - 1, patch.col_0);
+                write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix)?;
+            }
             state.next_idx += 1;
         } else {
             break;
@@ -1945,8 +1981,10 @@ fn insert_pending_before_non_cell<W: Write>(
         return Ok(());
     }
     for patch in &state.pending[state.next_idx..] {
-        let cell_ref = CellRef::new(state.row_1 - 1, patch.col_0);
-        write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix)?;
+        if patch.material_for_insertion {
+            let cell_ref = CellRef::new(state.row_1 - 1, patch.col_0);
+            write_patched_cell::<W>(writer, None, &cell_ref, patch, prefix)?;
+        }
     }
     state.next_idx = state.pending.len();
     Ok(())
@@ -2075,7 +2113,13 @@ fn write_patched_cell_children<W: Write>(
                     if let Some(formula) = patch_formula {
                         let detach_shared = should_detach_shared_formula(e, formula);
                         let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                        write_formula_element(writer, Some(e), formula, detach_shared, tag.as_str())?;
+                        write_formula_element(
+                            writer,
+                            Some(e),
+                            formula,
+                            detach_shared,
+                            tag.as_str(),
+                        )?;
                         formula_written = true;
                     }
                 }
@@ -2088,7 +2132,13 @@ fn write_patched_cell_children<W: Write>(
                     if let Some(formula) = patch_formula {
                         let detach_shared = should_detach_shared_formula(e, formula);
                         let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                        write_formula_element(writer, Some(e), formula, detach_shared, tag.as_str())?;
+                        write_formula_element(
+                            writer,
+                            Some(e),
+                            formula,
+                            detach_shared,
+                            tag.as_str(),
+                        )?;
                         formula_written = true;
                     }
                 }
@@ -2096,7 +2146,8 @@ fn write_patched_cell_children<W: Write>(
                 continue;
             }
             Event::Start(e)
-                if local_name(e.name().as_ref()) == b"v" || local_name(e.name().as_ref()) == b"is" =>
+                if local_name(e.name().as_ref()) == b"v"
+                    || local_name(e.name().as_ref()) == b"is" =>
             {
                 saw_value = true;
 
@@ -2116,7 +2167,8 @@ fn write_patched_cell_children<W: Write>(
                 continue;
             }
             Event::Empty(e)
-                if local_name(e.name().as_ref()) == b"v" || local_name(e.name().as_ref()) == b"is" =>
+                if local_name(e.name().as_ref()) == b"v"
+                    || local_name(e.name().as_ref()) == b"is" =>
             {
                 saw_value = true;
 
@@ -2402,7 +2454,10 @@ fn cell_representation(
                 }
                 match existing_t {
                     "inlineStr" => {
-                        return Ok((Some("inlineStr".to_string()), CellBodyKind::InlineStr(s.clone())));
+                        return Ok((
+                            Some("inlineStr".to_string()),
+                            CellBodyKind::InlineStr(s.clone()),
+                        ));
                     }
                     "str" => {
                         return Ok((Some("str".to_string()), CellBodyKind::V(s.clone())));
@@ -2418,13 +2473,19 @@ fn cell_representation(
             if formula.is_some() {
                 Ok((Some("str".to_string()), CellBodyKind::V(s.clone())))
             } else {
-                Ok((Some("inlineStr".to_string()), CellBodyKind::InlineStr(s.clone())))
+                Ok((
+                    Some("inlineStr".to_string()),
+                    CellBodyKind::InlineStr(s.clone()),
+                ))
             }
         }
         CellValue::RichText(rich) => {
             if let Some(existing_t) = existing_t {
                 if should_preserve_unknown_t(existing_t) {
-                    return Ok((Some(existing_t.to_string()), CellBodyKind::V(rich.text.clone())));
+                    return Ok((
+                        Some(existing_t.to_string()),
+                        CellBodyKind::V(rich.text.clone()),
+                    ));
                 }
                 if existing_t == "inlineStr" {
                     return Ok((
@@ -2466,7 +2527,9 @@ fn local_name(name: &[u8]) -> &[u8] {
 }
 
 fn element_prefix(name: &[u8]) -> Option<&[u8]> {
-    name.iter().rposition(|b| *b == b':').map(|idx| &name[..idx])
+    name.iter()
+        .rposition(|b| *b == b':')
+        .map(|idx| &name[..idx])
 }
 
 fn prefixed_tag(prefix: Option<&str>, local: &str) -> String {
@@ -2494,8 +2557,31 @@ struct PatchBounds {
     max_col_0: u32,
 }
 
+fn patch_is_material_for_insertion(patch: &WorksheetCellPatch) -> bool {
+    is_material_cell_patch_for_insertion(&patch.value, patch.formula.as_deref(), patch.xf_index)
+}
+
+fn is_material_cell_patch_for_insertion(
+    value: &CellValue,
+    formula: Option<&str>,
+    xf_index: Option<u32>,
+) -> bool {
+    !matches!(value, CellValue::Empty)
+        || formula_is_material(formula)
+        || xf_index.is_some_and(|xf| xf != 0)
+}
+
+fn formula_is_material(formula: Option<&str>) -> bool {
+    let Some(formula) = formula else {
+        return false;
+    };
+    !crate::formula_text::normalize_display_formula(formula).is_empty()
+}
+
 fn bounds_for_patches(patches: &[WorksheetCellPatch]) -> Option<PatchBounds> {
-    let mut iter = patches.iter();
+    let mut iter = patches
+        .iter()
+        .filter(|p| patch_is_material_for_insertion(p));
     let first = iter.next()?;
     let mut min_row_0 = first.cell.row;
     let mut max_row_0 = first.cell.row;

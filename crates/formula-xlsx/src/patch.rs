@@ -396,8 +396,10 @@ fn apply_cell_patches_to_package_inner(
 ) -> Result<(), XlsxError> {
     let workbook_sheets = pkg.workbook_sheets()?;
 
-    let shared_strings_part_name = resolve_shared_strings_part_name(pkg)?
-        .or_else(|| pkg.part("xl/sharedStrings.xml").map(|_| "xl/sharedStrings.xml".to_string()));
+    let shared_strings_part_name = resolve_shared_strings_part_name(pkg)?.or_else(|| {
+        pkg.part("xl/sharedStrings.xml")
+            .map(|_| "xl/sharedStrings.xml".to_string())
+    });
     let mut shared_strings = shared_strings_part_name
         .as_deref()
         .and_then(|part_name| pkg.part(part_name))
@@ -411,7 +413,8 @@ fn apply_cell_patches_to_package_inner(
             continue;
         }
 
-        let worksheet_part = resolve_worksheet_part_for_selector(pkg, &workbook_sheets, sheet_name)?;
+        let worksheet_part =
+            resolve_worksheet_part_for_selector(pkg, &workbook_sheets, sheet_name)?;
         let original = pkg
             .part(&worksheet_part)
             .ok_or_else(|| XlsxError::MissingPart(worksheet_part.clone()))?;
@@ -700,11 +703,12 @@ fn patch_worksheet_xml(
     // calc state.
     let mut formula_changed = false;
 
-    // Track the bounds of "non-empty" patches (cells that will contain a formula or value) so we
-    // can expand the worksheet `<dimension ref="..."/>` if needed.
+    // Track the bounds of *material* patches (cells that would require a `<c>` element to be
+    // inserted, e.g. value/formula/style writes) so we can expand the worksheet
+    // `<dimension ref="..."/>` if needed.
     //
     // We don't shrink dimensions (clears), mirroring Excel's typical behavior.
-    let patch_bounds = patch_bounds(patches);
+    let patch_bounds = patch_bounds(patches, style_id_to_xf)?;
 
     let dimension_ref_to_insert = (!scan.has_dimension).then(|| {
         let merged = match (scan.existing_used_range, patch_bounds) {
@@ -952,7 +956,11 @@ fn patch_sheet_data<R: std::io::BufRead>(
                         .map(|s| s.to_string());
                     let row_prefix = row_prefix_owned.as_deref().or(sheet_prefix);
 
-                    writer.write_event(Event::Start(rewrite_row_spans(&row_start, cells)?))?;
+                    writer.write_event(Event::Start(rewrite_row_spans(
+                        &row_start,
+                        cells,
+                        style_id_to_xf,
+                    )?))?;
                     let changed = patch_row(
                         reader,
                         writer,
@@ -1006,8 +1014,20 @@ fn patch_sheet_data<R: std::io::BufRead>(
                         .and_then(|p| std::str::from_utf8(p).ok())
                         .map(|s| s.to_string());
                     let row_prefix = row_prefix_owned.as_deref().or(sheet_prefix);
-                    writer.write_event(Event::Start(rewrite_row_spans(&row_empty, cells)?))?;
+                    let mut wrote_any = false;
                     for (col, patch) in cells {
+                        if !cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
+                            continue;
+                        }
+                        if !wrote_any {
+                            // Convert `<row/>` into `<row>...</row>`.
+                            writer.write_event(Event::Start(rewrite_row_spans(
+                                &row_empty,
+                                cells,
+                                style_id_to_xf,
+                            )?))?;
+                            wrote_any = true;
+                        }
                         formula_changed |= patch_has_formula(patch);
                         write_cell_patch(
                             writer,
@@ -1021,7 +1041,13 @@ fn patch_sheet_data<R: std::io::BufRead>(
                             row_prefix,
                         )?;
                     }
-                    writer.write_event(Event::End(BytesEnd::new(row_tag.as_str())))?;
+
+                    if wrote_any {
+                        writer.write_event(Event::End(BytesEnd::new(row_tag.as_str())))?;
+                    } else {
+                        // Nothing to insert; preserve the empty row unchanged.
+                        writer.write_event(Event::Empty(row_empty))?;
+                    }
                 } else {
                     writer.write_event(Event::Empty(row_empty))?;
                 }
@@ -1059,15 +1085,21 @@ fn patch_sheet_data<R: std::io::BufRead>(
     Ok(formula_changed)
 }
 
-fn patch_cols_bounds(patches: &[(u32, &CellPatch)]) -> Option<(u32, u32)> {
+fn patch_cols_bounds(
+    patches: &[(u32, &CellPatch)],
+    style_id_to_xf: Option<&HashMap<u32, u32>>,
+) -> Result<Option<(u32, u32)>, XlsxError> {
     let mut min_c = u32::MAX;
     let mut max_c = 0u32;
-    for (col_0, _) in patches {
+    for (col_0, patch) in patches {
+        if !cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
+            continue;
+        }
         let col_1 = col_0.saturating_add(1);
         min_c = min_c.min(col_1);
         max_c = max_c.max(col_1);
     }
-    (min_c != u32::MAX).then_some((min_c, max_c))
+    Ok((min_c != u32::MAX).then_some((min_c, max_c)))
 }
 
 fn parse_row_spans(spans: &str) -> Option<(u32, u32)> {
@@ -1081,8 +1113,9 @@ fn parse_row_spans(spans: &str) -> Option<(u32, u32)> {
 fn rewrite_row_spans(
     row: &BytesStart<'_>,
     patches: &[(u32, &CellPatch)],
+    style_id_to_xf: Option<&HashMap<u32, u32>>,
 ) -> Result<BytesStart<'static>, XlsxError> {
-    let Some((p_min_c, p_max_c)) = patch_cols_bounds(patches) else {
+    let Some((p_min_c, p_max_c)) = patch_cols_bounds(patches, style_id_to_xf)? else {
         return Ok(row.to_owned());
     };
 
@@ -1170,18 +1203,20 @@ fn patch_row<R: std::io::BufRead>(
                 let col = cell_ref.col;
                 while patch_idx < patches.len() && patches[patch_idx].0 < col {
                     let (patch_col, patch) = patches[patch_idx];
-                    formula_changed |= patch_has_formula(patch);
-                    write_cell_patch(
-                        writer,
-                        row_num,
-                        patch_col,
-                        patch,
-                        None,
-                        None,
-                        shared_strings,
-                        style_id_to_xf,
-                        insert_prefix,
-                    )?;
+                    if cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
+                        formula_changed |= patch_has_formula(patch);
+                        write_cell_patch(
+                            writer,
+                            row_num,
+                            patch_col,
+                            patch,
+                            None,
+                            None,
+                            shared_strings,
+                            style_id_to_xf,
+                            insert_prefix,
+                        )?;
+                    }
                     patch_idx += 1;
                 }
 
@@ -1259,18 +1294,20 @@ fn patch_row<R: std::io::BufRead>(
                 let col = cell_ref.col;
                 while patch_idx < patches.len() && patches[patch_idx].0 < col {
                     let (patch_col, patch) = patches[patch_idx];
-                    formula_changed |= patch_has_formula(patch);
-                    write_cell_patch(
-                        writer,
-                        row_num,
-                        patch_col,
-                        patch,
-                        None,
-                        None,
-                        shared_strings,
-                        style_id_to_xf,
-                        insert_prefix,
-                    )?;
+                    if cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
+                        formula_changed |= patch_has_formula(patch);
+                        write_cell_patch(
+                            writer,
+                            row_num,
+                            patch_col,
+                            patch,
+                            None,
+                            None,
+                            shared_strings,
+                            style_id_to_xf,
+                            insert_prefix,
+                        )?;
+                    }
                     patch_idx += 1;
                 }
 
@@ -1302,18 +1339,20 @@ fn patch_row<R: std::io::BufRead>(
                 if patch_idx < patches.len() && local_name(e.name().as_ref()) != b"c" {
                     while patch_idx < patches.len() {
                         let (col, patch) = patches[patch_idx];
-                        formula_changed |= patch_has_formula(patch);
-                        write_cell_patch(
-                            writer,
-                            row_num,
-                            col,
-                            patch,
-                            None,
-                            None,
-                            shared_strings,
-                            style_id_to_xf,
-                            insert_prefix,
-                        )?;
+                        if cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
+                            formula_changed |= patch_has_formula(patch);
+                            write_cell_patch(
+                                writer,
+                                row_num,
+                                col,
+                                patch,
+                                None,
+                                None,
+                                shared_strings,
+                                style_id_to_xf,
+                                insert_prefix,
+                            )?;
+                        }
                         patch_idx += 1;
                     }
                 }
@@ -1324,6 +1363,30 @@ fn patch_row<R: std::io::BufRead>(
                 if patch_idx < patches.len() && local_name(e.name().as_ref()) != b"c" {
                     while patch_idx < patches.len() {
                         let (col, patch) = patches[patch_idx];
+                        if cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
+                            formula_changed |= patch_has_formula(patch);
+                            write_cell_patch(
+                                writer,
+                                row_num,
+                                col,
+                                patch,
+                                None,
+                                None,
+                                shared_strings,
+                                style_id_to_xf,
+                                insert_prefix,
+                            )?;
+                        }
+                        patch_idx += 1;
+                    }
+                }
+                writer.write_event(Event::Empty(e.into_owned()))?;
+            }
+            Event::End(e) if local_name(e.name().as_ref()) == b"row" => {
+                let insert_prefix = cell_prefix.as_deref().or(default_prefix);
+                while patch_idx < patches.len() {
+                    let (col, patch) = patches[patch_idx];
+                    if cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
                         formula_changed |= patch_has_formula(patch);
                         write_cell_patch(
                             writer,
@@ -1336,27 +1399,7 @@ fn patch_row<R: std::io::BufRead>(
                             style_id_to_xf,
                             insert_prefix,
                         )?;
-                        patch_idx += 1;
                     }
-                }
-                writer.write_event(Event::Empty(e.into_owned()))?;
-            }
-            Event::End(e) if local_name(e.name().as_ref()) == b"row" => {
-                let insert_prefix = cell_prefix.as_deref().or(default_prefix);
-                while patch_idx < patches.len() {
-                    let (col, patch) = patches[patch_idx];
-                    formula_changed |= patch_has_formula(patch);
-                    write_cell_patch(
-                        writer,
-                        row_num,
-                        col,
-                        patch,
-                        None,
-                        None,
-                        shared_strings,
-                        style_id_to_xf,
-                        insert_prefix,
-                    )?;
                     patch_idx += 1;
                 }
                 writer.write_event(Event::End(e.into_owned()))?;
@@ -1384,20 +1427,25 @@ fn write_new_row(
     style_id_to_xf: Option<&HashMap<u32, u32>>,
     prefix: Option<&str>,
 ) -> Result<(), XlsxError> {
+    let Some((min_c, max_c)) = patch_cols_bounds(patches, style_id_to_xf)? else {
+        return Ok(());
+    };
+
     let row_tag = prefixed_tag(prefix, "row");
     let mut row = BytesStart::new(row_tag.as_str());
     let row_num_str = row_num.to_string();
     row.push_attribute(("r", row_num_str.as_str()));
 
-    let spans_str = sheet_uses_row_spans
-        .then(|| patch_cols_bounds(patches))
-        .flatten()
-        .map(|(min_c, max_c)| format!("{min_c}:{max_c}"));
-    if let Some(spans_str) = &spans_str {
+    if sheet_uses_row_spans {
+        let spans_str = format!("{min_c}:{max_c}");
         row.push_attribute(("spans", spans_str.as_str()));
     }
+
     writer.write_event(Event::Start(row))?;
     for (col, patch) in patches {
+        if !cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
+            continue;
+        }
         write_cell_patch(
             writer,
             row_num,
@@ -1410,6 +1458,7 @@ fn write_new_row(
             prefix,
         )?;
     }
+
     writer.write_event(Event::End(BytesEnd::new(row_tag.as_str())))?;
     Ok(())
 }
@@ -1555,10 +1604,7 @@ fn patch_cell_element(
     let style_change = match style_override {
         None => false,
         Some(0) => existing_s.is_some(),
-        Some(xf) => existing_s
-            .as_deref()
-            .and_then(|s| s.parse::<u32>().ok())
-            != Some(xf),
+        Some(xf) => existing_s.as_deref().and_then(|s| s.parse::<u32>().ok()) != Some(xf),
     };
 
     let update_formula = !formula_eq;
@@ -1673,9 +1719,7 @@ fn parse_existing_cell_semantics(
         match &inner_events[idx] {
             Event::Start(e) => {
                 if depth == 0 {
-                    if formula.is_none()
-                        && is_element_named(e.name().as_ref(), cell_prefix, b"f")
-                    {
+                    if formula.is_none() && is_element_named(e.name().as_ref(), cell_prefix, b"f") {
                         let (text, next_idx) = extract_element_text(inner_events, idx)?;
                         formula = Some(text);
                         idx = next_idx;
@@ -1687,8 +1731,7 @@ fn parse_existing_cell_semantics(
                         idx = next_idx;
                         continue;
                     }
-                    if is_text.is_none()
-                        && is_element_named(e.name().as_ref(), cell_prefix, b"is")
+                    if is_text.is_none() && is_element_named(e.name().as_ref(), cell_prefix, b"is")
                     {
                         let (text, next_idx) =
                             extract_inline_string_text(inner_events, idx, cell_prefix)?;
@@ -1701,9 +1744,7 @@ fn parse_existing_cell_semantics(
             }
             Event::Empty(e) => {
                 if depth == 0 {
-                    if formula.is_none()
-                        && is_element_named(e.name().as_ref(), cell_prefix, b"f")
-                    {
+                    if formula.is_none() && is_element_named(e.name().as_ref(), cell_prefix, b"f") {
                         formula = Some(String::new());
                     } else if v_text.is_none()
                         && is_element_named(e.name().as_ref(), cell_prefix, b"v")
@@ -1877,7 +1918,10 @@ fn cell_representation_for_patch(
             Some("b".to_string()),
             CellBodyKind::V(if *b { "1" } else { "0" }.to_string()),
         )),
-        CellValue::Error(e) => Ok((Some("e".to_string()), CellBodyKind::V(e.as_str().to_string()))),
+        CellValue::Error(e) => Ok((
+            Some("e".to_string()),
+            CellBodyKind::V(e.as_str().to_string()),
+        )),
         CellValue::String(s) => {
             if let Some(existing_t) = existing_t {
                 if should_preserve_unknown_t(existing_t) {
@@ -1923,7 +1967,10 @@ fn cell_representation_for_patch(
         CellValue::RichText(rich) => {
             if let Some(existing_t) = existing_t {
                 if should_preserve_unknown_t(existing_t) {
-                    return Ok((Some(existing_t.to_string()), CellBodyKind::V(rich.text.clone())));
+                    return Ok((
+                        Some(existing_t.to_string()),
+                        CellBodyKind::V(rich.text.clone()),
+                    ));
                 }
                 if existing_t == "inlineStr" {
                     return Ok((
@@ -2402,7 +2449,9 @@ fn prefixed_tag(prefix: Option<&str>, local: &str) -> String {
 }
 
 fn element_prefix(name: &[u8]) -> Option<&[u8]> {
-    name.iter().rposition(|b| *b == b':').map(|idx| &name[..idx])
+    name.iter()
+        .rposition(|b| *b == b':')
+        .map(|idx| &name[..idx])
 }
 
 fn worksheet_has_default_spreadsheetml_ns(e: &BytesStart<'_>) -> Result<bool, XlsxError> {
@@ -2475,21 +2524,35 @@ fn needs_space_preserve(text: &str) -> bool {
     text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace)
 }
 
-fn patch_bounds(patches: &WorksheetCellPatches) -> Option<(u32, u32, u32, u32)> {
+fn cell_patch_is_material_for_insertion(
+    patch: &CellPatch,
+    style_id_to_xf: Option<&HashMap<u32, u32>>,
+) -> Result<bool, XlsxError> {
+    let style_index = patch.style_index_override(style_id_to_xf)?;
+    if style_index.is_some_and(|xf| xf != 0) {
+        return Ok(true);
+    }
+
+    match patch {
+        CellPatch::Clear { .. } => Ok(false),
+        CellPatch::Set { value, formula, .. } => Ok(!matches!(value, CellValue::Empty)
+            || formula
+                .as_deref()
+                .is_some_and(|f| !crate::formula_text::normalize_display_formula(f).is_empty())),
+    }
+}
+
+fn patch_bounds(
+    patches: &WorksheetCellPatches,
+    style_id_to_xf: Option<&HashMap<u32, u32>>,
+) -> Result<Option<(u32, u32, u32, u32)>, XlsxError> {
     let mut min_row = u32::MAX;
     let mut min_col = u32::MAX;
     let mut max_row = 0u32;
     let mut max_col = 0u32;
 
     for (cell_ref, patch) in patches.iter() {
-        let is_non_empty = match patch {
-            CellPatch::Clear { .. } => false,
-            CellPatch::Set { value, formula, .. } => {
-                formula.as_ref().is_some() || !matches!(value, CellValue::Empty)
-            }
-        };
-
-        if !is_non_empty {
+        if !cell_patch_is_material_for_insertion(patch, style_id_to_xf)? {
             continue;
         }
 
@@ -2503,11 +2566,11 @@ fn patch_bounds(patches: &WorksheetCellPatches) -> Option<(u32, u32, u32, u32)> 
         max_col = max_col.max(col_1);
     }
 
-    if min_row == u32::MAX {
+    Ok(if min_row == u32::MAX {
         None
     } else {
         Some((min_row, min_col, max_row, max_col))
-    }
+    })
 }
 
 fn rewrite_dimension(
@@ -2565,12 +2628,7 @@ fn parse_dimension_ref(ref_str: &str) -> Option<(u32, u32, u32, u32)> {
     let (a, b) = s.split_once(':').unwrap_or((s, s));
     let start = CellRef::from_a1(a).ok()?;
     let end = CellRef::from_a1(b).ok()?;
-    Some((
-        start.row + 1,
-        start.col + 1,
-        end.row + 1,
-        end.col + 1,
-    ))
+    Some((start.row + 1, start.col + 1, end.row + 1, end.col + 1))
 }
 
 fn format_dimension(min_r: u32, min_c: u32, max_r: u32, max_c: u32) -> String {
@@ -2619,7 +2677,8 @@ mod tests {
         zip.start_file("xl/workbook.xml", options).unwrap();
         zip.write_all(workbook_xml.as_bytes()).unwrap();
 
-        zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .unwrap();
         zip.write_all(workbook_rels.as_bytes()).unwrap();
 
         zip.start_file("xl/worksheets/sheet1.xml", options).unwrap();
