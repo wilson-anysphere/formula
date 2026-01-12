@@ -109,7 +109,7 @@ pub struct EntityValue {
     /// User-visible string representation (what Excel renders in the grid).
     ///
     /// Accept the legacy `"display"` key as an alias for backward compatibility.
-    #[serde(default, alias = "display")]
+    #[serde(default, alias = "display", alias = "display_value")]
     pub display_value: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub properties: BTreeMap<String, CellValue>,
@@ -166,13 +166,18 @@ impl From<EntityValue> for CellValue {
 pub struct RecordValue {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub fields: BTreeMap<String, CellValue>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "display_field", skip_serializing_if = "Option::is_none")]
     pub display_field: Option<String>,
     /// Optional precomputed display string (legacy / fallback).
     ///
     /// This field exists to keep older IPC payloads working; when `displayField`
     /// is present and points to a scalar field, UIs should prefer that value.
-    #[serde(default, alias = "display", skip_serializing_if = "String::is_empty")]
+    #[serde(
+        default,
+        alias = "display",
+        alias = "display_value",
+        skip_serializing_if = "String::is_empty"
+    )]
     pub display_value: String,
 }
 
@@ -303,4 +308,58 @@ pub struct ArrayValue {
 pub struct SpillValue {
     /// Origin cell containing the spilling formula.
     pub origin: CellRef,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EntityValue, RecordValue};
+    use serde_json::json;
+
+    #[test]
+    fn entity_value_deserializes_legacy_display_aliases() {
+        let entity: EntityValue = serde_json::from_value(json!({
+            "display": "Entity display"
+        }))
+        .expect("deserialize legacy entity");
+        assert_eq!(entity.display_value, "Entity display");
+        let serialized = serde_json::to_value(&entity).expect("serialize entity");
+        assert_eq!(
+            serialized.get("displayValue").and_then(|v| v.as_str()),
+            Some("Entity display")
+        );
+
+        let entity: EntityValue = serde_json::from_value(json!({
+            "display_value": "Entity display"
+        }))
+        .expect("deserialize snake_case entity display");
+        assert_eq!(entity.display_value, "Entity display");
+    }
+
+    #[test]
+    fn record_value_deserializes_legacy_display_aliases() {
+        let record: RecordValue = serde_json::from_value(json!({
+            "display": "Record display"
+        }))
+        .expect("deserialize legacy record");
+        assert_eq!(record.display_value, "Record display");
+
+        let record: RecordValue = serde_json::from_value(json!({
+            "display_value": "Record display"
+        }))
+        .expect("deserialize snake_case record display");
+        assert_eq!(record.display_value, "Record display");
+    }
+
+    #[test]
+    fn record_value_deserializes_display_field_alias() {
+        let record: RecordValue = serde_json::from_value(json!({
+            "display_field": "Name",
+            "fields": {
+                "Name": { "type": "string", "value": "Alice" }
+            }
+        }))
+        .expect("deserialize record");
+        assert_eq!(record.display_field.as_deref(), Some("Name"));
+        assert_eq!(record.to_string(), "Alice");
+    }
 }
