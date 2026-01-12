@@ -647,6 +647,7 @@ fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, S
         depth: usize,
         out: &mut Vec<ListDirEntry>,
         allowed_roots: &[PathBuf],
+        seen: &mut usize,
     ) -> Result<(), String> {
         let canonical_dir = crate::fs_scope::canonicalize_in_allowed_roots(dir, allowed_roots)
             .map_err(|e| e.to_string())?;
@@ -660,6 +661,14 @@ fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, S
         let entries = std::fs::read_dir(&canonical_dir).map_err(|e| e.to_string())?;
         for entry in entries {
             let entry = entry.map_err(|e| e.to_string())?;
+            if *seen >= crate::resource_limits::MAX_LIST_DIR_ENTRIES {
+                return Err(format!(
+                    "Directory listing exceeded limit (max {} entries)",
+                    crate::resource_limits::MAX_LIST_DIR_ENTRIES
+                ));
+            }
+            *seen += 1;
+
             let entry_path = entry.path();
             let file_type = entry.file_type().map_err(|e| e.to_string())?;
             let resolved_path =
@@ -673,7 +682,7 @@ fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, S
                 // Never follow symlinked directories, to avoid cycles and unexpected traversal
                 // outside the requested subtree.
                 if recursive && !file_type.is_symlink() {
-                    visit(&entry_path, recursive, depth + 1, out, allowed_roots)?;
+                    visit(&entry_path, recursive, depth + 1, out, allowed_roots, seen)?;
                 }
                 continue;
             }
@@ -689,16 +698,6 @@ fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, S
 
             let name = entry.file_name().to_str().unwrap_or_default().to_string();
 
-            // Enforce a hard cap on output size to prevent unbounded memory usage.
-            //
-            // We allow exactly MAX_LIST_DIR_ENTRIES results; error only when we'd exceed it.
-            if out.len() >= crate::resource_limits::MAX_LIST_DIR_ENTRIES {
-                return Err(format!(
-                    "Directory listing exceeded limit (max {} entries)",
-                    crate::resource_limits::MAX_LIST_DIR_ENTRIES
-                ));
-            }
-
             out.push(ListDirEntry {
                 path: entry_path.to_string_lossy().to_string(),
                 name,
@@ -712,7 +711,8 @@ fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, S
     let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
     let root = PathBuf::from(path);
     let mut out = Vec::new();
-    visit(&root, recursive, 0, &mut out, &allowed_roots)?;
+    let mut seen = 0usize;
+    visit(&root, recursive, 0, &mut out, &allowed_roots, &mut seen)?;
     Ok(out)
 }
 
@@ -722,7 +722,7 @@ fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, S
 /// without depending on the optional Tauri FS plugin.
 ///
 /// Resource limits:
-/// - The result set is capped at `MAX_LIST_DIR_ENTRIES` (see `resource_limits.rs`).
+/// - The directory traversal is capped at `MAX_LIST_DIR_ENTRIES` (see `resource_limits.rs`).
 /// - Recursive traversal is capped at `MAX_LIST_DIR_DEPTH`.
 /// - Symlinked directories are not followed.
 ///
@@ -3705,7 +3705,7 @@ mod tests {
 
     #[test]
     fn list_dir_errors_when_entry_limit_reached() {
-        use std::fs::File;
+        use std::fs::{create_dir, remove_dir, File};
 
         let base_dirs = directories::BaseDirs::new().expect("base dirs");
         let dir = tempfile::Builder::new()
@@ -3724,6 +3724,23 @@ mod tests {
             crate::resource_limits::MAX_LIST_DIR_ENTRIES,
             "expected exactly MAX_LIST_DIR_ENTRIES results"
         );
+
+        // Adding even an empty directory should exceed the traversal limit (directory entries
+        // count toward the cap, even though only files are returned).
+        let extra_dir = dir.path().join("extra_dir");
+        create_dir(&extra_dir).expect("create extra dir");
+
+        let err = list_dir_blocking(dir.path().to_str().unwrap(), false)
+            .expect_err("expected list_dir to error once entry limit is exceeded");
+        assert!(
+            err.contains(&format!(
+                "Directory listing exceeded limit (max {} entries)",
+                crate::resource_limits::MAX_LIST_DIR_ENTRIES
+            )),
+            "unexpected error: {err}"
+        );
+
+        remove_dir(&extra_dir).expect("remove extra dir");
 
         // Now add one more file and ensure we get a clear error.
         let extra_path = dir.path().join(format!(

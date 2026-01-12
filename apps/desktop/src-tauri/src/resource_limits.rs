@@ -5,10 +5,14 @@
 //! conservative limits ensure the backend fails fast and deterministically instead of exhausting
 //! memory/CPU (OOM/freeze).
 
-/// Maximum number of entries returned by the `list_dir` command.
+/// Maximum number of filesystem entries processed by the `list_dir` command.
 ///
 /// The limit is enforced even when `recursive=false`, since a single directory can contain an
 /// unbounded number of files.
+///
+/// Note: `list_dir` returns file entries only, but this limit counts all directory entries
+/// encountered during traversal (files + directories). This ensures CPU usage is bounded even for
+/// directory trees that contain very few files.
 pub const MAX_LIST_DIR_ENTRIES: usize = 50_000;
 
 /// Maximum recursion depth for the `list_dir` command when `recursive=true`.
