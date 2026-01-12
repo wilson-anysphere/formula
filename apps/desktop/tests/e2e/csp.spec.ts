@@ -90,12 +90,12 @@ test.describe("Content Security Policy (Tauri parity)", () => {
 
     const connectSrc = getCspDirectiveSources(String(cspHeader), "connect-src");
     // The Tauri CSP is intentionally restrictive (no plain `http:`), but still allows
-    // outbound HTTPS + WebSockets for collaboration and extensions.
+    // outbound HTTPS + WebSockets for collaboration and extensions, along with the in-memory
+    // module URLs used by the extension system (`blob:`/`data:`).
     expect(connectSrc, "CSP `connect-src` should match Tauri config").toContain("'self'");
     expect(connectSrc).toContain("https:");
     expect(connectSrc).toContain("ws:");
     expect(connectSrc).toContain("wss:");
-    // Allow fetching in-memory `blob:`/`data:` URLs used by the extension system.
     expect(connectSrc).toContain("blob:");
     expect(connectSrc).toContain("data:");
     expect(connectSrc).not.toContain("http:");
