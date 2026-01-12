@@ -32,11 +32,23 @@ fn setup_error_engine(bytecode_enabled: bool) -> Engine {
     engine
 }
 
+fn setup_empty_engine(bytecode_enabled: bool) -> Engine {
+    let mut engine = Engine::new();
+    engine.set_bytecode_enabled(bytecode_enabled);
+    engine
+}
+
 #[test]
 fn bytecode_spills_match_ast_for_range_reference_and_elementwise_ops() {
     for (formula, expected) in [
-        ("=A1:A3", vec![Value::Number(1.0), Value::Number(2.0), Value::Number(3.0)]),
-        ("=A1:A3+1", vec![Value::Number(2.0), Value::Number(3.0), Value::Number(4.0)]),
+        (
+            "=A1:A3",
+            vec![Value::Number(1.0), Value::Number(2.0), Value::Number(3.0)],
+        ),
+        (
+            "=A1:A3+1",
+            vec![Value::Number(2.0), Value::Number(3.0), Value::Number(4.0)],
+        ),
     ] {
         let mut ast = setup_base_engine(false);
         ast.set_cell_formula("Sheet1", "C1", formula).unwrap();
@@ -98,15 +110,30 @@ fn bytecode_blocked_spills_match_ast() {
         "expected spill formula to compile to bytecode"
     );
 
-    assert_eq!(bytecode.get_cell_value("Sheet1", "C1"), Value::Error(ErrorKind::Spill));
+    assert_eq!(
+        bytecode.get_cell_value("Sheet1", "C1"),
+        Value::Error(ErrorKind::Spill)
+    );
     assert_eq!(bytecode.get_cell_value("Sheet1", "C2"), Value::Number(99.0));
     assert_eq!(bytecode.get_cell_value("Sheet1", "C3"), Value::Blank);
     assert!(bytecode.spill_range("Sheet1", "C1").is_none());
 
-    assert_eq!(bytecode.get_cell_value("Sheet1", "C1"), ast.get_cell_value("Sheet1", "C1"));
-    assert_eq!(bytecode.get_cell_value("Sheet1", "C2"), ast.get_cell_value("Sheet1", "C2"));
-    assert_eq!(bytecode.get_cell_value("Sheet1", "C3"), ast.get_cell_value("Sheet1", "C3"));
-    assert_eq!(bytecode.spill_range("Sheet1", "C1"), ast.spill_range("Sheet1", "C1"));
+    assert_eq!(
+        bytecode.get_cell_value("Sheet1", "C1"),
+        ast.get_cell_value("Sheet1", "C1")
+    );
+    assert_eq!(
+        bytecode.get_cell_value("Sheet1", "C2"),
+        ast.get_cell_value("Sheet1", "C2")
+    );
+    assert_eq!(
+        bytecode.get_cell_value("Sheet1", "C3"),
+        ast.get_cell_value("Sheet1", "C3")
+    );
+    assert_eq!(
+        bytecode.spill_range("Sheet1", "C1"),
+        ast.spill_range("Sheet1", "C1")
+    );
 }
 
 #[test]
@@ -309,16 +336,146 @@ fn bytecode_spills_match_ast_for_iserror_and_isna_over_ranges() {
 }
 
 #[test]
+fn bytecode_spills_match_ast_for_top_level_array_literals() {
+    struct Case {
+        formula: &'static str,
+        expected_end: &'static str,
+        expected_cells: Vec<(&'static str, Value)>,
+    }
+
+    for Case {
+        formula,
+        expected_end,
+        expected_cells,
+    } in [
+        Case {
+            formula: "={1,2;3,4}",
+            expected_end: "B2",
+            expected_cells: vec![
+                ("A1", Value::Number(1.0)),
+                ("B1", Value::Number(2.0)),
+                ("A2", Value::Number(3.0)),
+                ("B2", Value::Number(4.0)),
+            ],
+        },
+        Case {
+            formula: "={\"a\",TRUE;#VALUE!,\"b\"}",
+            expected_end: "B2",
+            expected_cells: vec![
+                ("A1", Value::Text("a".to_string())),
+                ("B1", Value::Bool(true)),
+                ("A2", Value::Error(ErrorKind::Value)),
+                ("B2", Value::Text("b".to_string())),
+            ],
+        },
+        Case {
+            formula: "={1,,3}",
+            expected_end: "C1",
+            expected_cells: vec![
+                ("A1", Value::Number(1.0)),
+                ("B1", Value::Blank),
+                ("C1", Value::Number(3.0)),
+            ],
+        },
+        Case {
+            formula: "=LET(x,{1,2;3,4},x)",
+            expected_end: "B2",
+            expected_cells: vec![
+                ("A1", Value::Number(1.0)),
+                ("B1", Value::Number(2.0)),
+                ("A2", Value::Number(3.0)),
+                ("B2", Value::Number(4.0)),
+            ],
+        },
+    ] {
+        let mut ast = setup_empty_engine(false);
+        ast.set_cell_formula("Sheet1", "A1", formula).unwrap();
+        ast.recalculate_single_threaded();
+
+        let mut bytecode = setup_empty_engine(true);
+        bytecode.set_cell_formula("Sheet1", "A1", formula).unwrap();
+        assert_eq!(
+            bytecode.bytecode_program_count(),
+            1,
+            "expected formula {formula} to compile to bytecode"
+        );
+        bytecode.recalculate_single_threaded();
+
+        let expected_spill = Some((parse_a1("A1").unwrap(), parse_a1(expected_end).unwrap()));
+
+        assert_eq!(
+            bytecode.spill_range("Sheet1", "A1"),
+            expected_spill,
+            "expected spill range for bytecode formula {formula}"
+        );
+        assert_eq!(
+            ast.spill_range("Sheet1", "A1"),
+            expected_spill,
+            "expected spill range for AST formula {formula}"
+        );
+
+        for (addr, expected_value) in expected_cells {
+            assert_eq!(
+                bytecode.get_cell_value("Sheet1", addr),
+                expected_value,
+                "bytecode mismatch at {addr} for {formula}"
+            );
+            assert_eq!(
+                ast.get_cell_value("Sheet1", addr),
+                expected_value,
+                "AST mismatch at {addr} for {formula}"
+            );
+        }
+    }
+}
+
+#[test]
+fn ragged_top_level_array_literals_match_ast_in_bytecode_mode() {
+    let formula = "={1,2;3}";
+
+    let mut ast = setup_empty_engine(false);
+    ast.set_cell_formula("Sheet1", "A1", formula).unwrap();
+    ast.recalculate_single_threaded();
+
+    let mut bytecode = setup_empty_engine(true);
+    bytecode.set_cell_formula("Sheet1", "A1", formula).unwrap();
+    // Ragged array literals are lowered as unsupported, so bytecode should fall back to AST.
+    assert_eq!(bytecode.bytecode_program_count(), 0);
+    bytecode.recalculate_single_threaded();
+
+    assert_eq!(
+        bytecode.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert!(bytecode.spill_range("Sheet1", "A1").is_none());
+
+    assert_eq!(
+        bytecode.get_cell_value("Sheet1", "A1"),
+        ast.get_cell_value("Sheet1", "A1")
+    );
+    assert_eq!(
+        bytecode.spill_range("Sheet1", "A1"),
+        ast.spill_range("Sheet1", "A1")
+    );
+}
+
+#[test]
 fn bytecode_spills_match_ast_for_row_and_column_reference_functions() {
     fn run(bytecode_enabled: bool) -> Engine {
         let mut engine = Engine::new();
         engine.set_bytecode_enabled(bytecode_enabled);
-        engine.set_cell_formula("Sheet1", "A1", "=ROW(D4:F5)").unwrap();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=ROW(D4:F5)")
+            .unwrap();
         engine
             .set_cell_formula("Sheet1", "E1", "=COLUMN(D4:F5)")
             .unwrap();
-        engine.set_cell_formula("Sheet1", "J1", "=ROW(5:7)").unwrap();
-        engine.set_cell_formula("Sheet1", "A10", "=COLUMN(D:F)").unwrap();
+        engine
+            .set_cell_formula("Sheet1", "J1", "=ROW(5:7)")
+            .unwrap();
+        engine
+            .set_cell_formula("Sheet1", "A10", "=COLUMN(D:F)")
+            .unwrap();
         engine.recalculate_single_threaded();
         engine
     }

@@ -6429,10 +6429,7 @@ fn rewrite_defined_name_constants_for_bytecode(
                 })
             }
             crate::Expr::Binary(b) => {
-                if matches!(
-                    b.op,
-                    crate::BinaryOp::Union | crate::BinaryOp::Intersect
-                ) {
+                if matches!(b.op, crate::BinaryOp::Union | crate::BinaryOp::Intersect) {
                     return None;
                 }
                 let left = rewrite_inner(&b.left, current_sheet, workbook, lexical_scopes);
@@ -6545,7 +6542,9 @@ fn engine_value_to_bytecode(value: &Value) -> bytecode::Value {
         Value::Blank => bytecode::Value::Empty,
         Value::Error(e) => bytecode::Value::Error(engine_error_to_bytecode(*e)),
         Value::Lambda(_) => bytecode::Value::Error(bytecode::ErrorKind::Calc),
-        Value::Reference(_) | Value::ReferenceUnion(_) => bytecode::Value::Error(bytecode::ErrorKind::Value),
+        Value::Reference(_) | Value::ReferenceUnion(_) => {
+            bytecode::Value::Error(bytecode::ErrorKind::Value)
+        }
         Value::Array(_) | Value::Spill { .. } => bytecode::Value::Error(bytecode::ErrorKind::Spill),
     }
 }
@@ -8000,13 +7999,15 @@ fn bytecode_expr_is_eligible_inner(
                 if args.len() != 8 && args.len() != 9 {
                     return false;
                 }
-                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::OddLPrice | bytecode::ast::Function::OddLYield => {
                 if args.len() != 7 && args.len() != 8 {
                     return false;
                 }
-                args.iter().all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
+                args.iter()
+                    .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes))
             }
             bytecode::ast::Function::Abs
             | bytecode::ast::Function::Now
@@ -10239,7 +10240,13 @@ mod tests {
                 matches!(compiled, CompiledFormula::Bytecode(_)),
                 "expected {a1} to compile to bytecode"
             );
-            tasks.push((CellKey { sheet: sheet_id, addr }, compiled));
+            tasks.push((
+                CellKey {
+                    sheet: sheet_id,
+                    addr,
+                },
+                compiled,
+            ));
         }
 
         // Column caches should *not* allocate full-column buffers for `A:A` / `B:B`.

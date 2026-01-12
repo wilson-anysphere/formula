@@ -1,5 +1,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 
+use chrono::{DateTime, Utc};
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::eval::{
     parse_a1, EvalContext, Evaluator, RecalcContext, SheetReference, ValueResolver,
@@ -16,7 +17,6 @@ use formula_engine::{
 use formula_model::table::TableColumn;
 use formula_model::{Range, Table};
 use proptest::prelude::*;
-use chrono::{DateTime, Utc};
 use std::sync::Arc;
 
 fn not_thread_safe_test(
@@ -113,7 +113,10 @@ impl ValueResolver for EngineResolver<'_> {
         &self,
         sheet_id: usize,
         origin: formula_engine::eval::CellAddr,
-    ) -> Option<(formula_engine::eval::CellAddr, formula_engine::eval::CellAddr)> {
+    ) -> Option<(
+        formula_engine::eval::CellAddr,
+        formula_engine::eval::CellAddr,
+    )> {
         let sheet = match sheet_id {
             0 => "Sheet1",
             _ => return None,
@@ -288,7 +291,10 @@ fn bytecode_backend_compiles_structured_refs_and_recompiles_on_table_changes() {
         .unwrap();
     engine_ast.recalculate_single_threaded();
     assert_eq!(engine_ast.bytecode_program_count(), 0);
-    assert_eq!(engine.get_cell_value("Sheet1", "E1"), engine_ast.get_cell_value("Sheet1", "E1"));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E1"),
+        engine_ast.get_cell_value("Sheet1", "E1")
+    );
 
     // Expand the table range to include another data row; Col1 sum should grow accordingly.
     let before_programs = engine.bytecode_program_count();
@@ -302,7 +308,10 @@ fn bytecode_backend_compiles_structured_refs_and_recompiles_on_table_changes() {
     engine_ast.set_sheet_tables("Sheet1", vec![table_fixture_multi_col("A1:D5")]);
     engine_ast.set_cell_value("Sheet1", "A5", 4.0).unwrap();
     engine_ast.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "E1"), engine_ast.get_cell_value("Sheet1", "E1"));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E1"),
+        engine_ast.get_cell_value("Sheet1", "E1")
+    );
 }
 
 #[test]
@@ -656,7 +665,10 @@ fn bytecode_backend_rejects_invalid_let_name_arg() {
     assert_eq!(engine.bytecode_program_count(), 0);
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Value)
+    );
     assert_engine_matches_ast(&engine, "=LET(1, 2, 3)", "A1");
 
     engine
@@ -666,7 +678,10 @@ fn bytecode_backend_rejects_invalid_let_name_arg() {
     assert_eq!(engine.bytecode_program_count(), 0);
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Error(ErrorKind::Value)
+    );
     assert_engine_matches_ast(&engine, "=LET(A1, 2, 3)", "A2");
 }
 
@@ -767,7 +782,10 @@ fn array_literal_errors_propagate_in_sum() {
     engine.recalculate_single_threaded();
 
     assert_engine_matches_ast(&engine, "=SUM({1,#DIV/0!})", "A1");
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Div0));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Div0)
+    );
 }
 
 #[test]
@@ -781,14 +799,33 @@ fn array_literals_enable_bytecode_for_logical_functions() {
     engine
         .set_cell_formula("Sheet1", "A2", "=OR({TRUE,FALSE})")
         .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=XOR({TRUE,FALSE})")
+        .unwrap();
 
-    assert_eq!(engine.bytecode_program_count(), 2);
+    assert_eq!(engine.bytecode_program_count(), 3);
 
     engine.recalculate_single_threaded();
-    assert_engine_matches_ast(&engine, "=AND({TRUE,FALSE})", "A1");
-    assert_engine_matches_ast(&engine, "=OR({TRUE,FALSE})", "A2");
     assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Bool(false));
     assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Bool(true));
+    assert_eq!(engine.get_cell_value("Sheet1", "A3"), Value::Bool(true));
+    assert_engine_matches_ast(&engine, "=AND({TRUE,FALSE})", "A1");
+    assert_engine_matches_ast(&engine, "=OR({TRUE,FALSE})", "A2");
+    assert_engine_matches_ast(&engine, "=XOR({TRUE,FALSE})", "A3");
+}
+
+#[test]
+fn bytecode_backend_supports_countif_array_literal_range_arg() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=COUNTIF({1,,3}, \"<1\")")
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(1.0));
+    assert_engine_matches_ast(&engine, "=COUNTIF({1,,3}, \"<1\")", "A1");
 }
 
 #[test]
@@ -1009,7 +1046,10 @@ fn bytecode_backend_rejects_invalid_let_arity() {
     assert_eq!(engine.bytecode_program_count(), 0);
 
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Value)
+    );
     assert_engine_matches_ast(&engine, "=LET(x, 1)", "A1");
 }
 
@@ -1110,10 +1150,15 @@ fn bytecode_backend_matches_ast_for_and_or_over_3d_sheet_spans() {
             "expected AND/OR formulas to compile to bytecode"
         );
 
-        for (sheet, value) in ["Sheet1", "Sheet2", "Sheet3"].into_iter().zip(values.iter()) {
+        for (sheet, value) in ["Sheet1", "Sheet2", "Sheet3"]
+            .into_iter()
+            .zip(values.iter())
+        {
             match value {
                 None => bytecode_engine.clear_cell(sheet, "A1").unwrap(),
-                Some(v) => bytecode_engine.set_cell_value(sheet, "A1", v.clone()).unwrap(),
+                Some(v) => bytecode_engine
+                    .set_cell_value(sheet, "A1", v.clone())
+                    .unwrap(),
             }
         }
 
@@ -1125,7 +1170,10 @@ fn bytecode_backend_matches_ast_for_and_or_over_3d_sheet_spans() {
         ast_engine.set_bytecode_enabled(false);
         setup(&mut ast_engine);
 
-        for (sheet, value) in ["Sheet1", "Sheet2", "Sheet3"].into_iter().zip(values.iter()) {
+        for (sheet, value) in ["Sheet1", "Sheet2", "Sheet3"]
+            .into_iter()
+            .zip(values.iter())
+        {
             match value {
                 None => ast_engine.clear_cell(sheet, "A1").unwrap(),
                 Some(v) => ast_engine.set_cell_value(sheet, "A1", v.clone()).unwrap(),
@@ -1211,7 +1259,7 @@ fn bytecode_backend_counta_and_countblank_respect_non_numeric_reference_cells() 
     engine.set_cell_value("Sheet1", "A2", "x").unwrap();
     engine.set_cell_value("Sheet1", "A3", true).unwrap();
     engine.set_cell_value("Sheet1", "A4", "").unwrap(); // empty string: non-blank for COUNTA, blank for COUNTBLANK
-    // A5 left blank
+                                                        // A5 left blank
 
     engine
         .set_cell_formula("Sheet1", "B1", "=COUNTA(A1:A5)")
@@ -1711,19 +1759,35 @@ fn bytecode_backend_matches_ast_for_scalar_information_functions() {
     engine
         .set_cell_formula("Sheet1", "B2", "=ISNUMBER(A2)")
         .unwrap();
-    engine.set_cell_formula("Sheet1", "B3", "=ISTEXT(A3)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=ISTEXT(A3)")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "B4", "=ISLOGICAL(A4)")
         .unwrap();
-    engine.set_cell_formula("Sheet1", "B5", "=ISERR(A5)").unwrap();
-    engine.set_cell_formula("Sheet1", "B6", "=ISERR(A6)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B5", "=ISERR(A5)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B6", "=ISERR(A6)")
+        .unwrap();
 
     // TYPE.
-    engine.set_cell_formula("Sheet1", "C1", "=TYPE(A1)").unwrap();
-    engine.set_cell_formula("Sheet1", "C2", "=TYPE(A2)").unwrap();
-    engine.set_cell_formula("Sheet1", "C3", "=TYPE(A3)").unwrap();
-    engine.set_cell_formula("Sheet1", "C4", "=TYPE(A4)").unwrap();
-    engine.set_cell_formula("Sheet1", "C5", "=TYPE(A5)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=TYPE(A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", "=TYPE(A2)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C3", "=TYPE(A3)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C4", "=TYPE(A4)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C5", "=TYPE(A5)")
+        .unwrap();
 
     // ERROR.TYPE.
     engine
@@ -1825,13 +1889,21 @@ fn bytecode_backend_matches_ast_for_coupon_schedule_functions() {
     let mut engine = Engine::new();
 
     engine
-        .set_cell_formula("Sheet1", "A1", r#"=COUPDAYBS("2020-02-01","2025-01-15",2,)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "A1",
+            r#"=COUPDAYBS("2020-02-01","2025-01-15",2,)"#,
+        )
         .unwrap();
     engine
         .set_cell_formula("Sheet1", "A2", r#"=COUPDAYS("2020-02-01","2025-01-15",2,)"#)
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "A3", r#"=COUPDAYSNC("2020-02-01","2025-01-15",2,)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "A3",
+            r#"=COUPDAYSNC("2020-02-01","2025-01-15",2,)"#,
+        )
         .unwrap();
     engine
         .set_cell_formula("Sheet1", "A4", r#"=COUPNCD("2020-02-01","2025-01-15",2,)"#)
@@ -1910,10 +1982,7 @@ fn bytecode_backend_matches_ast_for_standard_bond_functions() {
             "B1",
         ),
         (r#"=YIELD("2020-02-01","2025-01-15",0.05,95,100,2,)"#, "B2"),
-        (
-            r#"=DURATION("2020-02-01","2025-01-15",0.05,0.04,2,)"#,
-            "B3",
-        ),
+        (r#"=DURATION("2020-02-01","2025-01-15",0.05,0.04,2,)"#, "B3"),
         (
             r#"=MDURATION("2020-02-01","2025-01-15",0.05,0.04,2,)"#,
             "B4",
@@ -1951,10 +2020,7 @@ fn bytecode_backend_matches_ast_for_accrued_interest_functions() {
     engine.recalculate_single_threaded();
 
     for (formula, cell) in [
-        (
-            r#"=ACCRINTM("2019-12-31","2020-03-31",0.05,1000,)"#,
-            "C1",
-        ),
+        (r#"=ACCRINTM("2019-12-31","2020-03-31",0.05,1000,)"#, "C1"),
         (
             r#"=ACCRINT("2019-12-31","2020-06-30","2020-03-31",0.05,1000,2,,TRUE)"#,
             "C2",
@@ -1969,7 +2035,11 @@ fn bytecode_backend_matches_ast_for_discount_securities_and_tbill_functions() {
     let mut engine = Engine::new();
 
     engine
-        .set_cell_formula("Sheet1", "D1", r#"=DISC("2020-01-01","2020-12-31",97,100,)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "D1",
+            r#"=DISC("2020-01-01","2020-12-31",97,100,)"#,
+        )
         .unwrap();
     engine
         .set_cell_formula(
@@ -2014,7 +2084,11 @@ fn bytecode_backend_matches_ast_for_discount_securities_and_tbill_functions() {
         )
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "D8", r#"=TBILLEQ("2020-01-01","2020-06-30",0.05)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "D8",
+            r#"=TBILLEQ("2020-01-01","2020-06-30",0.05)"#,
+        )
         .unwrap();
     engine
         .set_cell_formula(
@@ -2024,7 +2098,11 @@ fn bytecode_backend_matches_ast_for_discount_securities_and_tbill_functions() {
         )
         .unwrap();
     engine
-        .set_cell_formula("Sheet1", "D10", r#"=TBILLYIELD("2020-01-01","2020-06-30",97)"#)
+        .set_cell_formula(
+            "Sheet1",
+            "D10",
+            r#"=TBILLYIELD("2020-01-01","2020-06-30",97)"#,
+        )
         .unwrap();
 
     let stats = engine.bytecode_compile_stats();
@@ -2134,9 +2212,7 @@ fn bytecode_backend_matches_ast_for_concat_operator() {
         .set_cell_value("Sheet1", "A2", 100000000000.0)
         .unwrap();
     engine.set_cell_value("Sheet1", "B2", "x").unwrap();
-    engine
-        .set_cell_formula("Sheet1", "C2", "=A2&B2")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "C2", "=A2&B2").unwrap();
 
     // Ensure we're exercising the bytecode path for both formulas.
     assert_eq!(engine.bytecode_program_count(), 2);
@@ -2199,7 +2275,9 @@ fn bytecode_backend_concat_function_uses_engine_value_locale_for_number_to_text(
     let mut engine = Engine::new();
     engine.set_value_locale(ValueLocaleConfig::de_de());
     engine.set_cell_value("Sheet1", "A1", 1.5).unwrap();
-    engine.set_cell_formula("Sheet1", "B1", r#"=CONCAT(A1,"x")"#).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=CONCAT(A1,"x")"#)
+        .unwrap();
     assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();
@@ -2226,7 +2304,9 @@ fn bytecode_backend_matches_ast_for_concat_operator_with_numeric_literals() {
 fn bytecode_backend_matches_ast_for_concat_operator_with_cell_and_string_literal() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 123.0).unwrap();
-    engine.set_cell_formula("Sheet1", "B1", r#"=A1&"x""#).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=A1&"x""#)
+        .unwrap();
 
     // Ensure we're exercising the bytecode path.
     assert_eq!(engine.bytecode_program_count(), 1);
@@ -2240,7 +2320,9 @@ fn bytecode_backend_concat_operator_uses_engine_value_locale_for_number_to_text(
     let mut engine = Engine::new();
     engine.set_value_locale(ValueLocaleConfig::de_de());
     engine.set_cell_value("Sheet1", "A1", 1.5).unwrap();
-    engine.set_cell_formula("Sheet1", "B1", r#"=A1&"x""#).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=A1&"x""#)
+        .unwrap();
     assert_eq!(engine.bytecode_program_count(), 1);
 
     engine.recalculate_single_threaded();
@@ -2256,7 +2338,9 @@ fn bytecode_backend_matches_ast_for_concat_operator_blank_and_error_operands() {
     let mut engine = Engine::new();
 
     // A1 left blank: concat should treat blanks as empty text.
-    engine.set_cell_formula("Sheet1", "B1", r#"=A1&"x""#).unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", r#"=A1&"x""#)
+        .unwrap();
     assert_eq!(engine.bytecode_program_count(), 1);
 
     // Errors should propagate through concatenation.
@@ -2336,9 +2420,7 @@ fn bytecode_backend_matches_ast_for_postfix_percent_blank_and_error_literals() {
     engine
         .set_cell_formula("Sheet1", "B2", "=#DIV/0!%")
         .unwrap();
-    engine
-        .set_cell_formula("Sheet1", "B3", "=200*50%")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "B3", "=200*50%").unwrap();
 
     // Ensure we're exercising the bytecode path.
     assert_eq!(engine.bytecode_program_count(), 3);
@@ -2429,7 +2511,8 @@ fn bytecode_backend_matches_ast_for_explicit_implicit_intersection_operator() {
 }
 
 #[test]
-fn bytecode_backend_matches_ast_for_implicit_intersection_over_sheet_span_when_only_one_area_hits() {
+fn bytecode_backend_matches_ast_for_implicit_intersection_over_sheet_span_when_only_one_area_hits()
+{
     let mut engine = Engine::new();
 
     // Bytecode lowering currently supports 3D sheet spans, but not plain `Sheet2!A1` references.
@@ -2469,10 +2552,22 @@ fn bytecode_implicit_intersection_matches_ast_for_2d_range_inside_rectangle() {
     engine.set_cell_value("Sheet1", "B2", 42.0).unwrap();
 
     let mut grid = SparseGrid::new(10, 10);
-    grid.set_value(CellCoord::new(0, 0), formula_engine::bytecode::Value::Number(1.0));
-    grid.set_value(CellCoord::new(1, 0), formula_engine::bytecode::Value::Number(2.0));
-    grid.set_value(CellCoord::new(0, 1), formula_engine::bytecode::Value::Number(10.0));
-    grid.set_value(CellCoord::new(1, 1), formula_engine::bytecode::Value::Number(42.0));
+    grid.set_value(
+        CellCoord::new(0, 0),
+        formula_engine::bytecode::Value::Number(1.0),
+    );
+    grid.set_value(
+        CellCoord::new(1, 0),
+        formula_engine::bytecode::Value::Number(2.0),
+    );
+    grid.set_value(
+        CellCoord::new(0, 1),
+        formula_engine::bytecode::Value::Number(10.0),
+    );
+    grid.set_value(
+        CellCoord::new(1, 1),
+        formula_engine::bytecode::Value::Number(42.0),
+    );
 
     let formula = "=@A1:B2";
     let current_cell = "B2";
@@ -2491,8 +2586,9 @@ fn bytecode_implicit_intersection_matches_ast_for_2d_range_inside_rectangle() {
     .expect("parse canonical formula");
 
     let mut resolve_sheet = |_name: &str| Some(0usize);
-    let bc_expr = formula_engine::bytecode::lower_canonical_expr(&ast.expr, origin, 0, &mut resolve_sheet)
-        .expect("lower to bytecode expr");
+    let bc_expr =
+        formula_engine::bytecode::lower_canonical_expr(&ast.expr, origin, 0, &mut resolve_sheet)
+            .expect("lower to bytecode expr");
 
     let cache = formula_engine::bytecode::BytecodeCache::new();
     let program = cache.get_or_compile(&bc_expr);
@@ -2507,7 +2603,13 @@ fn bytecode_implicit_intersection_matches_ast_for_2d_range_inside_rectangle() {
 
     let mut vm = Vm::with_capacity(32);
     let base = CellCoord::new(origin.row as i32, origin.col as i32);
-    let bc_value = vm.eval(&program, &grid, 0, base, &formula_engine::LocaleConfig::en_us());
+    let bc_value = vm.eval(
+        &program,
+        &grid,
+        0,
+        base,
+        &formula_engine::LocaleConfig::en_us(),
+    );
 
     assert_eq!(bytecode_value_to_engine(bc_value), expected);
 }
@@ -2681,9 +2783,15 @@ fn bytecode_backend_applies_implicit_intersection_for_lookup_value_ranges() {
     engine.recalculate_single_threaded();
 
     assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(30.0));
-    assert_eq!(engine.get_cell_value("Sheet1", "B5"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B5"),
+        Value::Error(ErrorKind::Value)
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "B21"), Value::Number(30.0));
-    assert_eq!(engine.get_cell_value("Sheet1", "D21"), Value::Error(ErrorKind::Value));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "D21"),
+        Value::Error(ErrorKind::Value)
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(2.0));
 
     for (formula, cell) in [
@@ -2778,7 +2886,10 @@ fn bytecode_backend_matches_ast_for_match() {
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 11);
-    assert_eq!(stats.compiled, 11, "expected MATCH formulas to compile to bytecode");
+    assert_eq!(
+        stats.compiled, 11,
+        "expected MATCH formulas to compile to bytecode"
+    );
     assert_eq!(stats.fallback, 0);
 
     engine.recalculate_single_threaded();
@@ -2786,12 +2897,24 @@ fn bytecode_backend_matches_ast_for_match() {
     // Explicit expectations for key MATCH behaviors.
     assert_eq!(engine.get_cell_value("Sheet1", "E1"), Value::Number(2.0));
     assert_eq!(engine.get_cell_value("Sheet1", "E2"), Value::Number(2.0));
-    assert_eq!(engine.get_cell_value("Sheet1", "E3"), Value::Error(ErrorKind::NA));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E3"),
+        Value::Error(ErrorKind::NA)
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "E4"), Value::Number(2.0));
     assert_eq!(engine.get_cell_value("Sheet1", "E5"), Value::Number(2.0));
-    assert_eq!(engine.get_cell_value("Sheet1", "E6"), Value::Error(ErrorKind::Div0));
-    assert_eq!(engine.get_cell_value("Sheet1", "E7"), Value::Error(ErrorKind::NA));
-    assert_eq!(engine.get_cell_value("Sheet1", "E8"), Value::Error(ErrorKind::NA));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E6"),
+        Value::Error(ErrorKind::Div0)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E7"),
+        Value::Error(ErrorKind::NA)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "E8"),
+        Value::Error(ErrorKind::NA)
+    );
     assert_eq!(engine.get_cell_value("Sheet1", "E9"), Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet1", "E10"), Value::Number(2.0));
     assert_eq!(engine.get_cell_value("Sheet1", "E11"), Value::Number(1.0));
@@ -2940,7 +3063,9 @@ fn bytecode_backend_if_two_arg_default_false_branch_matches_ast() {
     engine
         .set_cell_formula("Sheet1", "A1", "=IF(FALSE,1/0)")
         .unwrap();
-    engine.set_cell_formula("Sheet1", "A2", "=IF(TRUE,7)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=IF(TRUE,7)")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "A3", "=IF(TRUE,1/0)")
         .unwrap();
@@ -3153,7 +3278,9 @@ fn bytecode_backend_matches_ast_for_information_functions_with_error_literals() 
     engine
         .set_cell_formula("Sheet1", "A3", "=ISNA(#DIV/0!)")
         .unwrap();
-    engine.set_cell_formula("Sheet1", "A4", "=ISNA(#N/A)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A4", "=ISNA(#N/A)")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "A5", "=ISERR(#DIV/0!)")
         .unwrap();
@@ -3310,12 +3437,8 @@ fn bytecode_backend_choose_can_return_ranges() {
 #[test]
 fn bytecode_backend_and_or_reference_semantics_match_ast() {
     let mut engine = Engine::new();
-    engine
-        .set_cell_formula("Sheet1", "B1", "=AND(A1)")
-        .unwrap();
-    engine
-        .set_cell_formula("Sheet1", "B2", "=OR(A1)")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "B1", "=AND(A1)").unwrap();
+    engine.set_cell_formula("Sheet1", "B2", "=OR(A1)").unwrap();
 
     // Ensure we're exercising the bytecode path.
     assert_eq!(engine.bytecode_program_count(), 2);
@@ -3330,10 +3453,26 @@ fn bytecode_backend_and_or_reference_semantics_match_ast() {
             Value::Error(ErrorKind::Value),
         ),
         // Numbers/bools are included.
-        (Some(Value::Number(0.0)), Value::Bool(false), Value::Bool(false)),
-        (Some(Value::Number(2.0)), Value::Bool(true), Value::Bool(true)),
-        (Some(Value::Bool(false)), Value::Bool(false), Value::Bool(false)),
-        (Some(Value::Bool(true)), Value::Bool(true), Value::Bool(true)),
+        (
+            Some(Value::Number(0.0)),
+            Value::Bool(false),
+            Value::Bool(false),
+        ),
+        (
+            Some(Value::Number(2.0)),
+            Value::Bool(true),
+            Value::Bool(true),
+        ),
+        (
+            Some(Value::Bool(false)),
+            Value::Bool(false),
+            Value::Bool(false),
+        ),
+        (
+            Some(Value::Bool(true)),
+            Value::Bool(true),
+            Value::Bool(true),
+        ),
     ];
 
     for (a1, expected_and, expected_or) in cases {
@@ -3354,12 +3493,8 @@ fn bytecode_backend_and_or_reference_semantics_match_ast() {
 #[test]
 fn bytecode_backend_and_or_single_cell_range_semantics_match_ast() {
     let mut engine = Engine::new();
-    engine
-        .set_cell_formula("Sheet1", "B1", "=AND(A1)")
-        .unwrap();
-    engine
-        .set_cell_formula("Sheet1", "B2", "=OR(A1)")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "B1", "=AND(A1)").unwrap();
+    engine.set_cell_formula("Sheet1", "B2", "=OR(A1)").unwrap();
     engine
         .set_cell_formula("Sheet1", "C1", "=AND(A1:A1)")
         .unwrap();
@@ -3620,8 +3755,12 @@ fn bytecode_backend_matches_ast_for_information_functions_scalar() {
         .set_cell_formula("Sheet1", "B4", "=ISNUMBER(A4)")
         .unwrap();
 
-    engine.set_cell_formula("Sheet1", "B5", "=ISTEXT(A5)").unwrap();
-    engine.set_cell_formula("Sheet1", "B6", "=ISTEXT(A6)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B5", "=ISTEXT(A5)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B6", "=ISTEXT(A6)")
+        .unwrap();
 
     engine
         .set_cell_formula("Sheet1", "B7", "=ISLOGICAL(A7)")
@@ -3630,7 +3769,9 @@ fn bytecode_backend_matches_ast_for_information_functions_scalar() {
         .set_cell_formula("Sheet1", "B8", "=ISLOGICAL(A8)")
         .unwrap();
 
-    engine.set_cell_formula("Sheet1", "B9", "=ISERR(A9)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B9", "=ISERR(A9)")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "B10", "=ISERR(A10)")
         .unwrap();
@@ -3650,11 +3791,21 @@ fn bytecode_backend_matches_ast_for_information_functions_scalar() {
     engine.set_cell_formula("Sheet1", "B19", "=T(A19)").unwrap();
     engine.set_cell_formula("Sheet1", "B20", "=T(A20)").unwrap();
 
-    engine.set_cell_formula("Sheet1", "B21", "=TYPE(A21)").unwrap();
-    engine.set_cell_formula("Sheet1", "B22", "=TYPE(A22)").unwrap();
-    engine.set_cell_formula("Sheet1", "B23", "=TYPE(A23)").unwrap();
-    engine.set_cell_formula("Sheet1", "B24", "=TYPE(A24)").unwrap();
-    engine.set_cell_formula("Sheet1", "B25", "=TYPE(A25)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B21", "=TYPE(A21)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B22", "=TYPE(A22)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B23", "=TYPE(A23)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B24", "=TYPE(A24)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B25", "=TYPE(A25)")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "B26", "=TYPE(A26:A27)")
         .unwrap();
@@ -3708,16 +3859,26 @@ fn bytecode_backend_matches_ast_for_reference_functions() {
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
 
     engine.set_cell_formula("Sheet1", "C1", "=ROW()").unwrap();
-    engine.set_cell_formula("Sheet1", "C2", "=COLUMN()").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C2", "=COLUMN()")
+        .unwrap();
     engine.set_cell_formula("Sheet1", "C3", "=ROW(A1)").unwrap();
-    engine.set_cell_formula("Sheet1", "C4", "=COLUMN(A1)").unwrap();
-    engine.set_cell_formula("Sheet1", "C5", "=ROWS(A1:B3)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C4", "=COLUMN(A1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C5", "=ROWS(A1:B3)")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "C6", "=COLUMNS(A1:B3)")
         .unwrap();
 
-    engine.set_cell_formula("Sheet1", "C7", "=ADDRESS(1,1)").unwrap();
-    engine.set_cell_formula("Sheet1", "C8", "=ADDRESS(1,1,4)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C7", "=ADDRESS(1,1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C8", "=ADDRESS(1,1,4)")
+        .unwrap();
     engine
         .set_cell_formula("Sheet1", "C9", "=ADDRESS(1,1,1,FALSE)")
         .unwrap();
@@ -3810,9 +3971,7 @@ fn bytecode_backend_rows_and_columns_accept_array_literals() {
 #[test]
 fn bytecode_backend_xor_reference_semantics_match_ast() {
     let mut engine = Engine::new();
-    engine
-        .set_cell_formula("Sheet1", "B1", "=XOR(A1)")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "B1", "=XOR(A1)").unwrap();
     // Scalar text values coerce like NOT(); reference text values are ignored.
     engine
         .set_cell_formula("Sheet1", "B2", "=XOR(\"TRUE\")")
@@ -3832,7 +3991,10 @@ fn bytecode_backend_xor_reference_semantics_match_ast() {
         (Some(Value::Number(2.0)), Value::Bool(true)),
         (Some(Value::Bool(false)), Value::Bool(false)),
         (Some(Value::Bool(true)), Value::Bool(true)),
-        (Some(Value::Error(ErrorKind::Div0)), Value::Error(ErrorKind::Div0)),
+        (
+            Some(Value::Error(ErrorKind::Div0)),
+            Value::Error(ErrorKind::Div0),
+        ),
     ];
 
     for (a1, expected) in cases {
@@ -4215,7 +4377,9 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
     engine.set_cell_formula("Sheet1", "A2", "=RAND()").unwrap();
     // Cross-sheet reference.
     engine.set_cell_value("Sheet2", "A1", 42.0).unwrap();
-    engine.set_cell_formula("Sheet1", "A3", "=Sheet2!A1").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=Sheet2!A1")
+        .unwrap();
     // Unsupported operator (intersection).
     engine
         .set_cell_formula("Sheet1", "A4", "=A1:A2 B1:B2")
@@ -4278,7 +4442,9 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
         matches!(
             a4_reason,
             BytecodeCompileReason::IneligibleExpr
-                | BytecodeCompileReason::LowerError(formula_engine::bytecode::LowerError::Unsupported)
+                | BytecodeCompileReason::LowerError(
+                    formula_engine::bytecode::LowerError::Unsupported
+                )
         ),
         "unexpected A4 bytecode compile reason: {a4_reason:?}"
     );
@@ -4544,7 +4710,9 @@ fn bytecode_compile_diagnostics_reports_external_reference_through_defined_name_
     // Note: Without parentheses, `EXT.Price` is currently tokenized as a single dotted identifier
     // (e.g. to support `_xlfn.` prefixes), so use `(EXT).Price` to ensure we exercise the field
     // access operator.
-    engine.set_cell_formula("Sheet1", "A1", "=(EXT).Price").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=(EXT).Price")
+        .unwrap();
 
     let stats = engine.bytecode_compile_stats();
     assert_eq!(stats.total_formula_cells, 1);
@@ -4583,7 +4751,9 @@ fn bytecode_compile_diagnostics_reports_unknown_sheet_through_defined_name_formu
     assert_eq!(
         stats
             .fallback_reasons
-            .get(&BytecodeCompileReason::LowerError(bytecode::LowerError::UnknownSheet))
+            .get(&BytecodeCompileReason::LowerError(
+                bytecode::LowerError::UnknownSheet
+            ))
             .copied()
             .unwrap_or(0),
         1
@@ -4653,7 +4823,9 @@ fn bytecode_backend_inlines_constant_defined_names() {
             NameDefinition::Constant(Value::Number(0.1)),
         )
         .unwrap();
-    engine_bc.set_cell_formula("Sheet1", "A1", "=RATE*2").unwrap();
+    engine_bc
+        .set_cell_formula("Sheet1", "A1", "=RATE*2")
+        .unwrap();
     engine_bc.recalculate_single_threaded();
 
     assert_eq!(engine_bc.bytecode_program_count(), 1);
@@ -4668,7 +4840,9 @@ fn bytecode_backend_inlines_constant_defined_names() {
             NameDefinition::Constant(Value::Number(0.1)),
         )
         .unwrap();
-    engine_ast.set_cell_formula("Sheet1", "A1", "=RATE*2").unwrap();
+    engine_ast
+        .set_cell_formula("Sheet1", "A1", "=RATE*2")
+        .unwrap();
     engine_ast.recalculate_single_threaded();
 
     assert_eq!(
@@ -4947,7 +5121,10 @@ fn bytecode_backend_inlines_constant_defined_names_case_insensitive_and_recompil
         .unwrap();
     assert!(engine_bc.is_dirty("Sheet1", "A1"));
     engine_bc.recalculate_single_threaded();
-    assert_eq!(engine_bc.get_cell_value("Sheet1", "A1"), Value::Number(11.0));
+    assert_eq!(
+        engine_bc.get_cell_value("Sheet1", "A1"),
+        Value::Number(11.0)
+    );
     assert!(
         engine_bc.bytecode_program_count() >= 2,
         "expected name change to trigger bytecode recompilation"
@@ -5014,7 +5191,9 @@ fn bytecode_backend_inlines_constant_defined_name_error_values() {
             NameDefinition::Constant(Value::Error(ErrorKind::NA)),
         )
         .unwrap();
-    engine.set_cell_formula("Sheet1", "A1", "=IFNA(MyNa, 7)").unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=IFNA(MyNa, 7)")
+        .unwrap();
 
     // Ensure the constant error value was inlined and compiled to bytecode.
     assert_eq!(engine.bytecode_program_count(), 1);
@@ -5120,7 +5299,11 @@ fn bytecode_backend_propagates_error_literals_through_ops_and_functions() {
         ("A3", "=#N/A=0", Value::Error(ErrorKind::NA)),
         ("A4", "=IFERROR(1+#DIV/0!,7)", Value::Number(7.0)),
         ("A5", "=SUM(1,#DIV/0!,2)", Value::Error(ErrorKind::Div0)),
-        ("A6", r#"=CONCAT("x",#DIV/0!)"#, Value::Error(ErrorKind::Div0)),
+        (
+            "A6",
+            r#"=CONCAT("x",#DIV/0!)"#,
+            Value::Error(ErrorKind::Div0),
+        ),
         ("A7", "=NOT(#DIV/0!)", Value::Error(ErrorKind::Div0)),
         ("A8", "=ABS(#DIV/0!)", Value::Error(ErrorKind::Div0)),
         ("A9", "=-#DIV/0!", Value::Error(ErrorKind::Div0)),
@@ -5196,7 +5379,10 @@ fn bytecode_backend_handles_extended_error_literals_inside_expressions() {
 
         let a_cell = format!("A{row}");
         let a_formula = format!("={lit}+1");
-        assert_eq!(engine.get_cell_value("Sheet1", &a_cell), Value::Error(*kind));
+        assert_eq!(
+            engine.get_cell_value("Sheet1", &a_cell),
+            Value::Error(*kind)
+        );
         assert_engine_matches_ast(&engine, &a_formula, &a_cell);
 
         let b_cell = format!("B{row}");
@@ -5206,7 +5392,10 @@ fn bytecode_backend_handles_extended_error_literals_inside_expressions() {
 
         let c_cell = format!("C{row}");
         let c_formula = format!("=ERROR.TYPE({lit})");
-        assert_eq!(engine.get_cell_value("Sheet1", &c_cell), Value::Number(*code));
+        assert_eq!(
+            engine.get_cell_value("Sheet1", &c_cell),
+            Value::Number(*code)
+        );
         assert_engine_matches_ast(&engine, &c_formula, &c_cell);
 
         let d_cell = format!("D{row}");
@@ -5232,10 +5421,26 @@ fn bytecode_backend_compiles_criteria_functions_with_error_literal_criteria_args
 
     let cases = [
         // Criteria errors should propagate (even when written as error literals).
-        ("C1", "=SUMIF(A1:A3,#DIV/0!,B1:B3)", Value::Error(ErrorKind::Div0)),
-        ("C2", "=SUMIFS(B1:B3,A1:A3,#DIV/0!)", Value::Error(ErrorKind::Div0)),
-        ("C3", "=COUNTIFS(A1:A3,#DIV/0!)", Value::Error(ErrorKind::Div0)),
-        ("C4", "=AVERAGEIF(A1:A3,#DIV/0!,B1:B3)", Value::Error(ErrorKind::Div0)),
+        (
+            "C1",
+            "=SUMIF(A1:A3,#DIV/0!,B1:B3)",
+            Value::Error(ErrorKind::Div0),
+        ),
+        (
+            "C2",
+            "=SUMIFS(B1:B3,A1:A3,#DIV/0!)",
+            Value::Error(ErrorKind::Div0),
+        ),
+        (
+            "C3",
+            "=COUNTIFS(A1:A3,#DIV/0!)",
+            Value::Error(ErrorKind::Div0),
+        ),
+        (
+            "C4",
+            "=AVERAGEIF(A1:A3,#DIV/0!,B1:B3)",
+            Value::Error(ErrorKind::Div0),
+        ),
     ];
 
     for (cell, formula, _) in &cases {
@@ -5418,7 +5623,10 @@ fn bytecode_backend_propagates_error_literals_through_supported_ops() {
 
     engine.recalculate_single_threaded();
 
-    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Error(ErrorKind::NA));
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::NA)
+    );
     assert_engine_matches_ast(&engine, "=#N/A+1", "A1");
 }
 
@@ -5658,9 +5866,15 @@ fn bytecode_backend_matches_ast_for_sumifs_countifs_and_averageifs() {
         (4, ("b", 4.0, 40.0)),
         (5, ("a", 5.0, 50.0)),
     ] {
-        engine.set_cell_value("Sheet1", &format!("A{row}"), cat).unwrap();
-        engine.set_cell_value("Sheet1", &format!("B{row}"), n).unwrap();
-        engine.set_cell_value("Sheet1", &format!("C{row}"), v).unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("A{row}"), cat)
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("B{row}"), n)
+            .unwrap();
+        engine
+            .set_cell_value("Sheet1", &format!("C{row}"), v)
+            .unwrap();
     }
 
     engine
