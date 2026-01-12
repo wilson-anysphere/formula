@@ -6227,8 +6227,6 @@ export class SpreadsheetApp {
     if (!drag) return;
     if (e.pointerId !== drag.pointerId) return;
 
-    e.preventDefault();
-
     const pointerPos = drag.axis === "y" ? e.clientY : e.clientX;
     const thumbOffset = pointerPos - drag.trackStart - drag.grabOffset;
     const clamped = Math.min(Math.max(0, thumbOffset), drag.thumbTravel);
