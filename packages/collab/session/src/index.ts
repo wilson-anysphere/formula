@@ -1379,10 +1379,24 @@ export class CollabSession {
     // Note: the UndoManager instance is stored inside `localOrigins` (see
     // @formula/collab-undo).
     try {
-      const undoManagers = Array.from(this.localOrigins).filter((origin) => origin instanceof Y.UndoManager);
-      for (const undoManager of undoManagers) {
-        undoManager.destroy();
-      }
+      const isYUndoManager = (value: unknown): value is { destroy: () => void } => {
+        if (value instanceof Y.UndoManager) return true;
+        if (!value || typeof value !== "object") return false;
+        const maybe = value as any;
+        // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
+        // module instances (ESM + CJS). Avoid relying on `instanceof` and prefer a
+        // structural check so teardown still cleans up doc observers.
+        return (
+          typeof maybe.addToScope === "function" &&
+          typeof maybe.undo === "function" &&
+          typeof maybe.redo === "function" &&
+          typeof maybe.stopCapturing === "function" &&
+          typeof maybe.destroy === "function"
+        );
+      };
+
+      const undoManagers = Array.from(this.localOrigins).filter(isYUndoManager);
+      for (const undoManager of undoManagers) undoManager.destroy();
     } catch {
       // ignore
     }

@@ -232,6 +232,11 @@ test("CollabSession destroy cleans up UndoManager afterTransaction hooks", () =>
     session.localOrigins.add(origin);
   }
 
+  // Also simulate a foreign UndoManager created by another Yjs module instance (CJS).
+  const Ycjs = requireYjsCjs();
+  const foreignUndoManager = new Ycjs.UndoManager(doc, { doc });
+  session.localOrigins.add(foreignUndoManager);
+
   // Sanity check: UndoManager is installed and registers doc afterTransaction observers.
   const observers = /** @type {any} */ (doc)._observers?.get?.("afterTransaction");
   assert.ok(observers && observers.size > 0);
