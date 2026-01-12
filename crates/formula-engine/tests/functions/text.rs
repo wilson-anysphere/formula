@@ -259,6 +259,13 @@ fn hyperlink_returns_friendly_name_or_link_location() {
         sheet.eval("=HYPERLINK(123)"),
         Value::Text("123".to_string())
     );
+    // Numeric text coercion should respect the workbook value locale, like other text-producing
+    // functions/operators.
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+    assert_eq!(
+        sheet.eval("=HYPERLINK(1.5)"),
+        Value::Text("1,5".to_string())
+    );
 
     // Errors propagate from either argument.
     assert_eq!(
