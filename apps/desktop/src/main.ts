@@ -6289,6 +6289,7 @@ if (
     gridSplitterEl.setPointerCapture(pointerId);
 
     const rect = gridSplitEl.getBoundingClientRect();
+    const initialRatio = layoutController.layout.splitView.ratio;
     let latestClientX = event.clientX;
     let latestClientY = event.clientY;
     let lastRatio: number | null = null;
@@ -6343,11 +6344,17 @@ if (
       // Ignore capture release errors.
       }
 
-      // Emit a final layout change (one-time) and persist it so split ratio restores after reload.
       latestClientX = up.clientX;
       latestClientY = up.clientY;
-      applyRatio(true);
-      persistLayoutNow();
+      // Flush any pending silent updates so `lastRatio` reflects the final pointer position.
+      applyRatio(false);
+
+      // Emit a final layout change (one-time) and persist it so split ratio restores after reload.
+      // If the ratio never changed, avoid unnecessary layout normalization/persistence churn.
+      if (lastRatio != null && Math.abs(lastRatio - initialRatio) > 1e-6) {
+        applyRatio(true);
+        persistLayoutNow();
+      }
     };
 
     window.addEventListener("pointermove", onMove, { passive: false });
