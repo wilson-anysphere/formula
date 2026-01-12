@@ -608,3 +608,75 @@ fn bytecode_switch_does_not_eval_anything_after_case_value_error() {
     );
     assert_eq!(value, Value::Error(bytecode::ErrorKind::Div0));
 }
+
+#[test]
+fn bytecode_switch_does_not_eval_case_values_when_discriminant_is_error() {
+    // If the discriminant evaluation errors, SWITCH should return that error without evaluating
+    // any case values/results (or the default).
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=SWITCH(1/0, A2, 7, 1, 8)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("switch_discriminant_error_lazy"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Div0));
+}
+
+#[test]
+fn bytecode_ifs_does_not_eval_anything_when_condition_is_error() {
+    // If a condition evaluation errors, IFS should return that error without evaluating any
+    // values or later condition/value pairs.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IFS(1/0, 7, TRUE, A2)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("ifs_condition_error_lazy"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Div0));
+}
+
+#[test]
+fn bytecode_if_does_not_eval_branches_when_condition_is_error() {
+    // If the IF condition evaluation errors, IF should return that error without evaluating
+    // either branch.
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=IF(1/0, A2, A2)", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("if_condition_error_lazy"), &expr);
+
+    let grid = PanicGrid {
+        // A2 relative to origin (A1) => (row=1, col=0)
+        panic_coord: CellCoord::new(1, 0),
+    };
+
+    let mut vm = bytecode::Vm::with_capacity(32);
+    let value = vm.eval(
+        &program,
+        &grid,
+        0,
+        origin,
+        &formula_engine::LocaleConfig::en_us(),
+    );
+    assert_eq!(value, Value::Error(bytecode::ErrorKind::Div0));
+}
