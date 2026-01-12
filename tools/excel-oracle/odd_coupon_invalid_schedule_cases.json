@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "caseSet": "financial-odd-coupon-invalid-schedule",
+  "defaultSheet": "Sheet1",
+  "cases": [
+    {
+      "id": "oddfprice_invalid_schedule_dom_mismatch_ce323f02a9ef",
+      "description": "ODDFPRICE invalid schedule: first_coupon is not reachable from maturity by stepping 6 months (day-of-month mismatch; maturity-anchored EDATE schedule hits 2020-02-29, not 2020-02-28)",
+      "formula": "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,28),0.08,0.075,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "odd_coupon", "invalid_schedule", "ODDFPRICE"]
+    },
+    {
+      "id": "oddfyield_invalid_schedule_dom_mismatch_352719794f9c",
+      "description": "ODDFYIELD invalid schedule: first_coupon is not reachable from maturity by stepping 6 months (day-of-month mismatch; expected #NUM!)",
+      "formula": "=ODDFYIELD(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,28),0.08,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "odd_coupon", "invalid_schedule", "ODDFYIELD"]
+    },
+    {
+      "id": "oddfprice_invalid_schedule_maturity_eom_first_not_ce705dfabb4e",
+      "description": "ODDFPRICE invalid schedule: maturity is EOM (month-end schedule) but first_coupon is not; maturity-anchored EOMONTH stepping never hits first_coupon",
+      "formula": "=ODDFPRICE(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,30),0.05,0.06,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "odd_coupon", "invalid_schedule", "ODDFPRICE"]
+    },
+    {
+      "id": "oddfyield_invalid_schedule_maturity_eom_first_not_36ba94ae29a0",
+      "description": "ODDFYIELD invalid schedule: maturity is EOM but first_coupon is not (EOM schedule stepping)",
+      "formula": "=ODDFYIELD(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,30),0.05,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "odd_coupon", "invalid_schedule", "ODDFYIELD"]
+    },
+    {
+      "id": "oddfprice_invalid_schedule_maturity_not_eom_first_is_8c4407616753",
+      "description": "ODDFPRICE invalid schedule: maturity is not EOM (EDATE schedule) but first_coupon is EOM; maturity-anchored EDATE stepping never hits first_coupon",
+      "formula": "=ODDFPRICE(DATE(2022,12,20),DATE(2024,7,30),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "odd_coupon", "invalid_schedule", "ODDFPRICE"]
+    },
+    {
+      "id": "oddfyield_invalid_schedule_maturity_not_eom_first_is_7229368f6f7f",
+      "description": "ODDFYIELD invalid schedule: maturity is not EOM but first_coupon is EOM (schedule stepping)",
+      "formula": "=ODDFYIELD(DATE(2022,12,20),DATE(2024,7,30),DATE(2022,12,15),DATE(2023,1,31),0.05,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "odd_coupon", "invalid_schedule", "ODDFYIELD"]
+    },
+    {
+      "id": "oddlprice_invalid_schedule_misaligned_last_interest_7844a6299f87",
+      "description": "ODDLPRICE invalid schedule: last_interest is not on the maturity-anchored coupon schedule implied by maturity+frequency (maturity is EOM but last_interest is not)",
+      "formula": "=ODDLPRICE(DATE(2024,8,1),DATE(2025,1,31),DATE(2024,7,30),0.05,0.04,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "odd_coupon", "invalid_schedule", "ODDLPRICE"]
+    },
+    {
+      "id": "oddlyield_invalid_schedule_misaligned_last_interest_eae16064c1e4",
+      "description": "ODDLYIELD invalid schedule: last_interest is not on the maturity-anchored coupon schedule implied by maturity+frequency (maturity is EOM but last_interest is not)",
+      "formula": "=ODDLYIELD(DATE(2024,8,1),DATE(2025,1,31),DATE(2024,7,30),0.05,99,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "odd_coupon", "invalid_schedule", "ODDLYIELD"]
+    },
+    {
+      "id": "oddlprice_invalid_schedule_last_after_maturity_69b5d9af2de5",
+      "description": "ODDLPRICE invalid schedule: last_interest is after maturity (schedule alignment / chronology)",
+      "formula": "=ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2025,1,2),0.05,0.04,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "odd_coupon", "invalid_schedule", "ODDLPRICE"]
+    },
+    {
+      "id": "oddlyield_invalid_schedule_last_after_maturity_53d29e46e92c",
+      "description": "ODDLYIELD invalid schedule: last_interest is after maturity (schedule alignment / chronology)",
+      "formula": "=ODDLYIELD(DATE(2024,7,1),DATE(2025,1,1),DATE(2025,1,2),0.05,99,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "odd_coupon", "invalid_schedule", "ODDLYIELD"]
+    },
+    {
+      "id": "oddfprice_invalid_schedule_settlement_after_first_1bc49b18aff1",
+      "description": "ODDFPRICE invalid schedule: settlement is after first_coupon (expected #NUM!)",
+      "formula": "=ODDFPRICE(DATE(2020,8,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "odd_coupon", "invalid_schedule", "ODDFPRICE"]
+    },
+    {
+      "id": "oddfyield_invalid_schedule_settlement_after_first_938531ed93bc",
+      "description": "ODDFYIELD invalid schedule: settlement is after first_coupon (expected #NUM!)",
+      "formula": "=ODDFYIELD(DATE(2020,8,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,98,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": ["financial", "odd_coupon", "invalid_schedule", "ODDFYIELD"]
+    }
+  ]
+}

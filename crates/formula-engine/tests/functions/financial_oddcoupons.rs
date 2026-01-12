@@ -569,3 +569,112 @@ fn odd_coupon_internal_functions_reject_non_finite_numeric_inputs() {
         Err(ExcelError::Num)
     );
 }
+
+#[test]
+fn odd_coupon_invalid_schedule_inputs_return_num_errors() {
+    // These cases are mirrored in the Excel-oracle corpus (tagged `odd_coupon` + `invalid_schedule`).
+    //
+    // NOTE: The pinned Excel dataset in CI is currently a synthetic baseline generated from the
+    // engine. Once Task 486 lands (real Excel patching), these expected errors should be validated
+    // against real Excel and updated if needed.
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // ---------------------------------------------------------------------
+    // ODDF*: first_coupon not reachable from maturity-anchored schedule.
+    // ---------------------------------------------------------------------
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 20), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 8, 30), system).unwrap();
+    let issue = ymd_to_serial(ExcelDate::new(2020, 1, 15), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 2, 28), system).unwrap();
+
+    assert_eq!(
+        oddfprice(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            0.08,
+            0.075,
+            100.0,
+            2,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    assert_eq!(
+        oddfyield(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            0.08,
+            98.0,
+            100.0,
+            2,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+
+    // Worksheet evaluation should surface the same #NUM!.
+    let mut sheet = TestSheet::new();
+    let v = sheet.eval("=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,28),0.08,0.075,100,2,0)");
+    assert!(
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDFPRICE invalid schedule, got {v:?}"
+    );
+    let v = sheet.eval("=ODDFYIELD(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,28),0.08,98,100,2,0)");
+    assert!(
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDFYIELD invalid schedule, got {v:?}"
+    );
+
+    // ---------------------------------------------------------------------
+    // ODDL*: last_interest must be strictly before maturity.
+    // ---------------------------------------------------------------------
+    let settlement = ymd_to_serial(ExcelDate::new(2024, 7, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2025, 1, 1), system).unwrap();
+    let last_interest = ymd_to_serial(ExcelDate::new(2025, 1, 2), system).unwrap();
+
+    assert_eq!(
+        oddlprice(
+            settlement,
+            maturity,
+            last_interest,
+            0.05,
+            0.04,
+            100.0,
+            2,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+    assert_eq!(
+        oddlyield(
+            settlement,
+            maturity,
+            last_interest,
+            0.05,
+            99.0,
+            100.0,
+            2,
+            0,
+            system
+        ),
+        Err(ExcelError::Num)
+    );
+
+    let v = sheet.eval("=ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2025,1,2),0.05,0.04,100,2,0)");
+    assert!(
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDLPRICE invalid schedule, got {v:?}"
+    );
+    let v = sheet.eval("=ODDLYIELD(DATE(2024,7,1),DATE(2025,1,1),DATE(2025,1,2),0.05,99,100,2,0)");
+    assert!(
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDLYIELD invalid schedule, got {v:?}"
+    );
+}

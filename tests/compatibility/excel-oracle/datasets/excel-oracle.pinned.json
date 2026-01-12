@@ -17,8 +17,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "22051ab51dc52ac06ab9127429c6afa98929881b6686620485bae2edc4d06efe",
-    "count": 1784
+    "sha256": "1f6555a07245a868e5186a3fd3776f1d98f520ebc9ad3c2f6d8ce1f1d0e667e9",
+    "count": 1796
   },
   "results": [
     {
@@ -18580,6 +18580,126 @@
       },
       "address": "A1",
       "displayText": "31"
+    },
+    {
+      "caseId": "oddfprice_invalid_schedule_dom_mismatch_ce323f02a9ef",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfyield_invalid_schedule_dom_mismatch_352719794f9c",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfprice_invalid_schedule_maturity_eom_first_not_ce705dfabb4e",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfyield_invalid_schedule_maturity_eom_first_not_36ba94ae29a0",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfprice_invalid_schedule_maturity_not_eom_first_is_8c4407616753",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfyield_invalid_schedule_maturity_not_eom_first_is_7229368f6f7f",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddlprice_invalid_schedule_misaligned_last_interest_7844a6299f87",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 100.47630718954248
+      },
+      "address": "C1",
+      "displayText": "100.47630718954248"
+    },
+    {
+      "caseId": "oddlyield_invalid_schedule_misaligned_last_interest_eae16064c1e4",
+      "outputCell": "C1",
+      "result": {
+        "t": "n",
+        "v": 0.07041660821994312
+      },
+      "address": "C1",
+      "displayText": "0.07041660821994312"
+    },
+    {
+      "caseId": "oddlprice_invalid_schedule_last_after_maturity_69b5d9af2de5",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddlyield_invalid_schedule_last_after_maturity_53d29e46e92c",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfprice_invalid_schedule_settlement_after_first_1bc49b18aff1",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
+    },
+    {
+      "caseId": "oddfyield_invalid_schedule_settlement_after_first_938531ed93bc",
+      "outputCell": "C1",
+      "result": {
+        "t": "e",
+        "v": "#NUM!"
+      },
+      "address": "C1",
+      "displayText": "#NUM!"
     }
   ]
 }

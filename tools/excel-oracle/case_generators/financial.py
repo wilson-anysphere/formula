@@ -744,6 +744,164 @@ def generate(
         description="ODDLYIELD basis=1 with last_interest=2020-04-30 (month-end but not 31st)",
     )
 
+    # Invalid schedule/alignment cases (ODDF*/ODDL*).
+    #
+    # These scenarios are intended to pin Excel's subtle schedule validation rules around:
+    # - `first_coupon` / `maturity` alignment for ODDF* (maturity-anchored coupon stepping)
+    # - `last_interest` / `maturity` alignment for ODDL*
+    #
+    # NOTE: The pinned dataset in CI is currently a synthetic baseline generated from the engine.
+    # Treat these as regression tests for current engine behavior until we can patch with real Excel
+    # results (Task 486).
+    add_case(
+        cases,
+        prefix="oddfprice_invalid_schedule_dom_mismatch",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDFPRICE"],
+        formula=(
+            "=ODDFPRICE(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,28),"
+            "0.08,0.075,100,2,0)"
+        ),
+        description=(
+            "ODDFPRICE invalid schedule: first_coupon is not reachable from maturity by stepping 6 months "
+            "(day-of-month mismatch; maturity-anchored EDATE schedule hits 2020-02-29, not 2020-02-28)"
+        ),
+    )
+    add_case(
+        cases,
+        prefix="oddfyield_invalid_schedule_dom_mismatch",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDFYIELD"],
+        formula=(
+            "=ODDFYIELD(DATE(2020,1,20),DATE(2021,8,30),DATE(2020,1,15),DATE(2020,2,28),"
+            "0.08,98,100,2,0)"
+        ),
+        description=(
+            "ODDFYIELD invalid schedule: first_coupon is not reachable from maturity by stepping 6 months "
+            "(day-of-month mismatch; expected #NUM!)"
+        ),
+    )
+
+    # EOM mismatch: maturity is end-of-month but first_coupon is not (schedule is pinned to month-end).
+    add_case(
+        cases,
+        prefix="oddfprice_invalid_schedule_maturity_eom_first_not",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDFPRICE"],
+        formula=(
+            "=ODDFPRICE(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,30),"
+            "0.05,0.06,100,2,0)"
+        ),
+        description=(
+            "ODDFPRICE invalid schedule: maturity is EOM (month-end schedule) but first_coupon is not; "
+            "maturity-anchored EOMONTH stepping never hits first_coupon"
+        ),
+    )
+    add_case(
+        cases,
+        prefix="oddfyield_invalid_schedule_maturity_eom_first_not",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDFYIELD"],
+        formula=(
+            "=ODDFYIELD(DATE(2022,12,20),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,30),"
+            "0.05,98,100,2,0)"
+        ),
+        description=(
+            "ODDFYIELD invalid schedule: maturity is EOM but first_coupon is not (EOM schedule stepping)"
+        ),
+    )
+
+    # EOM mismatch: maturity is not end-of-month but first_coupon is (schedule is day-of-month based).
+    add_case(
+        cases,
+        prefix="oddfprice_invalid_schedule_maturity_not_eom_first_is",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDFPRICE"],
+        formula=(
+            "=ODDFPRICE(DATE(2022,12,20),DATE(2024,7,30),DATE(2022,12,15),DATE(2023,1,31),"
+            "0.05,0.06,100,2,0)"
+        ),
+        description=(
+            "ODDFPRICE invalid schedule: maturity is not EOM (EDATE schedule) but first_coupon is EOM; "
+            "maturity-anchored EDATE stepping never hits first_coupon"
+        ),
+    )
+    add_case(
+        cases,
+        prefix="oddfyield_invalid_schedule_maturity_not_eom_first_is",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDFYIELD"],
+        formula=(
+            "=ODDFYIELD(DATE(2022,12,20),DATE(2024,7,30),DATE(2022,12,15),DATE(2023,1,31),"
+            "0.05,98,100,2,0)"
+        ),
+        description=(
+            "ODDFYIELD invalid schedule: maturity is not EOM but first_coupon is EOM (schedule stepping)"
+        ),
+    )
+
+    # ODDL*: basic schedule-alignment invalidity (last_interest must be before maturity).
+    #
+    # We also include a "misaligned but chronologically valid" variant where `last_interest` is not
+    # reachable from `maturity` by stepping whole coupon periods under the maturity-anchored EOM
+    # schedule (Excel behavior for this is subtle; pin via oracle).
+    add_case(
+        cases,
+        prefix="oddlprice_invalid_schedule_misaligned_last_interest",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDLPRICE"],
+        formula="=ODDLPRICE(DATE(2024,8,1),DATE(2025,1,31),DATE(2024,7,30),0.05,0.04,100,2,0)",
+        description=(
+            "ODDLPRICE invalid schedule: last_interest is not on the maturity-anchored coupon schedule "
+            "implied by maturity+frequency (maturity is EOM but last_interest is not)"
+        ),
+    )
+    add_case(
+        cases,
+        prefix="oddlyield_invalid_schedule_misaligned_last_interest",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDLYIELD"],
+        formula="=ODDLYIELD(DATE(2024,8,1),DATE(2025,1,31),DATE(2024,7,30),0.05,99,100,2,0)",
+        description=(
+            "ODDLYIELD invalid schedule: last_interest is not on the maturity-anchored coupon schedule "
+            "implied by maturity+frequency (maturity is EOM but last_interest is not)"
+        ),
+    )
+
+    add_case(
+        cases,
+        prefix="oddlprice_invalid_schedule_last_after_maturity",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDLPRICE"],
+        formula="=ODDLPRICE(DATE(2024,7,1),DATE(2025,1,1),DATE(2025,1,2),0.05,0.04,100,2,0)",
+        description=(
+            "ODDLPRICE invalid schedule: last_interest is after maturity (schedule alignment / chronology)"
+        ),
+    )
+    add_case(
+        cases,
+        prefix="oddlyield_invalid_schedule_last_after_maturity",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDLYIELD"],
+        formula="=ODDLYIELD(DATE(2024,7,1),DATE(2025,1,1),DATE(2025,1,2),0.05,99,100,2,0)",
+        description=(
+            "ODDLYIELD invalid schedule: last_interest is after maturity (schedule alignment / chronology)"
+        ),
+    )
+
+    # Minimal ordering invalidity that is specifically about odd-coupon schedule semantics (not just
+    # settlement >= maturity): ODDF* requires settlement <= first_coupon.
+    add_case(
+        cases,
+        prefix="oddfprice_invalid_schedule_settlement_after_first",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDFPRICE"],
+        formula=(
+            "=ODDFPRICE(DATE(2020,8,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),"
+            "0.05,0.04,100,2,0)"
+        ),
+        description="ODDFPRICE invalid schedule: settlement is after first_coupon (expected #NUM!)",
+    )
+    add_case(
+        cases,
+        prefix="oddfyield_invalid_schedule_settlement_after_first",
+        tags=["financial", "odd_coupon", "invalid_schedule", "ODDFYIELD"],
+        formula=(
+            "=ODDFYIELD(DATE(2020,8,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),"
+            "0.05,98,100,2,0)"
+        ),
+        description="ODDFYIELD invalid schedule: settlement is after first_coupon (expected #NUM!)",
+    )
+
     add_case(
         cases,
         prefix="oddfprice_neg_yld",
