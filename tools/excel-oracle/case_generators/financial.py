@@ -1395,6 +1395,20 @@ def generate(
     )
     add_case(
         cases,
+        prefix="oddfprice_settlement_eq_maturity",
+        tags=["financial", "odd_coupon", "boundary", "ODDFPRICE", "error"],
+        formula="=ODDFPRICE(DATE(2020,7,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
+        description="ODDFPRICE boundary: settlement == maturity (expected #NUM!)",
+    )
+    add_case(
+        cases,
+        prefix="oddfyield_settlement_eq_maturity",
+        tags=["financial", "odd_coupon", "boundary", "ODDFYIELD", "error"],
+        formula="=ODDFYIELD(DATE(2020,7,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,99,100,2,0)",
+        description="ODDFYIELD boundary: settlement == maturity (expected #NUM!)",
+    )
+    add_case(
+        cases,
         prefix="oddfprice_issue_eq_first_coupon",
         tags=["financial", "odd_coupon", "boundary", "ODDFPRICE", "error"],
         formula="=ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,7,1),DATE(2020,7,1),0.05,0.04,100,2,0)",

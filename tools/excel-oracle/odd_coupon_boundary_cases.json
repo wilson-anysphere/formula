@@ -82,6 +82,34 @@
       "id": "oddfyield_first_coupon_eq_maturity_ded11f484474"
     },
     {
+      "formula": "=ODDFPRICE(DATE(2020,7,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "boundary",
+        "ODDFPRICE",
+        "error"
+      ],
+      "description": "ODDFPRICE boundary: settlement == maturity (expected #NUM!)",
+      "id": "oddfprice_settlement_eq_maturity_b623c4531ee4"
+    },
+    {
+      "formula": "=ODDFYIELD(DATE(2020,7,1),DATE(2020,7,1),DATE(2020,1,1),DATE(2020,7,1),0.05,99,100,2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "odd_coupon",
+        "boundary",
+        "ODDFYIELD",
+        "error"
+      ],
+      "description": "ODDFYIELD boundary: settlement == maturity (expected #NUM!)",
+      "id": "oddfyield_settlement_eq_maturity_0d2709ada9b0"
+    },
+    {
       "formula": "=ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,7,1),DATE(2020,7,1),0.05,0.04,100,2,0)",
       "outputCell": "C1",
       "inputs": [],
