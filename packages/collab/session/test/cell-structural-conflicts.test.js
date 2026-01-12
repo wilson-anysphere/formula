@@ -16,10 +16,13 @@ import { createCollabSession } from "../src/index.ts";
 function isYMap(value) {
   if (value instanceof Y.Map) return true;
   if (!value || typeof value !== "object") return false;
-  if (value.constructor?.name !== "YMap") return false;
   if (typeof value.get !== "function") return false;
   if (typeof value.set !== "function") return false;
   if (typeof value.delete !== "function") return false;
+  // Plain JS Maps also have get/set/delete; require Yjs' deep observer APIs so we
+  // don't accidentally treat a native Map as a Y.Map.
+  if (typeof value.observeDeep !== "function") return false;
+  if (typeof value.unobserveDeep !== "function") return false;
   return true;
 }
  

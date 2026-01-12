@@ -7,6 +7,19 @@ import { Y } from "./yjs-interop.ts";
 const reservedRootNames = new Set<string>(["versions", "versionsMeta"]);
 const reservedRootPrefixes = ["branching:"];
 
+function isYjsItemStruct(value: unknown): value is { parent: unknown; parentSub: unknown } {
+  if (!value || typeof value !== "object") return false;
+  const maybe = value as any;
+  // Yjs internal `Item` structs have these fields (see yjs/src/structs/Item).
+  if (!("id" in maybe)) return false;
+  if (typeof maybe.length !== "number") return false;
+  if (!("content" in maybe)) return false;
+  if (!("parent" in maybe)) return false;
+  if (!("parentSub" in maybe)) return false;
+  if (typeof maybe.content?.getContent !== "function") return false;
+  return true;
+}
+
 function setDeterministicClientId(doc: Y.Doc, clientId: number): void {
   // Yjs generates random clientIDs; for regression tests we'd rather have stable,
   // deterministic struct IDs across runs.
@@ -196,15 +209,15 @@ test("yjs update inspection: matches observeDeep ground truth for reserved roots
           versions.set("v3", 2);
         }, "origin-copy");
 
-        // Ensure this scenario actually exercises the tricky "parent omitted, copy from origin" encoding.
-        const update = Y.encodeStateAsUpdate(doc, serverStateVector);
-        const decoded = Y.decodeUpdate(update);
-        const sawParentOmitted = decoded.structs.some(
-          (s) => s.constructor.name === "Item" && (s as any).parent == null
-        );
-        assert.equal(sawParentOmitted, true);
-      }),
-    },
+         // Ensure this scenario actually exercises the tricky "parent omitted, copy from origin" encoding.
+         const update = Y.encodeStateAsUpdate(doc, serverStateVector);
+         const decoded = Y.decodeUpdate(update);
+         const sawParentOmitted = decoded.structs.some(
+          (s) => isYjsItemStruct(s) && (s as any).parent == null
+         );
+         assert.equal(sawParentOmitted, true);
+       }),
+     },
     {
       name: "mutate nested record field",
       update: makeUpdate(3, (doc) => {
@@ -224,15 +237,15 @@ test("yjs update inspection: matches observeDeep ground truth for reserved roots
           order.push(["v3"]);
         }, "order-push");
 
-        // Ensure this scenario actually encodes leaf items with parentSub=null (array insertions).
-        const update = Y.encodeStateAsUpdate(doc, serverStateVector);
-        const decoded = Y.decodeUpdate(update);
-        const sawArrayLeaf = decoded.structs.some(
-          (s) => s.constructor.name === "Item" && (s as any).parentSub === null
-        );
-        assert.equal(sawArrayLeaf, true);
-      }),
-    },
+         // Ensure this scenario actually encodes leaf items with parentSub=null (array insertions).
+         const update = Y.encodeStateAsUpdate(doc, serverStateVector);
+         const decoded = Y.decodeUpdate(update);
+         const sawArrayLeaf = decoded.structs.some(
+          (s) => isYjsItemStruct(s) && (s as any).parentSub === null
+         );
+         assert.equal(sawArrayLeaf, true);
+       }),
+     },
     {
       name: "delete a key (delete set)",
       update: makeUpdate(5, (doc) => {
@@ -364,7 +377,7 @@ test("yjs update inspection: versionsMeta.order array mutation resolves to versi
   // to recover the `order` map key.
   const decoded = Y.decodeUpdate(update);
   const sawArrayLeaf = decoded.structs.some(
-    (s) => s.constructor.name === "Item" && (s as any).parentSub === null
+    (s) => isYjsItemStruct(s) && (s as any).parentSub === null
   );
   assert.equal(sawArrayLeaf, true);
 
@@ -419,7 +432,7 @@ test("yjs update inspection: versions[v1].snapshotChunks array mutation resolves
   // attribute them to `versions.v1.snapshotChunks` via the nested type insertion chain.
   const decoded = Y.decodeUpdate(update);
   const sawArrayLeaf = decoded.structs.some(
-    (s) => s.constructor.name === "Item" && (s as any).parentSub === null
+    (s) => isYjsItemStruct(s) && (s as any).parentSub === null
   );
   assert.equal(sawArrayLeaf, true);
 
@@ -463,7 +476,7 @@ test("yjs update inspection: parent-info copy case is resolved", () => {
   // Ensure the test actually exercises the "parent info omitted" encoding.
   const decoded = Y.decodeUpdate(update);
   const sawParentOmitted = decoded.structs.some(
-    (s) => s.constructor.name === "Item" && (s as any).parent == null
+    (s) => isYjsItemStruct(s) && (s as any).parent == null
   );
   assert.equal(sawParentOmitted, true);
 
