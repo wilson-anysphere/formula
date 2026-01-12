@@ -119,3 +119,38 @@ fn warns_on_filtermode_and_sets_autofilter_from_dimensions_when_autofilterinfo_m
         result.warnings
     );
 }
+
+#[test]
+fn sets_autofilter_from_sheet_stream_when_autofilterinfo_present_without_filtermode() {
+    let bytes = xls_fixture_builder::build_autofilterinfo_only_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("AutoFilterInfoOnly")
+        .expect("AutoFilterInfoOnly missing");
+    let af = sheet
+        .auto_filter
+        .as_ref()
+        .expect("expected sheet.auto_filter to be set");
+    // DIMENSIONS is A1:D4 but AUTOFILTERINFO says only 2 columns, so clamp to A1:B4.
+    assert_eq!(af.range, Range::from_a1("A1:B4").expect("valid range"));
+
+    assert!(
+        result
+            .workbook
+            .get_defined_name(DefinedNameScope::Sheet(sheet.id), XLNM_FILTER_DATABASE)
+            .is_none(),
+        "unexpected _FilterDatabase defined name; defined_names={:?}",
+        result.workbook.defined_names
+    );
+
+    assert!(
+        !result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("has FILTERMODE (filtered rows)")),
+        "unexpected FILTERMODE warning(s): {:?}",
+        result.warnings
+    );
+}
