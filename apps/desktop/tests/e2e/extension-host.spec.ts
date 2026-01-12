@@ -457,11 +457,29 @@ test.describe("BrowserExtensionHost", () => {
     expect(result.clipboardText).toBe("10");
   });
 
-  test("clipboard.writeText is allowed when selection is Restricted but the extension did not read any cells", async ({
+  test("clipboard.writeText is blocked by selection DLP (desktop runtime adapter)", async ({
     page,
   }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await gotoDesktop(page);
+
+    const clipboardSupport = await page.evaluate(async () => {
+      if (!globalThis.isSecureContext) return { supported: false, reason: "not a secure context" };
+      if (!navigator.clipboard?.readText || !navigator.clipboard?.writeText) {
+        return { supported: false, reason: "navigator.clipboard.readText/writeText not available" };
+      }
+
+      try {
+        const marker = `__formula_clipboard_probe__${Math.random().toString(16).slice(2)}`;
+        await navigator.clipboard.writeText(marker);
+        const echoed = await navigator.clipboard.readText();
+        return { supported: echoed === marker, reason: echoed === marker ? null : `mismatch: ${echoed}` };
+      } catch (err: any) {
+        return { supported: false, reason: String(err?.message ?? err) };
+      }
+    });
+
+    test.skip(!clipboardSupport.supported, `Clipboard APIs are blocked: ${clipboardSupport.reason ?? ""}`);
 
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -508,9 +526,12 @@ test.describe("BrowserExtensionHost", () => {
     });
     await page.evaluate(() => (window as any).__formulaApp.whenIdle());
 
+    const marker = `__formula_clipboard_marker__${Math.random().toString(16).slice(2)}`;
+    await page.evaluate(async (marker) => await navigator.clipboard.writeText(marker), marker);
+
     // Move selection away and back before loading the extension. This ensures any host-side
-    // bookkeeping that keys off "selection changed at least once" is exercised, while still
-    // keeping the extension untainted (it isn't loaded yet).
+    // bookkeeping that keys off "selection changed at least once" is exercised, and leaves the
+    // UI selection on the Restricted cell so selection-based DLP blocks the clipboard write.
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const app: any = (window as any).__formulaApp;
@@ -579,8 +600,12 @@ test.describe("BrowserExtensionHost", () => {
       }
     });
 
-    expect(result.ok).toBe(true);
-    await expect(page.getByTestId("toast-root")).not.toContainText("Clipboard copy is blocked");
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("Clipboard copy is blocked");
+    await expect(page.getByTestId("toast-root")).toContainText("Clipboard copy is blocked");
+
+    // Ensure the clipboard was not modified.
+    await expect.poll(() => page.evaluate(async () => await navigator.clipboard.readText())).toBe(marker);
   });
 
   test("clipboard.writeText is blocked when Restricted data is received via events.onSelectionChanged", async ({
