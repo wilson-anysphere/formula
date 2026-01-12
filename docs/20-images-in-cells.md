@@ -41,10 +41,15 @@ xl/
 │   ├── cellImages.xml.rels       # Optional (only if a cellImages.xml part exists)
 │   └── metadata.xml.rels (commonly present when `metadata.xml` references `xl/richData/*`)
 └── richData/
-    ├── richValue.xml
-    ├── richValueRel.xml
-    ├── richValueTypes.xml
-    ├── richValueStructure.xml
+    # Observed rich value stores (see notes below):
+    ├── richValue.xml                 # legacy/2017 variant rich values
+    ├── richValueTypes.xml            # optional legacy types table
+    ├── richValueStructure.xml        # optional legacy structure table
+    ├── rdrichvalue.xml               # modern “Place in Cell” rich values (rdRichValue naming)
+    ├── rdrichvaluestructure.xml      # rdRichValue structure table (defines <v> positions)
+    ├── rdRichValueTypes.xml          # rdRichValue types table
+    # Shared relationship-slot table (used by both variants):
+    ├── richValueRel.xml              # integer slot -> r:id mapping
     └── _rels/
         └── richValueRel.xml.rels
 ```
@@ -69,17 +74,20 @@ Notes:
     [`fixtures/xlsx/rich-data/images-in-cell.md`](../fixtures/xlsx/rich-data/images-in-cell.md)).
   - If present, preserve it and its relationship graph.
 - `xl/media/*` contains the actual image bytes (usually `.png`, but Excel may use other formats).
-- The exact `xl/richData/*` file set can vary across Excel builds; the `richValue*` names shown above are
-  common, but Formula should preserve the entire `xl/richData/` directory byte-for-byte unless we
-  explicitly implement rich-value editing.
+- The exact `xl/richData/*` file set can vary across Excel builds; the part names shown above include the
+  two **observed** naming schemes in this repo:
+  - legacy: `richValue*.xml`
+  - modern “Place in Cell”: `rdrichvalue*.xml` + supporting structure/types tables
+  Formula should preserve the entire `xl/richData/` directory byte-for-byte unless we explicitly
+  implement rich-value editing.
 - `xl/metadata.xml` and the per-cell `c/@vm` + `c/@cm` attributes connect worksheet cells to the rich
   value system.
 - When present, `xl/_rels/metadata.xml.rels` typically connects `xl/metadata.xml` → `xl/richData/*` parts.
   Formula should preserve these relationships byte-for-byte for safe round-trips.
 
 See also: [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) for a deeper (still
-best-effort) description of the `richValue*` part set and how `richValueRel.xml` is used to resolve
-media relationships.
+best-effort) description of the `richValue*`/**`rdRichValue*`** part sets and how `richValueRel.xml` is
+used to resolve media relationships.
 
 For a concrete, fixture-backed “Place in Cell” schema walkthrough (including the `rdrichvalue*` keys
 `_rvRel:LocalImageIdentifier` and `CalcOrigin`), see:
