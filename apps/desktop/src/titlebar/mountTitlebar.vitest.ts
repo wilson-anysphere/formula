@@ -166,6 +166,23 @@ describe("mountTitlebar", () => {
     });
   }, TEST_TIMEOUT_MS);
 
+  it("does not strip a leading hyphen from a real document name", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    let handle: ReturnType<typeof mountTitlebar> | null = null;
+    await act(async () => {
+      handle = mountTitlebar(container, { documentName: "-report.xlsx", actions: [] });
+    });
+
+    expect(container.querySelector('[data-testid="titlebar-document-name"]')?.textContent).toBe("-report.xlsx");
+    expect(container.querySelector('[data-testid="titlebar-document-name"]')?.getAttribute("title")).toBe("-report.xlsx");
+
+    act(() => {
+      handle?.dispose();
+    });
+  }, TEST_TIMEOUT_MS);
+
   it("supports updating props via handle.update()", async () => {
     const container = document.createElement("div");
     container.classList.add("formula-titlebar");
