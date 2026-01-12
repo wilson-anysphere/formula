@@ -160,6 +160,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
 
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
