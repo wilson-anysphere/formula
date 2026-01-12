@@ -3655,10 +3655,12 @@ export class SpreadsheetApp {
   }
 
   fillDown(): void {
+    if (this.isEditing()) return;
     this.applyFillShortcut("down");
   }
 
   fillRight(): void {
+    if (this.isEditing()) return;
     this.applyFillShortcut("right");
   }
 

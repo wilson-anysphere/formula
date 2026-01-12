@@ -444,6 +444,49 @@ describe("SpreadsheetApp Excel-style date/time insertion shortcuts (serial value
     formulaBar.remove();
   });
 
+  it("Fill Down/Right commands no-op while the formula bar is actively editing", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const formulaBar = document.createElement("div");
+    document.body.appendChild(formulaBar);
+
+    const app = new SpreadsheetApp(root, status, { formulaBar });
+    const doc = app.getDocument();
+    const sheetId = app.getCurrentSheetId();
+
+    // Fill Down should not apply while editing.
+    doc.setCellInput(sheetId, { row: 0, col: 0 }, "TOP");
+    doc.setCellInput(sheetId, { row: 1, col: 0 }, "BOTTOM");
+
+    // Fill Right should not apply while editing.
+    doc.setCellInput(sheetId, { row: 0, col: 1 }, "RIGHT");
+
+    const input = formulaBar.querySelector<HTMLTextAreaElement>('[data-testid="formula-input"]');
+    expect(input).not.toBeNull();
+    input!.focus();
+    expect(app.isEditing()).toBe(true);
+
+    const beforeDown = doc.getCell(sheetId, { row: 1, col: 0 }).value;
+    const beforeRight = doc.getCell(sheetId, { row: 0, col: 1 }).value;
+
+    app.selectRange({ range: { startRow: 0, endRow: 1, startCol: 0, endCol: 0 } });
+    app.fillDown();
+    expect(doc.getCell(sheetId, { row: 1, col: 0 }).value).toBe(beforeDown);
+
+    app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 1 } });
+    app.fillRight();
+    expect(doc.getCell(sheetId, { row: 0, col: 1 }).value).toBe(beforeRight);
+
+    app.destroy();
+    root.remove();
+    formulaBar.remove();
+  });
+
   it("falls back to only inserting into the active cell when the selection exceeds 10k cells", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2020, 0, 2, 3, 4, 5));
