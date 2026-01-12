@@ -75,10 +75,13 @@ test("CellEditorOverlay static visibility + z-index are defined in CSS", () => {
   const zIndexValue = (zIndexMatch?.[1] ?? "").trim();
   if (/^\d+$/.test(zIndexValue)) {
     const parsed = Number.parseInt(zIndexValue, 10);
-    // shared-grid overlay layers go up to z-index 4 (see charts-overlay.css).
+    const chartsCssPath = path.join(__dirname, "..", "src", "styles", "charts-overlay.css");
+    const chartsCss = fs.readFileSync(chartsCssPath, "utf8");
+    const sharedZ = [...chartsCss.matchAll(/\bz-index\s*:\s*(\d+)\s*;/g)].map((m) => Number.parseInt(m[1], 10));
+    const maxShared = sharedZ.length === 0 ? 0 : Math.max(...sharedZ);
     assert.ok(
-      parsed > 4,
-      `Expected .cell-editor z-index to stay above shared-grid overlay canvases (got ${zIndexValue})`,
+      parsed > maxShared,
+      `Expected .cell-editor z-index (${zIndexValue}) to stay above shared-grid overlay layers (max ${maxShared})`,
     );
   }
 
