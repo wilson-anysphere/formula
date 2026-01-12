@@ -30,6 +30,17 @@ function isLayeredFormatRange(range) {
 function ensureSafeFormattingRange(rangeOrRanges) {
   let totalCells = 0;
 
+  const showTooLargeToast = () => {
+    try {
+      showToast(
+        `Selection too large to apply formatting (>${MAX_RANGE_FORMATTING_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
+        "warning",
+      );
+    } catch {
+      // `showToast` requires a #toast-root (and DOM globals); ignore in non-UI contexts/tests.
+    }
+  };
+
   for (const range of normalizeRanges(rangeOrRanges)) {
     const r = normalizeCellRange(range);
     if (isLayeredFormatRange(r)) {
@@ -60,26 +71,12 @@ function ensureSafeFormattingRange(rangeOrRanges) {
     // Even though DocumentController can represent large rectangles efficiently via range runs,
     // we keep formatting operations bounded to avoid accidental multi-million-cell changes.
     if (cellCount > MAX_RANGE_FORMATTING_CELLS) {
-      try {
-        showToast(
-          `Selection too large to apply formatting (>${MAX_RANGE_FORMATTING_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
-          "warning",
-        );
-      } catch {
-        // `showToast` requires a #toast-root (and DOM globals); ignore in non-UI contexts/tests.
-      }
+      showTooLargeToast();
       return false;
     }
     totalCells += cellCount;
     if (totalCells > MAX_RANGE_FORMATTING_CELLS) {
-      try {
-        showToast(
-          `Selection too large to apply formatting (>${MAX_RANGE_FORMATTING_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
-          "warning",
-        );
-      } catch {
-        // `showToast` requires a #toast-root (and DOM globals); ignore in non-UI contexts/tests.
-      }
+      showTooLargeToast();
       return false;
     }
   }

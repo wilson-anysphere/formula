@@ -133,7 +133,7 @@ test("toggleBold toggles OFF for large rectangles formatted via range runs (no p
   withGetCellFormatCallLimit(doc, 10_000, "toggleBold", () => toggleBold(doc, "Sheet1", hugeRect));
 
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").font?.bold), false);
-  assert.equal(Boolean(doc.getCellFormat("Sheet1", "C99999").font?.bold), false);
+  assert.equal(Boolean(doc.getCellFormat("Sheet1", "C20000").font?.bold), false);
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "D1").font?.bold), false);
   assert.equal(sheet.cells.size, 0);
 });
@@ -261,7 +261,7 @@ test("toggleWrap toggles OFF for large rectangles formatted via range runs (no p
   withGetCellFormatCallLimit(doc, 10_000, "toggleWrap", () => toggleWrap(doc, "Sheet1", hugeRect));
 
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "A1").alignment?.wrapText), false);
-  assert.equal(Boolean(doc.getCellFormat("Sheet1", "C99999").alignment?.wrapText), false);
+  assert.equal(Boolean(doc.getCellFormat("Sheet1", "C20000").alignment?.wrapText), false);
   assert.equal(Boolean(doc.getCellFormat("Sheet1", "D1").alignment?.wrapText), false);
   assert.equal(sheet.cells.size, 0);
 });
