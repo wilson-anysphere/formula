@@ -116,6 +116,7 @@
         { "event": "open-file-ready" },
         { "event": "close-prep-done" },
         { "event": "close-handled" },
+        { "event": "coi-check-result" },
         { "event": "updater-ui-ready" }
       ]
     },
