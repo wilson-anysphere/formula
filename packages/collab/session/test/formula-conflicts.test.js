@@ -263,6 +263,56 @@ test("CollabSession formula conflict monitor treats remoteUserId as unknown for 
   docB.destroy();
 });
 
+test("CollabSession formula conflict monitor treats remoteUserId as unknown for content conflicts when modifiedBy isn't updated (formula+value mode)", async () => {
+  // Ensure deterministic tie-breaking: higher clientID wins.
+  const docA = new Y.Doc();
+  docA.clientID = 1;
+  const docB = new Y.Doc();
+  docB.clientID = 2;
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    formulaConflicts: {
+      localUserId: "user-a",
+      mode: "formula+value",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+
+  // Remote doc without a formula conflict monitor: will overwrite formula/value without updating modifiedBy.
+  const sessionB = createCollabSession({ doc: docB });
+
+  // Establish base.
+  await sessionA.setCellValue("Sheet1:0:0", "base");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.value, "base");
+
+  // Offline concurrent edits: A writes a value; B overwrites with a formula.
+  disconnect();
+  await sessionA.setCellValue("Sheet1:0:0", "ours");
+  await sessionB.setCellFormula("Sheet1:0:0", "=1");
+
+  // Reconnect.
+  disconnect = connectDocs(docA, docB);
+
+  const conflict = conflictsA.find((c) => c.kind === "content") ?? null;
+  assert.ok(conflict, "expected a content conflict to be detected");
+  assert.equal(conflict.remoteUserId, "", "expected remoteUserId to be unknown when modifiedBy is unchanged");
+  assert.equal(conflict.local.type, "value");
+  assert.equal(conflict.local.value, "ours");
+  assert.equal(conflict.remote.type, "formula");
+  assert.equal(conflict.remote.formula, "=1");
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
 test("CollabSession formula conflict monitor detects value conflicts for cleared values after restart (formula+value mode)", async () => {
   // Ensure deterministic tie-breaking: higher clientID wins.
   const docA = new Y.Doc();
