@@ -527,7 +527,10 @@ fn relationship_target_ignore_map(
             continue;
         };
         let target = node.attribute("Target").unwrap_or_default();
-        let resolved = resolve_relationship_target(rels_part, target);
+        let resolved = match node.attribute("TargetMode") {
+            Some(mode) if mode.eq_ignore_ascii_case("External") => target.replace('\\', "/"),
+            _ => resolve_relationship_target(rels_part, target),
+        };
         ids.insert(id.to_string(), ignore.matches(&resolved));
     }
 
