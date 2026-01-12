@@ -250,6 +250,11 @@ if (!sheetTabsRoot) {
   throw new Error("Missing #sheet-tabs container");
 }
 const sheetTabsRootEl = sheetTabsRoot;
+// The HTML scaffold historically used `.sheet-tabs` for the container itself. The
+// modern sheet bar uses `.sheet-bar` with an inner `.sheet-tabs` strip (matching
+// `mockups/spreadsheet-main.html`), so update the class list once on boot.
+sheetTabsRootEl.classList.add("sheet-bar");
+sheetTabsRootEl.classList.remove("sheet-tabs");
 
 let lastSheetIds: string[] = [];
 
@@ -267,6 +272,29 @@ function renderSheetTabs(sheets: SheetUiInfo[] = listSheetsForUi()) {
 
   const active = app.getCurrentSheetId();
 
+  const nav = document.createElement("div");
+  nav.className = "sheet-nav";
+
+  const navLeft = document.createElement("button");
+  navLeft.type = "button";
+  navLeft.className = "sheet-nav-btn";
+  navLeft.textContent = "◀";
+  navLeft.setAttribute("aria-label", "Scroll sheets left");
+
+  const navRight = document.createElement("button");
+  navRight.type = "button";
+  navRight.className = "sheet-nav-btn";
+  navRight.textContent = "▶";
+  navRight.setAttribute("aria-label", "Scroll sheets right");
+
+  nav.append(navLeft, navRight);
+
+  const tabStrip = document.createElement("div");
+  tabStrip.className = "sheet-tabs";
+  tabStrip.setAttribute("role", "tablist");
+
+  let activeTabEl: HTMLElement | null = null;
+
   for (const sheet of sheets) {
     const sheetId = sheet.id;
     const button = document.createElement("button");
@@ -275,13 +303,56 @@ function renderSheetTabs(sheets: SheetUiInfo[] = listSheetsForUi()) {
     button.dataset.sheetId = sheetId;
     button.dataset.testid = `sheet-tab-${sheetId}`;
     button.dataset.active = sheetId === active ? "true" : "false";
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", sheetId === active ? "true" : "false");
     button.textContent = sheet.name;
     button.addEventListener("click", () => {
       app.activateSheet(sheetId);
       app.focus();
     });
-    sheetTabsRootEl.appendChild(button);
+    tabStrip.appendChild(button);
+    if (sheetId === active) activeTabEl = button;
   }
+
+  const addSheetBtn = document.createElement("button");
+  addSheetBtn.type = "button";
+  addSheetBtn.className = "sheet-add";
+  addSheetBtn.dataset.testid = "sheet-add";
+  addSheetBtn.textContent = "+";
+  addSheetBtn.setAttribute("aria-label", "Add sheet");
+  addSheetBtn.addEventListener("click", () => {
+    const existingIds = new Set(listSheetsForUi().map((sheet) => sheet.id));
+    let n = 1;
+    while (existingIds.has(`Sheet${n}`)) n += 1;
+    const newSheetId = `Sheet${n}`;
+
+    const doc = app.getDocument();
+    // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
+    doc.getCell(newSheetId, { row: 0, col: 0 });
+    app.activateSheet(newSheetId);
+    app.focus();
+  });
+
+  sheetTabsRootEl.append(nav, tabStrip, addSheetBtn);
+
+  const scrollStep = 120;
+  navLeft.addEventListener("click", () => {
+    tabStrip.scrollBy({ left: -scrollStep, behavior: "smooth" });
+  });
+  navRight.addEventListener("click", () => {
+    tabStrip.scrollBy({ left: scrollStep, behavior: "smooth" });
+  });
+
+  function updateNavDisabledState() {
+    const maxScrollLeft = tabStrip.scrollWidth - tabStrip.clientWidth;
+    navLeft.disabled = tabStrip.scrollLeft <= 0;
+    navRight.disabled = tabStrip.scrollLeft >= maxScrollLeft - 1;
+  }
+  tabStrip.addEventListener("scroll", updateNavDisabledState, { passive: true });
+  updateNavDisabledState();
+
+  // Best-effort: keep the active tab visible after re-rendering.
+  activeTabEl?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
 function syncSheetUi(): void {
