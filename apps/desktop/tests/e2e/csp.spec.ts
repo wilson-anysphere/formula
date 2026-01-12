@@ -233,7 +233,7 @@ test.describe("Content Security Policy (Tauri parity)", () => {
           // Vite rewrites `@formula/extension-api` into `/@fs/...` URLs, which fail the
           // strict import preflight. The import sandbox is exercised in unit tests; for
           // this e2e suite we disable preflight so we can validate CSP behavior.
-          sandbox: { strictImports: false },
+          sandbox: { strictImports: false }
         });
 
         await host.loadExtensionFromUrl(manifestUrl);
@@ -471,4 +471,85 @@ test.describe("Content Security Policy (Tauri parity)", () => {
 
     expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
   });
+
+  test("extension network.fetch fails when denied under CSP without CSP violations", async ({ page }) => {
+    const cspViolations: string[] = [];
+
+    page.on("console", (msg) => {
+      if (msg.type() !== "error" && msg.type() !== "warning") {
+        return;
+      }
+      const text = msg.text();
+      if (/content security policy/i.test(text)) {
+        cspViolations.push(text);
+      }
+    });
+
+    let requestCount = 0;
+    await page.route("https://example.test/**", async (route) => {
+      requestCount += 1;
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Content-Type": "text/plain"
+        },
+        body: "hello"
+      });
+    });
+
+    const response = await page.goto("/");
+    const cspHeader = response?.headers()["content-security-policy"];
+    expect(cspHeader, "E2E server should emit Content-Security-Policy header").toBeTruthy();
+
+    await expect(page.locator("#grid")).toHaveCount(1);
+
+    const manifestUrl = viteFsUrl(path.join(repoRoot, "extensions/sample-hello/package.json"));
+    const hostModuleUrl = viteFsUrl(path.join(repoRoot, "packages/extension-host/src/browser/index.mjs"));
+
+    const result = await page.evaluate(
+      async ({ manifestUrl, hostModuleUrl }) => {
+        const { BrowserExtensionHost } = await import(hostModuleUrl);
+
+        const host = new BrowserExtensionHost({
+          engineVersion: "1.0.0",
+          spreadsheetApi: {
+            async getSelection() {
+              return { startRow: 0, startCol: 0, endRow: 0, endCol: 0, values: [[null]] };
+            },
+            async getCell() {
+              return null;
+            },
+            async setCell() {
+              // noop
+            }
+          },
+          permissionPrompt: async ({ permissions }: { permissions: string[] }) => {
+            if (permissions.includes("network")) return false;
+            return true;
+          },
+          // Vite rewrites `@formula/extension-api` into `/@fs/...` URLs, which fail the strict import preflight.
+          sandbox: { strictImports: false },
+          // Avoid leaking persisted grants between tests.
+          permissionStorageKey: `formula.extensionHost.permissions.csp.deny.${Date.now()}`
+        });
+
+        try {
+          await host.loadExtensionFromUrl(manifestUrl);
+          await host.executeCommand("sampleHello.fetchText", "https://example.test/hello");
+          return { errorMessage: "" };
+        } catch (err: any) {
+          return { errorMessage: String(err?.message ?? err) };
+        } finally {
+          await host.dispose();
+        }
+      },
+      { manifestUrl, hostModuleUrl }
+    );
+
+    expect(result.errorMessage).toContain("Permission denied");
+    expect(requestCount).toBe(0);
+    expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
+  });
 });
+
