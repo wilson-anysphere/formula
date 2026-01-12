@@ -13,7 +13,7 @@ describe("createDesktopRagService (embedder config)", () => {
       createDesktopRagService({
         documentController: controller,
         workbookId: "wb_embedder_type_reject",
-        embedder: { type: "openai" } as any,
+        embedder: { type: "unsupported" } as any,
       }),
     ).toThrow(/only supports deterministic hash embeddings/i);
   });
