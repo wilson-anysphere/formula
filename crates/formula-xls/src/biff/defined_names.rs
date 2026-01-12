@@ -34,9 +34,18 @@ pub(crate) struct BiffDefinedName {
     pub(crate) name: String,
     /// BIFF sheet index (0-based) for local names, or `None` for workbook scope.
     pub(crate) scope_sheet: Option<usize>,
+    /// Raw BIFF `itab` value from the NAME record.
+    ///
+    /// - `0` => workbook scope
+    /// - `>0` => worksheet scope (`itab-1` is the BIFF sheet index)
+    pub(crate) itab: u16,
     pub(crate) refers_to: String,
     pub(crate) hidden: bool,
     pub(crate) comment: Option<String>,
+    /// Built-in defined name id (NAME.chKey) when `fBuiltin` is set.
+    pub(crate) builtin_id: Option<u8>,
+    /// Raw BIFF8 `rgce` bytes for the defined name formula.
+    pub(crate) rgce: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -49,8 +58,10 @@ pub(crate) struct BiffDefinedNames {
 struct RawDefinedName {
     name: String,
     scope_sheet: Option<usize>,
+    itab: u16,
     hidden: bool,
     comment: Option<String>,
+    builtin_id: Option<u8>,
     rgce: Vec<u8>,
 }
 
@@ -148,9 +159,12 @@ pub(crate) fn parse_biff_defined_names(
         out.names.push(BiffDefinedName {
             name: raw.name,
             scope_sheet: raw.scope_sheet,
+            itab: raw.itab,
             refers_to: decoded.text,
             hidden: raw.hidden,
             comment: raw.comment,
+            builtin_id: raw.builtin_id,
+            rgce: raw.rgce,
         });
     }
 
@@ -168,11 +182,11 @@ fn parse_biff8_name_record(
     // Fixed-size `NAME` record header (14 bytes).
     // [MS-XLS] 2.4.150
     let grbit = cursor.read_u16_le()?;
-    let _ch_key = cursor.read_u8()?;
+    let ch_key = cursor.read_u8()?;
     let cch = cursor.read_u8()? as usize;
     let cce = cursor.read_u16_le()? as usize;
     let _ixals = cursor.read_u16_le()?;
-    let itab_raw = cursor.read_u16_le()?;
+    let itab = cursor.read_u16_le()?;
     let cch_cust_menu = cursor.read_u8()? as usize;
     let cch_description = cursor.read_u8()? as usize;
     let cch_help_topic = cursor.read_u8()? as usize;
@@ -181,17 +195,43 @@ fn parse_biff8_name_record(
     let hidden = (grbit & NAME_FLAG_HIDDEN) != 0;
     let builtin = (grbit & NAME_FLAG_BUILTIN) != 0;
 
-    let scope_sheet = if itab_raw == 0 {
+    let scope_sheet = if itab == 0 {
         None
     } else {
-        Some(itab_raw as usize - 1)
+        Some(itab as usize - 1)
     };
 
-    let name = if builtin {
-        let id = cursor.read_u8()?;
-        builtin_name_to_string(id)
+    let (builtin_id, name) = if builtin {
+        // Built-in names are special:
+        //
+        // In BIFF8, `rgchName` is stored as a *single byte* built-in name id (no XLUnicodeString
+        // option flags), and `cch` MUST be 1. Some producers may also populate `chKey`; when
+        // present we prefer `chKey` as the authoritative id.
+        //
+        // We still consume `rgchName` so `rgce` parsing stays aligned.
+        let id_from_name = if cch > 0 { Some(cursor.read_u8()?) } else { None };
+        if cch > 1 {
+            cursor.skip_bytes(cch - 1)?;
+        }
+
+        let id = if ch_key != 0 {
+            if let Some(id_from_name) = id_from_name {
+                if id_from_name != ch_key {
+                    log::warn!(
+                        "NAME record built-in id mismatch: chKey=0x{ch_key:02X} rgchName=0x{id_from_name:02X}"
+                    );
+                }
+            }
+            ch_key
+        } else {
+            id_from_name.unwrap_or(0)
+        };
+
+        (Some(id), builtin_name_to_string(id))
     } else {
-        cursor.read_biff8_unicode_string_no_cch(cch, codepage)?
+        // `rgchName` (XLUnicodeStringNoCch): flags byte + character bytes.
+        let raw_name = cursor.read_biff8_unicode_string_no_cch(cch, codepage)?;
+        (None, raw_name)
     };
 
     // `rgce`: parsed formula bytes.
@@ -224,7 +264,7 @@ fn parse_biff8_name_record(
     if let Some(scope) = scope_sheet {
         if scope >= sheet_names.len() {
             log::warn!(
-                "NAME record `{name}` has out-of-range itab={itab_raw} (sheet count={})",
+                "NAME record `{name}` has out-of-range itab={itab} (sheet count={})",
                 sheet_names.len()
             );
         }
@@ -233,8 +273,10 @@ fn parse_biff8_name_record(
     Ok(RawDefinedName {
         name,
         scope_sheet,
+        itab,
         hidden,
         comment,
+        builtin_id,
         rgce,
     })
 }
@@ -245,10 +287,8 @@ fn builtin_name_to_string(id: u8) -> String {
         0x07 => formula_model::XLNM_PRINT_TITLES.to_string(),
         0x0D => formula_model::XLNM_FILTER_DATABASE.to_string(),
         other => {
-            log::warn!("unknown BIFF built-in defined name id 0x{other:02X}");
-            // Must be a valid `DefinedName` identifier (`validate_defined_name`), so keep it
-            // alphanumeric + underscore only.
-            format!("__biff_builtin_name_0x{other:02X}")
+            log::warn!("unsupported BIFF8 built-in NAME id 0x{other:02X}");
+            format!("_xlnm.Builtin_0x{other:02X}")
         }
     }
 }
@@ -679,6 +719,13 @@ mod tests {
         out
     }
 
+    fn xl_unicode_string_no_cch_compressed(s: &str) -> Vec<u8> {
+        let mut out = Vec::with_capacity(1 + s.len());
+        out.push(0); // flags (compressed)
+        out.extend_from_slice(s.as_bytes());
+        out
+    }
+
     #[test]
     fn parses_defined_name_with_continued_rgce_bytes() {
         let name = "Name";
@@ -1026,6 +1073,94 @@ mod tests {
         assert_eq!(parsed.names[0].name, name);
         assert_eq!(parsed.names[0].refers_to, "1");
         assert_eq!(parsed.names[0].comment.as_deref(), Some(description));
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+    }
+
+    #[test]
+    fn parses_name_metadata_and_builtin_name_ids() {
+        let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00]; // PtgInt 1
+        let description = "My description";
+
+        // Print_Area built-in, hidden, worksheet-scoped.
+        let grbit = NAME_FLAG_HIDDEN | NAME_FLAG_BUILTIN;
+        let builtin_id = 0x06u8;
+        let itab = 3u16;
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&grbit.to_le_bytes());
+        header.push(0); // chKey (keyboard shortcut; built-in id is stored in rgchName)
+        header.push(1); // cch (built-in name id length)
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&itab.to_le_bytes()); // itab
+        header.extend_from_slice(&[
+            0,                      // cchCustMenu
+            description.len() as u8, // cchDescription
+            0,                      // cchHelpTopic
+            0,                      // cchStatusText
+        ]);
+
+        let r_name = record(
+            RECORD_NAME,
+            &[
+                header,
+                vec![builtin_id], // rgchName (built-in id)
+                rgce.clone(),
+                xl_unicode_string_no_cch_compressed(description),
+            ]
+            .concat(),
+        );
+
+        // Additional built-ins to validate the mapping table.
+        fn builtin_record(id: u8) -> Vec<u8> {
+            let mut header = Vec::new();
+            header.extend_from_slice(&NAME_FLAG_BUILTIN.to_le_bytes());
+            header.push(0); // chKey
+            header.push(1); // cch (built-in id length)
+            header.extend_from_slice(&0u16.to_le_bytes()); // cce (empty formula)
+            header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+            header.extend_from_slice(&0u16.to_le_bytes()); // itab
+            header.extend_from_slice(&[0, 0, 0, 0]); // no optional strings
+
+            record(
+                RECORD_NAME,
+                &[header, vec![id]].concat(),
+            )
+        }
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            r_name,
+            builtin_record(0x07), // Print_Titles
+            builtin_record(0x0D), // _FilterDatabase
+            builtin_record(0xFF), // unknown => placeholder
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        // Provide at least 3 sheets so itab=3 is in range.
+        let sheet_names: Vec<String> = ["S1", "S2", "S3"].iter().map(|s| s.to_string()).collect();
+
+        let parsed = parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &sheet_names)
+            .expect("parse names");
+        assert_eq!(parsed.names.len(), 4);
+
+        assert_eq!(parsed.names[0].name, formula_model::XLNM_PRINT_AREA);
+        assert_eq!(parsed.names[0].builtin_id, Some(builtin_id));
+        assert_eq!(parsed.names[0].itab, itab);
+        assert_eq!(parsed.names[0].scope_sheet, Some(2));
+        assert!(parsed.names[0].hidden);
+        assert_eq!(parsed.names[0].comment.as_deref(), Some(description));
+        assert_eq!(parsed.names[0].rgce, rgce);
+        assert_eq!(parsed.names[0].refers_to, "1");
+
+        assert_eq!(parsed.names[1].name, formula_model::XLNM_PRINT_TITLES);
+        assert_eq!(parsed.names[1].builtin_id, Some(0x07));
+        assert_eq!(parsed.names[2].name, formula_model::XLNM_FILTER_DATABASE);
+        assert_eq!(parsed.names[2].builtin_id, Some(0x0D));
+        assert_eq!(parsed.names[3].name, "_xlnm.Builtin_0xFF");
+        assert_eq!(parsed.names[3].builtin_id, Some(0xFF));
+
         assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
     }
 }
