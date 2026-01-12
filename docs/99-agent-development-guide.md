@@ -201,6 +201,8 @@ pnpm test:node startSyncServer
 pnpm test:node -- desktop  # `--` delimiter is stripped for pnpm compatibility
 ```
 
+`pnpm test:node --help` prints usage without running the Cursor AI policy scan (so it stays fast).
+
 ### Vitest: run single files without accidentally running the full suite
 
 When debugging a specific Vitest file, **avoid** passing a bare `--` before the
