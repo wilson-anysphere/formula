@@ -254,6 +254,13 @@ Notes:
 * The `<k>` list defines the meaning of each `<v>` position.
 * The relationship-slot index is stored in the field named **`_rvRel:LocalImageIdentifier`** (not
   necessarily “the first `<v>`”).
+  * In this specific fixture, the `_localImage` key order is:
+    1) `_rvRel:LocalImageIdentifier`
+    2) `CalcOrigin`
+    so `<rv><v>0</v><v>5</v></rv>` means: relationship slot `0`, `CalcOrigin = 5`.
+* `xl/richData/_rels/richValueRel.xml.rels` is an unordered map; do not assume its `<Relationship>` order
+  matches the `<rel>` order in `richValueRel.xml`. Resolve the slot index using the `<rel>` list order,
+  then look up that `r:id` in the `.rels` file to find the `Target`.
 
 ---
 

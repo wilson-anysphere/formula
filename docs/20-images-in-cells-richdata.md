@@ -302,6 +302,25 @@ Notes:
 * The relationship-slot index is stored in the field named
   **`_rvRel:LocalImageIdentifier`** (type `t="i"`), which points to a slot in
   `xl/richData/richValueRel.xml`. Do **not** hardcode "first `<v>`" — use the structure’s key order.
+  * In this specific fixture, the `_localImage` key order is:
+    1) `_rvRel:LocalImageIdentifier`
+    2) `CalcOrigin`
+    so `<rv><v>0</v><v>5</v></rv>` means: relationship slot `0`, `CalcOrigin = 5`.
+* `xl/richData/_rels/richValueRel.xml.rels` is a **map** from `rId*` to a `Target`; its internal ordering
+  is not meaningful. In `fixtures/xlsx/basic/image-in-cell.xlsx` the `.rels` file lists `rId2` before
+  `rId1`, while `richValueRel.xml` lists `<rel r:id="rId1"/>` then `<rel r:id="rId2"/>`. Always resolve
+  the slot index using the `<rel>` list order, then resolve `r:id` via the `.rels` file.
+
+  ```xml
+  <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+    <Relationship Id="rId2"
+                  Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                  Target="../media/image2.png"/>
+    <Relationship Id="rId1"
+                  Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                  Target="../media/image1.png"/>
+  </Relationships>
+  ```
 
 **Workbook relationships**
 
