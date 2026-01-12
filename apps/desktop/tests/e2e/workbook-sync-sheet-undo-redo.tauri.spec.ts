@@ -2,6 +2,26 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { gotoDesktop } from "./helpers";
 
+async function openSheetTabContextMenu(page: Page, sheetId: string) {
+  // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+  await page.evaluate((id) => {
+    const tab = document.querySelector(`[data-testid="sheet-tab-${id}"]`) as HTMLElement | null;
+    if (!tab) throw new Error(`Missing sheet-tab-${id}`);
+    const rect = tab.getBoundingClientRect();
+    tab.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 10,
+        clientY: rect.top + 10,
+      }),
+    );
+  }, sheetId);
+  const menu = page.getByTestId("sheet-tab-context-menu");
+  await expect(menu).toBeVisible();
+  return menu;
+}
+
 function installTauriStubForTests() {
   const listeners: Record<string, any> = {};
   (window as any).__tauriListeners = listeners;
@@ -171,13 +191,10 @@ test.describe("tauri workbookSync sheet metadata undo/redo", () => {
     await page.addInitScript(installTauriStubForTests);
     await gotoDesktop(page);
 
-    const tab = page.getByTestId("sheet-tab-Sheet2");
-    await expect(tab).toBeVisible();
-    await tab.click({ button: "right" });
-
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Hide" }).click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    const menu = await openSheetTabContextMenu(page, "Sheet2");
+    await menu.getByRole("button", { name: "Hide", exact: true }).click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
 
     await expect
       .poll(
@@ -197,19 +214,17 @@ test.describe("tauri workbookSync sheet metadata undo/redo", () => {
 
     const calls = (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_visibility");
     expect(calls[1]?.args).toMatchObject({ sheet_id: "Sheet2", visibility: "visible" });
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
   });
 
   test("set tab color then undo mirrors set_sheet_tab_color back to null", async ({ page }) => {
     await page.addInitScript(installTauriStubForTests);
     await gotoDesktop(page);
 
-    const tab = page.getByTestId("sheet-tab-Sheet1");
-    await expect(tab).toBeVisible();
-    await tab.click({ button: "right" });
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Tab Color" }).click();
-    await menu.getByRole("button", { name: "Green" }).click();
+    const menu = await openSheetTabContextMenu(page, "Sheet1");
+    await menu.getByRole("button", { name: "Tab Color", exact: true }).click();
+    await menu.getByRole("button", { name: "Green", exact: true }).click();
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-tab-color", "#00b050");
 
     await expect
       .poll(async () => (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_tab_color").length, { timeout: 10_000 })
@@ -223,6 +238,7 @@ test.describe("tauri workbookSync sheet metadata undo/redo", () => {
 
     const calls = (await getInvokeCalls(page)).filter((c) => c.cmd === "set_sheet_tab_color");
     expect(calls[1]?.args).toMatchObject({ sheet_id: "Sheet1", tab_color: null });
+    await expect(page.getByTestId("sheet-tab-Sheet1")).not.toHaveAttribute("data-tab-color");
   });
 
   test("reorder sheets then undo mirrors the backend ordering via move_sheet", async ({ page }) => {
