@@ -188,14 +188,50 @@ fn parse_rich_value_store(pkg: &XlsxPackage) -> Result<Vec<RichValueScalarRecord
             source,
         })?;
 
-        for rv in doc
+        // Typical shape:
+        // <rvData> <values> <rv>...</rv>* </values> </rvData>
+        //
+        // Be tolerant: allow wrapper nodes under `<values>`. If a `<values>` container is present,
+        // prefer scanning within it to avoid false-positive `<rv>` matches elsewhere in the
+        // document.
+        let values_root = doc
             .descendants()
-            .filter(|n| n.is_element() && n.tag_name().name() == "rv")
-        {
-            let type_id = rv
-                .attribute("type")
-                .or_else(|| rv.attribute("t"))
-                .and_then(|v| v.trim().parse::<u32>().ok());
+            .find(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("values"));
+        let rv_nodes: Vec<roxmltree::Node<'_, '_>> = match values_root {
+            Some(values) => values
+                .descendants()
+                .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
+                // Avoid treating nested `<rv>` blocks as separate records. The rich value schema
+                // uses a flat list under `<values>`.
+                .filter(|rv| {
+                    !rv.ancestors()
+                        .skip(1)
+                        .filter(|n| n.is_element())
+                        .any(|n| n.tag_name().name().eq_ignore_ascii_case("rv"))
+                })
+                .collect(),
+            None => doc
+                .descendants()
+                .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("rv"))
+                .filter(|rv| {
+                    !rv.ancestors()
+                        .skip(1)
+                        .filter(|n| n.is_element())
+                        .any(|n| n.tag_name().name().eq_ignore_ascii_case("rv"))
+                })
+                .collect(),
+        };
+
+        for rv in rv_nodes {
+            // Match by local attribute name only (prefix/namespace can vary).
+            let type_id = rv.attributes().find_map(|attr| {
+                let local = attr.name().rsplit(':').next().unwrap_or(attr.name());
+                if local.eq_ignore_ascii_case("type") || local.eq_ignore_ascii_case("t") {
+                    attr.value().trim().parse::<u32>().ok()
+                } else {
+                    None
+                }
+            });
 
             // Rich values store scalar payloads in `<v>` nodes, typically matching the ordering of
             // members declared in `richValueStructure.xml`. Some producers wrap values in
@@ -204,11 +240,11 @@ fn parse_rich_value_store(pkg: &XlsxPackage) -> Result<Vec<RichValueScalarRecord
             let mut raw_values: Vec<String> = Vec::new();
             for v in rv
                 .descendants()
-                .filter(|n| n.is_element() && n.tag_name().name() == "v")
+                .filter(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("v"))
             {
                 if v.ancestors()
                     .filter(|n| n.is_element())
-                    .find(|n| n.tag_name().name() == "rv")
+                    .find(|n| n.tag_name().name().eq_ignore_ascii_case("rv"))
                     .is_some_and(|closest_rv| closest_rv != rv)
                 {
                     continue;
@@ -397,6 +433,37 @@ mod tests {
                 (Some(2), vec!["four".to_string()]),
             ]
         );
+    }
+
+    #[test]
+    fn rich_value_store_ignores_nested_rv_blocks() {
+        let rich_value_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv type="0">
+      <wrapper>
+        <rv type="99"><v>nested</v></rv>
+      </wrapper>
+      <v>outer</v>
+    </rv>
+  </values>
+</rvData>"#;
+
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file("xl/richData/richValue.xml", options).unwrap();
+        zip.write_all(rich_value_xml).unwrap();
+
+        let bytes = zip.finish().unwrap().into_inner();
+        let pkg = crate::XlsxPackage::from_bytes(&bytes).unwrap();
+
+        let parsed = parse_rich_value_store(&pkg).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].raw_values, vec!["outer".to_string()]);
+        assert_eq!(parsed[0].type_id, Some(0));
     }
 
     #[test]
