@@ -330,7 +330,7 @@ impl<'a> PythonRpcHost<'a> {
 
                 let sheet = self
                     .state
-                    .add_sheet(name, insert_after, index)
+                    .add_sheet(name, None, insert_after, index)
                     .map_err(|e| e.to_string())?;
                 Ok(JsonValue::String(sheet.id))
             }
