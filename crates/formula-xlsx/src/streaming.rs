@@ -573,6 +573,15 @@ mod macro_strip_streaming {
             }
         }
 
+        // Legacy macro surfaces beyond VBA:
+        // - Excel 4.0 macro sheets (XLM) stored under `xl/macrosheets/**`
+        // - Dialog sheets stored under `xl/dialogsheets/**`
+        for name in part_names {
+            if name.starts_with("xl/macrosheets/") || name.starts_with("xl/dialogsheets/") {
+                delete.insert(name.clone());
+            }
+        }
+
         // Parts referenced by `xl/_rels/vbaProject.bin.rels` (e.g. signature payloads).
         if part_names.contains("xl/_rels/vbaProject.bin.rels") {
             let rels_bytes =
