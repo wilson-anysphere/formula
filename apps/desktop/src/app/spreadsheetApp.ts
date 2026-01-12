@@ -1493,7 +1493,12 @@ export class SpreadsheetApp {
     this.externalRepaintUnsubscribe = this.document.on("change", (payload: any) => {
       const source = typeof payload?.source === "string" ? payload.source : "";
       const isExternalSource =
-        source === "collab" || source === "backend" || source === "python" || source === "macro" || source === "pivot";
+        source === "collab" ||
+        source === "backend" ||
+        source === "python" ||
+        source === "macro" ||
+        source === "pivot" ||
+        source === "extension";
       if (!isExternalSource) return;
       // Shared-grid mode repaints via CanvasGridRenderer/provider invalidations; avoid scheduling
       // redundant SpreadsheetApp refreshes (which mainly exist for the legacy renderer).

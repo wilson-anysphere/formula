@@ -3690,7 +3690,7 @@ if (
     },
     async setCell(row: number, col: number, value: unknown) {
       const sheetId = app.getCurrentSheetId();
-      app.getDocument().setCellValue(sheetId, { row, col }, value);
+      app.getDocument().setCellValue(sheetId, { row, col }, value, { source: "extension" });
     },
     async getRange(ref: string) {
       const { sheetId, startRow, startCol, endRow, endCol } = parseSheetQualifiedRange(ref);
@@ -3737,7 +3737,7 @@ if (
         }
       }
 
-      app.getDocument().setCellInputs(inputs, { label: "Extension setRange" });
+      app.getDocument().setCellInputs(inputs, { label: "Extension setRange", source: "extension" });
     },
   };
 
