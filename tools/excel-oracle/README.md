@@ -90,11 +90,39 @@ python tools/excel-oracle/pin_dataset.py \
 ```
 
 Note: `pin_dataset.py` enforces that the dataset includes Excel version/build/OS metadata
-from COM automation, to avoid accidentally pinning a synthetic/non-Excel dataset.
+from COM automation when pinning a real Excel dataset, to avoid accidentally pinning
+something that simply sets `source.kind="excel"`.
+
+`pin_dataset.py` also supports pinning a **synthetic CI baseline** from the in-repo Rust
+engine (`crates/formula-excel-oracle`, where `source.kind == "formula-engine"`). In that
+mode it re-tags the dataset as `source.kind="excel"` with `"unknown"` metadata and
+embeds the original engine metadata under `source.syntheticSource`.
 
 The workflow prefers `excel-oracle.pinned.json` if present.
 
 To force Excel generation in the workflow when a pinned dataset exists, run the workflow manually (`workflow_dispatch`) and set `oracle_source=generate`.
+
+## Regenerate the synthetic CI baseline (no Excel required)
+
+When adding new deterministic functions (e.g. new STAT functions), you often need to update
+multiple committed artifacts together to keep CI green:
+
+- `shared/functionCatalog.json` (+ `shared/functionCatalog.mjs`)
+- `tests/compatibility/excel-oracle/cases.json`
+- `tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json`
+
+To regenerate all of them from the current `formula-engine` implementation:
+
+```bash
+python tools/excel-oracle/regenerate_synthetic_baseline.py
+```
+
+This will:
+
+1. Regenerate the function catalog from `formula-engine`'s inventory registry.
+2. Regenerate the oracle case corpus (and validate coverage).
+3. Evaluate the full corpus using `crates/formula-excel-oracle`.
+4. Pin the results as a synthetic dataset for CI.
 
 ## Compare formula-engine output vs Excel oracle
 
