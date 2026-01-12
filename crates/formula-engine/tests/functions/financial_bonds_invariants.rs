@@ -143,6 +143,70 @@ fn coup_days_additivity_for_30_360_bases() {
 }
 
 #[test]
+fn coup_schedule_roundtrips_when_settlement_is_coupon_date() {
+    let mut sheet = TestSheet::new();
+
+    // Skip if the COUP date helpers aren't registered yet.
+    if eval_number_or_skip(
+        &mut sheet,
+        "=COUPPCD(DATE(2020,7,1),DATE(2021,1,1),2,0)",
+    )
+    .is_none()
+        || eval_number_or_skip(
+            &mut sheet,
+            "=COUPNCD(DATE(2020,7,1),DATE(2021,1,1),2,0)",
+        )
+        .is_none()
+        || eval_number_or_skip(
+            &mut sheet,
+            "=COUPNUM(DATE(2020,7,1),DATE(2021,1,1),2,0)",
+        )
+        .is_none()
+    {
+        return;
+    }
+
+    let maturities = ["DATE(2030,12,31)", "DATE(2031,2,28)", "DATE(2030,7,15)"];
+    let frequencies = [1, 2, 4];
+    let bases = [0, 1, 2, 3, 4];
+
+    for maturity in maturities {
+        for &frequency in &frequencies {
+            let months_per_period = 12 / frequency;
+            for k in 1..=6 {
+                let months_back = k * months_per_period;
+                let settlement = format!("EDATE({maturity},-{months_back})");
+                let expected_ncd = format!("EDATE({settlement},{months_per_period})");
+
+                for &basis in &bases {
+                    let pcd = eval_number(
+                        &mut sheet,
+                        &format!("=COUPPCD({settlement},{maturity},{frequency},{basis})"),
+                    );
+                    let settlement_serial =
+                        eval_number(&mut sheet, &format!("={settlement}"));
+                    assert_close(pcd, settlement_serial, 0.0);
+
+                    let ncd = eval_number(
+                        &mut sheet,
+                        &format!("=COUPNCD({settlement},{maturity},{frequency},{basis})"),
+                    );
+                    let expected_ncd_serial =
+                        eval_number(&mut sheet, &format!("={expected_ncd}"));
+                    assert_close(ncd, expected_ncd_serial, 0.0);
+
+                    let n = eval_number(
+                        &mut sheet,
+                        &format!("=COUPNUM({settlement},{maturity},{frequency},{basis})"),
+                    );
+                    assert_close(n, k as f64, 0.0);
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn price_yield_roundtrip_consistency() {
     let mut sheet = TestSheet::new();
 
@@ -171,7 +235,7 @@ fn price_yield_roundtrip_consistency() {
     for maturity in maturities {
         for &frequency in &frequencies {
             let months_per_period = 12 / frequency;
-            for k in 2..=5 {
+            for k in 1..=5 {
                 let months_back = k * months_per_period;
                 let settlement = format!("EDATE({maturity},-{months_back})");
 
@@ -223,7 +287,7 @@ fn mduration_matches_duration_identity() {
     for maturity in maturities {
         for &frequency in &frequencies {
             let months_per_period = 12 / frequency;
-            for k in 2..=6 {
+            for k in 1..=6 {
                 let months_back = k * months_per_period;
                 let settlement = format!("EDATE({maturity},-{months_back})");
 
