@@ -142,6 +142,20 @@ fn in_memory_cell_patches_support_vm_overrides() -> Result<(), Box<dyn std::erro
     assert_eq!(cell_attr(out_xml, "A1", "vm"), None);
     assert_eq!(cell_attr(out_xml, "A1", "cm"), Some("7".to_string()));
 
+    // Clear cm (while explicitly setting vm).
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A1")?,
+        CellPatch::set_value(CellValue::Number(1.0))
+            .with_vm(3)
+            .clear_cm(),
+    );
+    pkg.apply_cell_patches(&patches)?;
+    let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap())?;
+    assert_eq!(cell_attr(out_xml, "A1", "vm"), Some("3".to_string()));
+    assert_eq!(cell_attr(out_xml, "A1", "cm"), None);
+
     Ok(())
 }
 
@@ -198,6 +212,21 @@ fn streaming_cell_patches_support_vm_overrides() -> Result<(), Box<dyn std::erro
     let out_xml = sheet1_xml(&out3);
     assert_eq!(cell_attr(&out_xml, "A1", "vm"), None);
     assert_eq!(cell_attr(&out_xml, "A1", "cm"), Some("7".to_string()));
+
+    // Clear cm (while explicitly setting vm).
+    let pkg4 = XlsxPackage::from_bytes(&out3)?;
+    let clear_cm = PackageCellPatch::for_sheet_name(
+        "Sheet1",
+        CellRef::from_a1("A1")?,
+        CellValue::Number(1.0),
+        None,
+    )
+    .set_vm(3)
+    .clear_cm();
+    let out4 = pkg4.apply_cell_patches_to_bytes(&[clear_cm])?;
+    let out_xml = sheet1_xml(&out4);
+    assert_eq!(cell_attr(&out_xml, "A1", "vm"), Some("3".to_string()));
+    assert_eq!(cell_attr(&out_xml, "A1", "cm"), None);
 
     Ok(())
 }
