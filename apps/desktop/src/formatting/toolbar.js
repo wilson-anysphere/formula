@@ -9,38 +9,16 @@ const EXCEL_MAX_COL = 16_384 - 1;
 // This guard exists to prevent *per-cell* enumeration from exploding (e.g. multi-range
 // selections of many medium rectangles).
 const MAX_RANGE_FORMATTING_CELLS = 100_000;
-// Keep aligned with `DocumentController.setRangeFormat` (range-run fast path threshold).
-// Above this size, formatting is stored as compressed per-column range runs rather than
-// enumerating each cell in the rectangle.
-const RANGE_RUN_FORMAT_THRESHOLD = 50_000;
+const MAX_RANGE_FORMATTING_CELLS_LABEL = MAX_RANGE_FORMATTING_CELLS.toLocaleString();
 // Full-width row formatting still requires enumerating each row in the selection
 // (DocumentController row formatting layer). Align with `DEFAULT_FORMATTING_BAND_ROW_LIMIT`.
 const MAX_RANGE_FORMATTING_BAND_ROWS = 50_000;
 
-function rangeCellCount(range) {
-  const rows = Math.max(0, range.end.row - range.start.row + 1);
-  const cols = Math.max(0, range.end.col - range.start.col + 1);
-  return rows * cols;
-}
-
-function isLayeredFormatRange(range) {
-  // DocumentController.setRangeFormat has scalable implementations for:
-  // - full sheet (sheet format layer)
-  // - full-width rows (row format layer)
-  // - full-height columns (column format layer)
-  return (
-    (range.start.row === 0 && range.end.row === EXCEL_MAX_ROW) ||
-    (range.start.col === 0 && range.end.col === EXCEL_MAX_COL)
-  );
-}
-
 function ensureSafeFormattingRange(rangeOrRanges) {
-  let totalEnumeratedCells = 0;
-
   const showTooLargeToast = () => {
     try {
       showToast(
-        `Selection too large to apply formatting (>${MAX_RANGE_FORMATTING_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
+        `Selection too large to apply formatting (>${MAX_RANGE_FORMATTING_CELLS_LABEL} cells). Select fewer cells and try again.`,
         "warning",
       );
     } catch {
@@ -48,47 +26,42 @@ function ensureSafeFormattingRange(rangeOrRanges) {
     }
   };
 
-  for (const range of normalizeRanges(rangeOrRanges)) {
+  const ranges = normalizeRanges(rangeOrRanges);
+  if (ranges.length === 0) return true;
+
+  let totalCells = 0;
+  let allRangesBand = true;
+
+  for (const range of ranges) {
     const r = normalizeCellRange(range);
-    if (isLayeredFormatRange(r)) {
-      // Full-width row selections are only scalable up to a row-count cap.
-      const isFullWidthRows = r.start.col === 0 && r.end.col === EXCEL_MAX_COL;
-      const isFullSheet = isFullWidthRows && r.start.row === 0 && r.end.row === EXCEL_MAX_ROW;
-      if (isFullWidthRows && !isFullSheet) {
-        const rowCount = r.end.row - r.start.row + 1;
-        if (rowCount > MAX_RANGE_FORMATTING_BAND_ROWS) {
-          try {
-            showToast(
-              "Selection is too large to format. Try selecting fewer rows or formatting the entire sheet.",
-              "warning",
-            );
-          } catch {
-            // ignore (e.g. toast root missing in tests)
-          }
-          return false;
+
+    const rows = r.end.row - r.start.row + 1;
+    const cols = r.end.col - r.start.col + 1;
+    totalCells += Math.max(0, rows) * Math.max(0, cols);
+
+    // Full-width row selections are only scalable up to a row-count cap.
+    // (This matches `DEFAULT_FORMATTING_BAND_ROW_LIMIT` / `DocumentController.setRangeFormat`.)
+    const isFullWidthRows = r.start.col === 0 && r.end.col === EXCEL_MAX_COL;
+    const isFullHeightCols = r.start.row === 0 && r.end.row === EXCEL_MAX_ROW;
+    const isFullSheet = isFullWidthRows && r.start.row === 0 && r.end.row === EXCEL_MAX_ROW;
+    if (isFullWidthRows && !isFullSheet) {
+      if (rows > MAX_RANGE_FORMATTING_BAND_ROWS) {
+        try {
+          showToast("Selection is too large to format. Try selecting fewer rows or formatting the entire sheet.", "warning");
+        } catch {
+          // ignore (e.g. toast root missing in tests)
         }
+        return false;
       }
-      continue;
     }
 
-    const cellCount = rangeCellCount(r);
-    // Even though the engine can store formatting for large rectangles as compressed range runs,
-    // we still block formatting *enormous* selections to keep UI actions predictable (and undoable).
-    if (cellCount > MAX_RANGE_FORMATTING_CELLS) {
-      showTooLargeToast();
-      return false;
-    }
+    const isBandRange = isFullSheet || isFullHeightCols || isFullWidthRows;
+    if (!isBandRange) allRangesBand = false;
+  }
 
-    // Large rectangles use the DocumentController's compressed range-run formatting layer and do
-    // not require enumerating every cell in the selection, so they do not count towards the
-    // "enumerated cell" safety cap.
-    if (cellCount > RANGE_RUN_FORMAT_THRESHOLD) continue;
-
-    totalEnumeratedCells += cellCount;
-    if (totalEnumeratedCells > MAX_RANGE_FORMATTING_CELLS) {
-      showTooLargeToast();
-      return false;
-    }
+  if (totalCells > MAX_RANGE_FORMATTING_CELLS && !allRangesBand) {
+    showTooLargeToast();
+    return false;
   }
 
   return true;
