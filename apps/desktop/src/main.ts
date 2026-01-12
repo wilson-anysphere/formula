@@ -18,6 +18,8 @@ import "./styles/conflicts.css";
 import React from "react";
 import { createRoot } from "react-dom/client";
 
+import { SheetTabStrip } from "./sheets/SheetTabStrip";
+
 import { ThemeController } from "./theme/themeController.js";
 
 import { mountRibbon } from "./ribbon/index.js";
@@ -1283,7 +1285,7 @@ function currentSelectionRect(): SelectionRect {
 let openCommandPalette: (() => void) | null = null;
 const commandRegistry = new CommandRegistry();
 
-// --- Sheet tabs (minimal multi-sheet support) ---------------------------------
+// --- Sheet tabs (Excel-like multi-sheet UI) -----------------------------------
 
 const sheetTabsRoot = document.getElementById("sheet-tabs");
 if (!sheetTabsRoot) {
@@ -1294,6 +1296,10 @@ const sheetTabsRootEl = sheetTabsRoot;
 // Normalize older HTML scaffolds that used `.sheet-tabs` on the container itself.
 sheetTabsRootEl.classList.add("sheet-bar");
 sheetTabsRootEl.classList.remove("sheet-tabs");
+
+let sheetTabsReactRoot: ReturnType<typeof createRoot> | null = null;
+let stopSheetStoreListener: (() => void) | null = null;
+let addSheetInFlight = false;
 
 let lastDocSheetIdsKey = "";
 
@@ -1408,123 +1414,71 @@ function listSheetsForUi(): SheetUiInfo[] {
   return ids.map((id) => ({ id, name: id }));
 }
 
-function renderSheetTabs(sheets: SheetUiInfo[] = listSheetsForUi()) {
-  sheetTabsRootEl.replaceChildren();
+async function handleAddSheet(): Promise<void> {
+  if (addSheetInFlight) return;
+  addSheetInFlight = true;
+  try {
+    const activeId = app.getCurrentSheetId();
+    const desiredName = generateDefaultSheetName(workbookSheetStore.listAll());
+    const doc = app.getDocument();
 
-  const active = app.getCurrentSheetId();
+    const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+    if (typeof baseInvoke === "function") {
+      // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
+      const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
 
-  const nav = document.createElement("div");
-  nav.className = "sheet-nav";
+      // Allow any microtask-batched workbook edits to enqueue before we request a new sheet id.
+      await new Promise<void>((resolve) => queueMicrotask(resolve));
 
-  const navLeft = document.createElement("button");
-  navLeft.type = "button";
-  navLeft.className = "sheet-nav-btn";
-  navLeft.textContent = "◀";
-  navLeft.setAttribute("aria-label", "Scroll sheets left");
+      const info = (await invoke("add_sheet", { name: desiredName })) as SheetUiInfo;
+      const id = String((info as any)?.id ?? "").trim();
+      const name = String((info as any)?.name ?? "").trim();
+      if (!id) throw new Error("Backend returned empty sheet id");
 
-  const navRight = document.createElement("button");
-  navRight.type = "button";
-  navRight.className = "sheet-nav-btn";
-  navRight.textContent = "▶";
-  navRight.setAttribute("aria-label", "Scroll sheets right");
+      // Backend may adjust the name for uniqueness; trust it.
+      workbookSheetStore.addAfter(activeId, { id, name: name || desiredName });
 
-  nav.append(navLeft, navRight);
-
-  const tabStrip = document.createElement("div");
-  tabStrip.className = "sheet-tabs";
-  tabStrip.setAttribute("role", "tablist");
-
-  let activeTabEl: HTMLElement | null = null;
-
-  for (const sheet of sheets) {
-    const sheetId = sheet.id;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "sheet-tab";
-    button.dataset.sheetId = sheetId;
-    button.dataset.testid = `sheet-tab-${sheetId}`;
-    button.dataset.active = sheetId === active ? "true" : "false";
-    button.setAttribute("role", "tab");
-    button.setAttribute("aria-selected", sheetId === active ? "true" : "false");
-    button.textContent = sheet.name;
-    button.addEventListener("click", () => {
-      app.activateSheet(sheetId);
-      app.focus();
-    });
-    tabStrip.appendChild(button);
-    if (sheetId === active) activeTabEl = button;
-  }
-
-  const addSheetBtn = document.createElement("button");
-  addSheetBtn.type = "button";
-  addSheetBtn.className = "sheet-add";
-  addSheetBtn.dataset.testid = "sheet-add";
-  addSheetBtn.textContent = "+";
-  addSheetBtn.setAttribute("aria-label", "Add sheet");
-  addSheetBtn.addEventListener("click", () => {
-    void (async () => {
-      const activeId = app.getCurrentSheetId();
-      const desiredName = generateDefaultSheetName(workbookSheetStore.listAll());
-      const doc = app.getDocument();
-
-      const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
-      if (typeof baseInvoke === "function") {
-        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
-        const invoke = queuedInvoke ?? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args)));
-
-        // Allow any microtask-batched workbook edits to enqueue before we request a new sheet id.
-        await new Promise<void>((resolve) => queueMicrotask(resolve));
-
-        const info = (await invoke("add_sheet", { name: desiredName })) as SheetUiInfo;
-        const id = String((info as any)?.id ?? "").trim();
-        const name = String((info as any)?.name ?? "").trim();
-        if (!id) throw new Error("Backend returned empty sheet id");
-
-        // Backend may adjust the name for uniqueness; trust it.
-        workbookSheetStore.addAfter(activeId, { id, name: name || desiredName });
-
-        // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
-        doc.getCell(id, { row: 0, col: 0 });
-        doc.markDirty();
-        app.activateSheet(id);
-        app.focus();
-        return;
-      }
-
-      // Web-only behavior: create a local DocumentController sheet lazily.
-      // Until the DocumentController gains first-class sheet metadata, keep `id` and
-      // `name` in lockstep for newly-created sheets.
-      const newSheetId = desiredName;
-      workbookSheetStore.addAfter(activeId, { id: newSheetId, name: desiredName });
-      doc.getCell(newSheetId, { row: 0, col: 0 });
+      // DocumentController creates sheets lazily; touching any cell ensures the sheet exists.
+      doc.getCell(id, { row: 0, col: 0 });
       doc.markDirty();
-      app.activateSheet(newSheetId);
+      app.activateSheet(id);
       app.focus();
-    })().catch((err) => {
-      showToast(`Failed to add sheet: ${String((err as any)?.message ?? err)}`, "error");
-    });
-  });
+      return;
+    }
 
-  sheetTabsRootEl.append(nav, tabStrip, addSheetBtn);
-
-  const scrollStep = 120;
-  navLeft.addEventListener("click", () => {
-    tabStrip.scrollBy({ left: -scrollStep, behavior: "smooth" });
-  });
-  navRight.addEventListener("click", () => {
-    tabStrip.scrollBy({ left: scrollStep, behavior: "smooth" });
-  });
-
-  function updateNavDisabledState() {
-    const maxScrollLeft = tabStrip.scrollWidth - tabStrip.clientWidth;
-    navLeft.disabled = tabStrip.scrollLeft <= 0;
-    navRight.disabled = tabStrip.scrollLeft >= maxScrollLeft - 1;
+    // Web-only behavior: create a local DocumentController sheet lazily.
+    // Until the DocumentController gains first-class sheet metadata, keep `id` and
+    // `name` in lockstep for newly-created sheets.
+    const newSheetId = desiredName;
+    workbookSheetStore.addAfter(activeId, { id: newSheetId, name: desiredName });
+    doc.getCell(newSheetId, { row: 0, col: 0 });
+    doc.markDirty();
+    app.activateSheet(newSheetId);
+    app.focus();
+  } catch (err) {
+    showToast(`Failed to add sheet: ${String((err as any)?.message ?? err)}`, "error");
+  } finally {
+    addSheetInFlight = false;
   }
-  tabStrip.addEventListener("scroll", updateNavDisabledState, { passive: true });
-  updateNavDisabledState();
+}
 
-  // Best-effort: keep the active tab visible after re-rendering.
-  activeTabEl?.scrollIntoView({ block: "nearest", inline: "nearest" });
+function renderSheetTabs(): void {
+  if (!sheetTabsReactRoot) {
+    sheetTabsReactRoot = createRoot(sheetTabsRootEl);
+  }
+
+  sheetTabsReactRoot.render(
+    React.createElement(SheetTabStrip, {
+      store: workbookSheetStore,
+      activeSheetId: app.getCurrentSheetId(),
+      onActivateSheet: (sheetId: string) => {
+        app.activateSheet(sheetId);
+        app.focus();
+      },
+      onAddSheet: handleAddSheet,
+      onError: (message: string) => showToast(message, "error"),
+    }),
+  );
 }
 
 function renderSheetPosition(sheets: SheetUiInfo[], activeId: string): void {
@@ -1599,12 +1553,23 @@ function syncSheetUi(): void {
     }
 
     const nextActiveId = app.getCurrentSheetId();
-    renderSheetTabs(sheets);
+    renderSheetTabs();
     renderSheetSwitcher(sheets, nextActiveId);
     renderSheetPosition(sheets, nextActiveId);
   } finally {
     syncingSheetUi = false;
   }
+}
+
+function installSheetStoreSubscription(): void {
+  stopSheetStoreListener?.();
+  stopSheetStoreListener = workbookSheetStore.subscribe(() => {
+    syncWorkbookSheetNamesFromSheetStore();
+    const sheets = listSheetsForUi();
+    const activeId = app.getCurrentSheetId();
+    renderSheetSwitcher(sheets, activeId);
+    renderSheetPosition(sheets, activeId);
+  });
 }
 
 {
@@ -1614,6 +1579,7 @@ function syncSheetUi(): void {
     reconcileSheetStoreWithDocument(ids);
     lastDocSheetIdsKey = stableSheetIdKey(ids);
   }
+  installSheetStoreSubscription();
   syncSheetUi();
 }
 
@@ -5681,6 +5647,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     })),
   );
   syncWorkbookSheetNamesFromSheetStore();
+  installSheetStoreSubscription();
 
   const CHUNK_ROWS = 200;
   const { maxRows: MAX_ROWS, maxCols: MAX_COLS } = resolveWorkbookLoadLimits({

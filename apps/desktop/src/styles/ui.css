@@ -632,6 +632,7 @@
   cursor: pointer;
   white-space: nowrap;
   font-size: 12px;
+  position: relative;
 }
 
 #sheet-tabs.sheet-bar .sheet-tab:hover {
@@ -645,4 +646,42 @@
   margin-bottom: -1px;
   color: var(--text-primary);
   font-weight: 600;
+}
+
+#sheet-tabs.sheet-bar .sheet-tab:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
+}
+
+#sheet-tabs.sheet-bar .sheet-tab__name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#sheet-tabs.sheet-bar .sheet-tab__color {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 2px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+#sheet-tabs.sheet-bar .sheet-tab__input {
+  width: 140px;
+  max-width: 220px;
+  height: 18px;
+  padding: 1px 6px;
+  font: inherit;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--selection-border);
+  border-radius: 6px;
+  outline: none;
+}
+
+#sheet-tabs.sheet-bar .sheet-tab__input[aria-invalid="true"] {
+  border-color: var(--error);
+  box-shadow: 0 0 0 1px var(--error);
 }
