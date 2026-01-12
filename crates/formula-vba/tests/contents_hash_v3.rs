@@ -4,8 +4,8 @@ use formula_vba::{
     compress_container, contents_hash_v3, forms_normalized_data, project_normalized_data_v3,
     v3_content_normalized_data,
 };
-use md5::Md5;
 use sha2::Digest as _;
+use sha2::Sha256;
 
 fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
     out.extend_from_slice(&id.to_le_bytes());
@@ -288,7 +288,7 @@ fn project_normalized_data_v3_is_v3_content_plus_forms_normalized_data() {
 }
 
 #[test]
-fn contents_hash_v3_matches_explicit_normalized_transcript_md5() {
+fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
     // Module source includes:
     // - an Attribute line that must be stripped
     // - mixed newline styles (CRLF / CR-only / lone-LF)
@@ -341,7 +341,7 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_md5() {
     expected.extend_from_slice(designer_bytes);
     expected.extend(std::iter::repeat(0u8).take(1023 - designer_bytes.len()));
 
-    let expected_digest = Md5::digest(&expected).to_vec();
+    let expected_digest = Sha256::digest(&expected).to_vec();
     let actual_digest = contents_hash_v3(&vba_project_bin).expect("ContentsHashV3");
     assert_eq!(actual_digest, expected_digest);
 }

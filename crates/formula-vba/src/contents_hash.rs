@@ -3,8 +3,8 @@ use encoding_rs::{
     WINDOWS_1252, WINDOWS_1253, WINDOWS_1254, WINDOWS_1255, WINDOWS_1256, WINDOWS_1257,
     WINDOWS_1258, WINDOWS_874,
 };
-use md5::Md5;
 use sha2::Digest as _;
+use sha2::Sha256;
 
 use crate::forms_normalized_data;
 use crate::{decompress_container, DirParseError, DirStream, OleFile, ParseError};
@@ -387,18 +387,16 @@ pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
     Ok(out)
 }
 
-/// Compute the MS-OVBA §2.4.2 "Contents Hash V3" digest bytes for a `vbaProject.bin`.
+/// Compute the MS-OVBA §2.4.2 "Contents Hash" v3 digest bytes for a `vbaProject.bin`.
 ///
 /// This is the digest that the newest Office signature stream (`\x05DigitalSignatureExt`) binds
 /// against.
 ///
-/// Per MS-OSHARED §4.3, the VBA "source hash" algorithm is **MD5** (16 bytes) even when the
-/// Authenticode/CMS signature uses SHA-1/SHA-256.
+/// MS-OVBA v3 uses **SHA-256** over:
+/// `ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData`.
 pub fn contents_hash_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
     let normalized = project_normalized_data_v3(vba_project_bin)?;
-    let mut hasher = Md5::new();
-    hasher.update(&normalized);
-    Ok(hasher.finalize().to_vec())
+    Ok(Sha256::digest(&normalized).to_vec())
 }
 
 fn normalize_reference_project(data: &[u8]) -> Result<Vec<u8>, ParseError> {
