@@ -98,15 +98,16 @@ fn run() -> Result<(), String> {
 
 fn usage(program: &OsString) -> String {
     format!(
-        "usage: {} [--alg md5|sha256] <vbaProject.bin|workbook.xlsm|workbook.xlsx|workbook.xlsb>",
+        "usage: {} [--alg [md5|sha256]] <vbaProject.bin|workbook.xlsm|workbook.xlsx|workbook.xlsb>",
         program.to_string_lossy()
     )
 }
 
 fn parse_args(
     program: &OsString,
-    mut args: impl Iterator<Item = OsString>,
+    args: impl Iterator<Item = OsString>,
 ) -> Result<(PathBuf, Option<Alg>), String> {
+    let mut args = args.peekable();
     let mut input: Option<PathBuf> = None;
     let mut alg: Option<Alg> = None;
 
@@ -118,34 +119,30 @@ fn parse_args(
         }
 
         if arg_str == "--alg" {
-            // If the caller didn't provide an explicit value, default to SHA-256 (the common case).
+            // Optional value. If omitted, default to SHA-256 (the common case).
             //
-            // Accepting `--alg <input-path>` is slightly non-standard, but it makes the tool easier
-            // to use when you want to print only one digest (the default SHA-256) without having to
-            // spell out `--alg sha256`.
-            let Some(value) = args.next() else {
-                alg = Some(Alg::Sha256);
-                continue;
-            };
+            // This allows `--alg <input-path>` as shorthand for printing only the SHA-256 digest.
+            if let Some(value) = args.peek() {
+                if let Some(parsed) = parse_alg(value) {
+                    // Consume the value.
+                    args.next();
+                    alg = Some(parsed);
+                    continue;
+                }
 
-            if let Some(parsed) = parse_alg(&value) {
-                alg = Some(parsed);
-                continue;
+                // If an input path was already provided, a non-algorithm value after `--alg`
+                // indicates a mistake; treat as an error rather than silently defaulting.
+                if input.is_some() && !value.to_string_lossy().starts_with('-') {
+                    return Err(format!(
+                        "invalid --alg value (expected md5|sha256): {}\n{}",
+                        value.to_string_lossy(),
+                        usage(program)
+                    ));
+                }
             }
 
-            // If the next arg isn't a known algorithm and we haven't seen an input path yet, treat
-            // it as the input path and keep the default SHA-256 selection.
-            if input.is_none() {
-                alg = Some(Alg::Sha256);
-                input = Some(PathBuf::from(value));
-                continue;
-            }
-
-            return Err(format!(
-                "invalid --alg value (expected md5|sha256): {}\n{}",
-                value.to_string_lossy(),
-                usage(program)
-            ));
+            alg = Some(Alg::Sha256);
+            continue;
         }
 
         if let Some(rest) = arg_str.strip_prefix("--alg=") {
