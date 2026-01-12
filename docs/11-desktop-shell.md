@@ -132,14 +132,20 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
 ```jsonc
 // apps/desktop/src-tauri/tauri.conf.json
 {
+  "productName": "Formula",
+  "mainBinaryName": "formula-desktop",
+  "version": "0.1.0",
+  "identifier": "app.formula.desktop",
   "build": {
+    "beforeBuildCommand": "pnpm build",
+    "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:4174",
     "frontendDist": "../dist",
     "features": ["desktop"]
   },
   "app": {
     "security": {
-      "csp": "default-src 'self'; ...; worker-src 'self' blob:; ...;"
+      "csp": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob: data:; worker-src 'self' blob:; child-src 'self' blob:; connect-src 'self' https: wss: blob: data:"
     },
     "windows": [
       { "label": "main", "title": "Formula", "width": 1280, "height": 800, "dragDropEnabled": true, "capabilities": ["main"] }
@@ -382,23 +388,88 @@ backend library can still compile (and be tested) without linking Tauri or syste
 
 ---
 
-## Permissions: from “allowlist” (v1) to “capabilities” (v2)
+## Tauri v2 Capabilities & Permissions
 
-Tauri v1 used an `allowlist` section in config. **Tauri v2 replaces this with window-scoped “capabilities”**:
+### Source of truth
 
-- Capabilities define which **core APIs / plugin APIs** are available to which windows.
-- They are intended to be **narrow and explicit** (e.g. “main window can show file-open dialog” vs “all APIs enabled”).
+In Tauri v2, permissioning is driven by **capabilities**:
 
-This repo’s desktop shell currently relies primarily on:
+- `apps/desktop/src-tauri/capabilities/*.json` is the source of truth for what the webview is allowed to do.
 
-- explicit Rust `#[tauri::command]` functions in `apps/desktop/src-tauri/src/commands.rs` for privileged operations
-- a small set of runtime JS APIs (`__TAURI__.event`, `__TAURI__.window`, `__TAURI__.dialog`)
+The main capability in this repo is:
 
-Capabilities live alongside the Tauri app under:
+- `apps/desktop/src-tauri/capabilities/main.json` (capabilities live under `apps/desktop/src-tauri/capabilities/`)
 
-- `apps/desktop/src-tauri/capabilities/` (see `main.json`)
+The `tauri.conf.json` window config references capabilities via `app.windows[].capabilities`, and the capability file itself also lists which window labels it applies to via `"windows": [...]`.
 
-The `tauri.conf.json` window config references capabilities via `app.windows[].capabilities`.
+### How the main window is assigned a capability
+
+Capabilities are assigned to windows by **label**.
+
+- The main window label is `main` (see `apps/desktop/src-tauri/tauri.conf.json`).
+- The main window also explicitly opts into the `main` capability via `app.windows[0].capabilities: ["main"]` (see `apps/desktop/src-tauri/tauri.conf.json`).
+- `apps/desktop/src-tauri/capabilities/main.json` includes `"windows": ["main"]`, which grants the main window the listed permissions.
+
+### Which APIs are granted (and why)
+
+`apps/desktop/src-tauri/capabilities/main.json` currently grants:
+
+- `core:default`
+  - Enables `__TAURI__.core.invoke` for the app’s Rust IPC surface (`#[tauri::command]`).
+  - Enables core window/event plumbing used by the desktop shell (hide/close flows, host-emitted events like `file-dropped`).
+- `event:allow-listen` (scoped to a small allowlist of event names)
+  - Allows the frontend to install listeners for host-emitted events used by the desktop shell:
+    - close flow: `close-prep`, `close-requested`
+    - open flows: `file-dropped`
+    - tray + shortcuts: `tray-open`, `tray-new`, `tray-quit`, `shortcut-quick-open`, `shortcut-command-palette`
+    - updater: `update-available`
+- `event:allow-emit` (scoped to a small allowlist of event names)
+  - Allows the frontend to emit acknowledgement events during close handling:
+    - `close-prep-done`, `close-handled`
+- `dialog:allow-open`, `dialog:allow-save`
+  - Enables native open/save dialogs from the UI (`__TAURI__.dialog.open` / `save`).
+- `window:allow-hide`, `window:allow-show`, `window:allow-close`
+  - Enables the hide-to-tray close flow (the Rust host prevents default close; the UI hides/shows/closes based on user intent).
+- `clipboard:allow-read-text`, `clipboard:allow-write-text`
+  - Enables basic clipboard text integration for copy/paste.
+- `shell:allow-open`
+  - Allows opening external URLs in the user’s default browser (e.g. help/docs links).
+
+We intentionally keep capabilities narrow and rely on explicit Rust commands + higher-level app permission gates (macro trust, DLP, extension permissions) for privileged operations.
+
+---
+
+## Filesystem access + scope enforcement
+
+### Why we use custom commands (Power Query)
+
+The desktop webview needs local filesystem access for Power Query sources (CSV/JSON/Parquet, folder listings).
+
+This repo does **not** require the official Tauri FS plugin to be enabled: instead, it uses custom Rust commands in:
+
+- `apps/desktop/src-tauri/src/commands.rs`
+
+Notable commands:
+
+- `read_text_file`
+- `read_binary_file`
+- `read_binary_file_range`
+- `stat_file`
+- `list_dir`
+
+### Scope enforcement
+
+These commands enforce a filesystem scope equivalent to the platform allowlist:
+
+- `$HOME/**`
+- `$DOCUMENT/**`
+
+Implementation notes:
+
+- The scope helper lives in `apps/desktop/src-tauri/src/fs_scope.rs`.
+- Requested paths are **canonicalized** before checking scope.
+- Canonicalization normalizes `..` traversal and prevents symlink escapes (e.g. a symlink inside `$HOME` pointing to `/etc/passwd` is rejected).
+- `list_dir` validates the root directory and validates individual entries before returning metadata.
 
 ---
 

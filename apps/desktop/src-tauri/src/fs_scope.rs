@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 
 /// Return the canonicalized filesystem roots that the desktop app is allowed to access.
 ///
-/// This mirrors the desktop filesystem scope policy (home + documents) used for other local
-/// file-access commands.
+/// This mirrors the desktop filesystem scope policy used for local file access:
+/// - `$HOME/**`
+/// - `$DOCUMENT/**`
 pub(crate) fn desktop_allowed_roots() -> Result<Vec<PathBuf>> {
     let base_dirs =
         BaseDirs::new().ok_or_else(|| anyhow!("unable to determine home directory"))?;
@@ -33,3 +34,75 @@ pub(crate) fn path_in_allowed_roots(path: &Path, allowed_roots: &[PathBuf]) -> b
     allowed_roots.iter().any(|root| path.starts_with(root))
 }
 
+/// Canonicalize `path` and verify it is contained within `allowed_roots`.
+///
+/// This is used by IPC commands that proxy filesystem access to the webview. Canonicalization
+/// normalizes `..` segments and resolves symlinks, preventing symlink-based scope escapes.
+#[cfg(any(feature = "desktop", test))]
+pub(crate) fn canonicalize_in_allowed_roots(path: &Path, allowed_roots: &[PathBuf]) -> Result<PathBuf> {
+    let canonical =
+        std::fs::canonicalize(path).map_err(|e| anyhow!("canonicalize {}: {e}", path.display()))?;
+    if path_in_allowed_roots(&canonical, allowed_roots) {
+        Ok(canonical)
+    } else {
+        Err(anyhow!(
+            "Refusing to access '{}' because it is outside the allowed filesystem scope",
+            canonical.display()
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn canonicalize_in_allowed_roots_allows_paths_under_root() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let allowed_root = tmp.path().join("root");
+        fs::create_dir_all(&allowed_root).expect("create root");
+        let file_path = allowed_root.join("hello.txt");
+        fs::write(&file_path, "hello").expect("write file");
+
+        let allowed_roots = vec![std::fs::canonicalize(&allowed_root).expect("canonicalize root")];
+        let resolved = canonicalize_in_allowed_roots(&file_path, &allowed_roots).expect("in scope");
+        assert!(resolved.is_absolute());
+    }
+
+    #[test]
+    fn canonicalize_in_allowed_roots_rejects_paths_outside_root() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let allowed_root = tmp.path().join("root");
+        let outside_root = tmp.path().join("outside");
+        fs::create_dir_all(&allowed_root).expect("create root");
+        fs::create_dir_all(&outside_root).expect("create outside root");
+        let file_path = outside_root.join("secret.txt");
+        fs::write(&file_path, "secret").expect("write file");
+
+        let allowed_roots = vec![std::fs::canonicalize(&allowed_root).expect("canonicalize root")];
+        let err = canonicalize_in_allowed_roots(&file_path, &allowed_roots).unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("outside"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonicalize_in_allowed_roots_blocks_symlink_escape() {
+        use std::os::unix::fs as unix_fs;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let allowed_root = tmp.path().join("root");
+        let outside_root = tmp.path().join("outside");
+        fs::create_dir_all(&allowed_root).expect("create root");
+        fs::create_dir_all(&outside_root).expect("create outside root");
+        let outside_file = outside_root.join("secret.txt");
+        fs::write(&outside_file, "secret").expect("write outside file");
+
+        let symlink_path = allowed_root.join("escape.txt");
+        unix_fs::symlink(&outside_file, &symlink_path).expect("symlink");
+
+        let allowed_roots = vec![std::fs::canonicalize(&allowed_root).expect("canonicalize root")];
+        let err = canonicalize_in_allowed_roots(&symlink_path, &allowed_roots).unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("outside"));
+    }
+}

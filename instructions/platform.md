@@ -69,7 +69,7 @@ Build the native desktop application shell using **Tauri**. Handle system integr
 6. **Global shortcuts:** Capture shortcuts even when unfocused
 7. **Notifications:** Native system notifications
 
-### Tauri Security & Permissions (Tauri v2)
+### Tauri v2 Capabilities & Permissions
 
 This repo is on **Tauri v2**. Config lives in `apps/desktop/src-tauri/tauri.conf.json`.
 
@@ -81,10 +81,56 @@ Key config fields you'll touch most often:
 - `app.windows[].capabilities`: which Tauri capabilities apply to each window (see `apps/desktop/src-tauri/capabilities/*.json`)
 - `plugins.*`: plugin configuration (e.g. updater)
 
-> Note on permissions: Tauri v1 used a `tauri.allowlist` section. **Tauri v2 uses capabilities**
-> to grant access to core APIs and plugins. Capabilities are defined under
-> `apps/desktop/src-tauri/capabilities/` (e.g. `main.json`) and referenced from
-> `apps/desktop/src-tauri/tauri.conf.json` via `app.windows[].capabilities`.
+Tauri v2 permissions are granted via **capabilities**:
+
+- `apps/desktop/src-tauri/capabilities/*.json`
+
+Example (see `apps/desktop/src-tauri/capabilities/main.json`):
+
+```json
+{
+  "identifier": "main",
+  "description": "Permissions for the main desktop window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "event:allow-listen",
+      "allow": [
+        { "event": "close-prep" },
+        { "event": "close-requested" },
+        { "event": "file-dropped" },
+        { "event": "tray-open" },
+        { "event": "tray-new" },
+        { "event": "tray-quit" },
+        { "event": "shortcut-quick-open" },
+        { "event": "shortcut-command-palette" },
+        { "event": "update-available" }
+      ]
+    },
+    {
+      "identifier": "event:allow-emit",
+      "allow": [{ "event": "close-prep-done" }, { "event": "close-handled" }]
+    },
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "window:allow-hide",
+    "window:allow-show",
+    "window:allow-close",
+    "clipboard:allow-read-text",
+    "clipboard:allow-write-text",
+    "shell:allow-open"
+  ]
+}
+```
+
+Filesystem access for Power Query is handled via **custom Rust commands** (e.g. `read_text_file`, `list_dir`)
+instead of the optional Tauri FS plugin. Those commands enforce an explicit scope:
+
+- `$HOME/**`
+- `$DOCUMENT/**`
+
+The scope check uses canonicalization to normalize paths and prevent symlink-based escapes.
 
 ### Auto-Update
 

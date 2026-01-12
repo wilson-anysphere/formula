@@ -406,7 +406,10 @@ pub async fn new_workbook(state: State<'_, SharedAppState>) -> Result<WorkbookIn
 
 #[cfg(feature = "desktop")]
 #[tauri::command]
-pub async fn add_sheet(name: String, state: State<'_, SharedAppState>) -> Result<SheetInfo, String> {
+pub async fn add_sheet(
+    name: String,
+    state: State<'_, SharedAppState>,
+) -> Result<SheetInfo, String> {
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -430,13 +433,20 @@ pub async fn read_text_file(path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         use std::io::Read;
 
-        let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+        let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
+        let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
+            std::path::Path::new(&path),
+            &allowed_roots,
+        )
+        .map_err(|e| e.to_string())?;
+
+        let mut file = std::fs::File::open(&resolved).map_err(|e| e.to_string())?;
+        let metadata = file.metadata().map_err(|e| e.to_string())?;
         if !metadata.is_file() {
             return Err("Path is not a regular file".to_string());
         }
         crate::ipc_file_limits::validate_full_read_size(metadata.len()).map_err(|e| e.to_string())?;
 
-        let mut file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
         let mut buf = Vec::new();
         file.take(crate::ipc_file_limits::MAX_READ_FULL_BYTES + 1)
             .read_to_end(&mut buf)
@@ -466,7 +476,14 @@ pub async fn stat_file(path: String) -> Result<FileStat, String> {
     use std::time::UNIX_EPOCH;
 
     tauri::async_runtime::spawn_blocking(move || {
-        let metadata = std::fs::metadata(path).map_err(|e| e.to_string())?;
+        let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
+        let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
+            std::path::Path::new(&path),
+            &allowed_roots,
+        )
+        .map_err(|e| e.to_string())?;
+
+        let metadata = std::fs::metadata(&resolved).map_err(|e| e.to_string())?;
         let modified = metadata.modified().map_err(|e| e.to_string())?;
         let duration = modified
             .duration_since(UNIX_EPOCH)
@@ -491,13 +508,20 @@ pub async fn read_binary_file(path: String) -> Result<String, String> {
     let bytes = tauri::async_runtime::spawn_blocking(move || {
         use std::io::Read;
 
-        let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+        let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
+        let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
+            std::path::Path::new(&path),
+            &allowed_roots,
+        )
+        .map_err(|e| e.to_string())?;
+
+        let mut file = std::fs::File::open(&resolved).map_err(|e| e.to_string())?;
+        let metadata = file.metadata().map_err(|e| e.to_string())?;
         if !metadata.is_file() {
             return Err("Path is not a regular file".to_string());
         }
         crate::ipc_file_limits::validate_full_read_size(metadata.len()).map_err(|e| e.to_string())?;
 
-        let mut file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
         let mut buf = Vec::new();
         file.take(crate::ipc_file_limits::MAX_READ_FULL_BYTES + 1)
             .read_to_end(&mut buf)
@@ -533,7 +557,14 @@ pub async fn read_binary_file_range(
     }
 
     tauri::async_runtime::spawn_blocking(move || {
-        let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+        let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
+        let resolved = crate::fs_scope::canonicalize_in_allowed_roots(
+            std::path::Path::new(&path),
+            &allowed_roots,
+        )
+        .map_err(|e| e.to_string())?;
+
+        let mut file = std::fs::File::open(&resolved).map_err(|e| e.to_string())?;
         let metadata = file.metadata().map_err(|e| e.to_string())?;
         if !metadata.is_file() {
             return Err("Path is not a regular file".to_string());
@@ -573,7 +604,10 @@ fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, S
         recursive: bool,
         depth: usize,
         out: &mut Vec<ListDirEntry>,
+        allowed_roots: &[PathBuf],
     ) -> Result<(), String> {
+        let canonical_dir = crate::fs_scope::canonicalize_in_allowed_roots(dir, allowed_roots)
+            .map_err(|e| e.to_string())?;
         if depth > crate::resource_limits::MAX_LIST_DIR_DEPTH {
             return Err(format!(
                 "Directory listing exceeded depth limit (max {} levels)",
@@ -581,18 +615,23 @@ fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, S
             ));
         }
 
-        let entries = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
+        let entries = std::fs::read_dir(&canonical_dir).map_err(|e| e.to_string())?;
         for entry in entries {
             let entry = entry.map_err(|e| e.to_string())?;
             let entry_path = entry.path();
             let file_type = entry.file_type().map_err(|e| e.to_string())?;
-            let metadata = entry.metadata().map_err(|e| e.to_string())?;
+            let resolved_path =
+                match crate::fs_scope::canonicalize_in_allowed_roots(&entry_path, allowed_roots) {
+                    Ok(path) => path,
+                    Err(_) => continue,
+                };
+            let metadata = std::fs::metadata(&resolved_path).map_err(|e| e.to_string())?;
 
             if metadata.is_dir() {
                 // Never follow symlinked directories, to avoid cycles and unexpected traversal
                 // outside the requested subtree.
                 if recursive && !file_type.is_symlink() {
-                    visit(&entry_path, recursive, depth + 1, out)?;
+                    visit(&entry_path, recursive, depth + 1, out, allowed_roots)?;
                 }
                 continue;
             }
@@ -632,9 +671,10 @@ fn list_dir_blocking(path: &str, recursive: bool) -> Result<Vec<ListDirEntry>, S
         Ok(())
     }
 
+    let allowed_roots = crate::fs_scope::desktop_allowed_roots().map_err(|e| e.to_string())?;
     let root = PathBuf::from(path);
     let mut out = Vec::new();
-    visit(&root, recursive, 0, &mut out)?;
+    visit(&root, recursive, 0, &mut out, &allowed_roots)?;
     Ok(out)
 }
 
@@ -929,7 +969,10 @@ pub async fn save_workbook(
     let save_path_clone = save_path.clone();
     let written_bytes = tauri::async_runtime::spawn_blocking(move || {
         let path = std::path::Path::new(&save_path_clone);
-        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or_default();
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
 
         // XLSB saves must go through the `formula-xlsb` round-trip writer. The storage export
         // path only knows how to generate XLSX.
@@ -3523,7 +3566,6 @@ mod tests {
     use super::*;
     use crate::file_io::read_xlsx_blocking;
     use std::path::Path;
-    use tempfile::TempDir;
 
     #[test]
     fn coerce_save_path_to_xlsx_rewrites_non_workbook_origins() {
@@ -3589,7 +3631,11 @@ mod tests {
     fn list_dir_errors_when_entry_limit_reached() {
         use std::fs::File;
 
-        let dir = TempDir::new().expect("create temp dir");
+        let base_dirs = directories::BaseDirs::new().expect("base dirs");
+        let dir = tempfile::Builder::new()
+            .prefix("formula-list-dir-entry-limit")
+            .tempdir_in(base_dirs.home_dir())
+            .expect("create temp dir");
         for idx in 0..crate::resource_limits::MAX_LIST_DIR_ENTRIES {
             let path = dir.path().join(format!("file_{idx}.txt"));
             File::create(path).expect("create temp file");
@@ -3624,7 +3670,11 @@ mod tests {
     fn list_dir_errors_when_depth_limit_reached() {
         use std::fs::{create_dir, File};
 
-        let dir = TempDir::new().expect("create temp dir");
+        let base_dirs = directories::BaseDirs::new().expect("base dirs");
+        let dir = tempfile::Builder::new()
+            .prefix("formula-list-dir-depth-limit")
+            .tempdir_in(base_dirs.home_dir())
+            .expect("create temp dir");
         let mut current = dir.path().to_path_buf();
         for depth in 0..=crate::resource_limits::MAX_LIST_DIR_DEPTH {
             current = current.join(format!("d{depth}"));
