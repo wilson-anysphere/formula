@@ -31,6 +31,7 @@ pub use signature::{
     parse_and_verify_vba_signature_blob, parse_vba_digital_signature, verify_vba_digital_signature,
     verify_vba_digital_signature_bound, verify_vba_digital_signature_with_project,
     verify_vba_digital_signature_with_trust, verify_vba_signature_blob, SignatureError,
+    verify_vba_signature_binding, verify_vba_signature_certificate_trust,
     VbaCertificateTrust, VbaDigitalSignature, VbaDigitalSignatureBound, VbaDigitalSignatureStream,
     VbaDigitalSignatureTrusted, VbaProjectBindingVerification, VbaProjectDigestDebugInfo,
     VbaSignatureBinding, VbaSignatureBlobInfo, VbaSignatureTrustOptions, VbaSignatureVerification,

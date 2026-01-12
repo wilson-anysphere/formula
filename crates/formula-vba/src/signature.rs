@@ -473,7 +473,7 @@ pub fn verify_vba_digital_signature_with_project(
         let verification = verify_signature_blob(&signature);
         let binding = match verification {
             VbaSignatureVerification::SignedVerified => {
-                verify_signature_binding(vba_project_bin, &signature)
+                verify_vba_signature_binding(vba_project_bin, &signature)
             }
             _ => VbaSignatureBinding::Unknown,
         };
@@ -539,7 +539,7 @@ pub fn verify_vba_digital_signature_with_trust(
         let verification = verify_signature_blob(&signature_bytes);
         let binding = match verification {
             VbaSignatureVerification::SignedVerified => {
-                verify_signature_binding(vba_project_bin, &signature_bytes)
+                verify_vba_signature_binding(vba_project_bin, &signature_bytes)
             }
             _ => VbaSignatureBinding::Unknown,
         };
@@ -580,7 +580,13 @@ pub fn verify_vba_digital_signature_with_trust(
     Ok(first_verified.or(first))
 }
 
-fn verify_signature_binding(vba_project_bin: &[u8], signature: &[u8]) -> VbaSignatureBinding {
+/// Verify whether a VBA signature blob is bound to the given `vbaProject.bin` payload via the
+/// MS-OVBA "project digest" mechanism.
+///
+/// This is a best-effort helper: it returns [`VbaSignatureBinding::Unknown`] when the signature
+/// does not contain a supported digest structure, uses an unsupported hash algorithm, or the VBA
+/// project digest cannot be computed.
+pub fn verify_vba_signature_binding(vba_project_bin: &[u8], signature: &[u8]) -> VbaSignatureBinding {
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (vba_project_bin, signature);
@@ -608,6 +614,25 @@ fn verify_signature_binding(vba_project_bin: &[u8], signature: &[u8]) -> VbaSign
             VbaSignatureBinding::NotBound
         }
     }
+}
+
+/// Evaluate whether the signing certificate embedded in a PKCS#7/CMS VBA signature blob chains to
+/// a trusted root.
+///
+/// Returns [`VbaCertificateTrust::Unknown`] when:
+/// - no trusted roots are provided, or
+/// - running on `wasm32` targets (OpenSSL is unavailable).
+///
+/// Note: callers should typically only treat this result as meaningful when the signature's
+/// internal verification state is [`VbaSignatureVerification::SignedVerified`].
+pub fn verify_vba_signature_certificate_trust(
+    signature: &[u8],
+    options: &VbaSignatureTrustOptions,
+) -> VbaCertificateTrust {
+    if options.trusted_root_certs_der.is_empty() {
+        return VbaCertificateTrust::Unknown;
+    }
+    verify_pkcs7_trust(signature, &options.trusted_root_certs_der)
 }
 
 fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {

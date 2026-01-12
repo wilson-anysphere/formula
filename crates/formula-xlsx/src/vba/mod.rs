@@ -7,6 +7,7 @@ use crate::{XlsxDocument, XlsxPackage};
 pub use formula_vba::{
     SignatureError, VbaDigitalSignature, VbaDigitalSignatureBound, VbaProjectBindingVerification,
     VbaProjectDigestDebugInfo, VbaSignatureVerification, VBAModule, VBAProject, VBAReference,
+    VbaCertificateTrust, VbaDigitalSignatureTrusted, VbaSignatureTrustOptions,
 };
 
 const VBA_PROJECT_BIN: &str = "xl/vbaProject.bin";
@@ -54,6 +55,21 @@ impl XlsxPackage {
         }
         verify_vba_digital_signature_from_parts(self.parts_map())
     }
+
+    /// Inspect and (best-effort) cryptographically verify the VBA project digital signature,
+    /// optionally evaluating publisher trust.
+    ///
+    /// This mirrors [`formula_vba::verify_vba_digital_signature_with_trust`], but prefers the
+    /// dedicated signature part when present (`xl/vbaProjectSignature.bin` or the part referenced
+    /// from `xl/_rels/vbaProject.bin.rels`).
+    ///
+    /// Returns `Ok(None)` when `xl/vbaProject.bin` is absent.
+    pub fn verify_vba_digital_signature_with_trust(
+        &self,
+        options: &formula_vba::VbaSignatureTrustOptions,
+    ) -> Result<Option<formula_vba::VbaDigitalSignatureTrusted>, formula_vba::SignatureError> {
+        verify_vba_digital_signature_with_trust_from_parts(self.parts_map(), options)
+    }
 }
 
 impl XlsxDocument {
@@ -83,6 +99,21 @@ impl XlsxDocument {
             return Ok(None);
         }
         verify_vba_digital_signature_from_parts(self.parts())
+    }
+
+    /// Inspect and (best-effort) cryptographically verify the VBA project digital signature,
+    /// optionally evaluating publisher trust.
+    ///
+    /// This mirrors [`formula_vba::verify_vba_digital_signature_with_trust`], but prefers the
+    /// dedicated signature part when present (`xl/vbaProjectSignature.bin` or the part referenced
+    /// from `xl/_rels/vbaProject.bin.rels`).
+    ///
+    /// Returns `Ok(None)` when `xl/vbaProject.bin` is absent.
+    pub fn verify_vba_digital_signature_with_trust(
+        &self,
+        options: &formula_vba::VbaSignatureTrustOptions,
+    ) -> Result<Option<formula_vba::VbaDigitalSignatureTrusted>, formula_vba::SignatureError> {
+        verify_vba_digital_signature_with_trust_from_parts(self.parts(), options)
     }
 }
 
@@ -196,6 +227,108 @@ fn verify_vba_digital_signature_from_parts(
     if embedded
         .as_ref()
         .is_some_and(|sig| sig.verification == VbaSignatureVerification::SignedVerified)
+    {
+        return Ok(embedded);
+    }
+
+    Ok(signature_part_result.or(embedded))
+}
+
+fn verify_vba_digital_signature_with_trust_from_parts(
+    parts: &BTreeMap<String, Vec<u8>>,
+    options: &formula_vba::VbaSignatureTrustOptions,
+) -> Result<Option<formula_vba::VbaDigitalSignatureTrusted>, formula_vba::SignatureError> {
+    // Unlike the non-trusty helper, require that the workbook actually contains a VBA project.
+    // Trust-center semantics are only meaningful in the context of `xl/vbaProject.bin`.
+    let Some(vba_project_bin) = parts.get("xl/vbaProject.bin") else {
+        return Ok(None);
+    };
+
+    let signature_part_name = resolve_vba_signature_part_name(parts);
+    let mut signature_part_result: Option<formula_vba::VbaDigitalSignatureTrusted> = None;
+
+    if let Some(signature_part_name) = signature_part_name {
+        if let Some(bytes) = parts.get(&signature_part_name) {
+            // Attempt to treat the part as an OLE/CFB container first (the most common format).
+            match formula_vba::verify_vba_digital_signature(bytes) {
+                Ok(Some(mut sig)) => {
+                    // Preserve which part we read the signature from to avoid ambiguity.
+                    sig.stream_path = format!("{signature_part_name}:{}", sig.stream_path);
+
+                    // `vbaProjectSignature.bin` does not contain the full VBA project streams, so
+                    // binding must be evaluated against `xl/vbaProject.bin` when possible.
+                    sig.binding = if sig.verification == VbaSignatureVerification::SignedVerified {
+                        formula_vba::verify_vba_signature_binding(vba_project_bin, &sig.signature)
+                    } else {
+                        formula_vba::VbaSignatureBinding::Unknown
+                    };
+
+                    let cert_trust = if sig.verification == VbaSignatureVerification::SignedVerified {
+                        formula_vba::verify_vba_signature_certificate_trust(&sig.signature, options)
+                    } else {
+                        formula_vba::VbaCertificateTrust::Unknown
+                    };
+
+                    signature_part_result = Some(formula_vba::VbaDigitalSignatureTrusted {
+                        signature: sig,
+                        cert_trust,
+                    });
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    // Not an OLE container: fall back to verifying the part bytes as a raw PKCS#7/CMS
+                    // signature blob.
+                    let (verification, signer_subject) = formula_vba::verify_vba_signature_blob(bytes);
+
+                    let binding = if verification == VbaSignatureVerification::SignedVerified {
+                        formula_vba::verify_vba_signature_binding(vba_project_bin, bytes)
+                    } else {
+                        formula_vba::VbaSignatureBinding::Unknown
+                    };
+
+                    let cert_trust = if verification == VbaSignatureVerification::SignedVerified {
+                        formula_vba::verify_vba_signature_certificate_trust(bytes, options)
+                    } else {
+                        formula_vba::VbaCertificateTrust::Unknown
+                    };
+
+                    signature_part_result = Some(formula_vba::VbaDigitalSignatureTrusted {
+                        signature: VbaDigitalSignature {
+                            stream_path: signature_part_name,
+                            signer_subject,
+                            signature: bytes.to_vec(),
+                            verification,
+                            binding,
+                        },
+                        cert_trust,
+                    });
+                }
+            }
+        }
+    }
+
+    if signature_part_result
+        .as_ref()
+        .is_some_and(|sig| sig.signature.verification == VbaSignatureVerification::SignedVerified)
+    {
+        return Ok(signature_part_result);
+    }
+
+    // Fall back to inspecting `xl/vbaProject.bin` for embedded signature streams.
+    let embedded = match formula_vba::verify_vba_digital_signature_with_trust(vba_project_bin, options) {
+        Ok(sig) => sig,
+        Err(err) => {
+            // If we got anything useful from the signature part, return it rather than failing.
+            if signature_part_result.is_some() {
+                return Ok(signature_part_result);
+            }
+            return Err(err);
+        }
+    };
+
+    if embedded
+        .as_ref()
+        .is_some_and(|sig| sig.signature.verification == VbaSignatureVerification::SignedVerified)
     {
         return Ok(embedded);
     }
