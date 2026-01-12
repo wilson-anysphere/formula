@@ -20,6 +20,7 @@
     "@formula/collab-comments": "workspace:*",
     "@formula/data-io": "workspace:*",
     "@formula/engine": "workspace:*",
+    "@formula/extension-marketplace": "workspace:*",
     "@formula/fill-engine": "workspace:*",
     "@formula/grid": "workspace:*",
     "@formula/power-query": "workspace:*",

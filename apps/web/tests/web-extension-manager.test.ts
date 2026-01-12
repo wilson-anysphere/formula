@@ -7,7 +7,7 @@ import { Worker as NodeWorker } from "node:worker_threads";
 import { IDBKeyRange, indexedDB } from "fake-indexeddb";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
 
-import { WebExtensionManager } from "../src/marketplace/WebExtensionManager";
+import { WebExtensionManager } from "@formula/extension-marketplace";
 
 // CJS helpers (shared/* is CommonJS).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

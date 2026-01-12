@@ -65,6 +65,9 @@ importers:
       '@formula/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@formula/extension-marketplace':
+        specifier: workspace:*
+        version: link:../../packages/extension-marketplace
       '@formula/fill-engine':
         specifier: workspace:*
         version: link:../../packages/fill-engine
@@ -132,6 +135,9 @@ importers:
       '@formula/extension-host':
         specifier: workspace:*
         version: link:../../packages/extension-host
+      '@formula/extension-marketplace':
+        specifier: workspace:*
+        version: link:../../packages/extension-marketplace
       '@formula/fill-engine':
         specifier: workspace:*
         version: link:../../packages/fill-engine
@@ -314,6 +320,12 @@ importers:
       '@formula/security':
         specifier: workspace:*
         version: link:../security
+
+  packages/extension-marketplace:
+    dependencies:
+      '@formula/extension-host':
+        specifier: workspace:*
+        version: link:../extension-host
 
   packages/fill-engine:
     devDependencies:

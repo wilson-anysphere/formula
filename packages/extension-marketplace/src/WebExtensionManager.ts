@@ -1,11 +1,11 @@
 import type {
   ReadExtensionPackageV2Result,
   VerifiedExtensionPackageV2
-} from "../../../../shared/extension-package/v2-browser.mjs";
+} from "../../../shared/extension-package/v2-browser.mjs";
 import {
   readExtensionPackageV2,
   verifyExtensionPackageV2Browser
-} from "../../../../shared/extension-package/v2-browser.mjs";
+} from "../../../shared/extension-package/v2-browser.mjs";
 
 import { MarketplaceClient } from "./MarketplaceClient";
 

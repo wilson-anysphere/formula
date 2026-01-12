@@ -1,7 +1,5 @@
 import { BrowserExtensionHost } from "@formula/extension-host/browser";
-
-import { MarketplaceClient } from "./marketplace/MarketplaceClient";
-import { WebExtensionManager } from "./marketplace/WebExtensionManager";
+import { MarketplaceClient, WebExtensionManager } from "@formula/extension-marketplace";
 
 type CellValue = string | number | boolean | null;
 
@@ -114,4 +112,3 @@ export async function setupExtensionTestHarness(): Promise<void> {
 
   (window as any).__formulaExtensionTest = api;
 }
-

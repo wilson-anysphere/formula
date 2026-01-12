@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import { MarketplaceClient } from "../src/marketplace/MarketplaceClient";
+import { MarketplaceClient } from "@formula/extension-marketplace";
 
 const originalFetch = globalThis.fetch;
 const originalCrypto = (globalThis as any).crypto;
