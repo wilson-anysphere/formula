@@ -598,7 +598,6 @@ pub fn lower_canonical_expr(
             let key = crate::value::casefold(nref.name.trim());
             Ok(BytecodeExpr::NameRef(Arc::from(key)))
         }
-        crate::Expr::FieldAccess(_) => Err(LowerError::Unsupported),
-        crate::Expr::StructuredRef(_) => Err(LowerError::Unsupported),
+        crate::Expr::FieldAccess(_) | crate::Expr::StructuredRef(_) => Err(LowerError::Unsupported),
     }
 }

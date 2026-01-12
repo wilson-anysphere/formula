@@ -6854,6 +6854,7 @@ impl BytecodeColumnCache {
                 | Value::Reference(_)
                 | Value::ReferenceUnion(_)
                 | Value::Array(_)
+                | Value::Record(_)
                 | Value::Lambda(_)
                 | Value::Spill { .. } => {
                     seg.blocked_rows_strict.push(row);
@@ -8617,6 +8618,16 @@ fn walk_external_expr(
             visiting_names,
             lexical_scopes,
         ),
+        Expr::FieldAccess { base, .. } => {
+            walk_external_expr(
+                base,
+                current_cell,
+                workbook,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            );
+        }
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
             walk_external_expr(
                 left,
@@ -8790,6 +8801,7 @@ fn spill_range_target_cell(expr: &CompiledExpr, current_cell: CellKey) -> Option
                 addr: r.addr,
             })
         }
+        Expr::FieldAccess { base, .. } => spill_range_target_cell(base, current_cell),
         Expr::ImplicitIntersection(inner) | Expr::SpillRange(inner) => {
             spill_range_target_cell(inner, current_cell)
         }
@@ -8964,6 +8976,18 @@ fn walk_calc_expr(
         Expr::Unary { expr, .. } | Expr::Postfix { expr, .. } => {
             walk_calc_expr(
                 expr,
+                current_cell,
+                tables_by_sheet,
+                workbook,
+                spills,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            );
+        }
+        Expr::FieldAccess { base, .. } => {
+            walk_calc_expr(
+                base,
                 current_cell,
                 tables_by_sheet,
                 workbook,

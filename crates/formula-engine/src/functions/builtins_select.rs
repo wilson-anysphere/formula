@@ -473,6 +473,7 @@ fn excel_eq(left: &Value, right: &Value) -> Result<bool, ErrorKind> {
     if matches!(
         &left,
         Value::Array(_)
+            | Value::Record(_)
             | Value::Lambda(_)
             | Value::Spill { .. }
             | Value::Reference(_)
@@ -480,6 +481,7 @@ fn excel_eq(left: &Value, right: &Value) -> Result<bool, ErrorKind> {
     ) || matches!(
         &right,
         Value::Array(_)
+            | Value::Record(_)
             | Value::Lambda(_)
             | Value::Spill { .. }
             | Value::Reference(_)

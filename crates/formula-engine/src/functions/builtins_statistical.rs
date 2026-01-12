@@ -45,6 +45,7 @@ fn push_numbers_from_scalar(
                     | Value::Record(_)
                     | Value::Blank
                     | Value::Array(_)
+                    | Value::Record(_)
                     | Value::Spill { .. }
                     | Value::Reference(_)
                     | Value::ReferenceUnion(_) => {}
@@ -52,9 +53,11 @@ fn push_numbers_from_scalar(
             }
             Ok(())
         }
-        Value::Reference(_) | Value::ReferenceUnion(_) | Value::Lambda(_) | Value::Spill { .. } => {
-            Err(ErrorKind::Value)
-        }
+        Value::Reference(_)
+        | Value::ReferenceUnion(_)
+        | Value::Record(_)
+        | Value::Lambda(_)
+        | Value::Spill { .. } => Err(ErrorKind::Value),
     }
 }
 
@@ -75,6 +78,7 @@ fn push_numbers_from_reference(
             | Value::Record(_)
             | Value::Blank
             | Value::Array(_)
+            | Value::Record(_)
             | Value::Spill { .. }
             | Value::Reference(_)
             | Value::ReferenceUnion(_) => {}
@@ -105,6 +109,7 @@ fn push_numbers_from_reference_union(
                 | Value::Record(_)
                 | Value::Blank
                 | Value::Array(_)
+                | Value::Record(_)
                 | Value::Spill { .. }
                 | Value::Reference(_)
                 | Value::ReferenceUnion(_) => {}
@@ -159,6 +164,7 @@ fn push_numbers_a_from_scalar(out: &mut Vec<f64>, value: Value) -> Result<(), Er
                     Value::Number(n) => out.push(*n),
                     Value::Bool(b) => out.push(if *b { 1.0 } else { 0.0 }),
                     Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => out.push(0.0),
+                    Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => out.push(0.0),
                     Value::Lambda(_) => return Err(ErrorKind::Value),
                     Value::Array(_)
                     | Value::Spill { .. }
@@ -186,6 +192,7 @@ fn push_numbers_a_from_reference(
             Value::Number(n) => out.push(n),
             Value::Bool(b) => out.push(if b { 1.0 } else { 0.0 }),
             Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => out.push(0.0),
+            Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => out.push(0.0),
             Value::Lambda(_) => return Err(ErrorKind::Value),
             Value::Array(_)
             | Value::Spill { .. }
@@ -212,6 +219,7 @@ fn push_numbers_a_from_reference_union(
                 Value::Error(e) => return Err(e),
                 Value::Number(n) => out.push(n),
                 Value::Bool(b) => out.push(if b { 1.0 } else { 0.0 }),
+                Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => out.push(0.0),
                 Value::Blank | Value::Text(_) | Value::Entity(_) | Value::Record(_) => out.push(0.0),
                 Value::Lambda(_) => return Err(ErrorKind::Value),
                 Value::Array(_)
@@ -438,6 +446,7 @@ fn sumsq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
+                            | Value::Record(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}
@@ -446,6 +455,7 @@ fn sumsq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
                 Value::Reference(_)
                 | Value::ReferenceUnion(_)
+                | Value::Record(_)
                 | Value::Lambda(_)
                 | Value::Spill { .. } => return Value::Error(ErrorKind::Value),
             },
@@ -470,6 +480,7 @@ fn sumsq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
+                        | Value::Record(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => {}
@@ -502,6 +513,7 @@ fn sumsq_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
+                            | Value::Record(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}
@@ -707,6 +719,7 @@ fn arg_to_numeric_sequence(
                         | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
+                        | Value::Record(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => out.push(None),
@@ -737,6 +750,7 @@ fn arg_to_numeric_sequence(
                     | Value::Record(_)
                     | Value::Blank
                     | Value::Array(_)
+                    | Value::Record(_)
                     | Value::Spill { .. }
                     | Value::Reference(_)
                     | Value::ReferenceUnion(_) => out.push(None),
@@ -768,6 +782,7 @@ fn arg_to_numeric_sequence(
                         | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
+                        | Value::Record(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => out.push(None),

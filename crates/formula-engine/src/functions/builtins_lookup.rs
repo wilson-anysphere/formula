@@ -1,5 +1,5 @@
-use crate::eval::CompiledExpr;
 use crate::coercion::datetime::parse_value_text;
+use crate::eval::CompiledExpr;
 use crate::functions::lookup;
 use crate::functions::wildcard::WildcardPattern;
 use crate::functions::{
@@ -1972,6 +1972,7 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
             Value::Reference(_)
             | Value::ReferenceUnion(_)
             | Value::Array(_)
+            | Value::Record(_)
             | Value::Lambda(_)
             | Value::Spill { .. } => None,
         }
@@ -2031,7 +2032,9 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
                 }
                 (Value::Bool(x), Value::Bool(y)) => Some(ordering_to_i32(x.cmp(y))),
                 (Value::Blank, Value::Blank) => Some(0),
-                (Value::Error(x), Value::Error(y)) => Some(ordering_to_i32(x.code().cmp(&y.code()))),
+                (Value::Error(x), Value::Error(y)) => {
+                    Some(ordering_to_i32(x.code().cmp(&y.code())))
+                }
                 _ => None,
             }
         }

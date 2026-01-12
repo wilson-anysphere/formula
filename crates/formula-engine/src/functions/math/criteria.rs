@@ -64,8 +64,16 @@ impl Criteria {
 
     /// Parse an Excel criteria value, resolving date/time strings using the supplied workbook
     /// date system.
-    pub fn parse_with_date_system(input: &Value, system: ExcelDateSystem) -> Result<Self, ErrorKind> {
-        Self::parse_with_date_system_and_locale(input, system, ValueLocaleConfig::en_us(), Utc::now())
+    pub fn parse_with_date_system(
+        input: &Value,
+        system: ExcelDateSystem,
+    ) -> Result<Self, ErrorKind> {
+        Self::parse_with_date_system_and_locale(
+            input,
+            system,
+            ValueLocaleConfig::en_us(),
+            Utc::now(),
+        )
     }
 
     /// Parse an Excel criteria value, resolving numeric/date/time strings using the provided value
@@ -87,7 +95,13 @@ impl Criteria {
         criteria_locale.decimal_separator = separators.decimal_sep;
         criteria_locale.thousands_separator = Some(separators.thousands_sep);
 
-        Self::parse_with_date_system_and_locales(input, system, value_locale, now_utc, criteria_locale)
+        Self::parse_with_date_system_and_locales(
+            input,
+            system,
+            value_locale,
+            now_utc,
+            criteria_locale,
+        )
     }
 
     /// Parse an Excel criteria value using separate value (text -> number/date parsing) and
@@ -103,7 +117,8 @@ impl Criteria {
         locale: LocaleConfig,
     ) -> Result<Self, ErrorKind> {
         let separators = value_locale.separators;
-        let number_locale = NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep));
+        let number_locale =
+            NumberLocale::new(separators.decimal_sep, Some(separators.thousands_sep));
 
         match input {
             Value::Number(n) => Ok(Criteria {
@@ -212,8 +227,12 @@ impl Criteria {
                 value,
                 self.number_locale,
             ),
-            CriteriaRhs::Number(n) => matches_numeric_criteria(self.op, *n, value, self.number_locale),
-            CriteriaRhs::Text(pattern) => matches_text_criteria(self.op, pattern, value, self.value_locale),
+            CriteriaRhs::Number(n) => {
+                matches_numeric_criteria(self.op, *n, value, self.number_locale)
+            }
+            CriteriaRhs::Text(pattern) => {
+                matches_text_criteria(self.op, pattern, value, self.value_locale)
+            }
         }
     }
 }
@@ -465,6 +484,7 @@ fn coerce_to_number(value: &Value, locale: NumberLocale) -> Option<f64> {
         Value::Error(_)
         | Value::Reference(_)
         | Value::ReferenceUnion(_)
+        | Value::Record(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => None,
     }
@@ -488,6 +508,7 @@ fn coerce_to_text(value: &Value, value_locale: ValueLocaleConfig) -> Option<Stri
         Value::Error(_)
         | Value::Reference(_)
         | Value::ReferenceUnion(_)
+        | Value::Record(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => None,
         Value::Array(arr) => coerce_to_text(&arr.top_left(), value_locale),

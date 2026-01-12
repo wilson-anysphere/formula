@@ -175,6 +175,7 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
+                            | Value::Record(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}
@@ -192,7 +193,7 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
                 Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
-                Value::Reference(_) | Value::ReferenceUnion(_) => {
+                Value::Reference(_) | Value::ReferenceUnion(_) | Value::Record(_) => {
                     return Value::Error(ErrorKind::Value)
                 }
             },
@@ -226,6 +227,7 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
+                        | Value::Record(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => {}
@@ -275,6 +277,7 @@ fn sum(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
+                            | Value::Record(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}
@@ -381,6 +384,7 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
+                            | Value::Record(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}
@@ -396,7 +400,7 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                 }
                 Value::Lambda(_) => return Value::Error(ErrorKind::Value),
                 Value::Spill { .. } => return Value::Error(ErrorKind::Value),
-                Value::Reference(_) | Value::ReferenceUnion(_) => {
+                Value::Reference(_) | Value::ReferenceUnion(_) | Value::Record(_) => {
                     return Value::Error(ErrorKind::Value)
                 }
             },
@@ -430,6 +434,7 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
+                        | Value::Record(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => {}
@@ -478,6 +483,7 @@ fn average(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
+                            | Value::Record(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}
@@ -556,6 +562,7 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
+                            | Value::Record(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}
@@ -614,6 +621,7 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
+                        | Value::Record(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => {}
@@ -664,6 +672,7 @@ fn min_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
+                            | Value::Record(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}
@@ -741,6 +750,7 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
+                            | Value::Record(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}
@@ -799,6 +809,7 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
+                        | Value::Record(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => {}
@@ -849,6 +860,7 @@ fn max_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Record(_)
                             | Value::Blank
                             | Value::Array(_)
+                            | Value::Record(_)
                             | Value::Spill { .. }
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_) => {}
@@ -1002,6 +1014,7 @@ fn countif_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
             Value::Error(_)
             | Value::Reference(_)
             | Value::ReferenceUnion(_)
+            | Value::Record(_)
             | Value::Lambda(_)
             | Value::Spill { .. } => None,
         }

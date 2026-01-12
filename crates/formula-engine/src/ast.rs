@@ -370,12 +370,6 @@ pub enum Expr {
     Missing,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct FieldAccessExpr {
-    pub base: Box<Expr>,
-    pub field: String,
-}
-
 impl Expr {
     fn normalize_relative(&self, origin: CellAddr) -> Self {
         match self {
@@ -729,6 +723,12 @@ impl FunctionCall {
 pub struct CallExpr {
     pub callee: Box<Expr>,
     pub args: Vec<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldAccessExpr {
+    pub base: Box<Expr>,
+    pub field: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

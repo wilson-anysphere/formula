@@ -694,6 +694,7 @@ fn push_numbers_from_scalar(
                     | Value::Record(_)
                     | Value::Blank
                     | Value::Array(_)
+                    | Value::Record(_)
                     | Value::Spill { .. }
                     | Value::Reference(_)
                     | Value::ReferenceUnion(_) => {}
@@ -703,6 +704,7 @@ fn push_numbers_from_scalar(
         }
         Value::Reference(_)
         | Value::ReferenceUnion(_)
+        | Value::Record(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => Err(ErrorKind::Value),
     }
@@ -725,6 +727,7 @@ fn push_numbers_from_reference(
             | Value::Record(_)
             | Value::Blank
             | Value::Array(_)
+            | Value::Record(_)
             | Value::Spill { .. }
             | Value::Reference(_)
             | Value::ReferenceUnion(_) => {}
@@ -755,6 +758,7 @@ fn push_numbers_from_reference_union(
                 | Value::Record(_)
                 | Value::Blank
                 | Value::Array(_)
+                | Value::Record(_)
                 | Value::Spill { .. }
                 | Value::Reference(_)
                 | Value::ReferenceUnion(_) => {}
@@ -952,6 +956,7 @@ fn arg_to_numeric_sequence(
                         | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
+                        | Value::Record(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => out.push(None),
@@ -961,6 +966,7 @@ fn arg_to_numeric_sequence(
             }
             Value::Reference(_)
             | Value::ReferenceUnion(_)
+            | Value::Record(_)
             | Value::Lambda(_)
             | Value::Spill { .. } => Err(ErrorKind::Value),
         },
@@ -982,6 +988,7 @@ fn arg_to_numeric_sequence(
                     | Value::Record(_)
                     | Value::Blank
                     | Value::Array(_)
+                    | Value::Record(_)
                     | Value::Spill { .. }
                     | Value::Reference(_)
                     | Value::ReferenceUnion(_) => out.push(None),
@@ -1013,6 +1020,7 @@ fn arg_to_numeric_sequence(
                         | Value::Record(_)
                         | Value::Blank
                         | Value::Array(_)
+                        | Value::Record(_)
                         | Value::Spill { .. }
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_) => out.push(None),

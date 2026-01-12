@@ -1178,7 +1178,7 @@ impl<'a> Lexer<'a> {
         // `RC` + `AR`, which is not valid formula syntax and causes confusing parse errors.
         // Instead, reject the cell token when the next character would continue an identifier or
         // start a function call, so the full string is lexed as an identifier.
-        if matches!(self.peek_char(), Some(c) if is_ident_cont_char(c) || c == '(') {
+        if matches!(self.peek_char(), Some(c) if (is_ident_cont_char(c) && c != '.') || c == '(') {
             self.idx = save_idx;
             self.chars = save_chars;
             return None;
@@ -1222,7 +1222,7 @@ impl<'a> Lexer<'a> {
             _ => Coord::Offset(0),
         };
 
-        if matches!(self.peek_char(), Some(c) if is_ident_cont_char(c) || c == '(') {
+        if matches!(self.peek_char(), Some(c) if (is_ident_cont_char(c) && c != '.') || c == '(') {
             self.idx = save_idx;
             self.chars = save_chars;
             return None;
@@ -1266,7 +1266,7 @@ impl<'a> Lexer<'a> {
             _ => Coord::Offset(0),
         };
 
-        if matches!(self.peek_char(), Some(c) if is_ident_cont_char(c) || c == '(') {
+        if matches!(self.peek_char(), Some(c) if (is_ident_cont_char(c) && c != '.') || c == '(') {
             self.idx = save_idx;
             self.chars = save_chars;
             return None;

@@ -388,6 +388,7 @@ pub(super) fn sort_key(value: &Value) -> SortKeyValue {
         Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)
+        | Value::Record(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => SortKeyValue::Error(ErrorKind::Value),
     }
@@ -490,6 +491,7 @@ fn unique_key_cell(value: &Value) -> UniqueKeyCell {
         Value::Reference(_)
         | Value::ReferenceUnion(_)
         | Value::Array(_)
+        | Value::Record(_)
         | Value::Lambda(_)
         | Value::Spill { .. } => UniqueKeyCell::Error(ErrorKind::Value),
     }
@@ -1500,7 +1502,10 @@ fn eval_array_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<Arra
     arg_value_to_array(ctx, ctx.eval_arg(expr))
 }
 
-pub(super) fn arg_value_to_array(ctx: &dyn FunctionContext, arg: ArgValue) -> Result<Array, ErrorKind> {
+pub(super) fn arg_value_to_array(
+    ctx: &dyn FunctionContext,
+    arg: ArgValue,
+) -> Result<Array, ErrorKind> {
     match arg {
         ArgValue::Scalar(v) => match v {
             Value::Array(arr) => Ok(arr),

@@ -1,6 +1,6 @@
-use crate::error::{ExcelError, ExcelResult};
 use crate::date::ExcelDateSystem;
 use crate::locale::ValueLocaleConfig;
+use crate::error::{ExcelError, ExcelResult};
 use crate::{ErrorKind, Value};
 use formula_format::{DateSystem, FormatOptions, Value as FmtValue};
 

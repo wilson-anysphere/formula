@@ -12,9 +12,9 @@ use formula_format::{DateSystem, FormatOptions, Value as FmtValue};
 
 mod number_parse;
 
-pub use number_parse::NumberLocale;
-pub(crate) use number_parse::parse_number;
 use crate::date::ExcelDateSystem;
+pub(crate) use number_parse::parse_number;
+pub use number_parse::NumberLocale;
 
 pub(crate) fn cmp_ascii_case_insensitive(a: &str, b: &str) -> Ordering {
     let mut a_iter = a.as_bytes().iter();
@@ -640,7 +640,8 @@ fn coerce_text_to_number(
         return Ok(0.0);
     }
 
-    crate::coercion::datetime::parse_value_text(trimmed, cfg, now_utc, system).map_err(map_excel_error)
+    crate::coercion::datetime::parse_value_text(trimmed, cfg, now_utc, system)
+        .map_err(map_excel_error)
 }
 
 fn format_number_general(n: f64) -> String {

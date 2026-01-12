@@ -2,7 +2,9 @@ use std::collections::HashSet;
 
 use crate::error::ExcelError;
 use crate::eval::{CellAddr, CompiledExpr};
-use crate::functions::{array_lift, ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference};
+use crate::functions::{
+    array_lift, ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference,
+};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{Array, ErrorKind, Value};
 
@@ -71,7 +73,9 @@ fn dynamic_value_from_arg(ctx: &dyn FunctionContext, arg: ArgValue) -> Value {
 
 fn elementwise_unary(value: &Value, f: impl Fn(&Value) -> Value) -> Value {
     match value {
-        Value::Array(arr) => Value::Array(Array::new(arr.rows, arr.cols, arr.iter().map(f).collect())),
+        Value::Array(arr) => {
+            Value::Array(Array::new(arr.rows, arr.cols, arr.iter().map(f).collect()))
+        }
         other => f(other),
     }
 }
@@ -656,6 +660,7 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Entity(_)
                             | Value::Record(_)
                             | Value::Blank
+                            | Value::Record(_)
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_)
                             | Value::Array(_)
@@ -678,6 +683,7 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                         | Value::Entity(_)
                         | Value::Record(_)
                         | Value::Blank
+                        | Value::Record(_)
                         | Value::Reference(_)
                         | Value::ReferenceUnion(_)
                         | Value::Array(_)
@@ -701,6 +707,7 @@ fn product_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
                             | Value::Entity(_)
                             | Value::Record(_)
                             | Value::Blank
+                            | Value::Record(_)
                             | Value::Reference(_)
                             | Value::ReferenceUnion(_)
                             | Value::Array(_)
