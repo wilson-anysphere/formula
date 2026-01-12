@@ -5,10 +5,16 @@ pub use formula_xlsb as xlsb;
 pub use formula_xlsx as xlsx;
 use formula_model::import::{import_csv_into_workbook, CsvImportError, CsvOptions};
 
+const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("unsupported extension `{extension}` for workbook `{path}`")]
     UnsupportedExtension { path: PathBuf, extension: String },
+    #[error(
+        "encrypted workbook not supported: workbook `{path}` is password-protected/encrypted; remove password protection in Excel and try again"
+    )]
+    EncryptedWorkbook { path: PathBuf },
     #[error("failed to open workbook `{path}`: {source}")]
     OpenIo {
         path: PathBuf,
@@ -132,8 +138,6 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
         }
     };
 
-    // OLE2 compound file signature (XLS/BIFF).
-    const OLE2_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
     // ZIP local file header signature (XLSX/XLSM/XLSB).
     const ZIP_MAGIC: [u8; 4] = [0x50, 0x4B, 0x03, 0x04];
 
@@ -143,7 +147,26 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
         source,
     })?;
 
-    if n >= OLE2_MAGIC.len() && header[..OLE2_MAGIC.len()] == OLE2_MAGIC {
+    if n >= OLE_MAGIC.len() && header[..OLE_MAGIC.len()] == OLE_MAGIC {
+        // OLE compound files can either be legacy `.xls` BIFF workbooks, or Office-encrypted
+        // OOXML packages (e.g. password-protected `.xlsx`) that wrap the real workbook in an
+        // `EncryptedPackage` stream.
+        //
+        // We don't support decryption here; detect and return a user-friendly error.
+        file.seek(SeekFrom::Start(0)).map_err(|source| Error::OpenIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        if let Ok(mut ole) = cfb::CompoundFile::open(file) {
+            if stream_exists(&mut ole, "EncryptionInfo")
+                && stream_exists(&mut ole, "EncryptedPackage")
+            {
+                return Err(Error::EncryptedWorkbook {
+                    path: path.to_path_buf(),
+                });
+            }
+        }
+
         return Ok(WorkbookFormat::Xls);
     }
 
@@ -267,6 +290,17 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
             Ok(workbook)
         }
     }
+}
+
+fn stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
+    ole: &mut cfb::CompoundFile<R>,
+    name: &str,
+) -> bool {
+    if ole.open_stream(name).is_ok() {
+        return true;
+    }
+    let with_leading_slash = format!("/{name}");
+    ole.open_stream(&with_leading_slash).is_ok()
 }
 
 /// Open a spreadsheet workbook based on file extension.
