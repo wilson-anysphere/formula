@@ -31,8 +31,8 @@ test("uninstall clears permission grants + extension storage so reinstall behave
       version: "1.0.0",
       description: "",
       publisher: "test",
-      main: "./dist/extension.mjs",
-      browser: "./dist/extension.mjs",
+      main: "./dist/extension.js",
+      browser: "./dist/extension.js",
       engines: { formula: "^1.0.0" },
       activationEvents: ["onCommand:stateTest.set", "onCommand:stateTest.get"],
       contributes: {
@@ -46,11 +46,11 @@ test("uninstall clears permission grants + extension storage so reinstall behave
 
     await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
     await fs.writeFile(
-      path.join(extDir, "dist", "extension.mjs"),
+      path.join(extDir, "dist", "extension.js"),
       `import * as formula from "@formula/extension-api";
  export async function activate(context) {
    context.subscriptions.push(await formula.commands.registerCommand("stateTest.set", async (key, value) => {
-     await formula.storage.set(String(key), value);
+      await formula.storage.set(String(key), value);
      return true;
    }));
 
@@ -90,14 +90,20 @@ test("uninstall clears permission grants + extension storage so reinstall behave
           blocked: false,
           malicious: false,
           downloadCount: 0,
-          latestVersion: "1.0.0",
-          versions: [
-            { version: "1.0.0", sha256: pkgSha256, uploadedAt: new Date().toISOString(), yanked: false },
-          ],
-          readme: "",
-          publisherPublicKeyPem: keys.publicKeyPem,
-          publisherKeys: [{ id: publisherKeyId, publicKeyPem: keys.publicKeyPem, revoked: false }],
-          updatedAt: new Date().toISOString(),
+           latestVersion: "1.0.0",
+           versions: [
+            {
+              version: "1.0.0",
+              sha256: pkgSha256,
+              uploadedAt: new Date().toISOString(),
+              yanked: false,
+              scanStatus: "passed",
+            },
+           ],
+           readme: "",
+           publisherPublicKeyPem: keys.publicKeyPem,
+           publisherKeys: [{ id: publisherKeyId, publicKeyPem: keys.publicKeyPem, revoked: false }],
+           updatedAt: new Date().toISOString(),
           createdAt: new Date().toISOString(),
         }),
       });
@@ -111,6 +117,7 @@ test("uninstall clears permission grants + extension storage so reinstall behave
           "X-Package-Sha256": pkgSha256,
           "X-Package-Signature": pkgSignatureBase64,
           "X-Package-Format-Version": "2",
+          "X-Package-Scan-Status": "passed",
           "X-Publisher": "test",
           "X-Publisher-Key-Id": publisherKeyId,
         },
