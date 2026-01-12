@@ -3015,6 +3015,46 @@ mod tests {
     }
 
     #[test]
+    fn set_cell_rich_array_roundtrips_but_engine_degrades_to_spill_error() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let array = CellValue::Array(formula_model::ArrayValue {
+            data: vec![vec![CellValue::Number(1.0), CellValue::Number(2.0)]],
+        });
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", array.clone())
+            .unwrap();
+
+        let scalar = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(scalar.input, JsonValue::Null);
+        assert_eq!(scalar.value, json!("#SPILL!"));
+
+        let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(rich.input, array);
+        assert_eq!(rich.value, CellValue::Error(formula_model::ErrorValue::Spill));
+    }
+
+    #[test]
+    fn set_cell_rich_spill_marker_roundtrips_but_engine_degrades_to_spill_error() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        let spill = CellValue::Spill(formula_model::SpillValue {
+            origin: CellRef::new(0, 0),
+        });
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", spill.clone())
+            .unwrap();
+
+        let scalar = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(scalar.input, JsonValue::Null);
+        assert_eq!(scalar.value, json!("#SPILL!"));
+
+        let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(rich.input, spill);
+        assert_eq!(rich.value, CellValue::Error(formula_model::ErrorValue::Spill));
+    }
+
+    #[test]
     fn cell_value_json_roundtrips_entity_and_record() {
         let mut record_fields = BTreeMap::new();
         record_fields.insert("Name".to_string(), CellValue::String("Alice".to_string()));
