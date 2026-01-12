@@ -632,6 +632,67 @@ test("loadAllInstalled can call host.startup() even if startup already ran with 
   }
 });
 
+test("loadAllInstalled can re-run host.startup() when the host has preloaded inactive extensions (no startupExtension)", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-all-fallback-preloaded-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "startup-all-fallback-preloaded-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+    activationEvents: ["onStartupFinished"],
+    contributes: {}
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), `export async function activate() {}\n`);
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.startup-all-fallback-preloaded-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  // Pretend the host already has a (built-in) extension loaded, but not started yet (active=false).
+  const loaded: Array<{ id: string; active?: boolean }> = [{ id: "test.preloaded-ext", active: false }];
+  let startupCalls = 0;
+  const host = {
+    loadExtension: async ({ extensionId }: { extensionId: string }) => {
+      loaded.push({ id: extensionId, active: false });
+      return extensionId;
+    },
+    listExtensions: () => loaded,
+    startup: async () => {
+      startupCalls++;
+    }
+  };
+
+  const manager = new WebExtensionManager({ marketplaceClient, host: host as any, engineVersion: "1.0.0" });
+
+  try {
+    // Initial boot: no installed extensions, but host has preloaded inactive ones. We should still
+    // call startup once so the host is initialized.
+    await manager.loadAllInstalled();
+    expect(startupCalls).toBe(1);
+
+    // Installing a new onStartupFinished extension later should cause a second safe startup() call
+    // since no pre-existing extensions are active and there is no startupExtension() API.
+    await manager.install("test.startup-all-fallback-preloaded-ext");
+    await manager.loadAllInstalled();
+    expect(startupCalls).toBe(2);
+  } finally {
+    await manager.dispose();
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("loadAllInstalled does not call host.startup() when the host is already running (avoids workbookOpened spam)", async () => {
   const host = new BrowserExtensionHost({
     engineVersion: "1.0.0",

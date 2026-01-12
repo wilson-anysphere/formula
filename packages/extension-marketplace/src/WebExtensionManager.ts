@@ -1243,6 +1243,10 @@ export class WebExtensionManager {
     if (!this.host) throw new Error("WebExtensionManager requires a BrowserExtensionHost to load extensions");
     const initialHostExtensions = this.host.listExtensions();
     const initialHostExtensionCount = initialHostExtensions.length;
+    const initialHostProvidesActiveFlag = initialHostExtensions.some((ext: any) => {
+      if (!ext || typeof ext !== "object") return false;
+      return Object.prototype.hasOwnProperty.call(ext, "active");
+    });
     const initialHostHasActiveExtension = initialHostExtensions.some((ext: any) => {
       // `BrowserExtensionHost` includes `active`; treat any known-active extension as a signal that
       // calling `startup()` again would risk re-broadcasting `workbookOpened` to already-running
@@ -1290,7 +1294,14 @@ export class WebExtensionManager {
     // installed extension (safe: no existing extensions can be spammed).
     if (
       this.host.startup &&
-      (!this._didHostStartup || (initialHostExtensionCount === 0 && newlyLoaded.length > 0)) &&
+      (!this._didHostStartup ||
+        (initialHostExtensionCount === 0 && newlyLoaded.length > 0) ||
+        // Older hosts (no startupExtension) might have previously run startup when only built-in
+        // extensions were loaded but none were active (e.g. built-ins that only activate on
+        // commands). If we then load the first marketplace-installed onStartupFinished extension,
+        // we must re-run startup so it activates and receives workbookOpened. This is safe when
+        // the host provides an `active` flag and none of the pre-existing extensions are active.
+        (newlyLoaded.length > 0 && !this.host.startupExtension && initialHostProvidesActiveFlag)) &&
       !initialHostHasActiveExtension
     ) {
       await this.host.startup();
