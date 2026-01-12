@@ -246,7 +246,8 @@
   overflow: auto;
 }
 
-.dock-panel__body--fill {
+.dock-panel__body--fill,
+.panel-body--fill {
   flex: 1;
   min-height: 0;
   padding: 0;

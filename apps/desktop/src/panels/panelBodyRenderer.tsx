@@ -488,12 +488,12 @@ export function createPanelBodyRenderer(options: PanelBodyRendererOptions): Pane
   }
 
   function makeBodyFillAvailableHeight(body: HTMLDivElement) {
-    body.classList.add("dock-panel__body--fill");
+    body.classList.add("dock-panel__body--fill", "panel-body--fill");
   }
 
   function renderPanelBody(panelId: string, body: HTMLDivElement) {
     // Reset any previous renderer-specific body modifiers before applying this panel's layout.
-    body.classList.remove("dock-panel__body--fill");
+    body.classList.remove("dock-panel__body--fill", "panel-body--fill");
     const workbookId = options.getWorkbookId?.() ?? options.workbookId;
 
     if (panelId === PanelIds.AI_CHAT) {
