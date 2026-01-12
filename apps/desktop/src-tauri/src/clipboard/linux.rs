@@ -93,7 +93,11 @@ mod gtk_backend {
         let (tx, rx) = std::sync::mpsc::channel::<Result<R, ClipboardError>>();
 
         ctx.invoke(move || {
-            let res = op();
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(op)).unwrap_or_else(|_| {
+                Err(ClipboardError::OperationFailed(
+                    "GTK clipboard operation panicked".to_string(),
+                ))
+            });
             let _ = tx.send(res);
         });
 
