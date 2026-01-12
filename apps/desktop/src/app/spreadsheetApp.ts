@@ -3657,11 +3657,9 @@ export class SpreadsheetApp {
 
       let previewOverride: string | undefined = undefined;
       if (this.sharedHoverCellCommentIndexVersion !== this.commentIndexVersion) {
+        previewOverride = this.commentPreviewByCoord.get(cellKey);
+        this.sharedHoverCellHasComment = previewOverride !== undefined;
         this.sharedHoverCellCommentIndexVersion = this.commentIndexVersion;
-        this.sharedHoverCellHasComment = this.commentMetaByCoord.has(cellKey);
-        if (this.sharedHoverCellHasComment) {
-          previewOverride = this.commentPreviewByCoord.get(cellKey) ?? "";
-        }
       }
 
       if (!this.sharedHoverCellHasComment) {
@@ -3715,8 +3713,9 @@ export class SpreadsheetApp {
     const cellKey = docRow * COMMENT_COORD_COL_STRIDE + docCol;
     this.sharedHoverCellKey = cellKey;
     this.sharedHoverCellCommentIndexVersion = this.commentIndexVersion;
-    this.sharedHoverCellHasComment = this.commentMetaByCoord.has(cellKey);
-    if (!this.sharedHoverCellHasComment) {
+    const preview = this.commentPreviewByCoord.get(cellKey);
+    this.sharedHoverCellHasComment = preview !== undefined;
+    if (preview === undefined) {
       this.hideCommentTooltip();
       return;
     }
@@ -3729,7 +3728,6 @@ export class SpreadsheetApp {
     }
     this.lastHoveredCommentCellKey = cellKey;
     this.lastHoveredCommentIndexVersion = this.commentIndexVersion;
-    const preview = this.commentPreviewByCoord.get(cellKey) ?? "";
     this.commentTooltip.textContent = preview;
     this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
     this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
@@ -7044,8 +7042,8 @@ export class SpreadsheetApp {
 
     const cell = this.cellFromPoint(x, y);
     const metaKey = cell.row * COMMENT_COORD_COL_STRIDE + cell.col;
-    const hasComment = this.commentMetaByCoord.has(metaKey);
-    if (!hasComment) {
+    const preview = this.commentPreviewByCoord.get(metaKey);
+    if (preview === undefined) {
       this.hideCommentTooltip();
       return;
     }
@@ -7063,7 +7061,6 @@ export class SpreadsheetApp {
 
     this.lastHoveredCommentCellKey = metaKey;
     this.lastHoveredCommentIndexVersion = this.commentIndexVersion;
-    const preview = this.commentPreviewByCoord.get(metaKey) ?? "";
     this.commentTooltip.textContent = preview;
     this.commentTooltip.style.setProperty("--comment-tooltip-x", `${x + 12}px`);
     this.commentTooltip.style.setProperty("--comment-tooltip-y", `${y + 12}px`);
