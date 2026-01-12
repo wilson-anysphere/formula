@@ -47,7 +47,10 @@ function ensureSafeFormattingRange(rangeOrRanges) {
           } catch {
             // ignore (e.g. toast root missing in tests)
           }
-          return false;
+          // Let DocumentController.setRangeFormat enforce the cap and emit a warning.
+          // This keeps headless/unit test environments (where `showToast` is a no-op)
+          // observable and maintains a single source of truth for performance limits.
+          continue;
         }
       }
       continue;
