@@ -248,11 +248,30 @@ fn decodes_structured_ref_value_class_this_row_all_columns_adds_implicit_interse
 }
 
 #[test]
+fn decodes_structured_ref_value_class_this_row_range_adds_implicit_intersection() {
+    let rgce = ptg_list(1, 0x0010, 2, 4, 0x38);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "@[@[Column2]:[Column4]]");
+    assert_eq!(normalize(&text), normalize("@[@[Column2]:[Column4]]"));
+}
+
+#[test]
 fn decodes_structured_ref_value_class_headers_all_columns_adds_implicit_intersection() {
     let rgce = ptg_list(1, 0x0002, 0, 0, 0x38);
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "@Table1[#Headers]");
     assert_eq!(normalize(&text), normalize("@Table1[#Headers]"));
+}
+
+#[test]
+fn decodes_structured_ref_value_class_headers_column_range_adds_implicit_intersection() {
+    let rgce = ptg_list(1, 0x0002, 2, 4, 0x38);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "@Table1[[#Headers],[Column2]:[Column4]]");
+    assert_eq!(
+        normalize(&text),
+        normalize("@Table1[[#Headers],[Column2]:[Column4]]")
+    );
 }
 
 #[test]
@@ -269,6 +288,14 @@ fn decodes_structured_ref_value_class_all_adds_implicit_intersection() {
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "@Table1[#All]");
     assert_eq!(normalize(&text), normalize("@Table1[#All]"));
+}
+
+#[test]
+fn decodes_structured_ref_value_class_all_single_column_adds_implicit_intersection() {
+    let rgce = ptg_list(1, 0x0001, 2, 2, 0x38);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "@Table1[[#All],[Column2]]");
+    assert_eq!(normalize(&text), normalize("@Table1[[#All],[Column2]]"));
 }
 
 #[test]
