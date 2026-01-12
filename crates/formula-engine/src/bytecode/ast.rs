@@ -407,28 +407,27 @@ impl<'a> Parser<'a> {
 
         // Excel error literals are case-insensitive and start with `#`.
         //
-        // We accept the canonical 14-error set (including newer Excel error codes) for parity
-        // with the main parser. Error codes the bytecode engine does not model are lowered as
-        // `#VALUE!`, but unknown `#...` sequences are rejected.
-        const ERROR_LITERALS: &[&str] = &[
-            "#NULL!",
-            "#DIV/0!",
-            "#VALUE!",
-            "#REF!",
-            "#NAME?",
-            "#NUM!",
-            "#N/A",
-            "#GETTING_DATA",
-            "#SPILL!",
-            "#CALC!",
-            "#FIELD!",
-            "#CONNECT!",
-            "#BLOCKED!",
-            "#UNKNOWN!",
+        // We accept the canonical 14-error set for parity with the main parser.
+        // Unknown `#...` sequences are rejected.
+        const ERROR_LITERALS: &[(&str, ErrorKind)] = &[
+            ("#NULL!", ErrorKind::Null),
+            ("#DIV/0!", ErrorKind::Div0),
+            ("#VALUE!", ErrorKind::Value),
+            ("#REF!", ErrorKind::Ref),
+            ("#NAME?", ErrorKind::Name),
+            ("#NUM!", ErrorKind::Num),
+            ("#N/A", ErrorKind::NA),
+            ("#GETTING_DATA", ErrorKind::GettingData),
+            ("#SPILL!", ErrorKind::Spill),
+            ("#CALC!", ErrorKind::Calc),
+            ("#FIELD!", ErrorKind::Field),
+            ("#CONNECT!", ErrorKind::Connect),
+            ("#BLOCKED!", ErrorKind::Blocked),
+            ("#UNKNOWN!", ErrorKind::Unknown),
         ];
 
-        let mut best: Option<usize> = None;
-        for &lit in ERROR_LITERALS {
+        let mut best: Option<(usize, ErrorKind)> = None;
+        for &(lit, kind) in ERROR_LITERALS {
             let lit_bytes = lit.as_bytes();
             if remaining.len() < lit_bytes.len() {
                 continue;
@@ -438,18 +437,20 @@ impl<'a> Parser<'a> {
                 .zip(lit_bytes.iter())
                 .all(|(a, b)| a.to_ascii_uppercase() == b.to_ascii_uppercase());
             if matches {
-                best = Some(best.map_or(lit_bytes.len(), |cur| cur.max(lit_bytes.len())));
+                best = Some(match best {
+                    Some((cur_len, cur_kind)) if cur_len >= lit_bytes.len() => {
+                        (cur_len, cur_kind)
+                    }
+                    _ => (lit_bytes.len(), kind),
+                });
             }
         }
 
-        let Some(len) = best else {
+        let Some((len, kind)) = best else {
             return Err(ParseError::UnexpectedToken(start));
         };
 
         self.pos = start + len;
-        let raw = std::str::from_utf8(&self.input[start..self.pos])
-            .map_err(|_| ParseError::UnexpectedToken(start))?;
-        let kind = ErrorKind::from_code(raw).unwrap_or(ErrorKind::Value);
         Ok(Expr::Literal(Value::Error(kind)))
     }
 

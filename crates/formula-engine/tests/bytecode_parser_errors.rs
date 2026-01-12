@@ -59,3 +59,21 @@ fn rejects_unknown_error_literals() {
         Err(ParseError::UnexpectedToken(1))
     );
 }
+
+#[test]
+fn parses_error_literals_case_insensitively() {
+    let origin = CellCoord::new(0, 0);
+
+    assert_eq!(
+        parse_formula("=#dIv/0!", origin).unwrap(),
+        Expr::Literal(Value::Error(ErrorKind::Div0))
+    );
+    assert_eq!(
+        parse_formula("=#gEtTiNg_dAtA", origin).unwrap(),
+        Expr::Literal(Value::Error(ErrorKind::GettingData))
+    );
+    assert_eq!(
+        parse_formula("=#sPiLl!", origin).unwrap(),
+        Expr::Literal(Value::Error(ErrorKind::Spill))
+    );
+}
