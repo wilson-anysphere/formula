@@ -619,22 +619,29 @@ test.describe("sheet tabs", () => {
 
     // Sheet1 -> Sheet3 (Sheet2 is hidden).
     await page.evaluate(() => {
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid");
+      grid.focus();
       const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
-      window.dispatchEvent(evt);
+      grid.dispatchEvent(evt);
     });
     await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveAttribute("data-active", "true");
 
     // Wrap Sheet3 -> Sheet1.
     await page.evaluate(() => {
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid");
       const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
-      window.dispatchEvent(evt);
+      grid.dispatchEvent(evt);
     });
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
 
     // Ctrl+PgUp should follow visible sheets as well (wrap Sheet1 -> Sheet3).
     await page.evaluate(() => {
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid");
       const evt = new KeyboardEvent("keydown", { key: "PageUp", ctrlKey: true, bubbles: true, cancelable: true });
-      window.dispatchEvent(evt);
+      grid.dispatchEvent(evt);
     });
     await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveAttribute("data-active", "true");
   });
