@@ -163,8 +163,24 @@ async function ensureBuilt({ repoRoot, binPath }) {
         RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
         RUSTC_WORKSPACE_WRAPPER: process.env.RUSTC_WORKSPACE_WRAPPER ?? "",
       };
+
+      let useCargoAgent = false;
+      const cargoAgentPath = path.join(repoRoot, "scripts", "cargo_agent.sh");
+      if (process.platform !== "win32") {
+        try {
+          await access(cargoAgentPath);
+          useCargoAgent = true;
+        } catch {
+          useCargoAgent = false;
+        }
+      }
+
+      const buildCommand = useCargoAgent ? "bash" : "cargo";
+      const buildArgs = useCargoAgent
+        ? [cargoAgentPath, "build", "-q", "-p", "formula-vba-oracle-cli"]
+        : ["build", "-q", "-p", "formula-vba-oracle-cli"];
       try {
-        await execFileAsync("cargo", ["build", "-q", "-p", "formula-vba-oracle-cli"], { cwd: repoRoot, env: baseEnv });
+        await execFileAsync(buildCommand, buildArgs, { cwd: repoRoot, env: baseEnv });
       } catch (err) {
         // Some sandbox environments have flaky sccache daemons; retry once with sccache
         // disabled to keep tests deterministic.
@@ -187,7 +203,7 @@ async function ensureBuilt({ repoRoot, binPath }) {
           CARGO_BUILD_RUSTC_WRAPPER: "",
           CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER: "",
         };
-        await execFileAsync("cargo", ["build", "-q", "-p", "formula-vba-oracle-cli"], { cwd: repoRoot, env: noSccacheEnv });
+        await execFileAsync(buildCommand, buildArgs, { cwd: repoRoot, env: noSccacheEnv });
       }
     }
   })();

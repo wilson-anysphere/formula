@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -71,15 +72,24 @@ function isCatalogVolatility(value) {
 const jobs = process.env.FORMULA_CARGO_JOBS ?? process.env.CARGO_BUILD_JOBS ?? "4";
 const rayonThreads = process.env.RAYON_NUM_THREADS ?? process.env.FORMULA_RAYON_NUM_THREADS ?? jobs;
 
-const raw = await run("cargo", [
-  "run",
-  "--quiet",
-  "--locked",
-  "-p",
-  "formula-engine",
-  "--bin",
-  "function_catalog",
-], {
+const cargoAgentPath = path.join(repoRoot, "scripts", "cargo_agent.sh");
+const useCargoAgent = process.platform !== "win32" && existsSync(cargoAgentPath);
+
+const cargoCommand = useCargoAgent ? "bash" : "cargo";
+const cargoArgs = useCargoAgent
+  ? [
+      cargoAgentPath,
+      "run",
+      "--quiet",
+      "--locked",
+      "-p",
+      "formula-engine",
+      "--bin",
+      "function_catalog",
+    ]
+  : ["run", "--quiet", "--locked", "-p", "formula-engine", "--bin", "function_catalog"];
+
+const raw = await run(cargoCommand, cargoArgs, {
   env: {
     ...process.env,
     CARGO_HOME: cargoHome,
