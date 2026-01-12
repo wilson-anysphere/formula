@@ -112,6 +112,7 @@ export function SheetTabStrip({
   const renameInputRef = useRef<HTMLInputElement>(null!);
   const renameCommitRef = useRef<Promise<boolean> | null>(null);
   const [canScroll, setCanScroll] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
+  const tabColorPickerRef = useRef<HTMLInputElement | null>(null);
 
   const lastContextMenuFocusRef = useRef<HTMLElement | null>(null);
   const tabContextMenu = useMemo(
@@ -134,6 +135,21 @@ export function SheetTabStrip({
       tabContextMenu.close();
     };
   }, [tabContextMenu]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const input = document.createElement("input");
+    input.type = "color";
+    input.tabIndex = -1;
+    // Match `main.ts`'s hidden color pickers (see styles/shell.css).
+    input.className = "hidden-color-input shell-hidden-input";
+    document.body.appendChild(input);
+    tabColorPickerRef.current = input;
+    return () => {
+      tabColorPickerRef.current = null;
+      input.remove();
+    };
+  }, []);
 
   const stopAutoScroll = () => {
     const raf = autoScrollRef.current.raf;
@@ -473,6 +489,41 @@ export function SheetTabStrip({
               },
             };
           }),
+          { type: "separator" },
+          {
+            type: "item",
+            label: "More Colors…",
+            onSelect: () => {
+              const input = tabColorPickerRef.current;
+              if (!input) return;
+
+              // Best-effort: use current color as the initial value when it's a #RRGGBB hex string.
+              const currentCss = normalizeExcelColorToCss(sheet.tabColor?.rgb);
+              const initialValue = /^#[0-9a-fA-F]{6}$/.test(String(currentCss ?? ""))
+                ? String(currentCss).toLowerCase()
+                : "#000000";
+              input.value = initialValue;
+
+              // Preserve the current focus target so keyboard users return where they started.
+              const restore = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+              // Avoid `addEventListener({ once: true })`: `<input type="color">` does not emit
+              // a `change` event on cancel. Assigning `onchange` ensures we do not accumulate
+              // listeners across cancels.
+              input.onchange = () => {
+                input.onchange = null;
+                try {
+                  store.setTabColor(sheet.id, { rgb: input.value });
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : String(err);
+                  onError?.(message);
+                }
+                if (restore?.isConnected) restore.focus({ preventScroll: true });
+              };
+
+              input.click();
+            },
+          },
         ],
       },
     ];

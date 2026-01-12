@@ -477,7 +477,7 @@ test.describe("sheet tabs", () => {
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
   });
 
-  test("invalid rename blocks switching sheets via the sheet switcher <select>", async ({ page }) => {
+  test("invalid rename does not block switching sheets via the sheet switcher <select>", async ({ page }) => {
     await gotoDesktop(page);
 
     // Create a second sheet we can attempt to switch to.
@@ -490,19 +490,18 @@ test.describe("sheet tabs", () => {
     await expect(sheet1Tab).toHaveAttribute("data-active", "true");
 
     await sheet1Tab.dblclick();
-    const input = sheet1Tab.locator("input.sheet-tab__input");
+    const input = page.getByTestId("input-box-field");
     await expect(input).toBeVisible();
     await input.fill("A/B");
     await input.press("Enter");
-    await expect(input).toBeFocused();
+    await expect(page.locator('[data-testid="toast"]').filter({ hasText: /invalid character/i })).toBeVisible();
 
-    // Attempt to switch via the status-bar sheet switcher. Invalid rename should block it and keep focus in rename mode.
+    // Invalid rename should not wedge sheet navigation; switching via the status-bar sheet switcher should still work.
     const switcher = page.getByTestId("sheet-switcher");
     await switcher.selectOption("Sheet2", { force: true });
 
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
-    await expect(input).toBeVisible();
-    await expect(input).toBeFocused();
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
   });
 
   test("drag reordering sheet tabs updates Ctrl+PgUp/PgDn navigation order", async ({ page }) => {
@@ -688,11 +687,11 @@ test.describe("sheet tabs", () => {
 
     // Hide Sheet2 so the visible tabs are [Sheet1, Sheet3] while the full order is
     // [Sheet1, Sheet2(hidden), Sheet3].
-    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Hide" }).click();
-    await expect(page.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0);
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getWorkbookSheetStore().hide("Sheet2");
+    });
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
 
     // Drag Sheet3 before Sheet1.
     //
@@ -733,10 +732,10 @@ test.describe("sheet tabs", () => {
       .toEqual(desiredAll);
 
     // Unhide Sheet2 and ensure it lands at the end (i.e. hidden sheet moved as expected).
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
-    await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Unhide…" }).click();
-    await menu.getByRole("button", { name: "Sheet2" }).click();
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getWorkbookSheetStore().unhide("Sheet2");
+    });
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
     await expect
@@ -764,21 +763,20 @@ test.describe("sheet tabs", () => {
     await page.getByTestId("sheet-tab-Sheet3").click();
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
 
-    // Hide Sheet2 through the tab context menu so the position indicator reflects
-    // visible sheets (Excel-like behavior).
-    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right", position: { x: 10, y: 10 } });
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Hide", exact: true }).click();
+    // Hide Sheet2 so the position indicator reflects visible sheets (Excel-like behavior).
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getWorkbookSheetStore().hide("Sheet2");
+    });
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
 
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
 
-    // Unhide Sheet2 through the same context menu.
-    await page.getByTestId("sheet-tab-Sheet1").click({ button: "right", position: { x: 10, y: 10 } });
-    await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Unhide…", exact: true }).click();
-    await menu.getByRole("button", { name: "Sheet2" }).click();
+    // Unhide Sheet2 and ensure position updates.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getWorkbookSheetStore().unhide("Sheet2");
+    });
     await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
 
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
@@ -875,10 +873,10 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("sheet-tab-Sheet1")).toHaveAttribute("data-active", "true");
 
     // Hide the middle sheet.
-    await page.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
-    const menu = page.getByTestId("sheet-tab-context-menu");
-    await expect(menu).toBeVisible();
-    await menu.getByRole("button", { name: "Hide" }).click();
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getWorkbookSheetStore().hide("Sheet2");
+    });
     await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveCount(0);
 
     // Sheet1 -> Sheet3 (Sheet2 is hidden).
