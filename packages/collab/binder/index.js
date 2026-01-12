@@ -366,7 +366,9 @@ function sameNormalizedCell(a, b) {
  * - Layered formatting defaults: `defaultFormat`, `rowFormats`, `colFormats` (sheet/row/col styles)
  * - Range-run formatting: `formatRunsByCol` (compressed rectangular formatting; used for large ranges)
  *
- * It does **not** currently implement full sheet list semantics (create/delete/rename/reorder).
+ * It does **not** currently implement:
+ * - full sheet list semantics (create/delete/rename/reorder), or
+ * - per-sheet metadata syncing (e.g. `visibility`, `tabColor`)
  *
  * @param {{
  *   ydoc: import("yjs").Doc,
