@@ -21,6 +21,8 @@
         "clipboard_write",
         "read_clipboard",
         "write_clipboard",
+        "clipboard_read",
+        "clipboard_write",
         "power_query_cache_key_get_or_create",
         "power_query_credential_get",
         "power_query_credential_set",
