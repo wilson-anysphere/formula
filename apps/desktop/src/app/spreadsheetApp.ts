@@ -1977,25 +1977,24 @@ export class SpreadsheetApp {
       nextRows.set(row, size);
     }
 
-    const allCols = new Set<number>();
-    for (const col of this.sharedGridAxisCols) allCols.add(col);
-    for (const col of nextCols.keys()) allCols.add(col);
-    for (const col of allCols) {
-      const base = nextCols.get(col);
-      const gridCol = col + headerCols;
-      if (base === undefined) this.sharedGrid.renderer.resetColWidth(gridCol);
-      else this.sharedGrid.renderer.setColWidth(gridCol, base * zoom);
+    // Batch apply to avoid N-per-index invalidation + worst-case O(n^2) `VariableSizeAxis` updates.
+    const colSizes = new Map<number, number>();
+    for (let i = 0; i < headerCols; i += 1) {
+      colSizes.set(i, this.sharedGrid.renderer.getColWidth(i));
+    }
+    for (const [col, base] of nextCols) {
+      colSizes.set(col + headerCols, base * zoom);
     }
 
-    const allRows = new Set<number>();
-    for (const row of this.sharedGridAxisRows) allRows.add(row);
-    for (const row of nextRows.keys()) allRows.add(row);
-    for (const row of allRows) {
-      const base = nextRows.get(row);
-      const gridRow = row + headerRows;
-      if (base === undefined) this.sharedGrid.renderer.resetRowHeight(gridRow);
-      else this.sharedGrid.renderer.setRowHeight(gridRow, base * zoom);
+    const rowSizes = new Map<number, number>();
+    for (let i = 0; i < headerRows; i += 1) {
+      rowSizes.set(i, this.sharedGrid.renderer.getRowHeight(i));
     }
+    for (const [row, base] of nextRows) {
+      rowSizes.set(row + headerRows, base * zoom);
+    }
+
+    this.sharedGrid.renderer.applyAxisSizeOverrides({ rows: rowSizes, cols: colSizes }, { resetUnspecified: true });
 
     this.sharedGridAxisCols.clear();
     for (const col of nextCols.keys()) this.sharedGridAxisCols.add(col);

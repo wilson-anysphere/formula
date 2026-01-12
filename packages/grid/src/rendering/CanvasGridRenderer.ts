@@ -1070,6 +1070,89 @@ export class CanvasGridRenderer {
   }
 
   /**
+   * Apply many row/column size overrides in one batch, triggering at most one full invalidation.
+   *
+   * Sizes are specified in CSS pixels at the current zoom.
+   *
+   * When `resetUnspecified` is set, any existing overrides for the provided axes that are *not*
+   * present in the new maps are cleared.
+   *
+   * Notes:
+   * - Indices are applied in ascending order to keep `VariableSizeAxis` updates predictable.
+   * - Scroll clamping + device-pixel alignment happen once at the end.
+   */
+  applyAxisSizeOverrides(
+    overrides: { rows?: ReadonlyMap<number, number>; cols?: ReadonlyMap<number, number> },
+    options?: { resetUnspecified?: boolean }
+  ): void {
+    const rows = overrides.rows;
+    const cols = overrides.cols;
+    const resetUnspecified = options?.resetUnspecified ?? false;
+    const zoom = this.zoom;
+    let changed = false;
+
+    const applyAxis = (axis: "rows" | "cols") => {
+      const sizes = axis === "rows" ? rows : cols;
+      if (!sizes) return;
+
+      const baseOverrides = axis === "rows" ? this.rowHeightOverridesBase : this.colWidthOverridesBase;
+      const variableAxis = axis === "rows" ? this.scroll.rows : this.scroll.cols;
+      const assertIndex = axis === "rows" ? (idx: number) => this.assertRowIndex(idx) : (idx: number) => this.assertColIndex(idx);
+
+      if (resetUnspecified) {
+        // Delete in descending order so `VariableSizeAxis.deleteSize()` work stays near O(n).
+        const toDelete: number[] = [];
+        for (const existing of baseOverrides.keys()) {
+          if (!sizes.has(existing)) toDelete.push(existing);
+        }
+        toDelete.sort((a, b) => b - a);
+        for (const idx of toDelete) {
+          baseOverrides.delete(idx);
+          variableAxis.deleteSize(idx);
+          changed = true;
+        }
+      }
+
+      const indices = Array.from(sizes.keys()).sort((a, b) => a - b);
+      const defaultSize = variableAxis.defaultSize;
+      for (const idx of indices) {
+        assertIndex(idx);
+        const size = sizes.get(idx);
+        if (size === undefined) continue;
+        if (!Number.isFinite(size) || size <= 0) {
+          throw new Error(`${axis} size must be a positive finite number, got ${size} for index ${idx}`);
+        }
+
+        const isDefault = Math.abs(size - defaultSize) < 1e-6;
+        if (isDefault) {
+          if (baseOverrides.has(idx) || variableAxis.getSize(idx) !== defaultSize) {
+            baseOverrides.delete(idx);
+            variableAxis.deleteSize(idx);
+            changed = true;
+          }
+          continue;
+        }
+
+        const baseSize = size / zoom;
+        const prevBase = baseOverrides.get(idx);
+        const prevSize = variableAxis.getSize(idx);
+        if (prevBase === baseSize && prevSize === size) continue;
+
+        baseOverrides.set(idx, baseSize);
+        variableAxis.setSize(idx, size);
+        changed = true;
+      }
+    };
+
+    applyAxis("cols");
+    applyAxis("rows");
+
+    if (changed) {
+      this.onAxisSizeChanged();
+    }
+  }
+
+  /**
    * Auto-fit a column based on the widest visible cell text in the current viewport.
    *
    * Note: This intentionally only scans a bounded viewport window (visible range + small overscan)
