@@ -38,6 +38,11 @@ export function SheetTabStrip({
   onError,
 }: Props) {
   const [sheets, setSheets] = useState<SheetMeta[]>(() => store.listAll());
+  const activeSheetIdRef = useRef(activeSheetId);
+
+  useEffect(() => {
+    activeSheetIdRef.current = activeSheetId;
+  }, [activeSheetId]);
 
   useEffect(() => {
     setSheets(store.listAll());
@@ -237,7 +242,7 @@ export function SheetTabStrip({
       return;
     }
 
-    if (sheet.id === activeSheetId) {
+    if (sheet.id === activeSheetIdRef.current) {
       const next = store.listVisible().at(0)?.id ?? store.listAll().at(0)?.id ?? null;
       if (next && next !== sheet.id) {
         onActivateSheet(next);
@@ -245,7 +250,7 @@ export function SheetTabStrip({
     } else {
       // If we deleted a non-active sheet, re-focus the current sheet surface so the
       // user doesn't lose keyboard focus (especially after keyboard-invoked deletes).
-      onActivateSheet(activeSheetId);
+      onActivateSheet(activeSheetIdRef.current);
     }
 
     try {
