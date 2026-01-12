@@ -3,6 +3,7 @@ export { mountRibbon } from "./mountRibbon.js";
 export { defaultRibbonSchema } from "./ribbonSchema.js";
 export type {
   RibbonActions,
+  RibbonMenuItemDefinition,
   RibbonSchema,
   RibbonTabDefinition,
   RibbonGroupDefinition,
@@ -10,4 +11,3 @@ export type {
   RibbonButtonKind,
   RibbonButtonSize,
 } from "./ribbonSchema.js";
-
