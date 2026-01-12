@@ -236,6 +236,69 @@ describe("updaterUi (dialog + download)", () => {
     registerAppQuitHandlers(null);
   });
 
+  it("closes the update dialog after a successful restart-to-install flow", async () => {
+    const handlers = new Map<string, (event: any) => void>();
+    const listen = vi.fn(async (eventName: string, handler: (event: any) => void) => {
+      handlers.set(eventName, handler);
+      return () => handlers.delete(eventName);
+    });
+
+    const download = vi.fn(async (onProgress?: any) => {
+      onProgress?.({ downloaded: 100, total: 100 });
+    });
+
+    const install = vi.fn(async () => {});
+    const check = vi.fn(async () => ({
+      version: "1.2.3",
+      body: "notes",
+      download,
+      install,
+    }));
+
+    vi.stubGlobal("__TAURI__", {
+      event: { listen },
+      updater: { check },
+    });
+
+    const { installUpdaterUi } = await import("../updaterUi");
+    await installUpdaterUi();
+
+    handlers.get("update-available")?.({ payload: { source: "manual", version: "1.2.3", body: "notes" } });
+    await flushMicrotasks();
+
+    const dialog = document.querySelector<HTMLDialogElement>('[data-testid="updater-dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.getAttribute("open") === "" || dialog?.open === true).toBe(true);
+
+    const downloadBtn = document.querySelector<HTMLButtonElement>('[data-testid="updater-download"]');
+    expect(downloadBtn).not.toBeNull();
+    downloadBtn?.click();
+
+    await flushMicrotasks(8);
+    expect(download).toHaveBeenCalledTimes(1);
+
+    const restartBtn = document.querySelector<HTMLButtonElement>('[data-testid="updater-restart"]');
+    expect(restartBtn).not.toBeNull();
+
+    const { registerAppQuitHandlers } = await import("../appQuit");
+    const restartApp = vi.fn().mockResolvedValue(undefined);
+    registerAppQuitHandlers({
+      isDirty: () => false,
+      drainBackendSync: vi.fn().mockResolvedValue(undefined),
+      quitApp: vi.fn().mockResolvedValue(undefined),
+      restartApp,
+    });
+
+    restartBtn?.click();
+    await flushMicrotasks(8);
+
+    expect(install).toHaveBeenCalledTimes(1);
+    expect(restartApp).toHaveBeenCalledTimes(1);
+    expect(dialog?.getAttribute("open") === "" || dialog?.open === true).toBe(false);
+
+    registerAppQuitHandlers(null);
+  });
+
   it("promotes 'Download manually' when the update download fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
