@@ -1032,11 +1032,11 @@ fn parse_rich_value_parts_image_pointers(
             continue;
         };
         let xml = std::str::from_utf8(bytes).map_err(|source| RichDataError::XmlNonUtf8 {
-            part: (*part_name).to_string(),
+            part: part_name.to_string(),
             source,
         })?;
         let doc = roxmltree::Document::parse(xml).map_err(|source| RichDataError::XmlParse {
-            part: (*part_name).to_string(),
+            part: part_name.to_string(),
             source,
         })?;
 
@@ -1050,7 +1050,7 @@ fn parse_rich_value_parts_image_pointers(
                 out.insert(
                     global_idx,
                     RichValueImagePointer::DirectRelId {
-                        source_part: (*part_name).to_string(),
+                        source_part: part_name.to_string(),
                         rel_id,
                     },
                 );
