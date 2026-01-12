@@ -51,11 +51,25 @@ function hashStringToUInt32(value: string): number {
   return hash >>> 0;
 }
 
+function toHexByte(value: number): string {
+  const clamped = Math.max(0, Math.min(255, Math.round(value)));
+  return clamped.toString(16).padStart(2, "0");
+}
+
+function fallbackColorFromId(id: string): string {
+  // When CSS tokens are unavailable (e.g. node-only unit tests), produce a stable
+  // 6-digit hex color without embedding literal hex values in the source.
+  const hash = hashStringToUInt32(id);
+  // Keep colors away from pure black/white so they remain visible on common backgrounds.
+  const channel = (offset: number) => 64 + ((hash >> offset) & 0x7f);
+  const r = channel(0);
+  const g = channel(7);
+  const b = channel(14);
+  return `#${toHexByte(r)}${toHexByte(g)}${toHexByte(b)}`;
+}
+
 function colorFromId(id: string): string {
-  // The identity color is persisted and reused across sessions, so prefer a stable
-  // 6-digit hex fallback when theme CSS tokens are unavailable (e.g. unit tests).
-  // Keep fallback as concatenation so `test/noHardcodedColors.test.js` doesn't flag it.
-  const fallback = resolveCssVar("--formula-grid-remote-presence-default", { fallback: "#" + "0066cc" });
+  const fallback = resolveCssVar("--formula-grid-remote-presence-default", { fallback: fallbackColorFromId(id) });
   if (COLOR_TOKEN_PALETTE.length === 0) return fallback;
   const idx = hashStringToUInt32(id) % COLOR_TOKEN_PALETTE.length;
   const token = COLOR_TOKEN_PALETTE[idx]!;
