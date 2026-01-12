@@ -3,11 +3,14 @@ import assert from "node:assert/strict";
 
 import { DocumentController } from "../documentController.js";
 
+const EXCEL_MAX_COL = 16_384 - 1;
+
 test("setRangeFormat uses compressed range runs for huge rectangles without materializing cells", () => {
   const doc = new DocumentController();
 
   // 26 columns * 1,000,000 rows = 26,000,000 cells. This must not enumerate per cell.
   doc.setRangeFormat("Sheet1", "A1:Z1000000", { font: { bold: true } });
+  const boldStyleId = doc.styleTable.intern({ font: { bold: true } });
 
   const sheet = doc.model.sheets.get("Sheet1");
   assert.ok(sheet);
@@ -17,6 +20,14 @@ test("setRangeFormat uses compressed range runs for huge rectangles without mate
 
   // Range runs should be stored per-column.
   assert.equal(sheet.formatRunsByCol.size, 26);
+  for (let col = 0; col < 26; col += 1) {
+    const runs = sheet.formatRunsByCol.get(col);
+    assert.ok(Array.isArray(runs));
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].startRow, 0);
+    assert.equal(runs[0].endRowExclusive, 1_000_000);
+    assert.equal(runs[0].styleId, boldStyleId);
+  }
 
   // Effective formatting should apply to empty cells inside the rectangle.
   const inside = doc.getCellFormat("Sheet1", "A1");
@@ -34,6 +45,9 @@ test("setRangeFormat uses compressed range runs for huge rectangles without mate
   assert.equal(idsInside.length, 5);
   assert.equal(idsInside[3], 0); // cell layer remains empty
   assert.equal(idsInside[4], 1); // range-run layer contributes bold
+
+  // Default used range ignores format-only regions.
+  assert.equal(doc.getUsedRange("Sheet1"), null);
 
   // includeFormat used range should incorporate range-run formatting (without cell materialization).
   assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
@@ -76,11 +90,17 @@ test("range-run formatting is undoable + redoable", () => {
   const doc = new DocumentController();
   doc.setRangeFormat("Sheet1", "A1:Z1000000", { font: { bold: true } });
 
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.formatRunsByCol.size, 26);
+
   assert.equal(doc.getCellFormat("Sheet1", "A1").font?.bold, true);
   doc.undo();
   assert.equal(doc.getCellFormat("Sheet1", "A1").font?.bold, undefined);
+  assert.equal(sheet.formatRunsByCol.size, 0);
   doc.redo();
   assert.equal(doc.getCellFormat("Sheet1", "A1").font?.bold, true);
+  assert.equal(sheet.formatRunsByCol.size, 26);
 });
 
 test("encodeState/applyState roundtrip preserves range-run formatting", () => {
@@ -88,6 +108,21 @@ test("encodeState/applyState roundtrip preserves range-run formatting", () => {
   doc.setRangeFormat("Sheet1", "A1:Z1000000", { font: { bold: true } });
 
   const snapshot = doc.encodeState();
+  const decoded =
+    typeof TextDecoder !== "undefined"
+      ? new TextDecoder().decode(snapshot)
+      : // eslint-disable-next-line no-undef
+        Buffer.from(snapshot).toString("utf8");
+  const parsed = JSON.parse(decoded);
+  const sheetJson = parsed.sheets.find((s) => s.id === "Sheet1");
+  assert.ok(sheetJson);
+  assert.ok(Array.isArray(sheetJson.formatRunsByCol));
+  assert.equal(sheetJson.formatRunsByCol.length, 26);
+  assert.deepEqual(sheetJson.formatRunsByCol[0], {
+    col: 0,
+    runs: [{ startRow: 0, endRowExclusive: 1_000_000, format: { font: { bold: true } } }],
+  });
+
   const restored = new DocumentController();
   restored.applyState(snapshot);
 
@@ -95,4 +130,28 @@ test("encodeState/applyState roundtrip preserves range-run formatting", () => {
   const sheet = restored.model.sheets.get("Sheet1");
   assert.ok(sheet);
   assert.equal(sheet.formatRunsByCol.size, 26);
+});
+
+test("range-run formatting can be overridden by later full-width row formatting (row formatting patches runs)", () => {
+  const doc = new DocumentController();
+
+  // Seed a range-run format in A1:A60000 (exceeds range-run threshold so we don't enumerate cells).
+  doc.setRangeFormat("Sheet1", "A1:A60000", { fill: { fgColor: "red" } });
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 0);
+  assert.equal(sheet.formatRunsByCol.size, 1);
+
+  assert.equal(doc.getCellFormat("Sheet1", "A2").fill?.fgColor, "red");
+
+  // Apply a full-width row format to row 2 (0-based row=1) that conflicts with the run.
+  doc.setRangeFormat(
+    "Sheet1",
+    { start: { row: 1, col: 0 }, end: { row: 1, col: EXCEL_MAX_COL } },
+    { fill: { fgColor: "blue" } },
+  );
+
+  assert.equal(doc.getCellFormat("Sheet1", "A1").fill?.fgColor, "red");
+  assert.equal(doc.getCellFormat("Sheet1", "A2").fill?.fgColor, "blue");
+  assert.equal(doc.getCellFormat("Sheet1", "A3").fill?.fgColor, "red");
 });
