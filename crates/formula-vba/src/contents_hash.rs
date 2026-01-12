@@ -1103,6 +1103,17 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 out.extend_from_slice(data);
             }
 
+            // REFERENCENAME (Unicode / reserved marker record)
+            //
+            // In spec-compliant `VBA/dir` streams, REFERENCENAME is followed by a Reserved marker
+            // (0x003E) and the Unicode (UTF-16LE) form. When present, it appears as a standalone
+            // record (id=0x003E) whose payload is the Unicode bytes.
+            //
+            // We include the raw payload bytes to preserve stored order and to avoid decoding.
+            0x003E => {
+                out.extend_from_slice(data);
+            }
+
             // REFERENCEREGISTERED
             0x000D => {
                 out.extend_from_slice(data);
@@ -1361,9 +1372,19 @@ fn normalize_reference_original(data: &[u8]) -> Result<Vec<u8>, ParseError> {
     //
     // REFERENCEORIGINAL (0x0033) stores a u32-len-prefixed libid (LibidOriginal). The normalization
     // includes the libid bytes and stops at the first NUL byte.
-    let mut cur = data;
-    let libid_original = read_u32_len_prefixed_bytes(&mut cur)?;
-    Ok(copy_until_nul(&libid_original))
+    //
+    // Note: in spec-compliant `VBA/dir` streams, `SizeOfLibidOriginal` is the record's `len` field
+    // (i.e., it is not repeated inside the record payload). Many synthetic fixtures in our test
+    // suite use a simplified TLV-like encoding where the libid is itself u32-len-prefixed inside
+    // the record data. Support both encodings for robustness.
+    if data.len() >= 4 {
+        let len = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+        if 4 + len <= data.len() {
+            return Ok(copy_until_nul(&data[4..4 + len]));
+        }
+    }
+
+    Ok(copy_until_nul(data))
 }
 
 fn read_u32_len_prefixed_bytes<'a>(cur: &mut &'a [u8]) -> Result<Vec<u8>, ParseError> {

@@ -32,6 +32,9 @@ fn v3_content_normalized_data_includes_all_reference_record_types_in_order() {
 
         // REFERENCENAME (0x0016): copied as raw bytes.
         push_record(&mut out, 0x0016, b"RefName");
+        // REFERENCENAMEUNICODE marker / payload (0x003E): copied as raw bytes.
+        // Use UTF-16LE bytes that include NULs to ensure we do not treat this as NUL-terminated.
+        push_record(&mut out, 0x003E, &[b'U', 0x00, b'N', 0x00]);
 
         // REFERENCECONTROL (0x002F): u32-len-prefixed libid + reserved1(u32) + reserved2(u16).
         //
@@ -51,11 +54,10 @@ fn v3_content_normalized_data_includes_all_reference_record_types_in_order() {
         push_record(&mut out, 0x0030, b"EXTENDED");
 
         // REFERENCEORIGINAL (0x0033): u32-len-prefixed libid.
-        let libid_original = b"OrigLib";
-        let mut reference_original = Vec::new();
-        reference_original.extend_from_slice(&(libid_original.len() as u32).to_le_bytes());
-        reference_original.extend_from_slice(libid_original);
-        push_record(&mut out, 0x0033, &reference_original);
+        //
+        // In spec-compliant dir streams, `SizeOfLibidOriginal` is the record header `len`; the
+        // payload is the libid bytes (no u32 length prefix inside the payload).
+        push_record(&mut out, 0x0033, b"OrigLib");
 
         // REFERENCEREGISTERED (0x000D): record bytes are incorporated directly.
         push_record(&mut out, 0x000D, b"{REG}");
@@ -84,12 +86,14 @@ fn v3_content_normalized_data_includes_all_reference_record_types_in_order() {
 
     // Expected output is the concatenation of normalized reference record bytes in on-disk order:
     // - 0x0016: raw payload bytes
+    // - 0x003E: raw payload bytes
     // - 0x002F: TempBuffer = LibidTwiddled || Reserved1 || Reserved2; copy until first 0x00
     // - 0x0030: raw payload bytes
     // - 0x0033: LibidOriginal; copy until first 0x00
     // - 0x000D: raw bytes
     // - 0x000E: TempBuffer = LibidAbsolute || LibidRelative || MajorVersion || MinorVersion; copy until first 0x00
     let expected_name = b"RefName".as_slice();
+    let expected_name_unicode = [b'U', 0x00, b'N', 0x00].as_slice();
     let expected_control = b"ControlLib\x01".as_slice();
     let expected_extended = b"EXTENDED".as_slice();
     let expected_original = b"OrigLib".as_slice();
@@ -97,6 +101,7 @@ fn v3_content_normalized_data_includes_all_reference_record_types_in_order() {
     let expected_project = b"ProjLib\x01".as_slice();
     let expected = [
         expected_name,
+        expected_name_unicode,
         expected_control,
         expected_extended,
         expected_original,
