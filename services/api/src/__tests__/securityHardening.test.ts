@@ -93,6 +93,54 @@ describe("security hardening", () => {
     expect((limited.json() as any).error).toBe("too_many_requests");
   });
 
+  it("rate limits repeated SAML start requests and returns Retry-After", async () => {
+    let limited: any = null;
+    const orgId = "00000000-0000-0000-0000-000000000000";
+    for (let i = 0; i < 50; i++) {
+      const res = await app.inject({
+        method: "GET",
+        url: `/auth/saml/${orgId}/test/start`,
+        remoteAddress: "198.51.100.11"
+      });
+
+      if (res.statusCode === 429) {
+        limited = res;
+        break;
+      }
+    }
+
+    expect(limited).toBeTruthy();
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers["retry-after"]).toBeTypeOf("string");
+    expect(Number(limited.headers["retry-after"])).toBeGreaterThan(0);
+    expect((limited.json() as any).error).toBe("too_many_requests");
+  });
+
+  it("rate limits repeated SAML callback requests and returns Retry-After", async () => {
+    let limited: any = null;
+    const orgId = "00000000-0000-0000-0000-000000000000";
+    for (let i = 0; i < 50; i++) {
+      const res = await app.inject({
+        method: "POST",
+        url: `/auth/saml/${orgId}/test/callback`,
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        remoteAddress: "198.51.100.12",
+        payload: "SAMLResponse=Zm9v"
+      });
+
+      if (res.statusCode === 429) {
+        limited = res;
+        break;
+      }
+    }
+
+    expect(limited).toBeTruthy();
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers["retry-after"]).toBeTypeOf("string");
+    expect(Number(limited.headers["retry-after"])).toBeGreaterThan(0);
+    expect((limited.json() as any).error).toBe("too_many_requests");
+  });
+
   it("sets baseline security headers (and HSTS when cookieSecure=true)", async () => {
     const res = await app.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
