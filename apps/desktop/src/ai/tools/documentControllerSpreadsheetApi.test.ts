@@ -166,6 +166,19 @@ describe("DocumentControllerSpreadsheetApi", () => {
     ]);
   });
 
+  it("does not call exportSheetForSemanticDiff for listNonEmptyCells() or getLastUsedRow()", () => {
+    const controller = new DocumentController();
+    controller.setCellValue("Sheet1", "A1", 1);
+
+    const spy = vi.spyOn(controller, "exportSheetForSemanticDiff");
+
+    const api = new DocumentControllerSpreadsheetApi(controller);
+    api.listNonEmptyCells();
+    api.getLastUsedRow("Sheet1");
+
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it("supports legacy flat CellFormat keys stored in DocumentController styles", () => {
     const controller = new DocumentController();
     // Simulate the pre-fix adapter behavior that wrote ai-tools CellFormat objects directly

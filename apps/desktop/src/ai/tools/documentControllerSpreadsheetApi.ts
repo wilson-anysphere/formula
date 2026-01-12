@@ -276,6 +276,33 @@ function toCellDataFromExportedCell(exportedCell: any): CellData {
   };
 }
 
+function parseControllerCellKey(key: string): { row: number; col: number } {
+  const commaIdx = key.indexOf(",");
+  if (commaIdx === -1) throw new Error(`Invalid cell key: ${key}`);
+  const row = Number(key.slice(0, commaIdx));
+  const col = Number(key.slice(commaIdx + 1));
+  if (!Number.isInteger(row) || row < 0 || !Number.isInteger(col) || col < 0) {
+    throw new Error(`Invalid cell key: ${key}`);
+  }
+  return { row, col };
+}
+
+function toCellDataFromCellState(controller: DocumentController, cellState: any): CellData {
+  const rawFormula = cellState?.formula;
+  const normalizedFormula = normalizeFormula(rawFormula);
+
+  const styleId = typeof cellState?.styleId === "number" ? cellState.styleId : 0;
+  const format = styleId === 0 ? undefined : styleToCellFormat(controller.styleTable.get(styleId));
+
+  const value = normalizedFormula ? null : cloneCellValue(cellState?.value ?? null);
+
+  return {
+    value,
+    ...(normalizedFormula ? { formula: normalizedFormula } : {}),
+    ...(format ? { format } : {})
+  };
+}
+
 /**
  * Adapter that lets `packages/ai-tools` execute tool calls against the real
  * `DocumentController` workbook model (used by the desktop app).
@@ -304,10 +331,11 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
     const sheetIds = sheet ? [sheet] : this.controller.getSheetIds();
     const entries: CellEntry[] = [];
     for (const sheetId of sheetIds) {
-      const exported = this.controller.exportSheetForSemanticDiff(sheetId);
-      for (const [key, exportedCell] of exported.cells?.entries?.() ?? []) {
-        const { row, col } = parseSemanticDiffCellKey(key);
-        const cell = toCellDataFromExportedCell(exportedCell);
+      const sheetModel = this.controller.model.sheets.get(sheetId);
+      if (!sheetModel?.cells) continue;
+      for (const [key, cellState] of sheetModel.cells.entries()) {
+        const { row, col } = parseControllerCellKey(key);
+        const cell = toCellDataFromCellState(this.controller, cellState);
         if (isCellEmpty(cell)) continue;
         entries.push({
           address: { sheet: sheetId, row: row + 1, col: col + 1 },
@@ -482,10 +510,11 @@ export class DocumentControllerSpreadsheetApi implements SpreadsheetApi {
 
   getLastUsedRow(sheet: string): number {
     let max = 0;
-    const exported = this.controller.exportSheetForSemanticDiff(sheet);
-    for (const [key, exportedCell] of exported.cells?.entries?.() ?? []) {
-      const { row } = parseSemanticDiffCellKey(key);
-      const cell = toCellDataFromExportedCell(exportedCell);
+    const sheetModel = this.controller.model.sheets.get(sheet);
+    if (!sheetModel?.cells) return 0;
+    for (const [key, cellState] of sheetModel.cells.entries()) {
+      const { row } = parseControllerCellKey(key);
+      const cell = toCellDataFromCellState(this.controller, cellState);
       if (isCellEmpty(cell)) continue;
       max = Math.max(max, row + 1);
     }
