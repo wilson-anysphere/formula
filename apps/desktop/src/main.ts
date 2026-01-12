@@ -1641,7 +1641,9 @@ window.addEventListener("keydown", (e) => {
       return;
     }
     if (keyLower === "i") {
-      // Cmd+I is reserved for toggling the AI sidebar. Only bind italic to Ctrl+I.
+      // Only handle Ctrl+I here. We intentionally avoid binding Cmd+I in this legacy
+      // formatting handler so the global KeybindingService can own it via builtin
+      // keybindings (and we avoid conflicts with host-level shortcuts).
       if (!e.ctrlKey || e.metaKey) return;
       e.preventDefault();
       applyFormattingToSelection("Italic", (doc, sheetId, ranges) => toggleItalic(doc, sheetId, ranges));
