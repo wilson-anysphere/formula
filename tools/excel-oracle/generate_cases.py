@@ -120,6 +120,10 @@ def _validate_against_function_catalog(payload: dict[str, Any]) -> None:
     The goal of the Excel-oracle corpus is to provide end-to-end coverage for
     all deterministic functions. We intentionally exclude volatile functions
     from the corpus because they cannot be pinned/stably compared.
+
+    Coverage is computed from `case.formula` (the formula under test). Input-cell
+    formulas are allowed (e.g. `=NA()` to seed an error value), but do not count
+    toward function coverage.
     """
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -161,7 +165,8 @@ def _validate_against_function_catalog(payload: dict[str, Any]) -> None:
         preview = ", ".join(missing_nonvolatile[:25])
         suffix = "" if len(missing_nonvolatile) <= 25 else f" (+{len(missing_nonvolatile) - 25} more)"
         raise SystemExit(
-            "Oracle corpus does not cover all deterministic functions in shared/functionCatalog.json. "
+            "Oracle corpus does not cover all deterministic functions in shared/functionCatalog.json "
+            "(coverage is based on case.formula only). "
             f"Missing ({len(missing_nonvolatile)}): {preview}{suffix}"
         )
 
