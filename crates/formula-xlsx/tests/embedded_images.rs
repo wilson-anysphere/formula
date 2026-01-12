@@ -53,6 +53,19 @@ const METADATA_XML_T_ZERO_BASED: &str = r#"<?xml version="1.0" encoding="UTF-8" 
 </metadata>
 "#;
 
+const METADATA_XML_DIRECT_RICH_VALUE_INDEX: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <valueMetadata count="1">
+    <bk>
+      <rc t="1" v="0"/>
+    </bk>
+  </valueMetadata>
+</metadata>
+"#;
+
 const RDRICHVALUE_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
   <rv s="0">
@@ -106,7 +119,7 @@ const RICH_VALUE_REL_RELS_XML_NON_IMAGE: &str = r#"<?xml version="1.0" encoding=
 </Relationships>
 "#;
 
-fn assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(metadata_xml: &str) {
+fn assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(metadata_xml: &str, vm: u32) {
     let png_bytes = STANDARD
         .decode(PNG_1X1_TRANSPARENT_B64)
         .expect("decode png base64");
@@ -123,7 +136,8 @@ fn assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(metadata
     let sheet_part = "xl/worksheets/sheet1.xml";
     let mut sheet_xml = String::from_utf8(pkg.part(sheet_part).unwrap().to_vec()).unwrap();
     assert!(sheet_xml.contains(r#"r="B2""#), "expected B2 cell");
-    sheet_xml = sheet_xml.replacen(r#"r="B2""#, r#"r="B2" vm="1""#, 1);
+    let replacement = format!(r#"r="B2" vm="{vm}""#);
+    sheet_xml = sheet_xml.replacen(r#"r="B2""#, &replacement, 1);
     pkg.set_part(sheet_part, sheet_xml.into_bytes());
 
     // Add the rich value parts + image payload.
@@ -176,14 +190,30 @@ fn assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(metadata
 
 #[test]
 fn extracts_embedded_image_from_cell_vm_metadata_richdata_schema() {
-    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(METADATA_XML);
+    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(METADATA_XML, 1);
 }
 
 #[test]
 fn extracts_embedded_image_with_0_based_metadata_type_index() {
     // Some non-Excel producers have been observed to encode the `metadataTypes` index as 0-based
     // (`t="0"`) rather than Excel's typical 1-based (`t="1"`).
-    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(METADATA_XML_T_ZERO_BASED);
+    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(METADATA_XML_T_ZERO_BASED, 1);
+}
+
+#[test]
+fn extracts_embedded_image_when_metadata_uses_direct_rich_value_index() {
+    // Some producers omit `<futureMetadata name="XLRICHVALUE">` and store the rich value record
+    // index directly in `rc/@v`.
+    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(
+        METADATA_XML_DIRECT_RICH_VALUE_INDEX,
+        1,
+    );
+}
+
+#[test]
+fn extracts_embedded_image_when_cell_vm_is_zero() {
+    // Some workbooks have been observed to use 0-based `vm` indices.
+    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(METADATA_XML, 0);
 }
 
 #[test]

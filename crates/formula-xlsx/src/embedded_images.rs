@@ -470,7 +470,23 @@ fn parse_vm_to_rich_value_index(xml: &[u8]) -> Result<HashMap<u32, u32>, XlsxErr
             continue;
         };
 
-        let rich_value_index = resolve_bk_run(&future_bk_rich_value_index, future_idx).flatten();
+        // In most workbooks, `rc/@v` is an index into the `<futureMetadata name="XLRICHVALUE">`
+        // `<bk>` list and we must dereference `rvb/@i` to get the rich value record index.
+        //
+        // Some producers omit `<futureMetadata name="XLRICHVALUE">` entirely and store the rich
+        // value record index directly in `rc/@v`. If we didn't find any `futureMetadata` rich-value
+        // blocks, treat `rc/@v` as the record index.
+        let rich_value_index = if future_bk_rich_value_index.is_empty() {
+            Some(future_idx)
+        } else {
+            resolve_bk_run(&future_bk_rich_value_index, future_idx)
+                .or_else(|| {
+                    future_idx
+                        .checked_sub(1)
+                        .and_then(|idx| resolve_bk_run(&future_bk_rich_value_index, idx))
+                })
+                .flatten()
+        };
         let Some(rich_value_index) = rich_value_index else {
             vm_idx_1_based = vm_idx_1_based.saturating_add(count);
             continue;
@@ -523,6 +539,27 @@ mod tests {
         assert_eq!(map.get(&1), Some(&5));
         assert_eq!(map.get(&2), Some(&5));
         assert_eq!(map.get(&3), Some(&5));
+    }
+
+    #[test]
+    fn metadata_rc_v_can_store_rich_value_index_directly_when_futuremetadata_missing() {
+        // Some producers omit `<futureMetadata name="XLRICHVALUE">` and store the rich value index
+        // directly in `rc/@v`. Ensure we still build a vm->rich-value mapping in that case.
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <valueMetadata count="1">
+    <bk>
+      <rc t="1" v="7"/>
+    </bk>
+  </valueMetadata>
+</metadata>
+"#;
+
+        let map = parse_vm_to_rich_value_index(xml).expect("parse vm->rich value");
+        assert_eq!(map.get(&1), Some(&7));
     }
 }
 
