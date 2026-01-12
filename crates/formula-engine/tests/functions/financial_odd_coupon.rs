@@ -591,6 +591,12 @@ fn odd_coupon_functions_coerce_basis_like_excel() {
         None => return,
     };
 
+    // Omitting an optional parameter in Excel behaves the same as the default value (basis=0).
+    let omitted_basis = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2)";
+    let omitted_basis_value = eval_number_or_skip(&mut sheet, omitted_basis)
+        .expect("ODDFPRICE should accept omitted basis and default it to 0");
+    assert_close(omitted_basis_value, baseline_basis_0_value, 1e-9);
+
     // Basis passed as a blank cell should behave like basis=0.
     // (A1 is unset/blank by default.)
     let blank_basis = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,A1)";
@@ -635,6 +641,13 @@ fn odd_coupon_functions_coerce_basis_like_excel() {
         Some(v) => v,
         None => return,
     };
+
+    let oddl_omitted_basis =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2)";
+    let oddl_omitted_basis_value = eval_number_or_skip(&mut sheet, oddl_omitted_basis)
+        .expect("ODDLPRICE should accept omitted basis and default it to 0");
+    assert_close(oddl_omitted_basis_value, oddl_baseline_basis_0_value, 1e-9);
+
     let oddl_blank_basis =
         "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,A1)";
     let oddl_blank_basis_value = eval_number_or_skip(&mut sheet, oddl_blank_basis)
@@ -792,6 +805,13 @@ fn odd_coupon_yield_functions_coerce_basis_like_excel() {
         Some(v) => v,
         None => return,
     };
+
+    let oddf_omitted_basis =
+        "=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2))";
+    let oddf_omitted_basis_value = eval_number_or_skip(&mut sheet, oddf_omitted_basis)
+        .expect("ODDFYIELD should accept omitted basis and default it to 0");
+    assert_close(oddf_omitted_basis_value, oddf_baseline_basis_0_value, 1e-9);
+
     let oddf_blank_cell_basis =
         "=LET(pr,ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,0),ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,pr,100,2,A1))";
     let oddf_blank_cell_basis_value = eval_number_or_skip(&mut sheet, oddf_blank_cell_basis)
@@ -837,6 +857,13 @@ fn odd_coupon_yield_functions_coerce_basis_like_excel() {
         "=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,2,0))";
     let oddl_baseline_basis_0_value = eval_number_or_skip(&mut sheet, oddl_baseline_basis_0)
         .expect("ODDLYIELD baseline should evaluate");
+
+    let oddl_omitted_basis =
+        "=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,2))";
+    let oddl_omitted_basis_value = eval_number_or_skip(&mut sheet, oddl_omitted_basis)
+        .expect("ODDLYIELD should accept omitted basis and default it to 0");
+    assert_close(oddl_omitted_basis_value, oddl_baseline_basis_0_value, 1e-9);
+
     let oddl_blank_cell_basis =
         "=LET(pr,ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0),ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,pr,100,2,A1))";
     let oddl_blank_cell_basis_value = eval_number_or_skip(&mut sheet, oddl_blank_cell_basis)
