@@ -133,6 +133,38 @@ fn outer_broadcasting_over_array_literals_spills_2d_arrays() {
 }
 
 #[test]
+fn outer_broadcasting_over_spilled_ranges_spills_2d_arrays() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SEQUENCE(3,1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "C1", "=SEQUENCE(1,4)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A5", "=A1#+C1#")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A5").expect("spill range");
+    assert_eq!(start, parse_a1("A5").unwrap());
+    assert_eq!(end, parse_a1("D7").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A5"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B5"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C5"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D5"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A6"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B6"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C6"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D6"), Value::Number(6.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A7"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "B7"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "C7"), Value::Number(6.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "D7"), Value::Number(7.0));
+}
+
+#[test]
 fn row_broadcasting_preserves_column_count() {
     let mut engine = Engine::new();
     engine
