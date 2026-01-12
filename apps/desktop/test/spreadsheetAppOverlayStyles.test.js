@@ -20,5 +20,22 @@ test("SpreadsheetApp does not assign shared-grid overlay z-index via inline styl
     false,
     "SpreadsheetApp should not assign selection canvas z-index via inline style"
   );
-});
 
+  // Static clipping/layout styles for the chart overlay host should be expressed in CSS
+  // (e.g. charts-overlay.css), not reintroduced via inline style assignments.
+  assert.equal(
+    content.includes("chartLayer.style.overflow"),
+    false,
+    "SpreadsheetApp should not assign chart layer overflow via inline style"
+  );
+  assert.equal(
+    content.includes("chartLayer.style.right"),
+    false,
+    "SpreadsheetApp should not assign chart layer right via inline style"
+  );
+  assert.equal(
+    content.includes("chartLayer.style.bottom"),
+    false,
+    "SpreadsheetApp should not assign chart layer bottom via inline style"
+  );
+});
