@@ -52,8 +52,12 @@ test.describe("command palette shortcut hints", () => {
     await input.fill(" /");
     await expect(page.locator(".command-palette__hint")).toBeVisible();
 
-    // Shortcut mode should only render rows with visible shortcut pills.
-    await expect(page.locator(".command-palette__item-right[hidden]")).toHaveCount(0);
+    // Shortcut mode should only render rows with non-empty shortcut pills.
+    const shortcuts = await page.locator("li.command-palette__item").evaluateAll((els) =>
+      els.map((el) => (el.querySelector(".command-palette__shortcut")?.textContent ?? "").trim()),
+    );
+    expect(shortcuts.length).toBeGreaterThan(0);
+    expect(shortcuts.every((text) => text.length > 0)).toBe(true);
 
     // Shortcut mode should still return matching commands with shortcuts.
     await input.fill("/ copy");
