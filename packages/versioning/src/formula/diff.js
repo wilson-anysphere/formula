@@ -19,6 +19,14 @@ function tokenEquals(a, b, opts) {
   if (opts.normalize && a.type === "ident") {
     return a.value.toUpperCase() === b.value.toUpperCase();
   }
+  // Numeric literals can have multiple textual spellings (1, 1.0, 1e0). When
+  // normalization is enabled, treat numerically-equal values as equal to avoid
+  // diffs that are purely formatting.
+  if (opts.normalize && a.type === "number") {
+    const av = Number(a.value);
+    const bv = Number(b.value);
+    if (!Number.isNaN(av) && !Number.isNaN(bv)) return av === bv;
+  }
   // Excel uses either `,` or `;` as the function argument separator depending
   // on locale settings. Treat these as equivalent when normalization is enabled
   // so diffs don't get noisy across locales.
