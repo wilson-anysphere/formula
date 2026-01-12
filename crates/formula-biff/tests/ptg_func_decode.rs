@@ -1,5 +1,8 @@
-use formula_biff::{decode_rgce, encode_rgce, function_id_to_name, function_spec_from_id};
+use formula_biff::{decode_rgce, function_id_to_name, function_spec_from_id};
 use pretty_assertions::assert_eq;
+
+#[cfg(feature = "encode")]
+use formula_biff::encode_rgce;
 
 fn ptg_int(n: u16) -> [u8; 3] {
     let [lo, hi] = n.to_le_bytes();
@@ -47,6 +50,7 @@ fn decodes_ptgfunc_fixed_arity_functions() {
     assert_eq!(decode_rgce(&round).expect("decode ROUND"), "ROUND(1,2)");
 }
 
+#[cfg(feature = "encode")]
 #[test]
 fn encode_roundtrips_for_new_ptgfunc_functions() {
     // Ensure `function_spec_from_name` consults expanded metadata and that the encoder
