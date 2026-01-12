@@ -120,6 +120,40 @@ fn add_sheet_truncates_base_name_by_utf16_units_to_fit_unique_suffix() {
 }
 
 #[test]
+fn add_sheet_disambiguates_unicode_case_insensitive_duplicate() {
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("é".to_string());
+    workbook.add_sheet("Sheet2".to_string());
+
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    // Excel compares sheet names case-insensitively across Unicode; adding "É" should be treated
+    // as a duplicate of "é" and disambiguated with a suffix.
+    let added = state
+        .add_sheet("É".to_string(), None, None)
+        .expect("expected add_sheet to disambiguate unicode duplicate");
+    assert_eq!(added.name, "É 2");
+}
+
+#[test]
+fn add_sheet_disambiguates_unicode_nfkc_equivalent_duplicate() {
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("fi".to_string());
+    workbook.add_sheet("Sheet2".to_string());
+
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    // The "fi" ligature (U+FB01) NFKC-normalizes to "fi". Adding it should be treated as a
+    // duplicate and disambiguated with a suffix.
+    let added = state
+        .add_sheet("\u{FB01}".to_string(), None, None)
+        .expect("expected add_sheet to disambiguate NFKC-equivalent duplicate");
+    assert_eq!(added.name, "\u{FB01} 2");
+}
+
+#[test]
 fn create_sheet_rejects_invalid_character() {
     let (mut state, _sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
     let err = state
