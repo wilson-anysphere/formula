@@ -38,19 +38,31 @@ export function PrintPreviewDialog({ pdfBytes, filename, autoPrint = false, onDo
   }, []);
 
   const tryPrint = React.useCallback((): boolean => {
-    const win = iframeRef.current?.contentWindow;
-    const fn = (win as any)?.print;
-    if (!win || typeof fn !== "function") return false;
-
     try {
-      win.focus?.();
-    } catch {
-      // ignore focus issues (WebView restrictions)
-    }
+      const win = iframeRef.current?.contentWindow;
+      if (!win) return false;
 
-    try {
-      fn.call(win);
-      return true;
+      // Accessing `print` can throw in some WebView / cross-origin iframe situations.
+      let fn: any = null;
+      try {
+        fn = (win as any)?.print;
+      } catch {
+        return false;
+      }
+      if (typeof fn !== "function") return false;
+
+      try {
+        (win as any).focus?.();
+      } catch {
+        // ignore focus issues (WebView restrictions)
+      }
+
+      try {
+        fn.call(win);
+        return true;
+      } catch {
+        return false;
+      }
     } catch {
       return false;
     }
@@ -111,4 +123,3 @@ export function PrintPreviewDialog({ pdfBytes, filename, autoPrint = false, onDo
     </div>
   );
 }
-
