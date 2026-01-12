@@ -1228,7 +1228,12 @@ function EngineDemoApp() {
         Sheet:
         <select
           value={activeSheet}
-          onChange={(e) => setActiveSheet(e.target.value)}
+          onChange={(e) => {
+            // Treat sheet switching as a navigation action: after the change, restore
+            // focus to the grid so keyboard workflows (F2, typing, arrows) keep working.
+            setActiveSheet(e.target.value);
+            queueMicrotask(() => focusGrid());
+          }}
           style={{ padding: "4px 6px" }}
           disabled={!provider}
         >
