@@ -679,7 +679,13 @@ impl GroupByResult {
                             values.push(Value::Null);
                         } else {
                             let idx = indices[i] as usize;
-                            values.push(Value::String(dictionary[idx].clone()));
+                            values.push(
+                                dictionary
+                                    .get(idx)
+                                    .cloned()
+                                    .map(Value::String)
+                                    .unwrap_or(Value::Null),
+                            );
                         }
                     }
                 }
@@ -734,7 +740,11 @@ impl GroupByResult {
                 if !validity.get(row) {
                     Value::Null
                 } else {
-                    Value::String(dictionary[indices[row] as usize].clone())
+                    dictionary
+                        .get(indices[row] as usize)
+                        .cloned()
+                        .map(Value::String)
+                        .unwrap_or(Value::Null)
                 }
             }
             _ => Value::Null,

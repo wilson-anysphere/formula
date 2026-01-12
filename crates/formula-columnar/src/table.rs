@@ -80,7 +80,8 @@ impl Column {
                 .unwrap_or(Value::Null),
             (EncodedChunk::Dict(c), Some(dict), _) => c
                 .get_index(in_chunk)
-                .map(|idx| Value::String(dict[idx as usize].clone()))
+                .and_then(|idx| dict.get(idx as usize).cloned())
+                .map(Value::String)
                 .unwrap_or(Value::Null),
             _ => Value::Null,
         }
@@ -2318,7 +2319,8 @@ impl MutableDictColumn {
             };
             return c
                 .get_index(in_chunk)
-                .map(|idx| Value::String(self.dictionary[idx as usize].clone()))
+                .and_then(|idx| self.dictionary.get(idx as usize).cloned())
+                .map(Value::String)
                 .unwrap_or(Value::Null);
         }
 

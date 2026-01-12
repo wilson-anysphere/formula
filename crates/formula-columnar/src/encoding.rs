@@ -492,8 +492,8 @@ impl DecodedChunk {
                 if validity.as_ref().is_some_and(|v| !v.get(index)) {
                     return None;
                 }
-                let idx = indices[index] as usize;
-                Some(dictionary[idx].clone())
+                let idx = *indices.get(index)? as usize;
+                dictionary.get(idx).cloned()
             }
             _ => None,
         }
