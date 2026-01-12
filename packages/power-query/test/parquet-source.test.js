@@ -53,6 +53,45 @@ test("parquet query source loads into Arrow and runs transforms without material
   ]);
 });
 
+test("parquet query source supports readBinaryStream for Arrow-backed execution", { skip: !parquetAvailable }, async () => {
+  const parquetPath = path.join(__dirname, "..", "..", "data-io", "test", "fixtures", "simple.parquet");
+
+  const engine = new QueryEngine({
+    fileAdapter: {
+      readBinaryStream: async function* (p) {
+        const bytes = new Uint8Array(await readFile(p));
+        const chunkSize = 128;
+        for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+          yield bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize));
+        }
+      },
+    },
+  });
+
+  const query = {
+    id: "q_parquet_binary_stream",
+    name: "Parquet (binary stream)",
+    source: { type: "parquet", path: parquetPath, options: { batchSize: 2 } },
+    steps: [
+      {
+        id: "s_filter",
+        name: "Active only",
+        operation: { type: "filterRows", predicate: { type: "comparison", column: "active", operator: "equals", value: true } },
+      },
+      { id: "s_select", name: "Select", operation: { type: "selectColumns", columns: ["id", "name", "score"] } },
+      { id: "s_sort", name: "Sort", operation: { type: "sortRows", sortBy: [{ column: "score", direction: "descending" }] } },
+    ],
+  };
+
+  const result = await engine.executeQuery(query, {}, {});
+  assert.ok(result instanceof ArrowTableAdapter);
+  assert.deepEqual(result.toGrid(), [
+    ["id", "name", "score"],
+    [3, "Carla", 3.75],
+    [1, "Alice", 1.5],
+  ]);
+});
+
 test("parquet query source supports executeQueryStreaming", { skip: !parquetAvailable }, async () => {
   const parquetPath = path.join(__dirname, "..", "..", "data-io", "test", "fixtures", "simple.parquet");
 

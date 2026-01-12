@@ -1179,7 +1179,11 @@ export class QueryEngine {
       }
     } else {
       let source = query.source;
-      if (source.type === "parquet" && (this.fileAdapter?.readBinary || this.fileAdapter?.openFile)) {
+      const fileConnector = this.connectors.get("file");
+      if (
+        source.type === "parquet" &&
+        (fileConnector?.openFile || fileConnector?.readBinary || fileConnector?.readBinaryStream)
+      ) {
         const projection = computeParquetProjectionColumns(steps);
         const rowLimit = computeParquetRowLimit(steps, options.limit);
         const nextOptions = projection || rowLimit != null ? { ...(source.options ?? {}) } : null;
@@ -1986,10 +1990,12 @@ export class QueryEngine {
       // 1) `openFile`: avoids reading the entire parquet file into a single `Uint8Array` before
       //    decoding (parquet-wasm can stream from the file/blob handle).
       // 2) `readBinary`: legacy path, still columnar but requires a full file read.
+      // 3) `readBinaryStream`: compatible with adapters that only expose chunked reads (still
+      //    requires buffering the full file to construct a Blob).
       //
-      // Both avoid materializing row arrays and let downstream steps stay columnar.
-      if (source.type === "parquet" && this.fileAdapter?.openFile) {
-        const handle = await this.fileAdapter.openFile(source.path, { signal: options.signal });
+      // All avoid materializing row arrays and let downstream steps stay columnar.
+      if (source.type === "parquet" && connector.openFile) {
+        const handle = await connector.openFile(source.path, { signal: options.signal });
         throwIfAborted(options.signal);
         const { parquetFileToArrowTable } = await loadDataIoModule();
         const arrowTable = await parquetFileToArrowTable(handle, source.options);
@@ -2009,11 +2015,38 @@ export class QueryEngine {
         return { table, meta, sources: [meta] };
       }
 
-      if (source.type === "parquet" && this.fileAdapter?.readBinary) {
-        const bytes = await this.fileAdapter.readBinary(source.path);
+      if (source.type === "parquet" && connector.readBinary) {
+        const bytes = await connector.readBinary(source.path);
         throwIfAborted(options.signal);
         const { parquetToArrowTable } = await loadDataIoModule();
         const arrowTable = await parquetToArrowTable(bytes, source.options);
+        const table = new ArrowTableAdapter(arrowTable);
+        this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? source.path]);
+        const meta = {
+          refreshedAt: new Date(state.now()),
+          sourceTimestamp: sourceState.sourceTimestamp,
+          etag: sourceState.etag,
+          sourceKey,
+          schema: { columns: table.columns, inferred: true },
+          rowCount: table.rowCount,
+          rowCountEstimate: table.rowCount,
+          provenance: { kind: "file", path: source.path, format: "parquet" },
+        };
+        options.onProgress?.({ type: "source:complete", queryId: Array.from(callStack).at(-1) ?? "<unknown>", sourceType: source.type });
+        return { table, meta, sources: [meta] };
+      }
+
+      if (source.type === "parquet" && connector.readBinaryStream) {
+        /** @type {Uint8Array[]} */
+        const chunks = [];
+        for await (const chunk of connector.readBinaryStream(source.path, { signal: options.signal })) {
+          throwIfAborted(options.signal);
+          if (chunk) chunks.push(chunk);
+        }
+        const handle = new Blob(chunks);
+        throwIfAborted(options.signal);
+        const { parquetFileToArrowTable } = await loadDataIoModule();
+        const arrowTable = await parquetFileToArrowTable(handle, source.options);
         const table = new ArrowTableAdapter(arrowTable);
         this.setTableSourceIds(table, [getSourceIdForQuerySource(source) ?? source.path]);
         const meta = {
