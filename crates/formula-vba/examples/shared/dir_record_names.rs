@@ -5,12 +5,15 @@
 /// Notes (seen in the wild):
 /// - Some `VBA/dir` encodings emit Unicode/alternate strings as standalone records whose `data` is
 ///   UTF-16LE bytes (sometimes with an internal `u32le` length prefix).
-/// - The exact record IDs used for these Unicode/alternate records vary by layout; in this repo we
-///   most commonly see:
-///   - Project strings: `0x0040` (docstring Unicode), `0x003D` (helpfilepath2), `0x003C` (constants Unicode)
-///   - Module strings: `0x0047` (modulename Unicode), `0x0032` (modulestreamname Unicode), `0x0048` (moduledocstring Unicode)
-/// - `0x004A` is `PROJECTCOMPATVERSION` (present in many real-world files but excluded from some
-///   hashing transcripts).
+/// - MS-OVBA §2.3.4 defines canonical Unicode record IDs:
+///   - Project strings: `0x0040`..`0x0043`
+///   - Module strings: `0x0047`..`0x0049`
+/// - Some real-world `VBA/dir` streams also use non-canonical IDs (for example `0x0032` for
+///   `MODULESTREAMNAMEUNICODE`, `0x003C` for `PROJECTCONSTANTSUNICODE`, and `0x003D` for
+///   `PROJECTHELPFILEPATH2`). This table includes both the canonical spec IDs and a few observed
+///   variants.
+/// - `0x004A` is `PROJECTCOMPATVERSION` in the spec, but also appears in the wild as a Unicode
+///   module help file path record. We treat it as ambiguous for debugging.
 pub fn record_name(id: u16) -> Option<&'static str> {
     Some(match id {
         // ---- Project information records ----
@@ -18,18 +21,22 @@ pub fn record_name(id: u16) -> Option<&'static str> {
         0x0002 => "PROJECTLCID",
         0x0003 => "PROJECTCODEPAGE",
         0x0004 => "PROJECTNAME",
+        0x0040 => "PROJECTNAMEUNICODE",
         0x0005 => "PROJECTDOCSTRING",
-        0x0040 => "PROJECTDOCSTRINGUNICODE",
+        0x0041 => "PROJECTDOCSTRINGUNICODE",
         0x0006 => "PROJECTHELPFILEPATH",
+        0x0042 => "PROJECTHELPFILEPATHUNICODE",
         0x003D => "PROJECTHELPFILEPATH2",
         0x0007 => "PROJECTHELPCONTEXT",
         0x0008 => "PROJECTLIBFLAGS",
         0x0009 => "PROJECTVERSION",
         0x000C => "PROJECTCONSTANTS",
+        0x0043 => "PROJECTCONSTANTSUNICODE",
+        // Non-canonical/unofficial: observed in some files.
         0x003C => "PROJECTCONSTANTSUNICODE",
         0x0014 => "PROJECTLCIDINVOKE",
-        // Some real-world files include this in the ProjectInformation list.
-        0x004A => "PROJECTCOMPATVERSION",
+        // Spec: PROJECTCOMPATVERSION. Observed: MODULEHELPFILEPATHUNICODE.
+        0x004A => "PROJECTCOMPATVERSION / MODULEHELPFILEPATHUNICODE",
 
         // ---- Reference records ----
         0x000D => "REFERENCEREGISTERED",
@@ -49,9 +56,10 @@ pub fn record_name(id: u16) -> Option<&'static str> {
 
         0x001A => "MODULESTREAMNAME",
         0x0032 => "MODULESTREAMNAMEUNICODE",
+        0x0048 => "MODULESTREAMNAMEUNICODE",
 
         0x001C => "MODULEDOCSTRING",
-        0x0048 => "MODULEDOCSTRINGUNICODE",
+        0x0049 => "MODULEDOCSTRINGUNICODE",
 
         0x001D => "MODULEHELPFILEPATH",
         0x001E => "MODULEHELPCONTEXT",
