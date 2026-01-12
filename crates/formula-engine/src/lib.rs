@@ -62,7 +62,8 @@ pub use engine::{
     RecalcValueChange,
 };
 pub use parser::{
-    lex, parse_formula_partial, FunctionContext, ParseContext, PartialParse, Token, TokenKind,
+    lex, lex_partial, parse_formula_partial, FunctionContext, ParseContext, PartialLex, PartialParse,
+    Token, TokenKind,
 };
 pub use perf::{run_benchmarks, BenchmarkResult};
 pub use value::{Entity, ErrorKind, Record, Value};

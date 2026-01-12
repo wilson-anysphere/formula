@@ -280,6 +280,14 @@ export interface FormulaParseOptions {
   referenceStyle?: "A1" | "R1C1";
 }
 
+/**
+ * Result returned by `lexFormulaPartial`.
+ */
+export interface FormulaPartialLexResult {
+  tokens: FormulaToken[];
+  error: FormulaParseError | null;
+}
+
 export interface RpcOptions {
   signal?: AbortSignal;
   timeoutMs?: number;

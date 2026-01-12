@@ -64,6 +64,7 @@ describe("WasmWorkbookBackend", () => {
       applyOperation: vi.fn(async () => ({ changedCells: [], movedRanges: [], formulaRewrites: [] })),
       rewriteFormulasForCopyDelta: vi.fn(async () => []),
       lexFormula: vi.fn(async () => []),
+      lexFormulaPartial: vi.fn(async () => ({ tokens: [], error: null })),
       parseFormulaPartial: vi.fn(async () => ({ ast: null, error: null, context: { function: null } })),
       terminate: vi.fn(),
     };
@@ -133,6 +134,7 @@ describe("WasmWorkbookBackend", () => {
       applyOperation: vi.fn(async () => ({ changedCells: [], movedRanges: [], formulaRewrites: [] })),
       rewriteFormulasForCopyDelta: vi.fn(async () => []),
       lexFormula: vi.fn(async () => []),
+      lexFormulaPartial: vi.fn(async () => ({ tokens: [], error: null })),
       parseFormulaPartial: vi.fn(async () => ({ ast: null, error: null, context: { function: null } })),
       terminate: vi.fn(),
     };
@@ -204,6 +206,7 @@ describe("WasmWorkbookBackend", () => {
       applyOperation: vi.fn(async () => ({ changedCells: [], movedRanges: [], formulaRewrites: [] })),
       rewriteFormulasForCopyDelta: vi.fn(async () => []),
       lexFormula: vi.fn(async () => []),
+      lexFormulaPartial: vi.fn(async () => ({ tokens: [], error: null })),
       parseFormulaPartial: vi.fn(async () => ({ ast: null, error: null, context: { function: null } })),
       terminate: vi.fn(),
     };

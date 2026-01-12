@@ -6,6 +6,7 @@ import type {
   CellValueRich,
   EditOp,
   EditResult,
+  FormulaPartialLexResult,
   FormulaPartialParseResult,
   FormulaParseOptions,
   FormulaToken,
@@ -257,6 +258,20 @@ export class EngineWorker {
    */
   async lexFormula(formula: string, options?: FormulaParseOptions, rpcOptions?: RpcOptions): Promise<FormulaToken[]> {
     return (await this.invoke("lexFormula", { formula, options }, rpcOptions)) as FormulaToken[];
+  }
+
+  /**
+   * Best-effort lexer for editor syntax highlighting.
+   *
+   * Note: this RPC is independent of workbook state and intentionally does NOT
+   * flush pending `setCell` batches.
+   */
+  async lexFormulaPartial(
+    formula: string,
+    options?: FormulaParseOptions,
+    rpcOptions?: RpcOptions
+  ): Promise<FormulaPartialLexResult> {
+    return (await this.invoke("lexFormulaPartial", { formula, options }, rpcOptions)) as FormulaPartialLexResult;
   }
 
   /**

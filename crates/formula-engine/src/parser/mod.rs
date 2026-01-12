@@ -229,6 +229,21 @@ pub fn lex(formula: &str, opts: &ParseOptions) -> Result<Vec<Token>, ParseError>
     Lexer::new(formula, opts.locale.clone(), opts.reference_style).lex()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartialLex {
+    pub tokens: Vec<Token>,
+    pub error: Option<ParseError>,
+}
+
+/// Best-effort lexing used for editor/syntax-highlighting scenarios.
+///
+/// Unlike [`lex`], this API never returns an error. Instead, it returns:
+/// - `tokens`: as many tokens as possible (always ending with [`TokenKind::Eof`])
+/// - `error`: the first lex error encountered (if any)
+pub fn lex_partial(formula: &str, opts: &ParseOptions) -> PartialLex {
+    Lexer::new(formula, opts.locale.clone(), opts.reference_style).lex_partial()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ParenContext {
     /// Parentheses opened as part of a function call, along with the brace depth at the `(`.
@@ -870,6 +885,388 @@ impl<'a> Lexer<'a> {
         self.push(TokenKind::Eof, self.idx, self.idx);
         self.post_process_intersections();
         Ok(self.tokens)
+    }
+
+    fn lex_partial(mut self) -> PartialLex {
+        let mut first_error: Option<ParseError> = None;
+
+        'outer: while let Some(ch) = self.peek_char() {
+            let start = self.idx;
+            if self.bracket_depth > 0 && !matches!(ch, '[' | ']') {
+                // Inside workbook/structured reference brackets, treat everything as raw text so
+                // locale separators (e.g. `,` in `Table1[[#Headers],[Col]]`) don't get lexed as
+                // unions/arg separators and non-locale delimiters don't fail lexing.
+                let raw = self.take_while(|c| !matches!(c, '[' | ']'));
+                self.push(TokenKind::Ident(raw), start, self.idx);
+                continue;
+            }
+            match ch {
+                ' ' | '\t' | '\r' | '\n' => {
+                    let raw = self.take_while(|c| matches!(c, ' ' | '\t' | '\r' | '\n'));
+                    self.push(TokenKind::Whitespace(raw), start, self.idx);
+                }
+                '"' => {
+                    self.bump();
+                    let mut value = String::new();
+                    loop {
+                        match self.peek_char() {
+                            Some('"') => {
+                                self.bump();
+                                if self.peek_char() == Some('"') {
+                                    self.bump();
+                                    value.push('"');
+                                    continue;
+                                }
+                                break;
+                            }
+                            Some(c) => {
+                                self.bump();
+                                value.push(c);
+                            }
+                            None => {
+                                if first_error.is_none() {
+                                    first_error = Some(ParseError::new(
+                                        "Unterminated string literal",
+                                        Span::new(start, self.idx),
+                                    ));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    self.push(TokenKind::String(value), start, self.idx);
+                }
+                '\'' => {
+                    // Quoted identifier, typically for sheet names.
+                    self.bump();
+                    let mut value = String::new();
+                    loop {
+                        match self.peek_char() {
+                            Some('\'') => {
+                                self.bump();
+                                if self.peek_char() == Some('\'') {
+                                    self.bump();
+                                    value.push('\'');
+                                    continue;
+                                }
+                                break;
+                            }
+                            Some(c) => {
+                                self.bump();
+                                value.push(c);
+                            }
+                            None => {
+                                if first_error.is_none() {
+                                    first_error = Some(ParseError::new(
+                                        "Unterminated quoted identifier",
+                                        Span::new(start, self.idx),
+                                    ));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    self.push(TokenKind::QuotedIdent(value), start, self.idx);
+                }
+                '#' => {
+                    // Excel's spill-range reference operator (`#`) is postfix (e.g. `A1#`),
+                    // but error literals also start with `#` (e.g. `#REF!`).
+                    //
+                    // Treat `#` as a postfix operator only when it is *immediately* after an
+                    // expression-like token (no intervening whitespace).
+                    let is_immediate = self.tokens.last().is_some_and(|t| {
+                        t.span.end == start && !matches!(t.kind, TokenKind::Whitespace(_))
+                    });
+                    let is_postfix_spill = is_immediate
+                        && matches!(
+                            self.prev_sig,
+                            Some(
+                                TokenKind::Cell(_)
+                                    | TokenKind::Ident(_)
+                                    | TokenKind::QuotedIdent(_)
+                                    | TokenKind::RParen
+                                    | TokenKind::RBracket
+                            )
+                        );
+
+                    if is_postfix_spill {
+                        self.bump();
+                        self.push(TokenKind::Hash, start, self.idx);
+                        continue;
+                    }
+
+                    if let Some(len) = match_error_literal(&self.src[start..]) {
+                        let end = start + len;
+                        while self.idx < end {
+                            self.bump();
+                        }
+                        let raw = self.src[start..end].to_string();
+                        self.push(TokenKind::Error(raw), start, self.idx);
+                    } else if self
+                        .src
+                        .get(self.idx + 1..)
+                        .and_then(|s| s.chars().next())
+                        .is_some_and(is_error_body_char)
+                    {
+                        self.bump(); // '#'
+                        let mut rest = self.take_while(is_error_body_char);
+                        if matches!(self.peek_char(), Some('!' | '?')) {
+                            if let Some(ch) = self.bump() {
+                                rest.push(ch);
+                            }
+                        }
+                        let mut raw = String::from("#");
+                        raw.push_str(&rest);
+                        self.push(TokenKind::Error(raw), start, self.idx);
+                    } else {
+                        // Standalone `#` is the spill-range reference postfix operator (e.g. `A1#`).
+                        self.bump();
+                        self.push(TokenKind::Hash, start, self.idx);
+                    }
+                }
+                '(' => {
+                    self.bump();
+                    let is_func = matches!(
+                        self.prev_sig,
+                        Some(
+                            TokenKind::Number(_)
+                                | TokenKind::String(_)
+                                | TokenKind::Boolean(_)
+                                | TokenKind::Error(_)
+                                | TokenKind::Cell(_)
+                                | TokenKind::R1C1Cell(_)
+                                | TokenKind::R1C1Row(_)
+                                | TokenKind::R1C1Col(_)
+                                | TokenKind::Ident(_)
+                                | TokenKind::QuotedIdent(_)
+                                | TokenKind::RParen
+                                | TokenKind::RBrace
+                                | TokenKind::RBracket
+                                | TokenKind::Hash
+                                | TokenKind::Percent
+                        )
+                    );
+                    self.paren_stack.push(if is_func {
+                        ParenContext::FunctionCall {
+                            brace_depth: self.brace_depth,
+                        }
+                    } else {
+                        ParenContext::Group
+                    });
+                    self.push(TokenKind::LParen, start, self.idx);
+                }
+                ')' => {
+                    self.bump();
+                    self.paren_stack.pop();
+                    self.push(TokenKind::RParen, start, self.idx);
+                }
+                '{' => {
+                    self.bump();
+                    self.brace_depth += 1;
+                    self.push(TokenKind::LBrace, start, self.idx);
+                }
+                '}' => {
+                    self.bump();
+                    self.brace_depth = self.brace_depth.saturating_sub(1);
+                    self.push(TokenKind::RBrace, start, self.idx);
+                }
+                '[' => {
+                    if self.bracket_depth == 0 {
+                        if let Some(end) = find_bracket_end(self.src, start) {
+                            self.bump();
+                            self.push(TokenKind::LBracket, start, self.idx);
+
+                            let inner_start = self.idx;
+                            let inner_end = end.saturating_sub(1);
+                            if inner_end > inner_start {
+                                let raw = self.src[inner_start..inner_end].to_string();
+                                self.idx = inner_end;
+                                self.chars = self.src[self.idx..].chars();
+                                self.push(TokenKind::Ident(raw), inner_start, inner_end);
+                            }
+
+                            let close_start = self.idx;
+                            self.bump();
+                            self.push(TokenKind::RBracket, close_start, self.idx);
+                            continue;
+                        }
+                    }
+
+                    self.bump();
+                    self.bracket_depth += 1;
+                    self.push(TokenKind::LBracket, start, self.idx);
+                }
+                ']' => {
+                    // Excel escapes `]` inside structured references as `]]`. At the outermost
+                    // bracket depth, treat a double `]]` as a literal `]` rather than the end of
+                    // the bracketed segment.
+                    if self.bracket_depth == 1 && self.src[self.idx..].starts_with("]]") {
+                        self.bump();
+                        self.push(TokenKind::RBracket, start, self.idx);
+                        let start2 = self.idx;
+                        self.bump();
+                        self.push(TokenKind::RBracket, start2, self.idx);
+                        continue;
+                    }
+                    self.bump();
+                    self.bracket_depth = self.bracket_depth.saturating_sub(1);
+                    self.push(TokenKind::RBracket, start, self.idx);
+                }
+                '!' => {
+                    self.bump();
+                    self.push(TokenKind::Bang, start, self.idx);
+                }
+                ':' => {
+                    self.bump();
+                    self.push(TokenKind::Colon, start, self.idx);
+                }
+                c if c == self.locale.arg_separator => {
+                    self.bump();
+                    let is_func_arg_sep = matches!(
+                        self.paren_stack.last(),
+                        Some(ParenContext::FunctionCall { brace_depth }) if *brace_depth == self.brace_depth
+                    );
+                    if self.brace_depth > 0 && !is_func_arg_sep {
+                        // In array literals, commas/semicolons map to array separators.
+                        if c == self.locale.array_row_separator {
+                            self.push(TokenKind::ArrayRowSep, start, self.idx);
+                        } else if c == self.locale.array_col_separator {
+                            self.push(TokenKind::ArrayColSep, start, self.idx);
+                        } else {
+                            self.push(TokenKind::ArrayColSep, start, self.idx);
+                        }
+                    } else if is_func_arg_sep {
+                        self.push(TokenKind::ArgSep, start, self.idx);
+                    } else {
+                        self.push(TokenKind::Union, start, self.idx);
+                    }
+                }
+                c if self.brace_depth > 0
+                    && (c == self.locale.array_row_separator
+                        || c == self.locale.array_col_separator) =>
+                {
+                    self.bump();
+                    if c == self.locale.array_row_separator {
+                        self.push(TokenKind::ArrayRowSep, start, self.idx);
+                    } else {
+                        self.push(TokenKind::ArrayColSep, start, self.idx);
+                    }
+                }
+                '+' => {
+                    self.bump();
+                    self.push(TokenKind::Plus, start, self.idx);
+                }
+                '-' => {
+                    self.bump();
+                    self.push(TokenKind::Minus, start, self.idx);
+                }
+                '*' => {
+                    self.bump();
+                    self.push(TokenKind::Star, start, self.idx);
+                }
+                '/' => {
+                    self.bump();
+                    self.push(TokenKind::Slash, start, self.idx);
+                }
+                '^' => {
+                    self.bump();
+                    self.push(TokenKind::Caret, start, self.idx);
+                }
+                '&' => {
+                    self.bump();
+                    self.push(TokenKind::Amp, start, self.idx);
+                }
+                '%' => {
+                    self.bump();
+                    self.push(TokenKind::Percent, start, self.idx);
+                }
+                '@' => {
+                    self.bump();
+                    self.push(TokenKind::At, start, self.idx);
+                }
+                '=' => {
+                    self.bump();
+                    self.push(TokenKind::Eq, start, self.idx);
+                }
+                '<' => {
+                    self.bump();
+                    match self.peek_char() {
+                        Some('=') => {
+                            self.bump();
+                            self.push(TokenKind::Le, start, self.idx);
+                        }
+                        Some('>') => {
+                            self.bump();
+                            self.push(TokenKind::Ne, start, self.idx);
+                        }
+                        _ => self.push(TokenKind::Lt, start, self.idx),
+                    }
+                }
+                '>' => {
+                    self.bump();
+                    if self.peek_char() == Some('=') {
+                        self.bump();
+                        self.push(TokenKind::Ge, start, self.idx);
+                    } else {
+                        self.push(TokenKind::Gt, start, self.idx);
+                    }
+                }
+                c if is_digit(c)
+                    || (c == self.locale.decimal_separator && self.peek_next_is_digit()) =>
+                {
+                    let raw = self.lex_number();
+                    self.push(TokenKind::Number(raw), start, self.idx);
+                }
+                c if is_ident_start_char(c) => {
+                    if self.reference_style == ReferenceStyle::R1C1 {
+                        if let Some(cell) = self.try_lex_r1c1_cell_ref() {
+                            self.push(TokenKind::R1C1Cell(cell), start, self.idx);
+                            continue;
+                        }
+                        if let Some(row) = self.try_lex_r1c1_row_ref() {
+                            self.push(TokenKind::R1C1Row(row), start, self.idx);
+                            continue;
+                        }
+                        if let Some(col) = self.try_lex_r1c1_col_ref() {
+                            self.push(TokenKind::R1C1Col(col), start, self.idx);
+                            continue;
+                        }
+                    }
+
+                    if let Some(cell) = self.try_lex_cell_ref() {
+                        self.push(TokenKind::Cell(cell), start, self.idx);
+                    } else {
+                        let ident = self.lex_ident();
+                        let upper = ident.to_ascii_uppercase();
+                        if upper == "TRUE" {
+                            self.push(TokenKind::Boolean(true), start, self.idx);
+                        } else if upper == "FALSE" {
+                            self.push(TokenKind::Boolean(false), start, self.idx);
+                        } else {
+                            self.push(TokenKind::Ident(ident), start, self.idx);
+                        }
+                    }
+                }
+                _ => {
+                    if first_error.is_none() {
+                        first_error = Some(ParseError::new(
+                            format!("Unexpected character `{ch}`"),
+                            Span::new(start, self.idx + ch.len_utf8()),
+                        ));
+                    }
+                    // For now, stop scanning on unexpected characters. This keeps the token stream
+                    // deterministic and avoids getting stuck in error loops.
+                    break 'outer;
+                }
+            }
+        }
+
+        self.push(TokenKind::Eof, self.idx, self.idx);
+        self.post_process_intersections();
+        PartialLex {
+            tokens: self.tokens,
+            error: first_error,
+        }
     }
 
     fn post_process_intersections(&mut self) {

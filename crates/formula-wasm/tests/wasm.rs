@@ -30,6 +30,18 @@ struct TokenKindOnly {
     kind: String,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct LexError {
+    message: String,
+    span: Span,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct PartialLexResult {
+    tokens: Vec<LexToken>,
+    error: Option<LexError>,
+}
+
 fn assert_json_number(value: &JsonValue, expected: f64) {
     let actual = value
         .as_f64()
@@ -398,6 +410,25 @@ fn parse_formula_partial_accepts_full_parse_options_struct() {
         "expected full ParseOptions R1C1 parse to yield CellRef, got {:?}",
         parsed.ast.expr
     );
+}
+
+#[wasm_bindgen_test]
+fn lex_formula_partial_returns_tokens_and_error_for_unterminated_string() {
+    let js = formula_wasm::lex_formula_partial("=\"hello", None);
+    let parsed: PartialLexResult = serde_wasm_bindgen::from_value(js).unwrap();
+
+    assert!(!parsed.tokens.is_empty(), "expected at least one token");
+    let err = parsed.error.expect("expected an error");
+    assert_eq!(err.message, "Unterminated string literal".to_string());
+
+    // The string token should span to end-of-input, offset by the leading '='.
+    let string_token = parsed
+        .tokens
+        .iter()
+        .find(|t| t.kind == "String")
+        .expect("expected string token");
+    assert_eq!(string_token.span.start, 1);
+    assert_eq!(string_token.span.end, 7);
 }
 
 #[wasm_bindgen_test]

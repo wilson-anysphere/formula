@@ -401,6 +401,57 @@ pub fn lex_formula(formula: &str, opts: Option<JsValue>) -> Result<JsValue, JsVa
     serde_wasm_bindgen::to_value(&out).map_err(|err| js_err(err.to_string()))
 }
 
+#[derive(Debug, Serialize)]
+struct WasmLexError {
+    message: String,
+    span: Utf16Span,
+}
+
+#[derive(Debug, Serialize)]
+struct WasmPartialLex {
+    tokens: Vec<LexTokenDto>,
+    error: Option<WasmLexError>,
+}
+
+/// Best-effort lexer used for editor syntax highlighting.
+///
+/// This mirrors `lexFormula` but never throws: on errors it returns the tokens produced so far plus
+/// the first encountered lexer error.
+#[wasm_bindgen(js_name = "lexFormulaPartial")]
+pub fn lex_formula_partial(formula: &str, opts: Option<JsValue>) -> JsValue {
+    // `parseFormulaPartial`/`lexFormula` can be used without instantiating a workbook. Ensure the
+    // function registry constructors ran for wasm-bindgen-test environments.
+    ensure_rust_constructors_run();
+
+    // Best-effort: treat option parsing failures as "use defaults" so this API never throws.
+    let opts = parse_options_from_js(opts).unwrap_or_default();
+
+    let (expr_src, byte_offset) = if let Some(rest) = formula.strip_prefix('=') {
+        (rest, 1usize)
+    } else {
+        (formula, 0usize)
+    };
+
+    let utf16_map = Utf16IndexMap::new(formula);
+    let partial = formula_engine::lex_partial(expr_src, &opts);
+
+    let tokens: Vec<LexTokenDto> = partial
+        .tokens
+        .into_iter()
+        .map(|tok| token_to_dto(tok, byte_offset, &utf16_map))
+        .collect();
+
+    let error = partial.error.map(|err| WasmLexError {
+        message: err.message,
+        span: engine_span_to_utf16(add_byte_offset(err.span, byte_offset), &utf16_map),
+    });
+
+    let out = WasmPartialLex { tokens, error };
+    use serde::ser::Serialize as _;
+    out.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .unwrap_or_else(|err| js_err(err.to_string()))
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RewriteFormulaForCopyDeltaRequestDto {

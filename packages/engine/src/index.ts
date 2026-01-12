@@ -14,6 +14,7 @@ export type {
   EditResult,
   FormulaParseError,
   FormulaParseOptions,
+  FormulaPartialLexResult,
   FormulaPartialParseResult,
   FormulaCoord,
   FormulaSpan,

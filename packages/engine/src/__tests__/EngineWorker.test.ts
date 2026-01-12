@@ -160,6 +160,27 @@ describe("EngineWorker RPC", () => {
     ]);
   });
 
+  it("sends lexFormulaPartial requests with formula + options params", async () => {
+    const worker = new MockWorker();
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    await engine.lexFormulaPartial("=\"hello", { localeId: "de-DE", referenceStyle: "R1C1" });
+
+    const requests = worker.received.filter(
+      (msg): msg is RpcRequest => msg.type === "request" && (msg as RpcRequest).method === "lexFormulaPartial"
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].params).toEqual({
+      formula: "=\"hello",
+      options: { localeId: "de-DE", referenceStyle: "R1C1" }
+    });
+  });
+
   it("transfers xlsx ArrayBuffer when loading workbooks from bytes", async () => {
     const worker = new MockWorker();
     const channel = createMockChannel();

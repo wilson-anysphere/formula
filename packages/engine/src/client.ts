@@ -6,6 +6,7 @@ import type {
   CellValueRich,
   EditOp,
   EditResult,
+  FormulaPartialLexResult,
   FormulaPartialParseResult,
   FormulaParseOptions,
   FormulaToken,
@@ -115,6 +116,17 @@ export interface EngineClient {
    * This call is independent of any loaded workbook.
    */
   lexFormula(formula: string, options?: FormulaParseOptions, rpcOptions?: RpcOptions): Promise<FormulaToken[]>;
+
+  /**
+   * Best-effort lexer for editor syntax highlighting (never throws).
+   *
+   * This call is independent of any loaded workbook.
+   */
+  lexFormulaPartial(
+    formula: string,
+    options?: FormulaParseOptions,
+    rpcOptions?: RpcOptions
+  ): Promise<FormulaPartialLexResult>;
 
   /**
    * Best-effort partial parse for editor/autocomplete scenarios.
@@ -239,6 +251,8 @@ export function createEngineClient(options?: { wasmModuleUrl?: string; wasmBinar
       await withEngine((connected) => connected.rewriteFormulasForCopyDelta(requests, rpcOptions)),
     lexFormula: async (formula, options, rpcOptions) =>
       await withEngine((connected) => connected.lexFormula(formula, options, rpcOptions)),
+    lexFormulaPartial: async (formula, options, rpcOptions) =>
+      await withEngine((connected) => connected.lexFormulaPartial(formula, options, rpcOptions)),
     parseFormulaPartial: async (
       formula: string,
       cursorOrOptions?: number | FormulaParseOptions,

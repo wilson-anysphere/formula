@@ -36,6 +36,7 @@ type WasmModule = {
     fromJson(json: string): WasmWorkbookInstance;
     fromXlsxBytes?: (bytes: Uint8Array) => WasmWorkbookInstance;
   };
+  lexFormulaPartial?: (formula: string, options?: unknown) => unknown;
 };
 
 let port: MessagePort | null = null;
@@ -267,6 +268,15 @@ async function handleRequest(message: WorkerInboundMessage): Promise<void> {
             throw new Error("lexFormula: wasm module does not export lexFormula()");
           }
           result = cloneToPlainData(lexFormula(params.formula, params.options));
+        }
+        break;
+      case "lexFormulaPartial":
+        {
+          const lexFormulaPartial = mod.lexFormulaPartial;
+          if (typeof lexFormulaPartial !== "function") {
+            throw new Error("lexFormulaPartial: wasm module does not export lexFormulaPartial()");
+          }
+          result = cloneToPlainData(lexFormulaPartial(params.formula, params.options));
         }
         break;
       case "parseFormulaPartial":
