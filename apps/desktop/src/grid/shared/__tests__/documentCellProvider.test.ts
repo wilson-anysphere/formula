@@ -187,5 +187,20 @@ describe("DocumentCellProvider (shared grid)", () => {
     expect(getCommentMeta).toHaveBeenCalledWith(1, 1);
     expect("comment" in (withoutComment as any)).toBe(false);
   });
-});
 
+  it("does not request comment metadata for header cells", () => {
+    const getCommentMeta = vi.fn(() => ({ resolved: false }));
+
+    const { provider } = createProvider({
+      getSheetId: () => "sheet-1",
+      getCell: () => ({ value: "hello", formula: null }),
+      getCommentMeta,
+    });
+
+    // Header row / col cells should not trigger comment lookups.
+    provider.getCell(0, 5);
+    provider.getCell(5, 0);
+    provider.getCell(0, 0);
+    expect(getCommentMeta).toHaveBeenCalledTimes(0);
+  });
+});
