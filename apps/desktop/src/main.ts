@@ -1996,11 +1996,14 @@ if (
     const active = zone.active ?? zone.panels[0];
     if (!active) return;
 
-    function dockTabSelector(panelId: string): string {
+    function focusDockTab(panelId: string): void {
       const testId = `dock-tab-${panelId}`;
-      const escaped =
-        typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(testId) : testId.replace(/"/g, '\\"');
-      return `[data-testid="${escaped}"]`;
+      for (const tab of el.querySelectorAll<HTMLButtonElement>(".dock-panel__tab")) {
+        if (tab.dataset.testid === testId) {
+          tab.focus();
+          return;
+        }
+      }
     }
 
     const panel = document.createElement("div");
@@ -2029,6 +2032,7 @@ if (
         tab.className = "dock-panel__tab";
         tab.dataset.testid = `dock-tab-${panelId}`;
         tab.textContent = panelTitle(panelId);
+        tab.title = tab.textContent ?? "";
         tab.setAttribute("role", "tab");
         tab.setAttribute("aria-selected", panelId === active ? "true" : "false");
         tab.tabIndex = panelId === active ? 0 : -1;
@@ -2039,7 +2043,7 @@ if (
           // `activateDockedPanel` triggers a synchronous re-render via the layout controller
           // change listener. Focus the newly-rendered tab so keyboard users can continue to
           // navigate the tab strip after clicking.
-          el.querySelector<HTMLButtonElement>(dockTabSelector(panelId))?.focus();
+          focusDockTab(panelId);
         });
         tab.addEventListener("keydown", (e) => {
           const key = e.key;
@@ -2060,7 +2064,7 @@ if (
           if (!nextId) return;
 
           layoutController.activateDockedPanel(nextId, currentSide);
-          el.querySelector<HTMLButtonElement>(dockTabSelector(nextId))?.focus();
+          focusDockTab(nextId);
         });
         tabs.appendChild(tab);
       }
