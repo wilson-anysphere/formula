@@ -200,6 +200,34 @@ test.describe("updater UI wiring", () => {
     });
     expect(dismissal.version).toBe("9.9.8");
     expect(Number(dismissal.dismissedAt)).toBeGreaterThan(0);
+
+    // Restart should run the install + restart commands (and close the toast) without
+    // requiring the dialog to be open.
+    await fireTauriEvent(page, "update-downloaded", { source: "startup", version: "9.9.7" });
+    await expect(page.getByTestId("update-ready-toast")).toBeVisible();
+
+    await page.evaluate(() => {
+      (window as any).__tauriInvokeCalls = [];
+    });
+
+    await page.getByTestId("update-ready-restart").click();
+    await expect(page.getByTestId("update-ready-toast")).toHaveCount(0);
+
+    await page.waitForFunction(() => {
+      const calls = (window as any).__tauriInvokeCalls;
+      if (!Array.isArray(calls)) return false;
+      const cmds = calls.map((call) => call?.cmd);
+      return cmds.includes("install_downloaded_update") && (cmds.includes("restart_app") || cmds.includes("quit_app"));
+    });
+
+    const restartCalls = await page.evaluate(() => {
+      const calls = (window as any).__tauriInvokeCalls;
+      return Array.isArray(calls) ? calls : [];
+    });
+    const installIdx = restartCalls.findIndex((call) => call?.cmd === "install_downloaded_update");
+    const restartIdx = restartCalls.findIndex((call) => call?.cmd === "restart_app" || call?.cmd === "quit_app");
+    expect(installIdx).toBeGreaterThanOrEqual(0);
+    expect(restartIdx).toBeGreaterThan(installIdx);
   });
 
   test("download error events update the dialog when open", async ({ page }) => {
