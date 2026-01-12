@@ -32,6 +32,7 @@ test.describe("sheet switcher", () => {
     // Hide Sheet2 via context menu.
     await page.getByTestId("sheet-tab-Sheet2").click({ button: "right" });
     const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(page.getByTestId("context-menu")).toBeHidden();
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Hide sheet" }).click();
 
@@ -52,6 +53,7 @@ test.describe("sheet switcher", () => {
 
     // Unhide Sheet2 via context menu on any visible tab.
     await page.getByTestId("sheet-tab-Sheet1").click({ button: "right" });
+    await expect(page.getByTestId("context-menu")).toBeHidden();
     await expect(menu).toBeVisible();
     await menu.getByRole("button", { name: "Unhide Sheet2" }).click();
 
