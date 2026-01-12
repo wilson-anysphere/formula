@@ -33,7 +33,7 @@ workbook.xlsx (ZIP archive)
 │   ├── calcChain.xml            # Calculation order hints
 │   ├── metadata.xml             # Cell/value metadata (Excel "Rich Data")
 │   ├── richData/                # Excel 365+ rich values (data types, in-cell images; naming/casing varies)
-│   │   ├── rdrichvalue.xml              # or: richValue.xml
+│   │   ├── rdrichvalue.xml              # or: richValue.xml / richValues.xml (naming varies)
 │   │   ├── rdrichvaluestructure.xml     # or: richValueStructure.xml
 │   │   ├── rdRichValueTypes.xml         # or: richValueTypes.xml (casing varies)
 │   │   ├── richValueRel.xml             # Indirection to rich-value relationships (e.g. images)
