@@ -71,10 +71,10 @@ fn coupon_period_e(
         // NOTE: Keep this test-side model aligned with the engine's COUP* helper
         // (`coupon_schedule::coupon_period_e`). Source-of-truth:
         // `crates/formula-engine/src/functions/financial/coupon_schedule.rs::coupon_period_e`.
-        1 => (ncd - pcd) as f64,
         0 | 2 => 360.0 / freq,
         4 => 360.0 / freq,
         3 => 365.0 / freq,
+        1 => (ncd - pcd) as f64,
         _ => panic!("invalid basis {basis}"),
     }
 }
@@ -4138,7 +4138,10 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
             )
             .unwrap();
 
-            assert_close(actual, expected, 1e-10);
+            assert!(
+                (actual - expected).abs() <= 1e-10,
+                "basis {basis}: expected {expected}, got {actual}"
+            );
 
             let recovered = oddfyield(
                 settlement,
@@ -4153,7 +4156,10 @@ fn oddfprice_matches_excel_model_for_30_360_bases() {
                 system,
             )
             .unwrap();
-            assert_close(recovered, yld, 1e-9);
+            assert!(
+                (recovered - yld).abs() <= 1e-9,
+                "basis {basis}: expected yield {yld}, got {recovered}"
+            );
         }
     }
 }
@@ -4217,7 +4223,10 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
         )
         .unwrap();
 
-        assert_close(actual, expected, 1e-10);
+        assert!(
+            (actual - expected).abs() <= 1e-10,
+            "basis {basis}: expected {expected}, got {actual}"
+        );
 
         let recovered = oddlyield(
             settlement,
@@ -4231,7 +4240,10 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
             system,
         )
         .unwrap();
-        assert_close(recovered, yld, 1e-9);
+        assert!(
+            (recovered - yld).abs() <= 1e-9,
+            "basis {basis}: expected yield {yld}, got {recovered}"
+        );
     }
 }
 
