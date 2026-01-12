@@ -20220,16 +20220,6 @@
       "id": "coercion_07824d6e0929"
     },
     {
-      "formula": "=VALUE(\"1,234.5\")",
-      "outputCell": "C1",
-      "inputs": [],
-      "tags": [
-        "coercion",
-        "VALUE"
-      ],
-      "id": "value_be16b6778a10"
-    },
-    {
       "formula": "=VALUE(\"2020-01-01\")",
       "outputCell": "C1",
       "inputs": [],
@@ -20248,36 +20238,6 @@
         "VALUE"
       ],
       "id": "value_efcac2b241e9"
-    },
-    {
-      "formula": "=NUMBERVALUE(\"1.234,5\", \",\", \".\")",
-      "outputCell": "C1",
-      "inputs": [],
-      "tags": [
-        "coercion",
-        "NUMBERVALUE"
-      ],
-      "id": "numbervalue_9ef7bfba80b2"
-    },
-    {
-      "formula": "=DATEVALUE(\"2020-01-01\")",
-      "outputCell": "C1",
-      "inputs": [],
-      "tags": [
-        "coercion",
-        "DATEVALUE"
-      ],
-      "id": "datevalue_401759d91a05"
-    },
-    {
-      "formula": "=TIMEVALUE(\"1:30 PM\")",
-      "outputCell": "C1",
-      "inputs": [],
-      "tags": [
-        "coercion",
-        "TIMEVALUE"
-      ],
-      "id": "timevalue_2af2a5b3935f"
     },
     {
       "formula": "=TIMEVALUE(\"1 PM\")",
@@ -24826,9 +24786,10 @@
       "inputs": [],
       "tags": [
         "text",
-        "VALUE"
+        "VALUE",
+        "coercion"
       ],
-      "id": "value_735ce6725faf"
+      "id": "value_8e5491c6f776"
     },
     {
       "formula": "=VALUE(\"(1,000)\")",
@@ -24867,9 +24828,10 @@
       "inputs": [],
       "tags": [
         "text",
-        "NUMBERVALUE"
+        "NUMBERVALUE",
+        "coercion"
       ],
-      "id": "numbervalue_d44c1685d624"
+      "id": "numbervalue_72c7d7caf30d"
     },
     {
       "formula": "=NUMBERVALUE(\"1,23\", \",\", \",\")",
@@ -25552,9 +25514,10 @@
       "inputs": [],
       "tags": [
         "date",
-        "DATEVALUE"
+        "DATEVALUE",
+        "coercion"
       ],
-      "id": "datevalue_ba2ee4064b7b"
+      "id": "datevalue_5b60f1d8b3fd"
     },
     {
       "formula": "=DATEVALUE(\"nope\")",
@@ -25614,9 +25577,10 @@
       "inputs": [],
       "tags": [
         "date",
-        "TIMEVALUE"
+        "TIMEVALUE",
+        "coercion"
       ],
-      "id": "timevalue_ada371f4f92f"
+      "id": "timevalue_d20b8d021a68"
     },
     {
       "formula": "=TIMEVALUE(\"nope\")",

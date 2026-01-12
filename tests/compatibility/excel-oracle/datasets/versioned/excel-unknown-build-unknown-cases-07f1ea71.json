@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-01-12T01:19:35.906260873Z",
+  "generatedAt": "2026-01-12T02:16:00.349830007Z",
   "source": {
     "kind": "excel",
     "version": "unknown",
@@ -10,8 +10,8 @@
   },
   "caseSet": {
     "path": "tests/compatibility/excel-oracle/cases.json",
-    "sha256": "756b8f9366edf0bd4333b6596d2513ffbbd6122219c6aa1ec672068c57c69b58",
-    "count": 1393
+    "sha256": "07f1ea7107d7fecf6d6eeb47042b9620a6f1858515f49fcfb1d18c40fb31feef",
+    "count": 1389
   },
   "results": [
     {
@@ -9538,16 +9538,6 @@
       "displayText": "1234.5"
     },
     {
-      "caseId": "value_be16b6778a10",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1234.5
-      },
-      "address": "C1",
-      "displayText": "1234.5"
-    },
-    {
       "caseId": "value_77f4907b2420",
       "outputCell": "C1",
       "result": {
@@ -9566,36 +9556,6 @@
       },
       "address": "C1",
       "displayText": "43831.5625"
-    },
-    {
-      "caseId": "numbervalue_9ef7bfba80b2",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 1234.5
-      },
-      "address": "C1",
-      "displayText": "1234.5"
-    },
-    {
-      "caseId": "datevalue_401759d91a05",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 43831.0
-      },
-      "address": "C1",
-      "displayText": "43831"
-    },
-    {
-      "caseId": "timevalue_2af2a5b3935f",
-      "outputCell": "C1",
-      "result": {
-        "t": "n",
-        "v": 0.5625
-      },
-      "address": "C1",
-      "displayText": "0.5625"
     },
     {
       "caseId": "timevalue_6fcedd519d50",
@@ -11888,7 +11848,7 @@
       "displayText": "-$1.00"
     },
     {
-      "caseId": "value_735ce6725faf",
+      "caseId": "value_8e5491c6f776",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -11928,7 +11888,7 @@
       "displayText": "#VALUE!"
     },
     {
-      "caseId": "numbervalue_d44c1685d624",
+      "caseId": "numbervalue_72c7d7caf30d",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -12248,7 +12208,7 @@
       "displayText": "10"
     },
     {
-      "caseId": "datevalue_ba2ee4064b7b",
+      "caseId": "datevalue_5b60f1d8b3fd",
       "outputCell": "C1",
       "result": {
         "t": "n",
@@ -12308,7 +12268,7 @@
       "displayText": "0.0625"
     },
     {
-      "caseId": "timevalue_ada371f4f92f",
+      "caseId": "timevalue_d20b8d021a68",
       "outputCell": "C1",
       "result": {
         "t": "n",

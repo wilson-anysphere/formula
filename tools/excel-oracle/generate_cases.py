@@ -954,12 +954,8 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="coercion", tags=["coercion", "implicit", "add"], formula='="$1,234.50"+0')
 
     # Explicit conversion functions.
-    _add_case(cases, prefix="value", tags=["coercion", "VALUE"], formula='=VALUE("1,234.5")')
     _add_case(cases, prefix="value", tags=["coercion", "VALUE"], formula='=VALUE("2020-01-01")')
     _add_case(cases, prefix="value", tags=["coercion", "VALUE"], formula='=VALUE("2020-01-01 1:30 PM")')
-    _add_case(cases, prefix="numbervalue", tags=["coercion", "NUMBERVALUE"], formula='=NUMBERVALUE("1.234,5", ",", ".")')
-    _add_case(cases, prefix="datevalue", tags=["coercion", "DATEVALUE"], formula='=DATEVALUE("2020-01-01")')
-    _add_case(cases, prefix="timevalue", tags=["coercion", "TIMEVALUE"], formula='=TIMEVALUE("1:30 PM")')
     _add_case(cases, prefix="timevalue", tags=["coercion", "TIMEVALUE"], formula='=TIMEVALUE("1 PM")')
 
     # ------------------------------------------------------------------
@@ -1125,14 +1121,14 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="text_fmt", tags=["text", "TEXT"], formula='=TEXT(1234.567,"#,##0.00")')
     _add_case(cases, prefix="text_pct", tags=["text", "TEXT"], formula='=TEXT(1.23,"0%")')
     _add_case(cases, prefix="text_cur", tags=["text", "TEXT"], formula='=TEXT(-1,"$0.00")')
-    _add_case(cases, prefix="value", tags=["text", "VALUE"], formula='=VALUE("1,234.5")')
+    _add_case(cases, prefix="value", tags=["text", "VALUE", "coercion"], formula='=VALUE("1,234.5")')
     _add_case(cases, prefix="value", tags=["text", "VALUE"], formula='=VALUE("(1,000)")')
     _add_case(cases, prefix="value", tags=["text", "VALUE"], formula='=VALUE("10%")')
     _add_case(cases, prefix="value", tags=["text", "VALUE", "error"], formula='=VALUE("nope")')
     _add_case(
         cases,
         prefix="numbervalue",
-        tags=["text", "NUMBERVALUE"],
+        tags=["text", "NUMBERVALUE", "coercion"],
         formula='=NUMBERVALUE("1.234,5", ",", ".")',
     )
     _add_case(
@@ -1191,7 +1187,7 @@ def generate_cases() -> dict[str, Any]:
         )
 
     # Additional date/time functions (keep results numeric to avoid locale-dependent display text).
-    _add_case(cases, prefix="datevalue", tags=["date", "DATEVALUE"], formula='=DATEVALUE("2020-01-01")')
+    _add_case(cases, prefix="datevalue", tags=["date", "DATEVALUE", "coercion"], formula='=DATEVALUE("2020-01-01")')
     _add_case(cases, prefix="datevalue", tags=["date", "DATEVALUE", "error"], formula='=DATEVALUE("nope")')
 
     _add_case(cases, prefix="time", tags=["date", "TIME"], formula="=TIME(1,30,0)")
@@ -1199,7 +1195,7 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="time", tags=["date", "TIME", "error"], formula="=TIME(-1,0,0)")
 
     _add_case(cases, prefix="timevalue", tags=["date", "TIMEVALUE"], formula='=TIMEVALUE("1:30")')
-    _add_case(cases, prefix="timevalue", tags=["date", "TIMEVALUE"], formula='=TIMEVALUE("1:30 PM")')
+    _add_case(cases, prefix="timevalue", tags=["date", "TIMEVALUE", "coercion"], formula='=TIMEVALUE("1:30 PM")')
     _add_case(cases, prefix="timevalue", tags=["date", "TIMEVALUE", "error"], formula='=TIMEVALUE("nope")')
 
     _add_case(cases, prefix="hour", tags=["date", "HOUR"], formula="=HOUR(TIME(1,2,3))")
