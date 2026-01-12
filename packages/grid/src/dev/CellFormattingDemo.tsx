@@ -214,10 +214,19 @@ class CellFormattingDemoProvider implements CellProvider {
     put(15, 2, "Center", { textAlign: "center" });
     put(15, 3, "Right", { textAlign: "end" });
 
-    put(16, 1, "Wrap off: This text should overflow →", { wrapMode: "none", textAlign: "start" });
-    put(16, 2, "Wrap on: This text should wrap within the cell (word wrap).", { wrapMode: "word", textAlign: "start" });
+    // Wrap disabled: text should overflow into adjacent empty cells until blocked.
+    put(16, 1, "Wrap off: overflow into empty cells →", { wrapMode: "none", textAlign: "start" });
+    put(16, 4, "STOP", { fill: "#fee2e2", fontWeight: "700", textAlign: "center" });
 
-    put(17, 1, "Rotated 45°", {
+    // Wrap enabled: long text should wrap inside the cell.
+    put(
+      17,
+      1,
+      "Wrap on: This long text should wrap inside the cell (word wrap) instead of overflowing into neighbors.",
+      { wrapMode: "word", textAlign: "start" }
+    );
+
+    put(17, 3, "Rotated 45°", {
       rotationDeg: 45,
       textAlign: "center",
       verticalAlign: "middle",
@@ -353,7 +362,7 @@ export function CellFormattingDemo(): React.ReactElement {
                 <code>A8:C13</code>: borders (thin/medium/thick, dashed/dotted/double) + conflicts
               </li>
               <li>
-                <code>A14:C17</code>: alignment, wrap on/off, rotation
+                <code>A14:D17</code>: alignment, wrap on/off, rotation
               </li>
               <li>
                 <code>A20</code>: rich text runs (if Task 84 lands)
