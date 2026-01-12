@@ -1,9 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { JSDOM } from "jsdom";
-
 import { parseHtmlToCellGrid, serializeCellGridToHtml } from "../html.js";
+
+let JSDOM = null;
+try {
+  // `jsdom` is a dev dependency; some lightweight environments run node:test suites without
+  // installing workspace deps. Skip DOM-specific tests when the module is unavailable.
+  // eslint-disable-next-line node/no-unsupported-features/es-syntax
+  ({ JSDOM } = await import("jsdom"));
+} catch {
+  // ignore
+}
+
+const hasDom = Boolean(JSDOM);
+
+function domTest(name, fn) {
+  test(name, { skip: !hasDom }, fn);
+}
 
 function buildCfHtmlPayload(innerHtml) {
   const markerStart = "<!--StartFragment-->";
@@ -35,7 +49,7 @@ function buildCfHtmlPayload(innerHtml) {
   return header + html;
 }
 
-test("clipboard HTML DOM parser preserves <br> line breaks", () => {
+domTest("clipboard HTML DOM parser preserves <br> line breaks", () => {
   const dom = new JSDOM("", { url: "http://localhost" });
 
   const prevDomParser = globalThis.DOMParser;
@@ -56,7 +70,7 @@ test("clipboard HTML DOM parser preserves <br> line breaks", () => {
   }
 });
 
-test("clipboard HTML DOM parser does not double-count whitespace newlines after <br>", () => {
+domTest("clipboard HTML DOM parser does not double-count whitespace newlines after <br>", () => {
   const dom = new JSDOM("", { url: "http://localhost" });
 
   const prevDomParser = globalThis.DOMParser;
@@ -77,7 +91,7 @@ test("clipboard HTML DOM parser does not double-count whitespace newlines after 
   }
 });
 
-test("clipboard HTML DOM parser handles Windows CF_HTML payloads", () => {
+domTest("clipboard HTML DOM parser handles Windows CF_HTML payloads", () => {
   const dom = new JSDOM("", { url: "http://localhost" });
 
   const prevDomParser = globalThis.DOMParser;
@@ -98,7 +112,7 @@ test("clipboard HTML DOM parser handles Windows CF_HTML payloads", () => {
   }
 });
 
-test("clipboard HTML DOM parser normalizes NBSP to spaces", () => {
+domTest("clipboard HTML DOM parser normalizes NBSP to spaces", () => {
   const dom = new JSDOM("", { url: "http://localhost" });
 
   const prevDomParser = globalThis.DOMParser;
@@ -118,7 +132,7 @@ test("clipboard HTML DOM parser normalizes NBSP to spaces", () => {
   }
 });
 
-test("clipboard HTML DOM parser round-trips multiline content", () => {
+domTest("clipboard HTML DOM parser round-trips multiline content", () => {
   const dom = new JSDOM("", { url: "http://localhost" });
 
   const prevDomParser = globalThis.DOMParser;

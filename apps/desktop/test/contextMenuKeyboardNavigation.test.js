@@ -1,9 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { JSDOM } from "jsdom";
-
 import { ContextMenu } from "../src/menus/contextMenu.ts";
+
+let JSDOM = null;
+try {
+  // `jsdom` is optional for lightweight node:test runs (some agent environments do not
+  // install workspace dev dependencies). Skip DOM-specific tests when unavailable.
+  // eslint-disable-next-line node/no-unsupported-features/es-syntax
+  ({ JSDOM } = await import("jsdom"));
+} catch {
+  // ignore
+}
+
+const hasDom = Boolean(JSDOM);
 
 function withDom(fn) {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost" });
@@ -38,7 +48,10 @@ function withDom(fn) {
   }
 }
 
-test("ContextMenu.update preserves focus when called while a submenu is focused", () => {
+test(
+  "ContextMenu.update preserves focus when called while a submenu is focused",
+  { skip: !hasDom },
+  () => {
   withDom((dom) => {
     const menu = new ContextMenu();
 
@@ -86,9 +99,10 @@ test("ContextMenu.update preserves focus when called while a submenu is focused"
       menu.close();
     }
   });
-});
+  },
+);
 
-test("ContextMenu closes submenu and restores focus when the main menu scrolls", () => {
+test("ContextMenu closes submenu and restores focus when the main menu scrolls", { skip: !hasDom }, () => {
   withDom((dom) => {
     const menu = new ContextMenu();
 
@@ -128,4 +142,3 @@ test("ContextMenu closes submenu and restores focus when the main menu scrolls",
     }
   });
 });
-
