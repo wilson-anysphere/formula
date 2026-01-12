@@ -26,7 +26,9 @@ fixtures/xlsx/
 `charts/` and `pivots/` will expand over time as we add more complex corpora.
 `macros/` contains small `.xlsm` fixtures used to validate VBA project preservation.
 `rich-data/` is reserved for modern Excel 365 “rich value” features (linked data
-types and images-in-cells) which require ground-truth workbooks saved by Excel.
+types and images-in-cells). It is primarily intended for **ground-truth workbooks
+saved by Excel**, but it may also contain small **synthetic** fixtures used by
+tests (see `rich-data/README.md` and check `docProps/app.xml` for provenance).
 
 ## Notable fixtures
 
@@ -39,7 +41,8 @@ types and images-in-cells) which require ground-truth workbooks saved by Excel.
   - `grouped-rows.xlsx` - outline/grouped rows metadata.
   - `image.xlsx` - embedded image (`xl/media/image1.png`) + drawing relationship.
   - `image-in-cell.xlsx` - **real Excel** “Place in Cell” image values using `xl/metadata.xml` + `xl/richData/*` (no `xl/cellimages.xml`; see `basic/image-in-cell.md`).
-  - `cellimages.xlsx` - includes an Excel-style in-cell image store part (`xl/cellimages.xml` + `.rels`) referencing `xl/media/image1.png`.
+  - `image-in-cell-richdata.xlsx` - **synthetic** minimal in-cell image via rich values (`xl/metadata.xml` + `xl/richData/*`; see `basic/image-in-cell-richdata.md`).
+  - `cell-images.xlsx` / `cellimages.xlsx` - **synthetic** in-cell image store part only (`xl/cellImages.xml` or `xl/cellimages.xml` + `.rels`) referencing `xl/media/image1.png` (not Excel ground truth).
   - `activex-control.xlsx` - minimal ActiveX/form control parts (`xl/ctrlProps/*` + `xl/activeX/*`) with a worksheet `<controls>` fragment.
   - `print-settings.xlsx` - page setup + print titles/areas.
 - `formulas/`:
@@ -49,20 +52,20 @@ types and images-in-cells) which require ground-truth workbooks saved by Excel.
 - `metadata/`:
   - `row-col-properties.xlsx` - custom row height + hidden row, custom column width + hidden column.
   - `data-validation-list.xlsx` - simple list data validation (`<dataValidations>`).
-  - `rich-values-vm.xlsx` - workbook-level `xl/metadata.xml` part + workbook relationship + worksheet cell `vm="..."` rich-value binding (`futureMetadata` / `rvb`).
+  - `rich-values-vm.xlsx` - **synthetic** workbook-level `xl/metadata.xml` part + worksheet cell `vm="..."` rich-value binding (`futureMetadata` / `rvb`).
   - `defined-names.xlsx` - workbook named ranges (`<definedNames>` in `xl/workbook.xml`).
   - `external-link.xlsx` - minimal external link parts (`xl/externalLinks/externalLink1.xml` + rels).
 - `styles/`:
   - `styles.xlsx` - simple bold cell style.
   - `rich-text-shared-strings.xlsx` - shared strings with rich-text runs.
 - `rich-data/`:
-  - See `rich-data/README.md` for how to generate fixtures that include
-    `xl/metadata.xml`, `xl/richData/*`, and in-sheet `vm`/`cm` cell attributes
-    (linked data types like Stocks/Geography, and images placed in cells).
- - `richdata/`:
-   - `linked-data-types.xlsx` - minimal workbook exercising `xl/metadata.xml` + `xl/richData/*`
-     parts and `vm`/`cm` cell attributes (used by
-     `crates/formula-xlsx/tests/linked_data_types_fixture.rs`).
+  - `images-in-cell.xlsx` - **real Excel** images-in-cell fixture including both rich values (`xl/richData/*`) and `xl/cellimages.xml` (see `rich-data/images-in-cell.md`).
+  - `richdata-minimal.xlsx` - **synthetic** richData + metadata fixture used by tests (see `rich-data/README.md`).
+  - See `rich-data/README.md` for how to generate additional ground-truth Excel fixtures that include
+    `xl/metadata.xml`, `xl/richData/*`, and in-sheet `vm`/`cm` cell attributes.
+- `richdata/`:
+  - `linked-data-types.xlsx` - **synthetic** minimal workbook exercising `xl/metadata.xml` + `xl/richData/*`
+    parts and `vm`/`cm` cell attributes (used by `crates/formula-xlsx/tests/linked_data_types_fixture.rs`).
 - `conditional-formatting/`:
   - `conditional-formatting.xlsx` - simple `cfRule` example.
   - `conditional-formatting-2007.xlsx` - Excel 2007-style conditional formatting.
