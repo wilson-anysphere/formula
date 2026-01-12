@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 // Include an explicit `.ts` import specifier so the repo's node:test runner can
-// automatically skip this suite when `--experimental-strip-types` is not available.
+// automatically skip this suite when TypeScript execution isn't available.
 //
 // (The package itself exports TypeScript sources directly.)
 import { getSheetNameValidationErrorMessage as getMessageFromIndex } from "../packages/workbook-backend/src/index.ts";
