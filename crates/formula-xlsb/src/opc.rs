@@ -1237,7 +1237,7 @@ impl XlsbWorkbook {
 
             // When invalidating calcChain, we may need to rewrite XML parts even if they're
             // present in `overrides`.
-            if edited && name == "[Content_Types].xml" {
+            if edited && is_content_types_part_name(&name) {
                 if let Some(updated) = &updated_content_types {
                     if overrides.contains_key(&name) {
                         used_overrides.insert(name.clone());
@@ -1430,7 +1430,7 @@ impl XlsbWorkbook {
 
             // When invalidating calcChain, we may need to rewrite XML parts even if they're
             // present in `overrides`.
-            if edited && name == "[Content_Types].xml" {
+            if edited && is_content_types_part_name(&name) {
                 if let Some(updated) = &updated_content_types {
                     if overrides.contains_key(&name) {
                         used_overrides.insert(name.clone());
@@ -2328,6 +2328,11 @@ fn worksheets_edited<R: Read + Seek>(
 fn is_calc_chain_part_name(name: &str) -> bool {
     name.trim_start_matches('/')
         .eq_ignore_ascii_case("xl/calcChain.bin")
+}
+
+fn is_content_types_part_name(name: &str) -> bool {
+    name.trim_start_matches('/')
+        .eq_ignore_ascii_case("[Content_Types].xml")
 }
 
 fn patch_workbook_bin_full_calc_on_load(
