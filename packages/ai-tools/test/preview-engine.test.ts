@@ -343,7 +343,11 @@ describe("PreviewEngine", () => {
           parameters: { range: "Sheet1!A1:A1048576", format: { bold: true } }
         }
       ],
-      workbook
+      workbook,
+      // The default max_tool_range_cells (200k) would block this edit. Override it here so we
+      // can validate PreviewEngine's "tool-reported cells touched" approval gating for
+      // formatting backends that don't materialize per-cell entries.
+      { max_tool_range_cells: 2_000_000 }
     );
 
     // Diff should miss the edit because formatting isn't stored as per-cell entries.
