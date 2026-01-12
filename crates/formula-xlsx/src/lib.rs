@@ -335,7 +335,17 @@ impl XlsxDocument {
     /// This is a convenience wrapper over [`XlsxMeta::cell_meta`] and exists
     /// primarily for round-trip oriented tooling/tests. Many cells have no
     /// associated metadata entry.
+    ///
+    /// Note: Excel treats merged regions as a single cell anchored at the
+    /// region's top-left. To match workbook semantics, this helper resolves any
+    /// cell inside a merged region to that anchor cell before looking up
+    /// metadata.
     pub fn cell_meta(&self, sheet_id: WorksheetId, cell: CellRef) -> Option<&CellMeta> {
+        let cell = self
+            .workbook
+            .sheet(sheet_id)
+            .map(|sheet| sheet.merged_regions.resolve_cell(cell))
+            .unwrap_or(cell);
         self.meta.cell_meta.get(&(sheet_id, cell))
     }
 
@@ -371,6 +381,11 @@ impl XlsxDocument {
         let Some(sheet) = self.workbook.sheet_mut(sheet_id) else {
             return false;
         };
+
+        // Match workbook semantics for merged regions: any cell inside a merge resolves to the
+        // anchor (top-left) cell.
+        let cell = sheet.merged_regions.resolve_cell(cell);
+
         // Treat absent cells as equivalent to `CellValue::Empty` when detecting value changes. This
         // lets callers round-trip metadata-only cells (e.g. `c/@vm`) without losing those
         // attributes when they set the value to empty.
@@ -556,6 +571,10 @@ impl XlsxDocument {
         let Some(sheet) = self.workbook.sheet_mut(sheet_id) else {
             return false;
         };
+
+        // Match workbook semantics for merged regions: any cell inside a merge
+        // resolves to the anchor (top-left) cell.
+        let cell = sheet.merged_regions.resolve_cell(cell);
 
         let had_formula_before = sheet.formula(cell).is_some()
             || self
@@ -748,6 +767,11 @@ impl XlsxDocument {
         let Some(sheet) = self.workbook.sheet_mut(sheet_id) else {
             return false;
         };
+
+        // Match workbook semantics for merged regions: any cell inside a merge
+        // resolves to the anchor (top-left) cell.
+        let cell = sheet.merged_regions.resolve_cell(cell);
+
         let had_formula_before = sheet.formula(cell).is_some()
             || self
                 .meta
