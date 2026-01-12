@@ -791,6 +791,43 @@ fn v3_content_normalized_data_handles_modulestreamname_unicode_with_len_prefix_a
 }
 
 #[test]
+fn v3_content_normalized_data_errors_on_truncated_modulestreamname_unicode_tail() {
+    // If MODULESTREAMNAME advertises a Unicode tail (Reserved=0x0032) but the stream is truncated,
+    // parsing must fail cleanly with DirParseError::Truncated (and must not panic).
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, b"Module1"); // MODULENAME
+
+        // MODULESTREAMNAME record with Unicode tail, but truncated `StreamNameUnicode` bytes.
+        out.extend_from_slice(&0x001Au16.to_le_bytes()); // Id
+        out.extend_from_slice(&1u32.to_le_bytes()); // SizeOfStreamName
+        out.extend_from_slice(b"X"); // StreamName (MBCS)
+        out.extend_from_slice(&0x0032u16.to_le_bytes()); // Reserved marker
+        out.extend_from_slice(&100u32.to_le_bytes()); // SizeOfStreamNameUnicode (too large)
+        out.extend_from_slice(&[0x00, 0x00]); // truncated UTF-16LE bytes
+
+        out
+    };
+
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let err = v3_content_normalized_data(&vba_project_bin).expect_err("expected parse error");
+    assert!(
+        matches!(err, formula_vba::ParseError::Dir(formula_vba::DirParseError::Truncated)),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
 fn v3_content_normalized_data_project_information_includes_only_fields_listed_in_ms_ovba_pseudocode()
 {
     let vba_bin = build_project_with_project_info_records_only();
