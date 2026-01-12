@@ -2152,7 +2152,23 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
         &builtin_name_record(true, 1, 0x06, &print_area_rgce),
     );
 
-    // 11) Duplicate workbook-scoped name (should be skipped by the importer with a warning).
+    // 11) Reference to another defined name via PtgName: RefToGlobal -> GlobalName
+    let ref_to_global_rgce = ptg_name(1);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("RefToGlobal", 0, false, None, &ref_to_global_rgce),
+    );
+
+    // 12) Reference to a sheet-scoped name via PtgName: RefToLocal -> Sheet1!LocalName
+    let ref_to_local_rgce = ptg_name(3);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("RefToLocal", 0, false, None, &ref_to_local_rgce),
+    );
+
+    // 13) Duplicate workbook-scoped name (should be skipped by the importer with a warning).
     let dup_rgce = ptg_ref3d(0, 0, 2); // Sheet1!$C$1
     push_record(
         &mut globals,
@@ -2160,7 +2176,7 @@ fn build_defined_names_workbook_stream() -> Vec<u8> {
         &name_record("GlobalName", 0, false, None, &dup_rgce),
     );
 
-    // 12) Invalid name (looks like a cell reference) should be skipped with a warning.
+    // 14) Invalid name (looks like a cell reference) should be skipped with a warning.
     push_record(
         &mut globals,
         RECORD_NAME,
@@ -3085,6 +3101,16 @@ fn ptg_area3d(ixti: u16, row1: u16, row2: u16, col1: u16, col2: u16) -> Vec<u8> 
     out.extend_from_slice(&col2.to_le_bytes());
     out
 }
+
+fn ptg_name(name_id: u32) -> Vec<u8> {
+    // PtgName (0x23) payload: [name_id: u32][reserved: u16]
+    let mut out = Vec::<u8>::new();
+    out.push(0x23);
+    out.extend_from_slice(&name_id.to_le_bytes());
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out
+}
+
 fn build_outline_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 

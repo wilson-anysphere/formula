@@ -103,6 +103,18 @@ fn imports_defined_names_from_biff_name_records() {
     assert_eq!(print_area.refers_to, "Sheet1!$A$1:$B$2,Sheet1!$D$4:$E$5");
     assert_parseable_refers_to(&print_area.refers_to);
 
+    let ref_to_global = wb
+        .get_defined_name(DefinedNameScope::Workbook, "RefToGlobal")
+        .expect("RefToGlobal missing");
+    assert_eq!(ref_to_global.refers_to, "GlobalName");
+    assert_parseable_refers_to(&ref_to_global.refers_to);
+
+    let ref_to_local = wb
+        .get_defined_name(DefinedNameScope::Workbook, "RefToLocal")
+        .expect("RefToLocal missing");
+    assert_eq!(ref_to_local.refers_to, "Sheet1!LocalName");
+    assert_parseable_refers_to(&ref_to_local.refers_to);
+
     assert_eq!(
         wb.defined_names
             .iter()
