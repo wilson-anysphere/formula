@@ -274,9 +274,9 @@ function normalizeRichTextRuns(
 
 type UnderlineSpec = { underline: boolean; underlineStyle?: "double" };
 
-function resolveUnderline(style: RichTextRunStyle | undefined, defaultValue: boolean): UnderlineSpec {
+function resolveUnderline(style: RichTextRunStyle | undefined, defaultValue: UnderlineSpec): UnderlineSpec {
   const value = style?.underline;
-  if (value === undefined) return { underline: defaultValue, underlineStyle: undefined };
+  if (value === undefined) return defaultValue;
 
   if (value === false) return { underline: false, underlineStyle: undefined };
   if (value === true) return { underline: true, underlineStyle: undefined };
@@ -2719,13 +2719,18 @@ export class CanvasGridRenderer {
             style: fontStyle
           } satisfies Required<Pick<FontSpec, "family" | "sizePx">> & { weight: string | number; style: string };
 
-          const cellUnderline = style?.underline === true;
+          const defaultUnderline: UnderlineSpec =
+            style?.underlineStyle === "double"
+              ? { underline: true, underlineStyle: "double" }
+              : style?.underline === true || style?.underlineStyle === "single"
+                ? { underline: true, underlineStyle: undefined }
+                : { underline: false, underlineStyle: undefined };
           const cellStrike = style?.strike === true;
 
           const layoutRuns = rawRuns.map((run) => {
             const runStyle =
               run.style && typeof run.style === "object" ? (run.style as RichTextRunStyle) : (undefined as RichTextRunStyle | undefined);
-            const underlineSpec = resolveUnderline(runStyle, cellUnderline);
+            const underlineSpec = resolveUnderline(runStyle, defaultUnderline);
             return {
               text: sliceByCodePointRange(text, offsets, run.start, run.end),
               font: fontSpecForRichTextStyle(runStyle, defaults, zoom),
@@ -3066,11 +3071,15 @@ export class CanvasGridRenderer {
           const direction = style?.direction ?? "auto";
           const verticalAlign = style?.verticalAlign ?? "middle";
           const rotationDeg = style?.rotationDeg ?? 0;
-          const underline = style?.underline === true;
+          const underlineStyle = style?.underlineStyle;
+          const underline =
+            style?.underline === true || underlineStyle === "single" || underlineStyle === "double";
+          const doubleUnderline = underlineStyle === "double";
           const strike = style?.strike === true;
           const hasTextDecorations = underline || strike;
           const decorationLineWidth = hasTextDecorations ? Math.max(1, Math.round(fontSize / 12)) : 0;
           const alignDecorationY = (pos: number): number => {
+            if (rotationDeg !== 0) return pos;
             if (decorationLineWidth === 1) return crispLine(pos);
             return pos;
           };
@@ -3197,10 +3206,17 @@ export class CanvasGridRenderer {
               if (hasTextDecorations && textWidth > 0) {
                 prepareDecorationStroke();
                 if (underline) {
-                  const underlineY = alignDecorationY(baselineY + Math.max(1, Math.round(descent * 0.5)));
+                  const underlineOffset = Math.max(1, Math.round(descent * 0.5));
+                  const underlineY = alignDecorationY(baselineY + underlineOffset);
                   contentCtx.beginPath();
                   contentCtx.moveTo(textX, underlineY);
                   contentCtx.lineTo(textX + textWidth, underlineY);
+                  if (doubleUnderline) {
+                    const doubleGap = Math.max(2, Math.round(decorationLineWidth * 2));
+                    const underlineY2 = alignDecorationY(baselineY + underlineOffset + doubleGap);
+                    contentCtx.moveTo(textX, underlineY2);
+                    contentCtx.lineTo(textX + textWidth, underlineY2);
+                  }
                   contentCtx.stroke();
                 }
                 if (strike) {
@@ -3215,12 +3231,23 @@ export class CanvasGridRenderer {
             } else {
               contentCtx.fillText(text, textX, baselineY);
               if (hasTextDecorations && textWidth > 0) {
+                contentCtx.save();
+                contentCtx.beginPath();
+                contentCtx.rect(x, y, width, height);
+                contentCtx.clip();
                 prepareDecorationStroke();
                 if (underline) {
-                  const underlineY = alignDecorationY(baselineY + Math.max(1, Math.round(descent * 0.5)));
+                  const underlineOffset = Math.max(1, Math.round(descent * 0.5));
+                  const underlineY = alignDecorationY(baselineY + underlineOffset);
                   contentCtx.beginPath();
                   contentCtx.moveTo(textX, underlineY);
                   contentCtx.lineTo(textX + textWidth, underlineY);
+                  if (doubleUnderline) {
+                    const doubleGap = Math.max(2, Math.round(decorationLineWidth * 2));
+                    const underlineY2 = alignDecorationY(baselineY + underlineOffset + doubleGap);
+                    contentCtx.moveTo(textX, underlineY2);
+                    contentCtx.lineTo(textX + textWidth, underlineY2);
+                  }
                   contentCtx.stroke();
                 }
                 if (strike) {
@@ -3230,6 +3257,7 @@ export class CanvasGridRenderer {
                   contentCtx.lineTo(textX + textWidth, strikeY);
                   contentCtx.stroke();
                 }
+                contentCtx.restore();
               }
             }
           } else if (layoutEngine && maxWidth > 0) {
@@ -3256,6 +3284,7 @@ export class CanvasGridRenderer {
               if (!hasTextDecorations) return;
               prepareDecorationStroke();
               if (underline) {
+                const doubleGap = doubleUnderline ? Math.max(2, Math.round(decorationLineWidth * 2)) : 0;
                 contentCtx.beginPath();
                 for (let i = 0; i < layout.lines.length; i++) {
                   const line = layout.lines[i];
@@ -3263,9 +3292,15 @@ export class CanvasGridRenderer {
                   const x1 = originX + line.x;
                   const x2 = x1 + line.width;
                   const baselineY = originY + i * layout.lineHeight + line.ascent;
-                  const underlineY = alignDecorationY(baselineY + Math.max(1, Math.round(line.descent * 0.5)));
+                  const underlineOffset = Math.max(1, Math.round(line.descent * 0.5));
+                  const underlineY = alignDecorationY(baselineY + underlineOffset);
                   contentCtx.moveTo(x1, underlineY);
                   contentCtx.lineTo(x2, underlineY);
+                  if (doubleUnderline) {
+                    const underlineY2 = alignDecorationY(baselineY + underlineOffset + doubleGap);
+                    contentCtx.moveTo(x1, underlineY2);
+                    contentCtx.lineTo(x2, underlineY2);
+                  }
                 }
                 contentCtx.stroke();
               }

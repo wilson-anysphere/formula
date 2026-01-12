@@ -46,6 +46,13 @@ export interface CellStyle {
    */
   textIndentPx?: number;
   underline?: boolean;
+  /**
+   * Optional underline variant.
+   *
+   * Note: `underline=true` implies `"single"`. When set to `"double"`, the renderer draws two underline strokes
+   * (Excel-like).
+   */
+  underlineStyle?: "single" | "double";
   strike?: boolean;
   borders?: CellBorders;
   diagonalBorders?: CellDiagonalBorders;
