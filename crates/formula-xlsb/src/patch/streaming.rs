@@ -201,10 +201,20 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
             | biff12::FORMULA_BOOLERR
                 if in_sheet_data =>
             {
-                let payload = read_payload(&mut input, len)?;
+                // Cell records always start with `[col: u32][style: u32]`. For large sheets, most
+                // cells are untouched. Avoid allocating a fresh `Vec` for every cell by reading
+                // just the fixed prefix, and only materializing the full payload when we need to
+                // patch the record.
+                if len < 8 {
+                    return Err(Error::UnexpectedEof);
+                }
+                let mut prefix = [0u8; 8];
+                input
+                    .read_exact(&mut prefix)
+                    .map_err(super::map_io_error)?;
                 let row = current_row.unwrap_or(0);
-                let col = super::read_u32(&payload, 0)?;
-                let style = super::read_u32(&payload, 4)?;
+                let col = u32::from_le_bytes(prefix[0..4].try_into().expect("col bytes"));
+                let style = u32::from_le_bytes(prefix[4..8].try_into().expect("style bytes"));
 
                 if super::flush_missing_cells_before(
                     &mut writer,
@@ -221,9 +231,16 @@ pub fn patch_sheet_bin_streaming<R: Read, W: Write>(
 
                 let Some(&edit_idx) = edits_by_coord.get(&(row, col)) else {
                     write_raw_header(&mut writer, &header)?;
-                    writer.write_raw(&payload)?;
+                    writer.write_raw(&prefix)?;
+                    copy_exact(&mut input, &mut writer, len.saturating_sub(prefix.len()))?;
                     continue;
                 };
+
+                let mut payload = vec![0u8; len];
+                payload[0..prefix.len()].copy_from_slice(&prefix);
+                input
+                    .read_exact(&mut payload[prefix.len()..])
+                    .map_err(super::map_io_error)?;
 
                 applied[edit_idx] = true;
                 let edit = &edits[edit_idx];
