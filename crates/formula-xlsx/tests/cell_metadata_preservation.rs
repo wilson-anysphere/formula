@@ -117,6 +117,111 @@ fn apply_cell_patches_preserves_cell_attrs_and_extlst_when_updating_value() {
 }
 
 #[test]
+fn apply_cell_patches_preserves_vm_attr_and_extlst_when_updating_value() {
+    let extlst =
+        r#"<extLst><ext uri="{123}"><test xmlns="http://example.com">ok</test></ext></extLst>"#;
+    let worksheet_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1"><c r="A1" s="5" vm="9" customAttr="x"><v>1</v>{extlst}</c></row>
+  </sheetData>
+</worksheet>"#
+    );
+
+    let bytes = build_minimal_xlsx(&worksheet_xml);
+    let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A1").unwrap(),
+        CellPatch::set_value(CellValue::Number(2.0)),
+    );
+    pkg.apply_cell_patches(&patches).expect("apply patches");
+
+    let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+    assert!(
+        out_xml.contains(r#"vm="9""#),
+        "expected vm attribute to be preserved, got: {out_xml}"
+    );
+    assert!(
+        out_xml.contains(r#"customAttr="x""#),
+        "expected customAttr attribute to be preserved, got: {out_xml}"
+    );
+    assert!(
+        out_xml.contains(extlst),
+        "expected extLst subtree to be preserved, got: {out_xml}"
+    );
+    assert!(
+        out_xml.contains("<v>2</v>"),
+        "expected cached value to update, got: {out_xml}"
+    );
+}
+
+#[test]
+fn apply_cell_patches_preserves_vm_attr_and_extlst_when_updating_formula_and_value() {
+    let extlst =
+        r#"<extLst><ext uri="{123}"><test xmlns="http://example.com">ok</test></ext></extLst>"#;
+    let worksheet_xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <dimension ref="A1"/>
+  <sheetData>
+    <row r="1"><c r="A1" s="5" vm="9" customAttr="x"><v>1</v>{extlst}</c></row>
+  </sheetData>
+</worksheet>"#
+    );
+
+    let bytes = build_minimal_xlsx(&worksheet_xml);
+    let mut pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+
+    let mut patches = WorkbookCellPatches::default();
+    patches.set_cell(
+        "Sheet1",
+        CellRef::from_a1("A1").unwrap(),
+        CellPatch::set_value_with_formula(CellValue::Number(4.0), "=2+2"),
+    );
+    pkg.apply_cell_patches(&patches).expect("apply patches");
+
+    let out_xml = std::str::from_utf8(pkg.part("xl/worksheets/sheet1.xml").unwrap()).unwrap();
+    assert!(
+        out_xml.contains(r#"vm="9""#),
+        "expected vm attribute to be preserved, got: {out_xml}"
+    );
+    assert!(
+        out_xml.contains(r#"customAttr="x""#),
+        "expected customAttr attribute to be preserved, got: {out_xml}"
+    );
+    assert!(
+        out_xml.contains(extlst),
+        "expected extLst subtree to be preserved, got: {out_xml}"
+    );
+
+    let doc = roxmltree::Document::parse(out_xml).expect("parse worksheet xml");
+    let cell = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "c" && n.attribute("r") == Some("A1"))
+        .expect("expected A1 cell");
+
+    assert_eq!(cell.attribute("vm"), Some("9"));
+    assert_eq!(cell.attribute("customAttr"), Some("x"));
+
+    let f = cell
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "f")
+        .expect("expected <f>");
+    assert_eq!(f.text().unwrap_or_default(), "2+2");
+
+    let v = cell
+        .children()
+        .find(|n| n.is_element() && n.tag_name().name() == "v")
+        .expect("expected <v>");
+    assert_eq!(v.text().unwrap_or_default(), "4");
+}
+
+#[test]
 fn apply_cell_patches_preserves_non_formula_children_when_updating_formula() {
     let extlst =
         r#"<extLst><ext uri="{123}"><test xmlns="http://example.com">ok</test></ext></extLst>"#;
