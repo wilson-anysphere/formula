@@ -85,6 +85,8 @@ function rawDataByteLength(raw: WebSocket.RawData): number {
   return 0;
 }
 
+const MAX_DOC_NAME_BYTES = 1024;
+
 function sendUpgradeRejection(
   socket: Duplex,
   statusCode: number,
@@ -1338,6 +1340,10 @@ export function createSyncServer(
         const docName = url.pathname.replace(/^\//, "");
         if (!docName) {
           sendUpgradeRejection(socket, 400, "Missing document id");
+          return;
+        }
+        if (Buffer.byteLength(docName, "utf8") > MAX_DOC_NAME_BYTES) {
+          sendUpgradeRejection(socket, 414, "Document id too long");
           return;
         }
 

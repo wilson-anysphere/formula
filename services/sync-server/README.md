@@ -242,6 +242,9 @@ Notable metrics (prefix `sync_server_`):
 
 - `SYNC_SERVER_MAX_MESSAGE_BYTES` (default: `2097152` / 2 MiB). Set to `0` to disable (not recommended).
 
+- Hard maximum document id (room name) size:
+  - 1024 bytes (UTF-8). Requests exceeding this are rejected with HTTP `414`.
+
 - Connection limits:
   - `SYNC_SERVER_MAX_CONNECTIONS`
   - `SYNC_SERVER_MAX_CONNECTIONS_PER_IP`
