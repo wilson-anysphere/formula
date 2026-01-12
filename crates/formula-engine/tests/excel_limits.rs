@@ -20,6 +20,15 @@ fn nested_parens(depth: usize) -> String {
     out
 }
 
+fn pow_chain(ops: usize) -> String {
+    let mut out = String::from("=1");
+    for _ in 0..ops {
+        out.push('^');
+        out.push('1');
+    }
+    out
+}
+
 #[test]
 fn parse_rejects_formula_over_8192_chars() {
     // `="aaaa..."` (includes the leading `=`).
@@ -56,6 +65,18 @@ fn parse_rejects_parenthesis_nesting_over_64() {
 #[test]
 fn parse_allows_parenthesis_nesting_at_64() {
     let formula = nested_parens(64);
+    assert!(parse_formula(&formula, ParseOptions::default()).is_ok());
+}
+
+#[test]
+fn parse_rejects_pow_nesting_over_64() {
+    let formula = pow_chain(65);
+    assert!(parse_formula(&formula, ParseOptions::default()).is_err());
+}
+
+#[test]
+fn parse_allows_pow_nesting_at_64() {
+    let formula = pow_chain(64);
     assert!(parse_formula(&formula, ParseOptions::default()).is_ok());
 }
 

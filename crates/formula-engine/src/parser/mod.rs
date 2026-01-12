@@ -1401,6 +1401,8 @@ struct Parser<'a> {
     func_stack: Vec<(String, usize)>,
     call_depth: usize,
     group_depth: usize,
+    unary_depth: usize,
+    pow_depth: usize,
     first_error: Option<ParseError>,
 }
 
@@ -1413,6 +1415,8 @@ impl<'a> Parser<'a> {
             func_stack: Vec::new(),
             call_depth: 0,
             group_depth: 0,
+            unary_depth: 0,
+            pow_depth: 0,
             first_error: None,
         }
     }
@@ -1473,8 +1477,23 @@ impl<'a> Parser<'a> {
             if l_bp < min_bp {
                 break;
             }
+            if op == BinaryOp::Pow && self.pow_depth >= EXCEL_MAX_NESTED_CALLS {
+                return Err(ParseError::new(
+                    format!(
+                        "Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"
+                    ),
+                    self.current_span(),
+                ));
+            }
             self.next(); // consume operator
-            let rhs = self.parse_expression(r_bp)?;
+            let rhs = if op == BinaryOp::Pow {
+                self.pow_depth += 1;
+                let result = self.parse_expression(r_bp);
+                self.pow_depth = self.pow_depth.saturating_sub(1);
+                result?
+            } else {
+                self.parse_expression(r_bp)?
+            };
             let (left, right) = if op == BinaryOp::Range {
                 coerce_range_operands(lhs, rhs)
             } else {
@@ -1563,8 +1582,24 @@ impl<'a> Parser<'a> {
             if l_bp < min_bp {
                 break;
             }
+            if op == BinaryOp::Pow && self.pow_depth >= EXCEL_MAX_NESTED_CALLS {
+                self.record_error(ParseError::new(
+                    format!(
+                        "Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"
+                    ),
+                    self.current_span(),
+                ));
+                break;
+            }
             self.next(); // consume operator
-            let rhs = self.parse_expression_best_effort(r_bp);
+            let rhs = if op == BinaryOp::Pow {
+                self.pow_depth += 1;
+                let rhs = self.parse_expression_best_effort(r_bp);
+                self.pow_depth = self.pow_depth.saturating_sub(1);
+                rhs
+            } else {
+                self.parse_expression_best_effort(r_bp)
+            };
             let (left, right) = if op == BinaryOp::Range {
                 coerce_range_operands(lhs, rhs)
             } else {
@@ -1584,24 +1619,60 @@ impl<'a> Parser<'a> {
         self.skip_trivia();
         match self.peek_kind() {
             TokenKind::Plus => {
+                if self.unary_depth >= EXCEL_MAX_NESTED_CALLS {
+                    self.record_error(ParseError::new(
+                        format!(
+                            "Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"
+                        ),
+                        self.current_span(),
+                    ));
+                    self.next();
+                    return Expr::Missing;
+                }
                 self.next();
+                self.unary_depth += 1;
                 let expr = self.parse_expression_best_effort(50);
+                self.unary_depth = self.unary_depth.saturating_sub(1);
                 Expr::Unary(UnaryExpr {
                     op: UnaryOp::Plus,
                     expr: Box::new(expr),
                 })
             }
             TokenKind::Minus => {
+                if self.unary_depth >= EXCEL_MAX_NESTED_CALLS {
+                    self.record_error(ParseError::new(
+                        format!(
+                            "Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"
+                        ),
+                        self.current_span(),
+                    ));
+                    self.next();
+                    return Expr::Missing;
+                }
                 self.next();
+                self.unary_depth += 1;
                 let expr = self.parse_expression_best_effort(50);
+                self.unary_depth = self.unary_depth.saturating_sub(1);
                 Expr::Unary(UnaryExpr {
                     op: UnaryOp::Minus,
                     expr: Box::new(expr),
                 })
             }
             TokenKind::At => {
+                if self.unary_depth >= EXCEL_MAX_NESTED_CALLS {
+                    self.record_error(ParseError::new(
+                        format!(
+                            "Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"
+                        ),
+                        self.current_span(),
+                    ));
+                    self.next();
+                    return Expr::Missing;
+                }
                 self.next();
+                self.unary_depth += 1;
                 let expr = self.parse_expression_best_effort(50);
+                self.unary_depth = self.unary_depth.saturating_sub(1);
                 Expr::Unary(UnaryExpr {
                     op: UnaryOp::ImplicitIntersection,
                     expr: Box::new(expr),
@@ -2093,24 +2164,57 @@ impl<'a> Parser<'a> {
         self.skip_trivia();
         match self.peek_kind() {
             TokenKind::Plus => {
+                if self.unary_depth >= EXCEL_MAX_NESTED_CALLS {
+                    return Err(ParseError::new(
+                        format!(
+                            "Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"
+                        ),
+                        self.current_span(),
+                    ));
+                }
                 self.next();
-                let expr = self.parse_expression(50)?;
+                self.unary_depth += 1;
+                let result = self.parse_expression(50);
+                self.unary_depth = self.unary_depth.saturating_sub(1);
+                let expr = result?;
                 Ok(Expr::Unary(UnaryExpr {
                     op: UnaryOp::Plus,
                     expr: Box::new(expr),
                 }))
             }
             TokenKind::Minus => {
+                if self.unary_depth >= EXCEL_MAX_NESTED_CALLS {
+                    return Err(ParseError::new(
+                        format!(
+                            "Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"
+                        ),
+                        self.current_span(),
+                    ));
+                }
                 self.next();
-                let expr = self.parse_expression(50)?;
+                self.unary_depth += 1;
+                let result = self.parse_expression(50);
+                self.unary_depth = self.unary_depth.saturating_sub(1);
+                let expr = result?;
                 Ok(Expr::Unary(UnaryExpr {
                     op: UnaryOp::Minus,
                     expr: Box::new(expr),
                 }))
             }
             TokenKind::At => {
+                if self.unary_depth >= EXCEL_MAX_NESTED_CALLS {
+                    return Err(ParseError::new(
+                        format!(
+                            "Expression nesting exceeds Excel's {EXCEL_MAX_NESTED_CALLS}-level limit"
+                        ),
+                        self.current_span(),
+                    ));
+                }
                 self.next();
-                let expr = self.parse_expression(50)?;
+                self.unary_depth += 1;
+                let result = self.parse_expression(50);
+                self.unary_depth = self.unary_depth.saturating_sub(1);
+                let expr = result?;
                 Ok(Expr::Unary(UnaryExpr {
                     op: UnaryOp::ImplicitIntersection,
                     expr: Box::new(expr),
