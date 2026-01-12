@@ -24,6 +24,8 @@ function snapshotSheets(doc) {
   return doc.getArray("sheets").toArray().map((sheet) => ({
     id: String(sheet.get("id") ?? ""),
     name: sheet.get("name") == null ? null : String(sheet.get("name")),
+    visibility: sheet.get("visibility") == null ? "visible" : String(sheet.get("visibility")),
+    tabColor: sheet.get("tabColor") == null ? null : String(sheet.get("tabColor")),
   }));
 }
 
@@ -42,6 +44,8 @@ test("attachOfflinePersistence restores workbook metadata (sheets + namedRanges 
 
     sheets.addSheet({ id: "Sheet2", name: "Budget" });
     sheets.moveSheet("Sheet1", 1);
+    sheets.setTabColor("Sheet2", "ff0000ff");
+    sheets.setVisibility("Sheet2", "hidden");
     namedRanges.set("MyRange", { sheetId: "Sheet2", range: "A1:B2" });
     metadata.set("title", "Quarterly Budget");
 
@@ -60,6 +64,8 @@ test("attachOfflinePersistence restores workbook metadata (sheets + namedRanges 
     // Restored workbook metadata.
     assert.deepEqual(snapshotSheets(doc).map((s) => s.id), ["Sheet2", "Sheet1"]);
     assert.equal(snapshotSheets(doc).find((s) => s.id === "Sheet2")?.name, "Budget");
+    assert.equal(snapshotSheets(doc).find((s) => s.id === "Sheet2")?.visibility, "hidden");
+    assert.equal(snapshotSheets(doc).find((s) => s.id === "Sheet2")?.tabColor, "FF0000FF");
     assert.deepEqual(doc.getMap("namedRanges").get("MyRange"), { sheetId: "Sheet2", range: "A1:B2" });
     assert.equal(doc.getMap("metadata").get("title"), "Quarterly Budget");
 
