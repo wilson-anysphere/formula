@@ -5811,6 +5811,17 @@ fn fn_sumif(
         return Value::Number(0.0);
     }
 
+    // SIMD fast path: SUMIF over in-memory arrays with numeric criteria.
+    if let Some(numeric) = criteria.as_numeric_criteria() {
+        if let (Range2DArg::Array(criteria_arr), Range2DArg::Array(sum_arr)) =
+            (criteria_range, sum_range)
+        {
+            if let Some(sum) = sum_if_array_numeric_criteria(sum_arr, criteria_arr, numeric) {
+                return Value::Number(sum);
+            }
+        }
+    }
+
     let mut sum = 0.0;
     for row_off in 0..rows {
         for col_off in 0..cols {
@@ -6129,6 +6140,19 @@ fn sumifs_with_array_ranges(
         crits.push(crit);
     }
 
+    // SIMD fast path: single-criteria SUMIFS over in-memory arrays with numeric criteria.
+    if crit_ranges.len() == 1 {
+        if let Some(numeric) = crits[0].as_numeric_criteria() {
+            if let (Range2DArg::Array(sum_arr), Range2DArg::Array(criteria_arr)) =
+                (sum_range, crit_ranges[0])
+            {
+                if let Some(sum) = sum_if_array_numeric_criteria(sum_arr, criteria_arr, numeric) {
+                    return Value::Number(sum);
+                }
+            }
+        }
+    }
+
     let mut sum = 0.0;
     for row_off in 0..rows {
         'cell: for col_off in 0..cols {
@@ -6426,6 +6450,15 @@ fn countifs_with_array_ranges(
         return Value::Number(0.0);
     }
 
+    // Fast path: COUNTIFS with a single criteria pair is equivalent to COUNTIF.
+    if ranges.len() == 1 {
+        if let Some(numeric) = criteria[0].as_numeric_criteria() {
+            if let CriteriaRange::Array(arr) = ranges[0] {
+                return Value::Number(count_if_array_numeric_criteria(arr, numeric) as f64);
+            }
+        }
+    }
+
     let mut count = 0usize;
     for idx in 0..len {
         let row_off = idx / cols;
@@ -6672,6 +6705,22 @@ fn fn_averageif(
     }
     if rows <= 0 || cols <= 0 {
         return Value::Error(ErrorKind::Div0);
+    }
+
+    // SIMD fast path: AVERAGEIF over in-memory arrays with numeric criteria.
+    if let Some(numeric) = criteria.as_numeric_criteria() {
+        if let (Range2DArg::Array(criteria_arr), Range2DArg::Array(avg_arr)) =
+            (criteria_range, avg_range)
+        {
+            if let Some((sum, count)) =
+                sum_count_if_array_numeric_criteria(avg_arr, criteria_arr, numeric)
+            {
+                if count == 0 {
+                    return Value::Error(ErrorKind::Div0);
+                }
+                return Value::Number(sum / count as f64);
+            }
+        }
     }
 
     let mut sum = 0.0;
@@ -7020,6 +7069,24 @@ fn averageifs_with_array_ranges(
 
         crit_ranges.push(range);
         crits.push(crit);
+    }
+
+    // SIMD fast path: single-criteria AVERAGEIFS over in-memory arrays with numeric criteria.
+    if crit_ranges.len() == 1 {
+        if let Some(numeric) = crits[0].as_numeric_criteria() {
+            if let (Range2DArg::Array(avg_arr), Range2DArg::Array(criteria_arr)) =
+                (avg_range, crit_ranges[0])
+            {
+                if let Some((sum, count)) =
+                    sum_count_if_array_numeric_criteria(avg_arr, criteria_arr, numeric)
+                {
+                    if count == 0 {
+                        return Value::Error(ErrorKind::Div0);
+                    }
+                    return Value::Number(sum / count as f64);
+                }
+            }
+        }
     }
 
     let mut sum = 0.0;
@@ -9452,6 +9519,108 @@ fn count_if_array_numeric_criteria(arr: &ArrayValue, criteria: NumericCriteria) 
     count
 }
 
+fn sum_if_array_numeric_criteria(
+    values: &ArrayValue,
+    criteria_values: &ArrayValue,
+    criteria: NumericCriteria,
+) -> Option<f64> {
+    if values.len() != criteria_values.len() || values.len() < SIMD_ARRAY_MIN_LEN {
+        return None;
+    }
+
+    let mut sum = 0.0;
+    let mut values_buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+    let mut criteria_buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+    let mut len = 0usize;
+
+    for (crit_v, sum_v) in criteria_values.iter().zip(values.iter()) {
+        let Some(n) = coerce_countif_value_to_number(crit_v) else {
+            return None;
+        };
+        // Preserve scalar semantics for NaN numeric values by falling back. The SIMD criteria kernels
+        // treat NaNs as blanks.
+        if n.is_nan() {
+            return None;
+        }
+        criteria_buf[len] = n;
+
+        match sum_v {
+            Value::Number(x) => {
+                if x.is_nan() {
+                    return None;
+                }
+                values_buf[len] = *x;
+            }
+            // Errors/lambdas in the value range must be able to short-circuit when criteria matches.
+            Value::Error(_) | Value::Lambda(_) => return None,
+            _ => values_buf[len] = f64::NAN,
+        }
+
+        len += 1;
+        if len == SIMD_AGGREGATE_BLOCK {
+            sum += simd::sum_if_f64(&values_buf, &criteria_buf, criteria);
+            len = 0;
+        }
+    }
+
+    if len > 0 {
+        sum += simd::sum_if_f64(&values_buf[..len], &criteria_buf[..len], criteria);
+    }
+    Some(sum)
+}
+
+fn sum_count_if_array_numeric_criteria(
+    values: &ArrayValue,
+    criteria_values: &ArrayValue,
+    criteria: NumericCriteria,
+) -> Option<(f64, usize)> {
+    if values.len() != criteria_values.len() || values.len() < SIMD_ARRAY_MIN_LEN {
+        return None;
+    }
+
+    let mut sum = 0.0;
+    let mut count = 0usize;
+    let mut values_buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+    let mut criteria_buf = [0.0_f64; SIMD_AGGREGATE_BLOCK];
+    let mut len = 0usize;
+
+    for (crit_v, avg_v) in criteria_values.iter().zip(values.iter()) {
+        let Some(n) = coerce_countif_value_to_number(crit_v) else {
+            return None;
+        };
+        if n.is_nan() {
+            return None;
+        }
+        criteria_buf[len] = n;
+
+        match avg_v {
+            Value::Number(x) => {
+                if x.is_nan() {
+                    return None;
+                }
+                values_buf[len] = *x;
+            }
+            Value::Error(_) | Value::Lambda(_) => return None,
+            _ => values_buf[len] = f64::NAN,
+        }
+
+        len += 1;
+        if len == SIMD_AGGREGATE_BLOCK {
+            let (s, c) = simd::sum_count_if_f64(&values_buf, &criteria_buf, criteria);
+            sum += s;
+            count += c;
+            len = 0;
+        }
+    }
+
+    if len > 0 {
+        let (s, c) = simd::sum_count_if_f64(&values_buf[..len], &criteria_buf[..len], criteria);
+        sum += s;
+        count += c;
+    }
+    Some((sum, count))
+}
+
 #[inline]
 fn range_in_bounds(grid: &dyn Grid, range: ResolvedRange) -> bool {
     grid.in_bounds(CellCoord {
@@ -11376,6 +11545,165 @@ mod tests {
         let eq_zero = NumericCriteria::new(CmpOp::Eq, 0.0);
         // NaN == 0 => false, explicit 0 == 0 => true, empty(0) == 0 => true.
         assert_eq!(count_if_array_numeric_criteria(&arr, eq_zero), 2);
+    }
+
+    #[test]
+    fn sumif_averageif_array_numeric_criteria_match_scalar_semantics() {
+        let grid = ColumnarGrid::new(1, 1);
+        let base = CellCoord { row: 0, col: 0 };
+        let locale = crate::LocaleConfig::en_us();
+        let len = SIMD_ARRAY_MIN_LEN + 17;
+ 
+        let mut crit_values = Vec::with_capacity(len);
+        let mut sum_values = Vec::with_capacity(len);
+        let mut avg_values = Vec::with_capacity(len);
+        for i in 0..len {
+            crit_values.push(Value::Number(i as f64));
+            // Mix in some ignored values in sum/avg ranges.
+            if i % 7 == 0 {
+                sum_values.push(Value::Text(Arc::from("x")));
+                avg_values.push(Value::Bool(true));
+            } else {
+                sum_values.push(Value::Number(1.0));
+                avg_values.push(Value::Number(i as f64));
+            }
+        }
+ 
+        let criteria_arr = ArrayValue::new(1, len, crit_values);
+        let sum_arr = ArrayValue::new(1, len, sum_values);
+        let avg_arr = ArrayValue::new(1, len, avg_values);
+ 
+        let criteria = Value::Text(Arc::from(">10"));
+ 
+        let sum_out = fn_sumif(
+            &[Value::Array(criteria_arr.clone()), criteria.clone(), Value::Array(sum_arr)],
+            &grid,
+            base,
+            &locale,
+        );
+        let mut expected_sum = 0.0;
+        for i in 0..len {
+            if (i as f64) > 10.0 && i % 7 != 0 {
+                expected_sum += 1.0;
+            }
+        }
+        assert_eq!(sum_out, Value::Number(expected_sum));
+ 
+        let avg_out = fn_averageif(
+            &[Value::Array(criteria_arr), criteria, Value::Array(avg_arr)],
+            &grid,
+            base,
+            &locale,
+        );
+        let mut expected_sum = 0.0;
+        let mut expected_count = 0usize;
+        for i in 0..len {
+            if (i as f64) > 10.0 && i % 7 != 0 {
+                expected_sum += i as f64;
+                expected_count += 1;
+            }
+        }
+        assert_eq!(
+            avg_out,
+            Value::Number(expected_sum / expected_count as f64)
+        );
+    }
+ 
+    #[test]
+    fn sumif_averageif_array_numeric_criteria_propagate_errors() {
+        let grid = ColumnarGrid::new(1, 1);
+        let base = CellCoord { row: 0, col: 0 };
+        let locale = crate::LocaleConfig::en_us();
+        let len = SIMD_ARRAY_MIN_LEN + 8;
+ 
+        let mut crit_values = Vec::with_capacity(len);
+        let mut sum_values = Vec::with_capacity(len);
+        let mut avg_values = Vec::with_capacity(len);
+        for i in 0..len {
+            crit_values.push(Value::Number(i as f64));
+            sum_values.push(Value::Number(1.0));
+            avg_values.push(Value::Number(1.0));
+        }
+        // Error at a matching index (15 > 10).
+        sum_values[15] = Value::Error(ErrorKind::Div0);
+        avg_values[15] = Value::Error(ErrorKind::Div0);
+ 
+        let criteria_arr = ArrayValue::new(1, len, crit_values);
+        let sum_arr = ArrayValue::new(1, len, sum_values);
+        let avg_arr = ArrayValue::new(1, len, avg_values);
+ 
+        let criteria = Value::Text(Arc::from(">10"));
+ 
+        assert_eq!(
+            fn_sumif(
+                &[Value::Array(criteria_arr.clone()), criteria.clone(), Value::Array(sum_arr)],
+                &grid,
+                base,
+                &locale,
+            ),
+            Value::Error(ErrorKind::Div0)
+        );
+ 
+        assert_eq!(
+            fn_averageif(
+                &[Value::Array(criteria_arr), criteria, Value::Array(avg_arr)],
+                &grid,
+                base,
+                &locale,
+            ),
+            Value::Error(ErrorKind::Div0)
+        );
+    }
+
+    #[test]
+    fn sumifs_averageifs_countifs_single_array_criteria_match_countif_semantics() {
+        let grid = ColumnarGrid::new(1, 1);
+        let base = CellCoord { row: 0, col: 0 };
+        let locale = crate::LocaleConfig::en_us();
+        let len = SIMD_ARRAY_MIN_LEN + 9;
+
+        let mut crit_values = Vec::with_capacity(len);
+        let mut sum_values = Vec::with_capacity(len);
+        for i in 0..len {
+            crit_values.push(Value::Number(i as f64));
+            sum_values.push(Value::Number(1.0));
+        }
+        let criteria_arr = ArrayValue::new(1, len, crit_values);
+        let sum_arr = ArrayValue::new(1, len, sum_values);
+
+        let criteria = Value::Text(Arc::from(">10"));
+
+        // SUMIFS(sum_range, criteria_range, criteria)
+        assert_eq!(
+            fn_sumifs(
+                &[Value::Array(sum_arr.clone()), Value::Array(criteria_arr.clone()), criteria.clone()],
+                &grid,
+                base,
+                &locale,
+            ),
+            Value::Number((len - 11) as f64)
+        );
+
+        // AVERAGEIFS(avg_range, criteria_range, criteria)
+        assert_eq!(
+            fn_averageifs(
+                &[
+                    Value::Array(sum_arr),
+                    Value::Array(criteria_arr.clone()),
+                    criteria.clone()
+                ],
+                &grid,
+                base,
+                &locale,
+            ),
+            Value::Number(1.0)
+        );
+
+        // COUNTIFS(range, criteria)
+        assert_eq!(
+            fn_countifs(&[Value::Array(criteria_arr), criteria], &grid, base, &locale),
+            Value::Number((len - 11) as f64)
+        );
     }
 
     #[test]
