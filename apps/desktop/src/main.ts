@@ -2160,8 +2160,9 @@ async function copyPowerQueryPersistence(fromWorkbookId: string, toWorkbookId: s
   if (!fromWorkbookId || !toWorkbookId) return;
   if (fromWorkbookId === toWorkbookId) return;
 
-  // Query definitions are currently persisted in LocalStorage for the desktop shell.
-  // Copy them when the workbook id changes (e.g. Save As from an unsaved session).
+  // Query definitions are persisted inside the workbook file (`xl/formula/power-query.xml`),
+  // but we still mirror them to localStorage during the migration window. Copy the mirror when
+  // the workbook id changes (e.g. Save As from an unsaved session) so UI state remains stable.
   try {
     const queries = loadQueriesFromStorage(fromWorkbookId);
     if (queries.length > 0) saveQueriesToStorage(toWorkbookId, queries);
