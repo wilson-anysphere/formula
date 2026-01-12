@@ -221,9 +221,9 @@ Given inputs `(settlement, maturity, frequency, basis)`:
 - `COUPPCD(...)` returns `PCD` (date serial)
 - `COUPNCD(...)` returns `NCD` (date serial)
 - `COUPNUM(...)` returns `N` (count of coupons remaining, integer)
-- `COUPDAYBS(...)` returns `A` (days accrued since `PCD`, integer)
-- `COUPDAYSNC(...)` returns `DSC` (days until `NCD`, integer)
-- `COUPDAYS(...)` returns `E` (days in coupon period containing settlement, integer)
+- `COUPDAYBS(...)` returns `A` (days accrued since `PCD`; integer day count expressed as a number)
+- `COUPDAYSNC(...)` returns `DSC` (days until `NCD`; integer day count expressed as a number)
+- `COUPDAYS(...)` returns `E` (modeled coupon period length; for `basis=3` this is `365/f` and can be fractional)
 
 ---
 
