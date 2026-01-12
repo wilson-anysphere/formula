@@ -765,7 +765,8 @@ export class SpreadsheetApp {
               const prevZoom = this.sharedGridZoom;
               const nextZoom = this.sharedGrid?.renderer.getZoom() ?? prevZoom;
 
-              if (nextZoom !== prevZoom) {
+              const zoomChanged = nextZoom !== prevZoom;
+              if (zoomChanged) {
                 this.sharedGridZoom = nextZoom;
                 // Document sheet views store base axis sizes at zoom=1. When zoom changes via
                 // gestures (e.g. Ctrl/Cmd+wheel), the renderer scales its internal state but we
@@ -781,7 +782,7 @@ export class SpreadsheetApp {
               this.scrollY = scroll.y;
               this.syncSharedChartPanes(effectiveViewport);
               this.hideCommentTooltip();
-              this.renderCharts(false);
+              this.renderCharts(zoomChanged);
               this.renderAuditing();
               this.renderSelection();
               if (this.scrollX !== prevX || this.scrollY !== prevY) {
@@ -1348,13 +1349,9 @@ export class SpreadsheetApp {
   setZoom(nextZoom: number): void {
     if (!this.sharedGrid) return;
     this.sharedGrid.renderer.setZoom(nextZoom);
-    this.sharedGridZoom = this.sharedGrid.renderer.getZoom();
-    // Document sheet views store base axis sizes at zoom=1; apply zoom scaling and resync.
-    this.syncSharedGridAxisSizesFromDocument();
     // Re-emit scroll so overlays (charts, auditing, etc) can re-layout at the new zoom level.
     const scroll = this.sharedGrid.getScroll();
     this.sharedGrid.scrollTo(scroll.x, scroll.y);
-    this.dispatchZoomChanged();
   }
 
   zoomToSelection(): void {
