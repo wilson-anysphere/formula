@@ -5,6 +5,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 
+import { openExtensionsPanel } from "./helpers";
+
 // CJS helpers (shared/* is CommonJS). Playwright's TS loader may not always expose
 // named exports for CJS modules, so fall back to `.default`.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -201,11 +203,7 @@ test.describe("IndexedDB extension install corruption", () => {
     await waitForDesktopReady(page);
 
     // Opening the extensions panel triggers extension host startup + auto-load of installed extensions.
-    // The toggle lives in the ribbon UI; `apps/desktop/index.html` should not include a fallback
-    // debug button with the same test id (duplicate locators). Scope to the ribbon so we exercise
-    // the real command dispatch that triggers lazy extension loading.
-    await page.getByTestId("ribbon-root").getByTestId("open-extensions-panel").click();
-    await expect(page.getByTestId("panel-extensions")).toBeVisible();
+    await openExtensionsPanel(page);
     // Wait for the Extensions panel to finish lazy-loading the extension host manager (built-ins +
     // marketplace-installed extensions). Until `manager.ready` flips, the panel only shows a
     // "Loading extensions…" placeholder and does not render the IndexedDB install status section.
