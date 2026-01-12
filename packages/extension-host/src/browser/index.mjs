@@ -545,7 +545,7 @@ class BrowserExtensionHost {
     clipboardWriteGuard,
     storageApi,
     uiApi,
-    activationTimeoutMs = 5000,
+    activationTimeoutMs,
     commandTimeoutMs = 5000,
     customFunctionTimeoutMs = 5000,
     dataConnectorTimeoutMs = 5000,
@@ -565,9 +565,11 @@ class BrowserExtensionHost {
     this._dataConnectors = new Map();
     this._messages = [];
     this._uiApi = uiApi ?? null;
+    const isNodeRuntime = typeof process !== "undefined" && typeof process?.versions?.node === "string";
+    const defaultActivationTimeoutMs = isNodeRuntime ? 20000 : 5000;
     this._activationTimeoutMs = Number.isFinite(activationTimeoutMs)
       ? Math.max(0, activationTimeoutMs)
-      : 5000;
+      : defaultActivationTimeoutMs;
     this._commandTimeoutMs = Number.isFinite(commandTimeoutMs) ? Math.max(0, commandTimeoutMs) : 5000;
     this._customFunctionTimeoutMs = Number.isFinite(customFunctionTimeoutMs)
       ? Math.max(0, customFunctionTimeoutMs)

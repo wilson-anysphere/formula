@@ -141,7 +141,7 @@ describe("DocumentControllerSpreadsheetApi", () => {
   });
 
   it("returns an error when DocumentController refuses to apply formatting (safety caps)", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const controller = new DocumentController();
       const api = new DocumentControllerSpreadsheetApi(controller);
@@ -709,7 +709,7 @@ describe("DocumentControllerSpreadsheetApi", () => {
       // Allow full-column formatting for this test so we can validate PreviewEngine approval
       // gating even when the underlying spreadsheet stores formatting in layered defaults
       // (no per-cell diffs).
-      { default_sheet: "Sheet1", max_tool_range_cells: Number.POSITIVE_INFINITY }
+      { default_sheet: "Sheet1", max_tool_range_cells: 2_000_000 }
     );
 
     // The DocumentController formatting layer stores full-column formatting without creating per-cell entries,
