@@ -2014,11 +2014,15 @@ export class SpreadsheetApp {
     const zoom = this.sharedGrid.renderer.getZoom();
     const headerRows = this.sharedHeaderRows();
     const headerCols = this.sharedHeaderCols();
+    const { rowCount, colCount } = this.sharedGrid.renderer.scroll.getCounts();
+    const maxDocRows = Math.max(0, rowCount - headerRows);
+    const maxDocCols = Math.max(0, colCount - headerCols);
 
     const nextCols = new Map<number, number>();
     for (const [key, value] of Object.entries(view?.colWidths ?? {})) {
       const col = Number(key);
       if (!Number.isInteger(col) || col < 0) continue;
+      if (col >= maxDocCols) continue;
       const size = Number(value);
       if (!Number.isFinite(size) || size <= 0) continue;
       nextCols.set(col, size);
@@ -2028,6 +2032,7 @@ export class SpreadsheetApp {
     for (const [key, value] of Object.entries(view?.rowHeights ?? {})) {
       const row = Number(key);
       if (!Number.isInteger(row) || row < 0) continue;
+      if (row >= maxDocRows) continue;
       const size = Number(value);
       if (!Number.isFinite(size) || size <= 0) continue;
       nextRows.set(row, size);
