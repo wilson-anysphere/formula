@@ -20,6 +20,12 @@ async function getSheetSwitcherOptionValues(page: Page): Promise<string[]> {
   });
 }
 
+async function getDocumentSheetIdOrder(page: Page): Promise<string[]> {
+  return await page.evaluate(() => {
+    return (window as any).__formulaApp.getDocument().getSheetIds();
+  });
+}
+
 test.describe("sheet tabs", () => {
   test("drag-and-drop reorders tabs and marks the document dirty", async ({ page }) => {
     await gotoDesktop(page);
@@ -39,6 +45,9 @@ test.describe("sheet tabs", () => {
     await expect
       .poll(async () => await getSheetSwitcherOptionValues(page), { timeout: 5_000 })
       .toEqual(["Sheet1", "Sheet2", "Sheet3"]);
+
+    // Status bar should reflect the active sheet (new sheets are activated on creation).
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
 
     // Ensure the dirty assertion is specifically caused by sheet reordering.
     await page.evaluate(() => {
@@ -85,6 +94,14 @@ test.describe("sheet tabs", () => {
     await expect
       .poll(async () => await getSheetSwitcherOptionValues(page), { timeout: 2_000 })
       .toEqual(["Sheet3", "Sheet1", "Sheet2"]);
+
+    // DocumentController sheet iteration order should follow the tab reorder (used by versioning).
+    await expect
+      .poll(async () => await getDocumentSheetIdOrder(page), { timeout: 2_000 })
+      .toEqual(["Sheet3", "Sheet1", "Sheet2"]);
+
+    // Status bar should update to match the new position of the active sheet.
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
 
     // Reordering should not switch the active sheet; the dragged sheet remains active.
     await expect(page.getByTestId("sheet-tab-Sheet3")).toHaveAttribute("data-active", "true");
