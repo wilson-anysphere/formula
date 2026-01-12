@@ -150,6 +150,12 @@ localStorage.setItem("formula:marketplace:baseUrl", "https://marketplace.formula
 location.reload();
 ```
 
+To open the built-in Marketplace panel in dev (if it isn’t already exposed in the UI), run:
+
+```js
+window.dispatchEvent(new CustomEvent("formula:open-panel", { detail: { panelId: "marketplace" } }));
+```
+
 ### Legacy Node-only installer/runtime (deprecated)
 
 The repo still contains Node-only marketplace/host modules used by Node integration tests and earlier experiments:

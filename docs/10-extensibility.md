@@ -9,6 +9,12 @@ A vibrant extension ecosystem is critical for long-term success. We follow VS Co
 The desktop app wires `@formula/extension-host` contribution points into the UI so extensions are actually usable without devtools:
 
 - **Extensions panel**: open via the status bar **Extensions** button. It lists installed extensions, their contributed commands, and contributed panels.
+- **Marketplace panel**: installs and updates marketplace extensions via `WebExtensionManager` (IndexedDB-backed).
+  - Panel id: `"marketplace"` (`PanelIds.MARKETPLACE`)
+  - In dev builds you can open it via DevTools:
+    ```js
+    window.dispatchEvent(new CustomEvent("formula:open-panel", { detail: { panelId: "marketplace" } }));
+    ```
 - **Executing commands**: clicking a command routes to `BrowserExtensionHost.executeCommand(commandId, ...args)`. Errors surface as a toast.
 - **Panels / webviews**:
   - Contributed panels (`contributes.panels`) are registered in the panel registry so they can be persisted in layouts.
@@ -1085,8 +1091,10 @@ guardrails:
     (optionally `formula` if an import map/alias is provided)
   - any dynamic `import(...)` usage
   - any module URL that resolves outside the extension base URL (including redirects)
-  - implication: browser extensions must bundle third-party dependencies and reference any split
-    chunks via relative imports inside the extension package.
+  - implication: browser extensions must bundle third-party dependencies.
+    - When loaded from a normal (hierarchical) base URL, split chunks can be referenced via relative imports.
+    - When loaded from an in-memory `blob:`/`data:` entrypoint (marketplace installs), the entrypoint must be a
+      **single-file ESM bundle** (no relative imports).
 - **Code generation lockdown (best-effort)**: `eval`, `Function` (and related constructors), and
   string timer callbacks (`setTimeout("...")`) are disabled by default.
   - configurable via `new BrowserExtensionHost({ sandbox: { strictImports, disableEval } })`
