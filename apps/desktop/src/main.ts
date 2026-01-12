@@ -976,6 +976,7 @@ function openFormatCells(): void {
     getSheetId: () => app.getCurrentSheetId(),
     getActiveCell: () => app.getActiveCell(),
     getSelectionRanges: () => app.getSelectionRanges(),
+    getGridLimits: () => getGridLimitsForFormatting(),
     focusGrid: () => app.focus(),
   });
 }

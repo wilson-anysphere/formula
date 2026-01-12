@@ -1,5 +1,9 @@
 import { applyFormatCells } from "./formatCellsDialog.js";
 import { getEffectiveCellStyle } from "./getEffectiveCellStyle.js";
+import { showToast } from "../extensions/ui.js";
+import { DEFAULT_GRID_LIMITS } from "../selection/selection.js";
+import type { GridLimits, Range } from "../selection/types";
+import { DEFAULT_FORMATTING_APPLY_CELL_LIMIT, evaluateFormattingSelectionSize, normalizeSelectionRange } from "./selectionSizeGuard.js";
 
 export type FormatCellsDialogHost = {
   isEditing: () => boolean;
@@ -7,6 +11,11 @@ export type FormatCellsDialogHost = {
   getSheetId: () => string;
   getActiveCell: () => { row: number; col: number };
   getSelectionRanges: () => Array<{ startRow: number; startCol: number; endRow: number; endCol: number }>;
+  /**
+   * Optional: the current grid limits (used for band detection + expanding full row/col selections
+   * to canonical Excel bounds so layered formatting fast paths apply).
+   */
+  getGridLimits?: () => GridLimits;
   focusGrid: () => void;
 };
 
@@ -51,17 +60,6 @@ function normalizeArgb(value: unknown): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
   return trimmed.toUpperCase();
-}
-
-function normalizeSelectionRanges(
-  ranges: Array<{ startRow: number; startCol: number; endRow: number; endCol: number }>,
-): Array<{ startRow: number; startCol: number; endRow: number; endCol: number }> {
-  return ranges.map((r) => ({
-    startRow: Math.min(r.startRow, r.endRow),
-    endRow: Math.max(r.startRow, r.endRow),
-    startCol: Math.min(r.startCol, r.endCol),
-    endCol: Math.max(r.startCol, r.endCol),
-  }));
 }
 
 export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
@@ -447,17 +445,43 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
     if (!changes) return;
 
     const selectionRanges = host.getSelectionRanges();
-    const ranges =
+    const rawRanges =
       selectionRanges.length > 0
         ? selectionRanges
         : [{ startRow: activeNow.row, startCol: activeNow.col, endRow: activeNow.row, endCol: activeNow.col }];
 
-    const normalized = normalizeSelectionRanges(ranges);
+    const limits: GridLimits = host.getGridLimits?.() ?? DEFAULT_GRID_LIMITS;
+    const decision = evaluateFormattingSelectionSize(rawRanges as Range[], limits, {
+      maxCells: DEFAULT_FORMATTING_APPLY_CELL_LIMIT,
+    });
+    if (!decision.allowed) {
+      try {
+        showToast(
+          "Selection is too large to format. Try selecting fewer cells or an entire row/column.",
+          "warning",
+        );
+      } catch {
+        // `showToast` requires a #toast-root; ignore failures in test-only contexts.
+      }
+      return;
+    }
 
-    const useBatch = normalized.length > 1;
+    const normalized = rawRanges.map((r) => normalizeSelectionRange(r as Range));
+    const expanded = normalized.map((r) => {
+      const isFullColBand = r.startRow === 0 && r.endRow === limits.maxRows - 1;
+      const isFullRowBand = r.startCol === 0 && r.endCol === limits.maxCols - 1;
+      return {
+        startRow: r.startRow,
+        startCol: r.startCol,
+        endRow: isFullColBand ? DEFAULT_GRID_LIMITS.maxRows - 1 : r.endRow,
+        endCol: isFullRowBand ? DEFAULT_GRID_LIMITS.maxCols - 1 : r.endCol,
+      };
+    });
+
+    const useBatch = expanded.length > 1;
     if (useBatch) doc.beginBatch({ label: "Format Cells" });
     try {
-      for (const r of normalized) {
+      for (const r of expanded) {
         applyFormatCells(
           doc,
           sheetIdNow,
