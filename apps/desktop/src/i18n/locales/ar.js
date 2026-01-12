@@ -11,6 +11,7 @@ export const ar = {
   "commandPalette.shortcutSearch.hint": "بحث عن الاختصارات",
   "commandPalette.empty.noMatchingShortcuts": "لا توجد اختصارات مطابقة",
   "commandPalette.empty.noShortcuts": "لا توجد اختصارات",
+  "commandPalette.searching": "جارٍ البحث…",
   "clipboard.pasteSpecial.title": "لصق خاص…",
   "clipboard.pasteSpecial.paste": "لصق",
   "clipboard.pasteSpecial.pasteValues": "لصق القيم",

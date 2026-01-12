@@ -11,6 +11,7 @@ export const deDE = {
   "commandPalette.shortcutSearch.hint": "Tastenkürzel suchen",
   "commandPalette.empty.noMatchingShortcuts": "Keine passenden Tastenkürzel",
   "commandPalette.empty.noShortcuts": "Keine Tastenkürzel",
+  "commandPalette.searching": "Suche…",
   "clipboard.pasteSpecial.title": "Inhalte einfügen…",
   "clipboard.pasteSpecial.paste": "Einfügen",
   "clipboard.pasteSpecial.pasteValues": "Werte einfügen",
