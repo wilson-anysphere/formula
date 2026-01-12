@@ -3764,6 +3764,8 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
     let days360_eu =
         date_time::days360(prev_coupon, last_interest, true, system).unwrap() as f64;
     assert_close(days360_eu, 178.0, 0.0);
+    let e4 = coupon_period_e(prev_coupon, last_interest, 4, frequency, system);
+    assert_close(e4, 178.0, 0.0);
 
     for basis in [0, 4] {
         let expected = oddl_price_excel_model(
