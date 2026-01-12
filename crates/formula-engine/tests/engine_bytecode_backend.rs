@@ -3129,12 +3129,25 @@ fn bytecode_backend_matches_ast_for_choose_ifs_and_switch() {
     engine
         .set_cell_formula("Sheet1", "B11", "=CHOOSE(1/0, 1, 2)")
         .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B12", "=CHOOSE(\"2\", 1/0, 7)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B13", "=CHOOSE(TRUE, 10, 20)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B14", "=CHOOSE(FALSE, 10, 20)")
+        .unwrap();
 
+    let stats = engine.bytecode_compile_stats();
     assert_eq!(
-        engine.bytecode_program_count(),
-        11,
-        "expected all formulas to compile to bytecode"
+        stats.fallback,
+        0,
+        "expected all formulas to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
     );
+    assert_eq!(stats.total_formula_cells, 14);
+    assert_eq!(stats.compiled, 14);
 
     engine.recalculate_single_threaded();
 
@@ -3150,6 +3163,9 @@ fn bytecode_backend_matches_ast_for_choose_ifs_and_switch() {
         ("=CHOOSE(1, 1/0, 7)", "B9"),
         ("=CHOOSE(3, 1, 2)", "B10"),
         ("=CHOOSE(1/0, 1, 2)", "B11"),
+        ("=CHOOSE(\"2\", 1/0, 7)", "B12"),
+        ("=CHOOSE(TRUE, 10, 20)", "B13"),
+        ("=CHOOSE(FALSE, 10, 20)", "B14"),
     ] {
         assert_engine_matches_ast(&engine, formula, cell);
     }
