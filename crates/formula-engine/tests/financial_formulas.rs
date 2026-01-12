@@ -176,3 +176,27 @@ fn xirr_xnpv_length_mismatch_returns_num_error() {
         Value::Error(ErrorKind::Num)
     );
 }
+
+#[test]
+fn cashflow_functions_reject_lambda_values() {
+    let mut engine = Engine::new();
+
+    // Lambdas are not coercible to numbers for cashflow functions.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=NPV(0.1, LAMBDA(x,x))")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=IRR(LAMBDA(x,x))")
+        .unwrap();
+
+    engine.recalculate();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Error(ErrorKind::Value)
+    );
+}
