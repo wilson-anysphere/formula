@@ -130,6 +130,60 @@ function shouldPreserveSchemaV1SheetView(value, sheetId) {
 }
 
 /**
+ * Backwards-compatible detection for schemaVersion=1 callers that existed before
+ * BranchService tracked sheet visibility/tabColor metadata.
+ *
+ * Older callers will omit these fields from `sheets.metaById[sheetId]`. Treat
+ * omission (or invalid values) as "no change" so they can't accidentally wipe
+ * sheet metadata they don't understand.
+ *
+ * @param {any} value
+ * @param {string} sheetId
+ */
+function shouldPreserveSchemaV1SheetVisibility(value, sheetId) {
+  if (!isRecord(value) || value.schemaVersion !== 1) return false;
+  const sheets = value.sheets;
+  if (!isRecord(sheets) || !isRecord(sheets.metaById)) return false;
+  const meta = sheets.metaById[sheetId];
+  if (!isRecord(meta)) return false;
+
+  if ("visibility" in meta) {
+    const vis = meta.visibility;
+    if (vis === "visible" || vis === "hidden" || vis === "veryHidden") return false;
+    // Key exists but is invalid -> assume caller doesn't support; preserve.
+    return true;
+  }
+  return true;
+}
+
+/**
+ * @param {any} value
+ * @param {string} sheetId
+ */
+function shouldPreserveSchemaV1SheetTabColor(value, sheetId) {
+  if (!isRecord(value) || value.schemaVersion !== 1) return false;
+  const sheets = value.sheets;
+  if (!isRecord(sheets) || !isRecord(sheets.metaById)) return false;
+  const meta = sheets.metaById[sheetId];
+  if (!isRecord(meta)) return false;
+
+  if ("tabColor" in meta) {
+    const c = meta.tabColor;
+    // `null` is an explicit "clear tab color" operation.
+    if (c === null) return false;
+    if (typeof c === "string") {
+      // Treat invalid strings as omitted so older callers can't wipe a valid tabColor
+      // with a non-canonical representation.
+      if (/^[0-9A-Fa-f]{8}$/.test(c)) return false;
+      return true;
+    }
+    // Key exists but is invalid -> assume caller doesn't support; preserve.
+    return true;
+  }
+  return true;
+}
+
+/**
  * BranchService provides high-level branch/merge operations for a single
  * document.
  *
@@ -351,6 +405,24 @@ export class BranchService {
         const currentView = currentState.sheets.metaById?.[sheetId]?.view;
         if (currentView !== undefined) {
           merged.sheets.metaById[sheetId].view = structuredClone(currentView);
+          didOverlay = true;
+        }
+      }
+
+      // Preserve sheet metadata (visibility/tabColor) when the caller omits it.
+      for (const sheetId of Object.keys(merged.sheets.metaById ?? {})) {
+        if (!shouldPreserveSchemaV1SheetVisibility(nextState, sheetId)) continue;
+        const currentVisibility = currentState.sheets.metaById?.[sheetId]?.visibility;
+        if (currentVisibility !== undefined) {
+          merged.sheets.metaById[sheetId].visibility = currentVisibility;
+          didOverlay = true;
+        }
+      }
+      for (const sheetId of Object.keys(merged.sheets.metaById ?? {})) {
+        if (!shouldPreserveSchemaV1SheetTabColor(nextState, sheetId)) continue;
+        const currentTabColor = currentState.sheets.metaById?.[sheetId]?.tabColor;
+        if (currentTabColor !== undefined) {
+          merged.sheets.metaById[sheetId].tabColor = currentTabColor;
           didOverlay = true;
         }
       }

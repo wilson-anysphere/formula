@@ -526,6 +526,39 @@ export function mergeDocumentStates({ base, ours, theirs }) {
     else if (deepEqual(baseView, oursView)) mergedView = theirsView;
     else if (deepEqual(baseView, theirsView)) mergedView = oursView;
 
+    // Optional sheet metadata (visibility/tabColor) is stored outside the grid and should
+    // survive branching/merges once callers support it. Treat missing values as "no change"
+    // (important for older clients that don't include these fields in commits).
+    const baseVisibility = baseMeta?.visibility;
+    let oursVisibility = oursMeta?.visibility;
+    let theirsVisibility = theirsMeta?.visibility;
+    if (baseMeta && oursMeta && oursVisibility === undefined && baseVisibility !== undefined) {
+      oursVisibility = baseVisibility;
+    }
+    if (baseMeta && theirsMeta && theirsVisibility === undefined && baseVisibility !== undefined) {
+      theirsVisibility = baseVisibility;
+    }
+
+    let mergedVisibility = oursVisibility;
+    if (deepEqual(oursVisibility, theirsVisibility)) mergedVisibility = oursVisibility;
+    else if (deepEqual(baseVisibility, oursVisibility)) mergedVisibility = theirsVisibility;
+    else if (deepEqual(baseVisibility, theirsVisibility)) mergedVisibility = oursVisibility;
+
+    const baseTabColor = baseMeta?.tabColor;
+    let oursTabColor = oursMeta?.tabColor;
+    let theirsTabColor = theirsMeta?.tabColor;
+    if (baseMeta && oursMeta && oursTabColor === undefined && baseTabColor !== undefined) {
+      oursTabColor = baseTabColor;
+    }
+    if (baseMeta && theirsMeta && theirsTabColor === undefined && baseTabColor !== undefined) {
+      theirsTabColor = baseTabColor;
+    }
+
+    let mergedTabColor = oursTabColor;
+    if (deepEqual(oursTabColor, theirsTabColor)) mergedTabColor = oursTabColor;
+    else if (deepEqual(baseTabColor, oursTabColor)) mergedTabColor = theirsTabColor;
+    else if (deepEqual(baseTabColor, theirsTabColor)) mergedTabColor = oursTabColor;
+
     const baseSheet = baseMeta ? baseState.cells[sheetId] ?? {} : {};
     const oursSheet = oursMeta ? oursState.cells[sheetId] ?? {} : {};
     const theirsSheet = theirsMeta ? theirsState.cells[sheetId] ?? {} : {};
@@ -540,12 +573,20 @@ export function mergeDocumentStates({ base, ours, theirs }) {
     // Added sheets (base absent).
     if (!baseMeta) {
       if (oursMeta && !theirsMeta) {
-        metaById[sheetId] = { id: sheetId, name: oursMeta.name ?? null, view: structuredClone(oursView) };
+        /** @type {SheetMeta} */
+        const meta = { id: sheetId, name: oursMeta.name ?? null, view: structuredClone(oursView) };
+        if (oursVisibility !== undefined) meta.visibility = oursVisibility;
+        if (oursTabColor !== undefined) meta.tabColor = oursTabColor;
+        metaById[sheetId] = meta;
         cellStrategy.set(sheetId, "ours");
         continue;
       }
       if (!oursMeta && theirsMeta) {
-        metaById[sheetId] = { id: sheetId, name: theirsMeta.name ?? null, view: structuredClone(theirsView) };
+        /** @type {SheetMeta} */
+        const meta = { id: sheetId, name: theirsMeta.name ?? null, view: structuredClone(theirsView) };
+        if (theirsVisibility !== undefined) meta.visibility = theirsVisibility;
+        if (theirsTabColor !== undefined) meta.tabColor = theirsTabColor;
+        metaById[sheetId] = meta;
         cellStrategy.set(sheetId, "theirs");
         continue;
       }
@@ -560,7 +601,11 @@ export function mergeDocumentStates({ base, ours, theirs }) {
             theirs: theirsMeta.name ?? null,
           });
         }
-        metaById[sheetId] = { id: sheetId, name: oursMeta.name ?? null, view: structuredClone(mergedView) };
+        /** @type {SheetMeta} */
+        const meta = { id: sheetId, name: oursMeta.name ?? null, view: structuredClone(mergedView) };
+        if (mergedVisibility !== undefined) meta.visibility = mergedVisibility;
+        if (mergedTabColor !== undefined) meta.tabColor = mergedTabColor;
+        metaById[sheetId] = meta;
         cellStrategy.set(sheetId, "merge");
       }
       continue;
@@ -604,7 +649,11 @@ export function mergeDocumentStates({ base, ours, theirs }) {
         theirs: null,
       });
       // Prefer ours: keep sheet as-is.
-      metaById[sheetId] = { id: sheetId, name: oursMeta.name ?? null, view: structuredClone(oursView) };
+      /** @type {SheetMeta} */
+      const meta = { id: sheetId, name: oursMeta.name ?? null, view: structuredClone(oursView) };
+      if (oursVisibility !== undefined) meta.visibility = oursVisibility;
+      if (oursTabColor !== undefined) meta.tabColor = oursTabColor;
+      metaById[sheetId] = meta;
       cellStrategy.set(sheetId, "ours");
       continue;
     }
@@ -634,7 +683,11 @@ export function mergeDocumentStates({ base, ours, theirs }) {
         mergedName = oursName;
       }
 
-      metaById[sheetId] = { id: sheetId, name: mergedName, view: structuredClone(mergedView) };
+      /** @type {SheetMeta} */
+      const meta = { id: sheetId, name: mergedName, view: structuredClone(mergedView) };
+      if (mergedVisibility !== undefined) meta.visibility = mergedVisibility;
+      if (mergedTabColor !== undefined) meta.tabColor = mergedTabColor;
+      metaById[sheetId] = meta;
       cellStrategy.set(sheetId, "merge");
     }
   }
@@ -871,11 +924,20 @@ export function applyConflictResolutions(mergeResult, resolutions) {
           throw new Error("Sheet presence conflict manual resolution requires { meta, cells } or null");
         }
 
-        merged.sheets.metaById[sheetId] = {
+        /** @type {import("./types.js").SheetMeta} */
+        const nextMeta = {
           id: sheetId,
           name: chosen.meta.name == null ? null : String(chosen.meta.name),
           view: isRecord(chosen.meta.view) ? structuredClone(chosen.meta.view) : { frozenRows: 0, frozenCols: 0 },
         };
+        if (chosen.meta.visibility === "visible" || chosen.meta.visibility === "hidden" || chosen.meta.visibility === "veryHidden") {
+          nextMeta.visibility = chosen.meta.visibility;
+        }
+        if ("tabColor" in chosen.meta) {
+          if (chosen.meta.tabColor == null) nextMeta.tabColor = null;
+          else if (typeof chosen.meta.tabColor === "string") nextMeta.tabColor = chosen.meta.tabColor;
+        }
+        merged.sheets.metaById[sheetId] = nextMeta;
         merged.cells[sheetId] = structuredClone(chosen.cells);
         if (!merged.sheets.order.includes(sheetId)) merged.sheets.order.push(sheetId);
         continue;

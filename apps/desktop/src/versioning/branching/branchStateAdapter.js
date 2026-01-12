@@ -275,7 +275,29 @@ export function documentControllerToBranchState(doc) {
       delete view.colFormats;
     }
 
-    metaById[sheetId] = { id: sheetId, name, view };
+    /** @type {Record<string, any>} */
+    const metaOut = { id: sheetId, name, view };
+
+    const visibility = sheetMeta?.visibility;
+    if (visibility === "visible" || visibility === "hidden" || visibility === "veryHidden") {
+      metaOut.visibility = visibility;
+    }
+
+    if (sheetMeta && ("tabColor" in sheetMeta || "tab_color" in sheetMeta)) {
+      // Collab schema uses an 8-digit ARGB string. Be tolerant of other shapes
+      // (e.g. { rgb }) during Task 201 rollout.
+      let tabColor = sheetMeta.tabColor ?? sheetMeta.tab_color;
+      if (tabColor && typeof tabColor === "object" && typeof tabColor.rgb === "string") {
+        tabColor = tabColor.rgb;
+      }
+      if (tabColor == null) {
+        metaOut.tabColor = null;
+      } else if (typeof tabColor === "string") {
+        metaOut.tabColor = tabColor;
+      }
+    }
+
+    metaById[sheetId] = metaOut;
   }
 
   /** @type {DocumentState} */
@@ -353,6 +375,12 @@ export function applyBranchStateToDocumentController(doc, state) {
       rowHeights: view.rowHeights,
       cells
     };
+    if (meta.visibility === "visible" || meta.visibility === "hidden" || meta.visibility === "veryHidden") {
+      outSheet.visibility = meta.visibility;
+    }
+    if ("tabColor" in meta) {
+      outSheet.tabColor = meta.tabColor ?? null;
+    }
 
     // --- Layered formats (sheet/row/col defaults) ---
     //

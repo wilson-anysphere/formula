@@ -45,6 +45,8 @@
  * `name` is the user-visible display name (nullable for older/malformed docs).
  * `view` stores per-sheet UI state that should survive undo/redo and semantic merges
  * (e.g. frozen panes).
+ * `visibility` controls whether the sheet tab is visible to the user (Excel-like semantics).
+ * `tabColor` stores an optional sheet tab color as an 8-digit ARGB hex string.
  *
  * @typedef {{
  *   frozenRows: number,
@@ -77,7 +79,19 @@
  *   colFormats?: Record<string, JsonObject>,
  * }} SheetViewState
  *
- * @typedef {{ id: string, name: string | null, view?: SheetViewState }} SheetMeta
+ * @typedef {"visible" | "hidden" | "veryHidden"} SheetVisibility
+ *
+ * @typedef {{
+ *   id: string,
+ *   name: string | null,
+ *   view?: SheetViewState,
+ *   visibility?: SheetVisibility,
+ *   /**
+ *    * Optional sheet tab color as an 8-digit ARGB hex string (e.g. "FFFF0000").
+ *    * `null` indicates an explicit "no color" override; `undefined` means "unknown/untracked".
+ *    *\/
+ *   tabColor?: string | null,
+ * }} SheetMeta
  */
 
 /**

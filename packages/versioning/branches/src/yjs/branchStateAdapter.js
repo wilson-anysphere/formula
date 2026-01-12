@@ -341,6 +341,21 @@ export function branchStateFromYjsDoc(doc) {
     /** @type {SheetMeta} */
     const meta = { id, name };
 
+    // Optional sheet metadata mirrored from the collab workbook schema.
+    const rawVisibility = readYMapOrObject(entry, "visibility");
+    const visibility = coerceString(rawVisibility);
+    if (visibility === "visible" || visibility === "hidden" || visibility === "veryHidden") {
+      meta.visibility = visibility;
+    }
+
+    const rawTabColor = readYMapOrObject(entry, "tabColor");
+    if (rawTabColor === null) {
+      meta.tabColor = null;
+    } else {
+      const tabColor = coerceString(rawTabColor);
+      if (tabColor != null) meta.tabColor = tabColor;
+    }
+
     // Per-sheet view state (e.g. frozen panes) can be stored either under a
     // dedicated `view` object or (legacy/experimental) as top-level fields.
     const rawView = readYMapOrObject(entry, "view");
@@ -672,6 +687,20 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
           entry.set("id", sheetId);
           entry.set("name", meta?.name ?? null);
           if (meta?.view !== undefined) entry.set("view", structuredClone(meta.view));
+          if (meta && "visibility" in meta) {
+            if (meta.visibility === "visible" || meta.visibility === "hidden" || meta.visibility === "veryHidden") {
+              entry.set("visibility", meta.visibility);
+            } else if (meta.visibility == null) {
+              entry.delete("visibility");
+            }
+          }
+          if (meta && "tabColor" in meta) {
+            if (meta.tabColor == null) {
+              entry.delete("tabColor");
+            } else if (typeof meta.tabColor === "string") {
+              entry.set("tabColor", meta.tabColor);
+            }
+          }
           desiredEntries.push(entry);
         }
 

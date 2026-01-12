@@ -13,6 +13,7 @@
  * @typedef {import("./types.js").LegacyDocumentState} LegacyDocumentState
  * @typedef {import("./types.js").SheetsState} SheetsState
  * @typedef {import("./types.js").SheetMeta} SheetMeta
+ * @typedef {import("./types.js").SheetVisibility} SheetVisibility
  * @typedef {import("./types.js").CellMap} CellMap
  */
 
@@ -139,6 +140,26 @@ function normalizeSheetView(value) {
 }
 
 /**
+ * @param {any} value
+ * @returns {SheetVisibility | undefined}
+ */
+function normalizeSheetVisibility(value) {
+  if (value === "visible" || value === "hidden" || value === "veryHidden") return value;
+  return undefined;
+}
+
+/**
+ * @param {any} value
+ * @returns {string | null | undefined}
+ */
+function normalizeTabColor(value) {
+  if (value == null) return value === null ? null : undefined;
+  const str = String(value);
+  if (!/^[0-9A-Fa-f]{8}$/.test(str)) return undefined;
+  return str.toUpperCase();
+}
+
+/**
  * @returns {DocumentState}
  */
 export function emptyDocumentState() {
@@ -239,11 +260,20 @@ export function normalizeDocumentState(input) {
     const rawMeta = rawMetaById[sheetId];
     if (isRecord(rawMeta)) {
       const rawView = isRecord(rawMeta.view) ? rawMeta.view : rawMeta;
-      metaById[sheetId] = {
+      /** @type {SheetMeta} */
+      const meta = {
         id: typeof rawMeta.id === "string" && rawMeta.id.length > 0 ? rawMeta.id : sheetId,
         name: rawMeta.name == null ? null : String(rawMeta.name),
         view: normalizeSheetView(rawView),
       };
+
+      const visibility = normalizeSheetVisibility(rawMeta.visibility);
+      if (visibility !== undefined) meta.visibility = visibility;
+
+      const tabColor = normalizeTabColor(rawMeta.tabColor);
+      if (tabColor !== undefined) meta.tabColor = tabColor;
+
+      metaById[sheetId] = meta;
     } else {
       // Legacy histories have no separate sheet name; treat id as the display name.
       metaById[sheetId] = { id: sheetId, name: sheetId, view: { frozenRows: 0, frozenCols: 0 } };

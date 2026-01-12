@@ -263,6 +263,16 @@ export function applyPatch(state, patch) {
           id: typeof meta.id === "string" && meta.id.length > 0 ? meta.id : sheetId,
           name: meta.name == null ? null : String(meta.name),
         };
+        if (meta.visibility === "visible" || meta.visibility === "hidden" || meta.visibility === "veryHidden") {
+          nextMeta.visibility = meta.visibility;
+        }
+        if ("tabColor" in meta) {
+          if (meta.tabColor == null) {
+            nextMeta.tabColor = null;
+          } else if (typeof meta.tabColor === "string") {
+            nextMeta.tabColor = meta.tabColor;
+          }
+        }
         if (isRecord(meta.view)) {
           nextMeta.view = structuredClone(meta.view);
         } else if ("frozenRows" in meta || "frozenCols" in meta) {

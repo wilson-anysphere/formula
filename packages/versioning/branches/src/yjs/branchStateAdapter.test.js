@@ -350,3 +350,55 @@ test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: round-trips workbook metad
   assert.equal(doc2.getMap("metadata").get("title"), "Budget");
   assert.deepEqual(doc2.getMap("metadata").get("theme"), { name: "dark" });
 });
+
+test("branchStateFromYjsDoc/applyBranchStateToYjsDoc: round-trips sheet visibility + tabColor", () => {
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheet.set("visibility", "hidden");
+    // Use lowercase to ensure normalization canonicalizes.
+    sheet.set("tabColor", "ff00ff00");
+    sheets.push([sheet]);
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.equal(state.sheets.metaById.Sheet1?.visibility, "hidden");
+  assert.equal(state.sheets.metaById.Sheet1?.tabColor, "FF00FF00");
+
+  const doc2 = new Y.Doc();
+  applyBranchStateToYjsDoc(doc2, state);
+  const sheet2 = doc2.getArray("sheets").get(0);
+  assert.ok(sheet2 instanceof Y.Map);
+  assert.equal(sheet2.get("visibility"), "hidden");
+  assert.equal(sheet2.get("tabColor"), "FF00FF00");
+});
+
+test("applyBranchStateToYjsDoc: clears sheet tabColor when meta.tabColor is null", () => {
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheet.set("tabColor", "FFFF0000");
+    sheets.push([sheet]);
+  });
+
+  applyBranchStateToYjsDoc(doc, {
+    schemaVersion: 1,
+    sheets: {
+      order: ["Sheet1"],
+      metaById: { Sheet1: { id: "Sheet1", name: "Sheet1", tabColor: null } },
+    },
+    cells: { Sheet1: {} },
+    namedRanges: {},
+    comments: {},
+  });
+
+  const sheet1 = doc.getArray("sheets").get(0);
+  assert.ok(sheet1 instanceof Y.Map);
+  assert.equal(sheet1.get("tabColor"), undefined);
+});

@@ -129,7 +129,8 @@ export class DocumentBranchingWorkflow {
 
       if (!merged.sheets.metaById[sheetId]) {
         const nextMeta = nextState.sheets.metaById[sheetId];
-        merged.sheets.metaById[sheetId] = {
+        /** @type {import("../../../../../packages/versioning/branches/src/types.js").SheetMeta} */
+        const sheetMeta = {
           id: sheetId,
           // Before DocumentController tracked sheet metadata, BranchService owned sheet
           // names. Once Task 201 lands, DocumentController becomes authoritative for
@@ -138,6 +139,13 @@ export class DocumentBranchingWorkflow {
           name: supportsSheetMetadata ? (nextMeta?.name ?? sheetId) : sheetId,
           view: nextMeta?.view ? structuredClone(nextMeta.view) : { frozenRows: 0, frozenCols: 0 },
         };
+        if (supportsSheetMetadata && nextMeta?.visibility) {
+          sheetMeta.visibility = nextMeta.visibility;
+        }
+        if (supportsSheetMetadata && nextMeta && "tabColor" in nextMeta) {
+          sheetMeta.tabColor = nextMeta.tabColor ?? null;
+        }
+        merged.sheets.metaById[sheetId] = sheetMeta;
       } else {
         // DocumentController always owns per-sheet view state (e.g. frozen panes).
         // Once sheet metadata is implemented (Task 201), it also becomes authoritative
@@ -151,6 +159,12 @@ export class DocumentBranchingWorkflow {
           if (nextMeta.name !== sheetId || existingName == null || existingName === sheetId) {
             merged.sheets.metaById[sheetId] = { ...merged.sheets.metaById[sheetId], name: nextMeta.name };
           }
+        }
+        if (supportsSheetMetadata && nextMeta?.visibility) {
+          merged.sheets.metaById[sheetId] = { ...merged.sheets.metaById[sheetId], visibility: nextMeta.visibility };
+        }
+        if (supportsSheetMetadata && nextMeta && "tabColor" in nextMeta) {
+          merged.sheets.metaById[sheetId] = { ...merged.sheets.metaById[sheetId], tabColor: nextMeta.tabColor ?? null };
         }
         if (nextMeta?.view) {
           merged.sheets.metaById[sheetId] = { ...merged.sheets.metaById[sheetId], view: structuredClone(nextMeta.view) };
