@@ -508,6 +508,27 @@ pub fn build_note_comment_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a minimal BIFF5 `.xls` fixture containing a single sheet named `NotesBiff5`
+/// with a NOTE/OBJ/TXO comment anchored to `A1`.
+///
+/// This exercises BIFF5 comment parsing paths:
+/// - NOTE author stored as an ANSI short string (no BIFF8 flags byte)
+/// - TXO text stored as raw bytes in CONTINUE records (no per-fragment flags byte)
+/// - decoding via the workbook `CODEPAGE` record (here: 1251 / Windows-1251)
+pub fn build_note_comment_biff5_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_biff5_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture containing a single sheet with a merged region (`A1:B1`).
 ///
 /// The NOTE record is targeted at the non-anchor cell (`B1`), but the importer should
@@ -1697,6 +1718,14 @@ fn build_note_comment_workbook_stream(kind: NoteCommentSheetKind) -> Vec<u8> {
     build_single_sheet_workbook_stream(sheet_name, &sheet_stream, 1252)
 }
 
+fn build_note_comment_biff5_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream_biff5(
+        "NotesBiff5",
+        &build_note_comment_biff5_sheet_stream(),
+        1251,
+    )
+}
+
 fn build_note_comment_codepage_1251_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream(
         "NotesCp1251",
@@ -1834,6 +1863,47 @@ fn build_single_sheet_workbook_stream(sheet_name: &str, sheet_stream: &[u8], cod
     globals
 }
 
+fn build_single_sheet_workbook_stream_biff5(
+    sheet_name: &str,
+    sheet_stream: &[u8],
+    codepage: u16,
+) -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(
+        &mut globals,
+        RECORD_BOF,
+        &bof_biff5(BOF_DT_WORKBOOK_GLOBALS),
+    );
+    push_record(&mut globals, RECORD_CODEPAGE, &codepage.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font_biff5("Arial"));
+
+    // Many readers expect at least 16 style XFs before cell XFs. BIFF5 XF records are 16 bytes.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record_biff5(0, 0, true));
+    }
+    // One default cell XF (General).
+    push_record(&mut globals, RECORD_XF, &xf_record_biff5(0, 0, false));
+
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_ansi_string(&mut boundsheet, sheet_name);
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    let sheet_offset = globals.len();
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(sheet_stream);
+    globals
+}
+
 fn build_note_comment_sheet_stream(include_merged_region: bool) -> Vec<u8> {
     const OBJECT_ID: u16 = 1;
     const AUTHOR: &str = "Alice";
@@ -1841,6 +1911,61 @@ fn build_note_comment_sheet_stream(include_merged_region: bool) -> Vec<u8> {
 
     let segments: [&[u8]; 1] = [TEXT.as_bytes()];
     build_note_comment_sheet_stream_with_compressed_txo(include_merged_region, OBJECT_ID, AUTHOR, &segments)
+}
+
+fn build_note_comment_biff5_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    // The workbook globals above create 16 style XFs + 1 cell XF, so the first usable
+    // cell XF index is 16.
+    const XF_GENERAL_CELL: u16 = 16;
+
+    // In Windows-1251, 0xC0 maps to Cyrillic "А" (U+0410).
+    let author_bytes = [0xC0u8];
+    let text_bytes = [b'H', b'i', b' ', 0xC0u8];
+    let cch_text: u16 = text_bytes
+        .len()
+        .try_into()
+        .expect("comment text too long for u16 length");
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof_biff5(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS (BIFF5): [rwMic:u16][rwMac:u16][colMic:u16][colMac:u16][reserved:u16]
+    // rows [0, 1), cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    // WINDOW2 isn't required for comment parsing, but helps ensure readers create a worksheet view.
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Ensure the anchor cell exists in the calamine value grid.
+    push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
+
+    push_record(
+        &mut sheet,
+        RECORD_NOTE,
+        &note_record_biff5_author_bytes(0u16, 0u16, OBJECT_ID, &author_bytes),
+    );
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
+
+    // TXO header: cchText at offset 6, cbRuns at offset 12.
+    let mut txo = [0u8; 18];
+    txo[6..8].copy_from_slice(&cch_text.to_le_bytes());
+    txo[12..14].copy_from_slice(&4u16.to_le_bytes()); // cbRuns
+    push_record(&mut sheet, RECORD_TXO, &txo);
+
+    // CONTINUE: raw bytes (no per-fragment encoding flags byte).
+    push_record(&mut sheet, RECORD_CONTINUE, &text_bytes);
+    // Formatting runs continuation (dummy bytes).
+    push_record(&mut sheet, RECORD_CONTINUE, &[0u8; 4]);
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
 }
 
 fn build_note_comment_codepage_1251_sheet_stream() -> Vec<u8> {
@@ -2442,6 +2567,25 @@ fn note_record_author_bytes(row: u16, col: u16, object_id: u16, author_bytes: &[
     out.push(len);
     out.push(0); // compressed (8-bit)
     out.extend_from_slice(author_bytes);
+    out
+}
+
+fn note_record_biff5_author_bytes(
+    row: u16,
+    col: u16,
+    object_id: u16,
+    author_bytes: &[u8],
+) -> Vec<u8> {
+    // NOTE record (BIFF5): [rw: u16][col: u16][grbit: u16][idObj: u16][stAuthor]
+    //
+    // `stAuthor` is stored as an ANSI short string:
+    //   [cch: u8][rgb: u8 * cch]
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&row.to_le_bytes());
+    out.extend_from_slice(&col.to_le_bytes());
+    out.extend_from_slice(&object_id.to_le_bytes()); // grbit (or idObj)
+    out.extend_from_slice(&object_id.to_le_bytes()); // idObj (or grbit)
+    write_short_ansi_bytes(&mut out, author_bytes);
     out
 }
 
@@ -5676,6 +5820,20 @@ fn bof(dt: u16) -> [u8; 16] {
     out
 }
 
+fn bof_biff5(dt: u16) -> [u8; 8] {
+    // BOF record payload (BIFF5).
+    // [0..2]  BIFF version (0x0500)
+    // [2..4]  stream type (dt)
+    // [4..6]  build identifier
+    // [6..8]  build year
+    let mut out = [0u8; 8];
+    out[0..2].copy_from_slice(&0x0500u16.to_le_bytes());
+    out[2..4].copy_from_slice(&dt.to_le_bytes());
+    out[4..6].copy_from_slice(&0x0DBBu16.to_le_bytes()); // build
+    out[6..8].copy_from_slice(&0x07CCu16.to_le_bytes()); // year (1996)
+    out
+}
+
 fn window1() -> [u8; 18] {
     // WINDOW1 record payload (BIFF8, 18 bytes).
     // Keep fields mostly zeroed; Excel tolerates this and so does calamine.
@@ -6387,6 +6545,25 @@ fn font(name: &str) -> Vec<u8> {
     })
 }
 
+fn font_biff5(name: &str) -> Vec<u8> {
+    // Minimal BIFF5 FONT record payload.
+    //
+    // The BIFF5 structure is largely compatible with BIFF8 for the fixed-size fields, but the
+    // font name is stored as an ANSI short string (no BIFF8 Unicode flags byte).
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&200u16.to_le_bytes()); // height (10pt)
+    out.extend_from_slice(&0u16.to_le_bytes()); // option flags
+    out.extend_from_slice(&COLOR_AUTOMATIC.to_le_bytes()); // color
+    out.extend_from_slice(&400u16.to_le_bytes()); // weight
+    out.extend_from_slice(&0u16.to_le_bytes()); // escapement
+    out.push(0); // underline
+    out.push(0); // family
+    out.push(0); // charset
+    out.push(0); // reserved
+    write_short_ansi_string(&mut out, name);
+    out
+}
+
 struct FontOptions<'a> {
     name: &'a str,
     height_twips: u16,
@@ -6456,6 +6633,25 @@ fn xf_record(font_idx: u16, fmt_idx: u16, is_style_xf: bool) -> [u8; 20] {
     out[6] = 0x20;
 
     // Attribute flags: apply all so fixture cell XFs don't rely on inheritance.
+    out[9] = 0x3F;
+    out
+}
+
+fn xf_record_biff5(font_idx: u16, fmt_idx: u16, is_style_xf: bool) -> [u8; 16] {
+    // Minimal BIFF5 XF record payload (16 bytes).
+    //
+    // We only need enough structure for calamine to build a value grid for our fixtures; styling
+    // is not the focus of BIFF5 comment tests.
+    let mut out = [0u8; 16];
+    out[0..2].copy_from_slice(&font_idx.to_le_bytes());
+    out[2..4].copy_from_slice(&fmt_idx.to_le_bytes());
+
+    let flags: u16 = XF_FLAG_LOCKED | if is_style_xf { XF_FLAG_STYLE } else { 0 };
+    out[4..6].copy_from_slice(&flags.to_le_bytes());
+
+    // Default alignment: General + Bottom.
+    out[6] = 0x20;
+    // Attribute flags: apply all.
     out[9] = 0x3F;
     out
 }
@@ -6586,6 +6782,20 @@ fn write_short_unicode_string(out: &mut Vec<u8>, s: &str) {
             out.extend_from_slice(&ch.to_le_bytes());
         }
     }
+}
+
+fn write_short_ansi_string(out: &mut Vec<u8>, s: &str) {
+    write_short_ansi_bytes(out, s.as_bytes());
+}
+
+fn write_short_ansi_bytes(out: &mut Vec<u8>, bytes: &[u8]) {
+    // BIFF5 ANSI short string: [cch: u8][rgb: u8 * cch]
+    let len: u8 = bytes
+        .len()
+        .try_into()
+        .expect("string too long for u8 length");
+    out.push(len);
+    out.extend_from_slice(bytes);
 }
 
 fn write_unicode_string(out: &mut Vec<u8>, s: &str) {

@@ -43,6 +43,27 @@ fn imports_note_comment_records() {
 }
 
 #[test]
+fn imports_note_comment_records_biff5() {
+    let bytes = xls_fixture_builder::build_note_comment_biff5_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("NotesBiff5")
+        .expect("NotesBiff5 missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let comments = sheet.comments_for_cell(a1);
+    assert_eq!(comments.len(), 1, "expected 1 comment on A1");
+
+    let comment = &comments[0];
+    assert_eq!(comment.kind, CommentKind::Note);
+    assert_eq!(comment.content, "Hi \u{0410}");
+    assert_eq!(comment.author.name, "\u{0410}");
+    assert_eq!(comment.id, "xls-note:A1:1");
+}
+
+#[test]
 fn anchors_note_comments_to_merged_region_top_left_cell() {
     let bytes = xls_fixture_builder::build_note_comment_in_merged_region_fixture_xls();
     let result = import_fixture(&bytes);
