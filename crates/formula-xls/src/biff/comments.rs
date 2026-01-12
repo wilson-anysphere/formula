@@ -42,6 +42,8 @@ const OBJ_SUBRECORD_FT_CMO: u16 = 0x0015;
 // - the record is followed by `CONTINUE` records containing the character bytes and formatting runs
 const TXO_TEXT_LEN_OFFSET: usize = 6;
 const TXO_RUNS_LEN_OFFSET: usize = 12;
+const TXO_TEXT_LEN_OFFSETS: [usize; 4] = [TXO_TEXT_LEN_OFFSET, 4, 8, 10];
+const TXO_MAX_TEXT_CHARS: usize = 32 * 1024;
 
 const MAX_WARNINGS_PER_SHEET: usize = 20;
 
@@ -373,6 +375,34 @@ fn parse_txo_text_biff5(
     codepage: u16,
     warnings: &mut Vec<String>,
 ) -> Option<String> {
+    let first = record.first_fragment();
+    let fragments: Vec<&[u8]> = record.fragments().collect();
+    let continues = fragments.get(1..).unwrap_or_default();
+    if continues.is_empty() {
+        match parse_txo_cch_text(first, 0) {
+            Some(0) => {}
+            Some(cch_text) => {
+                push_warning(
+                    warnings,
+                    format!(
+                        "TXO record at offset {} missing CONTINUE fragments (expected {cch_text} chars)",
+                        record.offset
+                    ),
+                );
+            }
+            None => {
+                push_warning(
+                    warnings,
+                    format!(
+                        "TXO record at offset {} missing CONTINUE fragments (unable to read cchText from header)",
+                        record.offset
+                    ),
+                );
+            }
+        }
+        return Some(String::new());
+    }
+
     // BIFF5 typically stores the TXO text bytes directly in subsequent CONTINUE records (no
     // per-fragment option flags byte). Treat the continued bytes as ANSI encoded using the
     // workbook codepage.
@@ -380,65 +410,78 @@ fn parse_txo_text_biff5(
     // Some producers appear to mimic BIFF8's continued-string layout and prefix each CONTINUE
     // fragment with a one-byte "high-byte" flag (0/1). In that case, the TXO `cchText` count does
     // *not* include those flag bytes, so treat them as optional and skip them best-effort.
-    let first = record.first_fragment();
-    if first.len() < TXO_TEXT_LEN_OFFSET + 2 {
-        // Best-effort: if the TXO header is malformed, decode the first continuation as text.
-        return fallback_decode_first_continue_biff5(record, codepage, warnings);
-    }
-    let cch_text =
-        u16::from_le_bytes([first[TXO_TEXT_LEN_OFFSET], first[TXO_TEXT_LEN_OFFSET + 1]]) as usize;
-    if cch_text == 0 {
-        return Some(String::new());
-    }
-
-    let fragments: Vec<&[u8]> = record.fragments().collect();
-    let continues = fragments.get(1..).unwrap_or_default();
-    if continues.is_empty() {
-        push_warning(
-            warnings,
-            format!(
-                "TXO record at offset {} missing CONTINUE fragments (expected {cch_text} chars)",
-                record.offset
-            ),
-        );
-        return Some(String::new());
-    }
-
-    let mut skip_leading_flag_bytes = false;
-    if let Some(first_continue) = continues.first().copied() {
-        if matches!(first_continue.first().copied(), Some(0) | Some(1)) {
-            let max_chars_if_flags_present: usize = continues
-                .iter()
-                .map(|frag| {
-                    if frag.is_empty() {
-                        0
-                    } else if matches!(frag.first().copied(), Some(0) | Some(1)) {
-                        frag.len().saturating_sub(1)
-                    } else {
-                        frag.len()
-                    }
-                })
-                .sum();
-
-            if cch_text <= max_chars_if_flags_present {
-                skip_leading_flag_bytes = true;
-            }
+    let capacity_raw = txo_continue_capacity_biff5(continues);
+    let first_continue_has_flag = matches!(
+        continues
+            .first()
+            .copied()
+            .and_then(|frag| frag.first().copied()),
+        Some(0) | Some(1)
+    );
+    let capacity_without_flags = if first_continue_has_flag {
+        let mut cap = 0usize;
+        for &frag in continues {
+            let len = if matches!(frag.first().copied(), Some(0) | Some(1)) {
+                frag.len().saturating_sub(1)
+            } else {
+                frag.len()
+            };
+            cap = cap.saturating_add(len).min(TXO_MAX_TEXT_CHARS);
         }
+        cap
+    } else {
+        capacity_raw
+    };
+
+    let spec_cch_text = first
+        .get(TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2)
+        .map(|v| u16::from_le_bytes([v[0], v[1]]) as usize)
+        .filter(|&cch| cch != 0 && cch <= TXO_MAX_TEXT_CHARS);
+    let cch_text = detect_txo_cch_text(first, capacity_raw).or(spec_cch_text);
+
+    let skip_leading_flag_bytes = match cch_text {
+        Some(cch) => first_continue_has_flag && cch <= capacity_without_flags,
+        None => first_continue_has_flag,
+    };
+    let capacity = if skip_leading_flag_bytes {
+        capacity_without_flags
+    } else {
+        capacity_raw
+    };
+
+    let mut remaining = match cch_text {
+        Some(cch) => cch,
+        None => {
+            if capacity > 0 {
+                push_warning(
+                    warnings,
+                    format!(
+                        "TXO record at offset {} has malformed header/cchText; falling back to decoding CONTINUE fragments",
+                        record.offset
+                    ),
+                );
+            }
+            capacity
+        }
+    };
+    if remaining == 0 {
+        return Some(String::new());
     }
 
-    let mut remaining = cch_text;
     // Accumulate the byte payload first, then decode once. This preserves stateful multibyte
     // codepages (e.g. Shift-JIS) when a character boundary is split across CONTINUE records.
-    let mut bytes = Vec::with_capacity(cch_text);
-    for frag in continues {
+    let mut bytes = Vec::with_capacity(remaining);
+    for &frag in continues {
         if remaining == 0 {
             break;
         }
         if frag.is_empty() {
             continue;
         }
-        let frag = if skip_leading_flag_bytes && matches!(frag.first().copied(), Some(0) | Some(1)) {
-            &frag[1..]
+
+        let frag = if skip_leading_flag_bytes && matches!(frag.first().copied(), Some(0) | Some(1))
+        {
+            frag.get(1..).unwrap_or(&[])
         } else {
             frag
         };
@@ -451,15 +494,17 @@ fn parse_txo_text_biff5(
         remaining -= take;
     }
 
-    if remaining > 0 {
-        push_warning(
-            warnings,
-            format!(
-                "TXO record at offset {} truncated text (wanted {cch_text} chars, got {})",
-                record.offset,
-                cch_text.saturating_sub(remaining)
-            ),
-        );
+    if let Some(cch) = cch_text {
+        if remaining > 0 {
+            push_warning(
+                warnings,
+                format!(
+                    "TXO record at offset {} truncated text (wanted {cch} chars, got {})",
+                    record.offset,
+                    cch.saturating_sub(remaining)
+                ),
+            );
+        }
     }
     let mut out = strings::decode_ansi(codepage, &bytes);
     trim_trailing_nuls(&mut out);
@@ -521,7 +566,7 @@ fn parse_txo_text_biff8(
 
     let max_chars = estimate_max_chars_with_byte_limit(continues, text_continue_bytes);
     let Some(cch_text) = parse_txo_cch_text(first, max_chars) else {
-        return fallback_decode_first_continue(record, codepage, warnings);
+        return fallback_decode_continue_fragments(record, codepage, warnings);
     };
     if cch_text == 0 {
         return Some(String::new());
@@ -583,6 +628,38 @@ fn parse_txo_text(
     parse_txo_text_with_warnings(record, biff, codepage, warnings)
 }
 
+fn detect_txo_cch_text(header: &[u8], continue_capacity: usize) -> Option<usize> {
+    if continue_capacity == 0 {
+        return None;
+    }
+
+    for off in TXO_TEXT_LEN_OFFSETS {
+        if header.len() < off + 2 {
+            continue;
+        }
+        let cch = u16::from_le_bytes([header[off], header[off + 1]]) as usize;
+        if cch == 0 {
+            continue;
+        }
+        if cch > TXO_MAX_TEXT_CHARS {
+            continue;
+        }
+        if cch <= continue_capacity {
+            return Some(cch);
+        }
+    }
+
+    None
+}
+
+fn txo_continue_capacity_biff5(continues: &[&[u8]]) -> usize {
+    let mut cap = 0usize;
+    for frag in continues {
+        cap = cap.saturating_add(frag.len()).min(TXO_MAX_TEXT_CHARS);
+    }
+    cap
+}
+
 fn parse_txo_cch_text(header: &[u8], max_chars: usize) -> Option<usize> {
     // Heuristic: cchText is typically at offset 6 in the TXO header, but some sources disagree.
     // Try a few common offsets and choose the first plausible value.
@@ -590,9 +667,14 @@ fn parse_txo_cch_text(header: &[u8], max_chars: usize) -> Option<usize> {
         return None;
     }
 
+    let max_chars = max_chars.min(TXO_MAX_TEXT_CHARS);
+
     // Spec-defined BIFF8 offset for cchText.
-    let cch_at_6 =
+    let mut cch_at_6 =
         u16::from_le_bytes([header[TXO_TEXT_LEN_OFFSET], header[TXO_TEXT_LEN_OFFSET + 1]]) as usize;
+    if cch_at_6 > TXO_MAX_TEXT_CHARS {
+        cch_at_6 = 0;
+    }
 
     // If we have no continuation bytes to sanity-check against, trust the header.
     if max_chars == 0 {
@@ -614,7 +696,7 @@ fn parse_txo_cch_text(header: &[u8], max_chars: usize) -> Option<usize> {
             continue;
         }
         let cch = u16::from_le_bytes([header[off], header[off + 1]]) as usize;
-        if cch != 0 && cch <= max_chars {
+        if cch != 0 && cch <= max_chars && cch <= TXO_MAX_TEXT_CHARS {
             return Some(cch);
         }
     }
@@ -643,20 +725,19 @@ fn estimate_max_chars_with_byte_limit(continues: &[&[u8]], byte_limit: usize) ->
     total
 }
 
-fn fallback_decode_first_continue(
+fn fallback_decode_continue_fragments(
     record: &records::LogicalBiffRecord<'_>,
     codepage: u16,
     warnings: &mut Vec<String>,
 ) -> Option<String> {
     let mut fragments = record.fragments();
     let _ = fragments.next(); // skip header
-    let Some(first) = fragments.next() else {
+
+    let continues: Vec<&[u8]> = fragments.collect();
+    if continues.is_empty() {
         push_warning(
             warnings,
-            format!(
-                "TXO record at offset {} missing CONTINUE fragments",
-                record.offset
-            ),
+            format!("TXO record at offset {} missing CONTINUE fragments", record.offset),
         );
         return Some(String::new());
     };
@@ -664,66 +745,46 @@ fn fallback_decode_first_continue(
     push_warning(
         warnings,
         format!(
-            "TXO record at offset {} has malformed header; falling back to decoding first CONTINUE fragment",
-            record.offset
-        ),
-    );
-    let Some((&flags, bytes)) = first.split_first() else {
-        return Some(String::new());
-    };
-    let mut out = if (flags & 0x01) != 0 {
-        decode_utf16le(bytes)
-    } else {
-        strings::decode_ansi(codepage, bytes)
-    };
-    trim_trailing_nuls(&mut out);
-    strip_embedded_nuls(&mut out);
-    Some(out)
-}
-
-fn fallback_decode_first_continue_biff5(
-    record: &records::LogicalBiffRecord<'_>,
-    codepage: u16,
-    warnings: &mut Vec<String>,
-) -> Option<String> {
-    let mut fragments = record.fragments();
-    let _ = fragments.next(); // skip header
-    let Some(first) = fragments.next() else {
-        push_warning(
-            warnings,
-            format!(
-                "TXO record at offset {} missing CONTINUE fragments",
-                record.offset
-            ),
-        );
-        return Some(String::new());
-    };
-
-    push_warning(
-        warnings,
-        format!(
-            "TXO record at offset {} has malformed header; falling back to decoding first CONTINUE fragment",
+            "TXO record at offset {} has malformed header; falling back to decoding CONTINUE fragments",
             record.offset
         ),
     );
 
-    if first.is_empty() {
-        return Some(String::new());
-    }
-
-    // BIFF5 usually stores the raw ANSI bytes directly, but some producers mimic the BIFF8
-    // continued-string layout and prefix the fragment with a 0/1 "high-byte" flag.
-    let mut out = if matches!(first.first().copied(), Some(0) | Some(1)) {
-        let flags = first[0];
-        let bytes = &first[1..];
-        if (flags & 0x01) != 0 {
-            decode_utf16le(bytes)
-        } else {
-            strings::decode_ansi(codepage, bytes)
+    let mut out = String::new();
+    let mut remaining_chars = TXO_MAX_TEXT_CHARS;
+    for frag in continues {
+        if remaining_chars == 0 {
+            break;
         }
-    } else {
-        strings::decode_ansi(codepage, first)
-    };
+
+        let Some((&flags, bytes)) = frag.split_first() else {
+            continue;
+        };
+
+        // Continuation fragments for BIFF8 `XLUnicodeString` use a one-byte "high-byte" flag,
+        // which is typically 0/1. If we see something else, assume we've reached formatting-run
+        // data and stop best-effort.
+        if flags > 1 {
+            break;
+        }
+
+        let is_unicode = (flags & 0x01) != 0;
+        let bytes_per_char = if is_unicode { 2 } else { 1 };
+        let available_chars = bytes.len() / bytes_per_char;
+        if available_chars == 0 {
+            continue;
+        }
+
+        let take_chars = remaining_chars.min(available_chars);
+        let take_bytes = take_chars * bytes_per_char;
+        let slice = &bytes[..take_bytes];
+        if is_unicode {
+            out.push_str(&decode_utf16le(slice));
+        } else {
+            out.push_str(&strings::decode_ansi(codepage, slice));
+        }
+        remaining_chars -= take_chars;
+    }
 
     trim_trailing_nuls(&mut out);
     strip_embedded_nuls(&mut out);
@@ -1230,7 +1291,7 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_decoding_first_continue_when_txo_header_is_missing() {
+    fn falls_back_to_decoding_continue_fragments_when_txo_header_is_missing() {
         let stream = [
             bof(),
             note(0, 0, 1, "Alice"),
@@ -1253,7 +1314,7 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_decoding_first_continue_when_txo_header_is_missing_biff5() {
+    fn falls_back_to_decoding_continue_fragments_when_txo_header_is_missing_biff5() {
         let stream = [
             bof_biff5(),
             note_biff5(0, 0, 1, "Alice"),
@@ -1273,6 +1334,27 @@ mod tests {
             warnings.iter().any(|w| w.contains("falling back")),
             "expected fallback warning; warnings={warnings:?}"
         );
+    }
+
+    #[test]
+    fn falls_back_to_decoding_multiple_continue_fragments_when_txo_header_is_missing() {
+        // When the TXO header is truncated/missing, we still want best-effort recovery of text
+        // that spans multiple CONTINUE records.
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            record(RECORD_TXO, &[]),
+            continue_text_ascii("Hel"),
+            continue_text_ascii("lo"),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, .. } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
     }
 
     #[test]
@@ -1380,6 +1462,46 @@ mod tests {
         let ParsedSheetNotes { notes, warnings } =
             parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+    }
+
+    #[test]
+    fn parses_txo_text_when_cchtext_is_zero_but_continue_has_text() {
+        // Some files report `cchText=0` in the TXO header even though the continuation area still
+        // contains the text. Best-effort decoding should still recover it.
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text(0),
+            continue_text_ascii("Hello"),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, .. } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+    }
+
+    #[test]
+    fn trims_trailing_nuls_when_using_fallback_txo_decode() {
+        // Excel sometimes NUL-terminates TXO text. Ensure we trim trailing terminators even when
+        // we need to fall back to decoding based on the continuation payload.
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text(0),
+            continue_text_ascii("Hello\0\0"),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, .. } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Hello");
     }

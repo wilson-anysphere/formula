@@ -70,6 +70,24 @@ case ":${PATH}:" in
   *) export PATH="${CARGO_HOME}/bin:${PATH}" ;;
 esac
 
+# Prefer system OpenSSL on Linux when available.
+#
+# Our multi-agent hosts can hit OS process limits when building vendored OpenSSL from source. The
+# `openssl-sys` crate respects `OPENSSL_NO_VENDOR` even when downstream crates enable the
+# `vendored` feature, so set it opportunistically when `pkg-config` can locate OpenSSL.
+#
+# Users can override this behaviour by explicitly exporting `OPENSSL_NO_VENDOR`:
+# - unset / "0": allow vendored builds
+# - any other value: force system OpenSSL
+if [[ -z "${OPENSSL_NO_VENDOR:-}" ]]; then
+  uname_s="$(uname -s 2>/dev/null || echo "")"
+  if [[ "${uname_s}" == "Linux" ]]; then
+    if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists openssl >/dev/null 2>&1; then
+      export OPENSSL_NO_VENDOR=1
+    fi
+  fi
+fi
+
 # Detect nproc
 nproc_val=""
 if command -v nproc >/dev/null 2>&1; then
