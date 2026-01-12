@@ -145,7 +145,7 @@ import {
   toggleWrap,
   type CellRange,
 } from "./formatting/toolbar.js";
-import { PageSetupDialog, type CellRange as PrintCellRange, type PageSetup } from "./print/index.js";
+import { PageSetupDialog, PrintPreviewDialog, type CellRange as PrintCellRange, type PageSetup } from "./print/index.js";
 import {
   getDefaultSeedStoreStorage,
   readContributedPanelsSeedStore,
@@ -7233,92 +7233,150 @@ async function handleRibbonAddToPrintArea(): Promise<void> {
   }
 }
 
+async function generateSheetPdfBytes(invoke: TauriInvoke): Promise<{ sheetId: string; bytes: Uint8Array }> {
+  // Export should reflect the latest user input. If a cell edit is in progress, it may not yet
+  // have been committed into the DocumentController / backend sync pipeline.
+  commitAllPendingEditsForCommand();
+
+  // Best-effort: ensure any pending workbook sync changes are flushed before exporting.
+  await new Promise<void>((resolve) => queueMicrotask(resolve));
+  await drainBackendSync();
+
+  const sheetId = app.getCurrentSheetId();
+  const doc = app.getDocument();
+  const limits = getGridLimitsForFormatting();
+  const active = app.getActiveCell();
+
+  const clipBandSelectionToUsedRange = (range0: CellRange): CellRange => {
+    const normalized: CellRange = {
+      start: { row: Math.min(range0.start.row, range0.end.row), col: Math.min(range0.start.col, range0.end.col) },
+      end: { row: Math.max(range0.start.row, range0.end.row), col: Math.max(range0.start.col, range0.end.col) },
+    };
+
+    const activeCellFallback0: CellRange = {
+      start: { row: active.row, col: active.col },
+      end: { row: active.row, col: active.col },
+    };
+
+    const isFullHeight = normalized.start.row === 0 && normalized.end.row === limits.maxRows - 1;
+    const isFullWidth = normalized.start.col === 0 && normalized.end.col === limits.maxCols - 1;
+    if (!isFullHeight && !isFullWidth) return normalized;
+
+    const used = doc.getUsedRange(sheetId);
+    if (!used) return activeCellFallback0;
+
+    const startRow = Math.max(normalized.start.row, used.startRow);
+    const endRow = Math.min(normalized.end.row, used.endRow);
+    const startCol = Math.max(normalized.start.col, used.startCol);
+    const endCol = Math.min(normalized.end.col, used.endCol);
+    const clipped =
+      startRow <= endRow && startCol <= endCol
+        ? { start: { row: startRow, col: startCol }, end: { row: endRow, col: endCol } }
+        : null;
+    return clipped ?? activeCellFallback0;
+  };
+
+  // Use the selection by default, but clip full-row/full-column/full-sheet selections to the
+  // used range to avoid generating PDFs that span millions of empty cells.
+  let exportRange0 = clipBandSelectionToUsedRange(selectionBoundingBox0Based());
+
+  try {
+    const settings = await invoke("get_sheet_print_settings", { sheet_id: sheetId });
+    const printArea = (settings as any)?.print_area;
+    const first = Array.isArray(printArea) ? printArea[0] : null;
+    if (first) {
+      const startRow = Number(first.start_row);
+      const endRow = Number(first.end_row);
+      const startCol = Number(first.start_col);
+      const endCol = Number(first.end_col);
+      if ([startRow, endRow, startCol, endCol].every((v) => Number.isFinite(v) && v > 0)) {
+        exportRange0 = clipBandSelectionToUsedRange({
+          start: { row: Math.min(startRow, endRow) - 1, col: Math.min(startCol, endCol) - 1 },
+          end: { row: Math.max(startRow, endRow) - 1, col: Math.max(startCol, endCol) - 1 },
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to fetch print area settings; exporting selection instead:", err);
+  }
+
+  const range: PrintCellRange = {
+    startRow: exportRange0.start.row + 1,
+    endRow: exportRange0.end.row + 1,
+    startCol: exportRange0.start.col + 1,
+    endCol: exportRange0.end.col + 1,
+  };
+
+  const b64 = await invoke("export_sheet_range_pdf", {
+    sheet_id: sheetId,
+    range: { start_row: range.startRow, end_row: range.endRow, start_col: range.startCol, end_col: range.endCol },
+    col_widths_points: undefined,
+    row_heights_points: undefined,
+  });
+
+  return { sheetId, bytes: decodeBase64ToBytes(String(b64)) };
+}
+
+function showPrintPreviewDialogModal(args: { bytes: Uint8Array; filename: string; autoPrint?: boolean }): void {
+  const dialog = document.createElement("dialog");
+  dialog.className = "print-preview-dialog";
+
+  const container = document.createElement("div");
+  dialog.appendChild(container);
+  document.body.appendChild(dialog);
+
+  const root = createRoot(container);
+
+  const close = () => dialog.close();
+  root.render(
+    React.createElement(PrintPreviewDialog, {
+      pdfBytes: args.bytes,
+      filename: args.filename,
+      autoPrint: Boolean(args.autoPrint),
+      onDownload: () => downloadBytes(args.bytes, args.filename, "application/pdf"),
+      onClose: close,
+    }),
+  );
+
+  dialog.addEventListener(
+    "close",
+    () => {
+      root.unmount();
+      dialog.remove();
+      app.focus();
+    },
+    { once: true },
+  );
+
+  dialog.addEventListener("cancel", (e) => {
+    e.preventDefault();
+    dialog.close();
+  });
+
+  dialog.showModal();
+}
+
+async function handleRibbonPrintPreview(args: { autoPrint: boolean }): Promise<void> {
+  const invoke = getTauriInvokeForPrint();
+  if (!invoke) return;
+
+  try {
+    const { bytes, sheetId } = await generateSheetPdfBytes(invoke);
+    const sheetName = workbookSheetStore.getName(sheetId) ?? sheetId;
+    const filename = `${sanitizeFilename(sheetName)}.pdf`;
+    showPrintPreviewDialogModal({ bytes, filename, autoPrint: args.autoPrint });
+  } catch (err) {
+    console.error("Failed to open print preview:", err);
+    showToast(`Failed to open print preview: ${String(err)}`, "error");
+  }
+}
+
 async function handleRibbonExportPdf(): Promise<void> {
   const invoke = getTauriInvokeForPrint();
   if (!invoke) return;
 
   try {
-    // Export should reflect the latest user input. If a cell edit is in progress, it may not yet
-    // have been committed into the DocumentController / backend sync pipeline.
-    commitAllPendingEditsForCommand();
-
-    // Best-effort: ensure any pending workbook sync changes are flushed before exporting.
-    await new Promise<void>((resolve) => queueMicrotask(resolve));
-    await drainBackendSync();
-
-    const sheetId = app.getCurrentSheetId();
-    const doc = app.getDocument();
-    const limits = getGridLimitsForFormatting();
-    const active = app.getActiveCell();
-
-    const clipBandSelectionToUsedRange = (range0: CellRange): CellRange => {
-      const normalized: CellRange = {
-        start: { row: Math.min(range0.start.row, range0.end.row), col: Math.min(range0.start.col, range0.end.col) },
-        end: { row: Math.max(range0.start.row, range0.end.row), col: Math.max(range0.start.col, range0.end.col) },
-      };
-
-      const activeCellFallback0: CellRange = {
-        start: { row: active.row, col: active.col },
-        end: { row: active.row, col: active.col },
-      };
-
-      const isFullHeight = normalized.start.row === 0 && normalized.end.row === limits.maxRows - 1;
-      const isFullWidth = normalized.start.col === 0 && normalized.end.col === limits.maxCols - 1;
-      if (!isFullHeight && !isFullWidth) return normalized;
-
-      const used = doc.getUsedRange(sheetId);
-      if (!used) return activeCellFallback0;
-
-      const startRow = Math.max(normalized.start.row, used.startRow);
-      const endRow = Math.min(normalized.end.row, used.endRow);
-      const startCol = Math.max(normalized.start.col, used.startCol);
-      const endCol = Math.min(normalized.end.col, used.endCol);
-      const clipped =
-        startRow <= endRow && startCol <= endCol
-          ? { start: { row: startRow, col: startCol }, end: { row: endRow, col: endCol } }
-          : null;
-      return clipped ?? activeCellFallback0;
-    };
-
-    // Use the selection by default, but clip full-row/full-column/full-sheet selections to the
-    // used range to avoid generating PDFs that span millions of empty cells.
-    let exportRange0 = clipBandSelectionToUsedRange(selectionBoundingBox0Based());
-
-    try {
-      const settings = await invoke("get_sheet_print_settings", { sheet_id: sheetId });
-      const printArea = (settings as any)?.print_area;
-      const first = Array.isArray(printArea) ? printArea[0] : null;
-      if (first) {
-        const startRow = Number(first.start_row);
-        const endRow = Number(first.end_row);
-        const startCol = Number(first.start_col);
-        const endCol = Number(first.end_col);
-        if ([startRow, endRow, startCol, endCol].every((v) => Number.isFinite(v) && v > 0)) {
-          exportRange0 = clipBandSelectionToUsedRange({
-            start: { row: Math.min(startRow, endRow) - 1, col: Math.min(startCol, endCol) - 1 },
-            end: { row: Math.max(startRow, endRow) - 1, col: Math.max(startCol, endCol) - 1 },
-          });
-        }
-      }
-    } catch (err) {
-      console.warn("Failed to fetch print area settings; exporting selection instead:", err);
-    }
-
-    const range: PrintCellRange = {
-      startRow: exportRange0.start.row + 1,
-      endRow: exportRange0.end.row + 1,
-      startCol: exportRange0.start.col + 1,
-      endCol: exportRange0.end.col + 1,
-    };
-
-    const b64 = await invoke("export_sheet_range_pdf", {
-      sheet_id: sheetId,
-      range: { start_row: range.startRow, end_row: range.endRow, start_col: range.startCol, end_col: range.endCol },
-      col_widths_points: undefined,
-      row_heights_points: undefined,
-    });
-
-    const bytes = decodeBase64ToBytes(String(b64));
+    const { bytes, sheetId } = await generateSheetPdfBytes(invoke);
     const sheetName = workbookSheetStore.getName(sheetId) ?? sheetId;
     downloadBytes(bytes, `${sanitizeFilename(sheetName)}.pdf`, "application/pdf");
     app.focus();
@@ -7382,16 +7440,26 @@ mountRibbon(ribbonReactRoot, {
         showToast(`Failed to open page setup: ${String(err)}`, "error");
       });
     },
+    printPreview: () => {
+      const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+      if (!invokeAvailable) {
+        showDesktopOnlyToast("Print Preview is available in the desktop app.");
+        return;
+      }
+      void handleRibbonPrintPreview({ autoPrint: false }).catch((err) => {
+        console.error("Failed to open print preview:", err);
+        showToast(`Failed to open print preview: ${String(err)}`, "error");
+      });
+    },
     print: () => {
       const invokeAvailable = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
       if (!invokeAvailable) {
         showDesktopOnlyToast("Print is available in the desktop app.");
         return;
       }
-      showToast("Print is not implemented yet. Opening Page Setup…");
-      void handleRibbonPageSetup().catch((err) => {
-        console.error("Failed to open page setup:", err);
-        showToast(`Failed to open page setup: ${String(err)}`, "error");
+      void handleRibbonPrintPreview({ autoPrint: true }).catch((err) => {
+        console.error("Failed to print:", err);
+        showToast(`Failed to print: ${String(err)}`, "error");
       });
     },
     closeWindow: () => {
@@ -8173,10 +8241,9 @@ mountRibbon(ribbonReactRoot, {
           showDesktopOnlyToast("Print is available in the desktop app.");
           return;
         }
-        showToast("Print is not implemented yet. Opening Page Setup…");
-        void handleRibbonPageSetup().catch((err) => {
-          console.error("Failed to open page setup:", err);
-          showToast(`Failed to open page setup: ${String(err)}`, "error");
+        void handleRibbonPrintPreview({ autoPrint: true }).catch((err) => {
+          console.error("Failed to print:", err);
+          showToast(`Failed to print: ${String(err)}`, "error");
         });
         return;
       }
@@ -8187,10 +8254,9 @@ mountRibbon(ribbonReactRoot, {
           showDesktopOnlyToast("Print Preview is available in the desktop app.");
           return;
         }
-        showToast("Print Preview is not implemented yet. Exporting PDF instead…");
-        void handleRibbonExportPdf().catch((err) => {
-          console.error("Failed to export PDF:", err);
-          showToast(`Failed to export PDF: ${String(err)}`, "error");
+        void handleRibbonPrintPreview({ autoPrint: false }).catch((err) => {
+          console.error("Failed to open print preview:", err);
+          showToast(`Failed to open print preview: ${String(err)}`, "error");
         });
         return;
       }

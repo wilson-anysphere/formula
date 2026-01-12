@@ -82,6 +82,7 @@ export interface RibbonFileActions {
   versionHistory?: () => void;
   branchManager?: () => void;
   print?: () => void;
+  printPreview?: () => void;
   pageSetup?: () => void;
   closeWindow?: () => void;
   quit?: () => void;

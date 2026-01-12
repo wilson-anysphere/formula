@@ -115,6 +115,15 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.print,
       },
       {
+        iconId: "eye",
+        label: "Print Preview",
+        hint: "",
+        ariaKeyShortcuts: "",
+        testId: "file-print-preview",
+        ariaLabel: "Print preview",
+        onInvoke: actions?.printPreview,
+      },
+      {
         iconId: "settings",
         label: "Page Setup…",
         hint: "",
