@@ -88,6 +88,40 @@ test("desktop index.html exposes required shell containers and testids", () => {
     `apps/desktop/index.html is missing required shell markup:\\n${missing.map((m) => `- ${m}`).join("\\n")}`,
   );
 
+  // Debug controls should live in the ribbon (React) rather than being duplicated in the
+  // static `index.html` status bar. Duplicating them here causes Playwright strict-mode
+  // failures because `getByTestId(...)` matches multiple elements with the same test id.
+  const forbiddenSnippets = [
+    'data-testid="open-panel-ai-chat"',
+    'data-testid="open-panel-ai-audit"',
+    'data-testid="open-data-queries-panel"',
+    'data-testid="open-macros-panel"',
+    'data-testid="open-script-editor-panel"',
+    'data-testid="open-python-panel"',
+    'data-testid="open-extensions-panel"',
+    'data-testid="open-vba-migrate-panel"',
+    'data-testid="open-comments-panel"',
+    'data-testid="audit-precedents"',
+    'data-testid="audit-dependents"',
+    'data-testid="audit-transitive"',
+    'data-testid="split-vertical"',
+    'data-testid="split-horizontal"',
+    'data-testid="split-none"',
+    'data-testid="freeze-panes"',
+    'data-testid="freeze-top-row"',
+    'data-testid="freeze-first-column"',
+    'data-testid="unfreeze-panes"',
+  ];
+
+  const forbiddenPresent = forbiddenSnippets.filter((snippet) => html.includes(snippet));
+  assert.deepEqual(
+    forbiddenPresent,
+    [],
+    `apps/desktop/index.html should not include legacy debug buttons (they belong in the ribbon):\\n${forbiddenPresent
+      .map((m) => `- ${m}`)
+      .join("\\n")}`,
+  );
+
   // Ensure the base app shell styling hooks stay intact.
   assert.match(
     html,
