@@ -58,18 +58,49 @@ export function injectWebviewCsp(html: string): string {
         if (!stillPresent) continue;
       }
 
-      try {
-        // If we couldn't fully delete the global, attempt to lock it down to undefined so it can't be
-        // re-populated later in the page lifecycle.
-        Object.defineProperty(window, key, {
-          value: undefined,
-          writable: false,
-          configurable: false,
-        });
-        continue;
-      } catch {
-        // Ignore.
-      }
+      const lockDown = () => {
+        let enumerable = false;
+        let isAccessor = false;
+        let configurable = true;
+        try {
+          const desc = Object.getOwnPropertyDescriptor(window, key);
+          if (desc) {
+            enumerable = Boolean(desc.enumerable);
+            configurable = Boolean(desc.configurable);
+            isAccessor = typeof desc.get === "function" || typeof desc.set === "function";
+          }
+        } catch {
+          // Ignore.
+        }
+
+        try {
+          if (isAccessor) {
+            // Can't redefine an accessor if it's non-configurable.
+            if (!configurable) return false;
+            Object.defineProperty(window, key, {
+              get: () => undefined,
+              set: () => {},
+              enumerable,
+              configurable: false,
+            });
+            return true;
+          }
+
+          Object.defineProperty(window, key, {
+            value: undefined,
+            writable: false,
+            enumerable,
+            configurable: false,
+          });
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
+      // If we couldn't fully delete the global, attempt to lock it down to undefined so it can't be
+      // re-populated later in the page lifecycle.
+      if (lockDown()) continue;
 
       try {
         // If deletion fails, fall back to overwriting.
@@ -78,16 +109,8 @@ export function injectWebviewCsp(html: string): string {
         // Ignore.
       }
 
-      try {
-        // Best-effort: after overwriting, try to lock down the property to prevent later reinjection.
-        Object.defineProperty(window, key, {
-          value: undefined,
-          writable: false,
-          configurable: false,
-        });
-      } catch {
-        // Ignore.
-      }
+      // Best-effort: after overwriting, try to lock down the property to prevent later reinjection.
+      lockDown();
     }
   };
 

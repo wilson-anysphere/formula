@@ -96,6 +96,7 @@ test.describe("Extensions UI integration", () => {
                 value: {},
                 writable: true,
                 configurable: false,
+                enumerable: true,
               });
             } catch {
               try {
