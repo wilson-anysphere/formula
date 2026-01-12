@@ -2817,8 +2817,8 @@ fn values_equal_for_lookup(lookup_value: &Value, candidate: &Value) -> bool {
     }
 }
 
-fn error_code(e: ErrorKind) -> &'static str {
-    e.as_code()
+fn error_code(e: ErrorKind) -> u8 {
+    EngineErrorKind::from(e).code()
 }
 
 fn excel_le(a: &Value, b: &Value) -> Option<bool> {
@@ -2872,7 +2872,7 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
                 (Value::Bool(x), Value::Bool(y)) => Some(ordering_to_i32(x.cmp(y))),
                 (Value::Empty, Value::Empty) => Some(0),
                 (Value::Error(x), Value::Error(y)) => {
-                    Some(ordering_to_i32(error_code(*x).cmp(error_code(*y))))
+                    Some(ordering_to_i32(error_code(*x).cmp(&error_code(*y))))
                 }
                 _ => None,
             }
@@ -3079,7 +3079,6 @@ enum RangeArg<'a> {
     MultiRange(&'a super::value::MultiRangeRef),
     Array(&'a ArrayValue),
 }
-
 fn bytecode_value_to_engine(value: Value) -> EngineValue {
     match value {
         Value::Number(n) => EngineValue::Number(n),

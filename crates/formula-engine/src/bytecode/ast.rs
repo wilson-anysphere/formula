@@ -641,6 +641,16 @@ mod tests {
     }
 
     #[test]
+    fn parses_getting_data_error_literal_as_scalar_value() {
+        let origin = CellCoord::new(0, 0);
+
+        assert_eq!(
+            parse_formula("=#GETTING_DATA", origin).expect("parse"),
+            Expr::Literal(Value::Error(ErrorKind::GettingData))
+        );
+    }
+
+    #[test]
     fn parses_unknown_error_literals_as_value_error() {
         let origin = CellCoord::new(0, 0);
 

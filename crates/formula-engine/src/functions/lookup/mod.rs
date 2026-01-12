@@ -220,7 +220,7 @@ fn lookup_cmp(a: &Value, b: &Value) -> Ordering {
         (Value::Text(x), Value::Text(y)) => cmp_case_insensitive(x, y),
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
         (Value::Blank, Value::Blank) => Ordering::Equal,
-        (Value::Error(x), Value::Error(y)) => x.as_code().cmp(y.as_code()),
+        (Value::Error(x), Value::Error(y)) => x.code().cmp(&y.code()),
         _ => Ordering::Equal,
     }
 }

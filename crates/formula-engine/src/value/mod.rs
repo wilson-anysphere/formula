@@ -79,10 +79,15 @@ pub enum ErrorKind {
     GettingData,
     Spill,
     Calc,
+    Field,
+    Connect,
+    Blocked,
+    Unknown,
 }
 
 impl ErrorKind {
-    pub fn as_code(self) -> &'static str {
+    /// Excel's canonical spelling for the error (including punctuation).
+    pub const fn as_code(self) -> &'static str {
         match self {
             ErrorKind::Null => "#NULL!",
             ErrorKind::Div0 => "#DIV/0!",
@@ -94,12 +99,38 @@ impl ErrorKind {
             ErrorKind::GettingData => "#GETTING_DATA",
             ErrorKind::Spill => "#SPILL!",
             ErrorKind::Calc => "#CALC!",
+            ErrorKind::Field => "#FIELD!",
+            ErrorKind::Connect => "#CONNECT!",
+            ErrorKind::Blocked => "#BLOCKED!",
+            ErrorKind::Unknown => "#UNKNOWN!",
+        }
+    }
+
+    /// Numeric error code used by Excel in various internal representations.
+    ///
+    /// Values are based on the mapping documented in `docs/01-formula-engine.md`.
+    pub const fn code(self) -> u8 {
+        match self {
+            ErrorKind::Null => 1,
+            ErrorKind::Div0 => 2,
+            ErrorKind::Value => 3,
+            ErrorKind::Ref => 4,
+            ErrorKind::Name => 5,
+            ErrorKind::Num => 6,
+            ErrorKind::NA => 7,
+            ErrorKind::GettingData => 8,
+            ErrorKind::Spill => 9,
+            ErrorKind::Calc => 10,
+            ErrorKind::Field => 11,
+            ErrorKind::Connect => 12,
+            ErrorKind::Blocked => 13,
+            ErrorKind::Unknown => 14,
         }
     }
 
     /// Parse an Excel error literal (e.g. `#DIV/0!`) into an [`ErrorKind`].
     ///
-    /// Returns `None` for error literals that this engine does not model.
+    /// Returns `None` for unknown error literals.
     pub fn from_code(raw: &str) -> Option<Self> {
         let raw = raw.trim();
         if raw.eq_ignore_ascii_case("#NULL!") {
@@ -131,6 +162,18 @@ impl ErrorKind {
         }
         if raw.eq_ignore_ascii_case("#CALC!") {
             return Some(ErrorKind::Calc);
+        }
+        if raw.eq_ignore_ascii_case("#FIELD!") {
+            return Some(ErrorKind::Field);
+        }
+        if raw.eq_ignore_ascii_case("#CONNECT!") {
+            return Some(ErrorKind::Connect);
+        }
+        if raw.eq_ignore_ascii_case("#BLOCKED!") {
+            return Some(ErrorKind::Blocked);
+        }
+        if raw.eq_ignore_ascii_case("#UNKNOWN!") {
+            return Some(ErrorKind::Unknown);
         }
         None
     }

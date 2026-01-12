@@ -392,18 +392,7 @@ pub(super) fn sort_key(value: &Value) -> SortKeyValue {
 }
 
 fn error_rank(error: ErrorKind) -> u8 {
-    match error {
-        ErrorKind::Null => 0,
-        ErrorKind::Div0 => 1,
-        ErrorKind::Value => 2,
-        ErrorKind::Ref => 3,
-        ErrorKind::Name => 4,
-        ErrorKind::Num => 5,
-        ErrorKind::NA => 6,
-        ErrorKind::GettingData => 7,
-        ErrorKind::Spill => 8,
-        ErrorKind::Calc => 9,
-    }
+    error.code()
 }
 
 pub(super) fn compare_sort_keys(a: &SortKeyValue, b: &SortKeyValue, descending: bool) -> Ordering {

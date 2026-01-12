@@ -153,24 +153,13 @@ fn assert_engine_matches_ast(engine: &Engine, formula: &str, cell: &str) {
 }
 
 fn bytecode_value_to_engine(value: formula_engine::bytecode::Value) -> Value {
-    use formula_engine::bytecode::{ErrorKind as ByteErrorKind, Value as ByteValue};
+    use formula_engine::bytecode::Value as ByteValue;
     match value {
         ByteValue::Number(n) => Value::Number(n),
         ByteValue::Bool(b) => Value::Bool(b),
         ByteValue::Text(s) => Value::Text(s.to_string()),
         ByteValue::Empty => Value::Blank,
-        ByteValue::Error(e) => Value::Error(match e {
-            ByteErrorKind::Null => ErrorKind::Null,
-            ByteErrorKind::Div0 => ErrorKind::Div0,
-            ByteErrorKind::Ref => ErrorKind::Ref,
-            ByteErrorKind::Value => ErrorKind::Value,
-            ByteErrorKind::Name => ErrorKind::Name,
-            ByteErrorKind::Num => ErrorKind::Num,
-            ByteErrorKind::NA => ErrorKind::NA,
-            ByteErrorKind::GettingData => ErrorKind::GettingData,
-            ByteErrorKind::Spill => ErrorKind::Spill,
-            ByteErrorKind::Calc => ErrorKind::Calc,
-        }),
+        ByteValue::Error(e) => Value::Error(e.into()),
         // Array/range values are not valid scalar results for the engine API; treat them as spills.
         ByteValue::Array(_) | ByteValue::Range(_) | ByteValue::MultiRange(_) => {
             Value::Error(ErrorKind::Spill)

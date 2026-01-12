@@ -71,19 +71,12 @@ pub fn r#type(value: &Value) -> i32 {
 /// - 8: `#GETTING_DATA`
 /// - 9: `#SPILL!`
 /// - 10: `#CALC!`
+/// - 11: `#FIELD!`
+/// - 12: `#CONNECT!`
+/// - 13: `#BLOCKED!`
+/// - 14: `#UNKNOWN!`
 pub fn error_type_code(kind: ErrorKind) -> i32 {
-    match kind {
-        ErrorKind::Null => 1,
-        ErrorKind::Div0 => 2,
-        ErrorKind::Value => 3,
-        ErrorKind::Ref => 4,
-        ErrorKind::Name => 5,
-        ErrorKind::Num => 6,
-        ErrorKind::NA => 7,
-        ErrorKind::GettingData => 8,
-        ErrorKind::Spill => 9,
-        ErrorKind::Calc => 10,
-    }
+    kind.code().into()
 }
 
 /// Returns the ERROR.TYPE numeric code for a value, or `None` if the value is not an error.

@@ -1798,7 +1798,7 @@ fn excel_cmp(a: &Value, b: &Value) -> Option<i32> {
                 (Value::Text(x), Value::Text(y)) => Some(ordering_to_i32(cmp_case_insensitive(x, y))),
                 (Value::Bool(x), Value::Bool(y)) => Some(ordering_to_i32(x.cmp(y))),
                 (Value::Blank, Value::Blank) => Some(0),
-                (Value::Error(x), Value::Error(y)) => Some(ordering_to_i32(x.as_code().cmp(y.as_code()))),
+                (Value::Error(x), Value::Error(y)) => Some(ordering_to_i32(x.code().cmp(&y.code()))),
                 _ => None,
             }
         }

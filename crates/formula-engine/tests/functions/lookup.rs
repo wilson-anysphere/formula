@@ -307,6 +307,44 @@ fn xmatch_binary_search_modes() {
 }
 
 #[test]
+fn xmatch_binary_search_orders_errors_by_numeric_error_code() {
+    let array = vec![
+        Value::Error(ErrorKind::Null),
+        Value::Error(ErrorKind::Div0),
+        Value::Error(ErrorKind::Value),
+    ];
+    assert_eq!(
+        lookup::xmatch_with_modes(
+            &Value::Error(ErrorKind::Div0),
+            &array,
+            lookup::MatchMode::Exact,
+            lookup::SearchMode::BinaryAscending
+        )
+        .unwrap(),
+        2
+    );
+}
+
+#[test]
+fn xmatch_binary_search_orders_extended_errors_by_numeric_error_code() {
+    let array = vec![
+        Value::Error(ErrorKind::Field),
+        Value::Error(ErrorKind::Connect),
+        Value::Error(ErrorKind::Blocked),
+    ];
+    assert_eq!(
+        lookup::xmatch_with_modes(
+            &Value::Error(ErrorKind::Connect),
+            &array,
+            lookup::MatchMode::Exact,
+            lookup::SearchMode::BinaryAscending
+        )
+        .unwrap(),
+        2
+    );
+}
+
+#[test]
 fn xlookup_supports_binary_search_mode() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);

@@ -157,6 +157,10 @@ pub enum ErrorKind {
     GettingData,
     Spill,
     Calc,
+    Field,
+    Connect,
+    Blocked,
+    Unknown,
 }
 
 impl ErrorKind {
@@ -182,6 +186,10 @@ impl From<crate::value::ErrorKind> for ErrorKind {
             crate::value::ErrorKind::GettingData => ErrorKind::GettingData,
             crate::value::ErrorKind::Spill => ErrorKind::Spill,
             crate::value::ErrorKind::Calc => ErrorKind::Calc,
+            crate::value::ErrorKind::Field => ErrorKind::Field,
+            crate::value::ErrorKind::Connect => ErrorKind::Connect,
+            crate::value::ErrorKind::Blocked => ErrorKind::Blocked,
+            crate::value::ErrorKind::Unknown => ErrorKind::Unknown,
         }
     }
 }
@@ -199,6 +207,10 @@ impl From<ErrorKind> for crate::value::ErrorKind {
             ErrorKind::GettingData => crate::value::ErrorKind::GettingData,
             ErrorKind::Spill => crate::value::ErrorKind::Spill,
             ErrorKind::Calc => crate::value::ErrorKind::Calc,
+            ErrorKind::Field => crate::value::ErrorKind::Field,
+            ErrorKind::Connect => crate::value::ErrorKind::Connect,
+            ErrorKind::Blocked => crate::value::ErrorKind::Blocked,
+            ErrorKind::Unknown => crate::value::ErrorKind::Unknown,
         }
     }
 }
