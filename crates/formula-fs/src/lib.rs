@@ -62,6 +62,19 @@ pub fn atomic_write<T, E>(
     write_fn: impl FnOnce(&mut File) -> Result<T, E>,
 ) -> Result<T, AtomicWriteError<E>> {
     let dest = dest.as_ref();
+    // Best-effort: preserve permissions when overwriting an existing file.
+    //
+    // `tempfile::NamedTempFile` defaults to restrictive permissions (e.g. 0o600 on Unix),
+    // which is good for security but can be surprising when atomically replacing an existing
+    // user file (e.g. replacing a 0o644 workbook and making it unreadable to group/other).
+    //
+    // We apply the destination permissions to the temp file *after* writing (so we can still
+    // write even if the destination is read-only) and *before* the final `sync_all` so the
+    // metadata update is durably persisted along with the file contents.
+    //
+    // Failures are ignored: permission preservation is a best-effort quality-of-life feature
+    // and should not cause the write to fail when the data is otherwise safely written.
+    let dest_permissions = fs::metadata(dest).ok().map(|meta| meta.permissions());
     let dir = parent_dir_or_dot(dest);
     fs::create_dir_all(dir).map_err(AtomicWriteError::Io)?;
 
@@ -69,6 +82,9 @@ pub fn atomic_write<T, E>(
     let out = write_fn(tmp.as_file_mut()).map_err(AtomicWriteError::Writer)?;
 
     tmp.as_file_mut().flush().map_err(AtomicWriteError::Io)?;
+    if let Some(perms) = dest_permissions {
+        let _ = fs::set_permissions(tmp.path(), perms);
+    }
     tmp.as_file().sync_all().map_err(AtomicWriteError::Io)?;
 
     let tmp_path = tmp.into_temp_path();
@@ -92,6 +108,7 @@ pub fn atomic_write_with_path<T, E>(
     write_fn: impl FnOnce(&Path) -> Result<T, E>,
 ) -> Result<T, AtomicWriteError<E>> {
     let dest = dest.as_ref();
+    let dest_permissions = fs::metadata(dest).ok().map(|meta| meta.permissions());
     let dir = parent_dir_or_dot(dest);
     fs::create_dir_all(dir).map_err(AtomicWriteError::Io)?;
 
@@ -100,6 +117,10 @@ pub fn atomic_write_with_path<T, E>(
     let tmp_path_ref: &Path = <tempfile::TempPath as AsRef<Path>>::as_ref(&tmp_path);
 
     let out = write_fn(tmp_path_ref).map_err(AtomicWriteError::Writer)?;
+
+    if let Some(perms) = dest_permissions {
+        let _ = fs::set_permissions(tmp_path_ref, perms);
+    }
 
     // Ensure the temp file's contents are durably flushed before the rename.
     File::open(tmp_path_ref)
@@ -239,5 +260,31 @@ mod tests {
             vec![dest.clone()],
             "expected only the destination file to remain (no temp files)"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_preserves_existing_file_permissions() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let dest = tmp.path().join("perms.bin");
+
+        std::fs::write(&dest, b"old").expect("write dest");
+        let mut perms = std::fs::metadata(&dest)
+            .expect("metadata")
+            .permissions();
+        perms.set_mode(0o644);
+        std::fs::set_permissions(&dest, perms).expect("set permissions");
+
+        atomic_write_bytes(&dest, b"new").expect("atomic write");
+        assert_eq!(std::fs::read(&dest).expect("read"), b"new");
+
+        let mode = std::fs::metadata(&dest)
+            .expect("metadata after")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o644, "expected atomic write to preserve dest permissions");
     }
 }
