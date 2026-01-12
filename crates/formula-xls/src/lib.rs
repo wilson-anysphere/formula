@@ -1316,7 +1316,7 @@ fn import_xls_path_with_biff_reader(
     // supported). Never fail import due to AutoFilter parsing.
     let mut autofilters: Vec<(formula_model::WorksheetId, Range)> = Vec::new();
     for name in &out.defined_names {
-        if name.name != XLNM_FILTER_DATABASE {
+        if !name.name.eq_ignore_ascii_case(XLNM_FILTER_DATABASE) {
             continue;
         }
 
@@ -1329,19 +1329,7 @@ fn import_xls_path_with_biff_reader(
             continue;
         };
 
-        // Accept either `$A$1:$D$10` or `Sheet1!$A$1:$D$10` and strip a leading sheet prefix.
-        let mut a1 = name.refers_to.trim();
-        if let Some(rest) = a1.strip_prefix('=') {
-            a1 = rest.trim();
-        }
-        if let Some(rest) = a1.strip_prefix('@') {
-            a1 = rest.trim();
-        }
-        if let Some((_, rhs)) = a1.rsplit_once('!') {
-            a1 = rhs;
-        }
-
-        match Range::from_a1(a1) {
+        match parse_autofilter_range_from_defined_name(&name.refers_to) {
             Ok(range) => autofilters.push((sheet_id, range)),
             Err(err) => warnings.push(ImportWarning::new(format!(
                 "failed to parse `.xls` AutoFilter range `{}` from defined name `{}`: {err}",
@@ -2315,4 +2303,67 @@ fn build_in_memory_xls(workbook_stream: &[u8]) -> Result<Vec<u8>, ImportError> {
     }
 
     Ok(ole.into_inner().into_inner())
+}
+
+fn parse_autofilter_range_from_defined_name(refers_to: &str) -> Result<Range, String> {
+    let refers_to = refers_to.trim();
+    let refers_to = refers_to.strip_prefix('=').unwrap_or(refers_to).trim();
+    let refers_to = refers_to.strip_prefix('@').unwrap_or(refers_to).trim();
+    if refers_to.is_empty() {
+        return Err("empty `refers_to`".to_string());
+    }
+
+    // Reject union formulas like `Sheet1!$A$1:$A$2,Sheet1!$C$1:$C$2` (comma at the top level).
+    // We track quote and parenthesis nesting so commas inside quoted sheet names or function
+    // argument lists do not get misclassified.
+    let mut in_single_quote = false;
+    let mut in_double_quote = false;
+    let mut paren_depth: u32 = 0;
+
+    let bytes = refers_to.as_bytes();
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        match bytes[idx] {
+            b'"' => {
+                in_double_quote = !in_double_quote;
+                idx += 1;
+            }
+            b'\'' if !in_double_quote => {
+                if in_single_quote {
+                    // Inside sheet-name quoting, `''` escapes a single quote.
+                    if bytes.get(idx + 1) == Some(&b'\'') {
+                        idx += 2;
+                    } else {
+                        in_single_quote = false;
+                        idx += 1;
+                    }
+                } else {
+                    in_single_quote = true;
+                    idx += 1;
+                }
+            }
+            b'(' if !in_single_quote && !in_double_quote => {
+                paren_depth = paren_depth.saturating_add(1);
+                idx += 1;
+            }
+            b')' if !in_single_quote && !in_double_quote => {
+                paren_depth = paren_depth.saturating_sub(1);
+                idx += 1;
+            }
+            b',' if !in_single_quote && !in_double_quote && paren_depth == 0 => {
+                return Err("unsupported union formula (multiple areas)".to_string());
+            }
+            _ => idx += 1,
+        }
+    }
+
+    // Strip any sheet qualifier, leaving the trailing A1 range part.
+    // This handles `Sheet1!$A$1:$C$10` and `'My Sheet'!$A$1:$C$10`.
+    let a1 = refers_to
+        .rsplit_once('!')
+        .map(|(_, tail)| tail)
+        .unwrap_or(refers_to)
+        .trim();
+
+    Range::from_a1(a1).map_err(|err| format!("invalid A1 range `{a1}`: {err}"))
 }
