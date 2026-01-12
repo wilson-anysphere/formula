@@ -242,6 +242,16 @@ export class ScriptRuntime {
     switch (method) {
       case "ui.alert": {
         const message = params?.message ?? "";
+        const tauriMessage = globalThis?.__TAURI__?.dialog?.message ?? globalThis?.__TAURI__?.dialog?.alert;
+        if (typeof tauriMessage === "function") {
+          try {
+            await tauriMessage(String(message));
+            return null;
+          } catch {
+            // Fall back to `globalThis.alert` below.
+          }
+        }
+
         if (typeof globalThis.alert !== "function") {
           throw new Error("alert() is not available in this environment");
         }
@@ -250,6 +260,15 @@ export class ScriptRuntime {
       }
       case "ui.confirm": {
         const message = params?.message ?? "";
+        const tauriConfirm = globalThis?.__TAURI__?.dialog?.confirm;
+        if (typeof tauriConfirm === "function") {
+          try {
+            return Boolean(await tauriConfirm(String(message)));
+          } catch {
+            // Fall back to `globalThis.confirm` below.
+          }
+        }
+
         if (typeof globalThis.confirm !== "function") {
           throw new Error("confirm() is not available in this environment");
         }
