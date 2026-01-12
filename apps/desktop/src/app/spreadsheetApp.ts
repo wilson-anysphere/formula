@@ -120,6 +120,10 @@ const MAX_CHART_DATA_CELLS = 100_000;
 // `16_384` matches Excel's maximum column count, so the mapping is collision-free for Excel-sized sheets.
 const COMMENT_COORD_COL_STRIDE = 16_384;
 const COMPUTED_COORD_COL_STRIDE = COMMENT_COORD_COL_STRIDE;
+// Encode (row, col) into a single numeric key for per-call formula memoization / cycle detection.
+// Use a large stride so even when the UI is configured with a small `maxCols` (e.g. tests),
+// formulas referencing larger column indexes don't collide in memoization keys.
+const EVAL_COORD_COL_STRIDE = 1_048_576; // 2^20 (also Excel's max row count)
 // Plain A1 address (with optional `$` absolute markers) without sheet qualification.
 const A1_CELL_REF_RE = /^\$?[A-Za-z]+\$?[1-9][0-9]*$/;
 const AI_FUNCTION_CALL_RE = /\bAI(?:\.(?:EXTRACT|CLASSIFY|TRANSLATE))?\s*\(/i;
@@ -8474,8 +8478,8 @@ export class SpreadsheetApp {
       }
     }
 
-    const memo = new Map<string, SpreadsheetValue>();
-    const stack = new Set<string>();
+    const memo = new Map<string, Map<number, SpreadsheetValue>>();
+    const stack = new Map<string, Set<number>>();
     return this.computeCellValue(sheetId, cell, memo, stack, { useEngineCache });
   }
 
@@ -8713,8 +8717,8 @@ export class SpreadsheetApp {
   private computeCellValue(
     sheetId: string,
     cell: CellCoord,
-    memo: Map<string, SpreadsheetValue>,
-    stack: Set<string>,
+    memo: Map<string, Map<number, SpreadsheetValue>>,
+    stack: Map<string, Set<number>>,
     options: { useEngineCache: boolean }
   ): SpreadsheetValue {
     if (options.useEngineCache) {
@@ -8738,15 +8742,29 @@ export class SpreadsheetApp {
       return null;
     }
 
-    const computedKey = `${sheetId}\u0000${cell.row},${cell.col}`;
-    const cached = memo.get(computedKey);
-    if (cached !== undefined || memo.has(computedKey)) return cached ?? null;
-    if (stack.has(computedKey)) return "#REF!";
+    const key = cell.row * EVAL_COORD_COL_STRIDE + cell.col;
+    let sheetMemo = memo.get(sheetId);
+    if (!sheetMemo) {
+      sheetMemo = new Map();
+      memo.set(sheetId, sheetMemo);
+    }
 
-    stack.add(computedKey);
+    const cached = sheetMemo.get(key);
+    if (cached !== undefined || sheetMemo.has(key)) return cached ?? null;
+
+    let sheetStack = stack.get(sheetId);
+    if (!sheetStack) {
+      sheetStack = new Set();
+      stack.set(sheetId, sheetStack);
+    }
+
+    if (sheetStack.has(key)) return "#REF!";
+
+    sheetStack.add(key);
     const hasAiFunction = AI_FUNCTION_CALL_RE.test(state.formula);
     const address = hasAiFunction ? cellToA1(cell) : "";
     const cellAddress = hasAiFunction ? `${sheetId}!${address}` : undefined;
+    const coordScratch = { row: 0, col: 0 };
 
     const value = evaluateFormula(state.formula, (ref) => {
       const normalized = ref.replaceAll("$", "").trim();
@@ -8763,12 +8781,21 @@ export class SpreadsheetApp {
           targetAddress = addr.trim();
         }
       }
-      const coord = parseA1(targetAddress);
-      return this.computeCellValue(targetSheet, coord, memo, stack, options);
+      // Avoid allocating a fresh `{row,col}` object for every reference evaluation.
+      // (The scratch coord is safe because `computeCellValue` does not retain the object.)
+      try {
+        const parsed = fromA1A1(targetAddress);
+        coordScratch.row = parsed.row0;
+        coordScratch.col = parsed.col0;
+      } catch {
+        coordScratch.row = 0;
+        coordScratch.col = 0;
+      }
+      return this.computeCellValue(targetSheet, coordScratch, memo, stack, options);
     }, { ai: this.aiCellFunctions, cellAddress });
 
-    stack.delete(computedKey);
-    memo.set(computedKey, value);
+    sheetStack.delete(key);
+    sheetMemo.set(key, value);
     return value;
   }
 
