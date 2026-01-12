@@ -467,9 +467,9 @@ export function bindYjsToDocumentController(options) {
    * Normalize foreign nested Y.Maps (e.g. created by a different `yjs` module instance
    * in mixed ESM/CJS environments) into local types before mutating them.
    *
-   * This conversion is intentionally performed in an *untracked* transaction (origin
-   * not in UndoManager.trackedOrigins) so collaborative undo only captures the user's
-   * actual edit.
+   * This conversion is intentionally performed in an *untracked* transaction (no origin,
+   * i.e. not in UndoManager.trackedOrigins) so collaborative undo only captures the
+   * user's actual edit.
    *
    * @param {Iterable<string>} rawKeys
    */
