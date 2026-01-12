@@ -912,7 +912,8 @@ Two variants are observed in-repo:
 Other builds may:
 
 * split values across `xl/richData/richValue1.xml`, `richValue2.xml`, ... (or the plural `richValues1.xml` / `richValues2.xml` naming variant)
-  * Formula treats these as a single logical stream ordered by numeric suffix (see
+  * Formula orders multi-part rich value stores by numeric suffix **within a given family**
+    (`richValue*.xml` or `richValues*.xml`) (see
     `crates/formula-xlsx/tests/rich_value_part_numeric_suffix_order.rs`).
 * include an explicit global index attribute on `<rv>` (e.g. `i="…"`, `id="…"`, `idx="…"`)
 * include multiple `<v>` members, with types indicated by attributes like `kind="rel"` and/or `t="rel"` / `t="r"` / etc.
