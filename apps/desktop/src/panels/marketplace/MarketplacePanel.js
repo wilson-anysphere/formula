@@ -20,6 +20,14 @@ function tryShowToast(message, type = "info") {
   }
 }
 
+function tryNotifyExtensionsChanged() {
+  try {
+    window.dispatchEvent(new Event("formula:extensions-changed"));
+  } catch {
+    // ignore
+  }
+}
+
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
@@ -248,6 +256,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
                 }
                 updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
                 actions.textContent = "Installed";
+                tryNotifyExtensionsChanged();
               } catch (error) {
                 // eslint-disable-next-line no-console
                 console.error(error);
@@ -288,6 +297,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
                 if (storage) removeSeedPanelsForExtension(storage, item.id);
 
                 actions.textContent = "Uninstalled";
+                tryNotifyExtensionsChanged();
               } catch (error) {
                 // eslint-disable-next-line no-console
                 console.error(error);
@@ -336,6 +346,7 @@ async function renderSearchResults({ container, marketplaceClient, extensionMana
 
                 updateContributedPanelSeedsFromHost(extensionHostManager, item.id);
                 actions.textContent = "Updated";
+                tryNotifyExtensionsChanged();
               } catch (error) {
                 // eslint-disable-next-line no-console
                 console.error(error);

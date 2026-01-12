@@ -3979,6 +3979,22 @@ if (
   syncContributedPanelsRef = syncContributedPanels;
   updateKeybindingsRef = updateKeybindings;
 
+  // Marketplace installs (WebExtensionManager) can load/unload extensions directly into the shared
+  // BrowserExtensionHost. When that happens we need to resync contributed commands/panels/keybindings
+  // so the desktop UI surfaces the new contributions without requiring a reload.
+  window.addEventListener("formula:extensions-changed", () => {
+    void ensureExtensionsLoaded()
+      .then(() => {
+        updateKeybindings();
+        syncContributedCommands();
+        syncContributedPanels();
+        activateOpenExtensionPanels();
+      })
+      .catch(() => {
+        // ignore
+      });
+  });
+
   const contextMenu = new ContextMenu({
     onClose: () => {
       // Best-effort: return focus to the grid after closing.
