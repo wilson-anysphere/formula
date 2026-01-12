@@ -3121,6 +3121,47 @@ fn bytecode_backend_financial_date_text_respects_value_locale() {
 }
 
 #[test]
+fn bytecode_backend_coupon_date_text_respects_value_locale() {
+    let mut engine = Engine::new();
+    let formula = r#"=COUPDAYBS("01/02/2020","01/03/2020",2)"#;
+    engine.set_cell_formula("Sheet1", "A1", formula).unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 1);
+    assert_eq!(stats.fallback, 0);
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    // en-US (default) is MDY: "01/02/2020" == Jan 2, 2020.
+    let system = engine.date_system();
+    let settlement_us = ymd_to_serial(ExcelDate::new(2020, 1, 2), system).unwrap();
+    let maturity_us = ymd_to_serial(ExcelDate::new(2020, 1, 3), system).unwrap();
+    let expected_us =
+        formula_engine::functions::financial::coupdaybs(settlement_us, maturity_us, 2, 0, system)
+            .unwrap();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_us));
+    assert_engine_matches_ast(&engine, formula, "A1");
+
+    // Switch to a DMY locale and ensure the same text dates are parsed differently.
+    assert!(engine.set_value_locale_id("de-DE"));
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    // de-DE is DMY: "01/02/2020" == Feb 1, 2020.
+    let settlement_de = ymd_to_serial(ExcelDate::new(2020, 2, 1), system).unwrap();
+    let maturity_de = ymd_to_serial(ExcelDate::new(2020, 3, 1), system).unwrap();
+    let expected_de =
+        formula_engine::functions::financial::coupdaybs(settlement_de, maturity_de, 2, 0, system)
+            .unwrap();
+    assert_ne!(expected_de, expected_us);
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected_de));
+    assert_engine_matches_ast(&engine, formula, "A1");
+}
+
+#[test]
 fn bytecode_backend_financial_date_text_respects_engine_date_system() {
     let mut engine = Engine::new();
     // Excel's 1900 date system can (optionally) emulate the Lotus 1-2-3 leap-year bug and accept
