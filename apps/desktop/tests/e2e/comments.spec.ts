@@ -138,4 +138,71 @@ test.describe("comments", () => {
     await expect(page.getByTestId("comments-panel")).toBeVisible();
     await expect(page.getByTestId("new-comment-input")).toBeFocused();
   });
+
+  test("Shift+F2 opens the comments panel and focuses the input", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => {
+      const app = (window as any).__formulaApp;
+      const rect = app?.getCellRectA1?.("A1");
+      return rect && rect.width > 0 && rect.height > 0;
+    });
+
+    const a1 = (await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"))) as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+
+    const grid = page.locator("#grid");
+    await grid.click({ position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await expect(page.getByTestId("comments-panel")).not.toBeVisible();
+
+    await page.keyboard.press("Shift+F2");
+
+    await expect(page.getByTestId("comments-panel")).toBeVisible();
+    await expect(page.getByTestId("new-comment-input")).toBeFocused();
+  });
+
+  test("Ctrl/Cmd+Shift+M toggles the comments panel and returns focus to the grid on close", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.waitForFunction(() => {
+      const app = (window as any).__formulaApp;
+      const rect = app?.getCellRectA1?.("A1");
+      return rect && rect.width > 0 && rect.height > 0;
+    });
+
+    const a1 = (await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"))) as {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    };
+
+    const grid = page.locator("#grid");
+    await grid.click({ position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+
+    await page.keyboard.press(`${modifier}+Shift+M`);
+    await expect(page.getByTestId("comments-panel")).toBeVisible();
+
+    // The comments panel input intentionally stops keydown propagation (and the global
+    // keybinding handler ignores INPUT/TEXTAREA targets). To exercise the "toggle off"
+    // behavior, return focus to the grid first.
+    await grid.click({ position: { x: a1.x + a1.width / 2, y: a1.y + a1.height / 2 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await page.keyboard.press(`${modifier}+Shift+M`);
+    await expect(page.getByTestId("comments-panel")).not.toBeVisible();
+
+    // Ensure focus has returned to the grid (arrow keys should navigate selection).
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+  });
 });
