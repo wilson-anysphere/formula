@@ -10,6 +10,7 @@ mod dynamic_arrays_sortby;
 mod dynamic_arrays_stack;
 mod dynamic_arrays_textsplit;
 mod financial_cashflows;
+mod financial_bonds_date_system;
 mod financial_dates;
 mod financial_depreciation;
 mod financial_depreciation_ext;
