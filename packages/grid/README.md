@@ -157,6 +157,7 @@ Notable helpers:
 - `getViewportState()` returns the current scroll/viewport metrics (useful for overlay positioning without extra DOM reads).
 - `getFillHandleRect()` returns the active selection fill-handle rect (also in viewport coordinates).
 - `setZoom(zoom)` / `getZoom()` control the grid zoom level (scales cell sizes + text rendering).
+- `applyAxisSizeOverrides({ rows?, cols? }, { resetUnspecified? })` applies many row/column size overrides at once (single redraw).
 - Multi-range selection helpers: `setSelectionRanges`, `getSelectionRanges`, `getActiveSelectionRangeIndex`.
 
 ## Zoom
