@@ -278,12 +278,14 @@ mod tests {
     use crate::date::{ymd_to_serial, ExcelDate};
 
     #[test]
-    fn odd_coupon_e_uses_days360_between_coupon_dates_for_basis_4() {
+    fn odd_coupon_e_matches_coupdays_convention_for_basis_4() {
         // Regression test for basis=4 (30E/360):
-        // - Odd-coupon bond functions (ODDF*/ODDL*) use `coupon_schedule::coupon_period_e`, which
-        //   uses the European DAYS360 day-count between coupon dates (PCD->NCD).
-        // - Excel's COUPDAYS/COUPDAYSNC treat basis=4 as a fixed `360/frequency` coupon period even
-        //   when DAYS360(PCD, NCD, TRUE) differs for some end-of-month schedules involving February.
+        // - COUPDAYBS uses the European DAYS360 method (TRUE) for day counts like `A`.
+        // - COUPDAYS (and the odd-coupon bond functions via `coupon_schedule::coupon_period_e`)
+        //   model the coupon period length `E` as a fixed `360/frequency`.
+        //
+        // This intentionally diverges from `DAYS360(PCD, NCD, TRUE)` for some end-of-month schedules
+        // involving February (e.g. Feb 28 -> Aug 31 yields 182, not 180).
         let system = ExcelDateSystem::EXCEL_1900;
         let pcd = ymd_to_serial(ExcelDate::new(2001, 2, 28), system).unwrap();
         let ncd = ymd_to_serial(ExcelDate::new(2001, 8, 31), system).unwrap();
@@ -296,9 +298,10 @@ mod tests {
         assert_eq!(days360, 182);
 
         let e = coupon_period_e(pcd, ncd, basis, freq, system).unwrap();
-        assert_eq!(e, 182.0);
+        assert_eq!(e, 180.0);
+        assert_ne!(e as i64, days360);
 
-        // COUPDAYS models basis=4 as a fixed 360/frequency coupon period.
+        // COUPDAYS should use the same modeled coupon-period length.
         let settlement = ymd_to_serial(ExcelDate::new(2001, 5, 1), system).unwrap();
         let e_coupdays =
             super::super::coupon_schedule::coupdays(settlement, ncd, frequency, basis, system)
