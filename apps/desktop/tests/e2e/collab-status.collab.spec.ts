@@ -106,11 +106,15 @@ test.describe("collab status indicator (collab mode)", () => {
 
     await expect(page.getByTestId("collab-status")).toBeVisible();
     await expect(page2.getByTestId("collab-status")).toBeVisible();
+    await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-mode", "collab");
+    await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-mode", "collab");
 
     await expect(page.getByTestId("collab-status")).toContainText(docId);
     await expect(page2.getByTestId("collab-status")).toContainText(docId);
 
-    await expect(page.getByTestId("collab-status")).toContainText("Synced", { timeout: 30_000 });
-    await expect(page2.getByTestId("collab-status")).toContainText("Synced", { timeout: 30_000 });
+    await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 30_000 });
+    await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-sync", "synced", { timeout: 30_000 });
+    await expect(page.getByTestId("collab-status")).toHaveAttribute("data-collab-conn", "connected");
+    await expect(page2.getByTestId("collab-status")).toHaveAttribute("data-collab-conn", "connected");
   });
 });
