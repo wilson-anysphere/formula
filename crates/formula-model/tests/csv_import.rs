@@ -108,6 +108,18 @@ fn csv_import_handles_utf8_inside_quoted_fields() {
 }
 
 #[test]
+fn csv_import_preserves_whitespace_in_string_values() {
+    let csv = "text\n  hello  \n";
+    let sheet =
+        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+            .unwrap();
+    assert_eq!(
+        sheet.value(CellRef::new(0, 0)),
+        CellValue::String("  hello  ".to_string())
+    );
+}
+
+#[test]
 fn csv_import_header_only_defaults_columns_to_string() {
     let csv = "a,b,c";
     let table = import_csv_to_columnar_table(Cursor::new(csv.as_bytes()), CsvOptions::default())

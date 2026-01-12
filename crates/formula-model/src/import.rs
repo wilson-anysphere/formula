@@ -1028,28 +1028,42 @@ fn parse_typed_value(
     options: &CsvOptions,
     string_pool: &mut StringPool,
 ) -> ColumnarValue {
-    let v = field.trim();
-    if v.is_empty() {
-        return ColumnarValue::Null;
-    }
-
     match column_type {
-        ColumnarType::Number => parse_number_f64(v, options)
-            .map(ColumnarValue::Number)
-            .unwrap_or(ColumnarValue::Null),
-        ColumnarType::String => ColumnarValue::String(string_pool.intern(v)),
-        ColumnarType::Boolean => parse_bool(v)
-            .map(ColumnarValue::Boolean)
-            .unwrap_or(ColumnarValue::Null),
-        ColumnarType::DateTime => parse_datetime_millis(v, options)
-            .map(ColumnarValue::DateTime)
-            .unwrap_or(ColumnarValue::Null),
-        ColumnarType::Currency { scale } => parse_currency(v, scale, options)
-            .map(ColumnarValue::Currency)
-            .unwrap_or(ColumnarValue::Null),
-        ColumnarType::Percentage { scale } => parse_percentage(v, scale, options)
-            .map(ColumnarValue::Percentage)
-            .unwrap_or(ColumnarValue::Null),
+        // Preserve whitespace in string values. Unlike numeric parsing (which should ignore
+        // surrounding whitespace), CSV fields can legitimately contain leading/trailing spaces that
+        // Excel surfaces as part of the cell text.
+        ColumnarType::String => {
+            if field.is_empty() {
+                ColumnarValue::Null
+            } else {
+                ColumnarValue::String(string_pool.intern(field))
+            }
+        }
+        _ => {
+            let v = field.trim();
+            if v.is_empty() {
+                return ColumnarValue::Null;
+            }
+
+            match column_type {
+                ColumnarType::Number => parse_number_f64(v, options)
+                    .map(ColumnarValue::Number)
+                    .unwrap_or(ColumnarValue::Null),
+                ColumnarType::Boolean => parse_bool(v)
+                    .map(ColumnarValue::Boolean)
+                    .unwrap_or(ColumnarValue::Null),
+                ColumnarType::DateTime => parse_datetime_millis(v, options)
+                    .map(ColumnarValue::DateTime)
+                    .unwrap_or(ColumnarValue::Null),
+                ColumnarType::Currency { scale } => parse_currency(v, scale, options)
+                    .map(ColumnarValue::Currency)
+                    .unwrap_or(ColumnarValue::Null),
+                ColumnarType::Percentage { scale } => parse_percentage(v, scale, options)
+                    .map(ColumnarValue::Percentage)
+                    .unwrap_or(ColumnarValue::Null),
+                ColumnarType::String => unreachable!("handled above"),
+            }
+        }
     }
 }
 
