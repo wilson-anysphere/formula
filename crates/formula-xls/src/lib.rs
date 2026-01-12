@@ -30,9 +30,9 @@ use std::path::{Path, PathBuf};
 
 use calamine::{open_workbook, Data, Reader, Sheet, SheetType, SheetVisible, Xls};
 use formula_model::{
-    normalize_formula_text, CellRef, CellValue, Comment, CommentAuthor, CommentKind,
-    ColRange, DefinedNameScope, ErrorValue, HyperlinkTarget, PrintTitles, Range, RowRange,
-    SheetVisibility, Style, TabColor, Workbook, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    normalize_formula_text, CellRef, CellValue, ColRange, Comment, CommentAuthor, CommentKind,
+    DefinedNameScope, ErrorValue, HyperlinkTarget, PrintTitles, Range, RowRange, SheetAutoFilter,
+    SheetVisibility, Style, TabColor, Workbook, XLNM_FILTER_DATABASE, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
     EXCEL_MAX_SHEET_NAME_LEN,
 };
 use thiserror::Error;
@@ -1266,6 +1266,68 @@ fn import_xls_path_with_biff_reader(
     }
 
     populate_print_settings_from_defined_names(&mut out, &mut warnings);
+
+    // Best-effort import of worksheet AutoFilter ranges (phase 1).
+    //
+    // In BIFF, the filtered range is typically stored as a hidden built-in defined name
+    // `_xlnm._FilterDatabase`, scoped to the worksheet that owns the AutoFilter.
+    //
+    // We only import the presence + range in phase 1 (filter criteria and sort state are not yet
+    // supported). Never fail import due to AutoFilter parsing.
+    let mut autofilters: Vec<(formula_model::WorksheetId, Range)> = Vec::new();
+    for name in &out.defined_names {
+        if name.name != XLNM_FILTER_DATABASE {
+            continue;
+        }
+
+        let DefinedNameScope::Sheet(sheet_id) = name.scope else {
+            // AutoFilter names are expected to be sheet-scoped.
+            warnings.push(ImportWarning::new(format!(
+                "skipping `.xls` AutoFilter defined name `{}`: workbook-scoped",
+                name.name
+            )));
+            continue;
+        };
+
+        // Accept either `$A$1:$D$10` or `Sheet1!$A$1:$D$10` and strip a leading sheet prefix.
+        let mut a1 = name.refers_to.trim();
+        if let Some(rest) = a1.strip_prefix('=') {
+            a1 = rest.trim();
+        }
+        if let Some(rest) = a1.strip_prefix('@') {
+            a1 = rest.trim();
+        }
+        if let Some((_, rhs)) = a1.rsplit_once('!') {
+            a1 = rhs;
+        }
+
+        match Range::from_a1(a1) {
+            Ok(range) => autofilters.push((sheet_id, range)),
+            Err(err) => warnings.push(ImportWarning::new(format!(
+                "failed to parse `.xls` AutoFilter range `{}` from defined name `{}`: {err}",
+                name.refers_to, name.name
+            ))),
+        }
+    }
+
+    for (sheet_id, range) in autofilters {
+        let Some(sheet) = out.sheet_mut(sheet_id) else {
+            warnings.push(ImportWarning::new(format!(
+                "skipping `.xls` AutoFilter range for missing sheet id {sheet_id}"
+            )));
+            continue;
+        };
+        if sheet.auto_filter.is_some() {
+            continue;
+        }
+
+        sheet.auto_filter = Some(SheetAutoFilter {
+            range,
+            filter_columns: Vec::new(),
+            sort_state: None,
+            raw_xml: Vec::new(),
+        });
+    }
 
     Ok(XlsImportResult {
         workbook: out,
