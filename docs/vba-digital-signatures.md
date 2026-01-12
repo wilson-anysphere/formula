@@ -18,6 +18,10 @@ API notes:
 - `formula_vba::verify_vba_digital_signature_bound` returns a [`VbaDigitalSignatureBound`] with a
   richer binding enum (`VbaProjectBindingVerification`) and best-effort debug info (algorithm OID,
   signed digest bytes, computed digest bytes).
+- PKCS#7/CMS verification is *internal* signature verification only: by default we do **not**
+  validate the signer certificate chain (OpenSSL `NOVERIFY`). If you need opt-in “trusted publisher”
+  evaluation, use `formula_vba::verify_vba_digital_signature_with_trust` with an explicit root
+  certificate set.
 
 ## Where signatures live
 
