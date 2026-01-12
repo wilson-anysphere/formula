@@ -1,4 +1,4 @@
-use formula_engine::{Engine, Value};
+use formula_engine::{Engine, NameDefinition, NameScope, Value};
 use formula_model::EXCEL_MAX_COLS;
 
 #[test]
@@ -72,4 +72,77 @@ fn row_and_column_handle_row_and_column_refs_with_custom_dimensions() {
     assert_eq!(engine.get_cell_value("Sheet1", "A10"), Value::Number(4.0));
     assert_eq!(engine.get_cell_value("Sheet1", "B10"), Value::Number(5.0));
     assert_eq!(engine.get_cell_value("Sheet1", "C10"), Value::Number(6.0));
+}
+
+#[test]
+fn defined_name_whole_column_tracks_sheet_dimensions() {
+    let mut engine = Engine::new();
+    engine.set_sheet_dimensions("Sheet1", 10, 10).unwrap();
+    engine
+        .define_name(
+            "MyCol",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!A:A".to_string()),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ROWS(MyCol)")
+        .unwrap();
+
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(10.0));
+
+    // Growing the sheet should also grow whole-column references inside defined names.
+    engine.set_sheet_dimensions("Sheet1", 2_000_000, 10).unwrap();
+    engine.recalculate();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Number(2_000_000.0)
+    );
+}
+
+#[test]
+fn defined_name_whole_row_tracks_sheet_dimensions() {
+    let mut engine = Engine::new();
+    engine.set_sheet_dimensions("Sheet1", 100, 10).unwrap();
+    engine
+        .define_name(
+            "MyRow",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!1:1".to_string()),
+        )
+        .unwrap();
+    // Avoid a circular reference: `1:1` includes row 1, so the formula can't be on row 1.
+    engine
+        .set_cell_formula("Sheet1", "A2", "=COLUMNS(MyRow)")
+        .unwrap();
+
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(10.0));
+
+    // Growing the sheet should also grow whole-row references inside defined names.
+    engine.set_sheet_dimensions("Sheet1", 100, 12).unwrap();
+    engine.recalculate();
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(12.0));
+}
+
+#[test]
+fn indirect_whole_row_and_column_respect_sheet_dimensions() {
+    let mut engine = Engine::new();
+    engine
+        .set_sheet_dimensions("Sheet1", 2_000_000, 10)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=ROWS(INDIRECT(\"A:A\"))")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B2", "=COLUMNS(INDIRECT(\"1:1\"))")
+        .unwrap();
+
+    engine.recalculate();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Number(2_000_000.0)
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "B2"), Value::Number(10.0));
 }
