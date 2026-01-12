@@ -8,10 +8,12 @@ test.describe("Print Preview (tauri)", () => {
       const listeners: Record<string, Array<(event: any) => void>> = {};
       const invokes: Array<{ cmd: string; args: any }> = [];
       const downloadClicks: Array<{ download: string | null; href: string | null }> = [];
+      let printCalls = 0;
 
       (window as any).__tauriListeners = listeners;
       (window as any).__tauriInvokes = invokes;
       (window as any).__downloadClicks = downloadClicks;
+      (window as any).__printCalls = () => printCalls;
 
       // Avoid modal prompts blocking the test.
       window.confirm = () => true;
@@ -27,6 +29,38 @@ test.describe("Print Preview (tauri)", () => {
           // ignore
         }
       };
+
+      // Best-effort: avoid opening a real OS print dialog in CI/headless. Our print preview
+      // implementation calls `iframe.contentWindow.print()`. Stub it only for the print preview
+      // iframe (identified by being inside `dialog.print-preview-dialog`).
+      try {
+        const original = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "contentWindow");
+        if (original && typeof original.get === "function") {
+          Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", {
+            configurable: true,
+            enumerable: original.enumerable,
+            get: function () {
+              try {
+                const el = this as any;
+                const isPrintPreview = typeof el?.closest === "function" && el.closest("dialog.print-preview-dialog");
+                if (isPrintPreview) {
+                  return {
+                    print: () => {
+                      printCalls += 1;
+                    },
+                    focus: () => {},
+                  };
+                }
+              } catch {
+                // ignore
+              }
+              return original.get!.call(this);
+            },
+          });
+        }
+      } catch {
+        // ignore
+      }
 
       const windowHandle = {
         hide: async () => {},
@@ -115,10 +149,12 @@ test.describe("Print Preview (tauri)", () => {
     await page.waitForFunction(() => (window as any).__tauriInvokes?.some((e: any) => e?.cmd === "export_sheet_range_pdf"));
     await expect(page.locator("dialog.print-preview-dialog")).toBeVisible();
 
+    await page.locator("dialog.print-preview-dialog").getByRole("button", { name: "Print" }).click();
+    await page.waitForFunction(() => typeof (window as any).__printCalls === "function" && (window as any).__printCalls() > 0);
+
     await page.locator("dialog.print-preview-dialog").getByRole("button", { name: "Download PDF" }).click();
     await page.waitForFunction(() => Array.isArray((window as any).__downloadClicks) && (window as any).__downloadClicks.length > 0);
     const download = await page.evaluate(() => (window as any).__downloadClicks?.[(window as any).__downloadClicks.length - 1] ?? null);
     expect(download?.download).toMatch(/\.pdf$/i);
   });
 });
-
