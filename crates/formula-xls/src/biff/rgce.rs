@@ -2895,13 +2895,14 @@ mod tests {
     }
 
     #[test]
-    fn decodes_stack_underflow_to_unknown_error_literal_with_ptg_warning() {
+    fn decodes_stack_underflow_to_name_error_literal_with_ptg_warning() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
-        // PtgAdd requires two operands; with an empty stack this triggers stack underflow.
+        // PtgAdd requires two operands; with an empty stack this triggers stack underflow and the
+        // decoder falls back to a parseable Excel error literal.
         let rgce = [0x03];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#NAME?");
@@ -2922,13 +2923,14 @@ mod tests {
     }
 
     #[test]
-    fn decodes_truncated_ptg_payload_to_unknown_error_literal_with_ptg_warning() {
+    fn decodes_truncated_ptg_payload_to_name_error_literal_with_ptg_warning() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = Vec::new();
         let defined_names: Vec<DefinedNameMeta> = Vec::new();
         let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
 
-        // PtgInt expects 2 bytes of payload; provide only 1 to trigger unexpected EOF.
+        // PtgInt expects 2 bytes of payload; provide only 1 to trigger unexpected EOF and the
+        // decoder falls back to a parseable Excel error literal.
         let rgce = [0x1E, 0x01];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#NAME?");
