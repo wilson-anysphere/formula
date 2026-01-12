@@ -15,6 +15,9 @@ See also:
 - [`docs/20-images-in-cells.md`](../../../docs/20-images-in-cells.md)
 - [`docs/20-images-in-cells-richdata.md`](../../../docs/20-images-in-cells-richdata.md)
 - [`docs/20-xlsx-rich-data.md`](../../../docs/20-xlsx-rich-data.md)
+- Real Excel fixtures in this repo:
+  - `fixtures/xlsx/basic/image-in-cell.xlsx` (real Excel; `rdRichValue*` variant; no `xl/cellimages.xml`)
+  - `fixtures/xlsx/rich-data/images-in-cell.xlsx` (real Excel; unprefixed `richValue*` variant; includes `xl/cellimages.xml`)
 
 ## ZIP part inventory (complete)
 

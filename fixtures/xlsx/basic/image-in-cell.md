@@ -9,6 +9,8 @@ See also:
 - [`docs/20-images-in-cells.md`](../../../docs/20-images-in-cells.md) — overall “Images in Cell” packaging + round-trip constraints
 - [`docs/20-images-in-cells-richdata.md`](../../../docs/20-images-in-cells-richdata.md) — RichData (`richValue*` / `rdrichvalue*`) tables + index-base notes
 - [`docs/xlsx-embedded-images-in-cells.md`](../../../docs/xlsx-embedded-images-in-cells.md) — concrete schema walkthrough (relationships, content types, `_localImage` keys, etc.)
+- Related real Excel fixture (different on-disk shape): `fixtures/xlsx/rich-data/images-in-cell.xlsx` (includes
+  `xl/cellimages.xml` + unprefixed `richValue*` tables; see `fixtures/xlsx/rich-data/images-in-cell.md`).
 
 ## Provenance: confirm this file was saved by Excel
 
