@@ -11,6 +11,7 @@ describe("excel fill shortcuts", () => {
 
     doc.setCellInput(sheetId, "A1", "=B1");
     doc.setCellValue(sheetId, "B1", 10);
+    const undoBefore = doc.getStackDepths().undo;
 
     applyExcelFillDown({
       document: doc,
@@ -22,7 +23,7 @@ describe("excel fill shortcuts", () => {
     expect(doc.getCell(sheetId, "B3").value).toBe(10);
     expect(doc.getCell(sheetId, "A2").formula).toBe("=B2");
     expect(doc.getCell(sheetId, "A3").formula).toBe("=B3");
-    expect(doc.getStackDepths().undo).toBe(1);
+    expect(doc.getStackDepths().undo).toBe(undoBefore + 1);
     expect(doc.undoLabel).toBe("Fill Down");
   });
 
@@ -32,6 +33,7 @@ describe("excel fill shortcuts", () => {
 
     doc.setCellValue(sheetId, "A1", 1);
     doc.setCellInput(sheetId, "A2", "=A1+1");
+    const undoBefore = doc.getStackDepths().undo;
 
     applyExcelFillRight({
       document: doc,
@@ -43,8 +45,7 @@ describe("excel fill shortcuts", () => {
     expect(doc.getCell(sheetId, "C1").value).toBe(1);
     expect(doc.getCell(sheetId, "B2").formula).toBe("=B1+1");
     expect(doc.getCell(sheetId, "C2").formula).toBe("=C1+1");
-    expect(doc.getStackDepths().undo).toBe(1);
+    expect(doc.getStackDepths().undo).toBe(undoBefore + 1);
     expect(doc.undoLabel).toBe("Fill Right");
   });
 });
-
