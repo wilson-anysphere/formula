@@ -33,6 +33,14 @@ fn strip_embedded_nuls(s: &mut String) {
     }
 }
 
+/// Scan the workbook-global BIFF substream for a `CODEPAGE` record.
+///
+/// The result is used to decode 8-bit (ANSI) strings such as BIFF5 short strings and BIFF8
+/// compressed `XLUnicodeString` payloads.
+///
+/// This scan is best-effort: it stops at the workbook-global `EOF` record, the next `BOF` record,
+/// or the first malformed/truncated physical record. When the codepage is missing, defaults to the
+/// Excel/Windows "ANSI" codepage (`1252`).
 pub(crate) fn parse_biff_codepage(workbook_stream: &[u8]) -> u16 {
     let Ok(iter) = records::BestEffortSubstreamIter::from_offset(workbook_stream, 0) else {
         return 1252;
