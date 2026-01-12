@@ -156,9 +156,30 @@ export class DocumentCellProvider implements CellProvider {
           : undefined;
     if (strike === true) out.strike = true;
 
-    if (typeof font?.name === "string" && font.name.trim() !== "") out.fontFamily = font.name;
-    if (typeof font?.size === "number" && Number.isFinite(font.size)) {
-      out.fontSize = (font.size * 96) / 72;
+    const fontName =
+      typeof font?.name === "string"
+        ? font.name
+        : typeof (docStyle as any).fontFamily === "string"
+          ? (docStyle as any).fontFamily
+          : typeof (docStyle as any).font_family === "string"
+            ? (docStyle as any).font_family
+            : typeof (docStyle as any).fontName === "string"
+              ? (docStyle as any).fontName
+              : typeof (docStyle as any).font_name === "string"
+                ? (docStyle as any).font_name
+                : null;
+    if (fontName && fontName.trim() !== "") out.fontFamily = fontName;
+
+    const fontSizePt =
+      typeof font?.size === "number"
+        ? font.size
+        : typeof (docStyle as any).fontSize === "number"
+          ? (docStyle as any).fontSize
+          : typeof (docStyle as any).font_size === "number"
+            ? (docStyle as any).font_size
+            : null;
+    if (fontSizePt != null && Number.isFinite(fontSizePt)) {
+      out.fontSize = (fontSizePt * 96) / 72;
     }
     const fontColor = normalizeCssColor(
       font?.color ??
@@ -173,7 +194,12 @@ export class DocumentCellProvider implements CellProvider {
     if (typeof rawNumberFormat === "string" && rawNumberFormat.trim() !== "") out.numberFormat = rawNumberFormat;
 
     const alignment = isPlainObject(docStyle.alignment) ? docStyle.alignment : null;
-    const horizontal = alignment?.horizontal;
+    const horizontal =
+      alignment?.horizontal ??
+      (docStyle as any).horizontalAlign ??
+      (docStyle as any).horizontal_align ??
+      (docStyle as any).horizontalAlignment ??
+      (docStyle as any).horizontal_alignment;
     if (horizontal === "center") out.textAlign = "center";
     else if (horizontal === "left") out.textAlign = "start";
     else if (horizontal === "right") out.textAlign = "end";

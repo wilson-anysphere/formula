@@ -79,7 +79,13 @@ describe("DocumentCellProvider formatting integration", () => {
     const doc = new DocumentController();
 
     // Back-compat: some historical snapshots/tests/clipboard round-trips store flat keys.
-    doc.setRangeFormat("Sheet1", "A1", { bold: true, backgroundColor: "#FFFFFF00" });
+    doc.setRangeFormat("Sheet1", "A1", {
+      bold: true,
+      backgroundColor: "#FFFFFF00",
+      font_size: 12,
+      font_color: "#FF00FF00",
+      horizontal_align: "right",
+    });
 
     const headerRows = 1;
     const headerCols = 1;
@@ -98,6 +104,9 @@ describe("DocumentCellProvider formatting integration", () => {
     expect(cell).not.toBeNull();
     expect(cell?.style?.fontWeight).toBe("700");
     expect(cell?.style?.fill).toBe("#ffff00");
+    expect(cell?.style?.fontSize).toBe(16);
+    expect(cell?.style?.color).toBe("#00ff00");
+    expect(cell?.style?.textAlign).toBe("end");
   });
 
   it("maps diagonal border flags from DocumentController styles into grid CellStyle.diagonalBorders", () => {
@@ -127,7 +136,7 @@ describe("DocumentCellProvider formatting integration", () => {
     const cell = provider.getCell(headerRows, headerCols);
     expect(cell).not.toBeNull();
     expect(cell?.style?.diagonalBorders).toEqual({
-      down: { width: 1, style: "solid", color: "rgba(0,0,255,1)" }
+      down: { width: 1, style: "solid", color: "#0000ff" }
     });
   });
 
