@@ -248,4 +248,25 @@ describe("command-palette/recents", () => {
     );
     expect(readCommandRecents(storage)).toEqual([{ commandId: "cmd.normal", lastUsedMs: 1234 }]);
   });
+
+  test("ordering is deterministic when timestamps tie", async () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      COMMAND_RECENTS_STORAGE_KEY,
+      JSON.stringify([
+        { commandId: "cmd.a", lastUsedMs: 1, count: 1 },
+        { commandId: "cmd.b", lastUsedMs: 1, count: 1 },
+      ]),
+    );
+
+    // Parse should preserve original insertion order when timestamps are identical.
+    expect(readCommandRecents(storage).map((e) => e.commandId)).toEqual(["cmd.a", "cmd.b"]);
+
+    // Recording with the same timestamp should deterministically keep the new command first.
+    const commandRegistry = new CommandRegistry();
+    installCommandRecentsTracker(commandRegistry, storage, { now: () => 1 });
+    commandRegistry.registerBuiltinCommand("cmd.c", "C", () => "ok");
+    await commandRegistry.executeCommand("cmd.c");
+    expect(readCommandRecents(storage).map((e) => e.commandId)).toEqual(["cmd.c", "cmd.a", "cmd.b"]);
+  });
 });
