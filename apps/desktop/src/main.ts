@@ -5916,6 +5916,10 @@ mountRibbon(ribbonRoot, {
         void app.clipboardPasteSpecial("values");
         app.focus();
         return;
+      case "home.clipboard.pasteSpecial.formulas":
+        void app.clipboardPasteSpecial("formulas");
+        app.focus();
+        return;
       case "home.clipboard.pasteSpecial.formats":
         void app.clipboardPasteSpecial("formats");
         app.focus();

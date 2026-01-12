@@ -356,6 +356,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               menuItems: [
                 { id: "home.clipboard.pasteSpecial.dialog", label: "Paste Special…", ariaLabel: "Paste Special", icon: "📌" },
                 { id: "home.clipboard.pasteSpecial.values", label: "Values", ariaLabel: "Paste Values", icon: "123" },
+                { id: "home.clipboard.pasteSpecial.formulas", label: "Formulas", ariaLabel: "Paste Formulas", icon: "fx" },
                 { id: "home.clipboard.pasteSpecial.formats", label: "Formats", ariaLabel: "Paste Formats", icon: "🎨" },
                 { id: "home.clipboard.pasteSpecial.transpose", label: "Transpose", ariaLabel: "Transpose", icon: "🔁" },
               ],
