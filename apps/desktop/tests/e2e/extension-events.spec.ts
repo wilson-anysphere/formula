@@ -108,7 +108,10 @@ test.describe("formula.events desktop wiring", () => {
       if (!raw) return false;
       try {
         const parsed = JSON.parse(raw);
-        return parsed?.selectionChanged?.selection?.address === "A1:B1";
+        return (
+          parsed?.selectionChanged?.selection?.address === "A1:B1" &&
+          parsed?.selectionChanged?.sheetId === "Sheet1"
+        );
       } catch {
         return false;
       }
