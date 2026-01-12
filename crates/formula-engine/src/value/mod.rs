@@ -255,6 +255,13 @@ impl EntityValue {
             fields,
         }
     }
+
+    pub fn get_field_case_insensitive(&self, field: &str) -> Option<Value> {
+        self.fields
+            .iter()
+            .find(|(k, _)| cmp_case_insensitive(k, field) == Ordering::Equal)
+            .map(|(_, v)| v.clone())
+    }
 }
 
 /// Rich value representing an Excel Record.
@@ -288,6 +295,13 @@ impl RecordValue {
             display_field: None,
             fields,
         }
+    }
+
+    pub fn get_field_case_insensitive(&self, field: &str) -> Option<Value> {
+        self.fields
+            .iter()
+            .find(|(k, _)| cmp_case_insensitive(k, field) == Ordering::Equal)
+            .map(|(_, v)| v.clone())
     }
 }
 #[derive(Clone, PartialEq)]
@@ -518,7 +532,14 @@ impl Value {
         match self {
             Value::Text(s) => Ok(s.clone()),
             Value::Entity(v) => Ok(v.display.clone()),
-            Value::Record(v) => Ok(v.display.clone()),
+            Value::Record(v) => {
+                if let Some(display_field) = v.display_field.as_deref() {
+                    if let Some(value) = v.get_field_case_insensitive(display_field) {
+                        return value.coerce_to_string();
+                    }
+                }
+                Ok(v.display.clone())
+            }
             Value::Number(n) => Ok(format_number_general(*n)),
             Value::Bool(b) => Ok(if *b { "TRUE" } else { "FALSE" }.to_string()),
             Value::Blank => Ok(String::new()),
@@ -535,7 +556,14 @@ impl Value {
         match self {
             Value::Text(s) => Ok(s.clone()),
             Value::Entity(v) => Ok(v.display.clone()),
-            Value::Record(v) => Ok(v.display.clone()),
+            Value::Record(v) => {
+                if let Some(display_field) = v.display_field.as_deref() {
+                    if let Some(value) = v.get_field_case_insensitive(display_field) {
+                        return value.coerce_to_string_with_ctx(ctx);
+                    }
+                }
+                Ok(v.display.clone())
+            }
             Value::Number(n) => {
                 let options = FormatOptions {
                     locale: ctx.value_locale().separators,

@@ -40,12 +40,12 @@ fn field_access_partial_parse_trailing_dot() {
 }
 
 #[test]
-fn field_access_evaluates_to_field_error_for_non_rich_values() {
+fn field_access_evaluates_to_value_error_for_non_rich_values() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 123.0).unwrap();
     engine.set_cell_formula("Sheet1", "B1", "=A1.Price").unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Error(ErrorKind::Field));
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Error(ErrorKind::Value));
 }
 
 #[test]

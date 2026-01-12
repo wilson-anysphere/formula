@@ -668,48 +668,46 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
 
         // Field access (`A1.Price`) is lowered into a synthetic `_FIELDACCESS(base, "field")` call.
         //
-        // Match Excel's error semantics by returning `#FIELD!` when attempting to read a field from
-        // a non-rich value, while still propagating argument errors.
+        // Semantics (docs/04):
+        // - Base is Entity/Record: return matching field (case-insensitive), else `#FIELD!`
+        // - Base is not Entity/Record: `#VALUE!`
+        // - Errors propagate
+        // - Arrays lift elementwise
         if name.eq_ignore_ascii_case("_FIELDACCESS") {
             if args.len() != 2 {
                 return Value::Error(ErrorKind::Value);
             }
 
             let base = self.deref_eval_value_dynamic(self.eval_value(&args[0]));
-            if let Value::Error(e) = base {
-                return Value::Error(e);
-            }
-
             let field = self.deref_eval_value_dynamic(self.eval_value(&args[1]));
-            let field_name = match field {
+            let field = match field {
                 Value::Text(s) => s,
                 Value::Error(e) => return Value::Error(e),
                 _ => return Value::Error(ErrorKind::Value),
             };
 
-            fn map_lookup<'a>(
-                map: &'a std::collections::HashMap<String, Value>,
-                key: &str,
-            ) -> Option<&'a Value> {
-                if let Some(v) = map.get(key) {
-                    return Some(v);
+            fn eval_field_access(base: Value, field: &str) -> Value {
+                match base {
+                    Value::Error(e) => Value::Error(e),
+                    Value::Array(arr) => {
+                        let values = arr
+                            .values
+                            .into_iter()
+                            .map(|v| eval_field_access(v, field))
+                            .collect();
+                        Value::Array(Array::new(arr.rows, arr.cols, values))
+                    }
+                    Value::Entity(entity) => entity
+                        .get_field_case_insensitive(field)
+                        .unwrap_or(Value::Error(ErrorKind::Field)),
+                    Value::Record(record) => record
+                        .get_field_case_insensitive(field)
+                        .unwrap_or(Value::Error(ErrorKind::Field)),
+                    _ => Value::Error(ErrorKind::Value),
                 }
-                let folded = crate::value::casefold(key);
-                map.iter()
-                    .find(|(k, _)| crate::value::casefold(k) == folded)
-                    .map(|(_, v)| v)
             }
 
-            return match base {
-                Value::Entity(entity) => map_lookup(&entity.fields, &field_name)
-                    .cloned()
-                    .unwrap_or(Value::Error(ErrorKind::Field)),
-                Value::Record(record) => map_lookup(&record.fields, &field_name)
-                    .cloned()
-                    .unwrap_or(Value::Error(ErrorKind::Field)),
-                // Field access on a non-rich value is a `#FIELD!` error.
-                _ => Value::Error(ErrorKind::Field),
-            };
+            return eval_field_access(base, &field);
         }
 
         if let Some(spec) = crate::functions::lookup_function(name) {
