@@ -2,15 +2,9 @@ import { expect, test } from "@playwright/test";
 
 import { gotoDesktop } from "./helpers";
 
-async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
-  await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
-  await page.evaluate(() => (window as any).__formulaApp.whenIdle());
-}
-
 test.describe("Edit Cell command", () => {
   test("command palette runs Edit Cell and focuses the inline editor", async ({ page }) => {
     await gotoDesktop(page);
-    await waitForIdle(page);
 
     // Select A1.
     await page.waitForFunction(() => {
@@ -39,7 +33,6 @@ test.describe("Edit Cell command", () => {
 
   test("shortcut search mode (/ f2) runs Edit Cell and focuses the inline editor", async ({ page }) => {
     await gotoDesktop(page);
-    await waitForIdle(page);
 
     // Select A1.
     await page.waitForFunction(() => {
@@ -74,7 +67,6 @@ test.describe("Edit Cell command", () => {
 
   test("F2 keybinding runs Edit Cell and focuses the inline editor", async ({ page }) => {
     await gotoDesktop(page);
-    await waitForIdle(page);
 
     // Select A1.
     await page.waitForFunction(() => {
