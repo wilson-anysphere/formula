@@ -4,7 +4,7 @@ use crate::{
     authenticode::extract_vba_signature_signed_digest,
     contents_hash::content_normalized_data,
     normalized_data::forms_normalized_data,
-    project_digest::{compute_vba_project_digest_v3, DigestAlg},
+    project_digest::{compute_vba_project_digest, compute_vba_project_digest_v3, DigestAlg},
     OleError, OleFile,
 };
 use md5::{Digest as _, Md5};
@@ -215,32 +215,6 @@ pub struct VbaDigitalSignatureTrusted {
 pub enum SignatureError {
     #[error("OLE error: {0}")]
     Ole(#[from] OleError),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SignatureVariant {
-    DigitalSignature,
-    DigitalSignatureEx,
-    DigitalSignatureExt,
-    Unknown,
-}
-
-fn signature_variant_from_path(path: &str) -> SignatureVariant {
-    let mut variant = SignatureVariant::Unknown;
-    for component in path.split('/') {
-        let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
-        match trimmed {
-            "DigitalSignatureExt" => return SignatureVariant::DigitalSignatureExt,
-            "DigitalSignatureEx" => variant = SignatureVariant::DigitalSignatureEx,
-            "DigitalSignature" => {
-                if variant == SignatureVariant::Unknown {
-                    variant = SignatureVariant::DigitalSignature;
-                }
-            }
-            _ => {}
-        }
-    }
-    variant
 }
 
 /// Extract metadata from the signer certificate embedded in a VBA signature blob.
@@ -459,8 +433,8 @@ pub fn verify_vba_digital_signature_bound(
         debug.hash_algorithm_name =
             digest_name_from_oid_str(&signed.digest_algorithm_oid).map(str::to_owned);
 
-        match signature_variant_from_path(&signature.stream_path) {
-            SignatureVariant::DigitalSignatureExt => {
+        match signature.stream_kind {
+            VbaSignatureStreamKind::DigitalSignatureExt => {
                 let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) else {
                     return Ok(Some(VbaDigitalSignatureBound {
                         signature,
@@ -747,8 +721,10 @@ pub fn verify_vba_signature_binding_with_stream_path(
 
         let signed_digest = signed.digest.as_slice();
 
-        let variant = signature_variant_from_path(signature_stream_path);
-        if variant == SignatureVariant::DigitalSignatureExt {
+        if matches!(
+            signature_path_stream_kind(signature_stream_path),
+            Some(VbaSignatureStreamKind::DigitalSignatureExt)
+        ) {
             let Some(alg) = digest_alg_from_oid_str(&signed.digest_algorithm_oid) else {
                 return VbaSignatureBinding::Unknown;
             };
