@@ -16,6 +16,7 @@ fn import_fixture(bytes: &[u8]) -> formula_xls::XlsImportResult {
 fn imports_note_comment_records() {
     let bytes = xls_fixture_builder::build_note_comment_fixture_xls();
     let result = import_fixture(&bytes);
+    let result2 = import_fixture(&bytes);
 
     let sheet = result
         .workbook
@@ -31,6 +32,14 @@ fn imports_note_comment_records() {
     assert_eq!(comment.content, "Hello from note");
     assert_eq!(comment.author.name, "Alice");
     assert_eq!(comment.id, "xls-note:A1:1");
+
+    let sheet2 = result2
+        .workbook
+        .sheet_by_name("Notes")
+        .expect("Notes missing (2)");
+    let comments2 = sheet2.comments_for_cell(a1);
+    assert_eq!(comments2.len(), 1, "expected 1 comment on A1 (2)");
+    assert_eq!(comments2[0].id, comment.id, "comment ids should be stable across repeated imports");
 }
 
 #[test]

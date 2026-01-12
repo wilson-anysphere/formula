@@ -38,6 +38,12 @@ const TXO_TEXT_LEN_OFFSET: usize = 6;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BiffNote {
     pub(crate) cell: CellRef,
+    /// The drawing object id (`idObj`) that was used to resolve this note's TXO payload.
+    ///
+    /// NOTE records redundantly store two adjacent u16 fields (`grbit` + `idObj`) and some
+    /// producers appear to swap the ordering. We keep both candidates during parsing and then
+    /// choose whichever one has a matching TXO record. This field captures that chosen id so
+    /// callers can derive stable identifiers for imported comments.
     pub(crate) obj_id: u16,
     pub(crate) author: String,
     pub(crate) text: String,
@@ -182,7 +188,7 @@ fn parse_note_record(
         Ok((s, consumed)) => {
             // If BIFF8 short-string parsing succeeds but doesn't consume the full payload, attempt
             // `XLUnicodeString` decoding before falling back to the short-string result.
-            if matches!(biff, BiffVersion::Biff8) && consumed != author_bytes.len() {
+            if biff == BiffVersion::Biff8 && consumed != author_bytes.len() {
                 match strings::parse_biff8_unicode_string(author_bytes, codepage) {
                     Ok((alt, alt_consumed)) if alt_consumed == author_bytes.len() => alt,
                     _ => s,
@@ -191,23 +197,24 @@ fn parse_note_record(
                 s
             }
         }
-        Err(err) => match biff {
-            BiffVersion::Biff8 => match strings::parse_biff8_unicode_string(author_bytes, codepage) {
-                Ok((alt, _)) => alt,
-                Err(_) => {
-                    warnings.push(format!(
-                        "failed to parse NOTE author string at offset {offset}: {err}"
-                    ));
-                    String::new()
+        Err(err) => {
+            if biff == BiffVersion::Biff8 {
+                match strings::parse_biff8_unicode_string(author_bytes, codepage) {
+                    Ok((alt, _)) => alt,
+                    Err(unicode_err) => {
+                        warnings.push(format!(
+                            "failed to parse NOTE author string at offset {offset}: {err}; XLUnicodeString fallback also failed: {unicode_err}"
+                        ));
+                        String::new()
+                    }
                 }
-            },
-            BiffVersion::Biff5 => {
+            } else {
                 warnings.push(format!(
                     "failed to parse NOTE author string at offset {offset}: {err}"
                 ));
                 String::new()
             }
-        },
+        }
     };
     strip_embedded_nuls(&mut author);
 
@@ -573,6 +580,21 @@ mod tests {
         record(RECORD_NOTE, &payload)
     }
 
+    fn note_with_xl_unicode_author(row: u16, col: u16, obj_id: u16, author: &str) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&row.to_le_bytes());
+        payload.extend_from_slice(&col.to_le_bytes());
+        payload.extend_from_slice(&obj_id.to_le_bytes());
+        payload.extend_from_slice(&obj_id.to_le_bytes());
+
+        // BIFF8 XLUnicodeString author (u16 length).
+        payload.extend_from_slice(&(author.len() as u16).to_le_bytes());
+        payload.push(0); // flags (compressed)
+        payload.extend_from_slice(author.as_bytes());
+
+        record(RECORD_NOTE, &payload)
+    }
+
     fn note_biff5(row: u16, col: u16, obj_id: u16, author: &str) -> Vec<u8> {
         let mut payload = Vec::new();
         payload.extend_from_slice(&row.to_le_bytes());
@@ -724,6 +746,7 @@ mod tests {
         assert_eq!(notes.len(), 1);
         let note = &notes[0];
         assert_eq!(note.cell, CellRef::new(0, 0));
+        assert_eq!(note.obj_id, 1);
         assert_eq!(note.author, "Alice");
         assert_eq!(note.text, "Hello");
     }
@@ -888,11 +911,13 @@ mod tests {
 
         let n1 = by_cell.get(&CellRef::new(0, 0)).expect("note 1");
         assert_eq!(n1.cell, CellRef::new(0, 0));
+        assert_eq!(n1.obj_id, 1);
         assert_eq!(n1.author, "Alice");
         assert_eq!(n1.text, "First");
 
         let n2 = by_cell.get(&CellRef::new(1, 1)).expect("note 2");
         assert_eq!(n2.cell, CellRef::new(1, 1));
+        assert_eq!(n2.obj_id, 2);
         assert_eq!(n2.author, "Bob");
         assert_eq!(n2.text, "Second");
     }
@@ -1130,5 +1155,29 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].author, "Alice");
         assert_eq!(notes[0].text, "Hi А");
+    }
+
+    #[test]
+    fn parses_note_author_as_xl_unicode_string_when_short_string_leaves_trailing_bytes() {
+        // Some BIFF8 producers store NOTE authors as XLUnicodeString (u16 length) instead of
+        // ShortXLUnicodeString (u8 length). Our parser should detect this and fall back.
+        let stream = [
+            bof(),
+            note_with_xl_unicode_author(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_text("Hello"),
+            continue_text_ascii("Hello"),
+            eof(),
+        ]
+        .concat();
+
+        let (notes, warnings) =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert!(
+            warnings.is_empty(),
+            "unexpected warnings: {warnings:?}"
+        );
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].author, "Alice");
     }
 }

@@ -726,19 +726,11 @@ fn import_xls_path_with_biff_reader(
                             let mut used_note_ids: HashSet<String> = HashSet::new();
                             for note in notes {
                                 let anchor = sheet.merged_regions.resolve_cell(note.cell);
-                                let candidate_id =
+                                let base_id =
                                     format!("xls-note:{}:{}", anchor.to_a1(), note.obj_id);
-                                let id = if used_note_ids.insert(candidate_id.clone()) {
-                                    candidate_id
-                                } else {
-                                    warnings.push(ImportWarning::new(format!(
-                                        "duplicate `.xls` note comment id `{candidate_id}` in sheet `{sheet_name}` (index {sheet_idx}); generating UUID instead"
-                                    )));
-                                    String::new()
-                                };
 
-                                let comment = Comment {
-                                    id,
+                                let mut comment = Comment {
+                                    id: base_id.clone(),
                                     kind: CommentKind::Note,
                                     content: note.text,
                                     author: CommentAuthor {
@@ -748,11 +740,57 @@ fn import_xls_path_with_biff_reader(
                                     ..Default::default()
                                 };
 
-                                if let Err(err) = sheet.add_comment(note.cell, comment) {
+                                // Deterministic comment ids are important for stability across
+                                // repeated imports of the same `.xls` file.
+                                //
+                                // Handle collisions best-effort by trying deterministic suffixes
+                                // (`...:{n}`), then falling back to an auto-generated UUID and
+                                // emitting a warning.
+                                let mut added = false;
+                                for n in 1u32..=100 {
+                                    if n > 1 {
+                                        comment.id = format!("{base_id}:{n}");
+                                    }
+
+                                    // Keep ids deterministic within this import even if there are
+                                    // duplicate NOTE records.
+                                    if !used_note_ids.insert(comment.id.clone()) {
+                                        continue;
+                                    }
+
+                                    match sheet.add_comment(note.cell, comment.clone()) {
+                                        Ok(_) => {
+                                            added = true;
+                                            break;
+                                        }
+                                        Err(formula_model::CommentError::DuplicateCommentId(_)) => {
+                                            // Collision with an existing comment id in the sheet:
+                                            // try a suffix.
+                                            continue;
+                                        }
+                                        Err(err) => {
+                                            warnings.push(ImportWarning::new(format!(
+                                                "failed to import `.xls` note comment for sheet `{sheet_name}` (index {sheet_idx}) at {}: {err}",
+                                                note.cell.to_a1(),
+                                            )));
+                                            added = true;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if !added {
                                     warnings.push(ImportWarning::new(format!(
-                                        "failed to import `.xls` note comment for sheet `{sheet_name}` (index {sheet_idx}) at {}: {err}",
+                                        "duplicate comment id `{base_id}` while importing `.xls` note comment at {} in sheet `{sheet_name}` (index {sheet_idx}); falling back to auto-generated id",
                                         note.cell.to_a1(),
                                     )));
+                                    comment.id.clear();
+                                    if let Err(err) = sheet.add_comment(note.cell, comment) {
+                                        warnings.push(ImportWarning::new(format!(
+                                            "failed to import `.xls` note comment for sheet `{sheet_name}` (index {sheet_idx}) at {}: {err}",
+                                            note.cell.to_a1(),
+                                        )));
+                                    }
                                 }
                             }
                         }
