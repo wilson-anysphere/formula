@@ -141,9 +141,8 @@
 //!
 //! Typical validation (Excel-style `#NUM!`):
 //!
-//! - Chronology: `I <= S <= F <= M` with strict `I < F` and `S < M`.
-//!   - Engine behavior allows `I == S` and `S == F` (as well as `F == M`), but rejects cases like
-//!     `I == F` and `S == M`. See `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
+//! - Chronology: `I < S < F <= M` (with `I < F` and `S < M`), matching Excel’s odd-first-coupon
+//!   boundary behavior. See `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
 //! - `rate >= 0`, `yld` (or `pr`) finite, `redemption > 0`
 //! - `frequency ∈ {1,2,4}`, `basis ∈ 0..=4`
 //!
@@ -214,9 +213,8 @@
 //!
 //! Typical validation (Excel-style `#NUM!`):
 //!
-//! - Chronology: `L <= S < M` with strict `L < M`.
-//!   - Engine behavior allows `L == S` but rejects cases like `L == M` and `S == M`. See
-//!     `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
+//! - Chronology: `L < S < M` (with `L < M`), matching Excel’s odd-last-coupon boundary behavior.
+//!   See `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
 //! - `rate >= 0`, `yld` (or `pr`) finite, `redemption > 0`
 //! - `frequency ∈ {1,2,4}`, `basis ∈ 0..=4`
 //!
