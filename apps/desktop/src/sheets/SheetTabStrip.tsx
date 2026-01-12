@@ -101,34 +101,10 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
     return true;
   };
 
-  const moveVisibleSheet = (sheetId: string, targetVisibleIndex: number) => {
+  const moveSheet = (sheetId: string, dropTarget: Parameters<typeof computeWorkbookSheetMoveIndex>[0]["dropTarget"]) => {
     const all = store.listAll();
-    const visibleIds = all.filter((s) => s.visibility === "visible").map((s) => s.id);
-    if (visibleIds.length <= 1) return;
-
-    const fromVisibleIndex = visibleIds.findIndex((id) => id === sheetId);
-    if (fromVisibleIndex < 0) return;
-
-    // `targetVisibleIndex` is an insertion point in the visible tab strip (e.g.
-    // 0 = before first, visible.length = after last). Convert it into the final
-    // visible index after removing the dragged sheet, and early-return when the
-    // drop would be a visible no-op.
-    const rawTarget = Math.max(0, Math.min(Math.floor(targetVisibleIndex), visibleIds.length));
-    const insertVisibleIndex = rawTarget > fromVisibleIndex ? rawTarget - 1 : rawTarget;
-    if (insertVisibleIndex === fromVisibleIndex) return;
-
-    const dropTarget =
-      rawTarget >= visibleIds.length
-        ? ({ kind: "end" } as const)
-        : ({ kind: "before", targetSheetId: visibleIds[rawTarget]! } as const);
-
-    const toIndex = computeWorkbookSheetMoveIndex({
-      sheets: all,
-      fromSheetId: sheetId,
-      dropTarget,
-    });
+    const toIndex = computeWorkbookSheetMoveIndex({ sheets: all, fromSheetId: sheetId, dropTarget });
     if (toIndex == null) return;
-
     try {
       store.move(sheetId, toIndex);
     } catch (err) {
@@ -310,7 +286,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
           const fromId = e.dataTransfer.getData("text/sheet-id") || e.dataTransfer.getData("text/plain");
           if (!fromId) return;
           // Dropping on the container inserts at the end of the visible list.
-          moveVisibleSheet(fromId, visibleSheets.length);
+          moveSheet(fromId, { kind: "end" });
         }}
         onDragLeave={() => {
           stopAutoScroll();
@@ -345,14 +321,12 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
               const fromId = e.dataTransfer.getData("text/sheet-id") || e.dataTransfer.getData("text/plain");
               if (!fromId || fromId === sheet.id) return;
 
-              const targetIndex = visibleSheets.findIndex((s) => s.id === sheet.id);
-              if (targetIndex < 0) return;
-
               const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
               const shouldInsertAfter = e.clientX > rect.left + rect.width / 2;
-              const nextIndex = targetIndex + (shouldInsertAfter ? 1 : 0);
-
-              moveVisibleSheet(fromId, nextIndex);
+              moveSheet(fromId, {
+                kind: shouldInsertAfter ? "after" : "before",
+                targetSheetId: sheet.id,
+              });
             }}
           />
         ))}

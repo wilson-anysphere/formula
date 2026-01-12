@@ -73,4 +73,18 @@ describe("computeWorkbookSheetMoveIndex", () => {
     const next = applyMove(sheets, "A", toIndex!);
     expect(next.map((s) => `${s.id}:${s.visibility}`)).toEqual(["B:hidden", "C:visible", "A:visible", "D:veryHidden"]);
   });
+
+  it("supports inserting after a visible tab, crossing hidden sheets", () => {
+    const sheets = [makeSheet("A", "visible"), makeSheet("B", "hidden"), makeSheet("C", "visible")];
+
+    const toIndex = computeWorkbookSheetMoveIndex({
+      sheets,
+      fromSheetId: "C",
+      dropTarget: { kind: "after", targetSheetId: "A" },
+    });
+
+    expect(toIndex).toBe(1);
+    const next = applyMove(sheets, "C", toIndex!);
+    expect(next.map((s) => `${s.id}:${s.visibility}`)).toEqual(["A:visible", "C:visible", "B:hidden"]);
+  });
 });

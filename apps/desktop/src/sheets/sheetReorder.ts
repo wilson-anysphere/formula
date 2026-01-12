@@ -23,6 +23,14 @@ export type SheetTabDropTarget =
     }
   | {
       /**
+       * Drop the dragged sheet so it appears *after* the target sheet in the
+       * underlying workbook order (visible + hidden).
+       */
+      kind: "after";
+      targetSheetId: string;
+    }
+  | {
+      /**
        * Drop the dragged sheet at the end of the visible tab strip.
        *
        * This maps to "after the last visible sheet" in the full workbook order,
@@ -77,9 +85,19 @@ export function computeWorkbookSheetMoveIndex(params: {
   const targetIndex = sheets.findIndex((s) => s.id === dropTarget.targetSheetId);
   if (targetIndex < 0) return null;
 
-  // The tab strip drop semantics are "insert before target". If the dragged
-  // sheet currently appears before the target, removing it shifts the target
-  // left by one.
-  const toIndex = fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
+  if (dropTarget.kind === "before") {
+    // If the dragged sheet currently appears before the target, removing it
+    // shifts the target left by one.
+    const toIndex = fromIndex < targetIndex ? targetIndex - 1 : targetIndex;
+    return Math.max(0, Math.min(toIndex, sheets.length - 1));
+  }
+
+  // dropTarget.kind === "after"
+  //
+  // We want to insert immediately after the target sheet in the full order. If
+  // the dragged sheet is located before the target, removing it shifts the
+  // target left by one, so "after target" becomes the original `targetIndex`.
+  // Otherwise, it's `targetIndex + 1`.
+  const toIndex = fromIndex < targetIndex ? targetIndex : targetIndex + 1;
   return Math.max(0, Math.min(toIndex, sheets.length - 1));
 }
