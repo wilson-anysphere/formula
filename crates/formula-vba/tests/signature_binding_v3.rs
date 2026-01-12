@@ -7,7 +7,8 @@ use formula_vba::{
     verify_vba_digital_signature,
     verify_vba_digital_signature_bound, verify_vba_project_signature_binding,
     verify_vba_signature_binding, verify_vba_signature_binding_with_stream_path, DigestAlg,
-    VbaProjectBindingVerification, VbaSignatureBinding, VbaSignatureVerification,
+    VbaProjectBindingVerification, VbaSignatureBinding, VbaSignatureStreamKind,
+    VbaSignatureVerification,
 };
 
 mod signature_test_utils;
@@ -218,8 +219,9 @@ fn digital_signature_ext_uses_v3_project_digest_for_binding() {
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::Bound);
-    assert!(
-        sig.stream_path.contains("DigitalSignatureExt"),
+    assert_eq!(
+        sig.stream_kind,
+        VbaSignatureStreamKind::DigitalSignatureExt,
         "expected DigitalSignatureExt stream, got {}",
         sig.stream_path
     );
