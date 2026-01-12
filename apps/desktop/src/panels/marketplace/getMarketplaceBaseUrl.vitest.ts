@@ -30,6 +30,24 @@ describe("getMarketplaceBaseUrl", () => {
     expect(getMarketplaceBaseUrl({ storage, env: { PROD: true } })).toBe("https://example.com/api");
   });
 
+  it("strips query/hash from overrides", () => {
+    const storage = {
+      getItem(key: string) {
+        if (key === "formula:marketplace:baseUrl") return " https://example.com/api?x=y#z ";
+        return null;
+      },
+    };
+    expect(getMarketplaceBaseUrl({ storage, env: { PROD: true } })).toBe("https://example.com/api");
+
+    const relativeStorage = {
+      getItem(key: string) {
+        if (key === "formula:marketplace:baseUrl") return " /api?x=y#z ";
+        return null;
+      },
+    };
+    expect(getMarketplaceBaseUrl({ storage: relativeStorage, env: { DEV: true } })).toBe("/api");
+  });
+
   it("ignores invalid absolute URL overrides and falls back to defaults", () => {
     const storage = {
       getItem(key: string) {

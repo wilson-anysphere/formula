@@ -36,7 +36,8 @@ function normalizeBaseUrl(value: string): string | null {
   }
 
   // Relative path (same-origin). Keep it tolerant; MarketplaceClient will normalize further.
-  let out = trimmed.replace(/\/+$/, "");
+  let out = trimmed.split("#", 1)[0]!.split("?", 1)[0]!;
+  out = out.replace(/\/+$/, "");
   while (out.startsWith("./")) out = out.slice(2);
   if (!out) return null;
   if (!out.startsWith("/")) out = `/${out}`;
