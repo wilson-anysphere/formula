@@ -681,17 +681,24 @@ export class WorkbookContextBuilder {
     const schemaVersion =
       typeof extras?.schemaVersion === "number" && Number.isFinite(extras.schemaVersion) ? Math.trunc(extras.schemaVersion) : 0;
 
-    const extrasJson = safeStableJsonStringify({
-      namedRanges: extras?.namedRanges ?? [],
-      tables: extras?.tables ?? [],
-    });
-    const cacheKey = [
+    // Cache key should depend on schemaVersion when available (cheap invalidation signal).
+    // Only fall back to hashing the full extras payload when schemaProvider cannot provide
+    // a version counter (to avoid stale schemas when named ranges/tables change).
+    const shouldHashExtras = Boolean(this.options.schemaProvider && !this.options.schemaProvider.getSchemaVersion);
+    const cacheKeyParts = [
       sheetId,
       extras.dlpCacheKey,
       `schema:${this.options.maxSchemaRows}x${this.options.maxSchemaCols}`,
       `schemaVersion:${schemaVersion}`,
-      `extras:${extrasJson.length}:${hashString(extrasJson)}`,
-    ].join("\u0000");
+    ];
+    if (shouldHashExtras) {
+      const extrasJson = safeStableJsonStringify({
+        namedRanges: extras?.namedRanges ?? [],
+        tables: extras?.tables ?? [],
+      });
+      cacheKeyParts.push(`extras:${extrasJson.length}:${hashString(extrasJson)}`);
+    }
+    const cacheKey = cacheKeyParts.join("\u0000");
 
     const cached = this.sheetSummaryCache.get(cacheKey);
     if (cached && cached.contentVersion === contentVersion) {
