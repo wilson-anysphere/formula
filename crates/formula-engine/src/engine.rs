@@ -9761,6 +9761,86 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_rand_matches_ast_given_same_recalc_context() {
+        fn setup(engine: &mut Engine) {
+            engine
+                .set_cell_formula("Sheet1", "A1", "=RAND()")
+                .expect("set RAND()");
+            engine
+                .set_cell_formula("Sheet1", "A2", "=RAND()+RAND()")
+                .expect("set RAND()+RAND()");
+            engine
+                .set_cell_formula("Sheet1", "A3", "=RANDBETWEEN(10, 20)")
+                .expect("set RANDBETWEEN()");
+            engine
+                .set_cell_formula("Sheet1", "B1", "=A1+A2+A3")
+                .expect("set dependent");
+        }
+
+        let mut bytecode_engine = Engine::new();
+        setup(&mut bytecode_engine);
+
+        let mut ast_engine = Engine::new();
+        ast_engine.set_bytecode_enabled(false);
+        setup(&mut ast_engine);
+
+        let recalc_ctx = crate::eval::RecalcContext {
+            now_utc: chrono::Utc
+                .timestamp_opt(1_700_000_000, 123_456_789)
+                .single()
+                .unwrap(),
+            recalc_id: 123,
+            number_locale: crate::value::NumberLocale::en_us(),
+        };
+
+        // Ensure the volatile RNG formulas compile to bytecode when the backend is enabled.
+        let sheet_id = bytecode_engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        for addr in ["A1", "A2", "A3", "B1"] {
+            let addr = parse_a1(addr).unwrap();
+            let cell = bytecode_engine.workbook.sheets[sheet_id]
+                .cells
+                .get(&addr)
+                .expect("cell stored");
+            assert!(
+                matches!(cell.compiled.as_ref(), Some(CompiledFormula::Bytecode(_))),
+                "expected {addr:?} to compile to bytecode"
+            );
+        }
+
+        let levels_bc = bytecode_engine
+            .calc_graph
+            .calc_levels_for_dirty()
+            .expect("calc levels");
+        let _ = bytecode_engine.recalculate_levels(
+            levels_bc,
+            RecalcMode::SingleThreaded,
+            &recalc_ctx,
+            bytecode_engine.date_system,
+            None,
+        );
+
+        let levels_ast = ast_engine
+            .calc_graph
+            .calc_levels_for_dirty()
+            .expect("calc levels");
+        let _ = ast_engine.recalculate_levels(
+            levels_ast,
+            RecalcMode::SingleThreaded,
+            &recalc_ctx,
+            ast_engine.date_system,
+            None,
+        );
+
+        for addr in ["A1", "A2", "A3", "B1"] {
+            assert_eq!(
+                bytecode_engine.get_cell_value("Sheet1", addr),
+                ast_engine.get_cell_value("Sheet1", addr),
+                "bytecode vs ast mismatch at {addr}"
+            );
+        }
+    }
+
+    #[test]
     fn recalculate_with_value_changes_includes_spill_outputs() {
         let mut engine = Engine::new();
         engine

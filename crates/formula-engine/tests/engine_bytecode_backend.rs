@@ -4677,6 +4677,7 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
     let report = engine.bytecode_compile_report(usize::MAX);
     assert_eq!(report.len(), 2);
 
+    let a2 = parse_a1("A2").unwrap();
     let a3 = parse_a1("A3").unwrap();
     let a4 = parse_a1("A4").unwrap();
 
@@ -4687,6 +4688,7 @@ fn bytecode_compile_diagnostics_reports_fallback_reasons() {
             .map(|e| e.reason.clone())
     };
 
+    assert_eq!(reason_for(a2), None);
     assert_eq!(
         reason_for(a3),
         Some(BytecodeCompileReason::LowerError(
