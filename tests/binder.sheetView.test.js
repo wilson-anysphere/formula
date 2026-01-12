@@ -654,3 +654,45 @@ test("binder: syncs range-run formatting via sheet metadata (no per-cell materia
     ydoc.destroy();
   }
 });
+
+test("binder: clearing top-level formats overrides legacy view-based formats", async () => {
+  const ydoc = new Y.Doc();
+  const sheets = ydoc.getArray("sheets");
+  ydoc.transact(() => {
+    const entry = new Y.Map();
+    entry.set("id", "Sheet1");
+    entry.set("name", "Sheet1");
+    // Legacy encoding: layered formats stored inside `view` (older BranchService docs).
+    entry.set("view", { frozenRows: 0, frozenCols: 0, colFormats: { "0": { font: { bold: true } } } });
+    sheets.push([entry]);
+  });
+
+  const documentControllerA = new DocumentController();
+  const documentControllerB = new DocumentController();
+
+  const binderA = bindYjsToDocumentController({ ydoc, documentController: documentControllerA, defaultSheetId: "Sheet1" });
+  const binderB = bindYjsToDocumentController({ ydoc, documentController: documentControllerB, defaultSheetId: "Sheet1" });
+
+  try {
+    await waitForCondition(() => documentControllerA.getCellFormat("Sheet1", "A1")?.font?.bold === true);
+    await waitForCondition(() => documentControllerB.getCellFormat("Sheet1", "A1")?.font?.bold === true);
+
+    // Clear the formatting. Binder should write an explicit empty top-level `colFormats`
+    // map so we don't fall back to the stale `view.colFormats` value.
+    documentControllerA.setRangeFormat("Sheet1", "A1:A1048576", null);
+
+    await waitForCondition(() => {
+      const entry = findSheetEntry(ydoc, "Sheet1");
+      const topLevel = entry?.get?.("colFormats");
+      if (!topLevel || typeof topLevel.get !== "function") return false;
+      return topLevel.get("0") == null;
+    });
+
+    await waitForCondition(() => documentControllerB.getCellFormat("Sheet1", "A1")?.font?.bold !== true);
+    assert.equal(documentControllerB.getCell("Sheet1", "A1").styleId, 0);
+  } finally {
+    binderA.destroy();
+    binderB.destroy();
+    ydoc.destroy();
+  }
+});

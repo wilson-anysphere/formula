@@ -1824,23 +1824,14 @@ export function bindYjsToDocumentController(options) {
     };
 
     /**
-     * @param {Y.Map<any>} sheetMap
-     * @param {string} key
-     * @returns {Y.Map<any>}
+     * @param {string} sheetId
+     * @param {"row" | "col"} layer
+     * @returns {Map<number, number>}
      */
-    const ensureNestedMap = (sheetMap, key) => {
-      const existing = sheetMap.get(key);
-      const existingMap = getYMap(existing);
-      if (existingMap) return existingMap;
-      const next = new Y.Map();
-      if (isRecord(existing)) {
-        const keys = Object.keys(existing).sort();
-        for (const k of keys) {
-          next.set(k, existing[k]);
-        }
-      }
-      sheetMap.set(key, next);
-      return next;
+    const getLayerStyleIds = (sheetId, layer) => {
+      const sheet = documentController?.model?.sheets?.get?.(sheetId) ?? null;
+      const styles = layer === "row" ? sheet?.rowStyleIds : sheet?.colStyleIds;
+      return styles instanceof Map ? styles : new Map();
     };
 
     /** @type {Map<string, Array<{ sheetId: string, layer: string, index?: number, style: any | null }>>} */
@@ -1857,29 +1848,61 @@ export function bindYjsToDocumentController(options) {
     const apply = () => {
       for (const [sheetId, items] of preparedBySheet.entries()) {
         const sheetMaps = ensureYjsSheetMaps(sheetId);
+
+        // If the sheet metadata does not yet have top-level format maps (e.g. legacy docs
+        // stored them inside `view`), seed them from the DocumentController's current
+        // state so future reads don't fall back to stale view-encoded values.
+        const seedRowStyles = getLayerStyleIds(sheetId, "row");
+        const seedColStyles = getLayerStyleIds(sheetId, "col");
+
         for (const sheetMap of sheetMaps) {
+          const ensureLayerMap = (mapKey, seedStyles) => {
+            const existing = sheetMap.get(mapKey);
+            const existingMap = getYMap(existing);
+            if (existingMap) return existingMap;
+
+            const next = new Y.Map();
+
+            // If a previous client stored this map as a plain object, upgrade it.
+            if (isRecord(existing)) {
+              const keys = Object.keys(existing).sort();
+              for (const k of keys) {
+                next.set(k, existing[k]);
+              }
+            } else if (existing === undefined) {
+              // Legacy migration: seed from DocumentController.
+              for (const [idx, styleId] of seedStyles.entries()) {
+                const style = documentController.styleTable.get(styleId);
+                next.set(String(idx), style);
+              }
+            }
+
+            sheetMap.set(mapKey, next);
+            return next;
+          };
+
           for (const item of items) {
             const { layer, index, style } = item;
 
             if (layer === "sheet") {
-              if (style == null) sheetMap.delete("defaultFormat");
-              else sheetMap.set("defaultFormat", style);
+              // Always store an explicit value (style object or null) so top-level
+              // storage overrides any legacy `view.defaultFormat`.
+              sheetMap.set("defaultFormat", style == null ? null : style);
               continue;
             }
 
             const mapKey = layer === "row" ? "rowFormats" : "colFormats";
             const idxKey = String(index);
-            const existing = getYMap(sheetMap.get(mapKey));
+            const seedStyles = layer === "row" ? seedRowStyles : seedColStyles;
+            const ensured = getYMap(sheetMap.get(mapKey)) ?? ensureLayerMap(mapKey, seedStyles);
 
             if (style == null) {
-              if (existing) {
-                existing.delete(idxKey);
-                if (existing.size === 0) sheetMap.delete(mapKey);
-              }
+              ensured.delete(idxKey);
+              // Keep an empty Y.Map rather than deleting the key. This prevents falling
+              // back to stale legacy `view.rowFormats`/`view.colFormats` data.
               continue;
             }
 
-            const ensured = existing ?? ensureNestedMap(sheetMap, mapKey);
             ensured.set(idxKey, style);
           }
         }
@@ -1969,19 +1992,50 @@ export function bindYjsToDocumentController(options) {
 
     /**
      * @param {Y.Map<any>} sheetMap
+     * @param {string} sheetId
      * @returns {Y.Map<any>}
      */
-    const ensureFormatRunsMap = (sheetMap) => {
+    const ensureFormatRunsMap = (sheetMap, sheetId) => {
       const existing = sheetMap.get("formatRunsByCol");
       const existingMap = getYMap(existing);
       if (existingMap) return existingMap;
+
       const next = new Y.Map();
+
       if (isRecord(existing)) {
+        // Upgrade plain-object encodings.
         const keys = Object.keys(existing).sort();
         for (const key of keys) {
           next.set(key, cloneJson(existing[key]));
         }
+      } else if (existing === undefined) {
+        // Legacy migration: seed from the DocumentController's current range-run state so
+        // top-level storage becomes authoritative (overriding any legacy `view.formatRunsByCol`).
+        const sheet = documentController?.model?.sheets?.get?.(sheetId) ?? null;
+        const runsByCol = sheet?.formatRunsByCol;
+        if (runsByCol instanceof Map) {
+          for (const [col, runs] of runsByCol.entries()) {
+            if (!Array.isArray(runs) || runs.length === 0) continue;
+            const serialized = runs
+              .map((run) => {
+                const startRow = Number(run?.startRow);
+                const endRowExclusive = Number(run?.endRowExclusive);
+                const styleId = Number(run?.styleId);
+                if (!Number.isInteger(startRow) || startRow < 0) return null;
+                if (!Number.isInteger(endRowExclusive) || endRowExclusive <= startRow) return null;
+                if (!Number.isInteger(styleId) || styleId <= 0) return null;
+                return {
+                  startRow,
+                  endRowExclusive,
+                  format: cloneJson(documentController.styleTable.get(styleId)),
+                };
+              })
+              .filter(Boolean);
+            if (serialized.length > 0) next.set(String(col), serialized);
+          }
+        }
       }
+
       sheetMap.set("formatRunsByCol", next);
       return next;
     };
@@ -2020,17 +2074,15 @@ export function bindYjsToDocumentController(options) {
 
           for (const item of items) {
             const colKey = String(item.col);
-            const existingMap = getYMap(sheetMap.get("formatRunsByCol"));
+            const map = getYMap(sheetMap.get("formatRunsByCol")) ?? ensureFormatRunsMap(sheetMap, sheetId);
 
             if (item.runs.length === 0) {
-              if (existingMap) {
-                existingMap.delete(colKey);
-                if (existingMap.size === 0) sheetMap.delete("formatRunsByCol");
-              }
+              map.delete(colKey);
+              // Keep an empty Y.Map rather than deleting the key. This prevents falling back
+              // to stale legacy `view.formatRunsByCol` data.
               continue;
             }
 
-            const map = existingMap ?? ensureFormatRunsMap(sheetMap);
             map.set(colKey, item.runs);
           }
         }
