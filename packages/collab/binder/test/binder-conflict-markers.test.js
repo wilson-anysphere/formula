@@ -157,7 +157,15 @@ function nextTick() {
 test("binder preserves formula null markers and retains cell maps on clears", async (t) => {
   const ydoc = new Y.Doc();
   const documentController = new DocumentControllerStub();
-  const binding = bindYjsToDocumentController({ ydoc, documentController, userId: "u" });
+  const binding = bindYjsToDocumentController({
+    ydoc,
+    documentController,
+    userId: "u",
+    // Enable explicit `formula=null` markers + marker-preserving empty-cell behavior
+    // so downstream causal conflict detection (FormulaConflictMonitor) can detect
+    // delete-vs-overwrite and formula-vs-value conflicts reliably.
+    formulaConflictsMode: "formula+value",
+  });
 
   t.after(() => {
     binding.destroy();
