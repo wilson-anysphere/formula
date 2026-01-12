@@ -379,10 +379,12 @@ test("clipboard provider", async (t) => {
         assert.equal(invokeCalls.length, 1);
         assert.equal(invokeCalls[0][0], "clipboard_write");
         assert.deepEqual(invokeCalls[0][1], {
-          text: "plain",
-          html: "<p>hello</p>",
-          rtf: "{\\\\rtf1 hello}",
-          pngBase64: "CQgH",
+          payload: {
+            text: "plain",
+            html: "<p>hello</p>",
+            rtf: "{\\\\rtf1 hello}",
+            pngBase64: "CQgH",
+          },
         });
 
         assert.equal(writes.length, 1);
@@ -425,4 +427,3 @@ test("clipboard provider", async (t) => {
     );
   });
 });
-

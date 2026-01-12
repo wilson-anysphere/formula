@@ -160,18 +160,20 @@ function createTauriClipboardProvider() {
     async write(payload) {
       // 1) Prefer rich writes via the native clipboard command when available (Tauri IPC).
       let wrote = false;
-      if (typeof tauriInvoke === "function") {
-        try {
-          await tauriInvoke("clipboard_write", {
-            text: payload.text,
-            html: payload.html,
-            rtf: payload.rtf,
-            pngBase64: payload.pngBase64,
-          });
-          wrote = true;
-        } catch {
-          wrote = false;
-        }
+        if (typeof tauriInvoke === "function") {
+          try {
+            await tauriInvoke("clipboard_write", {
+            payload: {
+              text: payload.text,
+              html: payload.html,
+              rtf: payload.rtf,
+              pngBase64: payload.pngBase64,
+            },
+            });
+            wrote = true;
+          } catch {
+            wrote = false;
+          }
       }
 
       if (!wrote) {
