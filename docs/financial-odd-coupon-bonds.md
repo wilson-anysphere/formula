@@ -84,7 +84,7 @@ When adding odd-coupon coverage to the oracle corpus, prefer:
 
 The generator includes a small set of boundary-date equality cases (e.g. `issue == settlement`,
 `settlement == first_coupon`, `first_coupon == maturity`, `issue == first_coupon`,
-`settlement == last_interest`).
+`settlement == last_interest`, `last_interest == maturity`).
 
 It also includes a small set of **negative yield / negative coupon rate** validation cases
 (tagged `odd_coupon_validation`) to confirm Excel’s input-domain behavior for:
