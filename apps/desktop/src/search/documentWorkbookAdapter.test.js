@@ -126,3 +126,28 @@ test("DocumentWorkbookAdapter does not create phantom sheets when name resolutio
   assert.throws(() => workbook.getSheet("DoesNotExist"), /Unknown sheet/i);
   assert.deepEqual(doc.getSheetIds(), ["sheet-1"]);
 });
+
+test("DocumentWorkbookAdapter resolves quoted sheet names via sheetNameResolver", () => {
+  const doc = { getSheetIds: () => ["Sheet1", "Sheet2"] };
+  const namesById = new Map([
+    ["Sheet1", "Budget"],
+    ["Sheet2", "O'Brien"],
+  ]);
+  const sheetNameResolver = {
+    getSheetNameById: (id) => namesById.get(id) ?? null,
+    getSheetIdByName: (name) => {
+      const needle = String(name ?? "").trim().toLowerCase();
+      if (!needle) return null;
+      for (const [id, sheetName] of namesById.entries()) {
+        if (sheetName.toLowerCase() === needle) return id;
+      }
+      return null;
+    },
+  };
+
+  const workbook = new DocumentWorkbookAdapter({ document: doc, sheetNameResolver });
+
+  assert.equal(workbook.getSheet("'Budget'").sheetId, "Sheet1");
+  assert.equal(workbook.getSheet("'O''Brien'").sheetId, "Sheet2");
+  assert.throws(() => workbook.getSheet("'Missing'"), /Unknown sheet/i);
+});
