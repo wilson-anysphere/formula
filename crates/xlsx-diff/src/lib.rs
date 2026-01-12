@@ -752,7 +752,7 @@ pub fn collect_fixture_paths(root: &Path) -> Result<Vec<PathBuf>> {
         }
         let path = entry.path();
         match path.extension().and_then(|s| s.to_str()) {
-            Some("xlsx") | Some("xlsm") => files.push(path.to_path_buf()),
+            Some("xlsx") | Some("xlsm") | Some("xlsb") => files.push(path.to_path_buf()),
             _ => {}
         }
     }
