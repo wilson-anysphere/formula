@@ -316,6 +316,11 @@ fn verify_signature_part_binding_matches_vba_project_bin() {
     let vba_project_bin = build_minimal_vba_project_bin(b"module-bytes");
     let normalized = content_normalized_data(&vba_project_bin).expect("content normalized data");
     let digest = hash(MessageDigest::md5(), &normalized).expect("md5(content_normalized_data)");
+    assert_eq!(
+        digest.as_ref().len(),
+        16,
+        "expected 16-byte MD5 VBA project digest"
+    );
     let spc = make_spc_indirect_data_content_sha256(digest.as_ref());
 
     let pkcs7 = make_pkcs7_signed_message(&spc);
@@ -338,6 +343,11 @@ fn verify_signature_part_binding_detects_tampered_vba_project_bin() {
     let vba_project_bin = build_minimal_vba_project_bin(b"module-bytes");
     let normalized = content_normalized_data(&vba_project_bin).expect("content normalized data");
     let digest = hash(MessageDigest::md5(), &normalized).expect("md5(content_normalized_data)");
+    assert_eq!(
+        digest.as_ref().len(),
+        16,
+        "expected 16-byte MD5 VBA project digest"
+    );
     let spc = make_spc_indirect_data_content_sha256(digest.as_ref());
 
     let pkcs7 = make_pkcs7_signed_message(&spc);
