@@ -27,6 +27,14 @@ pub struct CellData {
     pub value: JsonValue,
 }
 
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct CellDataRich {
+    pub sheet: String,
+    pub address: String,
+    pub input: CellValue,
+    pub value: CellValue,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct CellChange {
     pub sheet: String,
@@ -412,6 +420,26 @@ fn normalize_sheet_key(name: &str) -> String {
     name.to_ascii_uppercase()
 }
 
+/// Encode a literal text string as a scalar workbook `input` value.
+///
+/// The legacy JS worker protocol treats strings that look like formulas (leading `=`, ignoring
+/// whitespace) and error codes (e.g. `#REF!`) as structured inputs. To preserve non-formula rich
+/// inputs through `toJson`/`fromJson` round-trips we apply Excel's quote prefix (`'`) when needed.
+fn encode_scalar_text_input(text: &str) -> String {
+    // If the desired text itself starts with a quote prefix, double it so the scalar path keeps a
+    // leading apostrophe after `json_to_engine_value` strips one.
+    if text.starts_with('\'') {
+        return format!("'{text}");
+    }
+
+    let candidate = JsonValue::String(text.to_string());
+    if is_formula_input(&candidate) || ErrorKind::from_code(text).is_some() {
+        format!("'{text}")
+    } else {
+        text.to_string()
+    }
+}
+
 fn json_to_engine_value(value: &JsonValue) -> EngineValue {
     match value {
         JsonValue::Null => EngineValue::Blank,
@@ -631,6 +659,59 @@ fn cell_value_to_json(value: &CellValue) -> JsonValue {
     engine_value_to_json(cell_value_to_engine(value))
 }
 
+fn cell_value_to_scalar_json_input(value: &CellValue) -> JsonValue {
+    match value {
+        CellValue::Empty => JsonValue::Null,
+        CellValue::Number(n) => serde_json::Number::from_f64(*n)
+            .map(JsonValue::Number)
+            .unwrap_or_else(|| JsonValue::String(ErrorKind::Num.as_code().to_string())),
+        CellValue::Boolean(b) => JsonValue::Bool(*b),
+        CellValue::String(s) => JsonValue::String(encode_scalar_text_input(s)),
+        CellValue::Error(err) => JsonValue::String(err.as_str().to_string()),
+        CellValue::RichText(rt) => {
+            JsonValue::String(encode_scalar_text_input(&rt.plain_text().to_string()))
+        }
+        CellValue::Entity(entity) => {
+            JsonValue::String(encode_scalar_text_input(&entity.display_value))
+        }
+        CellValue::Record(record) => {
+            let display = record.to_string();
+            JsonValue::String(encode_scalar_text_input(&display))
+        }
+        // Degrade arrays to their top-left value so `getCell`/`toJson` remain scalar-compatible.
+        CellValue::Array(arr) => arr
+            .data
+            .first()
+            .and_then(|row| row.first())
+            .map(cell_value_to_scalar_json_input)
+            .unwrap_or(JsonValue::Null),
+        // Preserve the scalar spill error in legacy IO paths.
+        CellValue::Spill(_) => JsonValue::String(ErrorKind::Spill.as_code().to_string()),
+    }
+}
+
+fn scalar_json_input_to_cell_value(input: &JsonValue) -> CellValue {
+    match input {
+        JsonValue::Null => CellValue::Empty,
+        JsonValue::Bool(b) => CellValue::Boolean(*b),
+        JsonValue::Number(n) => CellValue::Number(n.as_f64().unwrap_or(0.0)),
+        JsonValue::String(s) => {
+            // Preserve formulas / quote-prefixed strings exactly as stored in the legacy protocol.
+            if s.starts_with('\'') || is_formula_input(input) {
+                return CellValue::String(s.clone());
+            }
+
+            // Legacy scalar IO treats error literals as structured errors.
+            if let Some(kind) = ErrorKind::from_code(s) {
+                return CellValue::Error(engine_error_to_model(kind));
+            }
+
+            CellValue::String(s.clone())
+        }
+        JsonValue::Array(_) | JsonValue::Object(_) => CellValue::Empty,
+    }
+}
+
 struct WorkbookState {
     engine: Engine,
     formula_locale: &'static FormulaLocale,
@@ -655,6 +736,10 @@ struct WorkbookState {
     /// also blank, so we keep the previous value here and explicitly diff it against the post-recalc
     /// value.
     pending_formula_baselines: BTreeMap<FormulaCellKey, JsonValue>,
+    /// Rich cell input values set via `setCellRich`.
+    ///
+    /// This is stored separately from `sheets` to keep legacy scalar IO (`toJson`/`getCell`) stable.
+    sheets_rich: BTreeMap<String, BTreeMap<String, CellValue>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -766,6 +851,7 @@ impl WorkbookState {
             engine: Engine::new(),
             formula_locale: &EN_US,
             sheets: BTreeMap::new(),
+            sheets_rich: BTreeMap::new(),
             sheet_lookup: HashMap::new(),
             pending_spill_clears: BTreeSet::new(),
             pending_formula_baselines: BTreeMap::new(),
@@ -787,6 +873,7 @@ impl WorkbookState {
         let display = name.to_string();
         self.sheet_lookup.insert(key, display.clone());
         self.sheets.entry(display.clone()).or_default();
+        self.sheets_rich.entry(display.clone()).or_default();
         self.engine.ensure_sheet(&display);
         display
     }
@@ -841,6 +928,11 @@ impl WorkbookState {
         let sheet = self.ensure_sheet(sheet);
         let cell_ref = Self::parse_address(address)?;
         let address = cell_ref.to_a1();
+
+        // Legacy scalar edits overwrite any previous rich input for this cell.
+        if let Some(rich_cells) = self.sheets_rich.get_mut(&sheet) {
+            rich_cells.remove(&address);
+        }
 
         if let Some((origin, end)) = self.engine.spill_range(&sheet, &address) {
             let edited_row = cell_ref.row;
@@ -959,12 +1051,9 @@ impl WorkbookState {
         let cell_ref = Self::parse_address(address)?;
         let address = cell_ref.to_a1();
 
-        // Overwriting any cell inside a spill range must clear the spill outputs so the JS
-        // consumer cache stays coherent (mirrors `set_cell_internal` semantics).
         if let Some((origin, end)) = self.engine.spill_range(&sheet, &address) {
             let edited_row = cell_ref.row;
             let edited_col = cell_ref.col;
-            let edited_is_formula = false;
             for row in origin.row..=end.row {
                 for col in origin.col..=end.col {
                     // Skip the origin cell (top-left); we only need to clear spill outputs.
@@ -973,7 +1062,7 @@ impl WorkbookState {
                     }
                     // If the user overwrote a spill output cell with a literal value, don't emit a
                     // spill-clear change for that cell; the caller already knows its new input.
-                    if !edited_is_formula && row == edited_row && col == edited_col {
+                    if row == edited_row && col == edited_col {
                         continue;
                     }
                     self.pending_spill_clears
@@ -986,12 +1075,17 @@ impl WorkbookState {
             .sheets
             .get_mut(&sheet)
             .expect("sheet just ensured must exist");
+        let sheet_cells_rich = self
+            .sheets_rich
+            .get_mut(&sheet)
+            .expect("sheet just ensured must exist");
 
         if value.is_empty() {
             self.engine
                 .clear_cell(&sheet, &address)
                 .map_err(|err| js_err(err.to_string()))?;
             sheet_cells.remove(&address);
+            sheet_cells_rich.remove(&address);
             self.pending_spill_clears
                 .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
             self.pending_formula_baselines
@@ -1004,10 +1098,16 @@ impl WorkbookState {
             .set_cell_value(&sheet, &address, engine_value)
             .map_err(|err| js_err(err.to_string()))?;
 
-        // Preserve the legacy scalar workbook JSON schema by storing the degraded scalar input.
-        let input = cell_value_to_json(&value);
-        debug_assert!(is_scalar_json(&input));
-        sheet_cells.insert(address.clone(), input);
+        // Preserve the legacy scalar workbook JSON schema by storing a degraded scalar input.
+        let scalar_input = cell_value_to_scalar_json_input(&value);
+        debug_assert!(is_scalar_json(&scalar_input));
+        if scalar_input.is_null() {
+            sheet_cells.remove(&address);
+        } else {
+            sheet_cells.insert(address.clone(), scalar_input);
+        }
+
+        sheet_cells_rich.insert(address.clone(), value);
 
         self.pending_spill_clears
             .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
@@ -1038,6 +1138,35 @@ impl WorkbookState {
         let value = engine_value_to_json(self.engine.get_cell_value(&sheet, &address));
 
         Ok(CellData {
+            sheet,
+            address,
+            input,
+            value,
+        })
+    }
+
+    fn get_cell_rich_data(&self, sheet: &str, address: &str) -> Result<CellDataRich, JsValue> {
+        let sheet = self.require_sheet(sheet)?.to_string();
+        let address = Self::parse_address(address)?.to_a1();
+
+        let input = self
+            .sheets_rich
+            .get(&sheet)
+            .and_then(|cells| cells.get(&address))
+            .cloned()
+            .unwrap_or_else(|| {
+                let scalar_input = self
+                    .sheets
+                    .get(&sheet)
+                    .and_then(|cells| cells.get(&address))
+                    .cloned()
+                    .unwrap_or(JsonValue::Null);
+                scalar_json_input_to_cell_value(&scalar_input)
+            });
+
+        let value = engine_value_to_cell_value_rich(self.engine.get_cell_value(&sheet, &address));
+
+        Ok(CellDataRich {
             sheet,
             address,
             input,
@@ -1363,6 +1492,42 @@ impl WorkbookState {
 
                     Some(key.clone())
                 }
+                EngineEditOp::CopyRange {
+                    sheet,
+                    src,
+                    dst_top_left,
+                } if &key.sheet == sheet => {
+                    let dst_end = CellRef::new(
+                        dst_top_left.row + src.height().saturating_sub(1),
+                        dst_top_left.col + src.width().saturating_sub(1),
+                    );
+                    let dst = Range::new(*dst_top_left, dst_end);
+                    let in_dst =
+                        key.row >= dst.start.row && key.row <= dst.end.row && key.col >= dst.start.col && key.col <= dst.end.col;
+                    if in_dst {
+                        // Destination range contents are overwritten by the copy.
+                        return None;
+                    }
+                    Some(key.clone())
+                }
+                EngineEditOp::Fill { sheet, src, dst } if &key.sheet == sheet => {
+                    let in_dst =
+                        key.row >= dst.start.row && key.row <= dst.end.row && key.col >= dst.start.col && key.col <= dst.end.col;
+                    if !in_dst {
+                        return Some(key.clone());
+                    }
+
+                    let in_src = key.row >= src.start.row
+                        && key.row <= src.end.row
+                        && key.col >= src.start.col
+                        && key.col <= src.end.col;
+                    if in_src {
+                        // Preserve the source range; only the surrounding destination range is overwritten.
+                        return Some(key.clone());
+                    }
+
+                    None
+                }
                 _ => Some(key.clone()),
             }
         }
@@ -1383,6 +1548,92 @@ impl WorkbookState {
             }
         }
         self.pending_formula_baselines = next_formulas;
+
+        // Remap rich inputs to follow the same structural edit semantics as the engine.
+        match op {
+            EngineEditOp::CopyRange {
+                sheet,
+                src,
+                dst_top_left,
+            } => {
+                let dst_end = CellRef::new(
+                    dst_top_left.row + src.height().saturating_sub(1),
+                    dst_top_left.col + src.width().saturating_sub(1),
+                );
+                let dst = Range::new(*dst_top_left, dst_end);
+
+                let mut next_rich: BTreeMap<String, BTreeMap<String, CellValue>> = BTreeMap::new();
+                for (sheet_name, cells) in std::mem::take(&mut self.sheets_rich) {
+                    if &sheet_name != sheet {
+                        next_rich.insert(sheet_name, cells);
+                        continue;
+                    }
+
+                    let mut copied: Vec<(u32, u32, CellValue)> = Vec::new();
+                    for (address, value) in &cells {
+                        let Ok(cell_ref) = CellRef::from_a1(address) else {
+                            continue;
+                        };
+                        let in_src = cell_ref.row >= src.start.row
+                            && cell_ref.row <= src.end.row
+                            && cell_ref.col >= src.start.col
+                            && cell_ref.col <= src.end.col;
+                        if in_src {
+                            copied.push((cell_ref.row, cell_ref.col, value.clone()));
+                        }
+                    }
+
+                    let mut new_cells = BTreeMap::new();
+                    for (address, value) in cells {
+                        let Ok(cell_ref) = CellRef::from_a1(&address) else {
+                            new_cells.insert(address, value);
+                            continue;
+                        };
+                        let in_dst = cell_ref.row >= dst.start.row
+                            && cell_ref.row <= dst.end.row
+                            && cell_ref.col >= dst.start.col
+                            && cell_ref.col <= dst.end.col;
+                        if !in_dst {
+                            new_cells.insert(address, value);
+                        }
+                    }
+
+                    for (row, col, value) in copied {
+                        let dest_row = dst_top_left.row + (row - src.start.row);
+                        let dest_col = dst_top_left.col + (col - src.start.col);
+                        let address = CellRef::new(dest_row, dest_col).to_a1();
+                        new_cells.insert(address, value);
+                    }
+
+                    next_rich.insert(sheet_name, new_cells);
+                }
+                self.sheets_rich = next_rich;
+            }
+            _ => {
+                let mut next_rich: BTreeMap<String, BTreeMap<String, CellValue>> = BTreeMap::new();
+                for (sheet_name, cells) in std::mem::take(&mut self.sheets_rich) {
+                    for (address, input) in cells {
+                        let Ok(cell_ref) = CellRef::from_a1(&address) else {
+                            continue;
+                        };
+                        let key = FormulaCellKey {
+                            sheet: sheet_name.clone(),
+                            row: cell_ref.row,
+                            col: cell_ref.col,
+                        };
+                        let Some(remapped) = remap_key(&key, op) else {
+                            continue;
+                        };
+                        let remapped_address = CellRef::new(remapped.row, remapped.col).to_a1();
+                        next_rich
+                            .entry(remapped.sheet)
+                            .or_default()
+                            .insert(remapped_address, input);
+                    }
+                }
+                self.sheets_rich = next_rich;
+            }
+        }
     }
 
     fn apply_operation_internal(&mut self, dto: EditOpDto) -> Result<EditResultDto, JsValue> {
@@ -2212,8 +2463,8 @@ impl WasmWorkbook {
         sheet: Option<String>,
     ) -> Result<JsValue, JsValue> {
         let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
-        let value = self.inner.get_cell_rich_internal(sheet, &address)?;
-        serde_wasm_bindgen::to_value(&value).map_err(|err| js_err(err.to_string()))
+        let cell = self.inner.get_cell_rich_data(sheet, &address)?;
+        serde_wasm_bindgen::to_value(&cell).map_err(|err| js_err(err.to_string()))
     }
 
     #[wasm_bindgen(js_name = "setCell")]
@@ -2356,6 +2607,52 @@ impl WasmWorkbook {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn set_cell_rich_entity_roundtrips_through_get_cell_rich_and_degrades_in_get_cell() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        wb.set_cell_rich_internal(
+            DEFAULT_SHEET,
+            "A1",
+            CellValue::Entity(formula_model::EntityValue::new("Acme")),
+        )
+        .unwrap();
+
+        let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(
+            serde_json::to_value(&rich.input).unwrap(),
+            json!({"type":"entity","value":{"displayValue":"Acme"}})
+        );
+        assert_eq!(
+            serde_json::to_value(&rich.value).unwrap(),
+            json!({"type":"entity","value":{"displayValue":"Acme"}})
+        );
+
+        let scalar = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(scalar.value, json!("Acme"));
+    }
+
+    #[test]
+    fn set_cell_rich_error_field_degrades_in_get_cell() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+
+        wb.set_cell_rich_internal(
+            DEFAULT_SHEET,
+            "A1",
+            CellValue::Error(formula_model::ErrorValue::Field),
+        )
+        .unwrap();
+
+        let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(
+            serde_json::to_value(&rich.input).unwrap(),
+            json!({"type":"error","value":"#FIELD!"})
+        );
+
+        let scalar = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(scalar.value, json!("#FIELD!"));
+    }
 
     #[test]
     fn engine_value_to_json_degrades_rich_values_to_display_string() {
