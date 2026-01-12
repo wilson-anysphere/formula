@@ -1335,7 +1335,6 @@ export class ToolExecutor {
 
     const row0 = row - 1;
     const col0 = col - 1;
-    const coordKey = `${row0},${col0}`;
 
     // If we're explicitly including restricted content and policy allows it, a cell can become
     // ALLOW even if its classification exceeds `maxAllowed` (because `evaluatePolicy` short-circuits
@@ -1343,19 +1342,15 @@ export class ToolExecutor {
     const restrictedOverrideAllowed = dlp.includeRestrictedContent && dlp.policyAllowsRestrictedContent;
     const canShortCircuitOverThreshold = !restrictedOverrideAllowed;
     const maxAllowedRank = dlp.maxAllowedRank;
-
-    const decideAllowed = (rank: number): boolean => {
-      if (rank === RESTRICTED_CLASSIFICATION_RANK && dlp.includeRestrictedContent) {
-        return dlp.policyAllowsRestrictedContent;
-      }
-      return rank <= maxAllowedRank;
-    };
+    const restrictedAllowed = dlp.includeRestrictedContent
+      ? dlp.policyAllowsRestrictedContent
+      : maxAllowedRank >= RESTRICTED_CLASSIFICATION_RANK;
 
     let rank = index.docRankMax;
     if (index.sheetRankMax > rank) rank = index.sheetRankMax;
 
     if (rank === RESTRICTED_CLASSIFICATION_RANK) {
-      return decideAllowed(rank);
+      return restrictedAllowed;
     }
     if (canShortCircuitOverThreshold && rank > maxAllowedRank) {
       return false;
@@ -1364,16 +1359,19 @@ export class ToolExecutor {
     const colRank = index.columnRankByIndex.get(col0);
     if (colRank !== undefined && colRank > rank) rank = colRank;
     if (rank === RESTRICTED_CLASSIFICATION_RANK) {
-      return decideAllowed(rank);
+      return restrictedAllowed;
     }
     if (canShortCircuitOverThreshold && rank > maxAllowedRank) {
       return false;
     }
 
-    const cellRank = index.cellRankByCoord.get(coordKey);
-    if (cellRank !== undefined && cellRank > rank) rank = cellRank;
+    if (index.cellRankByCoord.size > 0) {
+      const coordKey = `${row0},${col0}`;
+      const cellRank = index.cellRankByCoord.get(coordKey);
+      if (cellRank !== undefined && cellRank > rank) rank = cellRank;
+    }
     if (rank === RESTRICTED_CLASSIFICATION_RANK) {
-      return decideAllowed(rank);
+      return restrictedAllowed;
     }
     if (canShortCircuitOverThreshold && rank > maxAllowedRank) {
       return false;
@@ -1383,7 +1381,7 @@ export class ToolExecutor {
       if (row0 < record.startRow || row0 > record.endRow || col0 < record.startCol || col0 > record.endCol) continue;
       if (record.rank > rank) rank = record.rank;
       if (rank === RESTRICTED_CLASSIFICATION_RANK) {
-        return decideAllowed(rank);
+        return restrictedAllowed;
       }
       if (canShortCircuitOverThreshold && rank > maxAllowedRank) {
         return false;
@@ -1399,7 +1397,8 @@ export class ToolExecutor {
       if (fallbackRank > rank) rank = fallbackRank;
     }
 
-    return decideAllowed(rank);
+    if (rank === RESTRICTED_CLASSIFICATION_RANK) return restrictedAllowed;
+    return rank <= maxAllowedRank;
   }
 
   private logToolDlpDecision(params: {
