@@ -126,6 +126,8 @@ test.describe("split view", () => {
 
     await expect(page.getByTestId("active-cell")).toHaveText("B2");
     await expect(page.getByTestId("formula-address")).toHaveValue("B2");
+    // The primary pane should also mirror the selection state (even if the cell is offscreen).
+    await expect(page.locator("#grid").getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell B2");
     const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
     expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
   });
@@ -156,6 +158,8 @@ test.describe("split view", () => {
 
     await expect(page.getByTestId("active-cell")).toHaveText("B2");
     await expect(page.getByTestId("formula-address")).toHaveValue("B2");
+    // The secondary pane should mirror selection state without being scrolled to reveal it.
+    await expect(secondary.getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell B2");
     const secondaryScrollAfter = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
     expect(Math.abs(secondaryScrollAfter - secondaryScrollBefore)).toBeLessThan(0.1);
   });
@@ -202,6 +206,7 @@ test.describe("split view", () => {
     await expect(page.getByTestId("selection-range")).toHaveText("B2:D4");
     await expect(page.getByTestId("active-cell")).toHaveText("D4");
     await expect(page.getByTestId("formula-address")).toHaveValue("D4");
+    await expect(page.locator("#grid").getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell D4");
 
     const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
     expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
@@ -236,6 +241,7 @@ test.describe("split view", () => {
     await expect(page.getByTestId("selection-range")).toHaveText("2 ranges");
     await expect(page.getByTestId("active-cell")).toHaveText("C3");
     await expect(page.getByTestId("formula-address")).toHaveValue("C3");
+    await expect(page.locator("#grid").getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell C3");
 
     const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
     expect(Math.abs(scrollAfter - scrollBefore)).toBeLessThan(0.1);
@@ -276,6 +282,7 @@ test.describe("split view", () => {
     await expect(page.getByTestId("selection-range")).toHaveText("2 ranges");
     await expect(page.getByTestId("active-cell")).toHaveText("C3");
     await expect(page.getByTestId("formula-address")).toHaveValue("C3");
+    await expect(secondary.getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell C3");
 
     const secondaryScrollAfter = Number((await secondary.getAttribute("data-scroll-y")) ?? 0);
     expect(Math.abs(secondaryScrollAfter - secondaryScrollBefore)).toBeLessThan(0.1);
