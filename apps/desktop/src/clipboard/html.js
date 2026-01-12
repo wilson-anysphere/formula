@@ -26,6 +26,77 @@ function decodeHtmlEntities(text) {
     .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => String.fromCharCode(Number.parseInt(code, 16)));
 }
 
+/**
+ * Normalize Windows CF_HTML clipboard payloads to a plain HTML string that DOMParser can ingest.
+ *
+ * Windows "HTML Format" clipboard entries often look like:
+ *   Version:0.9\r\nStartHTML:00000097\r\n...<html>...</html>
+ *
+ * When present, the numeric offsets are byte offsets into the full payload. In practice, they
+ * can be missing or incorrect (especially with non-ASCII content), so we defensively fall back
+ * to heuristics.
+ *
+ * @param {string} html
+ * @returns {string}
+ */
+function normalizeClipboardHtml(html) {
+  if (typeof html !== "string") return "";
+
+  // Some producers include trailing null terminators.
+  const input = html.replace(/\u0000+$/g, "");
+
+  const findStartOfMarkup = (s) => {
+    const doctype = s.search(/<!doctype/i);
+    const htmlTag = s.search(/<html\b/i);
+    const table = s.search(/<table\b/i);
+
+    const candidates = [doctype, htmlTag, table].filter((i) => i >= 0);
+    if (candidates.length === 0) return null;
+    return Math.min(...candidates);
+  };
+
+  const stripToMarkup = (s) => {
+    const idx = findStartOfMarkup(s);
+    if (idx == null) return s;
+    if (idx <= 0) return s;
+    return s.slice(idx);
+  };
+
+  const headerEnd = findStartOfMarkup(input);
+  const header = headerEnd == null ? input : input.slice(0, headerEnd);
+
+  const getOffset = (name) => {
+    const m = new RegExp(`(?:^|\\r?\\n)${name}:\\s*(-?\\d+)`, "i").exec(header);
+    if (!m) return null;
+    const n = Number.parseInt(m[1], 10);
+    if (!Number.isFinite(n) || n < 0) return null;
+    return n;
+  };
+
+  const startHtml = getOffset("StartHTML");
+  const endHtml = getOffset("EndHTML");
+  const startFragment = getOffset("StartFragment");
+  const endFragment = getOffset("EndFragment");
+
+  const safeSlice = (start, end) => {
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+    if (start < 0 || end <= start || end > input.length) return null;
+    return input.slice(start, end);
+  };
+
+  const containsTable = (s) => /<table\b/i.test(s);
+
+  // Prefer fragment offsets when they look sane, but fall back to StartHTML/EndHTML.
+  for (const candidate of [safeSlice(startFragment, endFragment), safeSlice(startHtml, endHtml)]) {
+    if (!candidate) continue;
+    const stripped = stripToMarkup(candidate);
+    if (containsTable(stripped)) return stripped;
+  }
+
+  // Offsets missing or incorrect; fall back to heuristics on the full payload.
+  return stripToMarkup(input);
+}
+
 function isLikelyDateNumberFormat(fmt) {
   if (typeof fmt !== "string") return false;
   return fmt.toLowerCase().includes("yyyy-mm-dd");
@@ -218,6 +289,7 @@ export function parseHtmlToCellGrid(html) {
  * @returns {CellGrid | null}
  */
 function parseHtmlToCellGridDom(html) {
+  html = normalizeClipboardHtml(html);
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
   const table = doc.querySelector("table");
@@ -283,6 +355,7 @@ function parseHtmlToCellGridDom(html) {
  * @returns {CellGrid | null}
  */
 function parseHtmlToCellGridFallback(html) {
+  html = normalizeClipboardHtml(html);
   const tableMatch = /<table\b[\s\S]*?<\/table>/i.exec(html);
   if (!tableMatch) return null;
 
