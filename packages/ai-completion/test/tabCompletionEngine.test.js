@@ -78,6 +78,57 @@ test("Typing =_xlfn.XLO suggests =_xlfn.XLOOKUP(", async () => {
   );
 });
 
+test("Typing =_xlfn.TAK suggests =_xlfn.TAKE(", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=_xlfn.TAK";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.TAKE("),
+    `Expected an _xlfn.TAKE suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =_xlfn.DRO suggests =_xlfn.DROP(", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=_xlfn.DRO";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.DROP("),
+    `Expected an _xlfn.DROP suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
+test("Typing =_xlfn.EXPA suggests =_xlfn.EXPAND(", async () => {
+  const engine = new TabCompletionEngine();
+
+  const currentInput = "=_xlfn.EXPA";
+  const suggestions = await engine.getSuggestions({
+    currentInput,
+    cursorPosition: currentInput.length,
+    cellRef: { row: 0, col: 0 },
+    surroundingCells: createMockCellContext({}),
+  });
+
+  assert.ok(
+    suggestions.some((s) => s.text === "=_xlfn.EXPAND("),
+    `Expected an _xlfn.EXPAND suggestion, got: ${suggestions.map((s) => s.text).join(", ")}`
+  );
+});
+
 test("Typing =SUM(A suggests a contiguous range above the current cell", async () => {
   const engine = new TabCompletionEngine();
 
