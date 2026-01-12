@@ -15,5 +15,8 @@ describe("Tauri capabilities", () => {
     expect(permissions).toContain("updater:allow-check");
     expect(permissions).toContain("updater:allow-download");
     expect(permissions).toContain("updater:allow-install");
+    // Ensure we keep the updater permission surface minimal/explicit.
+    expect(permissions).not.toContain("updater:default");
+    expect(permissions).not.toContain("updater:allow-download-and-install");
   });
 });
