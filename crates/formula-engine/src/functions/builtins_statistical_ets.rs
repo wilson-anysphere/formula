@@ -9,14 +9,16 @@ use crate::value::{ErrorKind, Value};
 fn collect_optional_numbers_from_arg(
     ctx: &dyn FunctionContext,
     expr: &CompiledExpr,
-    ) -> Result<Vec<Option<f64>>, ErrorKind> {
+) -> Result<Vec<Option<f64>>, ErrorKind> {
     fn coerce_cell(ctx: &dyn FunctionContext, v: &Value) -> Result<Option<f64>, ErrorKind> {
         match v {
             Value::Error(e) => Err(*e),
             Value::Blank => Ok(None),
             Value::Number(n) => Ok(Some(*n)),
             Value::Bool(b) => Ok(Some(if *b { 1.0 } else { 0.0 })),
-            Value::Text(_) | Value::Entity(_) | Value::Record(_) => Ok(Some(v.coerce_to_number_with_ctx(ctx)?)),
+            Value::Text(_) | Value::Entity(_) | Value::Record(_) => {
+                Ok(Some(v.coerce_to_number_with_ctx(ctx)?))
+            }
             Value::Array(_)
             | Value::Reference(_)
             | Value::ReferenceUnion(_)
