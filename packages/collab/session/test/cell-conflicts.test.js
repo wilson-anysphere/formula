@@ -279,7 +279,7 @@ test("CollabSession cell value conflict monitor ignores sequential deletes that 
     cellMap.set("modified", Date.now());
   });
 
-  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.value, null);
+  assert.equal(await sessionA.getCell("Sheet1:0:0"), null);
   assert.equal(conflictsA.length, 0);
 
   sessionA.destroy();

@@ -460,8 +460,8 @@ test("CollabSession formula conflict monitor does not resurrect formulas on sequ
   assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, "=1");
   await sessionB.setCellFormula("Sheet1:0:0", null);
 
-  assert.equal((await sessionA.getCell("Sheet1:0:0"))?.formula, null);
-  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, null);
+  assert.equal(await sessionA.getCell("Sheet1:0:0"), null);
+  assert.equal(await sessionB.getCell("Sheet1:0:0"), null);
 
   assert.equal(conflictsA.length, 0);
   assert.equal(conflictsB.length, 0);

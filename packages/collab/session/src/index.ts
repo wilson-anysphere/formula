@@ -1522,9 +1522,31 @@ export class CollabSession {
       };
     }
 
+    const rawValue = cell.get("value");
+    let value: any = rawValue ?? null;
+    if (value && typeof value === "object" && (value as any).t === "blank") {
+      value = null;
+    }
+
+    const rawFormula = cell.get("formula");
+    let formula: string | null = null;
+    if (typeof rawFormula === "string") {
+      const trimmed = rawFormula.trim();
+      formula = trimmed ? trimmed : null;
+    } else if (rawFormula != null) {
+      const trimmed = String(rawFormula).trim();
+      formula = trimmed ? trimmed : null;
+    }
+
+    // Treat marker-only cells (value/formula both null) as empty UI state.
+    // This keeps `getCell()` semantics aligned with other read paths (e.g. the
+    // DocumentController binder) even though we preserve the underlying Y.Map so
+    // conflict monitors can reason about causal history.
+    if (value === null && formula === null) return null;
+
     return {
-      value: cell.get("value") ?? null,
-      formula: (cell.get("formula") ?? null) as string | null,
+      value,
+      formula,
       modified: (cell.get("modified") ?? null) as number | null,
       modifiedBy: (cell.get("modifiedBy") ?? null) as string | null,
     };
