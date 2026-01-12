@@ -411,14 +411,14 @@ To bind the signature to the VBA project contents, `formula-vba`:
 1. Extracts the signed digest bytes from the signature payload.
 2. Computes the appropriate Contents Hash transcript:
    - v1/v2: per MS-OVBA §2.4.2.1/§2.4.2.2
-   - v3: per MS-OVBA §2.4.2.5/§2.4.2.6 (`ProjectNormalizedData`)
+   - v3: best-effort (see “`formula-vba` implementation notes (v3)” above)
 3. Computes digest bytes for that transcript:
    - v1 (`DigitalSignature`): compute **MD5** of `ContentNormalizedData` (MS-OSHARED §4.3; ignore the
-      `DigestInfo` OID for binding)
+       `DigestInfo` OID for binding)
    - v2 (`DigitalSignatureEx`): compute **MD5** of (`ContentNormalizedData || FormsNormalizedData`)
-      (MS-OSHARED §4.3; ignore the `DigestInfo` OID for binding)
-   - v3 (`DigitalSignatureExt`): compute **SHA-256** via `formula_vba::contents_hash_v3`
-     (MS-OVBA §2.4.2.7 `ContentsHashV3` is always SHA-256, regardless of the `DigestInfo` OID)
+       (MS-OSHARED §4.3; ignore the `DigestInfo` OID for binding)
+   - v3 (`DigitalSignatureExt`): currently compute **SHA-256** via `formula_vba::contents_hash_v3`
+     (best-effort; SHA-256 is common for `DigitalSignatureExt`, but not a spec-guaranteed constant)
    - When the signature stream kind is unknown (for example, a raw PKCS#7/CMS blob from
       `vbaProjectSignature.bin`), `formula-vba` best-effort attempts v3 binding first, then falls back
       to legacy binding.
