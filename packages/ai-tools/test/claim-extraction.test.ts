@@ -87,6 +87,23 @@ describe("extractVerifiableClaims", () => {
     ]);
   });
 
+  it("extracts range-stat function call claims (formula-style)", () => {
+    const claims = extractVerifiableClaims({
+      assistantText: "SUM(Sheet1!A1:A3) = 6.",
+      userText: ""
+    });
+
+    expect(claims).toEqual([
+      {
+        kind: "range_stat",
+        measure: "sum",
+        reference: "Sheet1!A1:A3",
+        expected: 6,
+        source: "SUM(Sheet1!A1:A3) = 6"
+      }
+    ]);
+  });
+
   it("extracts stdev claims (std. dev punctuation)", () => {
     const claims = extractVerifiableClaims({
       assistantText: "Std. dev for Sheet1!B2:B100 = 12.3.",

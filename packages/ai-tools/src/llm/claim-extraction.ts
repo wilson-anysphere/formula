@@ -80,6 +80,12 @@ const RANGE_STAT_WITH_REF_RE_1 = new RegExp(
   "gi"
 );
 
+// Support formula/function-style phrasings like "MEDIAN(A1:A10) = 5".
+const RANGE_STAT_WITH_REF_FUNCTION_CALL_RE = new RegExp(
+  `\\b(?<keyword>${KEYWORD_PATTERN})\\b\\s*\\(\\s*(?<ref>${A1_REFERENCE_PATTERN})\\s*\\)\\s*(?:is|was|=|:|equals)?\\s*(?<num>${NUMBER_PATTERN})`,
+  "gi"
+);
+
 const RANGE_STAT_WITH_REF_RE_2 = new RegExp(
   `(?<ref>${A1_REFERENCE_PATTERN})\\s*[,:-]?\\s*(?<keyword>${KEYWORD_PATTERN})\\b\\s*(?:is|was|=|:|equals)?\\s*(?<num>${NUMBER_PATTERN})`,
   "gi"
@@ -115,6 +121,7 @@ export function extractVerifiableClaims(params: ExtractVerifiableClaimsParams): 
   const spans: Array<MatchSpan<ExtractedSpreadsheetClaim>> = [];
 
   spans.push(...collectRangeStatWithRef(RANGE_STAT_WITH_REF_RE_1, assistantText));
+  spans.push(...collectRangeStatWithRef(RANGE_STAT_WITH_REF_FUNCTION_CALL_RE, assistantText));
   spans.push(...collectRangeStatWithRef(RANGE_STAT_WITH_REF_RE_2, assistantText));
   spans.push(...collectCellValueClaims(assistantText));
 
