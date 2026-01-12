@@ -883,7 +883,6 @@ impl MetadataPart {
                         vm_to_rich_value.entry(vm - 1).or_insert(idx);
                     }
                 }
-
                 return Ok(Self {
                     vm_to_rich_value,
                     ..Default::default()

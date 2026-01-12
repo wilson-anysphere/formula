@@ -130,30 +130,49 @@ impl MetadataPart {
 
     /// Resolve a worksheet cell's `vm=` index to the rich value record index (`XLRICHVALUE`).
     ///
+    /// Excel's documented behavior is that `c/@vm` is a 1-based index into `<valueMetadata>`'s
+    /// `<bk>` list, but real-world files exist that appear to use a 0-based scheme (notably
+    /// `vm="0"`).
+    ///
     /// This method is best-effort and intentionally tolerant:
     /// - ignores unrelated metadata types and tags
     /// - handles missing/invalid numeric attributes by skipping those entries
-    /// - tries both 0-based and 1-based interpretations for `vm`, `rc/@t`, and `rc/@v`
+    /// - tries both 1-based and 0-based interpretations for `vm`, plus 0/1-based interpretations
+    ///   for `rc/@t` and `rc/@v`
     pub fn vm_to_rich_value_index(&self, vm_raw: u32) -> Option<u32> {
-        let vm_bk = self.value_block_by_index(vm_raw)?;
+        // `vm` is 1-based in the OOXML schema, but tolerate 0-based indexing as a fallback.
+        //
+        // Try 1-based first so workbooks like `fixtures/xlsx/basic/image-in-cell.xlsx` resolve
+        // `vm="1"` to the first `<bk>` record (not the second).
+        let mut vm_candidates: [Option<u32>; 2] = [vm_raw.checked_sub(1), Some(vm_raw)];
+        // Prefer deterministic iteration order; `checked_sub` might yield `None` for `vm_raw=0`.
+        if vm_candidates[0].is_none() {
+            vm_candidates.swap(0, 1);
+        }
 
-        // A `<bk>` may contain multiple `<rc>` records for different metadata types.
-        for rc in &vm_bk.records {
-            // `t` indexes into `<metadataTypes>`.
-            for t_idx in index_candidates(rc.t, self.metadata_types.len()) {
-                let Some(metadata_type) = self.metadata_types.get(t_idx) else {
-                    continue;
-                };
-                if !metadata_type.name.eq_ignore_ascii_case("XLRICHVALUE") {
-                    continue;
-                }
+        for vm_idx in vm_candidates.into_iter().flatten() {
+            let Some(vm_bk) = self.block_by_index_candidate(&self.value_metadata, vm_idx) else {
+                continue;
+            };
 
-                // `v` indexes into `<futureMetadata name="XLRICHVALUE"><bk>...</bk></futureMetadata>`.
-                if let Some(Some(rich_idx)) = self
-                    .block_by_index(&self.xlrichvalue_future_bks, rc.v)
-                    .copied()
-                {
-                    return Some(rich_idx);
+            // A `<bk>` may contain multiple `<rc>` records for different metadata types.
+            for rc in &vm_bk.records {
+                // `t` indexes into `<metadataTypes>`.
+                for t_idx in index_candidates(rc.t, self.metadata_types.len()) {
+                    let Some(metadata_type) = self.metadata_types.get(t_idx) else {
+                        continue;
+                    };
+                    if !metadata_type.name.eq_ignore_ascii_case("XLRICHVALUE") {
+                        continue;
+                    }
+
+                    // `v` indexes into `<futureMetadata name="XLRICHVALUE"><bk>...</bk></futureMetadata>`.
+                    if let Some(Some(rich_idx)) = self
+                        .block_by_index(&self.xlrichvalue_future_bks, rc.v)
+                        .copied()
+                    {
+                        return Some(rich_idx);
+                    }
                 }
             }
         }

@@ -370,6 +370,15 @@ fn extract_rich_data_images_via_rel_table(
 
     Ok(out)
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RichValueImagePointer {
+    /// Indirect reference via `xl/richData/richValueRel.xml` (`<v t="rel">N</v>`).
+    RelIndex(u32),
+    /// Direct relationship ID reference stored inside the rich value entry (e.g. `<v>rId1</v>`),
+    /// resolved via the rich value part's `.rels` file (`xl/richData/_rels/richValue*.xml.rels`).
+    DirectRelId { source_part: String, rel_id: String },
+}
 /// Best-effort extraction of "image in cell" rich values.
 ///
 /// This follows the richData chain:
@@ -443,48 +452,81 @@ pub fn extract_rich_cell_images(
         return Ok(HashMap::new());
     }
 
-    let rich_value_to_rel_index = parse_rich_value_parts_rel_indices(pkg, &rich_value_parts)?;
-    if rich_value_to_rel_index.is_empty() {
+    let rich_value_to_image_pointer = parse_rich_value_parts_image_pointers(pkg, &rich_value_parts)?;
+    if rich_value_to_image_pointer.is_empty() {
         return Ok(HashMap::new());
     }
 
+    // Optional indirection parts used by the most common Excel layout.
     let rich_value_part_for_rels = rich_value_parts
         .iter()
         .copied()
         .find(|name| *name == "xl/richData/richValue.xml")
         .unwrap_or(rich_value_parts[0]);
-    let Some(rich_value_rel_part) = find_rich_value_rel_part(pkg, rich_value_part_for_rels) else {
-        return Ok(HashMap::new());
+    let rich_value_rel_part = find_rich_value_rel_part(pkg, rich_value_part_for_rels);
+    let rel_index_to_rid = match rich_value_rel_part
+        .as_deref()
+        .and_then(|part| pkg.part(part))
+    {
+        Some(bytes) => parse_rich_value_rel_rids(bytes)?,
+        None => Vec::new(),
     };
-    let Some(rich_value_rel_bytes) = pkg.part(&rich_value_rel_part) else {
-        return Ok(HashMap::new());
+    let rid_to_target = match rich_value_rel_part
+        .as_deref()
+        .map(path::rels_for_part)
+        .as_deref()
+        .and_then(|part| pkg.part(part))
+    {
+        Some(bytes) => parse_rich_value_rel_rels(bytes)?,
+        None => HashMap::new(),
     };
-    let rel_index_to_rid = parse_rich_value_rel_rids(rich_value_rel_bytes)?;
-    if rel_index_to_rid.is_empty() {
-        return Ok(HashMap::new());
-    }
 
-    let rich_value_rel_rels_part = path::rels_for_part(&rich_value_rel_part);
-    let Some(rich_value_rel_rels_bytes) = pkg.part(&rich_value_rel_rels_part) else {
-        return Ok(HashMap::new());
-    };
-    let rid_to_target = parse_rich_value_rel_rels(rich_value_rel_rels_bytes)?;
-    if rid_to_target.is_empty() {
-        return Ok(HashMap::new());
-    }
+    // Cache parsed relationships for richValue*.xml parts when resolving direct rId references.
+    let mut rich_value_part_rels: HashMap<String, HashMap<String, String>> = HashMap::new();
 
     let mut out: HashMap<(String, CellRef), Vec<u8>> = HashMap::new();
     for (sheet_name, cell, rich_value_idx) in cells_with_rich_value {
-        let Some(&rel_index) = rich_value_to_rel_index.get(&rich_value_idx) else {
+        let Some(pointer) = rich_value_to_image_pointer.get(&rich_value_idx) else {
             continue;
         };
-        let Some(rid) = rel_index_to_rid.get(rel_index as usize) else {
-            continue;
+
+        let target_part = match pointer {
+            RichValueImagePointer::RelIndex(rel_index) => {
+                let Some(rich_value_rel_part) = rich_value_rel_part.as_deref() else {
+                    continue;
+                };
+                if rel_index_to_rid.is_empty() || rid_to_target.is_empty() {
+                    continue;
+                }
+
+                let Some(rid) = rel_index_to_rid.get(*rel_index as usize) else {
+                    continue;
+                };
+                let Some(target) = rid_to_target.get(rid.as_str()) else {
+                    continue;
+                };
+                resolve_rich_value_rel_target_part(rich_value_rel_part, target)
+            }
+            RichValueImagePointer::DirectRelId {
+                source_part,
+                rel_id,
+            } => {
+                let rels = if let Some(cached) = rich_value_part_rels.get(source_part) {
+                    cached
+                } else {
+                    let parsed = parse_rich_value_part_relationship_targets(pkg, source_part)?;
+                    rich_value_part_rels.insert(source_part.clone(), parsed);
+                    rich_value_part_rels
+                        .get(source_part)
+                        .expect("just inserted")
+                };
+
+                let Some(target_part) = rels.get(rel_id.as_str()) else {
+                    continue;
+                };
+                target_part.to_string()
+            }
         };
-        let Some(target) = rid_to_target.get(rid.as_str()) else {
-            continue;
-        };
-        let target_part = resolve_rich_value_rel_target_part(&rich_value_rel_part, target);
         let Some(bytes) = pkg.part(&target_part) else {
             continue;
         };
@@ -871,6 +913,56 @@ fn parse_worksheet_vm_cells(bytes: &[u8]) -> Result<Vec<(CellRef, u32)>, RichDat
         .collect())
 }
 
+fn parse_rich_value_parts_image_pointers(
+    pkg: &XlsxPackage,
+    part_names: &[&str],
+) -> Result<HashMap<u32, RichValueImagePointer>, RichDataError> {
+    let mut out: HashMap<u32, RichValueImagePointer> = HashMap::new();
+    let mut global_idx: u32 = 0;
+
+    // Optional optimization: when present, `richValueTypes.xml` (and optionally
+    // `richValueStructure.xml`) can describe the schema of each rich value type and which property
+    // corresponds to a relationship (e.g. an image).
+    //
+    // This is best-effort: malformed/unexpected schemas are ignored and we fall back to the
+    // heuristic `<v t="rel">` / first-numeric parsing.
+    let rich_value_types = build_rich_value_type_schema_index_best_effort(pkg);
+
+    for part_name in part_names {
+        let Some(bytes) = pkg.part(part_name) else {
+            continue;
+        };
+        let xml = std::str::from_utf8(bytes).map_err(|source| RichDataError::XmlNonUtf8 {
+            part: (*part_name).to_string(),
+            source,
+        })?;
+        let doc = roxmltree::Document::parse(xml).map_err(|source| RichDataError::XmlParse {
+            part: (*part_name).to_string(),
+            source,
+        })?;
+
+        for rv in doc
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name() == "rv")
+        {
+            if let Some(rel_idx) = parse_rv_rel_index(rv, rich_value_types.as_ref()) {
+                out.insert(global_idx, RichValueImagePointer::RelIndex(rel_idx));
+            } else if let Some(rel_id) = parse_rv_direct_rel_id(rv) {
+                out.insert(
+                    global_idx,
+                    RichValueImagePointer::DirectRelId {
+                        source_part: (*part_name).to_string(),
+                        rel_id,
+                    },
+                );
+            }
+            global_idx = global_idx.saturating_add(1);
+        }
+    }
+
+    Ok(out)
+}
+
 fn parse_rich_value_parts_rel_indices(
     pkg: &XlsxPackage,
     part_names: &[&str],
@@ -955,6 +1047,64 @@ fn parse_rich_value_parts_rel_indices(
         }
     }
 
+    Ok(out)
+}
+
+fn parse_rv_direct_rel_id(rv: roxmltree::Node<'_, '_>) -> Option<String> {
+    // Prefer `<v>` descendant text.
+    for v in rv
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "v")
+    {
+        let text = v.text()?.trim();
+        if is_rid(text) {
+            return Some(text.to_string());
+        }
+    }
+
+    // Also search any attribute value in the `<rv>` subtree (some producers store rIds there).
+    for node in rv.descendants().filter(|n| n.is_element()) {
+        for attr in node.attributes() {
+            let value = attr.value().trim();
+            if is_rid(value) {
+                return Some(value.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+fn parse_rich_value_part_relationship_targets(
+    pkg: &XlsxPackage,
+    rich_value_part: &str,
+) -> Result<HashMap<String, String>, RichDataError> {
+    let rels_part = path::rels_for_part(rich_value_part);
+    let Some(rels_bytes) = pkg.part(&rels_part) else {
+        return Ok(HashMap::new());
+    };
+
+    let rels = crate::openxml::parse_relationships(rels_bytes)?;
+    let mut out: HashMap<String, String> = HashMap::new();
+    for rel in rels {
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|m| m.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
+        if rel.type_uri != crate::drawings::REL_TYPE_IMAGE {
+            continue;
+        }
+
+        let target = strip_fragment(&rel.target);
+        if target.is_empty() {
+            continue;
+        }
+        let target_part = resolve_rich_value_rel_target_part(rich_value_part, target);
+        out.insert(rel.id, target_part);
+    }
     Ok(out)
 }
 
