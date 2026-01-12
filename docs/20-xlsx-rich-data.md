@@ -497,7 +497,9 @@ xl/media/image1.png   # PNG binary payload for cell B2
 
 Even before full rich-data editing is implemented, round-trip compatibility needs:
 
-- **Preserve `vm="…"` attributes** on `<c>` elements (even if unknown).
+- Preserve `cm` and `<extLst>` on `<c>` elements.
+- Preserve `vm="…"` for untouched cells, but drop `vm` when overwriting a cell’s value/formula away from
+  rich-value placeholder semantics (until Formula implements rich-value editing).
 - Preserve `xl/metadata.xml` **byte-for-byte** if we don’t understand/edit it (same strategy as charts).
 - Preserve all `xl/richData/*` parts (including additional, not-yet-modeled parts Excel may emit).
 - Preserve **relationship ordering** inside `richValueRel.xml` because rich values appear to reference relationships by **slot index**, not by `rId` string.
