@@ -3990,6 +3990,43 @@ fn ensure_content_types_override(
                 }
                 writer.write_event(Event::Start(e.to_owned()))?;
             }
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"Types" => {
+                // Some producers emit an empty content-types part as `<Types .../>`.
+                // Expand it so we can insert the required Override.
+                if types_prefix.is_none() {
+                    types_prefix = element_prefix(e.name().as_ref())
+                        .map(|p| String::from_utf8_lossy(p).into_owned());
+                }
+                if !has_default_ns {
+                    has_default_ns = content_types_has_default_ns(e)?;
+                }
+
+                if saw_part {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                } else {
+                    let prefix = override_prefix.as_deref().or_else(|| {
+                        if !has_default_ns {
+                            types_prefix.as_deref()
+                        } else {
+                            None
+                        }
+                    });
+                    let tag = prefixed_tag(prefix, "Override");
+                    let mut override_el = quick_xml::events::BytesStart::new(tag.as_str());
+                    override_el.push_attribute(("PartName", part_name));
+                    override_el.push_attribute(("ContentType", content_type));
+
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                    writer.write_event(Event::Empty(override_el))?;
+
+                    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    writer.get_mut().extend_from_slice(b"</");
+                    writer.get_mut().extend_from_slice(tag.as_bytes());
+                    writer.get_mut().extend_from_slice(b">");
+
+                    inserted = true;
+                }
+            }
             Event::Start(ref e) if local_name(e.name().as_ref()) == b"Override" => {
                 if override_prefix.is_none() {
                     override_prefix = element_prefix(e.name().as_ref())
@@ -4098,6 +4135,43 @@ fn ensure_content_types_default(
                     has_default_ns = content_types_has_default_ns(e)?;
                 }
                 writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(ref e) if local_name(e.name().as_ref()) == b"Types" => {
+                // Some producers emit an empty content-types part as `<Types .../>`.
+                // Expand it so we can insert the required Default.
+                if types_prefix.is_none() {
+                    types_prefix =
+                        element_prefix(e.name().as_ref()).map(|p| String::from_utf8_lossy(p).into_owned());
+                }
+                if !has_default_ns {
+                    has_default_ns = content_types_has_default_ns(e)?;
+                }
+
+                if saw_ext {
+                    writer.write_event(Event::Empty(e.to_owned()))?;
+                } else {
+                    let prefix = default_prefix.as_deref().or_else(|| {
+                        if !has_default_ns {
+                            types_prefix.as_deref()
+                        } else {
+                            None
+                        }
+                    });
+                    let tag = prefixed_tag(prefix, "Default");
+                    let mut default_el = quick_xml::events::BytesStart::new(tag.as_str());
+                    default_el.push_attribute(("Extension", ext));
+                    default_el.push_attribute(("ContentType", content_type));
+
+                    writer.write_event(Event::Start(e.to_owned()))?;
+                    writer.write_event(Event::Empty(default_el))?;
+
+                    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    writer.get_mut().extend_from_slice(b"</");
+                    writer.get_mut().extend_from_slice(tag.as_bytes());
+                    writer.get_mut().extend_from_slice(b">");
+
+                    inserted = true;
+                }
             }
             Event::Start(ref e) if local_name(e.name().as_ref()) == b"Default" => {
                 if default_prefix.is_none() {
@@ -4244,6 +4318,47 @@ fn ensure_workbook_rels_has_relationship(
                     }
                 }
                 writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(ref e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
+            {
+                // Some producers emit an empty relationships part as `<Relationships .../>`.
+                // Expand it so we can insert the required Relationship.
+                if root_prefix.is_none() {
+                    root_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                }
+                if !root_has_default_ns {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if attr.key.as_ref() == b"xmlns" {
+                            root_has_default_ns = true;
+                            break;
+                        }
+                    }
+                }
+
+                let prefix = relationship_prefix.as_deref().or_else(|| {
+                    if root_has_default_ns {
+                        None
+                    } else {
+                        root_prefix.as_deref()
+                    }
+                });
+                let relationship_tag = prefixed_tag(prefix, "Relationship");
+                let mut rel = quick_xml::events::BytesStart::new(relationship_tag.as_str());
+                rel.push_attribute(("Id", id.as_str()));
+                rel.push_attribute(("Type", rel_type));
+                rel.push_attribute(("Target", target));
+
+                writer.write_event(Event::Start(e.to_owned()))?;
+                writer.write_event(Event::Empty(rel))?;
+
+                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                writer.get_mut().extend_from_slice(b"</");
+                writer.get_mut().extend_from_slice(tag.as_bytes());
+                writer.get_mut().extend_from_slice(b">");
             }
             Event::Start(ref e)
                 if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>

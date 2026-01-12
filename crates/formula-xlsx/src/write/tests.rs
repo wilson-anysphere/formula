@@ -382,6 +382,33 @@ fn ensure_content_types_default_preserves_prefix_only_content_types() {
     }
 }
 
+#[test]
+fn ensure_content_types_default_expands_self_closing_prefix_only_root() {
+    let ct_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types"/>"#;
+
+    let mut parts = BTreeMap::new();
+    parts.insert("[Content_Types].xml".to_string(), ct_xml.as_bytes().to_vec());
+
+    ensure_content_types_default(&mut parts, "png", "image/png").expect("patch content types");
+
+    let updated = std::str::from_utf8(parts.get("[Content_Types].xml").expect("ct part"))
+        .expect("utf8 ct xml");
+    assert_parses_xml(updated);
+    assert!(
+        updated.contains("</ct:Types>"),
+        "expected self-closing ct:Types root to be expanded; got:\n{updated}"
+    );
+    assert!(
+        updated.contains(r#"<ct:Default Extension="png" ContentType="image/png"/>"#),
+        "expected inserted ct:Default; got:\n{updated}"
+    );
+    assert!(
+        !updated.contains(r#"<Default Extension="png""#),
+        "must not introduce namespace-less <Default> elements; got:\n{updated}"
+    );
+}
+
 fn override_element_names(xml: &str) -> Vec<Vec<u8>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
@@ -493,6 +520,38 @@ fn ensure_content_types_override_preserves_prefix_only_content_types() {
 }
 
 #[test]
+fn ensure_content_types_override_expands_self_closing_prefix_only_root() {
+    let ct_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types"/>"#;
+
+    let mut parts = BTreeMap::new();
+    parts.insert("[Content_Types].xml".to_string(), ct_xml.as_bytes().to_vec());
+
+    ensure_content_types_override(
+        &mut parts,
+        "/xl/styles.xml",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml",
+    )
+    .expect("patch content types");
+
+    let updated = std::str::from_utf8(parts.get("[Content_Types].xml").expect("ct part"))
+        .expect("utf8 ct xml");
+    assert_parses_xml(updated);
+    assert!(
+        updated.contains("</ct:Types>"),
+        "expected self-closing ct:Types root to be expanded; got:\n{updated}"
+    );
+    assert!(
+        updated.contains(r#"<ct:Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>"#),
+        "expected inserted ct:Override; got:\n{updated}"
+    );
+    assert!(
+        !updated.contains("<Override"),
+        "must not introduce namespace-less <Override> elements; got:\n{updated}"
+    );
+}
+
+#[test]
 fn patch_content_types_for_sheet_edits_preserves_prefix_only_content_types() {
     let ct_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <ct:Types xmlns:ct="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -574,6 +633,39 @@ fn ensure_workbook_rels_has_relationship_inserts_prefixed_relationship() {
     assert!(
         out.contains(REL_TYPE_SHARED_STRINGS),
         "expected sharedStrings relationship to be inserted"
+    );
+    assert!(
+        !out.contains("<Relationship"),
+        "prefix-only rels must not contain namespace-less <Relationship> tags, got:\n{out}"
+    );
+}
+
+#[test]
+fn ensure_workbook_rels_has_relationship_expands_self_closing_prefix_only_root() {
+    let rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pr:Relationships xmlns:pr="http://schemas.openxmlformats.org/package/2006/relationships"/>"#;
+
+    let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    parts.insert(WORKBOOK_RELS_PART.to_string(), rels.as_bytes().to_vec());
+
+    ensure_workbook_rels_has_relationship(&mut parts, REL_TYPE_STYLES, "styles.xml")
+        .expect("patch workbook rels");
+
+    let out = std::str::from_utf8(
+        parts
+            .get(WORKBOOK_RELS_PART)
+            .expect("workbook rels present")
+            .as_slice(),
+    )
+    .expect("utf8");
+    assert_parses_xml(out);
+    assert!(
+        out.contains("</pr:Relationships>"),
+        "expected self-closing pr:Relationships root to be expanded; got:\n{out}"
+    );
+    assert!(
+        out.contains("<pr:Relationship"),
+        "expected inserted pr:Relationship; got:\n{out}"
     );
     assert!(
         !out.contains("<Relationship"),
