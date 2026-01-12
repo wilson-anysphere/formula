@@ -59,11 +59,11 @@ export class ContextMenu {
 
   private readonly buttonItems = new WeakMap<HTMLButtonElement, ContextMenuButtonItem>();
 
-  constructor(options: { onClose?: () => void } = {}) {
+  constructor(options: { onClose?: () => void; testId?: string } = {}) {
     this.onClose = options.onClose ?? null;
 
     const overlay = document.createElement("div");
-    overlay.dataset.testid = "context-menu";
+    overlay.dataset.testid = options.testId ?? "context-menu";
     overlay.className = "context-menu-overlay";
     overlay.hidden = true;
 

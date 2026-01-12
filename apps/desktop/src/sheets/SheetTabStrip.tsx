@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { ContextMenu, type ContextMenuItem } from "../menus/contextMenu";
 import type { SheetMeta, TabColor, WorkbookSheetStore } from "./workbookSheetStore";
 import { computeWorkbookSheetMoveIndex } from "./sheetReorder";
 
@@ -35,6 +36,27 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
   const [renameError, setRenameError] = useState<string | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null!);
   const [canScroll, setCanScroll] = useState<{ left: boolean; right: boolean }>({ left: false, right: false });
+
+  const lastContextMenuTabRef = useRef<HTMLButtonElement | null>(null);
+  const tabContextMenu = useMemo(
+    () =>
+      new ContextMenu({
+        testId: "sheet-tab-context-menu",
+        onClose: () => {
+          // Restore focus so keyboard users don't "fall off" the tab strip after dismissing the menu.
+          if (lastContextMenuTabRef.current?.isConnected) {
+            lastContextMenuTabRef.current.focus({ preventScroll: true });
+          }
+        },
+      }),
+    [],
+  );
+
+  useEffect(() => {
+    return () => {
+      tabContextMenu.close();
+    };
+  }, [tabContextMenu]);
 
   const stopAutoScroll = () => {
     const raf = autoScrollRef.current.raf;
@@ -99,6 +121,25 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
     setRenameError(null);
     setEditingSheetId(null);
     return true;
+  };
+
+  const openSheetTabContextMenu = (sheetId: string, anchor: { x: number; y: number }, options: { focusFirst?: boolean }) => {
+    const sheet = store.getById(sheetId);
+    if (!sheet) return;
+
+    const items: ContextMenuItem[] = [
+      {
+        type: "item",
+        label: "Rename",
+        onSelect: () => {
+          setEditingSheetId(sheet.id);
+          setDraftName(sheet.name);
+          setRenameError(null);
+        },
+      },
+    ];
+
+    tabContextMenu.open({ x: anchor.x, y: anchor.y, items, focusFirst: options.focusFirst });
   };
 
   const moveSheet = (sheetId: string, dropTarget: Parameters<typeof computeWorkbookSheetMoveIndex>[0]["dropTarget"]) => {
@@ -231,6 +272,18 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
                 next.scrollIntoView({ block: "nearest", inline: "nearest" });
               };
 
+              const isContextMenuKey = (e.shiftKey && e.key === "F10") || e.key === "ContextMenu" || e.code === "ContextMenu";
+              if (isContextMenuKey) {
+                const sheetId = target.dataset.sheetId;
+                if (!sheetId) return;
+                e.preventDefault();
+                e.stopPropagation();
+                lastContextMenuTabRef.current = target;
+                const rect = target.getBoundingClientRect();
+                openSheetTabContextMenu(sheetId, { x: rect.left + rect.width / 2, y: rect.bottom }, { focusFirst: true });
+                return;
+              }
+
               if (e.key === "ArrowRight") {
                 e.preventDefault();
                 e.stopPropagation();
@@ -257,7 +310,6 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
               }
 
               // Enter/Space are handled by the <button> itself to activate the focused tab.
-              // ContextMenu / Shift+F10 should open the native context menu.
             }
           }
 
@@ -304,6 +356,12 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
             tabRef={sheet.id === activeSheetId ? activeTabRef : undefined}
             onActivate={() => activateSheetWithRenameGuard(sheet.id)}
             onBeginRename={() => beginRenameWithGuard(sheet)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              lastContextMenuTabRef.current = e.currentTarget;
+              openSheetTabContextMenu(sheet.id, { x: e.clientX, y: e.clientY }, { focusFirst: false });
+            }}
             onCommitRename={() => commitRename(sheet.id)}
             onCancelRename={() => {
               setEditingSheetId(null);
@@ -361,6 +419,7 @@ function SheetTab(props: {
   tabRef?: React.Ref<HTMLButtonElement>;
   onActivate: () => void;
   onBeginRename: () => void;
+  onContextMenu: (e: React.MouseEvent<HTMLButtonElement>) => void;
   onCommitRename: () => void;
   onCancelRename: () => void;
   onDraftNameChange: (name: string) => void;
@@ -390,6 +449,10 @@ function SheetTab(props: {
       }}
       onDoubleClick={() => {
         if (!editing) props.onBeginRename();
+      }}
+      onContextMenu={(e) => {
+        if (editing) return;
+        props.onContextMenu(e);
       }}
       onDragStart={(e) => {
         props.onDragStart();

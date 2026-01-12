@@ -106,6 +106,26 @@ test.describe("sheet tabs", () => {
     await expect(page.getByTestId("active-value")).toHaveText("Hello from Sheet2");
   });
 
+  test("Shift+F10 opens the context menu for the focused sheet tab", async ({ page }) => {
+    await gotoDesktop(page);
+
+    const sheet1Tab = page.getByRole("tab", { name: "Sheet1" });
+    for (let i = 0; i < 6; i += 1) {
+      await page.keyboard.press("Tab");
+      if (await sheet1Tab.evaluate((el) => el === document.activeElement)) break;
+    }
+    await expect(sheet1Tab).toBeFocused();
+
+    await page.keyboard.press("Shift+F10");
+    const menu = page.getByTestId("sheet-tab-context-menu");
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole("button", { name: "Rename" })).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await expect(sheet1Tab).toBeFocused();
+  });
+
   test("double-click rename commits on Enter and updates the tab label", async ({ page }) => {
     await gotoDesktop(page);
 

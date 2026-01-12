@@ -3938,6 +3938,12 @@ if (
       const shouldOpen = (e.shiftKey && e.key === "F10") || e.key === "ContextMenu" || e.code === "ContextMenu";
       if (!shouldOpen) return;
 
+      // When focus is in the sheet tab strip, Shift+F10 / ContextMenu should behave like
+      // Excel and open the sheet-tab context menu instead of the active-cell context menu.
+      // (The tab strip is responsible for handling these keys.)
+      const target = e.target as Node | null;
+      if (target && sheetTabsRootEl.contains(target)) return;
+
       e.preventDefault();
       openGridContextMenuAtActiveCell();
     },
