@@ -219,6 +219,53 @@ fn format_function_call(name: &str, args: Vec<ExprFragment>) -> ExprFragment {
     }
 }
 
+fn namex_is_udf_call(remaining: &[u8]) -> bool {
+    // Excel encodes user-defined / add-in / future functions as a `PtgFuncVar` token with
+    // `iftab=0x00FF` (FTAB_USER_DEFINED), where the *function name* is the top-of-stack expression
+    // (often a `PtgNameX`).
+    //
+    // In practice, there may be `PtgAttr` tokens between the name and `PtgFuncVar` (e.g. spacing
+    // / evaluation attributes). To reliably render a parseable function identifier, treat `PtgNameX`
+    // as a function name if the next non-attr token is `PtgFuncVar(0x00FF)`.
+    //
+    // [MS-XLS] 2.5.198.42 (PtgFuncVar) and 2.5.198.3 (PtgAttr)
+    const PTG_ATTR: u8 = 0x19;
+    const T_ATTR_CHOOSE: u8 = 0x04;
+
+    let mut input = remaining;
+    while let Some(&ptg) = input.first() {
+        match ptg {
+            PTG_ATTR => {
+                // PtgAttr: [ptg][grbit: u8][wAttr: u16][optional jump table for tAttrChoose]
+                if input.len() < 4 {
+                    return false;
+                }
+                let grbit = input[1];
+                let w_attr = u16::from_le_bytes([input[2], input[3]]);
+                input = &input[4..];
+
+                if grbit & T_ATTR_CHOOSE != 0 {
+                    let needed = (w_attr as usize).saturating_mul(2);
+                    if input.len() < needed {
+                        return false;
+                    }
+                    input = &input[needed..];
+                }
+            }
+            // PtgFuncVar variants.
+            0x22 | 0x42 | 0x62 => {
+                if input.len() < 4 {
+                    return false;
+                }
+                let func_id = u16::from_le_bytes([input[2], input[3]]);
+                return func_id == formula_biff::FTAB_USER_DEFINED;
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
 pub(crate) fn decode_biff8_rgce(rgce: &[u8], ctx: &RgceDecodeContext<'_>) -> DecodeRgceResult {
     decode_biff8_rgce_with_base(rgce, ctx, None)
 }
@@ -631,9 +678,7 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 //
                 // In this case we must decode `PtgNameX` into a *function identifier* (no workbook
                 // prefix or quoting), otherwise the rendered formula won't be parseable.
-                let is_udf_call = matches!(input.get(0), Some(0x22 | 0x42 | 0x62))
-                    && input.len() >= 4
-                    && u16::from_le_bytes([input[2], input[3]]) == 0x00FF;
+                let is_udf_call = namex_is_udf_call(input);
 
                 match format_namex_ref(ixti, iname, is_udf_call, ctx) {
                     Ok(txt) => stack.push(ExprFragment::new(txt)),
@@ -3611,6 +3656,64 @@ mod tests {
         let rgce = vec![
             0x1E, 0x01, 0x00, // PtgInt 1
             0x39, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // PtgNameX (ixti=0, iname=1)
+            0x22, 0x02, 0xFF, 0x00, // PtgFuncVar(argc=2, iftab=0x00FF)
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "MyFunc(1)");
+        assert!(
+            decoded.warnings.is_empty(),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_namex_udf_function_name_skipping_ptgattr_before_ptgfuncvar_00ff() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 1,
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+
+        // Deliberately use an ExternalWorkbook SUPBOOK here: if `PtgNameX` is not recognized as a
+        // function name, the decoder would include a workbook+sheet prefix (`'[Book]Sheet'!Name`)
+        // and the rendered UDF call would no longer match Excel's canonical `Name(args...)` form.
+        let supbooks = vec![
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0001}".to_string(),
+                kind: SupBookKind::Internal,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: Vec::new(),
+            },
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "Book2.xlsx".to_string(),
+                kind: SupBookKind::ExternalWorkbook,
+                workbook_name: Some("Book2.xlsx".to_string()),
+                sheet_names: vec!["Sheet1".to_string()],
+                extern_names: vec!["MyFunc".to_string()],
+            },
+        ];
+
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        // MyFunc(1) encoded as: [PtgInt 1][PtgNameX][PtgAttr][PtgFuncVar argc=2 iftab=0x00FF]
+        let rgce = vec![
+            0x1E, 0x01, 0x00, // PtgInt 1
+            0x39, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // PtgNameX (ixti=0, iname=1)
+            0x19, 0x00, 0x00, 0x00, // PtgAttr (no-op; should be skipped by NameX UDF detection)
             0x22, 0x02, 0xFF, 0x00, // PtgFuncVar(argc=2, iftab=0x00FF)
         ];
 
