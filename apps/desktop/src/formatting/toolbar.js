@@ -70,6 +70,47 @@ function axisStyleIdCounts(axisMap, start, end) {
   return counts;
 }
 
+function styleIdForRowInRuns(runs, row) {
+  if (!Array.isArray(runs) || runs.length === 0) return 0;
+  let lo = 0;
+  let hi = runs.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const run = runs[mid];
+    if (!run) return 0;
+    if (row < run.startRow) {
+      hi = mid - 1;
+    } else if (row >= run.endRowExclusive) {
+      lo = mid + 1;
+    } else {
+      return run.styleId ?? 0;
+    }
+  }
+  return 0;
+}
+
+function runsOverlapRange(runs, startRow, endRowExclusive) {
+  if (!Array.isArray(runs) || runs.length === 0) return false;
+  for (const run of runs) {
+    if (!run) continue;
+    if (run.endRowExclusive <= startRow) continue;
+    if (run.startRow >= endRowExclusive) break;
+    return true;
+  }
+  return false;
+}
+
+function lowerBound(sorted, value) {
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sorted[mid] < value) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 function allCellsMatchRange(doc, sheetId, range, predicate) {
   const rowCount = range.end.row - range.start.row + 1;
   const colCount = range.end.col - range.start.col + 1;
@@ -144,14 +185,56 @@ function allCellsMatchRange(doc, sheetId, range, predicate) {
 
   const rowStyleIds = sheet.rowStyleIds ?? new Map();
   const colStyleIds = sheet.colStyleIds ?? new Map();
+  const formatRunsByCol = sheet.formatRunsByCol ?? new Map();
 
   const rowCounts = axisStyleIdCounts(rowStyleIds, range.start.row, range.end.row);
   const colCounts = axisStyleIdCounts(colStyleIds, range.start.col, range.end.col);
 
+  const startRow = range.start.row;
+  const endRowExclusive = range.end.row + 1;
+
+  /** @type {{ col: number, runs: any[] }[]} */
+  const runCols = [];
+  if (formatRunsByCol && typeof formatRunsByCol.entries === "function") {
+    for (const [rawCol, runs] of formatRunsByCol.entries()) {
+      const col = Number(rawCol);
+      if (!Number.isInteger(col) || col < range.start.col || col > range.end.col) continue;
+      if (!runsOverlapRange(runs, startRow, endRowExclusive)) continue;
+      runCols.push({ col, runs });
+    }
+  }
+
+  /** @type {Set<number>} */
+  const runColSet = new Set(runCols.map((c) => c.col));
+  /** @type {Map<number, number>} */
+  const colCountsNoRun = new Map(colCounts);
+  for (const { col } of runCols) {
+    const colStyleId = colStyleIds.get(col) ?? 0;
+    const prev = colCountsNoRun.get(colStyleId) ?? 0;
+    if (prev <= 1) colCountsNoRun.delete(colStyleId);
+    else colCountsNoRun.set(colStyleId, prev - 1);
+  }
+
+  /** @type {Map<number, number>} */
+  const rowOverrideStyleByRow = new Map();
+  /** @type {number[]} */
+  const rowOverrideRows = [];
+  if (rowStyleIds && rowStyleIds.size > 0) {
+    for (const [row, styleId] of rowStyleIds.entries()) {
+      if (row < range.start.row || row > range.end.row) continue;
+      rowOverrideStyleByRow.set(row, styleId);
+      rowOverrideRows.push(row);
+    }
+    rowOverrideRows.sort((a, b) => a - b);
+  }
+
   /** @type {Map<string, number>} */
-  const overriddenCellCountByRegion = new Map();
+  const overriddenCellCountByNoRunRegion = new Map();
+  /** @type {Map<number, number[]>} */
+  const cellOverrideRowsByRunCol = new Map();
 
   const sheetColCache = new Map();
+  const sheetColRowCache = new Map();
   const baseStyleCache = new Map();
   const basePredicateCache = new Map();
   const cellPredicateCache = new Map();
@@ -164,17 +247,26 @@ function allCellsMatchRange(doc, sheetId, range, predicate) {
     return merged;
   };
 
-  const baseStyle = (colStyleId, rowStyleId) => {
+  const sheetColRowStyle = (colStyleId, rowStyleId) => {
     const key = `${colStyleId}|${rowStyleId}`;
-    const cached = baseStyleCache.get(key);
+    const cached = sheetColRowCache.get(key);
     if (cached) return cached;
     const merged = applyStylePatch(sheetColStyle(colStyleId), styleTable.get(rowStyleId));
+    sheetColRowCache.set(key, merged);
+    return merged;
+  };
+
+  const baseStyle = (colStyleId, rowStyleId, runStyleId) => {
+    const key = `${colStyleId}|${rowStyleId}|${runStyleId}`;
+    const cached = baseStyleCache.get(key);
+    if (cached) return cached;
+    const merged = applyStylePatch(sheetColRowStyle(colStyleId, rowStyleId), styleTable.get(runStyleId));
     baseStyleCache.set(key, merged);
     return merged;
   };
 
-  // 1) Check explicit cell-level overrides inside the selection and track which base regions
-  //    still have at least one non-overridden cell.
+  // 1) Check explicit cell-level overrides inside the selection.
+  //    These always win over all other layers.
   if (sheet.cells && sheet.cells.size > 0) {
     for (const [key, cell] of sheet.cells.entries()) {
       if (!cell || cell.styleId === 0) continue;
@@ -186,41 +278,148 @@ function allCellsMatchRange(doc, sheetId, range, predicate) {
 
       const rowStyleId = rowStyleIds.get(row) ?? 0;
       const colStyleId = colStyleIds.get(col) ?? 0;
+      const runStyleId = styleIdForRowInRuns(formatRunsByCol.get(col), row);
 
-      const regionKey = `${colStyleId}|${rowStyleId}`;
-      overriddenCellCountByRegion.set(regionKey, (overriddenCellCountByRegion.get(regionKey) ?? 0) + 1);
+      if (runColSet.has(col)) {
+        let rows = cellOverrideRowsByRunCol.get(col);
+        if (!rows) {
+          rows = [];
+          cellOverrideRowsByRunCol.set(col, rows);
+        }
+        rows.push(row);
+      } else {
+        const regionKey = `${colStyleId}|${rowStyleId}`;
+        overriddenCellCountByNoRunRegion.set(regionKey, (overriddenCellCountByNoRunRegion.get(regionKey) ?? 0) + 1);
+      }
 
-      const cellKey = `${colStyleId}|${rowStyleId}|${cell.styleId}`;
+      const cellKey = `${colStyleId}|${rowStyleId}|${runStyleId}|${cell.styleId}`;
       const cachedMatch = cellPredicateCache.get(cellKey);
       if (cachedMatch === false) return false;
       if (cachedMatch === true) continue;
 
-      const merged = applyStylePatch(baseStyle(colStyleId, rowStyleId), styleTable.get(cell.styleId));
+      const merged = applyStylePatch(baseStyle(colStyleId, rowStyleId, runStyleId), styleTable.get(cell.styleId));
       const matches = Boolean(predicate(merged));
       cellPredicateCache.set(cellKey, matches);
       if (!matches) return false;
     }
   }
 
-  // 2) Check base styles (sheet/col/row) for any region that contains at least one cell not
-  //    overridden by a cell-level style.
+  /** @type {Map<number, Set<number>>} */
+  const cellOverrideRowSetByRunCol = new Map();
+  for (const [col, rows] of cellOverrideRowsByRunCol.entries()) {
+    rows.sort((a, b) => a - b);
+    cellOverrideRowSetByRunCol.set(col, new Set(rows));
+  }
+
+  // 2) Check base styles for columns WITHOUT applicable range runs in the selection.
+  //    Effective precedence for these cells is: sheet < col < row (run=0, cell=0).
   for (const [rowStyleId, rowsWithStyle] of rowCounts.entries()) {
-    for (const [colStyleId, colsWithStyle] of colCounts.entries()) {
+    for (const [colStyleId, colsWithStyle] of colCountsNoRun.entries()) {
       const regionCellCount = rowsWithStyle * colsWithStyle;
       if (regionCellCount <= 0) continue;
 
       const regionKey = `${colStyleId}|${rowStyleId}`;
-      const overriddenCount = overriddenCellCountByRegion.get(regionKey) ?? 0;
+      const overriddenCount = overriddenCellCountByNoRunRegion.get(regionKey) ?? 0;
       if (overriddenCount >= regionCellCount) continue;
 
-      const cacheKey = regionKey;
+      const cacheKey = `${colStyleId}|${rowStyleId}|0`;
       const cached = basePredicateCache.get(cacheKey);
       if (cached === false) return false;
       if (cached === true) continue;
 
-      const matches = Boolean(predicate(baseStyle(colStyleId, rowStyleId)));
+      const matches = Boolean(predicate(baseStyle(colStyleId, rowStyleId, 0)));
       basePredicateCache.set(cacheKey, matches);
       if (!matches) return false;
+    }
+  }
+
+  // 3) Check base styles for columns WITH range runs intersecting the selection.
+  //    Effective precedence for these cells is: sheet < col < row < run (cell=0).
+  for (const { col, runs } of runCols) {
+    const colStyleId = colStyleIds.get(col) ?? 0;
+    const overriddenRows = cellOverrideRowsByRunCol.get(col) ?? [];
+    const overriddenRowSet = cellOverrideRowSetByRunCol.get(col) ?? new Set();
+
+    let rowOverrideIdx = rowOverrideRows.length > 0 ? lowerBound(rowOverrideRows, startRow) : 0;
+    let cellOverrideIdx = overriddenRows.length > 0 ? lowerBound(overriddenRows, startRow) : 0;
+
+    const evalSegment = (segStart, segEnd, runStyleId) => {
+      const segLen = segEnd - segStart;
+      if (segLen <= 0) return true;
+
+      // Advance pointers to segment start.
+      while (rowOverrideIdx < rowOverrideRows.length && rowOverrideRows[rowOverrideIdx] < segStart) rowOverrideIdx += 1;
+      while (cellOverrideIdx < overriddenRows.length && overriddenRows[cellOverrideIdx] < segStart) cellOverrideIdx += 1;
+
+      // Row-level overrides (if their cell isn't explicitly overridden).
+      const rowOverrideStartIdx = rowOverrideIdx;
+      while (rowOverrideIdx < rowOverrideRows.length && rowOverrideRows[rowOverrideIdx] < segEnd) {
+        const row = rowOverrideRows[rowOverrideIdx];
+        const rowStyleId = rowOverrideStyleByRow.get(row) ?? 0;
+        if (rowStyleId !== 0 && !overriddenRowSet.has(row)) {
+          const cacheKey = `${colStyleId}|${rowStyleId}|${runStyleId}`;
+          const cached = basePredicateCache.get(cacheKey);
+          if (cached === false) return false;
+          if (cached !== true) {
+            const matches = Boolean(predicate(baseStyle(colStyleId, rowStyleId, runStyleId)));
+            basePredicateCache.set(cacheKey, matches);
+            if (!matches) return false;
+          }
+        }
+        rowOverrideIdx += 1;
+      }
+
+      const rowOverrideCount = rowOverrideIdx - rowOverrideStartIdx;
+      const defaultRowCount = segLen - rowOverrideCount;
+      if (defaultRowCount <= 0) return true;
+
+      // Count cell overrides that live on default rows (rowStyleId=0) within this segment.
+      let defaultCellOverrideCount = 0;
+      while (cellOverrideIdx < overriddenRows.length && overriddenRows[cellOverrideIdx] < segEnd) {
+        const row = overriddenRows[cellOverrideIdx];
+        if (!rowOverrideStyleByRow.has(row)) defaultCellOverrideCount += 1;
+        cellOverrideIdx += 1;
+      }
+
+      // No remaining cells use the base style for rowStyleId=0 in this segment.
+      if (defaultRowCount <= defaultCellOverrideCount) return true;
+
+      const cacheKey = `${colStyleId}|0|${runStyleId}`;
+      const cached = basePredicateCache.get(cacheKey);
+      if (cached === false) return false;
+      if (cached === true) return true;
+
+      const matches = Boolean(predicate(baseStyle(colStyleId, 0, runStyleId)));
+      basePredicateCache.set(cacheKey, matches);
+      return matches;
+    };
+
+    let cursor = startRow;
+    for (const run of runs) {
+      if (!run) continue;
+      if (run.endRowExclusive <= startRow) continue;
+      if (run.startRow >= endRowExclusive) break;
+
+      const runStart = Math.max(run.startRow, startRow);
+      const runEnd = Math.min(run.endRowExclusive, endRowExclusive);
+
+      // Gap before this run.
+      if (cursor < runStart) {
+        if (!evalSegment(cursor, runStart, 0)) return false;
+      }
+
+      // Overlapping run segment.
+      if (runStart < runEnd) {
+        if (!evalSegment(runStart, runEnd, run.styleId ?? 0)) return false;
+      }
+
+      cursor = Math.max(cursor, runEnd);
+      if (cursor >= endRowExclusive) break;
+    }
+
+    // Trailing gap after the last run.
+    if (cursor < endRowExclusive) {
+      if (!evalSegment(cursor, endRowExclusive, 0)) return false;
     }
   }
 
