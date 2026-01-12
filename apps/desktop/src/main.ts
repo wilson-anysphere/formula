@@ -3432,6 +3432,8 @@ if (
       if (key === lastSelectionEventKey) return;
       lastSelectionEventKey = key;
 
+      recordLastExtensionSelection(rect.sheetId, range);
+
       const values: Array<Array<string | number | boolean | null>> = [];
       for (let r = range.startRow; r <= range.endRow; r++) {
         const row: Array<string | number | boolean | null> = [];
@@ -3490,6 +3492,12 @@ if (
         const batch = Array.from(pendingCellChanges.values());
         pendingCellChanges.clear();
         for (const event of batch) {
+          recordLastExtensionSelection(event.sheetId, {
+            startRow: event.row,
+            startCol: event.col,
+            endRow: event.row,
+            endCol: event.col,
+          });
           for (const listener of [...cellChangedEventListeners]) {
             try {
               listener(event);
