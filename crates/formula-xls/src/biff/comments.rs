@@ -426,47 +426,29 @@ fn parse_txo_text_biff5(
         }
     }
 
-    let mut frag_idx = 1usize;
-    let mut offset = 0usize;
     let mut remaining = cch_text;
-    let mut out = String::new();
-
-    while remaining > 0 {
-        let frag = fragments.get(frag_idx).copied().unwrap_or_default();
+    // Accumulate the byte payload first, then decode once. This preserves stateful multibyte
+    // codepages (e.g. Shift-JIS) when a character boundary is split across CONTINUE records.
+    let mut bytes = Vec::with_capacity(cch_text);
+    for frag in continues {
+        if remaining == 0 {
+            break;
+        }
         if frag.is_empty() {
-            frag_idx += 1;
-            offset = 0;
-            if frag_idx >= fragments.len() {
-                break;
-            }
+            continue;
+        }
+        let frag = if skip_leading_flag_bytes && matches!(frag.first().copied(), Some(0) | Some(1)) {
+            &frag[1..]
+        } else {
+            frag
+        };
+        if frag.is_empty() {
             continue;
         }
 
-        if offset == 0
-            && skip_leading_flag_bytes
-            && matches!(frag.first().copied(), Some(0) | Some(1))
-        {
-            offset = 1;
-        }
-
-        if offset >= frag.len() {
-            frag_idx += 1;
-            offset = 0;
-            continue;
-        }
-
-        let available = frag.len() - offset;
-        let take = remaining.min(available);
-        out.push_str(&strings::decode_ansi(
-            codepage,
-            &frag[offset..offset + take],
-        ));
+        let take = remaining.min(frag.len());
+        bytes.extend_from_slice(&frag[..take]);
         remaining -= take;
-        offset += take;
-        if offset >= frag.len() {
-            frag_idx += 1;
-            offset = 0;
-        }
     }
 
     if remaining > 0 {
@@ -479,6 +461,7 @@ fn parse_txo_text_biff5(
             ),
         );
     }
+    let mut out = strings::decode_ansi(codepage, &bytes);
     trim_trailing_nuls(&mut out);
     strip_embedded_nuls(&mut out);
     Some(out)
@@ -1459,6 +1442,37 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].author, "Alice");
         assert_eq!(notes[0].text, "Hi А");
+    }
+
+    #[test]
+    fn parses_biff5_txo_text_with_multibyte_codepage_split_across_continue_records() {
+        // In Shift-JIS (codepage 932), '\u{3042}' ('あ') is encoded as 0x82 0xA0. Ensure we decode
+        // across CONTINUE boundaries without corrupting multibyte sequences.
+        let sjis = [0x82u8, 0xA0u8];
+        let cch_text = sjis.len() as u16;
+
+        let stream = [
+            bof_biff5(),
+            note_biff5(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text(cch_text),
+            continue_text_biff5(&sjis[..1]),
+            continue_text_biff5(&sjis[1..]),
+            // Formatting CONTINUE payload (dummy bytes).
+            continue_text_biff5(&[0u8; 4]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 932).expect("parse");
+        assert!(
+            warnings.is_empty(),
+            "unexpected warnings: {warnings:?}"
+        );
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].author, "Alice");
+        assert_eq!(notes[0].text, "\u{3042}");
     }
 
     #[test]
