@@ -17,6 +17,7 @@ See also:
 [Content_Types].xml
 xl/cellImages.xml
 xl/_rels/cellImages.xml.rels
+xl/metadata.xml
 xl/media/image1.png
 ```
 
@@ -36,6 +37,14 @@ In `xl/_rels/workbook.xml.rels`, the workbook links to `xl/cellImages.xml`:
 <Relationship Id="rId3"
               Type="http://schemas.microsoft.com/office/2023/02/relationships/cellImage"
               Target="cellImages.xml"/>
+```
+
+This fixture also includes an (empty) workbook-level `xl/metadata.xml` part:
+
+```xml
+<Relationship Id="rId4"
+              Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"
+              Target="metadata.xml"/>
 ```
 
 The corresponding `.rels` part links to the image bytes:
@@ -63,3 +72,14 @@ This fixture uses a minimal `<cellImage><a:blip …/></cellImage>` shape:
 Real Excel workbooks can emit different namespaces and/or embed a full DrawingML `<xdr:pic>` subtree.
 Treat this file as a **minimal** casing/URI-variability fixture, not Excel ground truth.
 
+## Worksheet note (`vm` is not semantically wired)
+
+`xl/worksheets/sheet1.xml` includes a `vm="1"` attribute on `A1`:
+
+```xml
+<c r="A1" vm="1"><v>0</v></c>
+```
+
+However, `xl/metadata.xml` is empty in this fixture, so this `vm` value does not form a valid rich-value
+binding chain. This is intentional: the fixture is meant to exercise **part-name/URI variability** and
+preservation behavior, not to represent a fully valid rich-data workbook.

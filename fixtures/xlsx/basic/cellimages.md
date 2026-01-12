@@ -61,3 +61,7 @@ This fixture uses a lightweight schema where the relationship ID is stored direc
 Real Excel workbooks can also store `xl/cellimages.xml` but may emit a richer DrawingML subtree (e.g.
 `<xdr:pic>`). Treat this fixture as a **minimal** preservation/regression sample, not Excel ground truth.
 
+## Worksheet note
+
+This fixture is focused on the standalone `cellimages` store part; its worksheet cells do **not** include
+`vm="…"`/`cm="…"` attributes or rich-data wiring.
