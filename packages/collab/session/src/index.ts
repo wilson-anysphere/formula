@@ -1,6 +1,5 @@
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
-import { attachOfflinePersistence } from "@formula/collab-offline";
 import { PresenceManager } from "@formula/collab-presence";
 import { createUndoService, type UndoService } from "@formula/collab-undo";
 import {
@@ -20,6 +19,7 @@ import {
   type CellPlaintext,
 } from "@formula/collab-encryption";
 import type { CollabPersistence, CollabPersistenceBinding } from "@formula/collab-persistence";
+import { IndexedDbCollabPersistence } from "@formula/collab-persistence/indexeddb";
 
 import { assertValidRole, getCellPermissions, maskCellValue } from "../../permissions/index.js";
 import {
@@ -352,6 +352,8 @@ export interface CollabSessionOptions {
    * Optional offline persistence configuration. When enabled, the session will
    * load/store Yjs updates locally so edits survive reload/crash and merge when
    * connectivity returns.
+   *
+   * @deprecated Use `options.persistence` (see `@formula/collab-persistence`) instead.
    */
   offline?: {
     mode: "indexeddb" | "file";
@@ -573,10 +575,18 @@ export class CollabSession {
    */
   readonly cellValueConflictMonitor: CellConflictMonitor | null;
 
-  private readonly persistence: CollabPersistence | null;
+  private persistence: CollabPersistence | null;
   private readonly persistenceDocId: string | null;
   private persistenceBinding: CollabPersistenceBinding | null = null;
+  private readonly hasLocalPersistence: boolean;
+  private readonly shouldGateProviderConnectOnLocalPersistence: boolean;
+  private localPersistenceStarted = false;
+  private localPersistenceStartPromise: Promise<void> | null = null;
   private readonly localPersistenceLoaded: Promise<void>;
+  private readonly resolveLocalPersistenceLoaded: (() => void) | null;
+  private readonly rejectLocalPersistenceLoaded: ((err: unknown) => void) | null;
+  private readonly localPersistenceFactory: (() => Promise<CollabPersistence>) | null;
+  private persistenceDetached = false;
 
   private permissions: SessionPermissions | null = null;
   private readonly defaultSheetId: string;
@@ -641,36 +651,75 @@ export class CollabSession {
     const guid = options.connection?.docId ?? options.docId;
     this.doc = options.doc ?? new Y.Doc(guid ? { guid } : undefined);
 
-    const persistence = options.persistence ?? null;
-    const persistenceDocId = persistence ? options.connection?.docId ?? options.docId : null;
-    if (persistence && !persistenceDocId) {
-      throw new Error(
-        "CollabSession persistence requires a stable docId (options.docId or options.connection.docId)"
-      );
-    }
-    this.persistence = persistence;
-    this.persistenceDocId = persistenceDocId;
-
-    this.localPersistenceLoaded = persistence
-      ? this.initLocalPersistence(persistenceDocId!, persistence)
-      : Promise.resolve();
-    // Avoid unhandled rejections when callers don't explicitly await persistence readiness.
-    if (persistence) void this.localPersistenceLoaded.catch(() => {});
-
     if (options.connection && options.provider) {
       throw new Error("CollabSession cannot be constructed with both `connection` and `provider` options");
     }
 
-    let onOfflineLoaded: (() => void) | null = null;
+    const explicitPersistence = options.persistence ?? null;
 
     const offlineEnabled = options.offline != null;
     const offlineAutoLoad = options.offline?.autoLoad ?? true;
     const offlineAutoConnectAfterLoad =
-      offlineEnabled && options.connection ? (options.offline?.autoConnectAfterLoad ?? true) : false;
+      offlineEnabled && !explicitPersistence && options.connection ? (options.offline?.autoConnectAfterLoad ?? true) : false;
     this.offlineAutoConnectAfterLoad = offlineAutoConnectAfterLoad;
 
+    const offlineShouldConfigurePersistence = offlineEnabled && !explicitPersistence;
+
+    const persistenceDocId =
+      explicitPersistence
+        ? options.connection?.docId ?? options.docId
+        : offlineShouldConfigurePersistence
+          ? this.getDocIdForOfflinePersistence(options.offline!, {
+              connectionDocId: options.connection?.docId,
+              explicitDocId: options.docId,
+            })
+          : null;
+
+    if (explicitPersistence && !persistenceDocId) {
+      throw new Error(
+        "CollabSession persistence requires a stable docId (options.docId or options.connection.docId)"
+      );
+    }
+
+    this.persistence = explicitPersistence;
+    this.persistenceDocId = persistenceDocId;
+
+    this.hasLocalPersistence = Boolean(explicitPersistence || offlineShouldConfigurePersistence);
+    this.shouldGateProviderConnectOnLocalPersistence = Boolean(
+      explicitPersistence || (offlineShouldConfigurePersistence && offlineAutoConnectAfterLoad)
+    );
+
+    this.localPersistenceFactory = offlineShouldConfigurePersistence
+      ? () => this.createPersistenceFromOfflineOptions(options.offline!)
+      : explicitPersistence
+        ? async () => explicitPersistence
+        : null;
+
+    if (!this.hasLocalPersistence) {
+      this.localPersistenceLoaded = Promise.resolve();
+      this.resolveLocalPersistenceLoaded = null;
+      this.rejectLocalPersistenceLoaded = null;
+    } else {
+      let resolveLocalPersistenceLoaded: (() => void) | null = null;
+      let rejectLocalPersistenceLoaded: ((err: unknown) => void) | null = null;
+      this.localPersistenceLoaded = new Promise<void>((resolve, reject) => {
+        resolveLocalPersistenceLoaded = resolve;
+        rejectLocalPersistenceLoaded = reject;
+      });
+      this.resolveLocalPersistenceLoaded = resolveLocalPersistenceLoaded;
+      this.rejectLocalPersistenceLoaded = rejectLocalPersistenceLoaded;
+
+      // Eagerly start persistence for explicit `options.persistence`. For legacy
+      // `options.offline`, respect `offline.autoLoad`.
+      if (explicitPersistence || (offlineShouldConfigurePersistence && offlineAutoLoad)) {
+        this.startLocalPersistence();
+        // Avoid unhandled rejections when callers don't explicitly await persistence readiness.
+        void this.localPersistenceLoaded.catch(() => {});
+      }
+    }
+
     const delayProviderConnect = Boolean(
-      options.connection && (persistence || offlineAutoConnectAfterLoad)
+      options.connection && (explicitPersistence || offlineAutoConnectAfterLoad)
     );
     this.provider =
       options.provider ??
@@ -688,26 +737,21 @@ export class CollabSession {
     this.awareness = options.awareness ?? this.provider?.awareness ?? null;
 
     if (offlineEnabled) {
-      const key = options.offline?.key ?? options.connection?.docId ?? this.doc.guid;
-      const handle = attachOfflinePersistence(this.doc, {
-        mode: options.offline!.mode,
-        key,
-        filePath: options.offline!.filePath,
-        autoLoad: options.offline!.autoLoad,
-      });
-
       const state = {
         isLoaded: false,
         whenLoaded: async () => {
           try {
-            await handle.whenLoaded();
+            await this.whenLocalPersistenceLoaded();
           } finally {
             state.isLoaded = true;
-            onOfflineLoaded?.();
           }
         },
-        destroy: () => handle.destroy(),
-        clear: () => handle.clear(),
+        destroy: () => {
+          this.detachLocalPersistence();
+        },
+        clear: async () => {
+          await this.clearLocalPersistence();
+        },
       };
 
       this.offline = state;
@@ -760,19 +804,7 @@ export class CollabSession {
         providerSynced = Boolean(provider.synced);
       }
 
-      // When offline persistence is enabled and configured to auto-load (or
-      // auto-connect after loading), schema initialization must wait for offline
-      // state to load to avoid creating default sheets that race with persisted
-      // document state.
-      //
-      // Note: we *do not* trigger offline hydration here. When `offline.autoLoad`
-      // is false, callers must call `session.offline.whenLoaded()` themselves.
-      // We still wait for that load to complete before creating the default
-      // sheet, otherwise we'd race with persisted state.
-      const shouldWaitForOffline = this.offline != null;
-      let offlineReady = !shouldWaitForOffline;
-
-      const shouldWaitForLocalPersistence = this.persistence != null;
+      const shouldWaitForLocalPersistence = this.hasLocalPersistence;
       let localPersistenceReady = !shouldWaitForLocalPersistence;
 
       let ensureDefaultSheetScheduled = false;
@@ -785,7 +817,6 @@ export class CollabSession {
         // and eagerly inserting a default sheet during that window can create
         // spurious extra sheets.
         if (!providerSynced) return;
-        if (!offlineReady) return;
         if (!localPersistenceReady) return;
         if (this.ensuringSchema) return;
         this.ensuringSchema = true;
@@ -816,19 +847,6 @@ export class CollabSession {
           });
         }
       };
-
-      if (shouldWaitForOffline) {
-        const markOfflineReady = () => {
-          if (offlineReady) return;
-          offlineReady = true;
-          onOfflineLoaded = null;
-          ensureSchema();
-        };
-
-        onOfflineLoaded = markOfflineReady;
-        // Handle the case where offline finished loading before we registered the callback.
-        if (this.offline!.isLoaded) markOfflineReady();
-      }
 
       if (shouldWaitForLocalPersistence) {
         void this.localPersistenceLoaded
@@ -953,19 +971,119 @@ export class CollabSession {
     }
   }
 
-  private async initLocalPersistence(docId: string, persistence: CollabPersistence): Promise<void> {
-    try {
-      await persistence.load(docId, this.doc);
-    } finally {
-      // Bind even if load fails so future edits still persist.
-      if (this.isDestroyed) return;
-      const binding = persistence.bind(docId, this.doc);
-      if (this.isDestroyed) {
-        void binding.destroy().catch(() => {});
-        return;
-      }
-      this.persistenceBinding = binding;
+  private startLocalPersistence(): void {
+    if (!this.hasLocalPersistence) return;
+    if (this.localPersistenceStarted) return;
+    this.localPersistenceStarted = true;
+
+    const factory = this.localPersistenceFactory;
+    const docId = this.persistenceDocId;
+    if (!factory || !docId) {
+      this.rejectLocalPersistenceLoaded?.(new Error("Internal error: persistence is configured but missing factory/docId"));
+      return;
     }
+
+    this.localPersistenceStartPromise = (async () => {
+      const persistence = this.persistence ?? (await factory());
+      this.persistence = persistence;
+
+      try {
+        await persistence.load(docId, this.doc);
+      } finally {
+        // Bind even if load fails so future edits still persist.
+        if (this.isDestroyed || this.persistenceDetached) return;
+        const binding = persistence.bind(docId, this.doc);
+        if (this.isDestroyed || this.persistenceDetached) {
+          void binding.destroy().catch(() => {});
+          return;
+        }
+        this.persistenceBinding = binding;
+      }
+    })();
+
+    void this.localPersistenceStartPromise.then(
+      () => this.resolveLocalPersistenceLoaded?.(),
+      (err) => this.rejectLocalPersistenceLoaded?.(err)
+    );
+  }
+
+  private async createPersistenceFromOfflineOptions(
+    offline: NonNullable<CollabSessionOptions["offline"]>
+  ): Promise<CollabPersistence> {
+    if (offline.mode === "indexeddb") {
+      return new IndexedDbCollabPersistence();
+    }
+    if (offline.mode === "file") {
+      if (!offline.filePath) {
+        throw new Error('CollabSession offline mode "file" requires offline.filePath');
+      }
+      // Avoid a top-level import of the Node-only persistence implementation so
+      // this module can still be bundled for browser environments.
+      const { FileCollabPersistence } = await import("@formula/collab-persistence/file");
+      const dir = this.dirnameForOfflineFilePath(offline.filePath);
+      return new FileCollabPersistence(dir);
+    }
+    throw new Error(`Unsupported offline persistence mode: ${String((offline as any).mode)}`);
+  }
+
+  private getDocIdForOfflinePersistence(
+    offline: NonNullable<CollabSessionOptions["offline"]>,
+    ctx: { connectionDocId?: string; explicitDocId?: string }
+  ): string {
+    if (offline.mode === "file") {
+      // The legacy `offline.filePath` mode identified documents purely by file
+      // path. Preserve that behavior by falling back to `filePath` as the
+      // persistence doc id when callers don't provide a stable `docId`.
+      return (
+        ctx.connectionDocId ??
+        ctx.explicitDocId ??
+        offline.key ??
+        offline.filePath ??
+        this.doc.guid
+      );
+    }
+    // IndexedDB mode already uses a stable key namespace.
+    return ctx.connectionDocId ?? ctx.explicitDocId ?? offline.key ?? this.doc.guid;
+  }
+
+  private dirnameForOfflineFilePath(filePath: string): string {
+    // `@formula/collab-offline` historically accepted an explicit file path. Our
+    // file persistence implementation stores one file per doc in a directory, so
+    // we map `offline.filePath` to its parent directory.
+    const slash = filePath.lastIndexOf("/");
+    const backslash = filePath.lastIndexOf("\\");
+    const idx = Math.max(slash, backslash);
+    if (idx <= 0) return ".";
+    return filePath.slice(0, idx);
+  }
+
+  private detachLocalPersistence(): void {
+    this.persistenceDetached = true;
+    const binding = this.persistenceBinding;
+    this.persistenceBinding = null;
+    if (binding) {
+      void binding.destroy().catch(() => {});
+    }
+  }
+
+  private async clearLocalPersistence(): Promise<void> {
+    this.persistenceDetached = true;
+    const docId = this.persistenceDocId;
+    if (!docId) return;
+
+    const binding = this.persistenceBinding;
+    this.persistenceBinding = null;
+    if (binding) {
+      await binding.destroy().catch(() => {});
+    }
+
+    const persistence =
+      this.persistence ??
+      (this.localPersistenceFactory ? await this.localPersistenceFactory() : null);
+    if (!persistence) return;
+    this.persistence = persistence;
+    if (typeof persistence.clear !== "function") return;
+    await persistence.clear(docId);
   }
 
   private scheduleProviderConnectAfterHydration(): void {
@@ -976,19 +1094,12 @@ export class CollabSession {
     this.providerConnectScheduled = true;
 
     const gates: Promise<void>[] = [];
-    if (this.persistence) {
+    if (this.shouldGateProviderConnectOnLocalPersistence) {
+      const gate = this.offline && this.offlineAutoConnectAfterLoad ? this.offline.whenLoaded() : this.whenLocalPersistenceLoaded();
       gates.push(
-        this.localPersistenceLoaded.catch(() => {
+        gate.catch(() => {
           // Even if local persistence fails, allow the provider to connect so the
           // session still works online.
-        })
-      );
-    }
-
-    if (this.offline && this.offlineAutoConnectAfterLoad && !this.offline.isLoaded) {
-      gates.push(
-        this.offline.whenLoaded().catch(() => {
-          // Ignore offline load errors. Callers can await `session.offline.whenLoaded()`.
         })
       );
     }
@@ -1016,17 +1127,14 @@ export class CollabSession {
     this.presence?.destroy();
     this.offline?.destroy();
     this.provider?.destroy?.();
-    void this.persistenceBinding?.destroy().catch(() => {});
+    this.detachLocalPersistence();
   }
 
   connect(): void {
     if (this.isDestroyed) return;
     if (!this.provider?.connect) return;
 
-    if (
-      this.persistence ||
-      (this.offline && this.offlineAutoConnectAfterLoad && !this.offline.isLoaded)
-    ) {
+    if (this.shouldGateProviderConnectOnLocalPersistence) {
       this.scheduleProviderConnectAfterHydration();
       return;
     }
@@ -1039,17 +1147,20 @@ export class CollabSession {
   }
 
   whenLocalPersistenceLoaded(): Promise<void> {
+    this.startLocalPersistence();
     return this.localPersistenceLoaded;
   }
 
   async flushLocalPersistence(): Promise<void> {
-    const persistence = this.persistence;
+    this.startLocalPersistence();
     const docId = this.persistenceDocId;
-    if (!persistence || !docId || typeof persistence.flush !== "function") return;
+    if (!docId) return;
 
     await this.localPersistenceLoaded.catch(() => {
       // If load failed, flushing may still be useful for subsequent updates.
     });
+    const persistence = this.persistence;
+    if (!persistence || typeof persistence.flush !== "function") return;
     await persistence.flush(docId);
   }
 

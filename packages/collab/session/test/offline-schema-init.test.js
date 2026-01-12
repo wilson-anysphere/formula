@@ -3,52 +3,57 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 import * as Y from "yjs";
 
-import { attachOfflinePersistence } from "@formula/collab-offline";
+import { FileCollabPersistence } from "@formula/collab-persistence/file";
 import { createCollabSession } from "../src/index.ts";
 
-test("CollabSession schema init waits for offline load (avoids extra default sheet)", async (t) => {
+test("CollabSession schema init waits for local persistence load (avoids extra default sheet)", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "collab-session-offline-schema-"));
-  const filePath = path.join(dir, "doc.yjslog");
+  const docId = `doc-${randomUUID()}`;
 
   t.after(async () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  // Seed offline storage with a workbook that already has a sheet id that is
-  // not the default "Sheet1".
+  // Seed local persistence storage with a workbook that already has a sheet id
+  // that is not the default "Sheet1".
   {
-    const doc = new Y.Doc();
-    const persistence = attachOfflinePersistence(doc, { mode: "file", filePath });
-    await persistence.whenLoaded();
+    const persistence = new FileCollabPersistence(dir, { compactAfterUpdates: 5 });
+    const session = createCollabSession({ docId, persistence, schema: { autoInit: false } });
+    await session.whenLocalPersistenceLoaded();
 
-    const sheets = doc.getArray("sheets");
+    const sheets = session.doc.getArray("sheets");
     const sheet = new Y.Map();
     sheet.set("id", "Persisted");
     sheet.set("name", "Persisted");
     sheets.push([sheet]);
 
-    persistence.destroy();
-    doc.destroy();
+    await session.flushLocalPersistence();
+    session.destroy();
+    session.doc.destroy();
+    await persistence.flush(docId);
   }
 
   // Now construct a CollabSession with schema auto-init enabled (default) and
-  // ensure it doesn't eagerly create the default sheet before offline load.
+  // ensure it doesn't eagerly create the default sheet before persistence load.
+  const persistence = new FileCollabPersistence(dir, { compactAfterUpdates: 5 });
   const session = createCollabSession({
-    doc: new Y.Doc(),
-    offline: { mode: "file", filePath, autoLoad: false },
+    docId,
+    doc: new Y.Doc({ guid: docId }),
+    persistence,
   });
 
-  t.after(() => {
+  t.after(async () => {
     session.destroy();
     session.doc.destroy();
+    await persistence.flush(docId);
   });
 
-  await session.offline?.whenLoaded();
+  await session.whenLocalPersistenceLoaded();
 
   const ids = session.sheets.toArray().map((s) => String(s.get("id") ?? ""));
   assert.deepEqual(ids, ["Persisted"]);
 });
-

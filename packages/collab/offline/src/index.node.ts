@@ -6,6 +6,11 @@ import type { OfflinePersistenceHandle, OfflinePersistenceOptions } from "./type
 
 export type { OfflinePersistenceHandle, OfflinePersistenceMode, OfflinePersistenceOptions } from "./types.ts";
 
+/**
+ * Legacy offline persistence helper.
+ *
+ * @deprecated Prefer `@formula/collab-persistence` and `CollabSessionOptions.persistence`.
+ */
 export function attachOfflinePersistence(doc: Y.Doc, opts: OfflinePersistenceOptions): OfflinePersistenceHandle {
   const autoLoad = opts.autoLoad ?? true;
   const key = opts.key ?? doc.guid;

@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 import WebSocket from "ws";
 
+import { FileCollabPersistence } from "@formula/collab-persistence/file";
 import { createCollabSession } from "../src/index.ts";
 import {
   getAvailablePort,
@@ -20,9 +22,8 @@ function sleep(ms) {
 test("CollabSession offline persistence survives restart and merges on reconnect (sync-server)", async (t) => {
   const dataDir = await mkdtemp(path.join(tmpdir(), "collab-session-offline-sync-server-data-"));
   const offlineDir = await mkdtemp(path.join(tmpdir(), "collab-session-offline-sync-server-client-"));
-  const offlineFilePath = path.join(offlineDir, "doc.yjslog");
 
-  const docId = `collab-session-offline-test-doc-${crypto.randomUUID()}`;
+  const docId = `collab-session-offline-test-doc-${randomUUID()}`;
   const port = await getAvailablePort();
 
   /** @type {Awaited<ReturnType<typeof startSyncServer>> | null} */
@@ -33,6 +34,10 @@ test("CollabSession offline persistence survives restart and merges on reconnect
   let sessionARestarted = null;
   /** @type {import("../src/index.ts").CollabSession | null} */
   let sessionB = null;
+  /** @type {import("@formula/collab-persistence/file").FileCollabPersistence | null} */
+  let persistenceA = null;
+  /** @type {import("@formula/collab-persistence/file").FileCollabPersistence | null} */
+  let persistenceARestarted = null;
 
   t.after(async () => {
     sessionA?.destroy();
@@ -41,6 +46,8 @@ test("CollabSession offline persistence survives restart and merges on reconnect
     sessionA?.doc.destroy();
     sessionARestarted?.doc.destroy();
     sessionB?.doc.destroy();
+    if (persistenceA) await persistenceA.flush(docId).catch(() => {});
+    if (persistenceARestarted) await persistenceARestarted.flush(docId).catch(() => {});
     await server?.stop();
     await rm(dataDir, { recursive: true, force: true });
     await rm(offlineDir, { recursive: true, force: true });
@@ -55,7 +62,8 @@ test("CollabSession offline persistence survives restart and merges on reconnect
 
   const wsUrl = server.wsUrl;
 
-  // Session A starts online with offline persistence enabled.
+  // Session A starts online with local persistence enabled.
+  persistenceA = new FileCollabPersistence(offlineDir, { compactAfterUpdates: 5 });
   sessionA = createCollabSession({
     connection: {
       wsUrl,
@@ -64,10 +72,10 @@ test("CollabSession offline persistence survives restart and merges on reconnect
       WebSocketPolyfill: WebSocket,
       disableBc: true,
     },
-    offline: { mode: "file", filePath: offlineFilePath },
+    persistence: persistenceA,
   });
 
-  await sessionA.offline?.whenLoaded();
+  await sessionA.whenLocalPersistenceLoaded();
   await sessionA.whenSynced();
 
   await sessionA.setCellValue("Sheet1:0:0", "online");
@@ -84,12 +92,15 @@ test("CollabSession offline persistence survives restart and merges on reconnect
   // Make edits while offline and "restart" the process.
   await sessionA.setCellValue("Sheet1:0:1", "offline");
   await sessionA.setCellFormula("Sheet1:0:2", "=1+2");
+  await sessionA.flushLocalPersistence();
 
   sessionA.destroy();
   sessionA.doc.destroy();
+  await persistenceA.flush(docId);
   sessionA = null;
 
   // Restart the client while the server is still down. Ensure we load from the offline log.
+  persistenceARestarted = new FileCollabPersistence(offlineDir, { compactAfterUpdates: 5 });
   sessionARestarted = createCollabSession({
     connection: {
       wsUrl,
@@ -98,10 +109,10 @@ test("CollabSession offline persistence survives restart and merges on reconnect
       WebSocketPolyfill: WebSocket,
       disableBc: true,
     },
-    offline: { mode: "file", filePath: offlineFilePath },
+    persistence: persistenceARestarted,
   });
 
-  await sessionARestarted.offline?.whenLoaded();
+  await sessionARestarted.whenLocalPersistenceLoaded();
 
   assert.equal((await sessionARestarted.getCell("Sheet1:0:0"))?.value, "online");
   assert.equal((await sessionARestarted.getCell("Sheet1:0:1"))?.value, "offline");
