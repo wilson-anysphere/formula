@@ -111,6 +111,73 @@ test.describe("split view", () => {
       .toBeCloseTo(persistedZoom, 2);
   });
 
+  test("secondary pane supports clipboard shortcuts + Delete key", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoDesktop(page, "/?grid=shared");
+
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("split-vertical").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await expect(secondary.locator("canvas")).toHaveCount(3);
+
+    // Focus/select A1 in secondary pane.
+    await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    // Type a value and commit (Enter moves selection down).
+    await page.keyboard.press("h");
+    const editor = page.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("ello");
+    await page.keyboard.press("Enter");
+    await waitForIdle(page);
+
+    await expect(page.getByTestId("active-cell")).toHaveText("A2");
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("hello");
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+
+    // Copy A1 and paste into B1, all while focus remains in secondary pane.
+    await page.keyboard.press("ArrowUp");
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe("grid-secondary");
+
+    await page.keyboard.press(`${modifier}+C`);
+    await waitForIdle(page);
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe("grid-secondary");
+
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+    await page.keyboard.press(`${modifier}+V`);
+    await waitForIdle(page);
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe("grid-secondary");
+
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"))).toBe("hello");
+
+    // Cut B1 and paste into C1.
+    await page.keyboard.press(`${modifier}+X`);
+    await waitForIdle(page);
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"))).toBe("");
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe("grid-secondary");
+
+    await page.keyboard.press("ArrowRight");
+    await expect(page.getByTestId("active-cell")).toHaveText("C1");
+    await page.keyboard.press(`${modifier}+V`);
+    await waitForIdle(page);
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"))).toBe("hello");
+
+    // Delete clears the active cell in secondary pane.
+    await page.keyboard.press("Delete");
+    await waitForIdle(page);
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1"))).toBe("");
+  });
+
   test("selection is global across panes without cross-pane scrolling", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
 

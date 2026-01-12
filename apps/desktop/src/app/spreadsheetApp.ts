@@ -1801,19 +1801,60 @@ export class SpreadsheetApp {
   copy(): void {
     if (this.inlineEditController.isOpen()) return;
     if (this.isEditing()) return;
+    const target = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
+    if (target) {
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
+    }
     this.idle.track(this.copySelectionToClipboard());
   }
 
   cut(): void {
     if (this.inlineEditController.isOpen()) return;
     if (this.isEditing()) return;
-    this.idle.track(this.cutSelectionToClipboard());
+    const focusTarget = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
+    if (focusTarget) {
+      const tag = focusTarget.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || focusTarget.isContentEditable) return;
+    }
+
+    const shouldRestoreFocus = focusTarget != null && focusTarget !== this.root;
+    const op = this.cutSelectionToClipboard();
+    const tracked = op.finally(() => {
+      if (!shouldRestoreFocus) return;
+      if (!focusTarget) return;
+      if (!focusTarget.isConnected) return;
+      try {
+        focusTarget.focus();
+      } catch {
+        // Ignore focus restore failures.
+      }
+    });
+    this.idle.track(tracked);
   }
 
   paste(): void {
     if (this.inlineEditController.isOpen()) return;
     if (this.isEditing()) return;
-    this.idle.track(this.pasteClipboardToSelection());
+    const focusTarget = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
+    if (focusTarget) {
+      const tag = focusTarget.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || focusTarget.isContentEditable) return;
+    }
+
+    const shouldRestoreFocus = focusTarget != null && focusTarget !== this.root;
+    const op = this.pasteClipboardToSelection();
+    const tracked = op.finally(() => {
+      if (!shouldRestoreFocus) return;
+      if (!focusTarget) return;
+      if (!focusTarget.isConnected) return;
+      try {
+        focusTarget.focus();
+      } catch {
+        // Ignore focus restore failures.
+      }
+    });
+    this.idle.track(tracked);
   }
 
   clearSelection(): void {
