@@ -1,3 +1,15 @@
+//! BIFF NOTE/OBJ/TXO parsing for legacy cell comments ("notes").
+//!
+//! Excel 97-2003 `.xls` files store cell notes as a small record graph:
+//! - `NOTE`: the cell anchor (row/col) + the displayed author string
+//! - `OBJ` (ftCmo): links the note to a drawing object id
+//! - `TXO` (+ `CONTINUE` records): stores the comment text payload
+//!
+//! This parser is intentionally best-effort and lossy:
+//! - Only plain text + author are decoded; rich text formatting and comment box
+//!   geometry/visibility are ignored.
+//! - Malformed/incomplete record sequences may yield partial output and warnings.
+
 #![allow(dead_code)]
 
 use std::collections::HashMap;
@@ -39,6 +51,10 @@ struct ParsedNote {
     author: String,
 }
 
+/// Best-effort parse of legacy note comments from a worksheet BIFF substream.
+///
+/// Returns `(notes, warnings)`. Warnings are non-fatal and should be surfaced to
+/// callers so partially-imported `.xls` files can be debugged.
 pub(crate) fn parse_biff_sheet_notes(
     workbook_stream: &[u8],
     start: usize,

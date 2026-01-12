@@ -3,18 +3,21 @@
 //! This importer is intentionally best-effort: BIFF contains many features that
 //! aren't representable in [`formula_model`]. We load sheets, cell values,
 //! formulas (as text), merged-cell regions, basic row/column size/visibility
-//! metadata, and legacy cell comments/notes ([`formula_model::CommentKind::Note`])
-//! on worksheets where available.
+//! metadata, hyperlinks, basic outline (grouping) metadata, and legacy cell
+//! comments/notes ([`formula_model::CommentKind::Note`]) on worksheets where
+//! available. We also attempt to preserve workbook/worksheet view state where
+//! possible (active tab, frozen panes, zoom, selection, and grid/headings/zero
+//! visibility flags).
 //!
 //! Note import is best-effort and intentionally lossy:
 //! - Comment box geometry/visibility/formatting is not preserved
 //! - Only plain text + author (when available) are imported
 //! - Threaded comments are not supported in `.xls`
 //!
-//! We also extract workbook-global styles needed to preserve Excel number format
-//! codes and the workbook date system (1900 vs 1904) when possible. Anything else
-//! is preserved as metadata/warnings. In particular, comment parsing may emit
-//! warnings when BIFF NOTE/OBJ/TXO records are malformed or incomplete.
+//! We also extract workbook-global styles (including number format codes) and the
+//! workbook date system (1900 vs 1904) when possible. Anything else is preserved
+//! as metadata/warnings. In particular, comment parsing may emit warnings when
+//! BIFF NOTE/OBJ/TXO records are malformed or incomplete.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
