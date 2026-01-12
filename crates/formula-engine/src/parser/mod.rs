@@ -1349,7 +1349,7 @@ impl<'a> Parser<'a> {
 
         loop {
             self.skip_trivia();
-            // Postfix call expressions: `expr(arg1, arg2, ...)`.
+            // Postfix call expressions: `expr(arg1, arg2, ...)` (e.g. `LAMBDA(x,x+1)(5)`).
             let call_bp = 90;
             if matches!(self.peek_kind(), TokenKind::LParen) && call_bp >= min_bp {
                 lhs = self.parse_call(lhs)?;
@@ -1372,13 +1372,6 @@ impl<'a> Parser<'a> {
                     op: PostfixOp::SpillRange,
                     expr: Box::new(lhs),
                 });
-                continue;
-            }
-
-            // Call expressions like `LAMBDA(x,x+1)(5)` or `(A1,B1)(C1)`.
-            let call_bp = 90;
-            if matches!(self.peek_kind(), TokenKind::LParen) && call_bp >= min_bp {
-                lhs = self.parse_call(lhs)?;
                 continue;
             }
 
@@ -1446,7 +1439,7 @@ impl<'a> Parser<'a> {
 
         loop {
             self.skip_trivia();
-            // Postfix call expressions: `expr(arg1, arg2, ...)`.
+            // Postfix call expressions: `expr(arg1, arg2, ...)` (e.g. `LAMBDA(x,x+1)(5)`).
             let call_bp = 90;
             if matches!(self.peek_kind(), TokenKind::LParen) && call_bp >= min_bp {
                 lhs = self.parse_call_best_effort(lhs);
@@ -1469,12 +1462,6 @@ impl<'a> Parser<'a> {
                     op: PostfixOp::SpillRange,
                     expr: Box::new(lhs),
                 });
-                continue;
-            }
-
-            let call_bp = 90;
-            if matches!(self.peek_kind(), TokenKind::LParen) && call_bp >= min_bp {
-                lhs = self.parse_call_best_effort(lhs);
                 continue;
             }
 

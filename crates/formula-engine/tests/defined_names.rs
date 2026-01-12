@@ -269,3 +269,30 @@ fn let_variable_names_do_not_register_defined_name_dependencies() {
         "LET-bound variable should not create a defined-name dependency"
     );
 }
+
+#[test]
+fn lambda_parameter_names_do_not_register_defined_name_dependencies() {
+    let mut engine = Engine::new();
+    engine
+        .define_name("X", NameScope::Workbook, NameDefinition::Constant(Value::Number(1.0)))
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LAMBDA(X,X+1)(1)")
+        .unwrap();
+    engine.recalculate();
+    assert!(
+        !engine.is_dirty("Sheet1", "A1"),
+        "cell should be clean after recalc"
+    );
+
+    // Updating a workbook-scoped name "X" should not dirty the cell because the LAMBDA parameter
+    // shadows the defined name within the body.
+    engine
+        .define_name("X", NameScope::Workbook, NameDefinition::Constant(Value::Number(2.0)))
+        .unwrap();
+    assert!(
+        !engine.is_dirty("Sheet1", "A1"),
+        "LAMBDA parameters should not create a defined-name dependency"
+    );
+}

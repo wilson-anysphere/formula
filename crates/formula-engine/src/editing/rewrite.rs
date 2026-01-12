@@ -1768,4 +1768,17 @@ mod tests {
         assert!(changed);
         assert_eq!(out, "=LAMBDA(x,x+1)(A2)");
     }
+
+    #[test]
+    fn copy_delta_rewrites_call_callee_references() {
+        let (out, changed) = rewrite_formula_for_copy_delta(
+            "=LAMBDA(x,A1+x)(1)",
+            "Sheet1",
+            CellAddr::new(0, 0),
+            1,
+            0,
+        );
+        assert!(changed);
+        assert_eq!(out, "=LAMBDA(x,A2+x)(1)");
+    }
 }
