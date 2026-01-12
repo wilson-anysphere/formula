@@ -1552,6 +1552,81 @@ test("BrowserExtensionHost: workbook.openWorkbook rejects missing path arguments
   assert.equal(apiError?.message, "Workbook path must be a non-empty string");
 });
 
+test("BrowserExtensionHost: workbook.openWorkbook rejects malformed args payloads", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let promptCalls = 0;
+
+  /** @type {any} */
+  let apiError;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "api_error" && msg.id === "req1") {
+          apiError = msg.error;
+          resolveDone();
+        }
+      }
+    }
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {},
+    permissionPrompt: async () => {
+      promptCalls += 1;
+      return true;
+    }
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-open-malformed-args";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-open-malformed-args/",
+    mainUrl: "memory://workbook-open-malformed-args/main.mjs",
+    manifest: {
+      name: "workbook-open-malformed-args",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"]
+    }
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+  extension.active = true;
+
+  // The host should treat non-array args as "no args" rather than indexing into the string.
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "openWorkbook",
+    args: "/tmp/opened.xlsx"
+  });
+
+  await done;
+
+  assert.equal(promptCalls, 0);
+  assert.equal(apiError?.message, "Workbook path must be a non-empty string");
+});
+
 test("BrowserExtensionHost: workbook.openWorkbook rejects whitespace-only paths", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
