@@ -7,6 +7,8 @@ import {
   verifyExtensionPackageV2Browser
 } from "../../../shared/extension-package/v2-browser.mjs";
 
+import { validateExtensionManifest } from "../../../../shared/extension-manifest/index.mjs";
+
 import { MarketplaceClient } from "./MarketplaceClient";
 
 // The extension worker (`packages/extension-host/src/browser/extension-worker.mjs`) eagerly imports
@@ -264,13 +266,20 @@ function rewriteEntrypointSource(source: string, { extensionApiUrl }: { extensio
 export class WebExtensionManager {
   readonly marketplaceClient: MarketplaceClient;
   readonly host: BrowserExtensionHostLike | null;
+  readonly engineVersion: string;
 
   private readonly _loadedMainUrls = new Map<string, { mainUrl: string; revoke: () => void }>();
   private _extensionApiModule: { url: string; revoke: () => void } | null = null;
 
-  constructor(options: { marketplaceClient?: MarketplaceClient; host?: BrowserExtensionHostLike | null } = {}) {
+  constructor(
+    options: { marketplaceClient?: MarketplaceClient; host?: BrowserExtensionHostLike | null; engineVersion?: string } = {}
+  ) {
     this.marketplaceClient = options.marketplaceClient ?? new MarketplaceClient();
     this.host = options.host ?? null;
+    this.engineVersion =
+      typeof options.engineVersion === "string" && options.engineVersion.trim().length > 0
+        ? options.engineVersion.trim()
+        : "1.0.0";
   }
 
   search(params: Parameters<MarketplaceClient["search"]>[0]) {
@@ -393,7 +402,8 @@ export class WebExtensionManager {
       );
     }
 
-    const manifest = verified.manifest;
+    const manifest = this._validateManifest(verified.manifest, { id, version: resolvedVersion });
+    verified = { ...verified, manifest };
     const bundleId = `${manifest.publisher}.${manifest.name}`;
     if (bundleId !== id) {
       throw new Error(`Package id mismatch: expected ${id} but got ${bundleId}`);
@@ -532,14 +542,22 @@ export class WebExtensionManager {
       throw new Error(`Missing stored package for ${installed.id}@${installed.version}`);
     }
 
+    const manifest = this._validateManifest(pkg.verified.manifest, { id: installed.id, version: installed.version });
+    const bundleId = `${manifest.publisher}.${manifest.name}`;
+    if (bundleId !== installed.id) {
+      throw new Error(`Package id mismatch: expected ${installed.id} but got ${bundleId}`);
+    }
+    if (manifest.version !== installed.version) {
+      throw new Error(`Package version mismatch: expected ${installed.version} but got ${manifest.version}`);
+    }
+
     if (!this._extensionApiModule) {
       this._extensionApiModule = createModuleUrlFromText(EXTENSION_API_SHIM_SOURCE);
     }
 
-    const { mainUrl, revoke } = await this._createMainModuleUrl(pkg, this._extensionApiModule.url);
+    const { mainUrl, revoke } = await this._createMainModuleUrl(pkg, manifest, this._extensionApiModule.url);
 
     const extensionPath = `indexeddb://formula/extensions/${installed.id}/${installed.version}`;
-    const manifest = pkg.verified.manifest;
 
     // If already loaded, the host will throw; ensure the manager keeps a single source of truth.
     if (this.host.listExtensions().some((e) => e.id === installed.id)) {
@@ -603,12 +621,13 @@ export class WebExtensionManager {
 
   private async _createMainModuleUrl(
     pkg: StoredPackageRecord,
+    manifest: Record<string, any>,
     extensionApiUrl: string
   ): Promise<{ mainUrl: string; revoke: () => void }> {
     const bytes = new Uint8Array(pkg.bytes);
     const parsed: ReadExtensionPackageV2Result = readExtensionPackageV2(bytes);
 
-    const entryRel = extractEntrypointPath(pkg.verified.manifest);
+    const entryRel = extractEntrypointPath(manifest);
     const entryBytes = parsed.files.get(entryRel);
     if (!entryBytes) {
       throw new Error(`Extension entrypoint missing from package: ${entryRel}`);
@@ -618,6 +637,21 @@ export class WebExtensionManager {
     const rewritten = rewriteEntrypointSource(source, { extensionApiUrl });
     const { url, revoke } = createModuleUrlFromText(rewritten);
     return { mainUrl: url, revoke };
+  }
+
+  private _validateManifest(
+    manifest: Record<string, any>,
+    context: { id: string; version: string }
+  ): Record<string, any> {
+    try {
+      return validateExtensionManifest(manifest, {
+        engineVersion: this.engineVersion,
+        enforceEngine: true
+      }) as Record<string, any>;
+    } catch (error) {
+      const msg = String((error as Error)?.message ?? error);
+      throw new Error(`Invalid extension manifest for ${context.id}@${context.version}: ${msg}`);
+    }
   }
 }
 

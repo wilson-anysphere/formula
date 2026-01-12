@@ -274,7 +274,7 @@ test("install → verify → load → execute a command (sample-hello)", async (
     permissionPrompt: async () => true
   });
 
-  const manager = new WebExtensionManager({ marketplaceClient, host });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
   await manager.install("formula.sample-hello");
   await manager.loadInstalled("formula.sample-hello");
@@ -308,13 +308,51 @@ test("tampered package fails verification and is not installed", async () => {
     permissionPrompt: async () => true
   });
 
-  const manager = new WebExtensionManager({ marketplaceClient, host });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
   await expect(manager.install("formula.sample-hello")).rejects.toThrow(/verification failed/i);
   expect(await manager.listInstalled()).toEqual([]);
 
   await manager.dispose();
   await host.dispose();
+});
+
+test("install fails when engines.formula is incompatible with engineVersion", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-engine-mismatch-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "engine-mismatch-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.mjs",
+    engines: { formula: "^2.0.0" }
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  const source = `export async function activate() {}\n`;
+  await fs.writeFile(path.join(extDir, "dist", "extension.mjs"), source);
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), source);
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.engine-mismatch-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const manager = new WebExtensionManager({ marketplaceClient, engineVersion: "1.0.0" });
+
+  await expect(manager.install("test.engine-mismatch-ext")).rejects.toThrow(/engine mismatch/i);
+  expect(await manager.listInstalled()).toEqual([]);
+
+  await manager.dispose();
+  await fs.rm(tmpRoot, { recursive: true, force: true });
 });
 
 test("update flow replaces installed version and reloads when loaded", async () => {
@@ -328,7 +366,7 @@ test("update flow replaces installed version and reloads when loaded", async () 
       name: "test-ext",
       publisher: "test",
       version,
-      main: "./dist/extension.mjs",
+      main: "./dist/extension.js",
       browser: "./dist/extension.mjs",
       engines: { formula: "^1.0.0" },
       activationEvents: ["onCommand:test.version"],
@@ -336,10 +374,9 @@ test("update flow replaces installed version and reloads when loaded", async () 
       contributes: { commands: [{ command: "test.version", title: "Version" }] }
     };
     await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
-    await fs.writeFile(
-      path.join(extDir, "dist", "extension.mjs"),
-      `import * as formula from "@formula/extension-api";\nexport async function activate() {\n  await formula.commands.registerCommand("test.version", () => "${marker}");\n}\n`
-    );
+    const source = `import * as formula from "@formula/extension-api";\nexport async function activate() {\n  await formula.commands.registerCommand("test.version", () => "${marker}");\n}\n`;
+    await fs.writeFile(path.join(extDir, "dist", "extension.mjs"), source);
+    await fs.writeFile(path.join(extDir, "dist", "extension.js"), source);
     return createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
   };
 
@@ -358,7 +395,7 @@ test("update flow replaces installed version and reloads when loaded", async () 
     spreadsheetApi: new TestSpreadsheetApi(),
     permissionPrompt: async () => true
   });
-  const manager = new WebExtensionManager({ marketplaceClient, host });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
   await manager.install("test.test-ext", "1.0.0");
   await manager.loadInstalled("test.test-ext");
@@ -386,7 +423,7 @@ test("install supports publisher signing key rotation via publisherKeys + per-ve
       name: "test-ext",
       publisher: "test",
       version,
-      main: "./dist/extension.mjs",
+      main: "./dist/extension.js",
       browser: "./dist/extension.mjs",
       engines: { formula: "^1.0.0" },
       activationEvents: ["onCommand:test.version"],
@@ -394,10 +431,9 @@ test("install supports publisher signing key rotation via publisherKeys + per-ve
       contributes: { commands: [{ command: "test.version", title: "Version" }] }
     };
     await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
-    await fs.writeFile(
-      path.join(extDir, "dist", "extension.mjs"),
-      `import * as formula from "@formula/extension-api";\nexport async function activate() {\n  await formula.commands.registerCommand("test.version", () => "${marker}");\n}\n`
-    );
+    const source = `import * as formula from "@formula/extension-api";\nexport async function activate() {\n  await formula.commands.registerCommand("test.version", () => "${marker}");\n}\n`;
+    await fs.writeFile(path.join(extDir, "dist", "extension.mjs"), source);
+    await fs.writeFile(path.join(extDir, "dist", "extension.js"), source);
     return createExtensionPackageV2(extDir, { privateKeyPem });
   };
 
@@ -424,7 +460,7 @@ test("install supports publisher signing key rotation via publisherKeys + per-ve
     spreadsheetApi: new TestSpreadsheetApi(),
     permissionPrompt: async () => true
   });
-  const manager = new WebExtensionManager({ marketplaceClient, host });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
   await manager.install("test.test-ext", "1.0.0");
   await manager.loadInstalled("test.test-ext");
@@ -458,7 +494,7 @@ test("install refuses when all publisher signing keys are revoked", async () => 
     spreadsheetApi: new TestSpreadsheetApi(),
     permissionPrompt: async () => true
   });
-  const manager = new WebExtensionManager({ marketplaceClient, host });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
   await expect(manager.install("formula.sample-hello", "1.0.0")).rejects.toThrow(/all publisher signing keys are revoked/i);
 
@@ -491,7 +527,7 @@ test("install fails for packages signed by a revoked key even if other keys exis
     spreadsheetApi: new TestSpreadsheetApi(),
     permissionPrompt: async () => true
   });
-  const manager = new WebExtensionManager({ marketplaceClient, host });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
   await expect(manager.install("formula.sample-hello", "1.0.0")).rejects.toThrow(/signature verification failed/i);
 
@@ -509,7 +545,7 @@ test("supports importing extension API via the \"formula\" alias", async () => {
     name: "alias-ext",
     publisher: "test",
     version: "1.0.0",
-    main: "./dist/extension.mjs",
+    main: "./dist/extension.js",
     browser: "./dist/extension.mjs",
     engines: { formula: "^1.0.0" },
     activationEvents: ["onCommand:test.alias"],
@@ -518,10 +554,9 @@ test("supports importing extension API via the \"formula\" alias", async () => {
   };
 
   await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
-  await fs.writeFile(
-    path.join(extDir, "dist", "extension.mjs"),
-    `import * as formula from "formula";\nexport async function activate() {\n  await formula.commands.registerCommand("test.alias", () => "ok");\n}\n`
-  );
+  const source = `import * as formula from "formula";\nexport async function activate() {\n  await formula.commands.registerCommand("test.alias", () => "ok");\n}\n`;
+  await fs.writeFile(path.join(extDir, "dist", "extension.mjs"), source);
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), source);
 
   const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
 
@@ -538,7 +573,7 @@ test("supports importing extension API via the \"formula\" alias", async () => {
     permissionPrompt: async () => true
   });
 
-  const manager = new WebExtensionManager({ marketplaceClient, host });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
   await manager.install("test.alias-ext");
   await manager.loadInstalled("test.alias-ext");
@@ -559,7 +594,7 @@ test("rejects browser entrypoints that contain dynamic import()", async () => {
     name: "dynamic-import-ext",
     publisher: "test",
     version: "1.0.0",
-    main: "./dist/extension.mjs",
+    main: "./dist/extension.js",
     browser: "./dist/extension.mjs",
     engines: { formula: "^1.0.0" },
     activationEvents: ["onCommand:test.dynamic"],
@@ -568,10 +603,9 @@ test("rejects browser entrypoints that contain dynamic import()", async () => {
   };
 
   await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
-  await fs.writeFile(
-    path.join(extDir, "dist", "extension.mjs"),
-    `import * as formula from "@formula/extension-api";\nexport async function activate() {\n  await import("data:text/javascript,export default 123");\n  await formula.commands.registerCommand("test.dynamic", () => "ok");\n}\n`
-  );
+  const source = `import * as formula from "@formula/extension-api";\nexport async function activate() {\n  await import("data:text/javascript,export default 123");\n  await formula.commands.registerCommand("test.dynamic", () => "ok");\n}\n`;
+  await fs.writeFile(path.join(extDir, "dist", "extension.mjs"), source);
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), source);
 
   const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
   const marketplaceClient = createMockMarketplace({
@@ -586,7 +620,7 @@ test("rejects browser entrypoints that contain dynamic import()", async () => {
     spreadsheetApi: new TestSpreadsheetApi(),
     permissionPrompt: async () => true
   });
-  const manager = new WebExtensionManager({ marketplaceClient, host });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
   await manager.install("test.dynamic-import-ext");
   await manager.loadInstalled("test.dynamic-import-ext");
