@@ -19,7 +19,17 @@ function extractSection(source, startMarker, endMarker) {
 }
 
 test("extension UI dialogs avoid inline style assignments", () => {
-  const uiPath = path.join(__dirname, "..", "src", "extensions", "ui.js");
+  const extensionsDir = path.join(__dirname, "..", "src", "extensions");
+  const uiCandidates = ["ui.js", "ui.ts"];
+  let uiPath = null;
+  for (const candidate of uiCandidates) {
+    const candidatePath = path.join(extensionsDir, candidate);
+    if (fs.existsSync(candidatePath)) {
+      uiPath = candidatePath;
+      break;
+    }
+  }
+  assert.ok(uiPath, "Expected to find extensions/ui.js or extensions/ui.ts");
   const uiSource = fs.readFileSync(uiPath, "utf8");
 
   const inputBoxSection = extractSection(
