@@ -222,7 +222,7 @@ function computeLineColumn(content, index) {
  * fallback for fixtures and non-git environments.
  *
  * @param {string} rootDir
- * @returns {string[] | null} file paths relative to rootDir (posix-ish)
+ * @returns {Array<{ path: string, mode: string }> | null} entries with file paths relative to rootDir (posix-ish)
  */
 function listGitTrackedFiles(rootDir) {
   try {
@@ -234,7 +234,9 @@ function listGitTrackedFiles(rootDir) {
     const resolvedTop = path.resolve(String(toplevel.stdout || "").trim());
     if (resolvedTop !== path.resolve(rootDir)) return null;
 
-    const proc = spawnSync("git", ["-C", rootDir, "ls-files", "-z"], {
+    // Include mode info (`-s`) so we can detect tracked symlinks without hitting
+    // the filesystem (important for performance when scanning thousands of files).
+    const proc = spawnSync("git", ["-C", rootDir, "ls-files", "-s", "-z"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: 10 * 1024 * 1024,
@@ -242,8 +244,17 @@ function listGitTrackedFiles(rootDir) {
     if (proc.status !== 0) return null;
     const out = String(proc.stdout || "");
     // `git ls-files -z` separates entries by NUL.
-    const files = out.split("\0").filter(Boolean);
-    return files;
+    const entries = out.split("\0").filter(Boolean);
+    return entries
+      .map((raw) => {
+        const tab = raw.indexOf("\t");
+        if (tab === -1) return null;
+        const meta = raw.slice(0, tab);
+        const filePath = raw.slice(tab + 1);
+        const mode = meta.split(" ")[0] || "";
+        return { path: filePath, mode };
+      })
+      .filter(Boolean);
   } catch {
     return null;
   }
@@ -593,16 +604,16 @@ export async function checkCursorAiPolicy(options = {}) {
       const isInIncludedDir = includedDirPrefixes.some((prefix) => rel.startsWith(prefix));
       return isRootFile || isInIncludedDir;
     };
-    const trackedToScan = tracked.filter(isAllowedByIncludedDirs);
+    const trackedToScan = tracked.filter((entry) => isAllowedByIncludedDirs(entry.path));
 
     // `git grep` is substantially faster than reading every file in Node for large
     // repos (like this one), but has noticeable process-spawn overhead. For small
     // temp repos (unit tests, fixtures) the simple per-file scan is quicker.
-    const GIT_GREP_MIN_FILES = 500;
+    const GIT_GREP_MIN_FILES = 200;
     if (trackedToScan.length < GIT_GREP_MIN_FILES) {
-      for (const rel of trackedToScan) {
+      for (const entry of trackedToScan) {
         if (violations.length >= maxViolations) break;
-        await scanFile(path.join(rootDir, rel));
+        await scanFile(path.join(rootDir, entry.path));
       }
       return { ok: violations.length === 0, violations };
     }
@@ -623,9 +634,9 @@ export async function checkCursorAiPolicy(options = {}) {
     if (matches === null) {
       // If `git grep` isn't available for some reason, fall back to the slower
       // per-file Node scan so the guard remains correct.
-      for (const rel of trackedToScan) {
+      for (const entry of trackedToScan) {
         if (violations.length >= maxViolations) break;
-        await scanFile(path.join(rootDir, rel));
+        await scanFile(path.join(rootDir, entry.path));
       }
     } else {
       for (const match of matches) {
@@ -723,24 +734,18 @@ export async function checkCursorAiPolicy(options = {}) {
       }
 
       // Preserve stable output order by iterating the tracked file list in order.
-      for (const rel of trackedToScan) {
+      for (const entry of trackedToScan) {
         if (violations.length >= maxViolations) break;
-
-        const abs = path.join(rootDir, rel);
+        const rel = entry.path;
         const relNormalized = rel.split(path.sep).join("/");
 
         // Symlinks are always forbidden (even in excluded directories), since they can bypass scanning.
-        try {
-          const st = await lstat(abs);
-          if (st.isSymbolicLink()) {
-            record({
-              file: relNormalized,
-              ruleId: "symlink",
-              message: "Forbidden: symlinked files/directories are not allowed (can bypass Cursor-only AI policy scans).",
-            });
-            continue;
-          }
-        } catch {
+        if (String(entry.mode) === "120000") {
+          record({
+            file: relNormalized,
+            ruleId: "symlink",
+            message: "Forbidden: symlinked files/directories are not allowed (can bypass Cursor-only AI policy scans).",
+          });
           continue;
         }
 

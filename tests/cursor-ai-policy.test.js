@@ -239,9 +239,11 @@ test(
     try {
       // Ensure we cross the `GIT_GREP_MIN_FILES` threshold so the policy guard uses
       // its git-grep fast path (as it does in the real repo).
-      const extraFileCount = 510;
+      const extraFileCount = 199;
+      const manyDir = path.join(tmpRoot, "packages", "example", "src", "many");
+      await fs.mkdir(manyDir, { recursive: true });
       for (let i = 0; i < extraFileCount; i += 1) {
-        await writeFixtureFile(tmpRoot, `packages/example/src/many/file-${i}.js`, "export const x = 1;\n");
+        await fs.writeFile(path.join(manyDir, `file-${i}.js`), "export const x = 1;\n", "utf8");
       }
       await writeFixtureFile(tmpRoot, "packages/example/src/index.js", 'const provider = "OpenAI";\n');
 
