@@ -74,6 +74,13 @@ pub struct VbaDigitalSignatureStream {
     pub signature: Vec<u8>,
     /// Verification state (best-effort).
     pub verification: VbaSignatureVerification,
+    /// If the signature stream is wrapped in an [MS-OFFCRYPTO] `DigSigInfoSerialized` prefix,
+    /// this is the byte offset (from the start of the stream) where the DER-encoded PKCS#7
+    /// `ContentInfo` begins.
+    pub pkcs7_offset: Option<usize>,
+    /// If the signature stream is wrapped in an [MS-OFFCRYPTO] `DigSigInfoSerialized` prefix,
+    /// this is the length (in bytes) of the DER-encoded PKCS#7 `ContentInfo`.
+    pub pkcs7_len: Option<usize>,
     /// Best-effort DigestInfo algorithm OID extracted from Authenticode's
     /// `SpcIndirectDataContent` (if present).
     pub signed_digest_algorithm_oid: Option<String>,
@@ -161,6 +168,11 @@ pub fn list_vba_digital_signatures(
         let signature = ole.read_stream_opt(&path)?.unwrap_or_default();
         let signer_subject = extract_first_certificate_subject(&signature);
         let verification = verify_signature_blob(&signature);
+        let (pkcs7_offset, pkcs7_len) = match crate::offcrypto::parse_digsig_info_serialized(&signature)
+        {
+            Some(info) => (Some(info.pkcs7_offset), Some(info.pkcs7_len)),
+            None => (None, None),
+        };
 
         let (signed_digest_algorithm_oid, signed_digest) =
             match crate::authenticode::extract_vba_signature_signed_digest(&signature) {
@@ -173,6 +185,8 @@ pub fn list_vba_digital_signatures(
             signer_subject,
             signature,
             verification,
+            pkcs7_offset,
+            pkcs7_len,
             signed_digest_algorithm_oid,
             signed_digest,
         });
