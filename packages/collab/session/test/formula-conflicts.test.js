@@ -171,6 +171,52 @@ test("CollabSession formula conflict monitor still detects conflicts after recre
   docB.destroy();
 });
 
+test("CollabSession formula conflict monitor treats remoteUserId as unknown when modifiedBy isn't updated", async () => {
+  // Ensure deterministic tie-breaking: higher clientID wins.
+  const docA = new Y.Doc();
+  docA.clientID = 1;
+  const docB = new Y.Doc();
+  docB.clientID = 2;
+  let disconnect = connectDocs(docA, docB);
+
+  /** @type {Array<any>} */
+  const conflictsA = [];
+
+  const sessionA = createCollabSession({
+    doc: docA,
+    formulaConflicts: {
+      localUserId: "user-a",
+      onConflict: (c) => conflictsA.push(c),
+    },
+  });
+
+  // Remote doc without a formula conflict monitor: will overwrite formula but omit modifiedBy updates.
+  const sessionB = createCollabSession({ doc: docB });
+
+  // Establish base.
+  await sessionA.setCellFormula("Sheet1:0:0", "=0");
+  assert.equal((await sessionB.getCell("Sheet1:0:0"))?.formula, "=0");
+
+  // Offline concurrent edits.
+  disconnect();
+  await sessionA.setCellFormula("Sheet1:0:0", "=1");
+  // sessionB has no permissions userId, so it will overwrite the formula without
+  // updating the cell's `modifiedBy` field (legacy/edge behavior).
+  await sessionB.setCellFormula("Sheet1:0:0", "=2");
+
+  // Reconnect.
+  disconnect = connectDocs(docA, docB);
+
+  assert.ok(conflictsA.length >= 1, "expected at least one conflict to be detected");
+  assert.equal(conflictsA[0].remoteUserId, "", "expected remoteUserId to be unknown when modifiedBy is unchanged");
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
 test("CollabSession formula conflict monitor does not emit conflicts for sequential overwrites", async () => {
   const docA = new Y.Doc();
   const docB = new Y.Doc();
