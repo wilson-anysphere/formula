@@ -10,6 +10,7 @@ import { AlignTopIcon } from "./AlignTopIcon";
 import { AutoSumIcon } from "./AutoSumIcon";
 import { BoldIcon } from "./BoldIcon";
 import { BordersIcon } from "./BordersIcon";
+import { BringForwardIcon } from "./BringForwardIcon";
 import { CellStylesIcon } from "./CellStylesIcon";
 import { ClearFormattingIcon } from "./ClearFormattingIcon";
 import { ClearIcon } from "./ClearIcon";
@@ -43,6 +44,8 @@ import { FormatAsTableIcon } from "./FormatAsTableIcon";
 import { FormatPainterIcon } from "./FormatPainterIcon";
 import { GlobeIcon } from "./GlobeIcon";
 import { GoToIcon } from "./GoToIcon";
+import { GridlinesIcon } from "./GridlinesIcon";
+import { HeadingsIcon } from "./HeadingsIcon";
 import { IncreaseDecimalIcon } from "./IncreaseDecimalIcon";
 import { IncreaseFontIcon } from "./IncreaseFontIcon";
 import { IncreaseIndentIcon } from "./IncreaseIndentIcon";
@@ -51,6 +54,7 @@ import { InsertColumnsIcon } from "./InsertColumnsIcon";
 import { InsertRowsIcon } from "./InsertRowsIcon";
 import { InsertSheetIcon } from "./InsertSheetIcon";
 import { ItalicIcon } from "./ItalicIcon";
+import { LayersIcon } from "./LayersIcon";
 import { LinkIcon } from "./LinkIcon";
 import { LockIcon } from "./LockIcon";
 import { MailIcon } from "./MailIcon";
@@ -60,19 +64,29 @@ import { NoteIcon } from "./NoteIcon";
 import { NumberFormatIcon } from "./NumberFormatIcon";
 import { OrientationIcon } from "./OrientationIcon";
 import { OrganizeSheetsIcon } from "./OrganizeSheetsIcon";
+import { PageBreakIcon } from "./PageBreakIcon";
+import { PageLandscapeIcon } from "./PageLandscapeIcon";
+import { PagePortraitIcon } from "./PagePortraitIcon";
 import { PageSetupIcon } from "./PageSetupIcon";
+import { PaletteIcon } from "./PaletteIcon";
 import { PasteIcon } from "./PasteIcon";
 import { PasteSpecialIcon } from "./PasteSpecialIcon";
 import { PercentIcon } from "./PercentIcon";
 import { PinIcon } from "./PinIcon";
 import { PictureIcon } from "./PictureIcon";
 import { PrintIcon } from "./PrintIcon";
+import { PrintAreaIcon } from "./PrintAreaIcon";
 import { PlusIcon } from "./PlusIcon";
+import { RedoIcon } from "./RedoIcon";
+import { RulerIcon } from "./RulerIcon";
 import { SaveIcon } from "./SaveIcon";
+import { SendBackwardIcon } from "./SendBackwardIcon";
 import { SettingsIcon } from "./SettingsIcon";
 import { ShareIcon } from "./ShareIcon";
 import { ReplaceIcon } from "./ReplaceIcon";
 import { RowHeightIcon } from "./RowHeightIcon";
+import { SlidersIcon } from "./SlidersIcon";
+import { SparklesIcon } from "./SparklesIcon";
 import { ShapesIcon } from "./ShapesIcon";
 import { SmartArtIcon } from "./SmartArtIcon";
 import { SortFilterIcon } from "./SortFilterIcon";
@@ -81,8 +95,10 @@ import { StarIcon } from "./StarIcon";
 import { StrikethroughIcon } from "./StrikethroughIcon";
 import { SubscriptIcon } from "./SubscriptIcon";
 import { SuperscriptIcon } from "./SuperscriptIcon";
+import { TagIcon } from "./TagIcon";
 import { TextBoxIcon } from "./TextBoxIcon";
 import { UnderlineIcon } from "./UnderlineIcon";
+import { UndoIcon } from "./UndoIcon";
 import { UserIcon } from "./UserIcon";
 import { WrapTextIcon } from "./WrapTextIcon";
 
@@ -256,6 +272,52 @@ export const ribbonIconMap = {
   "insert.equations.inkEquation": ReplaceIcon,
   "insert.symbols.equation": AutoSumIcon,
   "insert.symbols.symbol": StarIcon,
+
+  // Page Layout
+  "pageLayout.themes.themes": SlidersIcon,
+  "pageLayout.themes.colors": PaletteIcon,
+  "pageLayout.themes.fonts": FontSizeIcon,
+  "pageLayout.themes.effects": SparklesIcon,
+
+  "pageLayout.pageSetup.pageSetupDialog": PageSetupIcon,
+  "pageLayout.pageSetup.margins": RulerIcon,
+  "pageLayout.pageSetup.orientation": PagePortraitIcon,
+  "pageLayout.pageSetup.orientation.portrait": PagePortraitIcon,
+  "pageLayout.pageSetup.orientation.landscape": PageLandscapeIcon,
+  "pageLayout.pageSetup.size": PagePortraitIcon,
+  "pageLayout.pageSetup.printArea": PrintAreaIcon,
+  "pageLayout.pageSetup.printArea.set": PrintAreaIcon,
+  "pageLayout.pageSetup.printArea.clear": ClearIcon,
+  "pageLayout.pageSetup.printArea.addTo": PlusIcon,
+  "pageLayout.pageSetup.breaks": PageBreakIcon,
+  "pageLayout.pageSetup.background": PictureIcon,
+  "pageLayout.pageSetup.printTitles": TagIcon,
+
+  "pageLayout.printArea.setPrintArea": PrintAreaIcon,
+  "pageLayout.printArea.clearPrintArea": ClearIcon,
+
+  "pageLayout.export.exportPdf": ExportIcon,
+
+  "pageLayout.scaleToFit.width": ColumnWidthIcon,
+  "pageLayout.scaleToFit.height": RowHeightIcon,
+  "pageLayout.scaleToFit.scale": PercentIcon,
+
+  "pageLayout.sheetOptions.gridlinesView": GridlinesIcon,
+  "pageLayout.sheetOptions.gridlinesPrint": PrintIcon,
+  "pageLayout.sheetOptions.headingsView": HeadingsIcon,
+  "pageLayout.sheetOptions.headingsPrint": PrintIcon,
+
+  "pageLayout.arrange.bringForward": BringForwardIcon,
+  "pageLayout.arrange.sendBackward": SendBackwardIcon,
+  "pageLayout.arrange.selectionPane": LayersIcon,
+  "pageLayout.arrange.align": AlignCenterIcon,
+  "pageLayout.arrange.group": LinkIcon,
+  "pageLayout.arrange.group.group": LinkIcon,
+  "pageLayout.arrange.group.ungroup": CloseIcon,
+  "pageLayout.arrange.group.regroup": RedoIcon,
+  "pageLayout.arrange.rotate": RedoIcon,
+  "pageLayout.arrange.rotate.rotateRight90": RedoIcon,
+  "pageLayout.arrange.rotate.rotateLeft90": UndoIcon,
 
   // Fallbacks (re-usable)
   sort: SortIcon,
