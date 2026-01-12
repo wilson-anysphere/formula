@@ -61,9 +61,10 @@ function coerceUint8Array(val) {
     return new Uint8Array(val.buffer, val.byteOffset, val.byteLength);
   }
 
-  if (Array.isArray(val) && val.every((b) => typeof b === "number")) {
+  if (Array.isArray(val)) {
+    // Avoid iterating extremely large arrays; reject based on length first.
     if (val.length > MAX_IMAGE_BYTES) return undefined;
-    return new Uint8Array(val);
+    if (val.every((b) => typeof b === "number")) return new Uint8Array(val);
   }
 
   // Some native bridges may return base64.
@@ -154,7 +155,8 @@ function mergeClipboardContent(target, source) {
 async function readClipboardItemText(item, type, maxBytes) {
   try {
     const blob = await item.getType(type);
-    if (blob && typeof blob.size === "number" && blob.size > maxBytes) return undefined;
+    if (!blob || typeof blob.size !== "number") return undefined;
+    if (blob.size > maxBytes) return undefined;
     return await blob.text();
   } catch {
     return undefined;
@@ -170,7 +172,8 @@ async function readClipboardItemText(item, type, maxBytes) {
 async function readClipboardItemPng(item, type, maxBytes) {
   try {
     const blob = await item.getType(type);
-    if (blob && typeof blob.size === "number" && blob.size > maxBytes) return undefined;
+    if (!blob || typeof blob.size !== "number") return undefined;
+    if (blob.size > maxBytes) return undefined;
     const buf = await blob.arrayBuffer();
     return new Uint8Array(buf);
   } catch {
