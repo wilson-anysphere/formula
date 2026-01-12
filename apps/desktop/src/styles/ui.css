@@ -542,6 +542,19 @@
   font-size: 10px;
 }
 
+.command-palette__item-icon--command {
+  background: var(--bg-inset);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.command-palette__item-icon--goto {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
 .command-palette__item-right {
   margin-left: auto;
   display: inline-flex;

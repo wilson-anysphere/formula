@@ -505,6 +505,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     string,
     {
       li: HTMLLIElement;
+      icon: HTMLDivElement;
       label: HTMLDivElement;
       description: HTMLDivElement;
       right: HTMLDivElement;
@@ -607,6 +608,10 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
       li.setAttribute("role", "option");
       li.setAttribute("aria-selected", selectedIndex === 0 ? "true" : "false");
 
+      const icon = document.createElement("div");
+      icon.className = "command-palette__item-icon command-palette__item-icon--goto";
+      icon.textContent = "↦";
+
       const main = document.createElement("div");
       main.className = "command-palette__item-main";
 
@@ -620,6 +625,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
       description.textContent = goToSuggestion.resolved;
       main.appendChild(description);
 
+      li.appendChild(icon);
       li.appendChild(main);
 
       li.addEventListener("mousedown", (e) => {
@@ -766,6 +772,10 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
             li.className = "command-palette__item";
             li.setAttribute("role", "option");
 
+            const icon = document.createElement("div");
+            icon.className = "command-palette__item-icon command-palette__item-icon--command";
+            icon.textContent = "⌘";
+
             const main = document.createElement("div");
             main.className = "command-palette__item-main";
 
@@ -785,6 +795,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
             shortcutPill.className = "command-palette__shortcut";
             right.appendChild(shortcutPill);
 
+            li.appendChild(icon);
             li.appendChild(main);
             li.appendChild(right);
 
@@ -797,7 +808,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
               executeCommand(cmd.commandId);
             });
 
-            cached = { li, label, description, right, shortcutPill };
+            cached = { li, icon, label, description, right, shortcutPill };
             commandRowCache.set(cmd.commandId, cached);
           } else {
             // Mark as most-recently-used (Map iteration order is insertion order).
