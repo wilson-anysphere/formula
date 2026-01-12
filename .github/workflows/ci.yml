@@ -40,6 +40,7 @@ jobs:
 
   xlsx-roundtrip:
     name: XLSX round-trip fixtures
+    needs: conflict-marker-guard
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +52,7 @@ jobs:
 
   desktop-backend-tests:
     name: Desktop backend (Rust) tests
+    needs: conflict-marker-guard
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,6 +78,7 @@ jobs:
 
   excel-oracle-compat:
     name: Excel oracle compatibility (pinned)
+    needs: conflict-marker-guard
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -112,6 +115,7 @@ jobs:
 
   web:
     name: Web + desktop builds
+    needs: conflict-marker-guard
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -168,6 +172,7 @@ jobs:
 
   desktop-tauri-check:
     name: Desktop (Tauri) Rust compile check
+    needs: conflict-marker-guard
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -200,6 +205,7 @@ jobs:
 
   desktop-tauri-check-windows:
     name: Desktop (Tauri) Rust compile check (Windows)
+    needs: conflict-marker-guard
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -221,6 +227,7 @@ jobs:
 
   desktop-tauri-check-macos:
     name: Desktop (Tauri) Rust compile check (macOS)
+    needs: conflict-marker-guard
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -240,6 +247,7 @@ jobs:
 
   node-tests:
     name: Node tests
+    needs: conflict-marker-guard
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -264,6 +272,7 @@ jobs:
 
   desktop-tauri-guardrails:
     name: Desktop (Tauri) frontend guardrail tests
+    needs: conflict-marker-guard
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -294,6 +303,7 @@ jobs:
 
   sync-server-docker:
     name: Sync server Docker build
+    needs: conflict-marker-guard
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
