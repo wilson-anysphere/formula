@@ -457,11 +457,11 @@ test.describe("BrowserExtensionHost", () => {
     expect(result.clipboardText).toBe("10");
   });
 
-  test("clipboard.writeText is blocked by selection DLP (desktop runtime adapter)", async ({ page }) => {
+  test("clipboard.writeText is allowed when selection is Restricted but the extension did not read any cells", async ({
+    page,
+  }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
     await gotoDesktop(page);
-
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
 
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -508,18 +508,8 @@ test.describe("BrowserExtensionHost", () => {
     });
     await page.evaluate(() => (window as any).__formulaApp.whenIdle());
 
-    // Copy B1 -> clipboard (baseline) using a real user gesture.
-    await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
-      const sheetId = app.getCurrentSheetId();
-      app.activateCell({ sheetId, row: 0, col: 1 }); // B1
-    });
-    await expect(page.getByTestId("active-cell")).toHaveText("B1");
-    await page.keyboard.press(`${modifier}+C`);
-    await page.evaluate(() => (window as any).__formulaApp.whenIdle());
-
-    // Move selection onto the Restricted cell so clipboard.writeText enforcement uses it.
+    // Keep selection on the Restricted cell. Clipboard writes should still be allowed because the
+    // extension never reads any spreadsheet cells (no taint).
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const app: any = (window as any).__formulaApp;
@@ -527,6 +517,11 @@ test.describe("BrowserExtensionHost", () => {
       app.activateCell({ sheetId, row: 0, col: 0 }); // A1
     });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    // Clear pre-existing toasts so we can assert that DLP doesn't fire.
+    await page.evaluate(() => {
+      document.getElementById("toast-root")?.replaceChildren();
+    });
 
     const result = await page.evaluate(async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -582,23 +577,8 @@ test.describe("BrowserExtensionHost", () => {
       }
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.message).toContain("Clipboard copy is blocked");
-    await expect(page.getByTestId("toast-root")).toContainText("Clipboard copy is blocked");
-
-    // Paste into C1: the clipboard should still contain the baseline "SAFE" value, not "EVIL".
-    await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const app: any = (window as any).__formulaApp;
-      const sheetId = app.getCurrentSheetId();
-      app.activateCell({ sheetId, row: 0, col: 2 }); // C1
-    });
-    await expect(page.getByTestId("active-cell")).toHaveText("C1");
-    await page.keyboard.press(`${modifier}+V`);
-    await page.evaluate(() => (window as any).__formulaApp.whenIdle());
-    await expect
-      .poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C1")))
-      .toBe("SAFE");
+    expect(result.ok).toBe(true);
+    await expect(page.getByTestId("toast-root")).not.toContainText("Clipboard copy is blocked");
   });
 
   test("clipboard.writeText is blocked when Restricted data is received via events.onSelectionChanged", async ({
