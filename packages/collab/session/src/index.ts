@@ -1031,6 +1031,11 @@ export class CollabSession {
         this.persistenceBinding = binding;
       }
 
+      // If persistence was detached while we were setting up (e.g. legacy
+      // `session.offline.destroy()` called during async imports), do not apply
+      // persisted state into the doc.
+      if (this.isDestroyed || this.persistenceDetached) return;
+
       try {
         await persistence.load(docId, this.doc);
       } finally {
