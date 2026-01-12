@@ -1304,25 +1304,27 @@ function EngineDemoApp() {
                 const value = input.value;
                 const start = input.selectionStart ?? value.length;
                 const end = input.selectionEnd ?? value.length;
-                const { references, activeIndex } = extractFormulaReferences(value, start, end);
-                const active = activeIndex == null ? null : references[activeIndex] ?? null;
-                if (!active) return;
 
                 const toggled = toggleA1AbsoluteAtCursor(value, start, end);
                 if (!toggled) return;
 
-                // Keep the updated token selected so repeated F4 presses continue cycling
-                // (Excel behavior).
-                const delta = toggled.text.length - value.length;
-                const oldTokenLen = active.end - active.start;
-                const nextStart = active.start;
-                const nextEnd = Math.max(nextStart, Math.min(nextStart + oldTokenLen + delta, toggled.text.length));
-
                 rangeInsertionRef.current = null;
-                selectedReferenceIndexRef.current = activeIndex;
-                cursorRef.current = { start: nextStart, end: nextEnd };
-                pendingSelectionRef.current = { start: nextStart, end: nextEnd };
                 draftRef.current = toggled.text;
+                cursorRef.current = { start: toggled.cursorStart, end: toggled.cursorEnd };
+                pendingSelectionRef.current = { start: toggled.cursorStart, end: toggled.cursorEnd };
+
+                // Track full-token selections so click-to-select behaves like Excel.
+                // When the selection is collapsed (caret), treat it as "not selected".
+                if (toggled.cursorStart === toggled.cursorEnd) {
+                  selectedReferenceIndexRef.current = null;
+                } else {
+                  const min = Math.min(toggled.cursorStart, toggled.cursorEnd);
+                  const max = Math.max(toggled.cursorStart, toggled.cursorEnd);
+                  const { references } = extractFormulaReferences(toggled.text, min, max);
+                  const selected = references.find((ref) => ref.start === min && ref.end === max);
+                  selectedReferenceIndexRef.current = selected ? selected.index : null;
+                }
+
                 setDraft(toggled.text);
                 return;
               }

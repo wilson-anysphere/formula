@@ -1,5 +1,5 @@
 import type { GridApi } from "@formula/grid";
-import { extractFormulaReferences, toggleA1AbsoluteAtCursor } from "@formula/spreadsheet-frontend";
+import { toggleA1AbsoluteAtCursor } from "@formula/spreadsheet-frontend";
 import { useLayoutEffect, useRef, useState } from "react";
 
 type ViewportRect = { x: number; y: number; width: number; height: number };
@@ -74,19 +74,11 @@ export function CellEditorOverlay(props: {
           const value = input.value;
           const start = input.selectionStart ?? value.length;
           const end = input.selectionEnd ?? value.length;
-          const { references, activeIndex } = extractFormulaReferences(value, start, end);
-          const active = activeIndex == null ? null : references[activeIndex] ?? null;
-          if (!active) return;
 
           const toggled = toggleA1AbsoluteAtCursor(value, start, end);
           if (!toggled) return;
 
-          const delta = toggled.text.length - value.length;
-          const oldTokenLen = active.end - active.start;
-          const nextStart = active.start;
-          const nextEnd = Math.max(nextStart, Math.min(nextStart + oldTokenLen + delta, toggled.text.length));
-
-          pendingSelectionRef.current = { start: nextStart, end: nextEnd };
+          pendingSelectionRef.current = { start: toggled.cursorStart, end: toggled.cursorEnd };
           props.onChange(toggled.text);
           return;
         }
