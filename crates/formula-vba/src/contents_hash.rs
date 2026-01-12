@@ -154,6 +154,18 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
         })
         .unwrap_or(WINDOWS_1252);
 
+    // Prefer parsing the decompressed `VBA/dir` stream using the MS-OVBA §2.3.4.2 structured record
+    // layout. Many synthetic fixtures (including some in our test suite) use a simplified TLV-ish
+    // encoding (`u16 id || u32 len || data`) that is not fully spec-accurate; for those we fall
+    // back to the existing forgiving parser below.
+    //
+    // This keeps backwards compatibility for tests/fixtures while enabling correct Contents Hash
+    // recomputation for real-world projects that follow the spec record layout (with module/dir
+    // terminators, nested records, and reserved/unicode fields).
+    if let Some(strict) = content_normalized_data_strict(&mut ole, &dir_decompressed, encoding) {
+        return Ok(strict);
+    }
+
     let mut out = Vec::new();
     let mut modules: Vec<ModuleInfo> = Vec::new();
     let mut current_module: Option<ModuleInfo> = None;
@@ -256,6 +268,564 @@ pub fn content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     }
 
     Ok(out)
+}
+
+#[derive(Debug, Clone)]
+enum ReferenceForHash {
+    Registered,
+    Project {
+        size_of_libid_absolute: u32,
+        libid_absolute: Vec<u8>,
+        size_of_libid_relative: u32,
+        libid_relative: Vec<u8>,
+        major_version: u32,
+        minor_version: u16,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct ModuleForHash {
+    stream_name: String,
+    text_offset: u32,
+}
+
+#[derive(Debug, Clone)]
+struct DirForHash {
+    project_name: Vec<u8>,
+    project_constants: Vec<u8>,
+    references: Vec<ReferenceForHash>,
+    modules: Vec<ModuleForHash>,
+}
+
+/// Try to parse the decompressed `VBA/dir` stream according to the MS-OVBA §2.3.4.2 structured
+/// record layout and compute ContentNormalizedData (MS-OVBA §2.4.2.1).
+///
+/// Returns `None` when the input does not look like a spec-compliant `dir` stream (common for
+/// synthetic fixtures that use a simplified TLV encoding).
+fn content_normalized_data_strict(
+    ole: &mut OleFile,
+    dir_decompressed: &[u8],
+    encoding: &'static Encoding,
+) -> Option<Vec<u8>> {
+    let dir = parse_dir_for_hash_strict(dir_decompressed, encoding)?;
+
+    // MS-OVBA §2.4.2.1 ContentNormalizedData
+    let mut out = Vec::new();
+    out.extend_from_slice(&dir.project_name);
+    out.extend_from_slice(&dir.project_constants);
+
+    for r in &dir.references {
+        match r {
+            ReferenceForHash::Registered => out.push(0x7B),
+            ReferenceForHash::Project {
+                size_of_libid_absolute,
+                libid_absolute,
+                size_of_libid_relative,
+                libid_relative,
+                major_version,
+                minor_version,
+            } => {
+                // MS-OVBA §2.4.2.1 REFERENCEPROJECT normalization.
+                let mut temp = Vec::new();
+                temp.extend_from_slice(&size_of_libid_absolute.to_le_bytes());
+                temp.extend_from_slice(libid_absolute);
+                temp.extend_from_slice(&size_of_libid_relative.to_le_bytes());
+                temp.extend_from_slice(libid_relative);
+                temp.extend_from_slice(&major_version.to_le_bytes());
+                temp.extend_from_slice(&minor_version.to_le_bytes());
+                temp.push(0x00);
+
+                for &b in &temp {
+                    if b == 0x00 {
+                        break;
+                    }
+                    out.push(b);
+                }
+            }
+        }
+    }
+
+    for m in &dir.modules {
+        let stream_path = format!("VBA/{}", m.stream_name);
+        let module_stream = ole.read_stream_opt(&stream_path).ok().flatten()?;
+        let text_offset = (m.text_offset as usize).min(module_stream.len());
+        let source_container = &module_stream[text_offset..];
+        let source = decompress_container(source_container).ok()?;
+        out.extend_from_slice(&normalize_module_source_strict(&source));
+    }
+
+    Some(out)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DirCursor<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> DirCursor<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, offset: 0 }
+    }
+
+    fn remaining(&self) -> usize {
+        self.bytes.len().saturating_sub(self.offset)
+    }
+
+    fn peek_u16(&self) -> Option<u16> {
+        if self.remaining() < 2 {
+            return None;
+        }
+        Some(u16::from_le_bytes([
+            self.bytes[self.offset],
+            self.bytes[self.offset + 1],
+        ]))
+    }
+
+    fn read_u16(&mut self) -> Option<u16> {
+        let v = self.peek_u16()?;
+        self.offset += 2;
+        Some(v)
+    }
+
+    fn read_u32(&mut self) -> Option<u32> {
+        if self.remaining() < 4 {
+            return None;
+        }
+        let v = u32::from_le_bytes([
+            self.bytes[self.offset],
+            self.bytes[self.offset + 1],
+            self.bytes[self.offset + 2],
+            self.bytes[self.offset + 3],
+        ]);
+        self.offset += 4;
+        Some(v)
+    }
+
+    fn take(&mut self, n: usize) -> Option<&'a [u8]> {
+        if self.remaining() < n {
+            return None;
+        }
+        let out = &self.bytes[self.offset..self.offset + n];
+        self.offset += n;
+        Some(out)
+    }
+
+    fn skip(&mut self, n: usize) -> Option<()> {
+        self.take(n).map(|_| ())
+    }
+}
+
+fn parse_fixed_record(cur: &mut DirCursor<'_>, expected_id: u16, expected_size: u32) -> Option<()> {
+    let id = cur.read_u16()?;
+    let size = cur.read_u32()?;
+    if id != expected_id || size != expected_size {
+        return None;
+    }
+    cur.skip(size as usize)?;
+    Some(())
+}
+
+fn parse_record_u16_u16(cur: &mut DirCursor<'_>, expected_id: u16, expected_size: u32) -> Option<u16> {
+    let id = cur.read_u16()?;
+    let size = cur.read_u32()?;
+    if id != expected_id || size != expected_size {
+        return None;
+    }
+    cur.read_u16()
+}
+
+fn parse_projectname_record(cur: &mut DirCursor<'_>) -> Option<Vec<u8>> {
+    let id = cur.read_u16()?;
+    if id != 0x0004 {
+        return None;
+    }
+    let size = cur.read_u32()? as usize;
+    let name = cur.take(size)?.to_vec();
+    Some(name)
+}
+
+fn parse_projectdocstring_record(cur: &mut DirCursor<'_>) -> Option<()> {
+    let id = cur.read_u16()?;
+    if id != 0x0005 {
+        return None;
+    }
+    let size = cur.read_u32()? as usize;
+    cur.skip(size)?;
+    // Reserved (0x0040) + SizeOfDocStringUnicode + DocStringUnicode
+    let reserved = cur.read_u16()?;
+    if reserved != 0x0040 {
+        return None;
+    }
+    let size_unicode = cur.read_u32()? as usize;
+    cur.skip(size_unicode)?;
+    Some(())
+}
+
+fn parse_projecthelpfilepath_record(cur: &mut DirCursor<'_>) -> Option<()> {
+    let id = cur.read_u16()?;
+    if id != 0x0006 {
+        return None;
+    }
+    let size1 = cur.read_u32()? as usize;
+    cur.skip(size1)?;
+    let reserved = cur.read_u16()?;
+    if reserved != 0x003D {
+        return None;
+    }
+    let size2 = cur.read_u32()? as usize;
+    cur.skip(size2)?;
+    Some(())
+}
+
+fn parse_projectversion_record(cur: &mut DirCursor<'_>) -> Option<()> {
+    let id = cur.read_u16()?;
+    if id != 0x0009 {
+        return None;
+    }
+    let _reserved = cur.read_u32()?;
+    let _major = cur.read_u32()?;
+    let _minor = cur.read_u16()?;
+    Some(())
+}
+
+fn parse_projectconstants_record(cur: &mut DirCursor<'_>) -> Option<Vec<u8>> {
+    let id = cur.read_u16()?;
+    if id != 0x000C {
+        return None;
+    }
+    let size = cur.read_u32()? as usize;
+    let constants = cur.take(size)?.to_vec();
+    // Reserved (0x003C) + SizeOfConstantsUnicode + ConstantsUnicode
+    let reserved = cur.read_u16()?;
+    if reserved != 0x003C {
+        return None;
+    }
+    let size_unicode = cur.read_u32()? as usize;
+    cur.skip(size_unicode)?;
+    Some(constants)
+}
+
+fn parse_referencename_record(cur: &mut DirCursor<'_>) -> Option<()> {
+    let id = cur.read_u16()?;
+    if id != 0x0016 {
+        return None;
+    }
+    let size = cur.read_u32()? as usize;
+    cur.skip(size)?;
+    let _reserved = cur.read_u16()?;
+    let size_unicode = cur.read_u32()? as usize;
+    cur.skip(size_unicode)?;
+    Some(())
+}
+
+fn parse_reference_control(cur: &mut DirCursor<'_>) -> Option<()> {
+    let id = cur.read_u16()?;
+    if id != 0x002F {
+        return None;
+    }
+    let size_twiddled = cur.read_u32()? as usize;
+    cur.skip(size_twiddled)?;
+
+    // Optional NameRecordExtended (REFERENCENAME).
+    if cur.peek_u16()? == 0x0016 {
+        parse_referencename_record(cur)?;
+    }
+
+    let reserved3 = cur.read_u16()?;
+    if reserved3 != 0x0030 {
+        return None;
+    }
+    let size_extended = cur.read_u32()? as usize;
+    cur.skip(size_extended)?;
+    Some(())
+}
+
+fn parse_reference_for_hash(cur: &mut DirCursor<'_>) -> Option<Option<ReferenceForHash>> {
+    // Optional NameRecord.
+    if cur.peek_u16()? == 0x0016 {
+        parse_referencename_record(cur)?;
+    }
+
+    let id = cur.peek_u16()?;
+    match id {
+        0x000D => {
+            let _id = cur.read_u16()?;
+            let size = cur.read_u32()? as usize;
+            cur.skip(size)?;
+            Some(Some(ReferenceForHash::Registered))
+        }
+        0x000E => {
+            let _id = cur.read_u16()?;
+            let size_total = cur.read_u32()? as usize;
+            let start = cur.offset;
+
+            let size_abs = cur.read_u32()?;
+            let libid_abs = cur.take(size_abs as usize)?.to_vec();
+            let size_rel = cur.read_u32()?;
+            let libid_rel = cur.take(size_rel as usize)?.to_vec();
+            let major = cur.read_u32()?;
+            let minor = cur.read_u16()?;
+
+            // Ensure we consumed exactly the expected number of bytes.
+            let consumed = cur.offset.checked_sub(start)?;
+            if consumed != size_total {
+                return None;
+            }
+
+            Some(Some(ReferenceForHash::Project {
+                size_of_libid_absolute: size_abs,
+                libid_absolute: libid_abs,
+                size_of_libid_relative: size_rel,
+                libid_relative: libid_rel,
+                major_version: major,
+                minor_version: minor,
+            }))
+        }
+        0x002F => {
+            parse_reference_control(cur)?;
+            Some(None)
+        }
+        0x0033 => {
+            let _id = cur.read_u16()?;
+            let size_libid = cur.read_u32()? as usize;
+            cur.skip(size_libid)?;
+            // Nested REFERENCECONTROL.
+            parse_reference_control(cur)?;
+            Some(None)
+        }
+        _ => None,
+    }
+}
+
+fn parse_modulename_record(cur: &mut DirCursor<'_>, expected_id: u16) -> Option<Vec<u8>> {
+    let id = cur.read_u16()?;
+    if id != expected_id {
+        return None;
+    }
+    let size = cur.read_u32()? as usize;
+    cur.take(size).map(|b| b.to_vec())
+}
+
+fn parse_module_stream_name(cur: &mut DirCursor<'_>, encoding: &'static Encoding) -> Option<String> {
+    let id = cur.read_u16()?;
+    if id != 0x001A {
+        return None;
+    }
+    let size_name = cur.read_u32()? as usize;
+    let raw_name = cur.take(size_name)?.to_vec();
+
+    // Spec-compliant MODULESTREAMNAME includes Reserved (0x0032) + Unicode name, but many fixtures
+    // omit those fields. Only parse them when the Reserved marker is present.
+    let unicode_name = if cur.peek_u16() == Some(0x0032) {
+        let _reserved = cur.read_u16()?;
+        let size_unicode = cur.read_u32()? as usize;
+        Some(cur.take(size_unicode)?.to_vec())
+    } else {
+        None
+    };
+
+    if let Some(unicode) = unicode_name {
+        let (cow, _) = UTF_16LE.decode_without_bom_handling(&unicode);
+        return Some(cow.into_owned());
+    }
+
+    Some(decode_dir_string(trim_reserved_u16(&raw_name), encoding))
+}
+
+fn parse_moduledocstring_record(cur: &mut DirCursor<'_>) -> Option<()> {
+    let id = cur.read_u16()?;
+    if id != 0x001C {
+        return None;
+    }
+    let size = cur.read_u32()? as usize;
+    cur.skip(size)?;
+    let reserved = cur.read_u16()?;
+    if reserved != 0x0048 {
+        return None;
+    }
+    let size_unicode = cur.read_u32()? as usize;
+    cur.skip(size_unicode)?;
+    Some(())
+}
+
+fn parse_moduleoffset_record(cur: &mut DirCursor<'_>) -> Option<u32> {
+    let id = cur.read_u16()?;
+    if id != 0x0031 {
+        return None;
+    }
+    let size = cur.read_u32()?;
+    if size != 0x0000_0004 {
+        return None;
+    }
+    cur.read_u32()
+}
+
+fn parse_dir_for_hash_strict(dir_decompressed: &[u8], encoding: &'static Encoding) -> Option<DirForHash> {
+    let mut cur = DirCursor::new(dir_decompressed);
+
+    // PROJECTINFORMATION record (MS-OVBA §2.3.4.2.1)
+    parse_fixed_record(&mut cur, 0x0001, 0x0000_0004)?; // PROJECTSYSKIND
+    if cur.peek_u16()? == 0x004A {
+        parse_fixed_record(&mut cur, 0x004A, 0x0000_0004)?; // PROJECTCOMPATVERSION (optional)
+    }
+    parse_fixed_record(&mut cur, 0x0002, 0x0000_0004)?; // PROJECTLCID
+    parse_fixed_record(&mut cur, 0x0014, 0x0000_0004)?; // PROJECTLCIDINVOKE
+    parse_record_u16_u16(&mut cur, 0x0003, 0x0000_0002)?; // PROJECTCODEPAGE
+    let project_name = parse_projectname_record(&mut cur)?;
+    parse_projectdocstring_record(&mut cur)?;
+    parse_projecthelpfilepath_record(&mut cur)?;
+    parse_fixed_record(&mut cur, 0x0007, 0x0000_0004)?; // PROJECTHELPCONTEXT
+    parse_fixed_record(&mut cur, 0x0008, 0x0000_0004)?; // PROJECTLIBFLAGS
+    parse_projectversion_record(&mut cur)?;
+    let project_constants = if cur.peek_u16()? == 0x000C {
+        parse_projectconstants_record(&mut cur)?
+    } else {
+        Vec::new()
+    };
+
+    // PROJECTREFERENCES record (MS-OVBA §2.3.4.2.2): variable array terminated by PROJECTMODULES (0x000F).
+    let mut references = Vec::new();
+    loop {
+        let next = cur.peek_u16()?;
+        if next == 0x000F {
+            break;
+        }
+        if let Some(r) = parse_reference_for_hash(&mut cur)? {
+            references.push(r);
+        }
+    }
+
+    // PROJECTMODULES record (MS-OVBA §2.3.4.2.3)
+    let modules_id = cur.read_u16()?;
+    if modules_id != 0x000F {
+        return None;
+    }
+    let modules_size = cur.read_u32()?;
+    if modules_size != 0x0000_0002 {
+        return None;
+    }
+    let module_count = cur.read_u16()? as usize;
+
+    // PROJECTCOOKIE record (MS-OVBA §2.3.4.2.3.1)
+    let cookie_id = cur.read_u16()?;
+    if cookie_id != 0x0013 {
+        return None;
+    }
+    let cookie_size = cur.read_u32()?;
+    if cookie_size != 0x0000_0002 {
+        return None;
+    }
+    cur.read_u16()?; // Cookie (ignored)
+
+    let mut modules = Vec::new();
+    for _ in 0..module_count {
+        // MODULENAME
+        parse_modulename_record(&mut cur, 0x0019)?;
+        // Optional MODULENAMEUNICODE (0x0047)
+        if cur.peek_u16()? == 0x0047 {
+            parse_modulename_record(&mut cur, 0x0047)?;
+        }
+        // MODULESTREAMNAME
+        let stream_name = parse_module_stream_name(&mut cur, encoding)?;
+        // MODULEDOCSTRING
+        parse_moduledocstring_record(&mut cur)?;
+        // MODULEOFFSET
+        let text_offset = parse_moduleoffset_record(&mut cur)?;
+        // MODULEHELPCONTEXT
+        parse_fixed_record(&mut cur, 0x001E, 0x0000_0004)?;
+        // MODULECOOKIE
+        parse_fixed_record(&mut cur, 0x002C, 0x0000_0002)?;
+        // MODULETYPE (id 0x0021 or 0x0022, followed by reserved u32)
+        let module_type_id = cur.read_u16()?;
+        if module_type_id != 0x0021 && module_type_id != 0x0022 {
+            return None;
+        }
+        cur.read_u32()?; // Reserved
+        // Optional MODULEREADONLY (0x0025) and MODULEPRIVATE (0x0028)
+        if cur.peek_u16()? == 0x0025 {
+            cur.read_u16()?;
+            cur.read_u32()?;
+        }
+        if cur.peek_u16()? == 0x0028 {
+            cur.read_u16()?;
+            cur.read_u32()?;
+        }
+        // Terminator + reserved
+        let term = cur.read_u16()?;
+        if term != 0x002B {
+            return None;
+        }
+        let reserved = cur.read_u32()?;
+        if reserved != 0 {
+            return None;
+        }
+
+        modules.push(ModuleForHash {
+            stream_name,
+            text_offset,
+        });
+    }
+
+    // Dir stream terminator + reserved (MS-OVBA §2.3.4.2)
+    let end = cur.read_u16()?;
+    if end != 0x0010 {
+        return None;
+    }
+    let reserved = cur.read_u32()?;
+    if reserved != 0 {
+        return None;
+    }
+    if cur.offset != dir_decompressed.len() {
+        return None;
+    }
+
+    Some(DirForHash {
+        project_name,
+        project_constants,
+        references,
+        modules,
+    })
+}
+
+fn normalize_module_source_strict(bytes: &[u8]) -> Vec<u8> {
+    // MS-OVBA §2.4.2.1: split into lines on CR and lone-LF; ignore the LF of CRLF.
+    let mut lines: Vec<&[u8]> = Vec::new();
+    let mut line_start = 0usize;
+    let mut prev = 0u8;
+    for (i, &ch) in bytes.iter().enumerate() {
+        if ch == b'\r' {
+            lines.push(&bytes[line_start..i]);
+            line_start = i + 1;
+        } else if ch == b'\n' {
+            if prev != b'\r' {
+                lines.push(&bytes[line_start..i]);
+            }
+            // Always advance past LF (whether it was a lone LF or part of CRLF).
+            line_start = i + 1;
+        }
+        prev = ch;
+    }
+    lines.push(&bytes[line_start..]);
+
+    let mut out = Vec::with_capacity(bytes.len());
+    for line in lines {
+        if starts_with_ascii_case_insensitive(line, b"attribute") {
+            continue;
+        }
+        out.extend_from_slice(line);
+    }
+    out
+}
+
+fn starts_with_ascii_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
+    if haystack.len() < needle.len() {
+        return false;
+    }
+    haystack[..needle.len()]
+        .iter()
+        .zip(needle.iter())
+        .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase())
 }
 
 /// Compute the MS-OVBA §2.4.2.3 **Content Hash** (v1) for a VBA project.
