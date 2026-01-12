@@ -94,4 +94,18 @@ describe("CanvasGridRenderer.applyAxisSizeOverrides", () => {
     // The second call should be a no-op and not schedule another frame.
     expect(requestRenderSpy).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps runtime axis overrides consistent when setting a size very close to the default", () => {
+    const provider: CellProvider = { getCell: () => null };
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 10, colCount: 10, defaultRowHeight: 10, defaultColWidth: 10 });
+
+    // Within the renderer's epsilon, this should be treated as "default sized" and clear the override.
+    renderer.setRowHeight(2, 10 + 5e-7);
+    expect(renderer.getRowHeight(2)).toBe(10);
+    expect(renderer.scroll.rows.getSize(2)).toBe(10);
+
+    renderer.setColWidth(3, 10 + 5e-7);
+    expect(renderer.getColWidth(3)).toBe(10);
+    expect(renderer.scroll.cols.getSize(3)).toBe(10);
+  });
 });
