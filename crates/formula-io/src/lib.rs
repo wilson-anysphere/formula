@@ -1,5 +1,48 @@
-use std::io::{Read, Seek};
+use std::fs::{self, File};
+use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
+
+use tempfile::NamedTempFile;
+
+#[derive(Debug)]
+enum AtomicWriteError<E> {
+    Io(io::Error),
+    Write(E),
+}
+
+impl<E> From<io::Error> for AtomicWriteError<E> {
+    fn from(value: io::Error) -> Self {
+        Self::Io(value)
+    }
+}
+
+fn atomic_write<E>(
+    path: &Path,
+    write_fn: impl FnOnce(&mut File) -> Result<(), E>,
+) -> Result<(), AtomicWriteError<E>> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(dir)?;
+
+    let mut temp = NamedTempFile::new_in(dir)?;
+    write_fn(temp.as_file_mut()).map_err(AtomicWriteError::Write)?;
+    temp.flush()?;
+    temp.as_file().sync_all()?;
+
+    match temp.persist(path) {
+        Ok(_) => Ok(()),
+        Err(err) => match err.error.kind() {
+            // Best-effort replacement on platforms where rename doesn't clobber.
+            io::ErrorKind::AlreadyExists => {
+                let _ = fs::remove_file(path);
+                err.file
+                    .persist(path)
+                    .map(|_| ())
+                    .map_err(|e| AtomicWriteError::Io(e.error))
+            }
+            _ => Err(AtomicWriteError::Io(err.error)),
+        },
+    }
+}
 
 pub use formula_xls as xls;
 pub use formula_xlsb as xlsb;
@@ -696,11 +739,6 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
     match workbook {
         Workbook::Xlsx(package) => match ext.as_str() {
             "xlsx" => {
-                let file = std::fs::File::create(path).map_err(|source| Error::SaveIo {
-                    path: path.to_path_buf(),
-                    source,
-                })?;
-
                 // If we're saving a macro-enabled workbook to a `.xlsx` filename, strip the VBA
                 // project and its related parts/relationships so we don't produce an
                 // XLSM-in-disguise (which Excel refuses to open).
@@ -712,65 +750,86 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
                             path: path.to_path_buf(),
                             source,
                         })?;
-                    stripped
-                        .write_to(file)
-                        .map_err(|source| Error::SaveXlsxPackage {
+                    atomic_write(path, |file| stripped.write_to(file)).map_err(|err| match err {
+                        AtomicWriteError::Io(source) => Error::SaveIo {
                             path: path.to_path_buf(),
                             source,
-                        })?;
+                        },
+                        AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
+                            path: path.to_path_buf(),
+                            source,
+                        },
+                    })
                 } else {
-                    package
-                        .write_to(file)
-                        .map_err(|source| Error::SaveXlsxPackage {
+                    atomic_write(path, |file| package.write_to(file)).map_err(|err| match err {
+                        AtomicWriteError::Io(source) => Error::SaveIo {
                             path: path.to_path_buf(),
                             source,
-                        })?;
+                        },
+                        AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
+                            path: path.to_path_buf(),
+                            source,
+                        },
+                    })
                 }
-                Ok(())
             }
-            "xlsm" => {
-                let file = std::fs::File::create(path).map_err(|source| Error::SaveIo {
+            "xlsm" => atomic_write(path, |file| package.write_to(file)).map_err(|err| match err {
+                AtomicWriteError::Io(source) => Error::SaveIo {
                     path: path.to_path_buf(),
                     source,
-                })?;
-                package
-                    .write_to(file)
-                    .map_err(|source| Error::SaveXlsxPackage {
-                        path: path.to_path_buf(),
-                        source,
-                    })?;
-                Ok(())
-            }
+                },
+                AtomicWriteError::Write(source) => Error::SaveXlsxPackage {
+                    path: path.to_path_buf(),
+                    source,
+                },
+            }),
             other => Err(Error::UnsupportedExtension {
                 path: path.to_path_buf(),
                 extension: other.to_string(),
             }),
         },
         Workbook::Xls(result) => match ext.as_str() {
-            "xlsx" => xlsx::write_workbook(&result.workbook, path).map_err(|source| {
-                Error::SaveXlsxExport {
-                    path: path.to_path_buf(),
-                    source,
-                }
-            }),
+            "xlsx" => atomic_write(path, |file| xlsx::write_workbook_to_writer(&result.workbook, file))
+                .map_err(|err| match err {
+                    AtomicWriteError::Io(source) => Error::SaveIo {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                    AtomicWriteError::Write(source) => Error::SaveXlsxExport {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                }),
             other => Err(Error::UnsupportedExtension {
                 path: path.to_path_buf(),
                 extension: other.to_string(),
             }),
         },
         Workbook::Xlsb(wb) => match ext.as_str() {
-            "xlsb" => wb.save_as(path).map_err(|source| Error::SaveXlsbPackage {
-                path: path.to_path_buf(),
-                source,
+            "xlsb" => atomic_write(path, |file| wb.save_as_to_writer(file)).map_err(|err| match err {
+                AtomicWriteError::Io(source) => Error::SaveIo {
+                    path: path.to_path_buf(),
+                    source,
+                },
+                AtomicWriteError::Write(source) => Error::SaveXlsbPackage {
+                    path: path.to_path_buf(),
+                    source,
+                },
             }),
             "xlsx" => {
                 let model = xlsb_to_model_workbook(wb).map_err(|source| Error::SaveXlsbExport {
                     path: path.to_path_buf(),
                     source,
                 })?;
-                xlsx::write_workbook(&model, path).map_err(|source| Error::SaveXlsxExport {
-                    path: path.to_path_buf(),
-                    source,
+                atomic_write(path, |file| xlsx::write_workbook_to_writer(&model, file)).map_err(|err| match err {
+                    AtomicWriteError::Io(source) => Error::SaveIo {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                    AtomicWriteError::Write(source) => Error::SaveXlsxExport {
+                        path: path.to_path_buf(),
+                        source,
+                    },
                 })
             }
             other => Err(Error::UnsupportedExtension {
@@ -781,9 +840,15 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
         Workbook::Model(model) => match ext.as_str() {
             "xlsx" => {
                 let export = materialize_columnar_tables_for_export(model);
-                xlsx::write_workbook(&export, path).map_err(|source| Error::SaveXlsxExport {
-                    path: path.to_path_buf(),
-                    source,
+                atomic_write(path, |file| xlsx::write_workbook_to_writer(&export, file)).map_err(|err| match err {
+                    AtomicWriteError::Io(source) => Error::SaveIo {
+                        path: path.to_path_buf(),
+                        source,
+                    },
+                    AtomicWriteError::Write(source) => Error::SaveXlsxExport {
+                        path: path.to_path_buf(),
+                        source,
+                    },
                 })
             }
             other => Err(Error::UnsupportedExtension {

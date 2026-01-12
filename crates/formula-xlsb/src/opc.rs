@@ -478,6 +478,13 @@ impl XlsbWorkbook {
         self.save_with_part_overrides(dest, &HashMap::new())
     }
 
+    /// Save the workbook as an `.xlsb` package written to an arbitrary writer.
+    ///
+    /// This is equivalent to [`Self::save_as`] but does not require a filesystem path.
+    pub fn save_as_to_writer<W: Write + Seek>(&self, writer: W) -> Result<(), ParseError> {
+        self.save_with_part_overrides_to_writer(writer, &HashMap::new())
+    }
+
     /// Save the workbook with an updated numeric cell value.
     ///
     /// This is a convenience wrapper around the in-memory worksheet patcher ([`patch_sheet_bin`])
@@ -1121,8 +1128,19 @@ impl XlsbWorkbook {
         dest: impl AsRef<Path>,
         overrides: &HashMap<String, Vec<u8>>,
     ) -> Result<(), ParseError> {
-        let dest = dest.as_ref();
+        let out = File::create(dest)?;
+        self.save_with_part_overrides_to_writer(out, overrides)
+    }
 
+    /// Save the workbook while overriding specific part payloads, writing the output ZIP to
+    /// `writer`.
+    ///
+    /// This is the writer-based equivalent of [`Self::save_with_part_overrides`].
+    pub fn save_with_part_overrides_to_writer<W: Write + Seek>(
+        &self,
+        writer: W,
+        overrides: &HashMap<String, Vec<u8>>,
+    ) -> Result<(), ParseError> {
         let file = File::open(&self.path)?;
         let mut zip = ZipArchive::new(file)?;
 
@@ -1177,8 +1195,7 @@ impl XlsbWorkbook {
             }
         }
 
-        let out = File::create(dest)?;
-        let mut writer = ZipWriter::new(out);
+        let mut zip_writer = ZipWriter::new(writer);
 
         // Use a consistent compression method for output. This does *not* affect payload
         // preservation: we always copy/write the uncompressed part bytes.
@@ -1194,7 +1211,7 @@ impl XlsbWorkbook {
             if entry.is_dir() {
                 // Directory entries are optional in ZIPs, but we recreate them when present to
                 // preserve the package layout more closely.
-                writer.add_directory(name, options.clone())?;
+                zip_writer.add_directory(name, options.clone())?;
                 continue;
             }
 
@@ -1206,7 +1223,7 @@ impl XlsbWorkbook {
                 continue;
             }
 
-            writer.start_file(name.as_str(), options.clone())?;
+            zip_writer.start_file(name.as_str(), options.clone())?;
 
             // When invalidating calcChain, we may need to rewrite XML parts even if they're
             // present in `overrides`.
@@ -1215,7 +1232,7 @@ impl XlsbWorkbook {
                     if overrides.contains_key(&name) {
                         used_overrides.insert(name.clone());
                     }
-                    writer.write_all(updated)?;
+                    zip_writer.write_all(updated)?;
                     continue;
                 }
             }
@@ -1224,7 +1241,7 @@ impl XlsbWorkbook {
                     if overrides.contains_key(&name) {
                         used_overrides.insert(name.clone());
                     }
-                    writer.write_all(updated)?;
+                    zip_writer.write_all(updated)?;
                     continue;
                 }
             }
@@ -1233,18 +1250,18 @@ impl XlsbWorkbook {
                     if overrides.contains_key(&name) {
                         used_overrides.insert(name.clone());
                     }
-                    writer.write_all(updated)?;
+                    zip_writer.write_all(updated)?;
                     continue;
                 }
             }
 
             if let Some(bytes) = overrides.get(&name) {
                 used_overrides.insert(name.clone());
-                writer.write_all(bytes)?;
+                zip_writer.write_all(bytes)?;
             } else if let Some(bytes) = self.preserved_parts.get(&name) {
-                writer.write_all(bytes)?;
+                zip_writer.write_all(bytes)?;
             } else {
-                io::copy(&mut entry, &mut writer)?;
+                io::copy(&mut entry, &mut zip_writer)?;
             }
         }
 
@@ -1265,7 +1282,7 @@ impl XlsbWorkbook {
             )));
         }
 
-        writer.finish()?;
+        zip_writer.finish()?;
         Ok(())
     }
 

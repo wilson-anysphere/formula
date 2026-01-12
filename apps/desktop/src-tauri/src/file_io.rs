@@ -20,11 +20,12 @@ use formula_xlsx::{
     CellPatch as XlsxCellPatch, PartOverride, PreservedPivotParts, WorkbookCellPatches, XlsxPackage,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::io::{BufReader, Cursor};
+use std::io::{BufReader, Cursor, Write};
 use std::path::Path;
 #[cfg(feature = "desktop")]
 use std::path::PathBuf;
 use std::sync::Arc;
+use tempfile::NamedTempFile;
 
 use crate::macro_trust::compute_macro_fingerprint;
 
@@ -1254,6 +1255,28 @@ fn xlsb_error_display(code: u8) -> String {
     formula_xlsb::errors::xlsb_error_display(code)
 }
 
+fn atomic_write_bytes(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(dir)?;
+
+    let mut temp = NamedTempFile::new_in(dir)?;
+    temp.write_all(bytes)?;
+    temp.flush()?;
+    temp.as_file().sync_all()?;
+
+    match temp.persist(path) {
+        Ok(_) => Ok(()),
+        Err(err) => match err.error.kind() {
+            // Best-effort replacement on platforms where rename doesn't clobber.
+            std::io::ErrorKind::AlreadyExists => {
+                let _ = std::fs::remove_file(path);
+                err.file.persist(path).map(|_| ()).map_err(|e| e.error)
+            }
+            _ => Err(err.error),
+        },
+    }
+}
+
 #[cfg(feature = "desktop")]
 pub async fn write_xlsx(
     path: impl Into<PathBuf> + Send + 'static,
@@ -1333,7 +1356,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             matches!(extension.as_deref(), Some("xlsx") | Some("xltx")) && workbook.vba_project_bin.is_some();
 
         if patches.is_empty() && !print_settings_changed && !wants_drop_vba && !power_query_changed {
-            std::fs::write(path, origin_bytes)
+            atomic_write_bytes(path, origin_bytes)
                 .with_context(|| format!("write workbook {:?}", path))?;
             return Ok(workbook
                 .origin_xlsx_bytes
@@ -1347,7 +1370,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
             let bytes = Arc::<[u8]>::from(bytes);
-            std::fs::write(path, bytes.as_ref())
+            atomic_write_bytes(path, bytes.as_ref())
                 .with_context(|| format!("write workbook {:?}", path))?;
             return Ok(bytes);
         }
@@ -1404,7 +1427,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
             }
 
             let bytes = Arc::<[u8]>::from(bytes);
-            std::fs::write(path, bytes.as_ref())
+            atomic_write_bytes(path, bytes.as_ref())
                 .with_context(|| format!("write workbook {:?}", path))?;
             return Ok(bytes);
         }
@@ -1508,7 +1531,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
         }
 
         let bytes = Arc::<[u8]>::from(bytes);
-        std::fs::write(path, bytes.as_ref())
+        atomic_write_bytes(path, bytes.as_ref())
             .with_context(|| format!("write workbook {:?}", path))?;
         return Ok(bytes);
     }
@@ -1575,7 +1598,7 @@ pub fn write_xlsx_blocking(path: &Path, workbook: &Workbook) -> anyhow::Result<A
     }
 
     let bytes = Arc::<[u8]>::from(bytes);
-    std::fs::write(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
+    atomic_write_bytes(path, bytes.as_ref()).with_context(|| format!("write workbook {:?}", path))?;
     Ok(bytes)
 }
 
@@ -4539,5 +4562,75 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
 
         let written_bytes = std::fs::read(&out_path).expect("read written bytes");
         assert_eq!(original_bytes, written_bytes);
+    }
+
+    #[test]
+    fn write_xlsx_blocking_replaces_existing_file() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/basic.xlsx"
+        ));
+        let workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
+        let expected = workbook
+            .origin_xlsx_bytes
+            .as_ref()
+            .expect("origin bytes should be captured for xlsx inputs")
+            .clone();
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("existing.xlsx");
+        std::fs::write(&out_path, b"old-bytes").expect("seed existing file");
+
+        let written = write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+        let file_bytes = std::fs::read(&out_path).expect("read written file");
+
+        assert_eq!(file_bytes.as_slice(), written.as_ref());
+        assert_eq!(file_bytes.as_slice(), expected.as_ref());
+    }
+
+    #[test]
+    fn write_xlsx_blocking_creates_parent_dirs_for_patched_bytes() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/basic.xlsx"
+        ));
+        let mut workbook = read_xlsx_blocking(fixture_path).expect("read fixture workbook");
+
+        let sheet_id = workbook.sheets[0].id.clone();
+        workbook
+            .sheet_mut(&sheet_id)
+            .expect("sheet exists")
+            .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(123.0))));
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("nested/dir/patched.xlsx");
+
+        let written = write_xlsx_blocking(&out_path, &workbook).expect("write patched workbook");
+        let file_bytes = std::fs::read(&out_path).expect("read written file");
+
+        assert_eq!(file_bytes.as_slice(), written.as_ref());
+    }
+
+    #[test]
+    fn write_xlsx_blocking_creates_parent_dirs_for_generated_bytes() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+        workbook
+            .sheet_mut(&sheet_id)
+            .expect("sheet exists")
+            .set_cell(
+                0,
+                0,
+                Cell::from_literal(Some(CellScalar::Text("Hello".to_string()))),
+            );
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("deep/nested/generated.xlsx");
+
+        let written = write_xlsx_blocking(&out_path, &workbook).expect("write generated workbook");
+        let file_bytes = std::fs::read(&out_path).expect("read written file");
+
+        assert_eq!(file_bytes.as_slice(), written.as_ref());
     }
 }

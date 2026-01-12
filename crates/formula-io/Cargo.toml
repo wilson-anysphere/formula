@@ -12,6 +12,7 @@ formula-columnar = { path = "../formula-columnar", optional = true, features = [
 formula-xlsx = { path = "../formula-xlsx" }
 formula-xls = { path = "../formula-xls" }
 formula-xlsb = { path = "../formula-xlsb" }
+tempfile = "3.10"
 thiserror = "1.0"
 zip = { version = "2.1", default-features = false }
 
@@ -20,5 +21,4 @@ default = []
 parquet = ["dep:formula-columnar"]
 
 [dev-dependencies]
-tempfile = "3.10"
 xlsx-diff = { path = "../xlsx-diff" }
