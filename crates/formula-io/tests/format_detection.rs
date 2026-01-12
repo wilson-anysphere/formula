@@ -109,12 +109,28 @@ fn detect_workbook_format_sniffs_utf16le_tab_delimited_text() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("data.xlsx");
 
-    let tsv = "col1\tcol2\n1\thello\n2\tworld\n";
+    let tsv = "col1\tcol2\r\n1\thello\r\n2\tworld\r\n";
     let mut bytes = vec![0xFF, 0xFE];
     for unit in tsv.encode_utf16() {
         bytes.extend_from_slice(&unit.to_le_bytes());
     }
     std::fs::write(&path, &bytes).expect("write utf16 tsv");
+
+    let fmt = detect_workbook_format(&path).expect("detect format");
+    assert_eq!(fmt, WorkbookFormat::Csv);
+}
+
+#[test]
+fn detect_workbook_format_sniffs_utf16be_tab_delimited_text() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("data.xlsx");
+
+    let tsv = "col1\tcol2\r\n1\thello\r\n2\tworld\r\n";
+    let mut bytes = vec![0xFE, 0xFF];
+    for unit in tsv.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_be_bytes());
+    }
+    std::fs::write(&path, &bytes).expect("write utf16be tsv");
 
     let fmt = detect_workbook_format(&path).expect("detect format");
     assert_eq!(fmt, WorkbookFormat::Csv);

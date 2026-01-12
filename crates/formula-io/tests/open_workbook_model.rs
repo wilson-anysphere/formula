@@ -471,12 +471,41 @@ fn open_workbook_model_sniffs_utf16le_tab_delimited_text() {
     let path = tmp.path().join("data.txt");
 
     // Excel's "Unicode Text" export is UTF-16LE with a BOM and (typically) tab-delimited.
-    let tsv = "col1\tcol2\n1\thello\n2\tworld\n";
+    let tsv = "col1\tcol2\r\n1\thello\r\n2\tworld\r\n";
     let mut bytes = vec![0xFF, 0xFE];
     for unit in tsv.encode_utf16() {
         bytes.extend_from_slice(&unit.to_le_bytes());
     }
     std::fs::write(&path, &bytes).expect("write utf16 tsv");
+
+    let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "data");
+
+    let sheet = workbook.sheet_by_name("data").expect("data sheet missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value_a1("A2").unwrap(), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value_a1("B2").unwrap(),
+        CellValue::String("world".to_string())
+    );
+}
+
+#[test]
+fn open_workbook_model_sniffs_utf16be_tab_delimited_text() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let path = tmp.path().join("data.txt");
+
+    let tsv = "col1\tcol2\r\n1\thello\r\n2\tworld\r\n";
+    let mut bytes = vec![0xFE, 0xFF];
+    for unit in tsv.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_be_bytes());
+    }
+    std::fs::write(&path, &bytes).expect("write utf16be tsv");
 
     let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
     assert_eq!(workbook.sheets.len(), 1);

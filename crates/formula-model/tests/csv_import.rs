@@ -90,7 +90,7 @@ fn csv_import_handles_utf8_inside_quoted_fields() {
 #[test]
 fn csv_import_supports_utf16le_bom_tab_delimited_text() {
     // Excel's "Unicode Text" export is UTF-16LE with a BOM and (typically) tab-delimited.
-    let tsv = "id\ttext\n1\thello\n2\tworld\n";
+    let tsv = "id\ttext\r\n1\thello\r\n2\tworld\r\n";
     let mut bytes = vec![0xFF, 0xFE];
     for unit in tsv.encode_utf16() {
         bytes.extend_from_slice(&unit.to_le_bytes());
@@ -98,6 +98,29 @@ fn csv_import_supports_utf16le_bom_tab_delimited_text() {
 
     let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(bytes), CsvOptions::default())
         .expect("import utf16 tsv");
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value(CellRef::new(0, 1)),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value(CellRef::new(1, 0)), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value(CellRef::new(1, 1)),
+        CellValue::String("world".to_string())
+    );
+}
+
+#[test]
+fn csv_import_supports_utf16be_bom_tab_delimited_text() {
+    let tsv = "id\ttext\r\n1\thello\r\n2\tworld\r\n";
+    let mut bytes = vec![0xFE, 0xFF];
+    for unit in tsv.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_be_bytes());
+    }
+
+    let sheet = import_csv_to_worksheet(1, "Data", Cursor::new(bytes), CsvOptions::default())
+        .expect("import utf16be tsv");
 
     assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
     assert_eq!(
