@@ -446,15 +446,6 @@ pub enum DecodedChunk {
 }
 
 impl DecodedChunk {
-    pub fn len(&self) -> usize {
-        match self {
-            Self::Int { values, .. } => values.len(),
-            Self::Dict { indices, .. } => indices.len(),
-            Self::Bool { values, .. } => values.len(),
-            Self::Float { values, .. } => values.len(),
-        }
-    }
-
     pub fn get_i64(&self, index: usize) -> Option<i64> {
         match self {
             Self::Int { values, validity } => {

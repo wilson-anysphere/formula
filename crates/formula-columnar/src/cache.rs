@@ -56,15 +56,6 @@ where
         self.stats
     }
 
-    pub fn len(&self) -> usize {
-        self.map.len()
-    }
-
-    pub fn clear(&mut self) {
-        self.map.clear();
-        self.order.clear();
-    }
-
     pub fn remove(&mut self, key: &K) -> Option<V> {
         self.map.remove(key).map(|(value, _)| value)
     }

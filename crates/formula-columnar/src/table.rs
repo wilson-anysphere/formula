@@ -55,18 +55,6 @@ pub struct Column {
 }
 
 impl Column {
-    pub fn name(&self) -> &str {
-        &self.schema.name
-    }
-
-    pub fn column_type(&self) -> ColumnType {
-        self.schema.column_type
-    }
-
-    pub fn stats(&self) -> &ColumnStats {
-        &self.stats
-    }
-
     fn chunk_index(&self, row: usize, page_size: usize) -> (usize, usize) {
         (row / page_size, row % page_size)
     }
