@@ -45,12 +45,23 @@ test("workbook-backend is importable under Node ESM when executing TS sources (s
   assert.equal(TS_EXCEL_MAX_SHEET_NAME_LEN, JS_EXCEL_MAX_SHEET_NAME_LEN);
   assert.deepEqual([...TS_INVALID_SHEET_NAME_CHARACTERS], JS_INVALID_SHEET_NAME_CHARACTERS);
 
+  // 31 character limit is measured in UTF-16 code units (JS `string.length`).
+  // 🙂 is outside the BMP and takes two UTF-16 code units.
+  const maxOk = `${"a".repeat(TS_EXCEL_MAX_SHEET_NAME_LEN - 2)}🙂`;
+  assert.equal(maxOk.length, TS_EXCEL_MAX_SHEET_NAME_LEN);
+  const tooLong = `${"a".repeat(TS_EXCEL_MAX_SHEET_NAME_LEN - 1)}🙂`;
+  assert.equal(tooLong.length, TS_EXCEL_MAX_SHEET_NAME_LEN + 1);
+  assert.equal(mod.getSheetNameValidationErrorMessage(maxOk), null);
+  assert.equal(mod.getSheetNameValidationErrorMessage(tooLong), `sheet name cannot exceed ${TS_EXCEL_MAX_SHEET_NAME_LEN} characters`);
+
   const samples = [
     { name: "Sheet1", options: undefined },
     { name: "", options: undefined },
     { name: "'Budget", options: undefined },
     { name: "Bad:Name", options: undefined },
     { name: "budget", options: { existingNames: ["Budget"] } },
+    { name: maxOk, options: undefined },
+    { name: tooLong, options: undefined },
   ];
   for (const sample of samples) {
     assert.equal(getMessageFromTs(sample.name, sample.options), getMessageFromJs(sample.name, sample.options));
