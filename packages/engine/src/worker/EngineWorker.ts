@@ -60,12 +60,18 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 const FORMULA_PARSE_OPTIONS_ERROR =
-  'options must be { localeId?: string, referenceStyle?: "A1" | "R1C1" }';
+  'options must be { localeId?: string, referenceStyle?: "A1" | "R1C1" } or a ParseOptions object';
 
-function normalizeFormulaParseOptions(options: unknown): FormulaParseOptions | undefined {
+function normalizeFormulaParseOptions(options: unknown): unknown | undefined {
   if (options == null) return undefined;
   if (!isPlainObject(options)) {
     throw new Error(FORMULA_PARSE_OPTIONS_ERROR);
+  }
+
+  // Backward compatibility: older call sites may pass the full `ParseOptions` object supported by
+  // `crates/formula-wasm` (snake_case keys like `reference_style`).
+  if ("locale" in options || "reference_style" in options || "normalize_relative_to" in options) {
+    return options;
   }
 
   const allowed = new Set(["localeId", "referenceStyle"]);
