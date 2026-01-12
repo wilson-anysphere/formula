@@ -87,6 +87,8 @@ export function normalizeMarketplaceBaseUrl(baseUrl: string): string {
   if (!raw) return "/api";
 
   raw = raw.replace(/\\/g, "/");
+  // Base URL should not carry query/hash. (These break `${baseUrl}/search` concatenation.)
+  raw = raw.split("#", 1)[0]!.split("?", 1)[0]!;
 
   // Strip trailing slashes.
   //

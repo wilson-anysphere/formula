@@ -34,6 +34,13 @@ describe("normalizeMarketplaceBaseUrl", () => {
     expect(normalizeMarketplaceBaseUrl("http://127.0.0.1:8080")).toBe("http://127.0.0.1:8080/api");
     expect(normalizeMarketplaceBaseUrl("http://127.0.0.1:8080/api")).toBe("http://127.0.0.1:8080/api");
   });
+
+  it("strips query/hash components", () => {
+    expect(normalizeMarketplaceBaseUrl("/api?x=y")).toBe("/api");
+    expect(normalizeMarketplaceBaseUrl("/api#frag")).toBe("/api");
+    expect(normalizeMarketplaceBaseUrl("https://marketplace.formula.app/api?x=y")).toBe("https://marketplace.formula.app/api");
+    expect(normalizeMarketplaceBaseUrl("https://marketplace.formula.app/api#frag")).toBe("https://marketplace.formula.app/api");
+  });
 });
 
 describe("MarketplaceClient default baseUrl", () => {
