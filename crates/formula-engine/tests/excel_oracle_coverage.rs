@@ -22,12 +22,14 @@ fn excel_oracle_function_calls_are_registered() {
 
     let mut unknown = BTreeSet::new();
     for case in cases {
+        let case_id = case.get("id").and_then(|v| v.as_str()).unwrap_or("<unknown>");
         let formula = case
             .get("formula")
             .and_then(|v| v.as_str())
             .expect("case.formula");
-        let parsed = eval::Parser::parse(formula)
-            .unwrap_or_else(|e| panic!("parse formula {formula:?}: {e}"));
+        let parsed = eval::Parser::parse(formula).unwrap_or_else(|e| {
+            panic!("parse excel oracle formula ({case_id}) {formula:?}: {e}")
+        });
         collect_unknown_function_calls(&parsed, &mut unknown);
     }
 
@@ -45,6 +47,13 @@ struct FunctionCatalog {
 struct CatalogFunction {
     name: String,
     volatility: String,
+}
+
+fn normalize_function_call_name(name: &str) -> String {
+    // Mirror `functions::lookup_function` behavior: Excel stores newer functions with an
+    // `_xlfn.` prefix, but they should count as coverage for the unprefixed built-in.
+    let upper = name.to_ascii_uppercase();
+    upper.strip_prefix("_XLFN.").unwrap_or(&upper).to_string()
 }
 
 #[test]
@@ -65,12 +74,14 @@ fn excel_oracle_corpus_covers_nonvolatile_function_catalog() {
 
     let mut called = BTreeSet::new();
     for case in cases {
+        let case_id = case.get("id").and_then(|v| v.as_str()).unwrap_or("<unknown>");
         let formula = case
             .get("formula")
             .and_then(|v| v.as_str())
             .expect("case.formula");
-        let parsed = eval::Parser::parse(formula)
-            .unwrap_or_else(|e| panic!("parse formula {formula:?}: {e}"));
+        let parsed = eval::Parser::parse(formula).unwrap_or_else(|e| {
+            panic!("parse excel oracle formula ({case_id}) {formula:?}: {e}")
+        });
         collect_function_calls(&parsed, &mut called);
     }
 
@@ -144,7 +155,7 @@ fn collect_unknown_function_calls(expr: &eval::Expr<String>, unknown: &mut BTree
     match expr {
         eval::Expr::FunctionCall { name, args, .. } => {
             if functions::lookup_function(name).is_none() {
-                unknown.insert(name.clone());
+                unknown.insert(normalize_function_call_name(name));
             }
             for arg in args {
                 collect_unknown_function_calls(arg, unknown);
@@ -184,13 +195,7 @@ fn collect_unknown_function_calls(expr: &eval::Expr<String>, unknown: &mut BTree
 fn collect_function_calls(expr: &eval::Expr<String>, called: &mut BTreeSet<String>) {
     match expr {
         eval::Expr::FunctionCall { name, args, .. } => {
-            let upper = name.to_ascii_uppercase();
-            let normalized = if let Some(rest) = upper.strip_prefix("_XLFN.") {
-                rest.to_string()
-            } else {
-                upper
-            };
-            called.insert(normalized);
+            called.insert(normalize_function_call_name(name));
             for arg in args {
                 collect_function_calls(arg, called);
             }
