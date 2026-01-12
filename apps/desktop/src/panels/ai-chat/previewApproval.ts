@@ -1,6 +1,8 @@
 import type { PreviewApprovalRequest } from "../../../../../packages/ai-tools/src/llm/integration.js";
 import type { CellData } from "../../../../../packages/ai-tools/src/spreadsheet/types.js";
 
+import * as nativeDialogs from "../../tauri/nativeDialogs.js";
+
 function safeStringify(value: unknown): string {
   if (typeof value === "string") return value;
   try {
@@ -58,6 +60,5 @@ export function formatPreviewApprovalPrompt(request: PreviewApprovalRequest, opt
 
 export async function confirmPreviewApproval(request: PreviewApprovalRequest): Promise<boolean> {
   const prompt = formatPreviewApprovalPrompt(request);
-  if (typeof globalThis.confirm !== "function") return false;
-  return globalThis.confirm(prompt);
+  return nativeDialogs.confirm(prompt, { title: "Approve AI changes?" });
 }

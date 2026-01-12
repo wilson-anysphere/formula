@@ -1,3 +1,5 @@
+import * as nativeDialogs from "../tauri/nativeDialogs.js";
+
 type NetworkRequestInfo = {
   host?: string;
   url?: string;
@@ -64,10 +66,7 @@ async function promptOnce(req: ExtensionPermissionPromptRequest): Promise<boolea
   if (typeof document === "undefined" || !document.body) {
     const ext = req.displayName ? `${req.displayName} (${req.extensionId})` : req.extensionId;
     const list = permissions.map((p) => formatPermissionLabel(p, req)).join(", ");
-    if (typeof globalThis.confirm === "function") {
-      return globalThis.confirm(`Allow ${ext} to use: ${list}?`);
-    }
-    return false;
+    return nativeDialogs.confirm(`Allow ${ext} to use: ${list}?`, { title: "Extension Permission Request" });
   }
 
   const dialog = document.createElement("dialog");
