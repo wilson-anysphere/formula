@@ -622,8 +622,14 @@ fn extract_source_hash_from_sig_data_v1_serialized(
 fn extract_source_hash_from_sig_data_v1_serialized_asn1(
     bytes: &[u8],
 ) -> Result<Option<Vec<u8>>, VbaSignatureSignedDigestError> {
-    // SigDataV1Serialized (ASN.1 form; best-effort) is expected to start with a version INTEGER
-    // followed by one or more fields that include the 16-byte sourceHash.
+    // SigDataV1Serialized (ASN.1 form; best-effort) has multiple observed shapes.
+    //
+    // Real-world producers appear to encode either:
+    // 1) `SEQUENCE { version INTEGER, ... , sourceHash OCTET STRING }`, or
+    // 2) `SEQUENCE { algorithmId AlgorithmIdentifier, sourceHash OCTET STRING }`.
+    //
+    // We handle both, but keep the parser conservative to avoid accidentally treating unrelated
+    // 16-byte OCTET STRINGs as the VBA project hash.
     let Ok((tag, len, rest)) = parse_tag_and_length(bytes) else {
         return Ok(None);
     };
@@ -635,15 +641,37 @@ fn extract_source_hash_from_sig_data_v1_serialized_asn1(
     };
     let mut cur = content;
 
-    let Some((version, after_ver)) = parse_integer_u32(cur)? else {
-        return Ok(None);
-    };
-    if !(1..=0x100).contains(&version) {
-        return Ok(None);
+    // Pattern (1): version INTEGER, then scan for a 16-byte OCTET STRING in the remainder.
+    if let Some((version, after_ver)) = parse_integer_u32(cur)? {
+        if (1..=0x100).contains(&version) {
+            if let Some(hash) = scan_asn1_for_octet_string_len(after_ver, 16)? {
+                return Ok(Some(hash));
+            }
+        }
     }
-    cur = after_ver;
 
-    scan_asn1_for_octet_string_len(cur, 16)
+    // Pattern (2): algorithmId AlgorithmIdentifier, then `sourceHash` OCTET STRING (16 bytes).
+    //
+    // Validate that the first element looks like an AlgorithmIdentifier by requiring it to be a
+    // SEQUENCE whose first child is an OBJECT IDENTIFIER. This keeps the match conservative.
+    let (first_tag, first_len, first_rest) = match parse_tag_and_length(cur) {
+        Ok(v) => v,
+        Err(_) => return Ok(None),
+    };
+    if first_tag.class == Asn1Class::Universal && first_tag.constructed && first_tag.number == 16 {
+        let alg_content = slice_constructed_contents(first_rest, first_len)?;
+        if parse_oid(alg_content).is_ok() {
+            cur = skip_element(cur)?;
+            if !cur.is_empty() && !is_eoc(cur) {
+                let (hash, _after) = parse_octet_string(cur)?;
+                if hash.len() == 16 {
+                    return Ok(Some(hash));
+                }
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 fn extract_source_hash_from_sig_data_v1_serialized_binary(bytes: &[u8]) -> Option<Vec<u8>> {
