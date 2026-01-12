@@ -1,6 +1,7 @@
 use std::io::Write;
 
 use calamine::{open_workbook, Reader, Xls};
+use formula_engine::{parse_formula, ParseOptions};
 use formula_model::{DefinedNameScope, XLNM_PRINT_AREA};
 
 mod common;
@@ -17,6 +18,11 @@ fn import_fixture_without_biff(bytes: &[u8]) -> formula_xls::XlsImportResult {
     let mut tmp = tempfile::NamedTempFile::new().expect("temp file");
     tmp.write_all(bytes).expect("write xls bytes");
     formula_xls::import_xls_path_without_biff(tmp.path()).expect("import xls")
+}
+
+fn assert_parseable_refers_to(expr: &str) {
+    parse_formula(&format!("={expr}"), ParseOptions::default())
+        .unwrap_or_else(|e| panic!("expected refers_to to be parseable, expr={expr:?}, err={e:?}"));
 }
 
 #[test]
@@ -40,6 +46,7 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
     assert!(!zed.hidden);
     assert_eq!(zed.refers_to, "Sheet1!$B$1");
     assert_eq!(zed.xlsx_local_sheet_id, None);
+    assert_parseable_refers_to(&zed.refers_to);
 
     let local = result
         .workbook
@@ -52,6 +59,7 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
     assert_eq!(local.refers_to, "Sheet1!$A$1");
     assert_eq!(local.comment.as_deref(), Some("Local description"));
     assert_eq!(local.xlsx_local_sheet_id, Some(0));
+    assert_parseable_refers_to(&local.refers_to);
 
     let hidden = result
         .workbook
@@ -62,6 +70,7 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
     assert_eq!(hidden.scope, DefinedNameScope::Workbook);
     assert!(hidden.hidden);
     assert_eq!(hidden.refers_to, "Sheet1!$A$1:$B$2");
+    assert_parseable_refers_to(&hidden.refers_to);
 
     let union = result
         .workbook
@@ -71,6 +80,7 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
         .expect("UnionName missing");
     assert_eq!(union.scope, DefinedNameScope::Workbook);
     assert_eq!(union.refers_to, "Sheet1!$A$1,Sheet1!$B$1");
+    assert_parseable_refers_to(&union.refers_to);
 
     let my_name = result
         .workbook
@@ -81,6 +91,7 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
     assert_eq!(my_name.scope, DefinedNameScope::Workbook);
     assert!(!my_name.hidden);
     assert_eq!(my_name.refers_to, "SUM(Sheet1!$A$1:$A$3)");
+    assert_parseable_refers_to(&my_name.refers_to);
 
     let abs = result
         .workbook
@@ -90,6 +101,7 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
         .expect("AbsName missing");
     assert_eq!(abs.scope, DefinedNameScope::Workbook);
     assert_eq!(abs.refers_to, "ABS(1)");
+    assert_parseable_refers_to(&abs.refers_to);
 
     let union_func = result
         .workbook
@@ -99,6 +111,7 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
         .expect("UnionFunc missing");
     assert_eq!(union_func.scope, DefinedNameScope::Workbook);
     assert_eq!(union_func.refers_to, "SUM((Sheet1!$A$1,Sheet1!$B$1))");
+    assert_parseable_refers_to(&union_func.refers_to);
 
     let miss = result
         .workbook
@@ -108,6 +121,7 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
         .expect("MissingArgName missing");
     assert_eq!(miss.scope, DefinedNameScope::Workbook);
     assert_eq!(miss.refers_to, "IF(,1,2)");
+    assert_parseable_refers_to(&miss.refers_to);
 
     let print_area = result
         .workbook
@@ -122,6 +136,7 @@ fn imports_biff_defined_names_with_scope_and_3d_refs() {
         "Sheet1!$A$1:$B$2,Sheet1!$D$4:$E$5"
     );
     assert_eq!(print_area.xlsx_local_sheet_id, Some(0));
+    assert_parseable_refers_to(&print_area.refers_to);
 }
 
 #[test]
@@ -144,6 +159,7 @@ fn defined_name_formulas_quote_sheet_names() {
             .find(|n| n.name == name)
             .unwrap_or_else(|| panic!("{name} missing"));
         assert_eq!(dn.refers_to, expected_refers_to);
+        assert_parseable_refers_to(&dn.refers_to);
     }
 }
 
