@@ -12,29 +12,35 @@ fn eval_formula(formula: &str) -> Value {
 #[test]
 fn oddfprice_allows_issue_equal_settlement() {
     let v = eval_formula("=ODDFPRICE(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)");
-    assert!(matches!(v, Value::Number(n) if n.is_finite()));
+    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
 }
 
 #[test]
 fn oddfyield_allows_issue_equal_settlement() {
     let v = eval_formula(
-        "=ODDFYIELD(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,99,100,2,0)",
+        "=ODDFYIELD(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,ODDFPRICE(DATE(2020,1,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0),100,2,0)",
     );
-    assert!(matches!(v, Value::Number(n) if n.is_finite()));
+    assert!(
+        matches!(v, Value::Number(n) if (n - 0.04).abs() <= 1e-6),
+        "expected yield ~0.04, got {v:?}"
+    );
 }
 
 #[test]
 fn oddfprice_allows_settlement_equal_first_coupon() {
     let v = eval_formula("=ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0)");
-    assert!(matches!(v, Value::Number(n) if n.is_finite()));
+    assert!(matches!(v, Value::Number(n) if n.is_finite()), "got {v:?}");
 }
 
 #[test]
 fn oddfyield_allows_settlement_equal_first_coupon() {
     let v = eval_formula(
-        "=ODDFYIELD(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,99,100,2,0)",
+        "=ODDFYIELD(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,ODDFPRICE(DATE(2020,7,1),DATE(2025,1,1),DATE(2020,1,1),DATE(2020,7,1),0.05,0.04,100,2,0),100,2,0)",
     );
-    assert!(matches!(v, Value::Number(n) if n.is_finite()));
+    assert!(
+        matches!(v, Value::Number(n) if (n - 0.04).abs() <= 1e-6),
+        "expected yield ~0.04, got {v:?}"
+    );
 }
 
 #[test]
