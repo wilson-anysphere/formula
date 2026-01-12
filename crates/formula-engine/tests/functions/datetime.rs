@@ -219,6 +219,22 @@ fn days360_matches_excel_examples() {
         &sheet.eval("=DAYS360(DATE(2019,1,31),DATE(2019,2,28),TRUE)"),
         28.0,
     );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2019,2,28),DATE(2019,3,31))"),
+        30.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2019,2,28),DATE(2019,3,31),TRUE)"),
+        32.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2019,2,15),DATE(2019,2,28))"),
+        16.0,
+    );
+    assert_number(
+        &sheet.eval("=DAYS360(DATE(2019,2,15),DATE(2019,2,28),TRUE)"),
+        13.0,
+    );
     assert_eq!(
         sheet.eval("=DAYS360(\"nope\",DATE(2020,1,1))"),
         Value::Error(ErrorKind::Value)
@@ -258,6 +274,10 @@ fn yearfrac_matches_basis_conventions() {
     assert_number(
         &sheet.eval("=YEARFRAC(DATE(2020,2,29),DATE(2021,2,28),1)"),
         1.0,
+    );
+    assert_number(
+        &sheet.eval("=YEARFRAC(DATE(2020,2,29),DATE(2022,2,28),1)"),
+        2.0,
     );
     assert_number(
         &sheet.eval("=YEARFRAC(DATE(2020,2,29),DATE(2021,3,1),1)"),

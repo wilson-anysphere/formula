@@ -86,6 +86,19 @@ fn days360_matches_excel_examples() {
     let end = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
     assert_eq!(date_time::days360(start, end, false, system).unwrap(), 30);
     assert_eq!(date_time::days360(start, end, true, system).unwrap(), 28);
+
+    // Non-leap February month-end to 31st-of-month.
+    let start = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2019, 3, 31), system).unwrap();
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 30);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 32);
+
+    // US/NASD-only behavior: if end_date is month-end and start_day < 30, end_date rolls to the
+    // 1st of the next month (this includes end-of-February handling).
+    let start = ymd_to_serial(ExcelDate::new(2019, 2, 15), system).unwrap();
+    let end = ymd_to_serial(ExcelDate::new(2019, 2, 28), system).unwrap();
+    assert_eq!(date_time::days360(start, end, false, system).unwrap(), 16);
+    assert_eq!(date_time::days360(start, end, true, system).unwrap(), 13);
 }
 
 #[test]
@@ -141,6 +154,12 @@ fn yearfrac_respects_basis_conventions() {
     assert!((de - expected_de).abs() < 1e-12);
     assert!((de + date_time::yearfrac(e, d, 1, system).unwrap()).abs() < 1e-12);
     assert!((0.0..=2.0).contains(&de));
+
+    // Multi-year leap-day clamping should still count whole-year anniversaries.
+    let a2 = ymd_to_serial(ExcelDate::new(2022, 2, 28), system).unwrap();
+    let aa2 = date_time::yearfrac(a, a2, 1, system).unwrap();
+    assert!((aa2 - 2.0).abs() < 1e-12);
+    assert!((aa2 + date_time::yearfrac(a2, a, 1, system).unwrap()).abs() < 1e-12);
 
     assert_eq!(date_time::yearfrac(start, end, 9, system).unwrap_err(), ExcelError::Num);
 }
