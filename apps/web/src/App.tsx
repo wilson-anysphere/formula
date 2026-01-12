@@ -49,11 +49,17 @@ function EngineDemoApp() {
   );
   const lastAppliedAxisSheetRef = useRef<string | null>(null);
 
-  // +1 for frozen header row/col.
-  const rowCount = 1_000_000 + 1;
-  const colCount = 100 + 1;
-  const frozenRows = 1;
-  const frozenCols = 1;
+  const HEADER_ROWS = 1;
+  const HEADER_COLS = 1;
+
+  // +1 for the header row/col (implemented using frozen panes in the grid).
+  const rowCount = 1_000_000 + HEADER_ROWS;
+  const colCount = 100 + HEADER_COLS;
+
+  const [frozenBySheet, setFrozenBySheet] = useState<Record<string, { frozenRows: number; frozenCols: number }>>({});
+  const sheetFrozen = frozenBySheet[activeSheet] ?? { frozenRows: 0, frozenCols: 0 };
+  const frozenRows = HEADER_ROWS + sheetFrozen.frozenRows;
+  const frozenCols = HEADER_COLS + sheetFrozen.frozenCols;
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState("");
@@ -69,8 +75,8 @@ function EngineDemoApp() {
 
   const isFormulaEditing = formulaFocused && draft.trim().startsWith("=");
   const isFormulaEditingRef = useRef(isFormulaEditing);
-  const headerRowOffset = frozenRows > 0 ? 1 : 0;
-  const headerColOffset = frozenCols > 0 ? 1 : 0;
+  const headerRowOffset = HEADER_ROWS;
+  const headerColOffset = HEADER_COLS;
 
   const gridApiRef = useRef<GridApi | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -96,6 +102,78 @@ function EngineDemoApp() {
   const activeAddress = gridCellToA1Address(activeCell);
 
   const [activeValue, setActiveValue] = useState<CellScalar>(null);
+
+  const setActiveSheetFrozen = (next: { frozenRows: number; frozenCols: number }) => {
+    setFrozenBySheet((prev) => ({ ...prev, [activeSheet]: next }));
+  };
+
+  const handleFreezePanes = () => {
+    if (!activeCell) return;
+    const row0 = activeCell.row - headerRowOffset;
+    const col0 = activeCell.col - headerColOffset;
+    setActiveSheetFrozen({ frozenRows: Math.max(0, row0), frozenCols: Math.max(0, col0) });
+  };
+
+  const handleFreezeTopRow = () => {
+    setActiveSheetFrozen({ frozenRows: 1, frozenCols: 0 });
+  };
+
+  const handleFreezeFirstColumn = () => {
+    setActiveSheetFrozen({ frozenRows: 0, frozenCols: 1 });
+  };
+
+  const handleUnfreezePanes = () => {
+    setActiveSheetFrozen({ frozenRows: 0, frozenCols: 0 });
+  };
+
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [commandPaletteQuery, setCommandPaletteQuery] = useState("");
+  const [commandPaletteSelectedIndex, setCommandPaletteSelectedIndex] = useState(0);
+  const commandPaletteInputRef = useRef<HTMLInputElement | null>(null);
+
+  const closeCommandPalette = () => {
+    setCommandPaletteOpen(false);
+    setCommandPaletteQuery("");
+    setCommandPaletteSelectedIndex(0);
+  };
+
+  const commandPaletteCommands: Array<{ id: string; title: string; run: () => void; keywords?: string[] }> = [
+    { id: "view.freezePanes", title: "Freeze Panes", run: handleFreezePanes, keywords: ["frozen", "pane"] },
+    { id: "view.freezeTopRow", title: "Freeze Top Row", run: handleFreezeTopRow, keywords: ["frozen", "row"] },
+    { id: "view.freezeFirstColumn", title: "Freeze First Column", run: handleFreezeFirstColumn, keywords: ["frozen", "column"] },
+    { id: "view.unfreezePanes", title: "Unfreeze Panes", run: handleUnfreezePanes, keywords: ["frozen", "pane"] },
+  ];
+
+  const filteredCommandPalette = commandPaletteCommands.filter((cmd) => {
+    const query = commandPaletteQuery.trim().toLowerCase();
+    if (!query) return true;
+    const haystack = `${cmd.title} ${cmd.id} ${(cmd.keywords ?? []).join(" ")}`.toLowerCase();
+    return haystack.includes(query);
+  });
+
+  const clampedCommandPaletteIndex = Math.max(
+    0,
+    Math.min(commandPaletteSelectedIndex, Math.max(0, filteredCommandPalette.length - 1)),
+  );
+  const selectedCommand = filteredCommandPalette[clampedCommandPaletteIndex];
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const primary = event.ctrlKey || event.metaKey;
+      if (!primary || !event.shiftKey) return;
+      if (event.key !== "P" && event.key !== "p") return;
+      event.preventDefault();
+      setCommandPaletteOpen(true);
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!commandPaletteOpen) return;
+    queueMicrotask(() => commandPaletteInputRef.current?.focus());
+  }, [commandPaletteOpen]);
 
   useEffect(() => {
     draftRef.current = draft;
@@ -1100,6 +1178,24 @@ function EngineDemoApp() {
         </select>
       </label>
 
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+        <button type="button" onClick={handleFreezePanes} disabled={!provider || !activeCell}>
+          Freeze Panes
+        </button>
+        <button type="button" onClick={handleFreezeTopRow} disabled={!provider}>
+          Freeze Top Row
+        </button>
+        <button type="button" onClick={handleFreezeFirstColumn} disabled={!provider}>
+          Freeze First Column
+        </button>
+        <button type="button" onClick={handleUnfreezePanes} disabled={!provider}>
+          Unfreeze Panes
+        </button>
+        <span style={{ fontSize: 12, color: "#475569" }}>
+          Frozen: {sheetFrozen.frozenRows} rows, {sheetFrozen.frozenCols} cols
+        </span>
+      </div>
+
       <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
         Import XLSX:
         <input
@@ -1319,9 +1415,102 @@ function EngineDemoApp() {
             />
           </>
         ) : (
-          <GridPlaceholder />
+         <GridPlaceholder />
         )}
       </div>
+
+      {commandPaletteOpen ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.25)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "flex-start",
+            paddingTop: 80,
+            zIndex: 1000
+          }}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeCommandPalette();
+          }}
+        >
+          <div
+            data-testid="command-palette"
+            style={{
+              width: 420,
+              maxWidth: "92vw",
+              borderRadius: 12,
+              border: "1px solid #cbd5e1",
+              background: "#ffffff",
+              padding: 12,
+              boxShadow: "0 10px 30px rgba(15, 23, 42, 0.18)"
+            }}
+          >
+            <input
+              ref={commandPaletteInputRef}
+              type="text"
+              value={commandPaletteQuery}
+              placeholder="Type a command…"
+              onChange={(event) => {
+                setCommandPaletteQuery(event.currentTarget.value);
+                setCommandPaletteSelectedIndex(0);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  closeCommandPalette();
+                  return;
+                }
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setCommandPaletteSelectedIndex((prev) => prev + 1);
+                  return;
+                }
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setCommandPaletteSelectedIndex((prev) => Math.max(0, prev - 1));
+                  return;
+                }
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  closeCommandPalette();
+                  selectedCommand?.run();
+                }
+              }}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1px solid #cbd5e1",
+                fontSize: 14,
+                outline: "none"
+              }}
+            />
+            <ul style={{ margin: "10px 0 0", padding: 0, listStyle: "none" }}>
+              {filteredCommandPalette.map((cmd, idx) => (
+                <li
+                  key={cmd.id}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 10,
+                    cursor: "pointer",
+                    background: idx === clampedCommandPaletteIndex ? "#e0e7ff" : "transparent"
+                  }}
+                  onMouseMove={() => setCommandPaletteSelectedIndex(idx)}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    closeCommandPalette();
+                    cmd.run();
+                  }}
+                >
+                  {cmd.title}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

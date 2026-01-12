@@ -142,6 +142,19 @@ test("getUsedRange can include format-only cells", () => {
   });
 });
 
+test("setFrozen is undoable", () => {
+  const doc = new DocumentController();
+
+  doc.setFrozen("Sheet1", 2, 1);
+  assert.deepEqual(doc.getSheetView("Sheet1"), { frozenRows: 2, frozenCols: 1 });
+
+  doc.undo();
+  assert.deepEqual(doc.getSheetView("Sheet1"), { frozenRows: 0, frozenCols: 0 });
+
+  doc.redo();
+  assert.deepEqual(doc.getSheetView("Sheet1"), { frozenRows: 2, frozenCols: 1 });
+});
+
 test("mergeKey collapses consecutive edits into one history entry, but saving stops merging", () => {
   const doc = new DocumentController({ mergeWindowMs: 10_000 });
 

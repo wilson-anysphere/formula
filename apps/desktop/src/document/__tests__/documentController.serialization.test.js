@@ -9,6 +9,7 @@ test("encodeState/applyState roundtrip restores cell inputs and clears history",
   doc.setCellValue("Sheet1", "A1", 1);
   doc.setCellFormula("Sheet1", "B1", "SUM(A1:A3)");
   doc.setRangeFormat("Sheet1", "A1", { bold: true });
+  doc.setFrozen("Sheet1", 2, 1);
   assert.equal(doc.canUndo, true);
 
   const snapshot = doc.encodeState();
@@ -31,6 +32,7 @@ test("encodeState/applyState roundtrip restores cell inputs and clears history",
   const a1 = restored.getCell("Sheet1", "A1");
   assert.deepEqual(restored.styleTable.get(a1.styleId), { bold: true });
   assert.equal(restored.getCell("Sheet1", "B1").formula, "=SUM(A1:A3)");
+  assert.deepEqual(restored.getSheetView("Sheet1"), { frozenRows: 2, frozenCols: 1 });
 });
 
 test("applyState materializes empty sheets from snapshots", () => {

@@ -72,6 +72,56 @@ function normalizeFormula(formula) {
 }
 
 /**
+ * @typedef {{ frozenRows: number, frozenCols: number }} SheetViewState
+ */
+
+/**
+ * @param {any} value
+ * @returns {number}
+ */
+function normalizeFrozenCount(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.trunc(num));
+}
+
+/**
+ * @param {any} view
+ * @returns {SheetViewState}
+ */
+function normalizeSheetViewState(view) {
+  return {
+    frozenRows: normalizeFrozenCount(view?.frozenRows),
+    frozenCols: normalizeFrozenCount(view?.frozenCols),
+  };
+}
+
+/**
+ * @returns {SheetViewState}
+ */
+function emptySheetViewState() {
+  return { frozenRows: 0, frozenCols: 0 };
+}
+
+/**
+ * @param {SheetViewState} view
+ * @returns {SheetViewState}
+ */
+function cloneSheetViewState(view) {
+  return { frozenRows: view.frozenRows, frozenCols: view.frozenCols };
+}
+
+/**
+ * @param {SheetViewState} a
+ * @param {SheetViewState} b
+ * @returns {boolean}
+ */
+function sheetViewStateEquals(a, b) {
+  if (a === b) return true;
+  return a.frozenRows === b.frozenRows && a.frozenCols === b.frozenCols;
+}
+
+/**
  * @typedef {{
  *   sheetId: string,
  *   row: number,
@@ -83,10 +133,19 @@ function normalizeFormula(formula) {
 
 /**
  * @typedef {{
+ *   sheetId: string,
+ *   before: SheetViewState,
+ *   after: SheetViewState,
+ * }} SheetViewDelta
+ */
+
+/**
+ * @typedef {{
  *   label?: string,
  *   mergeKey?: string,
  *   timestamp: number,
  *   deltasByCell: Map<string, CellDelta>,
+ *   deltasBySheetView: Map<string, SheetViewDelta>,
  * }} HistoryEntry
  */
 
@@ -101,16 +160,38 @@ function cloneDelta(delta) {
 }
 
 /**
+ * @param {SheetViewDelta} delta
+ * @returns {SheetViewDelta}
+ */
+function cloneSheetViewDelta(delta) {
+  return {
+    sheetId: delta.sheetId,
+    before: cloneSheetViewState(delta.before),
+    after: cloneSheetViewState(delta.after),
+  };
+}
+
+/**
  * @param {HistoryEntry} entry
  * @returns {CellDelta[]}
  */
-function entryDeltas(entry) {
+function entryCellDeltas(entry) {
   const deltas = Array.from(entry.deltasByCell.values()).map(cloneDelta);
   deltas.sort((a, b) => {
     const ak = sortKey(a.sheetId, a.row, a.col);
     const bk = sortKey(b.sheetId, b.row, b.col);
     return ak < bk ? -1 : ak > bk ? 1 : 0;
   });
+  return deltas;
+}
+
+/**
+ * @param {HistoryEntry} entry
+ * @returns {SheetViewDelta[]}
+ */
+function entrySheetViewDeltas(entry) {
+  const deltas = Array.from(entry.deltasBySheetView.values()).map(cloneSheetViewDelta);
+  deltas.sort((a, b) => (a.sheetId < b.sheetId ? -1 : a.sheetId > b.sheetId ? 1 : 0));
   return deltas;
 }
 
@@ -128,10 +209,24 @@ function invertDeltas(deltas) {
   }));
 }
 
+/**
+ * @param {SheetViewDelta[]} deltas
+ * @returns {SheetViewDelta[]}
+ */
+function invertSheetViewDeltas(deltas) {
+  return deltas.map((d) => ({
+    sheetId: d.sheetId,
+    before: cloneSheetViewState(d.after),
+    after: cloneSheetViewState(d.before),
+  }));
+}
+
 class SheetModel {
   constructor() {
     /** @type {Map<string, CellState>} */
     this.cells = new Map();
+    /** @type {SheetViewState} */
+    this.view = emptySheetViewState();
   }
 
   /**
@@ -154,6 +249,20 @@ class SheetModel {
       return;
     }
     this.cells.set(`${row},${col}`, cloneCellState(cell));
+  }
+
+  /**
+   * @returns {SheetViewState}
+   */
+  getView() {
+    return cloneSheetViewState(this.view);
+  }
+
+  /**
+   * @param {SheetViewState} view
+   */
+  setView(view) {
+    this.view = cloneSheetViewState(view);
   }
 }
 
@@ -194,6 +303,22 @@ class WorkbookModel {
    */
   setCell(sheetId, row, col, cell) {
     this.#sheet(sheetId).setCell(row, col, cell);
+  }
+
+  /**
+   * @param {string} sheetId
+   * @returns {SheetViewState}
+   */
+  getSheetView(sheetId) {
+    return this.#sheet(sheetId).getView();
+  }
+
+  /**
+   * @param {string} sheetId
+   * @param {SheetViewState} view
+   */
+  setSheetView(sheetId, view) {
+    this.#sheet(sheetId).setView(view);
   }
 }
 
@@ -246,7 +371,7 @@ export class DocumentController {
    * Subscribe to controller events.
    *
    * Events:
-   * - `change`: { deltas: CellDelta[], source?: string, recalc?: boolean }
+   * - `change`: { deltas: CellDelta[], sheetViewDeltas?: SheetViewDelta[], source?: string, recalc?: boolean }
    * - `history`: { canUndo: boolean, canRedo: boolean }
    * - `dirty`: { isDirty: boolean }
    * - `update`: emitted after any applied change (including undo/redo) for versioning adapters
@@ -306,7 +431,11 @@ export class DocumentController {
     if (this.cursor !== this.savedCursor) return true;
     // While a batch is active we may have applied uncommitted changes to the
     // model/engine. Those should still be treated as "dirty" for close prompts.
-    if (this.batchDepth > 0 && this.activeBatch && this.activeBatch.deltasByCell.size > 0) {
+    if (
+      this.batchDepth > 0 &&
+      this.activeBatch &&
+      (this.activeBatch.deltasByCell.size > 0 || this.activeBatch.deltasBySheetView.size > 0)
+    ) {
       return true;
     }
     return false;
@@ -575,6 +704,33 @@ export class DocumentController {
   }
 
   /**
+   * Return the currently frozen pane counts for a sheet.
+   *
+   * @param {string} sheetId
+   * @returns {SheetViewState}
+   */
+  getSheetView(sheetId) {
+    return this.model.getSheetView(sheetId);
+  }
+
+  /**
+   * Set frozen pane counts for a sheet.
+   *
+   * This is undoable and persisted in `encodeState()` snapshots.
+   *
+   * @param {string} sheetId
+   * @param {number} frozenRows
+   * @param {number} frozenCols
+   * @param {{ label?: string, mergeKey?: string }} [options]
+   */
+  setFrozen(sheetId, frozenRows, frozenCols, options = {}) {
+    const before = this.model.getSheetView(sheetId);
+    const after = normalizeSheetViewState({ frozenRows, frozenCols });
+    if (sheetViewStateEquals(before, after)) return;
+    this.#applyUserSheetViewDeltas([{ sheetId, before, after }], options);
+  }
+
+  /**
    * Export a single sheet in the `SheetState` shape expected by the versioning `semanticDiff`.
    *
    * @param {string} sheetId
@@ -608,6 +764,7 @@ export class DocumentController {
     const sheetIds = Array.from(this.model.sheets.keys()).sort();
     const sheets = sheetIds.map((id) => {
       const sheet = this.model.sheets.get(id);
+      const view = sheet?.view ? cloneSheetViewState(sheet.view) : emptySheetViewState();
       const cells = Array.from(sheet?.cells.entries() ?? []).map(([key, cell]) => {
         const { row, col } = parseRowColKey(key);
         return {
@@ -619,7 +776,7 @@ export class DocumentController {
         };
       });
       cells.sort((a, b) => (a.row - b.row === 0 ? a.col - b.col : a.row - b.row));
-      return { id, cells };
+      return { id, frozenRows: view.frozenRows, frozenCols: view.frozenCols, cells };
     });
 
     return encodeUtf8(JSON.stringify({ schemaVersion: 1, sheets }));
@@ -639,9 +796,12 @@ export class DocumentController {
 
     /** @type {Map<string, Map<string, CellState>>} */
     const nextSheets = new Map();
+    /** @type {Map<string, SheetViewState>} */
+    const nextViews = new Map();
     for (const sheet of sheets) {
       if (!sheet?.id) continue;
       const cellList = Array.isArray(sheet.cells) ? sheet.cells : [];
+      const view = normalizeSheetViewState({ frozenRows: sheet?.frozenRows, frozenCols: sheet?.frozenCols });
       /** @type {Map<string, CellState>} */
       const cellMap = new Map();
       for (const entry of cellList) {
@@ -655,6 +815,7 @@ export class DocumentController {
         cellMap.set(`${row},${col}`, cloneCellState(cell));
       }
       nextSheets.set(sheet.id, cellMap);
+      nextViews.set(sheet.id, view);
     }
 
     const existingSheetIds = new Set(this.model.sheets.keys());
@@ -680,6 +841,15 @@ export class DocumentController {
       }
     }
 
+    /** @type {SheetViewDelta[]} */
+    const sheetViewDeltas = [];
+    for (const sheetId of allSheetIds) {
+      const before = this.model.getSheetView(sheetId);
+      const after = nextViews.get(sheetId) ?? emptySheetViewState();
+      if (sheetViewStateEquals(before, after)) continue;
+      sheetViewDeltas.push({ sheetId, before, after });
+    }
+
     // Ensure all snapshot sheet ids exist even when they contain no cells (the model is otherwise
     // lazily materialized via reads/writes).
     for (const sheetId of nextSheetIds) {
@@ -697,7 +867,7 @@ export class DocumentController {
 
     // Apply changes as a single engine batch.
     this.engine?.beginBatch?.();
-    this.#applyDeltas(deltas, { recalc: false, emitChange: true, source: "applyState" });
+    this.#applyEdits(deltas, sheetViewDeltas, { recalc: false, emitChange: true, source: "applyState" });
     this.engine?.endBatch?.();
     this.engine?.recalculate();
 
@@ -731,7 +901,7 @@ export class DocumentController {
 
     const recalc = options.recalc ?? true;
     const source = typeof options.source === "string" ? options.source : undefined;
-    this.#applyDeltas(deltas, { recalc, emitChange: true, source });
+    this.#applyEdits(deltas, [], { recalc, emitChange: true, source });
 
     // Mark dirty even though we didn't advance the undo cursor.
     this.savedCursor = null;
@@ -823,6 +993,7 @@ export class DocumentController {
         label: options.label,
         timestamp: Date.now(),
         deltasByCell: new Map(),
+        deltasBySheetView: new Map(),
       };
       this.engine?.beginBatch?.();
       this.#emitHistory();
@@ -841,7 +1012,7 @@ export class DocumentController {
     this.activeBatch = null;
     this.engine?.endBatch?.();
 
-    if (!batch || batch.deltasByCell.size === 0) {
+    if (!batch || (batch.deltasByCell.size === 0 && batch.deltasBySheetView.size === 0)) {
       this.#emitHistory();
       this.#emitDirty();
       return;
@@ -849,7 +1020,7 @@ export class DocumentController {
 
     this.#commitHistoryEntry(batch);
     this.engine?.recalculate();
-    this.#emit("change", { deltas: [], source: "endBatch", recalc: true });
+    this.#emit("change", { deltas: [], sheetViewDeltas: [], source: "endBatch", recalc: true });
   }
 
   /**
@@ -864,7 +1035,7 @@ export class DocumentController {
     if (this.batchDepth === 0) return false;
 
     const batch = this.activeBatch;
-    const hadDeltas = Boolean(batch && batch.deltasByCell.size > 0);
+    const hadDeltas = Boolean(batch && (batch.deltasByCell.size > 0 || batch.deltasBySheetView.size > 0));
 
     // Reset batching state first so observers see consistent canUndo/canRedo.
     this.batchDepth = 0;
@@ -873,14 +1044,15 @@ export class DocumentController {
     this.lastMergeTime = 0;
 
     if (hadDeltas && batch) {
-      const inverse = invertDeltas(entryDeltas(batch));
-      this.#applyDeltas(inverse, { recalc: false, emitChange: true });
+      const inverseCells = invertDeltas(entryCellDeltas(batch));
+      const inverseViews = invertSheetViewDeltas(entrySheetViewDeltas(batch));
+      this.#applyEdits(inverseCells, inverseViews, { recalc: false, emitChange: true });
     }
 
     this.engine?.endBatch?.();
     if (hadDeltas) this.engine?.recalculate();
     if (hadDeltas) {
-      this.#emit("change", { deltas: [], source: "cancelBatch", recalc: true });
+      this.#emit("change", { deltas: [], sheetViewDeltas: [], source: "cancelBatch", recalc: true });
     }
 
     this.#emitHistory();
@@ -895,14 +1067,16 @@ export class DocumentController {
   undo() {
     if (!this.canUndo) return false;
     const entry = this.history[this.cursor - 1];
-    const deltas = entryDeltas(entry);
-    const inverse = invertDeltas(deltas);
+    const cellDeltas = entryCellDeltas(entry);
+    const viewDeltas = entrySheetViewDeltas(entry);
+    const inverseCells = invertDeltas(cellDeltas);
+    const inverseViews = invertSheetViewDeltas(viewDeltas);
     this.cursor -= 1;
 
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
-    this.#applyDeltas(inverse, { recalc: true, emitChange: true });
+    this.#applyEdits(inverseCells, inverseViews, { recalc: true, emitChange: true });
     this.#emitHistory();
     this.#emitDirty();
     return true;
@@ -915,13 +1089,14 @@ export class DocumentController {
   redo() {
     if (!this.canRedo) return false;
     const entry = this.history[this.cursor];
-    const deltas = entryDeltas(entry);
+    const cellDeltas = entryCellDeltas(entry);
+    const viewDeltas = entrySheetViewDeltas(entry);
     this.cursor += 1;
 
     this.lastMergeKey = null;
     this.lastMergeTime = 0;
 
-    this.#applyDeltas(deltas, { recalc: true, emitChange: true });
+    this.#applyEdits(cellDeltas, viewDeltas, { recalc: true, emitChange: true });
     this.#emitHistory();
     this.#emitDirty();
     return true;
@@ -941,7 +1116,7 @@ export class DocumentController {
       if (deltas.length === 0) return;
     }
 
-    this.#applyDeltas(deltas, { recalc: this.batchDepth === 0, emitChange: true });
+    this.#applyEdits(deltas, [], { recalc: this.batchDepth === 0, emitChange: true });
 
     if (this.batchDepth > 0) {
       this.#mergeIntoBatch(deltas);
@@ -949,7 +1124,7 @@ export class DocumentController {
       return;
     }
 
-    this.#commitOrMergeHistoryEntry(deltas, options);
+    this.#commitOrMergeHistoryEntry(deltas, [], options);
   }
 
   /**
@@ -958,7 +1133,7 @@ export class DocumentController {
   #mergeIntoBatch(deltas) {
     if (!this.activeBatch) {
       // Should be unreachable, but avoid dropping history silently.
-      this.activeBatch = { timestamp: Date.now(), deltasByCell: new Map() };
+      this.activeBatch = { timestamp: Date.now(), deltasByCell: new Map(), deltasBySheetView: new Map() };
     }
     for (const delta of deltas) {
       const key = mapKey(delta.sheetId, delta.row, delta.col);
@@ -972,10 +1147,46 @@ export class DocumentController {
   }
 
   /**
-   * @param {CellDelta[]} deltas
+   * @param {SheetViewDelta[]} deltas
+   */
+  #mergeSheetViewIntoBatch(deltas) {
+    if (!this.activeBatch) {
+      this.activeBatch = { timestamp: Date.now(), deltasByCell: new Map(), deltasBySheetView: new Map() };
+    }
+    for (const delta of deltas) {
+      const existing = this.activeBatch.deltasBySheetView.get(delta.sheetId);
+      if (!existing) {
+        this.activeBatch.deltasBySheetView.set(delta.sheetId, cloneSheetViewDelta(delta));
+      } else {
+        existing.after = cloneSheetViewState(delta.after);
+      }
+    }
+  }
+
+  /**
+   * @param {SheetViewDelta[]} deltas
    * @param {{ label?: string, mergeKey?: string }} options
    */
-  #commitOrMergeHistoryEntry(deltas, options) {
+  #applyUserSheetViewDeltas(deltas, options) {
+    if (!deltas || deltas.length === 0) return;
+
+    this.#applyEdits([], deltas, { recalc: false, emitChange: true });
+
+    if (this.batchDepth > 0) {
+      this.#mergeSheetViewIntoBatch(deltas);
+      this.#emitDirty();
+      return;
+    }
+
+    this.#commitOrMergeHistoryEntry([], deltas, options);
+  }
+
+  /**
+   * @param {CellDelta[]} cellDeltas
+   * @param {SheetViewDelta[]} sheetViewDeltas
+   * @param {{ label?: string, mergeKey?: string }} options
+   */
+  #commitOrMergeHistoryEntry(cellDeltas, sheetViewDeltas, options) {
     // If we have redo history, truncate it before pushing a new edit.
     if (this.cursor < this.history.length) {
       if (this.savedCursor != null && this.savedCursor > this.cursor) {
@@ -1000,13 +1211,22 @@ export class DocumentController {
 
     if (canMerge) {
       const entry = this.history[this.cursor - 1];
-      for (const delta of deltas) {
+      for (const delta of cellDeltas) {
         const key = mapKey(delta.sheetId, delta.row, delta.col);
         const existing = entry.deltasByCell.get(key);
         if (!existing) {
           entry.deltasByCell.set(key, cloneDelta(delta));
         } else {
           existing.after = cloneCellState(delta.after);
+        }
+      }
+
+      for (const delta of sheetViewDeltas) {
+        const existing = entry.deltasBySheetView.get(delta.sheetId);
+        if (!existing) {
+          entry.deltasBySheetView.set(delta.sheetId, cloneSheetViewDelta(delta));
+        } else {
+          existing.after = cloneSheetViewState(delta.after);
         }
       }
       entry.timestamp = now;
@@ -1026,10 +1246,15 @@ export class DocumentController {
       mergeKey,
       timestamp: now,
       deltasByCell: new Map(),
+      deltasBySheetView: new Map(),
     };
 
-    for (const delta of deltas) {
+    for (const delta of cellDeltas) {
       entry.deltasByCell.set(mapKey(delta.sheetId, delta.row, delta.col), cloneDelta(delta));
+    }
+
+    for (const delta of sheetViewDeltas) {
+      entry.deltasBySheetView.set(delta.sheetId, cloneSheetViewDelta(delta));
     }
 
     this.#commitHistoryEntry(entry);
@@ -1047,7 +1272,7 @@ export class DocumentController {
    * @param {HistoryEntry} entry
    */
   #commitHistoryEntry(entry) {
-    if (entry.deltasByCell.size === 0) return;
+    if (entry.deltasByCell.size === 0 && entry.deltasBySheetView.size === 0) return;
     this.history.push(entry);
     this.cursor += 1;
     this.#emitHistory();
@@ -1057,19 +1282,23 @@ export class DocumentController {
   /**
    * Apply deltas to the model and engine. This is the single authoritative mutation path.
    *
-   * @param {CellDelta[]} deltas
+   * @param {CellDelta[]} cellDeltas
+   * @param {SheetViewDelta[]} sheetViewDeltas
    * @param {{ recalc: boolean, emitChange: boolean, source?: string }} options
    */
-  #applyDeltas(deltas, options) {
+  #applyEdits(cellDeltas, sheetViewDeltas, options) {
     // Apply to the canonical model first.
-    for (const delta of deltas) {
+    for (const delta of sheetViewDeltas) {
+      this.model.setSheetView(delta.sheetId, delta.after);
+    }
+    for (const delta of cellDeltas) {
       this.model.setCell(delta.sheetId, delta.row, delta.col, delta.after);
     }
 
     /** @type {CellChange[] | null} */
     let engineChanges = null;
-    if (this.engine) {
-      engineChanges = deltas.map((d) => ({
+    if (this.engine && cellDeltas.length > 0) {
+      engineChanges = cellDeltas.map((d) => ({
         sheetId: d.sheetId,
         row: d.row,
         col: d.col,
@@ -1082,14 +1311,21 @@ export class DocumentController {
       if (options.recalc) this.engine?.recalculate();
     } catch (err) {
       // Roll back the canonical model if the engine rejects a change.
-      for (const delta of deltas) {
+      for (const delta of sheetViewDeltas) {
+        this.model.setSheetView(delta.sheetId, delta.before);
+      }
+      for (const delta of cellDeltas) {
         this.model.setCell(delta.sheetId, delta.row, delta.col, delta.before);
       }
       throw err;
     }
 
     if (options.emitChange) {
-      const payload = { deltas: deltas.map(cloneDelta), recalc: options.recalc };
+      const payload = {
+        deltas: cellDeltas.map(cloneDelta),
+        sheetViewDeltas: sheetViewDeltas.map(cloneSheetViewDelta),
+        recalc: options.recalc,
+      };
       if (options.source) payload.source = options.source;
       this.#emit("change", payload);
     }

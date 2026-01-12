@@ -43,8 +43,12 @@
  *
  * `id` is the stable sheet identifier used by collaboration and cell keys.
  * `name` is the user-visible display name (nullable for older/malformed docs).
+ * `view` stores per-sheet UI state that should survive undo/redo and semantic merges
+ * (e.g. frozen panes).
  *
- * @typedef {{ id: string, name: string | null }} SheetMeta
+ * @typedef {{ frozenRows: number, frozenCols: number }} SheetViewState
+ *
+ * @typedef {{ id: string, name: string | null, view?: SheetViewState }} SheetMeta
  */
 
 /**

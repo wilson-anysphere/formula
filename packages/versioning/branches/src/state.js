@@ -25,6 +25,26 @@ function isRecord(value) {
 }
 
 /**
+ * @param {any} value
+ * @returns {number}
+ */
+function normalizeFrozenCount(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.trunc(num));
+}
+
+/**
+ * @param {any} value
+ * @returns {{ frozenRows: number, frozenCols: number }}
+ */
+function normalizeSheetView(value) {
+  const frozenRows = normalizeFrozenCount(isRecord(value) ? value.frozenRows : undefined);
+  const frozenCols = normalizeFrozenCount(isRecord(value) ? value.frozenCols : undefined);
+  return { frozenRows, frozenCols };
+}
+
+/**
  * @returns {DocumentState}
  */
 export function emptyDocumentState() {
@@ -124,13 +144,15 @@ export function normalizeDocumentState(input) {
   for (const sheetId of sheetIds) {
     const rawMeta = rawMetaById[sheetId];
     if (isRecord(rawMeta)) {
+      const rawView = isRecord(rawMeta.view) ? rawMeta.view : rawMeta;
       metaById[sheetId] = {
         id: typeof rawMeta.id === "string" && rawMeta.id.length > 0 ? rawMeta.id : sheetId,
         name: rawMeta.name == null ? null : String(rawMeta.name),
+        view: normalizeSheetView(rawView),
       };
     } else {
       // Legacy histories have no separate sheet name; treat id as the display name.
-      metaById[sheetId] = { id: sheetId, name: sheetId };
+      metaById[sheetId] = { id: sheetId, name: sheetId, view: { frozenRows: 0, frozenCols: 0 } };
     }
   }
 

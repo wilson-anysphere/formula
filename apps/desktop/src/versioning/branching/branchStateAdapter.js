@@ -86,7 +86,8 @@ export function documentControllerToBranchState(doc) {
 
     cells[sheetId] = outSheet;
     // DocumentController doesn't currently track display names separately from ids.
-    metaById[sheetId] = { id: sheetId, name: sheetId };
+    const view = doc.getSheetView(sheetId);
+    metaById[sheetId] = { id: sheetId, name: sheetId, view: cloneJsonish(view) };
   }
 
   /** @type {DocumentState} */
@@ -116,6 +117,8 @@ export function applyBranchStateToDocumentController(doc, state) {
 
   const sheets = sheetIds.map((sheetId) => {
     const cellMap = normalized.cells[sheetId] ?? {};
+    const meta = normalized.sheets.metaById[sheetId] ?? { id: sheetId, name: sheetId, view: { frozenRows: 0, frozenCols: 0 } };
+    const view = meta.view ?? { frozenRows: 0, frozenCols: 0 };
     /** @type {Array<{ row: number, col: number, value: any, formula: string | null, format: any }>} */
     const cells = [];
 
@@ -146,7 +149,7 @@ export function applyBranchStateToDocumentController(doc, state) {
     }
 
     cells.sort((a, b) => (a.row - b.row === 0 ? a.col - b.col : a.row - b.row));
-    return { id: sheetId, cells };
+    return { id: sheetId, frozenRows: view.frozenRows ?? 0, frozenCols: view.frozenCols ?? 0, cells };
   });
 
   const snapshot = { schemaVersion: 1, sheets };

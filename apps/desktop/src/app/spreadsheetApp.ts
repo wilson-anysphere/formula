@@ -340,6 +340,16 @@ export class SpreadsheetApp {
       }
     | null = null;
 
+  // Frozen panes for the active sheet. `frozenRows`/`frozenCols` are sheet
+  // indices (0-based counts); `frozenWidth`/`frozenHeight` are viewport pixels
+  // for the visible (i.e. not hidden) frozen rows/cols.
+  private frozenRows = 0;
+  private frozenCols = 0;
+  private frozenVisibleRows: number[] = [];
+  private frozenVisibleCols: number[] = [];
+  private frozenWidth = 0;
+  private frozenHeight = 0;
+
   // Maps from sheet row/col -> visual index (excluding hidden rows/cols).
   // These allow O(1) cell->pixel conversions for any in-bounds cell.
   private rowToVisual = new Map<number, number>();
@@ -1057,6 +1067,49 @@ export class SpreadsheetApp {
     this.sharedGrid?.setPerfStatsEnabled(enabled);
   }
 
+  getFrozen(): { frozenRows: number; frozenCols: number } {
+    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    return { frozenRows: view?.frozenRows ?? 0, frozenCols: view?.frozenCols ?? 0 };
+  }
+
+  private syncFrozenPanes(): void {
+    const { frozenRows, frozenCols } = this.getFrozen();
+    if (this.sharedGrid) {
+      // Shared-grid mode uses frozen panes for headers + user freezes.
+      const headerRows = 1;
+      const headerCols = 1;
+      this.sharedGrid.renderer.setFrozen(headerRows + frozenRows, headerCols + frozenCols);
+      // Force scrollbars + overlay layers to re-measure frozen extents.
+      this.sharedGrid.scrollTo(this.scrollX, this.scrollY);
+      return;
+    }
+
+    this.clampScroll();
+    this.syncScrollbars();
+    this.refresh();
+  }
+
+  freezePanes(): void {
+    const active = this.selection.active;
+    this.document.setFrozen(this.sheetId, active.row, active.col, { label: "Freeze Panes" });
+    this.syncFrozenPanes();
+  }
+
+  freezeTopRow(): void {
+    this.document.setFrozen(this.sheetId, 1, 0, { label: "Freeze Top Row" });
+    this.syncFrozenPanes();
+  }
+
+  freezeFirstColumn(): void {
+    this.document.setFrozen(this.sheetId, 0, 1, { label: "Freeze First Column" });
+    this.syncFrozenPanes();
+  }
+
+  unfreezePanes(): void {
+    this.document.setFrozen(this.sheetId, 0, 0, { label: "Unfreeze Panes" });
+    this.syncFrozenPanes();
+  }
+
   addChart(spec: CreateChartSpec): CreateChartResult {
     return this.chartStore.createChart(spec);
   }
@@ -1111,6 +1164,7 @@ export class SpreadsheetApp {
       }
       this.referencePreview = null;
       this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
+      this.syncFrozenPanes();
       if (this.wasmEngine) {
         await this.enqueueWasmSync(async (engine) => {
           const changes = await engineHydrateFromDocument(engine, this.document);
@@ -1251,6 +1305,16 @@ export class SpreadsheetApp {
     this.chartStore.setDefaultSheet(sheetId);
     this.referencePreview = null;
     this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
+    if (this.sharedGrid) {
+      const { frozenRows, frozenCols } = this.getFrozen();
+      const headerRows = 1;
+      const headerCols = 1;
+      this.sharedGrid.renderer.setFrozen(headerRows + frozenRows, headerCols + frozenCols);
+      this.sharedGrid.scrollTo(this.scrollX, this.scrollY);
+    } else {
+      this.clampScroll();
+      this.syncScrollbars();
+    }
     this.renderGrid();
     this.renderCharts(true);
     this.renderReferencePreview();
@@ -1276,6 +1340,16 @@ export class SpreadsheetApp {
       this.chartStore.setDefaultSheet(target.sheetId);
       this.referencePreview = null;
       this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
+      if (this.sharedGrid) {
+        const { frozenRows, frozenCols } = this.getFrozen();
+        const headerRows = 1;
+        const headerCols = 1;
+        this.sharedGrid.renderer.setFrozen(headerRows + frozenRows, headerCols + frozenCols);
+        this.sharedGrid.scrollTo(this.scrollX, this.scrollY);
+      } else {
+        this.clampScroll();
+        this.syncScrollbars();
+      }
       this.renderGrid();
       this.renderCharts(true);
       this.sharedProvider?.invalidateAll();
@@ -1307,6 +1381,16 @@ export class SpreadsheetApp {
       this.chartStore.setDefaultSheet(target.sheetId);
       this.referencePreview = null;
       this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
+      if (this.sharedGrid) {
+        const { frozenRows, frozenCols } = this.getFrozen();
+        const headerRows = 1;
+        const headerCols = 1;
+        this.sharedGrid.renderer.setFrozen(headerRows + frozenRows, headerCols + frozenCols);
+        this.sharedGrid.scrollTo(this.scrollX, this.scrollY);
+      } else {
+        this.clampScroll();
+        this.syncScrollbars();
+      }
       this.renderGrid();
       this.renderCharts(true);
       this.sharedProvider?.invalidateAll();
@@ -2060,13 +2144,18 @@ export class SpreadsheetApp {
     const viewportWidth = this.viewportWidth();
     const viewportHeight = this.viewportHeight();
 
-    const cols = this.visibleCols.length;
-    const rows = this.visibleRows.length;
+    const frozenWidth = Math.min(viewportWidth, this.frozenWidth);
+    const frozenHeight = Math.min(viewportHeight, this.frozenHeight);
+    const scrollableWidth = Math.max(0, viewportWidth - frozenWidth);
+    const scrollableHeight = Math.max(0, viewportHeight - frozenHeight);
 
-    const startX = originX + this.visibleColStart * this.cellWidth - this.scrollX;
-    const startY = originY + this.visibleRowStart * this.cellHeight - this.scrollY;
-    const endX = startX + cols * this.cellWidth;
-    const endY = startY + rows * this.cellHeight;
+    const frozenRows = this.frozenVisibleRows;
+    const frozenCols = this.frozenVisibleCols;
+    const scrollRows = this.visibleRows;
+    const scrollCols = this.visibleCols;
+
+    const startXScroll = originX + this.visibleColStart * this.cellWidth - this.scrollX;
+    const startYScroll = originY + this.visibleRowStart * this.cellHeight - this.scrollY;
 
     ctx.strokeStyle = resolveCssVar("--grid-line", { fallback: "CanvasText" });
     ctx.lineWidth = 1;
@@ -2095,100 +2184,184 @@ export class SpreadsheetApp {
     const defaultTextColor = resolveCssVar("--text-primary", { fallback: "CanvasText" });
     const errorTextColor = resolveCssVar("--error", { fallback: defaultTextColor });
 
-    // Data region (cells) are clipped so we never paint into header chrome.
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(originX, originY, viewportWidth, viewportHeight);
-    ctx.clip();
+    const renderCellRegion = (options: {
+      clipX: number;
+      clipY: number;
+      clipWidth: number;
+      clipHeight: number;
+      rows: number[];
+      cols: number[];
+      startX: number;
+      startY: number;
+    }): void => {
+      const { clipX, clipY, clipWidth, clipHeight, rows, cols, startX, startY } = options;
+      if (clipWidth <= 0 || clipHeight <= 0) return;
+      if (rows.length === 0 || cols.length === 0) return;
 
-    // Grid lines for the data region.
-    for (let r = 0; r <= rows; r++) {
-      const y = startY + r * this.cellHeight + 0.5;
+      const endX = startX + cols.length * this.cellWidth;
+      const endY = startY + rows.length * this.cellHeight;
+
+      ctx.save();
       ctx.beginPath();
-      ctx.moveTo(startX, y);
-      ctx.lineTo(endX, y);
-      ctx.stroke();
-    }
+      ctx.rect(clipX, clipY, clipWidth, clipHeight);
+      ctx.clip();
 
-    for (let c = 0; c <= cols; c++) {
-      const x = startX + c * this.cellWidth + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(x, startY);
-      ctx.lineTo(x, endY);
-      ctx.stroke();
-    }
+      // Grid lines for this quadrant.
+      for (let r = 0; r <= rows.length; r++) {
+        const y = startY + r * this.cellHeight + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(startX, y);
+        ctx.lineTo(endX, y);
+        ctx.stroke();
+      }
 
-    for (let visualRow = 0; visualRow < rows; visualRow++) {
-      const row = this.visibleRows[visualRow]!;
-      for (let visualCol = 0; visualCol < cols; visualCol++) {
-        const col = this.visibleCols[visualCol]!;
-        const state = this.document.getCell(this.sheetId, { row, col }) as {
-          value: unknown;
-          formula: string | null;
-        };
-        if (!state) continue;
+      for (let c = 0; c <= cols.length; c++) {
+        const x = startX + c * this.cellWidth + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(x, startY);
+        ctx.lineTo(x, endY);
+        ctx.stroke();
+      }
 
-        let rich: { text: string; runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }> } | null =
-          null;
-        let color = defaultTextColor;
+      for (let visualRow = 0; visualRow < rows.length; visualRow++) {
+        const row = rows[visualRow]!;
+        for (let visualCol = 0; visualCol < cols.length; visualCol++) {
+          const col = cols[visualCol]!;
+          const state = this.document.getCell(this.sheetId, { row, col }) as {
+            value: unknown;
+            formula: string | null;
+          };
+          if (!state) continue;
 
-        if (state.formula != null) {
-          if (this.showFormulas) {
-            rich = { text: state.formula, runs: [] };
-          } else {
-            const computed = this.getCellComputedValue({ row, col });
-            if (computed != null) {
-              rich = { text: String(computed), runs: [] };
-              if (typeof computed === "string" && computed.startsWith("#")) {
-                color = errorTextColor;
+          let rich: { text: string; runs?: Array<{ start: number; end: number; style?: Record<string, unknown> }> } | null =
+            null;
+          let color = defaultTextColor;
+
+          if (state.formula != null) {
+            if (this.showFormulas) {
+              rich = { text: state.formula, runs: [] };
+            } else {
+              const computed = this.getCellComputedValue({ row, col });
+              if (computed != null) {
+                rich = { text: String(computed), runs: [] };
+                if (typeof computed === "string" && computed.startsWith("#")) {
+                  color = errorTextColor;
+                }
               }
             }
+          } else if (isRichTextValue(state.value)) {
+            rich = state.value;
+          } else if (state.value != null) {
+            rich = { text: String(state.value), runs: [] };
           }
-        } else if (isRichTextValue(state.value)) {
-          rich = state.value;
-        } else if (state.value != null) {
-          rich = { text: String(state.value), runs: [] };
+
+          if (!rich || rich.text === "") continue;
+
+          renderRichText(
+            ctx,
+            rich,
+            {
+              x: startX + visualCol * this.cellWidth,
+              y: startY + visualRow * this.cellHeight,
+              width: this.cellWidth,
+              height: this.cellHeight
+            },
+            {
+              padding: 4,
+              align: "start",
+              verticalAlign: "middle",
+              fontFamily,
+              fontSizePx,
+              color
+            }
+          );
         }
+      }
 
-        if (!rich || rich.text === "") continue;
-
-        renderRichText(
-          ctx,
-          rich,
-          {
+      // Comment indicators.
+      for (let visualRow = 0; visualRow < rows.length; visualRow++) {
+        const row = rows[visualRow]!;
+        for (let visualCol = 0; visualCol < cols.length; visualCol++) {
+          const col = cols[visualCol]!;
+          const cellRef = cellToA1({ row, col });
+          if (!this.commentCells.has(cellRef)) continue;
+          drawCommentIndicator(ctx, {
             x: startX + visualCol * this.cellWidth,
             y: startY + visualRow * this.cellHeight,
             width: this.cellWidth,
-            height: this.cellHeight
-          },
-          {
-            padding: 4,
-            align: "start",
-            verticalAlign: "middle",
-            fontFamily,
-            fontSizePx,
-            color
-          }
-        );
+            height: this.cellHeight,
+          });
+        }
       }
-    }
 
-    // Comment indicators.
-    for (let visualRow = 0; visualRow < rows; visualRow++) {
-      const row = this.visibleRows[visualRow]!;
-      for (let visualCol = 0; visualCol < cols; visualCol++) {
-        const col = this.visibleCols[visualCol]!;
-        const cellRef = cellToA1({ row, col });
-        if (!this.commentCells.has(cellRef)) continue;
-        drawCommentIndicator(ctx, {
-          x: startX + visualCol * this.cellWidth,
-          y: startY + visualRow * this.cellHeight,
-          width: this.cellWidth,
-          height: this.cellHeight,
-        });
-      }
-    }
+      ctx.restore();
+    };
 
+    // --- Data quadrants ---
+    renderCellRegion({
+      clipX: originX,
+      clipY: originY,
+      clipWidth: frozenWidth,
+      clipHeight: frozenHeight,
+      rows: frozenRows,
+      cols: frozenCols,
+      startX: originX,
+      startY: originY
+    });
+
+    renderCellRegion({
+      clipX: originX + frozenWidth,
+      clipY: originY,
+      clipWidth: scrollableWidth,
+      clipHeight: frozenHeight,
+      rows: frozenRows,
+      cols: scrollCols,
+      startX: startXScroll,
+      startY: originY
+    });
+
+    renderCellRegion({
+      clipX: originX,
+      clipY: originY + frozenHeight,
+      clipWidth: frozenWidth,
+      clipHeight: scrollableHeight,
+      rows: scrollRows,
+      cols: frozenCols,
+      startX: originX,
+      startY: startYScroll
+    });
+
+    renderCellRegion({
+      clipX: originX + frozenWidth,
+      clipY: originY + frozenHeight,
+      clipWidth: scrollableWidth,
+      clipHeight: scrollableHeight,
+      rows: scrollRows,
+      cols: scrollCols,
+      startX: startXScroll,
+      startY: startYScroll
+    });
+
+    // Freeze lines.
+    ctx.save();
+    ctx.strokeStyle = resolveCssVar("--formula-grid-freeze-line", {
+      fallback: resolveCssVar("--grid-line", { fallback: "CanvasText" })
+    });
+    ctx.lineWidth = 2;
+    if (frozenWidth > 0 && frozenWidth < viewportWidth) {
+      const x = originX + frozenWidth + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, this.height);
+      ctx.stroke();
+    }
+    if (frozenHeight > 0 && frozenHeight < viewportHeight) {
+      const y = originY + frozenHeight + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(this.width, y);
+      ctx.stroke();
+    }
     ctx.restore();
 
     // Header labels.
@@ -2197,32 +2370,50 @@ export class SpreadsheetApp {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
-    // Column header labels (horizontally scroll with the grid).
+    // Column header labels: frozen columns (pinned).
     ctx.save();
     ctx.beginPath();
-    ctx.rect(originX, 0, viewportWidth, originY);
+    ctx.rect(originX, 0, frozenWidth, originY);
     ctx.clip();
-    for (let visualCol = 0; visualCol < cols; visualCol++) {
-      const colIndex = this.visibleCols[visualCol]!;
-      ctx.fillText(
-        colToName(colIndex),
-        startX + visualCol * this.cellWidth + this.cellWidth / 2,
-        this.colHeaderHeight / 2
-      );
+    for (let visualCol = 0; visualCol < frozenCols.length; visualCol++) {
+      const colIndex = frozenCols[visualCol]!;
+      ctx.fillText(colToName(colIndex), originX + visualCol * this.cellWidth + this.cellWidth / 2, originY / 2);
     }
     ctx.restore();
 
-    // Row header labels (vertically scroll with the grid).
+    // Column header labels: scrollable columns.
     ctx.save();
     ctx.beginPath();
-    ctx.rect(0, originY, originX, viewportHeight);
+    ctx.rect(originX + frozenWidth, 0, scrollableWidth, originY);
     ctx.clip();
-    for (let visualRow = 0; visualRow < rows; visualRow++) {
-      const rowIndex = this.visibleRows[visualRow]!;
+    for (let visualCol = 0; visualCol < scrollCols.length; visualCol++) {
+      const colIndex = scrollCols[visualCol]!;
+      ctx.fillText(colToName(colIndex), startXScroll + visualCol * this.cellWidth + this.cellWidth / 2, originY / 2);
+    }
+    ctx.restore();
+
+    // Row header labels: frozen rows (pinned).
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, originY, originX, frozenHeight);
+    ctx.clip();
+    for (let visualRow = 0; visualRow < frozenRows.length; visualRow++) {
+      const rowIndex = frozenRows[visualRow]!;
+      ctx.fillText(String(rowIndex + 1), originX / 2, originY + visualRow * this.cellHeight + this.cellHeight / 2);
+    }
+    ctx.restore();
+
+    // Row header labels: scrollable rows.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, originY + frozenHeight, originX, scrollableHeight);
+    ctx.clip();
+    for (let visualRow = 0; visualRow < scrollRows.length; visualRow++) {
+      const rowIndex = scrollRows[visualRow]!;
       ctx.fillText(
         String(rowIndex + 1),
-        this.rowHeaderWidth / 2,
-        startY + visualRow * this.cellHeight + this.cellHeight / 2
+        originX / 2,
+        startYScroll + visualRow * this.cellHeight + this.cellHeight / 2
       );
     }
     ctx.restore();
@@ -2340,9 +2531,12 @@ export class SpreadsheetApp {
 
     if (width <= 0 || height <= 0) return null;
 
+    const scrollX = anchor.kind === "absolute" ? this.scrollX : (anchor.fromCol < this.frozenCols ? 0 : this.scrollX);
+    const scrollY = anchor.kind === "absolute" ? this.scrollY : (anchor.fromRow < this.frozenRows ? 0 : this.scrollY);
+
     return {
-      left: left - this.scrollX,
-      top: top - this.scrollY,
+      left: left - scrollX,
+      top: top - scrollY,
       width,
       height
     };
@@ -2461,13 +2655,20 @@ export class SpreadsheetApp {
 
     const renderer = this.formulaBar?.isFormulaEditing() ? this.formulaSelectionRenderer : this.selectionRenderer;
 
+    const visibleRows = this.frozenVisibleRows.length
+      ? [...this.frozenVisibleRows, ...this.visibleRows]
+      : this.visibleRows;
+    const visibleCols = this.frozenVisibleCols.length
+      ? [...this.frozenVisibleCols, ...this.visibleCols]
+      : this.visibleCols;
+
     renderer.render(
       this.selectionCtx,
       this.selection,
       {
         getCellRect: (cell) => this.getCellRect(cell),
-        visibleRows: this.visibleRows,
-        visibleCols: this.visibleCols,
+        visibleRows,
+        visibleCols,
       },
       {
         clipRect,
@@ -2755,6 +2956,8 @@ export class SpreadsheetApp {
     const did = undo ? this.document.undo() : this.document.redo();
     if (did) {
       this.syncEngineNow();
+      this.clampScroll();
+      this.syncScrollbars();
       this.refresh();
     }
     return true;
@@ -2882,11 +3085,31 @@ export class SpreadsheetApp {
     const totalRows = this.rowIndexByVisual.length;
     const totalCols = this.colIndexByVisual.length;
 
+    const view = this.document.getSheetView(this.sheetId) as { frozenRows?: number; frozenCols?: number } | null;
+    const nextFrozenRows = Number.isFinite(view?.frozenRows) ? Math.max(0, Math.trunc(view?.frozenRows ?? 0)) : 0;
+    const nextFrozenCols = Number.isFinite(view?.frozenCols) ? Math.max(0, Math.trunc(view?.frozenCols ?? 0)) : 0;
+
+    this.frozenRows = Math.min(nextFrozenRows, this.limits.maxRows);
+    this.frozenCols = Math.min(nextFrozenCols, this.limits.maxCols);
+
+    const frozenRowCount = this.lowerBound(this.rowIndexByVisual, this.frozenRows);
+    const frozenColCount = this.lowerBound(this.colIndexByVisual, this.frozenCols);
+    this.frozenVisibleRows = this.rowIndexByVisual.slice(0, frozenRowCount);
+    this.frozenVisibleCols = this.colIndexByVisual.slice(0, frozenColCount);
+    this.frozenHeight = frozenRowCount * this.cellHeight;
+    this.frozenWidth = frozenColCount * this.cellWidth;
+
     const overscan = 1;
-    const firstRow = Math.max(0, Math.floor(this.scrollY / this.cellHeight) - overscan);
+    const firstRow = Math.max(
+      frozenRowCount,
+      Math.floor((this.scrollY + this.frozenHeight) / this.cellHeight) - overscan
+    );
     const lastRow = Math.min(totalRows, Math.ceil((this.scrollY + availableHeight) / this.cellHeight) + overscan);
 
-    const firstCol = Math.max(0, Math.floor(this.scrollX / this.cellWidth) - overscan);
+    const firstCol = Math.max(
+      frozenColCount,
+      Math.floor((this.scrollX + this.frozenWidth) / this.cellWidth) - overscan
+    );
     const lastCol = Math.min(totalCols, Math.ceil((this.scrollX + availableWidth) / this.cellWidth) + overscan);
 
     this.visibleRowStart = firstRow;
@@ -2948,6 +3171,9 @@ export class SpreadsheetApp {
       this.sharedGrid.syncScrollbars();
       return;
     }
+
+    // Keep frozen metrics up-to-date so scrollbars reflect the scrollable region.
+    this.updateViewportMapping();
     const maxX = this.maxScrollX();
     const maxY = this.maxScrollY();
     const showH = maxX > 0;
@@ -2968,8 +3194,8 @@ export class SpreadsheetApp {
       const trackSize = Math.max(0, this.height - (this.colHeaderHeight + padding) - ((showH ? thickness : 0) + padding));
       const { size, offset } = this.computeScrollbarThumb({
         scrollPos: this.scrollY,
-        viewportSize: this.viewportHeight(),
-        contentSize: this.contentHeight(),
+        viewportSize: Math.max(0, this.viewportHeight() - this.frozenHeight),
+        contentSize: Math.max(0, this.contentHeight() - this.frozenHeight),
         trackSize
       });
 
@@ -2986,8 +3212,8 @@ export class SpreadsheetApp {
       const trackSize = Math.max(0, this.width - (this.rowHeaderWidth + padding) - ((showV ? thickness : 0) + padding));
       const { size, offset } = this.computeScrollbarThumb({
         scrollPos: this.scrollX,
-        viewportSize: this.viewportWidth(),
-        contentSize: this.contentWidth(),
+        viewportSize: Math.max(0, this.viewportWidth() - this.frozenWidth),
+        contentSize: Math.max(0, this.contentWidth() - this.frozenWidth),
         trackSize
       });
 
@@ -3113,6 +3339,9 @@ export class SpreadsheetApp {
       return before.x !== after.x || before.y !== after.y;
     }
 
+    // Ensure frozen pane metrics are current even when called outside `renderGrid()`.
+    this.updateViewportMapping();
+
     const visualRow = this.rowToVisual.get(cell.row);
     const visualCol = this.colToVisual.get(cell.col);
     if (visualRow === undefined || visualCol === undefined) return false;
@@ -3130,16 +3359,24 @@ export class SpreadsheetApp {
     let nextX = this.scrollX;
     let nextY = this.scrollY;
 
-    if (left < nextX + pad) {
-      nextX = left - pad;
-    } else if (right > nextX + viewportWidth - pad) {
-      nextX = right - viewportWidth + pad;
+    if (cell.col >= this.frozenCols) {
+      const minX = nextX + this.frozenWidth + pad;
+      const maxX = nextX + viewportWidth - pad;
+      if (left < minX) {
+        nextX = left - this.frozenWidth - pad;
+      } else if (right > maxX) {
+        nextX = right - viewportWidth + pad;
+      }
     }
 
-    if (top < nextY + pad) {
-      nextY = top - pad;
-    } else if (bottom > nextY + viewportHeight - pad) {
-      nextY = bottom - viewportHeight + pad;
+    if (cell.row >= this.frozenRows) {
+      const minY = nextY + this.frozenHeight + pad;
+      const maxY = nextY + viewportHeight - pad;
+      if (top < minY) {
+        nextY = top - this.frozenHeight - pad;
+      } else if (bottom > maxY) {
+        nextY = bottom - viewportHeight + pad;
+      }
     }
 
     return this.setScroll(nextX, nextY);
@@ -3160,6 +3397,9 @@ export class SpreadsheetApp {
       this.scrollY = after.y;
       return before.x !== after.x || before.y !== after.y;
     }
+
+    // Ensure frozen pane metrics are current even when called outside `renderGrid()`.
+    this.updateViewportMapping();
 
     const startRow = Math.max(0, Math.min(this.limits.maxRows - 1, range.startRow));
     const endRow = Math.max(0, Math.min(this.limits.maxRows - 1, range.endRow));
@@ -3184,20 +3424,32 @@ export class SpreadsheetApp {
     let nextX = this.scrollX;
     let nextY = this.scrollY;
 
+    const affectsX = Math.max(startCol, endCol) >= this.frozenCols;
+    const affectsY = Math.max(startRow, endRow) >= this.frozenRows;
+
+    const scrollableViewportWidth = Math.max(0, viewportWidth - this.frozenWidth);
+    const scrollableViewportHeight = Math.max(0, viewportHeight - this.frozenHeight);
+    const scrollableLeft = Math.max(left, this.frozenWidth);
+    const scrollableTop = Math.max(top, this.frozenHeight);
+
     // Only attempt to fully fit the range when it fits within the viewport.
     // Otherwise, fall back to keeping the active cell visible.
-    if (right - left <= viewportWidth - pad * 2) {
-      if (left < nextX + pad) {
-        nextX = left - pad;
-      } else if (right > nextX + viewportWidth - pad) {
+    if (affectsX && right - scrollableLeft <= scrollableViewportWidth - pad * 2) {
+      const minX = nextX + this.frozenWidth + pad;
+      const maxX = nextX + viewportWidth - pad;
+      if (scrollableLeft < minX) {
+        nextX = scrollableLeft - this.frozenWidth - pad;
+      } else if (right > maxX) {
         nextX = right - viewportWidth + pad;
       }
     }
 
-    if (bottom - top <= viewportHeight - pad * 2) {
-      if (top < nextY + pad) {
-        nextY = top - pad;
-      } else if (bottom > nextY + viewportHeight - pad) {
+    if (affectsY && bottom - scrollableTop <= scrollableViewportHeight - pad * 2) {
+      const minY = nextY + this.frozenHeight + pad;
+      const maxY = nextY + viewportHeight - pad;
+      if (scrollableTop < minY) {
+        nextY = scrollableTop - this.frozenHeight - pad;
+      } else if (bottom > maxY) {
         nextY = bottom - viewportHeight + pad;
       }
     }
@@ -3442,9 +3694,12 @@ export class SpreadsheetApp {
     const visualRow = rowDirect ?? this.lowerBound(this.rowIndexByVisual, cell.row);
     const visualCol = colDirect ?? this.lowerBound(this.colIndexByVisual, cell.col);
 
+    const frozenRows = this.frozenRows;
+    const frozenCols = this.frozenCols;
+
     return {
-      x: this.rowHeaderWidth + visualCol * this.cellWidth - this.scrollX,
-      y: this.colHeaderHeight + visualRow * this.cellHeight - this.scrollY,
+      x: this.rowHeaderWidth + visualCol * this.cellWidth - (cell.col < frozenCols ? 0 : this.scrollX),
+      y: this.colHeaderHeight + visualRow * this.cellHeight - (cell.row < frozenRows ? 0 : this.scrollY),
       width: colDirect == null ? 0 : this.cellWidth,
       height: rowDirect == null ? 0 : this.cellHeight
     };
@@ -3459,8 +3714,13 @@ export class SpreadsheetApp {
     const clampedX = Math.min(Math.max(pointX, this.rowHeaderWidth), maxX);
     const clampedY = Math.min(Math.max(pointY, this.colHeaderHeight), maxY);
 
-    const sheetX = this.scrollX + (clampedX - this.rowHeaderWidth);
-    const sheetY = this.scrollY + (clampedY - this.colHeaderHeight);
+    const frozenEdgeX = this.rowHeaderWidth + this.frozenWidth;
+    const frozenEdgeY = this.colHeaderHeight + this.frozenHeight;
+    const localX = clampedX - this.rowHeaderWidth;
+    const localY = clampedY - this.colHeaderHeight;
+
+    const sheetX = clampedX < frozenEdgeX ? localX : this.scrollX + localX;
+    const sheetY = clampedY < frozenEdgeY ? localY : this.scrollY + localY;
 
     const colVisual = Math.floor(sheetX / this.cellWidth);
     const rowVisual = Math.floor(sheetY / this.cellHeight);
@@ -3696,7 +3956,9 @@ export class SpreadsheetApp {
 
     // Column header selects entire column.
     if (y < this.colHeaderHeight && x >= this.rowHeaderWidth) {
-      const sheetX = this.scrollX + (x - this.rowHeaderWidth);
+      const frozenEdgeX = this.rowHeaderWidth + this.frozenWidth;
+      const localX = x - this.rowHeaderWidth;
+      const sheetX = x < frozenEdgeX ? localX : this.scrollX + localX;
       const visualCol = Math.floor(sheetX / this.cellWidth);
       const safeVisualCol = Math.max(0, Math.min(this.colIndexByVisual.length - 1, visualCol));
       const col = this.colIndexByVisual[safeVisualCol] ?? 0;
@@ -3709,7 +3971,9 @@ export class SpreadsheetApp {
 
     // Row header selects entire row.
     if (x < this.rowHeaderWidth && y >= this.colHeaderHeight) {
-      const sheetY = this.scrollY + (y - this.colHeaderHeight);
+      const frozenEdgeY = this.colHeaderHeight + this.frozenHeight;
+      const localY = y - this.colHeaderHeight;
+      const sheetY = y < frozenEdgeY ? localY : this.scrollY + localY;
       const visualRow = Math.floor(sheetY / this.cellHeight);
       const safeVisualRow = Math.max(0, Math.min(this.rowIndexByVisual.length - 1, visualRow));
       const row = this.rowIndexByVisual[safeVisualRow] ?? 0;

@@ -517,6 +517,15 @@ export function mergeDocumentStates({ base, ours, theirs }) {
     const oursMeta = oursState.sheets.metaById[sheetId] ?? null;
     const theirsMeta = theirsState.sheets.metaById[sheetId] ?? null;
 
+    const baseView = baseMeta?.view ?? { frozenRows: 0, frozenCols: 0 };
+    const oursView = oursMeta?.view ?? { frozenRows: 0, frozenCols: 0 };
+    const theirsView = theirsMeta?.view ?? { frozenRows: 0, frozenCols: 0 };
+
+    let mergedView = oursView;
+    if (deepEqual(oursView, theirsView)) mergedView = oursView;
+    else if (deepEqual(baseView, oursView)) mergedView = theirsView;
+    else if (deepEqual(baseView, theirsView)) mergedView = oursView;
+
     const baseSheet = baseMeta ? baseState.cells[sheetId] ?? {} : {};
     const oursSheet = oursMeta ? oursState.cells[sheetId] ?? {} : {};
     const theirsSheet = theirsMeta ? theirsState.cells[sheetId] ?? {} : {};
@@ -531,12 +540,12 @@ export function mergeDocumentStates({ base, ours, theirs }) {
     // Added sheets (base absent).
     if (!baseMeta) {
       if (oursMeta && !theirsMeta) {
-        metaById[sheetId] = { id: sheetId, name: oursMeta.name ?? null };
+        metaById[sheetId] = { id: sheetId, name: oursMeta.name ?? null, view: structuredClone(oursView) };
         cellStrategy.set(sheetId, "ours");
         continue;
       }
       if (!oursMeta && theirsMeta) {
-        metaById[sheetId] = { id: sheetId, name: theirsMeta.name ?? null };
+        metaById[sheetId] = { id: sheetId, name: theirsMeta.name ?? null, view: structuredClone(theirsView) };
         cellStrategy.set(sheetId, "theirs");
         continue;
       }
@@ -551,7 +560,7 @@ export function mergeDocumentStates({ base, ours, theirs }) {
             theirs: theirsMeta.name ?? null,
           });
         }
-        metaById[sheetId] = { id: sheetId, name: oursMeta.name ?? null };
+        metaById[sheetId] = { id: sheetId, name: oursMeta.name ?? null, view: structuredClone(mergedView) };
         cellStrategy.set(sheetId, "merge");
       }
       continue;
@@ -595,7 +604,7 @@ export function mergeDocumentStates({ base, ours, theirs }) {
         theirs: null,
       });
       // Prefer ours: keep sheet as-is.
-      metaById[sheetId] = { id: sheetId, name: oursMeta.name ?? null };
+      metaById[sheetId] = { id: sheetId, name: oursMeta.name ?? null, view: structuredClone(oursView) };
       cellStrategy.set(sheetId, "ours");
       continue;
     }
@@ -625,7 +634,7 @@ export function mergeDocumentStates({ base, ours, theirs }) {
         mergedName = oursName;
       }
 
-      metaById[sheetId] = { id: sheetId, name: mergedName };
+      metaById[sheetId] = { id: sheetId, name: mergedName, view: structuredClone(mergedView) };
       cellStrategy.set(sheetId, "merge");
     }
   }
@@ -824,7 +833,7 @@ export function applyConflictResolutions(mergeResult, resolutions) {
         else name = resolution.manualSheetName ?? null;
 
         if (!merged.sheets.metaById[sheetId]) {
-          merged.sheets.metaById[sheetId] = { id: sheetId, name: name ?? null };
+          merged.sheets.metaById[sheetId] = { id: sheetId, name: name ?? null, view: { frozenRows: 0, frozenCols: 0 } };
         } else {
           merged.sheets.metaById[sheetId].name = name ?? null;
         }
@@ -865,6 +874,12 @@ export function applyConflictResolutions(mergeResult, resolutions) {
         merged.sheets.metaById[sheetId] = {
           id: sheetId,
           name: chosen.meta.name == null ? null : String(chosen.meta.name),
+          view: isRecord(chosen.meta.view)
+            ? {
+                frozenRows: Number.isFinite(Number(chosen.meta.view.frozenRows)) ? Math.max(0, Math.trunc(chosen.meta.view.frozenRows)) : 0,
+                frozenCols: Number.isFinite(Number(chosen.meta.view.frozenCols)) ? Math.max(0, Math.trunc(chosen.meta.view.frozenCols)) : 0,
+              }
+            : { frozenRows: 0, frozenCols: 0 },
         };
         merged.cells[sheetId] = structuredClone(chosen.cells);
         if (!merged.sheets.order.includes(sheetId)) merged.sheets.order.push(sheetId);
