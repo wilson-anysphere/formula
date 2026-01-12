@@ -457,20 +457,117 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     return unsupported(ptg, warnings);
                 }
             },
-            // Ptg* token 0x18 (and class variants) has an opaque 5-byte payload.
+            // PtgExtend / PtgExtendV / PtgExtendA (ptg=0x18 variants).
             //
-            // Some `.xls` files include this token (calamine treats it as a fixed-size payload and
-            // skips it). It does not affect the printed formula text, but we must consume the
-            // payload to keep the stream aligned so subsequent tokens can still be decoded.
+            // Modern Excel can embed newer operand subtypes behind `PtgExtend` using an `etpg`
+            // subtype byte. In particular, structured references (tables) use `etpg=0x19`
+            // (PtgList).
+            //
+            // Some `.xls` files in the wild also include a 5-byte opaque token with this ptg value
+            // (calamine treats it as a fixed-size payload and skips it). For compatibility, if the
+            // subtype is not recognized we treat the token as a 5-byte no-op payload so the stream
+            // stays aligned.
             0x18 | 0x38 | 0x58 | 0x78 => {
-                if input.len() < 5 {
+                let Some(&etpg) = input.first() else {
                     warnings.push("unexpected end of rgce stream".to_string());
                     return unsupported(ptg, warnings);
+                };
+
+                match etpg {
+                    // Structured reference / table ref (PtgList).
+                    0x19 => {
+                        // Payload: [etpg: u8][12-byte PtgList payload]
+                        if input.len() < 13 {
+                            warnings.push("unexpected end of rgce stream".to_string());
+                            return unsupported(ptg, warnings);
+                        }
+                        let mut payload = [0u8; 12];
+                        payload.copy_from_slice(&input[1..13]);
+                        input = &input[13..];
+
+                        let decoded = decode_ptg_list_payload_best_effort(&payload);
+
+                        // Interpret row/item flags. Accept unknown bits and continue decoding.
+                        let flags16 = (decoded.flags & 0xFFFF) as u16;
+                        const FLAG_ALL: u16 = 0x0001;
+                        const FLAG_HEADERS: u16 = 0x0002;
+                        const FLAG_DATA: u16 = 0x0004;
+                        const FLAG_TOTALS: u16 = 0x0008;
+                        const FLAG_THIS_ROW: u16 = 0x0010;
+                        const KNOWN_FLAGS: u16 =
+                            FLAG_ALL | FLAG_HEADERS | FLAG_DATA | FLAG_TOTALS | FLAG_THIS_ROW;
+                        let unknown = flags16 & !KNOWN_FLAGS;
+                        if unknown != 0 {
+                            warnings.push(format!(
+                                "PtgList structured ref has unknown flags 0x{unknown:04X} (raw=0x{:08X})",
+                                decoded.flags
+                            ));
+                        }
+
+                        let item = if flags16 & FLAG_THIS_ROW != 0 {
+                            Some(StructuredRefItem::ThisRow)
+                        } else if flags16 & FLAG_HEADERS != 0 {
+                            Some(StructuredRefItem::Headers)
+                        } else if flags16 & FLAG_TOTALS != 0 {
+                            Some(StructuredRefItem::Totals)
+                        } else if flags16 & FLAG_ALL != 0 {
+                            Some(StructuredRefItem::All)
+                        } else if flags16 & FLAG_DATA != 0 {
+                            Some(StructuredRefItem::Data)
+                        } else {
+                            None
+                        };
+
+                        let table_name = format!("Table{}", decoded.table_id);
+
+                        let col_first = decoded.col_first;
+                        let col_last = decoded.col_last;
+
+                        let columns = if col_first == 0 && col_last == 0 {
+                            StructuredColumns::All
+                        } else if col_first == col_last {
+                            StructuredColumns::Single(format!("Column{col_first}"))
+                        } else {
+                            StructuredColumns::Range {
+                                start: format!("Column{col_first}"),
+                                end: format!("Column{col_last}"),
+                            }
+                        };
+
+                        let display_table_name = match item {
+                            Some(StructuredRefItem::ThisRow) => None,
+                            _ => Some(table_name.as_str()),
+                        };
+
+                        let mut out = format_structured_ref(display_table_name, item, &columns);
+
+                        let mut prec = 100;
+                        let is_value_class = ptg == 0x38;
+                        if is_value_class && !structured_ref_is_single_cell(item, &columns) {
+                            // Like value-class range/name tokens, Excel uses value-class list
+                            // tokens to represent legacy implicit intersection.
+                            out = format!("@{out}");
+                            prec = 70;
+                        }
+
+                        stack.push(ExprFragment {
+                            text: out,
+                            precedence: prec,
+                            contains_union: false,
+                            is_missing: false,
+                        });
+                    }
+                    _ => {
+                        if input.len() < 5 {
+                            warnings.push("unexpected end of rgce stream".to_string());
+                            return unsupported(ptg, warnings);
+                        }
+                        input = &input[5..];
+                        warnings.push(format!(
+                            "skipped opaque 5-byte payload token 0x{ptg:02X} (Ptg18 variant) in rgce"
+                        ));
+                    }
                 }
-                input = &input[5..];
-                warnings.push(format!(
-                    "skipped opaque 5-byte payload token 0x{ptg:02X} (Ptg18 variant) in rgce"
-                ));
             }
             // PtgAttr: [grbit: u8][wAttr: u16]
             //
@@ -525,6 +622,12 @@ pub(crate) fn decode_biff8_rgce_with_base(
                     0x24 => "#NUM!",
                     0x2A => "#N/A",
                     0x2B => "#GETTING_DATA",
+                    0x2C => "#SPILL!",
+                    0x2D => "#CALC!",
+                    0x2E => "#FIELD!",
+                    0x2F => "#CONNECT!",
+                    0x30 => "#BLOCKED!",
+                    0x31 => "#UNKNOWN!",
                     other => {
                         warnings.push(format!("unknown error literal 0x{other:02X} in rgce"));
                         "#UNKNOWN!"
@@ -1835,6 +1938,221 @@ fn col_from_a1(col: &str) -> Option<u32> {
     Some(value - 1)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StructuredRefItem {
+    All,
+    Data,
+    Headers,
+    Totals,
+    ThisRow,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum StructuredColumns {
+    All,
+    Single(String),
+    Range { start: String, end: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PtgListDecoded {
+    table_id: u32,
+    flags: u32,
+    col_first: u32,
+    col_last: u32,
+}
+
+fn decode_ptg_list_payload_best_effort(payload: &[u8; 12]) -> PtgListDecoded {
+    // There are multiple observed encodings for the 12-byte PtgList payload (table refs /
+    // structured references). Try a handful of plausible layouts and prefer the one that looks
+    // most consistent without workbook table metadata.
+    //
+    // Layout A (u32 + 4*u16):
+    //   [table_id: u32][flags: u16][col_first: u16][col_last: u16][reserved: u16]
+    //
+    // Layout B (u32 + 2*u32):
+    //   [table_id: u32][col_first_raw: u32][col_last_raw: u32]
+    //   where `col_first_raw` packs `[col_first: u16][flags: u16]` (and `col_last_raw` packs
+    //   `[col_last: u16][reserved: u16]`).
+    //
+    // Layout C (3*u32):
+    //   [table_id: u32][flags: u32][col_spec: u32]
+    //   where `col_spec` packs `[col_first: u16][col_last: u16]`.
+    let table_id = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+
+    let flags_a = u16::from_le_bytes([payload[4], payload[5]]) as u32;
+    let col_first_a = u16::from_le_bytes([payload[6], payload[7]]) as u32;
+    let col_last_a = u16::from_le_bytes([payload[8], payload[9]]) as u32;
+
+    let col_first_raw = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let col_last_raw = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
+    let col_first_b = (col_first_raw & 0xFFFF) as u32;
+    let flags_b = (col_first_raw >> 16) & 0xFFFF;
+    let col_last_b = (col_last_raw & 0xFFFF) as u32;
+
+    let flags_c = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let col_spec_c = u32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]);
+    let col_first_c = (col_spec_c & 0xFFFF) as u32;
+    let col_last_c = ((col_spec_c >> 16) & 0xFFFF) as u32;
+
+    let candidates = [
+        PtgListDecoded {
+            table_id,
+            flags: flags_a,
+            col_first: col_first_a,
+            col_last: col_last_a,
+        },
+        PtgListDecoded {
+            table_id,
+            flags: flags_b,
+            col_first: col_first_b,
+            col_last: col_last_b,
+        },
+        PtgListDecoded {
+            table_id,
+            flags: flags_c,
+            col_first: col_first_c,
+            col_last: col_last_c,
+        },
+        // Layout D: treat the middle/end u32s as raw column ids with no separate flags.
+        PtgListDecoded {
+            table_id,
+            flags: 0,
+            col_first: col_first_raw,
+            col_last: col_last_raw,
+        },
+    ];
+
+    *candidates
+        .iter()
+        .max_by_key(|cand| score_ptg_list_candidate(cand))
+        .expect("non-empty")
+}
+
+fn score_ptg_list_candidate(cand: &PtgListDecoded) -> i32 {
+    let mut score = 0i32;
+
+    // Table ids are typically non-zero and small.
+    if cand.table_id != 0 {
+        score += 1;
+    }
+
+    let col_first = cand.col_first;
+    let col_last = cand.col_last;
+
+    // Column id `0` is treated as a sentinel for "all columns"; seeing it on only one side is
+    // usually a sign we've chosen the wrong payload layout.
+    if (col_first == 0) ^ (col_last == 0) {
+        score -= 50;
+    }
+
+    // Most table column ids are small-ish.
+    if col_first <= 16_384 {
+        score += 1;
+    }
+    if col_last <= 16_384 {
+        score += 1;
+    }
+
+    // Prefer flags that fit in the lower 16 bits (where the documented item bits live).
+    if cand.flags <= 0xFFFF {
+        score += 1;
+    }
+
+    score
+}
+
+fn structured_ref_is_single_cell(item: Option<StructuredRefItem>, columns: &StructuredColumns) -> bool {
+    match (item, columns) {
+        (Some(StructuredRefItem::ThisRow), StructuredColumns::Single(_)) => true,
+        (Some(StructuredRefItem::Headers), StructuredColumns::Single(_)) => true,
+        (Some(StructuredRefItem::Totals), StructuredColumns::Single(_)) => true,
+        _ => false,
+    }
+}
+
+fn format_structured_ref(
+    table_name: Option<&str>,
+    item: Option<StructuredRefItem>,
+    columns: &StructuredColumns,
+) -> String {
+    // This-row shorthand: `[@Col]`, `[@]`, and `[@[Col1]:[Col2]]`.
+    if matches!(item, Some(StructuredRefItem::ThisRow)) {
+        match columns {
+            StructuredColumns::Single(col) => {
+                return format!("[@{}]", escape_structured_ref_bracket_content(col));
+            }
+            StructuredColumns::All => return "[@]".to_string(),
+            StructuredColumns::Range { start, end } => {
+                let start = escape_structured_ref_bracket_content(start);
+                let end = escape_structured_ref_bracket_content(end);
+                return format!("[@[{start}]:[{end}]]");
+            }
+        }
+    }
+
+    let table = table_name.unwrap_or("");
+
+    // Item-only selections: `Table1[#All]`, `Table1[#Headers]`, etc.
+    if columns == &StructuredColumns::All {
+        if let Some(item) = item {
+            return format!("{table}[{}]", structured_ref_item_literal(item));
+        }
+        // Default row selector with no column selection: treat as `[#Data]`.
+        return format!("{table}[#Data]");
+    }
+
+    // Single-column selection with default/data item: `Table1[Col]`.
+    if matches!(item, None | Some(StructuredRefItem::Data)) {
+        match columns {
+            StructuredColumns::Single(col) => {
+                return format!("{table}[{}]", escape_structured_ref_bracket_content(col));
+            }
+            StructuredColumns::Range { start, end } => {
+                let start = escape_structured_ref_bracket_content(start);
+                let end = escape_structured_ref_bracket_content(end);
+                return format!("{table}[[{start}]:[{end}]]");
+            }
+            StructuredColumns::All => {}
+        }
+    }
+
+    // General nested form: `Table1[[#Headers],[Col]]` or `Table1[[#Headers],[Col1]:[Col2]]`.
+    let item = item.expect("handled None above");
+    match columns {
+        StructuredColumns::Single(col) => {
+            let col = escape_structured_ref_bracket_content(col);
+            format!("{table}[[{}],[{col}]]", structured_ref_item_literal(item))
+        }
+        StructuredColumns::Range { start, end } => {
+            let start = escape_structured_ref_bracket_content(start);
+            let end = escape_structured_ref_bracket_content(end);
+            format!(
+                "{table}[[{}],[{start}]:[{end}]]",
+                structured_ref_item_literal(item)
+            )
+        }
+        StructuredColumns::All => unreachable!("handled above"),
+    }
+}
+
+fn structured_ref_item_literal(item: StructuredRefItem) -> &'static str {
+    match item {
+        StructuredRefItem::All => "#All",
+        StructuredRefItem::Data => "#Data",
+        StructuredRefItem::Headers => "#Headers",
+        StructuredRefItem::Totals => "#Totals",
+        StructuredRefItem::ThisRow => "#This Row",
+    }
+}
+
+fn escape_structured_ref_bracket_content(s: &str) -> String {
+    if !s.contains(']') {
+        return s.to_string();
+    }
+    s.replace(']', "]]")
+}
+
 fn push_column(col: u32, out: &mut String) {
     // Excel columns are 1-based in A1 notation. We store 0-based internally.
     let mut n = col + 1;
@@ -2291,6 +2609,67 @@ mod tests {
             "warnings={:?}",
             decoded.warnings
         );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_list_structured_ref() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgExtend(etpg=0x19) table ref with placeholder table/column ids.
+        //
+        // Payload layout (12 bytes):
+        //   [table_id: u32][flags: u16][col_first: u16][col_last: u16][reserved: u16]
+        let table_id = 1u32;
+        let flags = 0u16; // default/data
+        let col_first = 2u16;
+        let col_last = 2u16;
+        let reserved = 0u16;
+        let rgce = [
+            vec![0x18, 0x19], // PtgExtend + etpg=PtgList
+            table_id.to_le_bytes().to_vec(),
+            flags.to_le_bytes().to_vec(),
+            col_first.to_le_bytes().to_vec(),
+            col_last.to_le_bytes().to_vec(),
+            reserved.to_le_bytes().to_vec(),
+        ]
+        .concat();
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "Table1[Column2]");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_list_structured_ref_value_class_adds_at() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // Value-class PtgExtend (0x38) for a multi-cell structured ref should render with `@`.
+        let table_id = 1u32;
+        let flags = 0u16; // default/data
+        let col_first = 2u16;
+        let col_last = 2u16;
+        let reserved = 0u16;
+        let rgce = [
+            vec![0x38, 0x19], // PtgExtendV + etpg=PtgList
+            table_id.to_le_bytes().to_vec(),
+            flags.to_le_bytes().to_vec(),
+            col_first.to_le_bytes().to_vec(),
+            col_last.to_le_bytes().to_vec(),
+            reserved.to_le_bytes().to_vec(),
+        ]
+        .concat();
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "@Table1[Column2]");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
         assert_parseable(&decoded.text);
     }
 

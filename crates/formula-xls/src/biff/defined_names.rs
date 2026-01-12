@@ -600,15 +600,26 @@ impl<'a> FragmentCursor<'a> {
                         out.extend_from_slice(&extra);
                     }
                 }
-                // Ptg* token 0x18 (and class variants) has an opaque 5-byte payload.
+                // PtgExtend* token 0x18 (and class variants).
                 //
-                // Excel uses this token in some formulas (calamine treats it as a 5-byte payload
-                // and skips it). We treat it as an uninterpreted fixed-size token so we can keep
-                // the token stream aligned and continue to correctly skip the continued-segment
-                // option flags byte injected when a later `PtgStr` crosses a `CONTINUE` boundary.
+                // Excel can embed newer operand subtypes behind `PtgExtend` using an `etpg` subtype
+                // byte. Structured references (tables) use `etpg=0x19` (PtgList) and include a
+                // 12-byte payload.
+                //
+                // Some `.xls` files in the wild also include a 5-byte opaque token with this ptg
+                // value (calamine treats it as a 5-byte payload and skips it). To remain compatible
+                // while keeping the token stream aligned, we parse `etpg=0x19` as a 13-byte payload
+                // (etpg + 12 bytes) and treat all other subtypes as a 5-byte opaque payload.
                 0x18 | 0x38 | 0x58 | 0x78 => {
-                    let bytes = self.read_bytes(5)?;
-                    out.extend_from_slice(&bytes);
+                    let etpg = self.read_u8()?;
+                    out.push(etpg);
+                    if etpg == 0x19 {
+                        let bytes = self.read_bytes(12)?;
+                        out.extend_from_slice(&bytes);
+                    } else {
+                        let bytes = self.read_bytes(4)?;
+                        out.extend_from_slice(&bytes);
+                    }
                 }
                 // PtgAttr (evaluation hints / jump tables).
                 //
@@ -1113,6 +1124,68 @@ mod tests {
 
         // Split the PtgStr character bytes across the CONTINUE boundary after "AB".
         let first_rgce = &rgce[..(6 + 3 + 2)]; // ptg18 (6) + ptgstr header (3) + "AB" (2)
+        let second_chars = &literal.as_bytes()[2..]; // "CDE"
+
+        let mut continue_payload = Vec::new();
+        continue_payload.push(0); // continued segment option flags (fHighByte=0)
+        continue_payload.extend_from_slice(second_chars);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_NAME, &[header, name_str, first_rgce.to_vec()].concat()),
+            record(records::RECORD_CONTINUE, &continue_payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let allows_continuation = |id: u16| id == RECORD_NAME;
+        let iter = records::LogicalBiffRecordIter::new(&stream, allows_continuation);
+        let record = iter
+            .filter_map(Result::ok)
+            .find(|r| r.record_id == RECORD_NAME)
+            .expect("NAME record");
+        let raw = parse_biff8_name_record(&record, 1252, &[]).expect("parse NAME");
+        assert_eq!(raw.name, name);
+        assert_eq!(raw.rgce, rgce);
+    }
+
+    #[test]
+    fn parses_name_record_with_ptglist_before_continued_ptgstr_token() {
+        let name = "PtgListStr";
+        let literal = "ABCDE";
+
+        // rgce: PtgExtend(etpg=0x19 PtgList) + PtgStr.
+        let table_id = 1u32;
+        let flags = 0u16;
+        let col_first = 2u16;
+        let col_last = 2u16;
+        let reserved = 0u16;
+        let rgce: Vec<u8> = [
+            vec![0x18, 0x19], // PtgExtend + etpg=PtgList
+            table_id.to_le_bytes().to_vec(),
+            flags.to_le_bytes().to_vec(),
+            col_first.to_le_bytes().to_vec(),
+            col_last.to_le_bytes().to_vec(),
+            reserved.to_le_bytes().to_vec(),
+            vec![0x17, literal.len() as u8, 0u8], // PtgStr + cch + flags (compressed)
+            literal.as_bytes().to_vec(),
+        ]
+        .concat();
+
+        let mut header = Vec::new();
+        header.extend_from_slice(&0u16.to_le_bytes()); // grbit
+        header.push(0); // chKey
+        header.push(name.len() as u8); // cch
+        header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        header.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        header.extend_from_slice(&0u16.to_le_bytes()); // itab
+        header.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu, cchDescription, cchHelpTopic, cchStatusText
+
+        let name_str = xl_unicode_string_no_cch_compressed(name);
+
+        // Split the PtgStr character bytes across the CONTINUE boundary after "AB".
+        let ptglist_len = 1 + 1 + 12; // ptg + etpg + payload
+        let first_rgce = &rgce[..(ptglist_len + 3 + 2)]; // PtgList (14) + PtgStr header (3) + "AB" (2)
         let second_chars = &literal.as_bytes()[2..]; // "CDE"
 
         let mut continue_payload = Vec::new();
