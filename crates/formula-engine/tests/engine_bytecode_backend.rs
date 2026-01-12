@@ -422,3 +422,26 @@ fn bytecode_backend_countif_criteria_respects_engine_value_locale() {
     assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(1.0));
     assert_engine_matches_ast(&engine, "=COUNTIF(A1:A2, D1)", "B1");
 }
+
+#[test]
+fn bytecode_backend_coerces_scalar_text_using_engine_value_locale() {
+    let mut engine = Engine::new();
+    engine.set_value_locale(ValueLocaleConfig::de_de());
+
+    // In de-DE, dot-separated numeric strings with three components (like `1.5.2020`) should be
+    // treated as dates rather than a number with stripped thousands separators.
+    engine
+        .set_cell_formula("Sheet1", "A1", r#"="1.5.2020"+0"#)
+        .unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    let system = engine.date_system();
+    let expected = ymd_to_serial(ExcelDate::new(2020, 5, 1), system).unwrap();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(expected as f64));
+    assert_engine_matches_ast(&engine, r#"="1.5.2020"+0"#, "A1");
+}

@@ -70,6 +70,25 @@ fn thread_now_utc() -> DateTime<Utc> {
     BYTECODE_NOW_UTC.with(|cell| cell.borrow().clone())
 }
 
+fn parse_value_from_text(s: &str) -> Result<f64, ErrorKind> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Ok(0.0);
+    }
+
+    crate::coercion::datetime::parse_value_text(
+        trimmed,
+        thread_value_locale(),
+        thread_now_utc(),
+        thread_date_system(),
+    )
+    .map_err(|e| match e {
+        ExcelError::Div0 => ErrorKind::Div0,
+        ExcelError::Value => ErrorKind::Value,
+        ExcelError::Num => ErrorKind::Num,
+    })
+}
+
 pub fn eval_ast(expr: &Expr, grid: &dyn Grid, base: CellCoord) -> Value {
     match expr {
         Expr::Literal(v) => v.clone(),
@@ -135,7 +154,7 @@ fn coerce_to_number(v: Value) -> Result<f64, ErrorKind> {
         Value::Number(n) => Ok(n),
         Value::Bool(b) => Ok(if b { 1.0 } else { 0.0 }),
         Value::Empty => Ok(0.0),
-        Value::Text(s) => parse_number_from_text(&s),
+        Value::Text(s) => parse_value_from_text(&s),
         Value::Error(e) => Err(e),
         // Dynamic arrays / range-as-scalar: treat as a spill attempt (engine semantics).
         Value::Array(_) | Value::Range(_) => Err(ErrorKind::Spill),
@@ -586,7 +605,7 @@ fn fn_sum(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             },
             Value::Empty => {}
             Value::Error(e) => return Value::Error(*e),
-            Value::Text(s) => match parse_number_from_text(s) {
+            Value::Text(s) => match parse_value_from_text(s) {
                 Ok(v) => sum += v,
                 Err(e) => return Value::Error(e),
             },
@@ -625,7 +644,7 @@ fn fn_average(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             },
             Value::Empty => {}
             Value::Error(e) => return Value::Error(*e),
-            Value::Text(s) => match parse_number_from_text(s) {
+            Value::Text(s) => match parse_value_from_text(s) {
                 Ok(v) => {
                     sum += v;
                     count += 1;
@@ -665,7 +684,7 @@ fn fn_min(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             },
             Value::Empty => out = Some(out.map_or(0.0, |prev| prev.min(0.0))),
             Value::Error(e) => return Value::Error(*e),
-            Value::Text(s) => match parse_number_from_text(s) {
+            Value::Text(s) => match parse_value_from_text(s) {
                 Ok(v) => out = Some(out.map_or(v, |prev| prev.min(v))),
                 Err(e) => return Value::Error(e),
             },
@@ -699,7 +718,7 @@ fn fn_max(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
             },
             Value::Empty => out = Some(out.map_or(0.0, |prev| prev.max(0.0))),
             Value::Error(e) => return Value::Error(*e),
-            Value::Text(s) => match parse_number_from_text(s) {
+            Value::Text(s) => match parse_value_from_text(s) {
                 Ok(v) => out = Some(out.map_or(v, |prev| prev.max(v))),
                 Err(e) => return Value::Error(e),
             },
