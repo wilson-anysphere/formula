@@ -194,12 +194,20 @@ function sheetViewStateEquals(a, b) {
 
 function getYMap(value) {
   if (!value || typeof value !== "object") return null;
-  // eslint-disable-next-line no-prototype-builtins
-  if (value.constructor?.name !== "YMap") return null;
-  if (typeof value.get !== "function") return null;
-  if (typeof value.set !== "function") return null;
-  if (typeof value.delete !== "function") return null;
-  return value;
+  // Tolerate multiple `yjs` module instances (ESM/CJS) and differing constructor
+  // names across builds (e.g. `YMap` vs `_YMap`) by relying on structural checks.
+  //
+  // Note: plain JS Maps also have get/set/delete, so additionally require Yjs'
+  // observeDeep/unobserveDeep APIs.
+  const maybe = value;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.set !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.keys !== "function") return null;
+  if (typeof maybe.forEach !== "function") return null;
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
+  return maybe;
 }
 
 function getYMapCell(cellData) {
@@ -210,13 +218,18 @@ function getYMapCell(cellData) {
   // Use a lightweight duck-type check instead of `instanceof Y.Map` so the
   // binder can interop with y-websocket providers in pnpm workspaces.
   if (!cellData || typeof cellData !== "object") return null;
-  // eslint-disable-next-line no-prototype-builtins
-  if (cellData.constructor?.name !== "YMap") return null;
-  if (typeof cellData.get !== "function") return null;
-  if (typeof cellData.set !== "function") return null;
-  if (typeof cellData.delete !== "function") return null;
-  if (typeof cellData.forEach !== "function") return null;
-  return cellData;
+  // Tolerate differing constructor names across builds (e.g. `YMap` vs `_YMap`)
+  // and multiple `yjs` module instances by relying on structural checks.
+  const maybe = cellData;
+  if (typeof maybe.get !== "function") return null;
+  if (typeof maybe.set !== "function") return null;
+  if (typeof maybe.delete !== "function") return null;
+  if (typeof maybe.forEach !== "function") return null;
+  // Plain JS Maps also have get/set/delete/forEach, so additionally require the
+  // Yjs observer APIs.
+  if (typeof maybe.observeDeep !== "function") return null;
+  if (typeof maybe.unobserveDeep !== "function") return null;
+  return maybe;
 }
 
 function normalizeFormula(value) {
@@ -376,6 +389,7 @@ export function bindYjsToDocumentController(options) {
   if (!documentController) throw new Error("bindYjsToDocumentController requires { documentController }");
 
   const { cells, sheets } = getWorkbookRoots(ydoc);
+  const YMapCtor = cells?.constructor ?? Y.Map;
   const docIdForEncryption = ydoc.guid ?? "unknown";
 
   // Stable origin token for local DocumentController -> Yjs transactions when
@@ -1538,7 +1552,7 @@ export function bindYjsToDocumentController(options) {
           let cellData = cells.get(rawKey);
           let cell = getYMapCell(cellData);
           if (!cell) {
-            cell = new Y.Map();
+            cell = new YMapCtor();
             cells.set(rawKey, cell);
           }
 

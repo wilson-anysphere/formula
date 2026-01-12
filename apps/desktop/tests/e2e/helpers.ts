@@ -1,12 +1,29 @@
 import type { Page } from "@playwright/test";
 
+type DesktopReadyOptions = {
+  /**
+   * Whether to call `__formulaApp.whenIdle()` after `__formulaApp` is available.
+   *
+   * Defaults to true because most e2e tests want the app (engine, grid, workers)
+   * to finish bootstrapping before interacting.
+   */
+  waitForIdle?: boolean;
+  /**
+   * Optional cap on how long we'll wait for `whenIdle()` before proceeding.
+   * This is useful for tests that intentionally enable background activity (e.g. collaboration),
+   * where the app may never become fully idle.
+   */
+  idleTimeoutMs?: number;
+};
+
 /**
  * Navigate to the desktop shell and wait for the e2e harness to be ready.
  *
  * The app boot sequence can involve dynamic imports (WASM engine, scripting runtimes),
  * so make tests wait for `window.__formulaApp` before interacting with the grid.
  */
-export async function gotoDesktop(page: Page, path: string = "/"): Promise<void> {
+export async function gotoDesktop(page: Page, path: string = "/", options: DesktopReadyOptions = {}): Promise<void> {
+  const { waitForIdle = true, idleTimeoutMs } = options;
   // Vite may trigger a one-time full reload after dependency optimization. If that
   // happens mid-wait, retry once after the navigation completes.
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -15,12 +32,17 @@ export async function gotoDesktop(page: Page, path: string = "/"): Promise<void>
       await page.waitForFunction(() => Boolean((window as any).__formulaApp), undefined, { timeout: 60_000 });
       // `__formulaApp` is assigned early in `main.ts` so tests can still introspect failures,
       // but that means we need to explicitly wait for the app to settle before interacting.
-      await page.evaluate(async () => {
+      await page.evaluate(async ({ waitForIdle, idleTimeoutMs }) => {
         const app = (window as any).__formulaApp;
+        if (!waitForIdle) return;
         if (app && typeof app.whenIdle === "function") {
-          await app.whenIdle();
+          if (typeof idleTimeoutMs === "number" && idleTimeoutMs > 0) {
+            await Promise.race([app.whenIdle(), new Promise<void>((r) => setTimeout(r, idleTimeoutMs))]);
+          } else {
+            await app.whenIdle();
+          }
         }
-      });
+      }, { waitForIdle, idleTimeoutMs });
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

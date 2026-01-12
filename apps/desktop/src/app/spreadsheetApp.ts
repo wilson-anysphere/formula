@@ -359,6 +359,7 @@ export type SpreadsheetAppCollabOptions = {
   docId: string;
   token?: string;
   user: CollabUserIdentity;
+  disableBc?: boolean;
 };
 
 function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
@@ -374,10 +375,13 @@ function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
 
     const token = params.get("collabToken") ?? params.get("token") ?? undefined;
     const identity = getCollabUserIdentity({ search: window.location.search });
+    const disableBcRaw = params.get("collabDisableBc") ?? params.get("disableBc");
+    const disableBc = disableBcRaw === "1" || disableBcRaw === "true" || disableBcRaw === "yes";
     return {
       wsUrl,
       docId,
       token,
+      disableBc,
       user: identity,
     };
   } catch {
@@ -699,7 +703,7 @@ export class SpreadsheetApp {
       const binderOrigin = { type: "desktop-document-controller:binder" };
 
       this.collabSession = createCollabSession({
-        connection: { wsUrl: collab.wsUrl, docId: collab.docId, token: collab.token },
+        connection: { wsUrl: collab.wsUrl, docId: collab.docId, token: collab.token, disableBc: collab.disableBc },
         presence: { user: collab.user, activeSheet: this.sheetId },
       });
       // Populate `modifiedBy` metadata for any direct `CollabSession.setCell*` writes
