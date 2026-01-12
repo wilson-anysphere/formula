@@ -195,6 +195,7 @@ Further reading:
 - [20-images-in-cells.md](./20-images-in-cells.md)
 - [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md)
 - [20-xlsx-rich-data.md](./20-xlsx-rich-data.md)
+- [xlsx-embedded-images-in-cells.md](./xlsx-embedded-images-in-cells.md) (concrete “Place in Cell” schema walkthrough + exact URIs)
 
 ##### Worksheet cell encoding
 
