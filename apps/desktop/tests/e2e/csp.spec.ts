@@ -695,6 +695,8 @@ test.describe("Content Security Policy (Tauri parity)", () => {
 
     expect(panelHtml).toContain("Content-Security-Policy");
     expect(panelHtml).toContain("connect-src 'none'");
+    expect(panelHtml).toContain("worker-src 'none'");
+    expect(panelHtml).toContain("frame-src 'none'");
     expect(cspViolations, `Unexpected CSP violations:\\n${cspViolations.join("\n")}`).toEqual([]);
   });
 });

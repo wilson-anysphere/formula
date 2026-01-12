@@ -7,10 +7,14 @@ const WEBVIEW_CSP = [
   // into the HTML they set (inline scripts/styles, data: URLs, etc). This avoids bypassing
   // the extension host permission model from inside the iframe.
   "default-src 'none'",
+  "object-src 'none'",
   "img-src data: blob:",
   "style-src 'unsafe-inline'",
   "script-src 'unsafe-inline'",
   "connect-src 'none'",
+  "worker-src 'none'",
+  "child-src 'none'",
+  "frame-src 'none'",
   "font-src data:",
   "base-uri 'none'",
   "form-action 'none'",
