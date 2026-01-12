@@ -21,6 +21,205 @@ fn eval_value_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<Value> {
 }
 
 #[test]
+fn oddfprice_zero_coupon_rate_reduces_to_discounted_redemption() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Long first coupon period: issue -> first_coupon spans 9 months, then regular semiannual.
+    let issue = ymd_to_serial(ExcelDate::new(2019, 10, 1), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 7, 1), system).unwrap();
+
+    let rate = 0.0;
+    let yld = 0.1;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 0;
+
+    let price = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+    assert!(price.is_finite());
+
+    // With rate=0, coupons and accrued interest are 0, so the price reduces to a discounted redemption:
+    // P = redemption / (1 + yld/frequency)^(n-1 + DSC/E)
+    //
+    // Here (basis 0, 30/360):
+    // - Coupon dates: 2020-07-01, 2021-01-01, 2021-07-01 => n = 3
+    // - E = 360/frequency = 180, DSC = 180 => DSC/E = 1
+    // - exponent = 3
+    let y = yld / (frequency as f64);
+    let expected = redemption / (1.0 + y).powi(3);
+    assert_close(price, expected, 1e-12);
+}
+
+#[test]
+fn oddlprice_zero_coupon_rate_reduces_to_discounted_redemption() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Short odd last period inside an otherwise regular semiannual schedule.
+    let last_interest = ymd_to_serial(ExcelDate::new(2021, 1, 1), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2021, 2, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 5, 1), system).unwrap();
+
+    let rate = 0.0;
+    let yld = 0.1;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 0;
+
+    let price = oddlprice(
+        settlement,
+        maturity,
+        last_interest,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+    assert!(price.is_finite());
+
+    // With rate=0, coupons and accrued interest are 0:
+    // P = redemption / (1 + yld/frequency)^(DSC/E)
+    //
+    // Basis 0 (30/360), frequency=2: E=180, DSC=90 => exponent=0.5.
+    let y = yld / (frequency as f64);
+    let expected = redemption / (1.0 + y).powf(0.5);
+    assert_close(price, expected, 1e-12);
+}
+
+#[test]
+fn odd_coupon_yield_inverts_zero_coupon_prices() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // ODDF*
+    let issue = ymd_to_serial(ExcelDate::new(2019, 10, 1), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 7, 1), system).unwrap();
+
+    let rate = 0.0;
+    let yld = 0.1;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 0;
+
+    let price = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+
+    let solved = oddfyield(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        price,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+    assert_close(solved, yld, 1e-10);
+
+    // ODDL*
+    let last_interest = ymd_to_serial(ExcelDate::new(2021, 1, 1), system).unwrap();
+    let settlement2 = ymd_to_serial(ExcelDate::new(2021, 2, 1), system).unwrap();
+    let maturity2 = ymd_to_serial(ExcelDate::new(2021, 5, 1), system).unwrap();
+
+    let price2 = oddlprice(
+        settlement2,
+        maturity2,
+        last_interest,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+
+    let solved2 = oddlyield(
+        settlement2,
+        maturity2,
+        last_interest,
+        rate,
+        price2,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+    assert_close(solved2, yld, 1e-10);
+}
+
+#[test]
+fn builtins_odd_coupon_zero_coupon_rate_oracle_cases() {
+    let mut sheet = TestSheet::new();
+
+    // Deterministic oracle values (Excel 1900 date system).
+    let price = match eval_number_or_skip(
+        &mut sheet,
+        "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0,0.1,100,2,0)",
+    ) {
+        Some(v) => v,
+        None => return,
+    };
+    assert_close(price, 86.3837598531476, 1e-9);
+
+    let price2 = eval_number_or_skip(
+        &mut sheet,
+        "=ODDLPRICE(DATE(2021,2,1),DATE(2021,5,1),DATE(2021,1,1),0,0.1,100,2,0)",
+    )
+    .expect("ODDLPRICE should evaluate");
+    assert_close(price2, 97.59000729485331, 1e-9);
+
+    let yld = eval_number_or_skip(
+        &mut sheet,
+        &format!(
+            "=ODDFYIELD(DATE(2020,1,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0,{price},100,2,0)"
+        ),
+    )
+    .expect("ODDFYIELD should evaluate");
+    assert_close(yld, 0.1, 1e-10);
+
+    let yld2 = eval_number_or_skip(
+        &mut sheet,
+        &format!(
+            "=ODDLYIELD(DATE(2021,2,1),DATE(2021,5,1),DATE(2021,1,1),0,{price2},100,2,0)"
+        ),
+    )
+    .expect("ODDLYIELD should evaluate");
+    assert_close(yld2, 0.1, 1e-10);
+}
+
+#[test]
 fn oddfyield_extreme_prices_roundtrip() {
     let system = ExcelDateSystem::EXCEL_1900;
 

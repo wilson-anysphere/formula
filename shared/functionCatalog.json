@@ -2148,6 +2148,76 @@
       ]
     },
     {
+      "name": "ODDFPRICE",
+      "min_args": 8,
+      "max_args": 9,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any",
+        "any",
+        "number",
+        "number",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "ODDFYIELD",
+      "min_args": 8,
+      "max_args": 9,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any",
+        "any",
+        "number",
+        "number",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "ODDLPRICE",
+      "min_args": 7,
+      "max_args": 8,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any",
+        "number",
+        "number",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "ODDLYIELD",
+      "min_args": 7,
+      "max_args": 8,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "any",
+        "any",
+        "any",
+        "number",
+        "number",
+        "number",
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "OFFSET",
       "min_args": 3,
       "max_args": 5,

@@ -7,6 +7,7 @@ mod builtins_bonds;
 mod builtins_depreciation_ext;
 mod builtins_french_depreciation;
 mod builtins_misc;
+mod builtins_odd_coupon;
 mod builtins_securities;
 mod bonds;
 mod bonds_odd;

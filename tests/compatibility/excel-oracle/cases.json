@@ -32302,6 +32302,54 @@
       "id": "err_na_110d25eb74fa"
     },
     {
+      "formula": "=ODDFPRICE(43831,44378,43739,44013,0,0.1,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFPRICE",
+        "zero-coupon"
+      ],
+      "description": "ODDFPRICE zero-coupon: discounted redemption with odd first coupon schedule",
+      "id": "financial_oddfprice_zero_coupon_5a4bd7ab1a3c"
+    },
+    {
+      "formula": "=ODDFYIELD(43831,44378,43739,44013,0,86.3837598531476,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDFYIELD",
+        "zero-coupon"
+      ],
+      "description": "ODDFYIELD inverts ODDFPRICE for a zero-coupon bond",
+      "id": "financial_oddfyield_zero_coupon_2d7f1a6b0c9e"
+    },
+    {
+      "formula": "=ODDLPRICE(44228,44317,44197,0,0.1,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLPRICE",
+        "zero-coupon"
+      ],
+      "description": "ODDLPRICE zero-coupon: discounted redemption with odd last coupon schedule",
+      "id": "financial_oddlprice_zero_coupon_3a2c6d48d1fe"
+    },
+    {
+      "formula": "=ODDLYIELD(44228,44317,44197,0,97.59000729485331,100,2,0)",
+      "outputCell": "A1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "ODDLYIELD",
+        "zero-coupon"
+      ],
+      "description": "ODDLYIELD inverts ODDLPRICE for a zero-coupon bond",
+      "id": "financial_oddlyield_zero_coupon_1f5d9b0e3c71"
+    },
+    {
       "formula": "=NO_SUCH_FUNCTION(1)",
       "outputCell": "A1",
       "inputs": [],
