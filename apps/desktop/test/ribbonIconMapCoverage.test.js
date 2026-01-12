@@ -10,16 +10,6 @@ function readDesktopSource(...segments) {
   return fs.readFileSync(path.join(__dirname, "..", "src", ...segments), "utf8");
 }
 
-function collectRibbonIconMapKeys(source) {
-  const keys = new Set();
-  const re = /"([^"]+)"\s*:/g;
-  let match;
-  while ((match = re.exec(source))) {
-    keys.add(match[1]);
-  }
-  return keys;
-}
-
 function collectSchemaButtonIdsWithSize(source, sizeValue) {
   const ids = new Set();
   const re = new RegExp(`\\bsize\\s*:\\s*\\"${sizeValue}\\"`, "g");
@@ -162,6 +152,14 @@ function readTopLevelStringProp(objectSource, propName) {
   throw new Error(`Missing top-level '${propName}' string property in object:\n${objectSource.slice(0, 200)}…`);
 }
 
+function readTopLevelStringPropOptional(objectSource, propName) {
+  try {
+    return readTopLevelStringProp(objectSource, propName);
+  } catch {
+    return null;
+  }
+}
+
 function isIdentifierAt(source, index, ident) {
   if (!source.startsWith(ident, index)) return false;
   const before = source[index - 1];
@@ -177,37 +175,55 @@ function skipWhitespace(source, index) {
   return i;
 }
 
-test('ribbonIconMap covers schema buttons with size: "icon"', () => {
+test('ribbon schema assigns iconId for buttons with size: "icon"', () => {
   const schemaSource = readDesktopSource("ribbon", "ribbonSchema.ts");
-  const iconMapSource = readDesktopSource("ui", "icons", "ribbonIconMap.ts");
 
   const iconButtonIds = collectSchemaButtonIdsWithSize(schemaSource, "icon");
   assert.ok(iconButtonIds.includes("home.font.bold"), "Sanity-check: expected an icon-sized button id");
 
-  const iconMapKeys = collectRibbonIconMapKeys(iconMapSource);
-  const missing = iconButtonIds.filter((id) => !iconMapKeys.has(id));
+  const missing = [];
+  for (const id of iconButtonIds) {
+    // Find the *specific* button object that contains this id. We keep the parsing
+    // intentionally simple (string search + enclosing object scan) so this test can
+    // run under Node without a TypeScript parser.
+    const idRe = new RegExp(`\\bid\\s*:\\s*["']${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`, "g");
+    const match = idRe.exec(schemaSource);
+    assert.ok(match, `Could not locate schema button id ${id}`);
+    const objectStart = findEnclosingObjectStart(schemaSource, match.index);
+    const objectEnd = findEnclosingObjectEnd(schemaSource, objectStart);
+    const objectSource = schemaSource.slice(objectStart, objectEnd + 1);
+    const iconId = readTopLevelStringPropOptional(objectSource, "iconId");
+    if (!iconId) missing.push(id);
+  }
 
   assert.deepEqual(
     missing,
     [],
-    `Missing ribbonIconMap entries for schema size:\"icon\" buttons:\n${missing.map((id) => `- ${id}`).join("\n")}`,
+    `Missing iconId entries for schema size:\"icon\" buttons:\n${missing.map((id) => `- ${id}`).join("\n")}`,
   );
 });
 
-test('ribbonIconMap covers schema buttons with size: "large"', () => {
+test('ribbon schema assigns iconId for buttons with size: "large"', () => {
   const schemaSource = readDesktopSource("ribbon", "ribbonSchema.ts");
-  const iconMapSource = readDesktopSource("ui", "icons", "ribbonIconMap.ts");
 
   const largeButtonIds = collectSchemaButtonIdsWithSize(schemaSource, "large");
   assert.ok(largeButtonIds.includes("file.save.save"), "Sanity-check: expected a large-sized button id");
 
-  const iconMapKeys = collectRibbonIconMapKeys(iconMapSource);
-  const missing = largeButtonIds.filter((id) => !iconMapKeys.has(id));
+  const missing = [];
+  for (const id of largeButtonIds) {
+    const idRe = new RegExp(`\\bid\\s*:\\s*["']${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`, "g");
+    const match = idRe.exec(schemaSource);
+    assert.ok(match, `Could not locate schema button id ${id}`);
+    const objectStart = findEnclosingObjectStart(schemaSource, match.index);
+    const objectEnd = findEnclosingObjectEnd(schemaSource, objectStart);
+    const objectSource = schemaSource.slice(objectStart, objectEnd + 1);
+    const iconId = readTopLevelStringPropOptional(objectSource, "iconId");
+    if (!iconId) missing.push(id);
+  }
 
   assert.deepEqual(
     missing,
     [],
-    `Missing ribbonIconMap entries for schema size:\"large\" buttons:\n${missing.map((id) => `- ${id}`).join("\n")}`,
+    `Missing iconId entries for schema size:\"large\" buttons:\n${missing.map((id) => `- ${id}`).join("\n")}`,
   );
 });
-
