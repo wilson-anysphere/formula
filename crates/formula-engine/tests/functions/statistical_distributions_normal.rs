@@ -101,6 +101,15 @@ fn normal_distribution_parses_numeric_text_using_value_locale() {
 }
 
 #[test]
+fn norm_functions_accept_xlfn_prefix() {
+    let mut sheet = TestSheet::new();
+    assert_number(&sheet.eval("=_xlfn.NORM.DIST(0,0,1,TRUE)"), 0.5);
+    assert_number(&sheet.eval("=_xlfn.NORM.S.DIST(1,TRUE)"), 0.8413447460685429);
+    assert_number(&sheet.eval("=_xlfn.NORM.INV(0.5,1,2)"), 1.0);
+    assert_number(&sheet.eval("=_xlfn.NORM.S.INV(0.5)"), 0.0);
+}
+
+#[test]
 fn norm_s_dist_array_lift_spills() {
     let mut sheet = TestSheet::new();
     sheet.set_formula("Z1", "=NORM.S.DIST({-1,0,1},TRUE)");
