@@ -139,6 +139,7 @@ pub(crate) fn parse_biff_sheet_notes(
     }
 
     let mut out: Vec<BiffNote> = Vec::with_capacity(notes.len());
+    let mut out_by_obj_id: HashMap<u16, usize> = HashMap::new();
     for note in notes {
         let Some((obj_id, text)) = texts_by_obj_id
             .get(&note.primary_obj_id)
@@ -159,12 +160,28 @@ pub(crate) fn parse_biff_sheet_notes(
             continue;
         };
 
-        out.push(BiffNote {
+        let resolved = BiffNote {
             cell: note.cell,
             obj_id,
             author: note.author,
             text: text.clone(),
-        });
+        };
+
+        if let Some(&existing) = out_by_obj_id.get(&obj_id) {
+            warnings.push(format!(
+                "duplicate NOTE record for object id {obj_id} (cell {}); overwriting previous NOTE at cell {}",
+                resolved.cell.to_a1(),
+                out.get(existing)
+                    .map(|note| note.cell.to_a1())
+                    .unwrap_or_else(|| "<unknown>".to_string())
+            ));
+            if let Some(slot) = out.get_mut(existing) {
+                *slot = resolved;
+            }
+        } else {
+            out_by_obj_id.insert(obj_id, out.len());
+            out.push(resolved);
+        }
     }
 
     Ok(ParsedSheetNotes {
@@ -1121,6 +1138,32 @@ mod tests {
         assert_eq!(n2.obj_id, 2);
         assert_eq!(n2.author, "Bob");
         assert_eq!(n2.text, "Second");
+    }
+
+    #[test]
+    fn dedupes_duplicate_note_records_by_object_id() {
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            // Duplicate NOTE for the same object id; later record should win.
+            note(1, 1, 1, "Bob"),
+            obj_with_id(1),
+            txo_with_text("Hello"),
+            continue_text_ascii("Hello"),
+            eof(),
+        ]
+        .concat();
+
+        let (notes, warnings) =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].cell, CellRef::new(1, 1));
+        assert_eq!(notes[0].author, "Bob");
+        assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("duplicate NOTE record")),
+            "expected duplicate NOTE warning; warnings={warnings:?}"
+        );
     }
 
     #[test]
