@@ -42,6 +42,11 @@ import { MockEngine } from "../document/engine.js";
 import { isRedoKeyboardEvent, isUndoKeyboardEvent } from "../document/shortcuts.js";
 import { showToast } from "../extensions/ui.js";
 import { applyNumberFormatPreset, toggleBold, toggleItalic, toggleUnderline } from "../formatting/toolbar.js";
+import {
+  DEFAULT_FORMATTING_APPLY_CELL_LIMIT,
+  evaluateFormattingSelectionSize,
+  normalizeSelectionRange,
+} from "../formatting/selectionSizeGuard.js";
 import { formatValueWithNumberFormat } from "../formatting/numberFormat.ts";
 import { createDesktopDlpContext } from "../dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
@@ -99,7 +104,7 @@ type AuditingCacheEntry = {
   precedentsError: string | null;
   dependentsError: string | null;
 };
-const MAX_KEYBOARD_FORMATTING_CELLS = 50_000;
+const MAX_KEYBOARD_FORMATTING_CELLS = DEFAULT_FORMATTING_APPLY_CELL_LIMIT;
 // Copying a large rectangle requires allocating a per-cell clipboard payload (TSV/HTML/RTF)
 // and (for internal pastes) a per-cell snapshot of effective formats. Keep this bounded so
 // Excel-scale sheet limits don't allow accidental multi-million-cell allocations.
@@ -7468,29 +7473,25 @@ export class SpreadsheetApp {
 
     e.preventDefault();
 
-    const ranges = this.selection.ranges.length
+    const selectionRanges = this.selection.ranges.length
       ? this.selection.ranges
       : [
           {
             startRow: this.selection.active.row,
             endRow: this.selection.active.row,
             startCol: this.selection.active.col,
-            endCol: this.selection.active.col
-          }
+            endCol: this.selection.active.col,
+          },
         ];
 
-    let totalCells = 0;
-    for (const range of ranges) {
-      const rows = Math.max(0, range.endRow - range.startRow + 1);
-      const cols = Math.max(0, range.endCol - range.startCol + 1);
-      totalCells += rows * cols;
-      if (totalCells > MAX_KEYBOARD_FORMATTING_CELLS) break;
-    }
+    const decision = evaluateFormattingSelectionSize(selectionRanges, this.limits, {
+      maxCells: MAX_KEYBOARD_FORMATTING_CELLS,
+    });
 
-    if (totalCells > MAX_KEYBOARD_FORMATTING_CELLS) {
+    if (!decision.allowed) {
       try {
         showToast(
-          `Selection too large to apply formatting (>${MAX_KEYBOARD_FORMATTING_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
+          "Selection is too large to format. Try selecting fewer cells or an entire row/column.",
           "warning"
         );
       } catch {
@@ -7498,6 +7499,21 @@ export class SpreadsheetApp {
       }
       return true;
     }
+
+    // When the UI selection is a full row/column/sheet *within the current grid limits*,
+    // expand it to the canonical Excel bounds so DocumentController can use fast layered
+    // formatting paths (sheet/row/col style ids) without enumerating every cell.
+    const ranges = selectionRanges.map((range) => {
+      const r = normalizeSelectionRange(range);
+      const isFullColBand = r.startRow === 0 && r.endRow === this.limits.maxRows - 1;
+      const isFullRowBand = r.startCol === 0 && r.endCol === this.limits.maxCols - 1;
+      return {
+        startRow: r.startRow,
+        startCol: r.startCol,
+        endRow: isFullColBand ? DEFAULT_GRID_LIMITS.maxRows - 1 : r.endRow,
+        endCol: isFullRowBand ? DEFAULT_GRID_LIMITS.maxCols - 1 : r.endCol,
+      };
+    });
 
     const batchLabel = (() => {
       switch (action.kind) {
