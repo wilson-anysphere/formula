@@ -94,7 +94,6 @@ import { getCollabUserIdentity, type CollabUserIdentity } from "../collab/userId
 import { PresenceRenderer } from "../grid/presence-renderer/presenceRenderer.js";
 import { ConflictUiController } from "../collab/conflicts-ui/conflict-ui-controller.js";
 import { StructuralConflictUiController } from "../collab/conflicts-ui/structural-conflict-ui-controller.js";
-import { createDesktopFormulaConflictMonitor } from "../collab/conflict-monitors.js";
 
 type EngineCellRef = { sheetId?: string; sheet?: string; row?: number; col?: number; address?: string; value?: unknown };
 type AuditingCacheEntry = {
@@ -683,8 +682,6 @@ export class SpreadsheetApp {
   private collabBinder: { destroy: () => void } | null = null;
   private collabSelectionUnsubscribe: (() => void) | null = null;
   private collabPresenceUnsubscribe: (() => void) | null = null;
-  private formulaConflictMonitor: { dispose: () => void; resolveConflict: (id: string, chosen: unknown) => boolean } | null =
-    null;
   private conflictUi: ConflictUiController | null = null;
   private conflictUiContainer: HTMLDivElement | null = null;
   private structuralConflictUi: StructuralConflictUiController | null = null;
@@ -793,6 +790,22 @@ export class SpreadsheetApp {
             }
           : {}),
         presence: { user: collab.user, activeSheet: this.sheetId },
+        // Enable formula/value conflict monitoring in collab mode.
+        formulaConflicts: {
+          localUserId: collab.user.id,
+          mode: "formula+value",
+          onConflict: (conflict) => {
+            // Conflicts are surfaced via a minimal DOM UI (ConflictUiController).
+            // To exercise manually, edit the same formula concurrently in two clients.
+            if (this.conflictUi) {
+              this.conflictUi.addConflict(conflict);
+            } else {
+              // Conflicts can be detected before the UI overlay is mounted (e.g. during
+              // initial sync). Queue until the UI is ready.
+              this.pendingFormulaConflicts.push(conflict);
+            }
+          },
+        },
         // Enable structural conflict monitoring (move/delete-vs-edit/content/format) in collab mode.
         cellConflicts: {
           localUserId: collab.user.id,
@@ -854,32 +867,6 @@ export class SpreadsheetApp {
       for (const origin of undoService.localOrigins ?? []) {
         this.collabSession.localOrigins.add(origin);
       }
-
-      // Desktop wiring:
-      // - Structural conflicts are monitored by `CollabSession.cellConflictMonitor` (enabled above via `cellConflicts`).
-      // - Formula/value conflicts are monitored by a desktop-configured monitor so we can ignore
-      //   bulk "time travel" operations (version restore / branching apply) and avoid surfacing
-      //   spurious conflict UI.
-      this.formulaConflictMonitor = createDesktopFormulaConflictMonitor({
-        doc: this.collabSession.doc,
-        cells: this.collabSession.cells as any,
-        localUserId: collab.user.id,
-        sessionOrigin: this.collabSession.origin,
-        binderOrigin,
-        undoLocalOrigins: undoService.localOrigins,
-        mode: "formula+value",
-        onConflict: (conflict) => {
-          // Conflicts are surfaced via a minimal DOM UI (ConflictUiController).
-          // To exercise manually, edit the same formula concurrently in two clients.
-          if (this.conflictUi) {
-            this.conflictUi.addConflict(conflict);
-          } else {
-            // Conflicts can be detected before the UI overlay is mounted (e.g. during
-            // initial sync). Queue until the UI is ready.
-            this.pendingFormulaConflicts.push(conflict);
-          }
-        },
-      });
 
       // Comments sync through the shared collaborative Y.Doc when collab is enabled.
       this.commentsDoc = this.collabSession.doc;
@@ -1699,7 +1686,7 @@ export class SpreadsheetApp {
         sheetNameResolver: this.sheetNameResolver,
         monitor: {
           resolveConflict: (id: string, chosen: unknown) => {
-            const monitor = this.formulaConflictMonitor;
+            const monitor = this.collabSession?.formulaConflictMonitor;
             return monitor ? monitor.resolveConflict(id, chosen) : false;
           },
         },
@@ -1851,8 +1838,6 @@ export class SpreadsheetApp {
     this.collabPresenceUnsubscribe = null;
     this.collabBinder?.destroy();
     this.collabBinder = null;
-    this.formulaConflictMonitor?.dispose();
-    this.formulaConflictMonitor = null;
     // Tests sometimes inject a minimal collab session stub (e.g. `{ presence }`)
     // to exercise presence behavior without spinning up a provider. Use optional
     // method calls so teardown remains resilient.
