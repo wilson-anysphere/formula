@@ -77,6 +77,16 @@ describe("keybindings", () => {
     expect(matchesKeybinding(left!, eventForKey("ArrowLeft", { ctrlKey: true }))).toBe(true);
   });
 
+  it("normalizes page navigation aliases (pgup/pgdn)", () => {
+    const pgup = parseKeybinding("cmd", "ctrl+pgup");
+    expect(pgup).not.toBeNull();
+    expect(matchesKeybinding(pgup!, eventForKey("PageUp", { ctrlKey: true }))).toBe(true);
+
+    const pgdn = parseKeybinding("cmd", "ctrl+pgdn");
+    expect(pgdn).not.toBeNull();
+    expect(matchesKeybinding(pgdn!, eventForKey("PageDown", { ctrlKey: true }))).toBe(true);
+  });
+
   it("matches shifted punctuation via KeyboardEvent.code fallback (ctrl+shift+;)", () => {
     const binding = parseKeybinding("cmd", "ctrl+shift+;");
     expect(binding).not.toBeNull();
