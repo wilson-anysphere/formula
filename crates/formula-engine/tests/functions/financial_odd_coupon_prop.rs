@@ -163,6 +163,7 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
             )
             .map_err(|e| TestCaseError::fail(format!("ODDFPRICE errored: {e:?} case={case:?}")))?;
             prop_assert!(price.is_finite(), "non-finite ODDFPRICE {price} (case={case:?})");
+            prop_assert!(price > 0.0, "non-positive ODDFPRICE {price} (case={case:?})");
 
             let yld_out = oddfyield(
                 case.settlement,
@@ -213,6 +214,10 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
                 "non-finite ODDFPRICE {price_roundtrip} (case={case:?})"
             );
             prop_assert!(
+                price_roundtrip > 0.0,
+                "non-positive ODDFPRICE {price_roundtrip} (case={case:?})"
+            );
+            prop_assert!(
                 (price_roundtrip - price).abs() <= PRICE_TOLERANCE,
                 "ODDF price roundtrip failed: price_in={price} price_out={price_roundtrip} yld_out={yld_out} case={case:?}",
             );
@@ -257,6 +262,7 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
                 })?;
 
                 prop_assert!(p_lo.is_finite() && p_hi.is_finite());
+                prop_assert!(p_lo > 0.0 && p_hi > 0.0);
                 prop_assert!(
                     p_hi <= p_lo + 1e-8,
                     "ODDF monotonicity failed: y_lo={y_lo} p_lo={p_lo} y_hi={y_hi} p_hi={p_hi} case={case:?}",
@@ -294,6 +300,7 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
             )
             .map_err(|e| TestCaseError::fail(format!("ODDLPRICE errored: {e:?} case={case:?}")))?;
             prop_assert!(price.is_finite(), "non-finite ODDLPRICE {price} (case={case:?})");
+            prop_assert!(price > 0.0, "non-positive ODDLPRICE {price} (case={case:?})");
 
             let yld_out = oddlyield(
                 case.settlement,
@@ -336,10 +343,13 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
                     "ODDLPRICE(yld_out) errored: {e:?} yld_out={yld_out} price={price} case={case:?}"
                 ))
             })?;
-
             prop_assert!(
                 price_roundtrip.is_finite(),
                 "non-finite ODDLPRICE {price_roundtrip} (case={case:?})"
+            );
+            prop_assert!(
+                price_roundtrip > 0.0,
+                "non-positive ODDLPRICE {price_roundtrip} (case={case:?})"
             );
             prop_assert!(
                 (price_roundtrip - price).abs() <= PRICE_TOLERANCE,
@@ -383,6 +393,7 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
                 })?;
 
                 prop_assert!(p_lo.is_finite() && p_hi.is_finite());
+                prop_assert!(p_lo > 0.0 && p_hi > 0.0);
                 prop_assert!(
                     p_hi <= p_lo + 1e-8,
                     "ODDL monotonicity failed: y_lo={y_lo} p_lo={p_lo} y_hi={y_hi} p_hi={p_hi} case={case:?}",
