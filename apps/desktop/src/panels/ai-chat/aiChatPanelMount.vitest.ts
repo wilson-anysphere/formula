@@ -45,6 +45,11 @@ vi.mock("../../ai/llm/desktopLLMClient.js", () => ({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+const [{ createPanelBodyRenderer }, { PanelIds }] = await Promise.all([
+  import("../panelBodyRenderer.js"),
+  import("../panelRegistry.js"),
+]);
+
 function clearAiStorage() {
   // Node 25 ships an experimental `globalThis.localStorage` accessor that throws
   // unless Node is started with `--localstorage-file`. Guard all access so our
@@ -73,8 +78,6 @@ describe("AI chat panel", () => {
       const doc = new DocumentController();
       const getDocumentController = vi.fn(() => doc);
 
-      const { createPanelBodyRenderer } = await import("../panelBodyRenderer.js");
-      const { PanelIds } = await import("../panelRegistry.js");
       const renderer = createPanelBodyRenderer({ getDocumentController });
 
       const body = document.createElement("div");
