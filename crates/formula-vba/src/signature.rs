@@ -835,6 +835,9 @@ fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
         "1.3.14.3.2.26" => Some(DigestAlg::Sha1),
         // id-sha256 (NIST)
         "2.16.840.1.101.3.4.2.1" => Some(DigestAlg::Sha256),
+        "1.2.840.113549.1.1.4" => Some(DigestAlg::Md5),
+        "1.2.840.113549.1.1.5" => Some(DigestAlg::Sha1),
+        "1.2.840.113549.1.1.11" => Some(DigestAlg::Sha256),
         _ => None,
     }
 }

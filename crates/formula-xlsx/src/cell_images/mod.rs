@@ -14,7 +14,6 @@ use roxmltree::Document;
 use crate::drawings::{content_type_for_extension, REL_TYPE_IMAGE};
 use crate::path::resolve_target;
 use crate::XlsxError;
-
 type Result<T> = std::result::Result<T, XlsxError>;
 
 const REL_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";

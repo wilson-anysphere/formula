@@ -54,6 +54,27 @@ pub enum RichDataError {
     },
 }
 
+impl XlsxPackage {
+    /// Extract in-cell images stored via the Excel rich-data (`xl/metadata.xml` + `xl/richData/*`)
+    /// mechanism.
+    ///
+    /// This is a convenience wrapper around [`extract_rich_cell_images`].
+    pub fn extract_rich_data_images(
+        &self,
+    ) -> Result<HashMap<(String, CellRef), Vec<u8>>, XlsxError> {
+        match extract_rich_cell_images(self) {
+            Ok(v) => Ok(v),
+            Err(RichDataError::Xlsx(e)) => Err(e),
+            Err(RichDataError::XmlNonUtf8 { part, source }) => Err(XlsxError::Invalid(format!(
+                "xml part {part} is not valid UTF-8: {source}"
+            ))),
+            Err(RichDataError::XmlParse { part, source }) => Err(XlsxError::Invalid(format!(
+                "xml parse error in {part}: {source}"
+            ))),
+        }
+    }
+}
+
 /// Best-effort extraction of "image in cell" rich values.
 ///
 /// This follows the richData chain:
