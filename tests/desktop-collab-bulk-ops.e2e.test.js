@@ -6,6 +6,7 @@ import * as Y from "yjs";
 
 import { ConflictUiController } from "../apps/desktop/src/collab/conflicts-ui/index.js";
 import {
+  BRANCHING_APPLY_ORIGIN,
   VERSIONING_RESTORE_ORIGIN,
   createDesktopCellStructuralConflictMonitor,
   createDesktopFormulaConflictMonitor,
@@ -130,7 +131,8 @@ test("Desktop wiring: branch checkout/merge origin does not surface formula conf
     // Establish a baseline local formula.
     monitor.setLocalFormula("s:0:0", "=1");
 
-    // Simulate a branch checkout by applying a snapshot update tagged with the session origin.
+    // Simulate a branch checkout/merge by applying a snapshot update tagged with the
+    // branching-apply origin (bulk rewrite).
     const branchDoc = new Y.Doc();
     branchDoc.clientID = 2;
     const branchCells = branchDoc.getMap("cells");
@@ -142,7 +144,7 @@ test("Desktop wiring: branch checkout/merge origin does not surface formula conf
     branchCells.set("s:0:0", branchCell);
 
     const branchUpdate = Y.encodeStateAsUpdate(branchDoc);
-    Y.applyUpdate(doc, branchUpdate, sessionOrigin);
+    Y.applyUpdate(doc, branchUpdate, BRANCHING_APPLY_ORIGIN);
 
     assert.equal(conflicts.length, 0);
     assert.equal(monitor.listConflicts().length, 0);
@@ -178,14 +180,14 @@ test("Desktop wiring: structural op log does not grow during version restore or 
     const ops = doc.getMap("cellStructuralOps");
     assert.equal(ops.size, 0);
 
-    // Simulate a branch checkout/merge (bulk apply) using session origin.
+    // Simulate a branch checkout/merge (bulk apply) using the branching-apply origin.
     doc.transact(() => {
       const cell = new Y.Map();
       cell.set("value", "bulk");
       cell.set("modifiedBy", "alice");
       cell.set("modified", Date.now());
       cells.set("Sheet1:0:0", cell);
-    }, sessionOrigin);
+    }, BRANCHING_APPLY_ORIGIN);
 
     // Simulate a version restore using the restore origin.
     doc.transact(() => {
