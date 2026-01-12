@@ -238,36 +238,53 @@
   background: var(--selection-bg);
 }
 
+.formula-bar-highlight .formula-bar-ghost {
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
 .formula-bar-highlight span[data-kind="function"] {
-  color: var(--accent);
+  color: var(--formula-fn-color);
   font-weight: 600;
 }
 
-.formula-bar-highlight span[data-kind="string"] {
-  color: var(--warning);
-}
-
-.formula-bar-highlight span[data-kind="number"] {
-  color: var(--success);
-}
-
-.formula-bar-highlight span[data-kind="operator"] {
-  color: var(--text-primary);
-}
-
-.formula-bar-highlight span[data-kind="punctuation"] {
-  color: var(--text-secondary);
-}
-
-.formula-bar-highlight span[data-kind="error"] {
-  color: var(--error);
-  font-weight: 700;
+.formula-bar-highlight span[data-kind="reference"] {
+  color: var(--formula-ref-color);
 }
 
 .formula-bar-highlight span.formula-bar-reference--active {
   text-decoration: underline;
   text-decoration-thickness: 2px;
   text-underline-offset: 2px;
+  text-decoration-color: currentColor;
+}
+
+.formula-bar-highlight span[data-kind="string"] {
+  color: var(--formula-string-color);
+}
+
+.formula-bar-highlight span[data-kind="number"] {
+  color: var(--formula-number-color);
+}
+
+.formula-bar-highlight span[data-kind="operator"] {
+  color: var(--formula-operator-color);
+}
+
+.formula-bar-highlight span[data-kind="punctuation"] {
+  color: var(--formula-punctuation-color);
+}
+
+.formula-bar-highlight span[data-kind="error"] {
+  color: var(--formula-error-color);
+  font-weight: 600;
+}
+
+.formula-bar-highlight .formula-bar-preview {
+  color: var(--text-secondary);
+  opacity: 0.8;
+  font-size: 12px;
+  margin-left: 6px;
 }
 
 .formula-bar-hint {
@@ -318,18 +335,6 @@
 .formula-bar-error-suggestions {
   margin: 0;
   padding-left: 18px;
-}
-
-.formula-bar-highlight .formula-bar-ghost {
-  color: var(--text-secondary);
-  opacity: 0.6;
-}
-
-.formula-bar-highlight .formula-bar-preview {
-  color: var(--text-secondary);
-  opacity: 0.8;
-  font-size: 12px;
-  margin-left: 6px;
 }
 
 .grid {

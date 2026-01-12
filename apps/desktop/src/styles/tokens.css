@@ -101,6 +101,13 @@
   /* Formula bar */
   --formula-bar-bg: var(--bg-secondary);
   --formula-bar-border: var(--border);
+  --formula-fn-color: var(--accent);
+  --formula-ref-color: #7c3aed;
+  --formula-string-color: var(--warning);
+  --formula-number-color: var(--success);
+  --formula-operator-color: var(--text-primary);
+  --formula-punctuation-color: var(--text-secondary);
+  --formula-error-color: var(--error);
 
   /* Shape / depth */
   --radius: 6px;
@@ -145,6 +152,7 @@
   /* Accent backgrounds in dark are typically light, so dark text reads best. */
   --text-on-accent: #1e1e1e;
 
+  --formula-ref-color: #c4b5fd;
   --shadow-surface: 0 1px 2px rgba(0, 0, 0, 0.5);
 
   --panel-shadow: -2px 0 10px rgba(0, 0, 0, 0.4);
@@ -197,6 +205,14 @@
 
   --dialog-shadow: none;
   --dialog-backdrop: transparent;
+
+  --formula-fn-color: var(--accent);
+  --formula-ref-color: LinkText;
+  --formula-string-color: var(--warning);
+  --formula-number-color: var(--success);
+  --formula-operator-color: var(--text-primary);
+  --formula-punctuation-color: var(--text-secondary);
+  --formula-error-color: var(--error);
 }
 
 @media (forced-colors: active), (prefers-contrast: more) {
@@ -230,6 +246,13 @@
     --selection-text: HighlightText;
 
     --shadow-surface: none;
+    --formula-fn-color: var(--accent);
+    --formula-ref-color: LinkText;
+    --formula-string-color: CanvasText;
+    --formula-number-color: CanvasText;
+    --formula-operator-color: CanvasText;
+    --formula-punctuation-color: CanvasText;
+    --formula-error-color: CanvasText;
   }
 }
 
