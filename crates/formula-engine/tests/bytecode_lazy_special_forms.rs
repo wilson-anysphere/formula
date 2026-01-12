@@ -25,6 +25,29 @@ impl bytecode::Grid for PanicGrid {
     }
 }
 
+#[derive(Clone)]
+struct TextGrid {
+    coord: CellCoord,
+    value: Value,
+}
+
+impl bytecode::Grid for TextGrid {
+    fn get_value(&self, coord: CellCoord) -> Value {
+        if coord == self.coord {
+            return self.value.clone();
+        }
+        Value::Empty
+    }
+
+    fn column_slice(&self, _col: i32, _row_start: i32, _row_end: i32) -> Option<&[f64]> {
+        None
+    }
+
+    fn bounds(&self) -> (i32, i32) {
+        (10, 10)
+    }
+}
+
 #[test]
 fn bytecode_choose_is_lazy() {
     // CHOOSE(2, <unused>, 7) must not evaluate the first choice expression.
@@ -67,6 +90,34 @@ fn bytecode_eval_ast_choose_is_lazy() {
         &formula_engine::LocaleConfig::en_us(),
     );
     assert_eq!(value, Value::Number(7.0));
+}
+
+#[test]
+fn bytecode_eval_ast_choose_matches_vm_reference_semantics() {
+    // CHOOSE should evaluate its selected argument in "argument mode" (preserving direct cell
+    // references as references), matching the VM compiler which lowers selected cell refs to
+    // Range values.
+    //
+    // This matters when the CHOOSE result is consumed by a function with range/reference semantics
+    // like SUM: if CHOOSE returns the *value* of a text cell, SUM will parse it, but if CHOOSE
+    // returns a reference, SUM will ignore the text (Excel/engine semantics).
+    let origin = CellCoord::new(0, 0);
+    let expr = bytecode::parse_formula("=SUM(CHOOSE(1, A1, 0))", origin).expect("parse");
+    let program = bytecode::Compiler::compile(Arc::from("choose_sum_ref_semantics"), &expr);
+
+    let grid = TextGrid {
+        coord: CellCoord::new(0, 0),
+        value: Value::Text(Arc::from("5")),
+    };
+    let locale = formula_engine::LocaleConfig::en_us();
+
+    let mut vm = bytecode::Vm::with_capacity(64);
+    let vm_value = vm.eval(&program, &grid, 0, origin, &locale);
+
+    let ast_value = bytecode::eval_ast(&expr, &grid, 0, origin, &locale);
+
+    assert_eq!(ast_value, vm_value);
+    assert_eq!(vm_value, Value::Number(0.0));
 }
 
 #[test]

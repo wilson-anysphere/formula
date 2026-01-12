@@ -403,14 +403,14 @@ fn eval_ast_inner(
                     if idx_usize >= args.len() {
                         return Value::Error(ErrorKind::Value);
                     }
-                    return eval_ast_inner(
-                        &args[idx_usize],
-                        grid,
-                        sheet_id,
-                        base,
-                        locale,
-                        lexical_scopes,
-                    );
+                    // Evaluate the selected branch in "argument mode", matching the bytecode
+                    // compiler and main evaluator: direct cell references are preserved as
+                    // references so consumers like SUM can apply range semantics.
+                    let choice_expr = &args[idx_usize];
+                    return match choice_expr {
+                        Expr::CellRef(r) => Value::Range(RangeRef::new(*r, *r)),
+                        other => eval_ast_inner(other, grid, sheet_id, base, locale, lexical_scopes),
+                    };
                 }
                 Function::Ifs => {
                     if args.len() % 2 != 0 {
