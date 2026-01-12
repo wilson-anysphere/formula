@@ -1,10 +1,36 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { gotoDesktop, waitForDesktopReady } from "./helpers";
+
+async function grantSampleHelloPermissions(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const extensionId = "formula.sample-hello";
+    const key = "formula.extensionHost.permissions";
+    const existing = (() => {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : {};
+      } catch {
+        return {};
+      }
+    })();
+
+    existing[extensionId] = {
+      ...(existing[extensionId] ?? {}),
+      "ui.commands": true,
+      "ui.panels": true,
+      "cells.read": true,
+      "cells.write": true,
+    };
+
+    localStorage.setItem(key, JSON.stringify(existing));
+  });
+}
 
 test.describe("Extensions UI integration", () => {
   test("runs sampleHello.openPanel and renders the panel webview", async ({ page }) => {
     await gotoDesktop(page);
+    await grantSampleHelloPermissions(page);
 
     await page.getByTestId("open-extensions-panel").click();
     await expect(page.getByTestId("panel-extensions")).toBeVisible();
@@ -23,6 +49,7 @@ test.describe("Extensions UI integration", () => {
 
   test("runs sampleHello.sumSelection via the Extensions panel and shows a toast", async ({ page }) => {
     await gotoDesktop(page);
+    await grantSampleHelloPermissions(page);
 
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -50,6 +77,7 @@ test.describe("Extensions UI integration", () => {
 
   test("persists an extension panel in the layout and re-activates it after reload", async ({ page }) => {
     await gotoDesktop(page);
+    await grantSampleHelloPermissions(page);
 
     await page.getByTestId("open-extensions-panel").click();
     await page.getByTestId("run-command-sampleHello.openPanel").click();
@@ -60,6 +88,7 @@ test.describe("Extensions UI integration", () => {
 
     await page.reload();
     await waitForDesktopReady(page);
+    await grantSampleHelloPermissions(page);
 
     await expect(page.getByTestId("panel-sampleHello.panel")).toBeVisible();
     const frameAfter = page.frameLocator('iframe[data-testid="extension-webview-sampleHello.panel"]');
@@ -68,6 +97,7 @@ test.describe("Extensions UI integration", () => {
 
   test("executes a contributed keybinding when its when-clause matches", async ({ page }) => {
     await gotoDesktop(page);
+    await grantSampleHelloPermissions(page);
 
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -96,6 +126,7 @@ test.describe("Extensions UI integration", () => {
 
   test("does not execute a keybinding when its when-clause fails", async ({ page }) => {
     await gotoDesktop(page);
+    await grantSampleHelloPermissions(page);
 
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -138,6 +169,7 @@ test.describe("Extensions UI integration", () => {
 
   test("executes a contributed context menu item when its when-clause matches", async ({ page }) => {
     await gotoDesktop(page);
+    await grantSampleHelloPermissions(page);
 
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

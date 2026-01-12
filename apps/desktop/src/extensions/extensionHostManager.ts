@@ -4,6 +4,7 @@
 // into the desktop UI (toasts, panels, commands).
 
 import { BrowserExtensionHost } from "../../../../packages/extension-host/src/browser/index.mjs";
+import { createDesktopPermissionPrompt } from "./permissionPrompt.js";
 
 type ExtensionHostUiApi = {
   showMessage?: (message: string, type?: string) => Promise<void> | void;
@@ -134,7 +135,9 @@ export class DesktopExtensionHostManager {
       engineVersion: params.engineVersion,
       spreadsheetApi: params.spreadsheetApi,
       uiApi: params.uiApi,
-      permissionPrompt: params.permissionPrompt ?? (async () => true),
+      // Default to a real UI permission prompt (persisted by PermissionManager
+      // in localStorage). Tests can override via the `permissionPrompt` param.
+      permissionPrompt: params.permissionPrompt ?? createDesktopPermissionPrompt(),
       clipboardApi: createDesktopClipboardApi(params.uiApi),
     });
   }
