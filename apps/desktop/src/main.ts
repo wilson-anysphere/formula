@@ -5394,6 +5394,17 @@ mountRibbon(ribbonRoot, {
       case "open-python-panel":
         toggleDockPanel(PanelIds.PYTHON);
         return;
+      case "open-marketplace-panel": {
+        // Marketplace uses the extension host runtime for install/load actions; ensure it is started.
+        const ensure = ensureExtensionsLoadedRef?.();
+        if (ensure) {
+          void ensure.catch(() => {
+            // Best-effort; opening the panel should still work even if extension load fails.
+          });
+        }
+        toggleDockPanel(PanelIds.MARKETPLACE);
+        return;
+      }
       case "open-extensions-panel": {
         // Extensions are lazy-loaded to keep startup light. Opening the Extensions panel
         // should trigger the host to load + sync contributed panels/commands.

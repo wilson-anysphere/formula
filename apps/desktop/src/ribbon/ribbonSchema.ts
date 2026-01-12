@@ -2028,6 +2028,19 @@ export const defaultRibbonSchema: RibbonSchema = {
           ],
         },
         {
+          id: "view.panels",
+          label: "Panels",
+          buttons: [
+            {
+              id: "open-marketplace-panel",
+              label: "Marketplace",
+              ariaLabel: "Marketplace",
+              icon: "🛒",
+              testId: "open-marketplace-panel",
+            },
+          ],
+        },
+        {
           id: "view.appearance",
           label: "Appearance",
           buttons: [
