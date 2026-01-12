@@ -75,3 +75,19 @@ test("Parquet export from document range produces a readable parquet file", { sk
   assert.equal(roundTrip.getChildAt(1).get(2), "Carla");
   assert.equal(roundTrip.getChildAt(3).get(1), 2.25);
 });
+
+test("Parquet export rejects huge ranges before scanning cells", async () => {
+  let scanned = 0;
+  const doc = {
+    getCell() {
+      scanned += 1;
+      throw new Error("Should not scan");
+    },
+  };
+
+  await assert.rejects(
+    () => exportDocumentRangeToParquet(doc, "Sheet1", "A1:Z8000"),
+    /Range too large to export to Parquet/i,
+  );
+  assert.equal(scanned, 0);
+});

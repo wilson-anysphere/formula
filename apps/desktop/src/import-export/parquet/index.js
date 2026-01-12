@@ -13,6 +13,11 @@ import {
   parseRangeA1,
 } from "../../document/coords.js";
 
+// Exporting a rectangular range requires materializing a full columnar representation
+// (`Record<string, any[]>`) in JS memory. Keep this bounded so Excel-scale selections
+// can't accidentally allocate millions of values.
+export const DEFAULT_MAX_PARQUET_EXPORT_CELLS = 200_000;
+
 /**
  * Import a Parquet file into a columnar sheet backing store.
  *
@@ -133,11 +138,22 @@ function makeUniqueColumnNames(names) {
  * @param {import("../../document/documentController.js").DocumentController} doc
  * @param {string} sheetId
  * @param {import("../../document/coords.js").CellRange | string} range
- * @param {{ headerRow?: boolean; compression?: any }} [options]
+ * @param {{ headerRow?: boolean; compression?: any; maxCells?: number }} [options]
  */
 export async function exportDocumentRangeToParquet(doc, sheetId, range, options = {}) {
   const r = typeof range === "string" ? parseRangeA1(range) : normalizeRange(range);
   const headerRow = options.headerRow ?? true;
+  const maxCells = options.maxCells ?? DEFAULT_MAX_PARQUET_EXPORT_CELLS;
+
+  const rowCount = Math.max(0, r.end.row - r.start.row + 1);
+  const colCount = Math.max(0, r.end.col - r.start.col + 1);
+  const cellCount = rowCount * colCount;
+  if (cellCount > maxCells) {
+    throw new Error(
+      `Range too large to export to Parquet (${rowCount}x${colCount}=${cellCount} cells). ` +
+        `Limit is ${maxCells} cells.`,
+    );
+  }
 
   const columnNames = [];
   for (let col = r.start.col; col <= r.end.col; col++) {

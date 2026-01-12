@@ -8191,6 +8191,19 @@ export class SpreadsheetApp {
       );
       if (rowCount === 0 || colCount === 0) return;
 
+      const pastedCellCount = rowCount * colCount;
+      if (pastedCellCount > MAX_CLIPBOARD_CELLS) {
+        try {
+          showToast(
+            `Paste too large (>${MAX_CLIPBOARD_CELLS.toLocaleString()} cells). Paste fewer cells and try again.`,
+            "warning"
+          );
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
+        return;
+      }
+
       if (
         isInternalPaste
       ) {
