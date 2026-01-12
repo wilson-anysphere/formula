@@ -68,6 +68,25 @@ test.describe("Extensions UI integration", () => {
       frame.locator('meta[http-equiv="Content-Security-Policy"]'),
       "webview should inject a restrictive CSP meta tag",
     ).toHaveCount(1);
+
+    const iframeHandle = await page
+      .locator('iframe[data-testid="extension-webview-sampleHello.panel"]')
+      .elementHandle();
+    expect(iframeHandle, "expected webview iframe to exist").not.toBeNull();
+
+    const webviewFrame = await iframeHandle!.contentFrame();
+    expect(webviewFrame, "expected webview iframe to have a content frame").not.toBeNull();
+
+    const sandboxInfo = await webviewFrame!.evaluate(() => (window as any).__formulaWebviewSandbox);
+    expect(sandboxInfo, "webview should inject a sandbox hardening script").toBeTruthy();
+    expect(typeof sandboxInfo.tauriGlobalsPresent).toBe("boolean");
+
+    const tauriTypes = await webviewFrame!.evaluate(() => ({
+      tauri: typeof (window as any).__TAURI__,
+      tauriIpc: typeof (window as any).__TAURI_IPC__,
+    }));
+    expect(tauriTypes.tauri, "webview should not expose __TAURI__").toBe("undefined");
+    expect(tauriTypes.tauriIpc, "webview should not expose __TAURI_IPC__").toBe("undefined");
   });
 
   test("runs sampleHello.sumSelection via the Extensions panel and shows a toast", async ({ page }) => {

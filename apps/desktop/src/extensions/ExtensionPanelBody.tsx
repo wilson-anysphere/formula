@@ -18,24 +18,60 @@ const WEBVIEW_CSP = [
 
 function injectWebviewCsp(html: string): string {
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${WEBVIEW_CSP}">`;
+  const hardenTauriGlobalsScript = `<script>
+(() => {
+  "use strict";
+  const keys = ["__TAURI__", "__TAURI_IPC__", "__TAURI_INTERNALS__", "__TAURI_METADATA__"];
+  const presentKeys = [];
+  for (const key of keys) {
+    try {
+      if (key in window) presentKeys.push(key);
+    } catch {
+      // Ignore.
+    }
+  }
+  const tauriGlobalsPresent = presentKeys.length > 0;
+  for (const key of presentKeys) {
+    try {
+      // Some environments (including strict mode) throw if the property is non-configurable.
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete window[key];
+    } catch {
+      // Ignore.
+    }
+    try {
+      // If deletion fails, fall back to overwriting.
+      window[key] = undefined;
+    } catch {
+      // Ignore.
+    }
+  }
+  try {
+    // Marker used by desktop e2e tests to verify the hardening script ran in the iframe.
+    window.__formulaWebviewSandbox = { tauriGlobalsPresent };
+  } catch {
+    // Ignore.
+  }
+})();
+</script>`;
   const src = String(html ?? "");
 
   // If the extension already provides a `<head>`, inject our CSP as early as possible.
   const headMatch = /<head(\s[^>]*)?>/i.exec(src);
   if (headMatch && typeof headMatch.index === "number") {
     const insertAt = headMatch.index + headMatch[0].length;
-    return `${src.slice(0, insertAt)}${cspMeta}${src.slice(insertAt)}`;
+    return `${src.slice(0, insertAt)}${cspMeta}${hardenTauriGlobalsScript}${src.slice(insertAt)}`;
   }
 
   // Otherwise, inject a `<head>` right after the `<html>` element when present.
   const htmlMatch = /<html(\s[^>]*)?>/i.exec(src);
   if (htmlMatch && typeof htmlMatch.index === "number") {
     const insertAt = htmlMatch.index + htmlMatch[0].length;
-    return `${src.slice(0, insertAt)}<head>${cspMeta}</head>${src.slice(insertAt)}`;
+    return `${src.slice(0, insertAt)}<head>${cspMeta}${hardenTauriGlobalsScript}</head>${src.slice(insertAt)}`;
   }
 
   // Fall back to wrapping arbitrary markup in a full document.
-  return `<!doctype html><html><head>${cspMeta}</head><body>${src}</body></html>`;
+  return `<!doctype html><html><head>${cspMeta}${hardenTauriGlobalsScript}</head><body>${src}</body></html>`;
 }
 
 export function ExtensionPanelBody({ panelId, bridge }: { panelId: string; bridge: ExtensionPanelBridge }) {
