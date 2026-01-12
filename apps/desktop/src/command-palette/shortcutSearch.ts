@@ -180,11 +180,11 @@ function matchesShortcutTokenQuery(shortcutDisplay: string, query: string): bool
   return true;
 }
 
-function getPrimaryShortcut(value: string | readonly string[] | undefined): string | null {
-  if (!value) return null;
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value[0] ?? null;
-  return null;
+function getShortcuts(value: string | readonly string[] | undefined): readonly string[] {
+  if (!value) return [];
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value;
+  return [];
 }
 
 function compareShortcutMatches(a: { shortcut: string; title: string; commandId: string }, b: { shortcut: string; title: string; commandId: string }): number {
@@ -223,12 +223,14 @@ export function searchShortcutCommands<T extends ShortcutSearchCommandLike>(para
 
     const byCategory = new Map<string, Array<ShortcutSearchMatch<T>>>();
     for (const cmd of params.commands) {
-      const shortcut = getPrimaryShortcut(params.keybindingIndex.get(cmd.commandId));
+      const shortcuts = getShortcuts(params.keybindingIndex.get(cmd.commandId));
+      const shortcut = shortcuts[0] ?? null;
       if (!shortcut) continue;
 
       if (q) {
-        const haystack = `${cmd.title} ${cmd.commandId} ${shortcut}`.toLowerCase();
-        if (!haystack.includes(q) && !matchesShortcutTokenQuery(shortcut, q)) continue;
+        const haystack = `${cmd.title} ${cmd.commandId} ${shortcuts.join(" ")}`.toLowerCase();
+        const tokenMatch = shortcuts.some((candidate) => matchesShortcutTokenQuery(candidate, q));
+        if (!haystack.includes(q) && !tokenMatch) continue;
       }
 
       const category = normalizeCategory(cmd.category);
@@ -270,12 +272,14 @@ export function searchShortcutCommands<T extends ShortcutSearchCommandLike>(para
 
   const matches: Array<ShortcutSearchMatch<T>> = [];
   for (const cmd of params.commands) {
-    const shortcut = getPrimaryShortcut(params.keybindingIndex.get(cmd.commandId));
+    const shortcuts = getShortcuts(params.keybindingIndex.get(cmd.commandId));
+    const shortcut = shortcuts[0] ?? null;
     if (!shortcut) continue;
 
     if (q) {
-      const haystack = `${cmd.title} ${cmd.commandId} ${shortcut}`.toLowerCase();
-      if (!haystack.includes(q) && !matchesShortcutTokenQuery(shortcut, q)) continue;
+      const haystack = `${cmd.title} ${cmd.commandId} ${shortcuts.join(" ")}`.toLowerCase();
+      const tokenMatch = shortcuts.some((candidate) => matchesShortcutTokenQuery(candidate, q));
+      if (!haystack.includes(q) && !tokenMatch) continue;
     }
 
     matches.push({ ...cmd, shortcut });

@@ -85,6 +85,19 @@ describe("command-palette shortcut search", () => {
     ]);
   });
 
+  test("matches against secondary shortcuts in the keybinding index", () => {
+    const commands = [
+      { commandId: "edit.redo", title: "Redo", category: "Edit", source: { kind: "builtin" as const } },
+    ];
+    const keybindingIndex = new Map<string, readonly string[]>([
+      ["edit.redo", ["Ctrl+Y", "Ctrl+Shift+Z"]],
+    ]);
+
+    expect(searchShortcutCommands({ commands, keybindingIndex, query: "ctrl+shift+z" }).map((c) => c.commandId)).toEqual([
+      "edit.redo",
+    ]);
+  });
+
   test("does not drop punctuation tokens (cmd+[ should not match all cmd shortcuts)", () => {
     const commands = [
       { commandId: "audit", title: "Audit", category: "Cat", source: { kind: "builtin" as const } },
