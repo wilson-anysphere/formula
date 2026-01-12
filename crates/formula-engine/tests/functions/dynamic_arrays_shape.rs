@@ -328,6 +328,15 @@ fn shape_functions_accept_xlfn_prefix() {
     engine
         .set_cell_formula("Sheet1", "D1", "=_xlfn.DROP(A1:A3)")
         .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "H1", "=_xlfn.CHOOSECOLS(A1:C3,2)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "H5", "=_xlfn.CHOOSEROWS(A1:C3,2)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "H7", "=_xlfn.EXPAND(A1:B2,3,2,0)")
+        .unwrap();
 
     engine.recalculate_single_threaded();
 
@@ -344,4 +353,28 @@ fn shape_functions_accept_xlfn_prefix() {
     assert_eq!(engine.get_cell_value("Sheet1", "D1"), Value::Number(1.0));
     assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(4.0));
     assert_eq!(engine.get_cell_value("Sheet1", "D3"), Value::Number(7.0));
+
+    let (start, end) = engine.spill_range("Sheet1", "H1").expect("spill range");
+    assert_eq!(start, parse_a1("H1").unwrap());
+    assert_eq!(end, parse_a1("H3").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "H1"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H2"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H3"), Value::Number(8.0));
+
+    let (start, end) = engine.spill_range("Sheet1", "H5").expect("spill range");
+    assert_eq!(start, parse_a1("H5").unwrap());
+    assert_eq!(end, parse_a1("J5").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "H5"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "I5"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "J5"), Value::Number(6.0));
+
+    let (start, end) = engine.spill_range("Sheet1", "H7").expect("spill range");
+    assert_eq!(start, parse_a1("H7").unwrap());
+    assert_eq!(end, parse_a1("I9").unwrap());
+    assert_eq!(engine.get_cell_value("Sheet1", "H7"), Value::Number(1.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "I7"), Value::Number(2.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H8"), Value::Number(4.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "I8"), Value::Number(5.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "H9"), Value::Number(0.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "I9"), Value::Number(0.0));
 }
