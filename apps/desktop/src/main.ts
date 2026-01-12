@@ -5118,6 +5118,28 @@ mountRibbon(ribbonRoot, {
       case "home.alignment.alignLeft":
         applyToSelection("Align left", (sheetId, ranges) => setHorizontalAlign(app.getDocument(), sheetId, ranges, "left"));
         return;
+      case "home.alignment.topAlign":
+        applyToSelection("Vertical align", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { alignment: { vertical: "top" } }, { label: "Vertical align" });
+          }
+        });
+        return;
+      case "home.alignment.middleAlign":
+        applyToSelection("Vertical align", (sheetId, ranges) => {
+          for (const range of ranges) {
+            // Spreadsheet vertical alignment uses "center" (Excel/OOXML); the grid maps this to CSS middle.
+            doc.setRangeFormat(sheetId, range, { alignment: { vertical: "center" } }, { label: "Vertical align" });
+          }
+        });
+        return;
+      case "home.alignment.bottomAlign":
+        applyToSelection("Vertical align", (sheetId, ranges) => {
+          for (const range of ranges) {
+            doc.setRangeFormat(sheetId, range, { alignment: { vertical: "bottom" } }, { label: "Vertical align" });
+          }
+        });
+        return;
       case "home.alignment.center":
         applyToSelection("Align center", (sheetId, ranges) =>
           setHorizontalAlign(app.getDocument(), sheetId, ranges, "center"),
