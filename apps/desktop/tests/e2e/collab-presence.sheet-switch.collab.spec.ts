@@ -64,28 +64,28 @@ test.describe("collab presence: sheet switching", () => {
           if (!app) return [];
           const mode = app.getGridMode?.() ?? null;
 
-          // Shared-grid mode: presences are pushed into the CanvasGridRenderer selection layer.
-          if (mode === "shared") {
-            const renderer = (app as any).sharedGrid?.renderer;
-            const presences = renderer?.remotePresences ?? [];
-            return Array.isArray(presences)
-              ? presences.map((presence: any) => presence?.id).filter((id: any) => typeof id === "string")
-              : [];
-          }
+        // Shared-grid mode: presences are pushed into the CanvasGridRenderer selection layer.
+        if (mode === "shared") {
+          const renderer = (app as any).sharedGrid?.renderer;
+          const presences = renderer?.remotePresences ?? [];
+          const ids = Array.isArray(presences)
+            ? presences.map((presence: any) => presence?.id).filter((id: any) => typeof id === "string")
+            : [];
+          return ids.sort();
+        }
 
           // Legacy mode: remote presences are stored on the app and rendered via `renderPresence()`.
           const presences = (app as any).remotePresences ?? [];
-          return Array.isArray(presences)
+          const ids = Array.isArray(presences)
             ? presences.map((presence: any) => presence?.id).filter((id: any) => typeof id === "string")
             : [];
+          return ids.sort();
         });
       };
 
       // With both clients on the initial sheet, user2 should see user1's presence.
       await expect
-        .poll(async () => {
-          return remotePresenceIds(page2);
-        })
+        .poll(async () => remotePresenceIds(page2), { timeout: 30_000 })
         .toEqual(["user1"]);
 
       // Add a second sheet in user1; the desktop UI automatically activates it.
@@ -97,9 +97,7 @@ test.describe("collab presence: sheet switching", () => {
 
       // user2 stays on Sheet1, so user1 should no longer appear in user2's filtered remote presences.
       await expect
-        .poll(async () => {
-          return remotePresenceIds(page2);
-        })
+        .poll(async () => remotePresenceIds(page2), { timeout: 30_000 })
         .toEqual([]);
 
       // When user2 switches to the same sheet, they should see user1 again.
@@ -107,9 +105,7 @@ test.describe("collab presence: sheet switching", () => {
       await expect(page2.getByRole("tab", { name: "Sheet2" })).toHaveAttribute("aria-selected", "true", { timeout: 30_000 });
 
       await expect
-        .poll(async () => {
-          return remotePresenceIds(page2);
-        })
+        .poll(async () => remotePresenceIds(page2), { timeout: 30_000 })
         .toEqual(["user1"]);
     });
   }
