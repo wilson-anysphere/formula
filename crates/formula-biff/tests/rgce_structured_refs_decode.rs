@@ -64,6 +64,14 @@ fn decodes_structured_ref_headers_column() {
 }
 
 #[test]
+fn decodes_structured_ref_totals_column() {
+    let rgce = ptg_list(1, 0x0008, 2, 2, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[[#Totals],[Column2]]");
+    assert_eq!(normalize(&text), normalize("Table1[[#Totals],[Column2]]"));
+}
+
+#[test]
 fn decodes_structured_ref_item_only_all() {
     let rgce = ptg_list(1, 0x0001, 0, 0, 0x18);
     let text = decode_rgce(&rgce).expect("decode");
@@ -83,11 +91,28 @@ fn decodes_structured_ref_column_range() {
 }
 
 #[test]
+fn decodes_structured_ref_this_row_range() {
+    let rgce = ptg_list(1, 0x0010, 2, 4, 0x18);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "[@[Column2]:[Column4]]");
+    assert_eq!(normalize(&text), normalize("[@[Column2]:[Column4]]"));
+}
+
+#[test]
 fn decodes_structured_ref_value_class_emits_explicit_implicit_intersection() {
     let rgce = ptg_list(1, 0x0000, 2, 2, 0x38);
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "@Table1[Column2]");
     assert_eq!(normalize(&text), normalize("@Table1[Column2]"));
+}
+
+#[test]
+fn decodes_structured_ref_extend_a_is_supported() {
+    // PtgExtendA (0x58) uses the same payload as ref/value class variants.
+    let rgce = ptg_list(1, 0x0000, 2, 2, 0x58);
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(text, "Table1[Column2]");
+    assert_eq!(normalize(&text), normalize("Table1[Column2]"));
 }
 
 #[test]
