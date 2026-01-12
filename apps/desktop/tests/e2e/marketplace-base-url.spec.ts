@@ -88,9 +88,8 @@ test.describe("Marketplace base URL configuration", () => {
 
       await gotoDesktop(page);
 
-      await page.evaluate(() => {
-        window.dispatchEvent(new CustomEvent("formula:open-panel", { detail: { panelId: "marketplace" } }));
-      });
+      await page.getByRole("tab", { name: "View", exact: true }).click();
+      await page.getByTestId("open-marketplace-panel").click();
 
       const panel = page.getByTestId("panel-marketplace");
       await expect(panel).toBeVisible();
@@ -113,4 +112,3 @@ test.describe("Marketplace base URL configuration", () => {
     }
   });
 });
-

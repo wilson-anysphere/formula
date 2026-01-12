@@ -176,7 +176,10 @@ location.reload();
 For running a local marketplace server (and registering a publisher for test publishes), see
 `services/marketplace/README.md`.
 
-To open the built-in Marketplace panel in dev (if it isn’t already exposed in the UI), run:
+To open the built-in Marketplace panel in dev:
+
+- Use the ribbon: **View → Panels → Marketplace**
+- Or run from DevTools:
 
 ```js
 window.dispatchEvent(new CustomEvent("formula:open-panel", { detail: { panelId: "marketplace" } }));

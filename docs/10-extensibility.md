@@ -11,7 +11,7 @@ The desktop app wires `@formula/extension-host` contribution points into the UI 
 - **Extensions panel**: open via the status bar **Extensions** button. It lists installed extensions, their contributed commands, and contributed panels.
 - **Marketplace panel**: installs and updates marketplace extensions via `WebExtensionManager` (IndexedDB-backed).
   - Panel id: `"marketplace"` (`PanelIds.MARKETPLACE`)
-  - In dev builds you can open it via DevTools:
+  - In dev builds you can open it via the ribbon (**View → Panels → Marketplace**) or via DevTools:
     ```js
     window.dispatchEvent(new CustomEvent("formula:open-panel", { detail: { panelId: "marketplace" } }));
     ```
