@@ -116,6 +116,7 @@ export const ribbonIconMap = {
   "home.clipboard.clipboardPane": ClipboardPaneIcon,
 
   // Font
+  "home.font.fontSize": FontSizeIcon,
   "home.font.increaseFont": IncreaseFontIcon,
   "home.font.decreaseFont": DecreaseFontIcon,
   "home.font.bold": BoldIcon,
