@@ -11,6 +11,7 @@ pub mod metadata;
 pub mod rich_value_structure;
 pub mod rich_value_types;
 mod media_parts;
+mod rich_value_rel_images;
 mod rich_value_images;
 
 pub use rich_value_images::{ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning};
