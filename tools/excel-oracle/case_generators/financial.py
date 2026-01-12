@@ -597,6 +597,48 @@ def generate(
     )
     add_case(
         cases,
+        prefix="oddfprice_neg_yld_below_minus1",
+        tags=["financial", "odd_coupon", "ODDFPRICE"],
+        formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-1.5,100,2,0)",
+        description="ODDFPRICE with yld=-1.5 (below -1 but still within the per-period domain yld > -frequency when frequency=2)",
+    )
+    add_case(
+        cases,
+        prefix="oddlprice_neg_yld_below_minus1",
+        tags=["financial", "odd_coupon", "ODDLPRICE"],
+        formula="=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-1.5,100,2,0)",
+        description="ODDLPRICE with yld=-1.5 (below -1 but still within the per-period domain yld > -frequency when frequency=2)",
+    )
+    add_case(
+        cases,
+        prefix="oddfprice_yld_eq_neg_frequency",
+        tags=["financial", "odd_coupon", "ODDFPRICE"],
+        formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-2,100,2,0)",
+        description="ODDFPRICE with yld == -frequency (discount base hits 0; confirm Excel returns #DIV/0!)",
+    )
+    add_case(
+        cases,
+        prefix="oddlprice_yld_eq_neg_frequency",
+        tags=["financial", "odd_coupon", "ODDLPRICE"],
+        formula="=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-2,100,2,0)",
+        description="ODDLPRICE with yld == -frequency (discount base hits 0; confirm Excel returns #DIV/0!)",
+    )
+    add_case(
+        cases,
+        prefix="oddfprice_yld_below_neg_frequency",
+        tags=["financial", "odd_coupon", "ODDFPRICE"],
+        formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-2.5,100,2,0)",
+        description="ODDFPRICE with yld < -frequency (confirm Excel returns #NUM!)",
+    )
+    add_case(
+        cases,
+        prefix="oddlprice_yld_below_neg_frequency",
+        tags=["financial", "odd_coupon", "ODDLPRICE"],
+        formula="=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-2.5,100,2,0)",
+        description="ODDLPRICE with yld < -frequency (confirm Excel returns #NUM!)",
+    )
+    add_case(
+        cases,
         prefix="oddfprice_neg_rate",
         tags=["financial", "odd_coupon", "ODDFPRICE"],
         formula="=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),-0.01,0.0625,100,2,0)",

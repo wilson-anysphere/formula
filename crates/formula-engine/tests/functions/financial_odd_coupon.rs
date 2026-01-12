@@ -2977,24 +2977,32 @@ fn odd_coupon_worksheet_price_rejects_yield_at_or_below_negative_frequency() {
 fn odd_coupon_bond_price_allows_negative_yield() {
     let mut sheet = TestSheet::new();
 
-    let oddf = "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,-0.5,100,2,0)";
-    let oddl = "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,-0.5,100,2,0)";
+    // Ensure worksheet wrappers accept negative yields below -1 (but still within the valid per-period
+    // domain yld > -frequency when frequency=2).
+    for yld in [-0.5, -1.5] {
+        let oddf = format!(
+            "=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,{yld},100,2,0)"
+        );
+        let oddl = format!(
+            "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,{yld},100,2,0)"
+        );
 
-    let oddf_price = match eval_number_or_skip(&mut sheet, oddf) {
-        Some(v) => v,
-        None => return,
-    };
-    let oddl_price = eval_number_or_skip(&mut sheet, oddl)
-        .expect("ODDLPRICE should return a number for negative yld within (-frequency, ∞)");
+        let oddf_price = match eval_number_or_skip(&mut sheet, &oddf) {
+            Some(v) => v,
+            None => return,
+        };
+        let oddl_price = eval_number_or_skip(&mut sheet, &oddl)
+            .expect("ODDLPRICE should return a number for negative yld within (-frequency, ∞)");
 
-    assert!(
-        oddf_price.is_finite(),
-        "expected finite price, got {oddf_price}"
-    );
-    assert!(
-        oddl_price.is_finite(),
-        "expected finite price, got {oddl_price}"
-    );
+        assert!(
+            oddf_price.is_finite(),
+            "expected finite price, got {oddf_price}"
+        );
+        assert!(
+            oddl_price.is_finite(),
+            "expected finite price, got {oddl_price}"
+        );
+    }
 }
 
 #[test]
