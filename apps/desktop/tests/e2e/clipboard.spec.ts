@@ -596,7 +596,6 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     await expect(page.getByTestId("selection-range")).toHaveText("A1");
 
     await page.keyboard.press(`${modifier}+C`);
-    await waitForIdle(page);
 
     const toastRoot = page.getByTestId("toast-root");
     const copyToast = toastRoot.getByTestId("toast").last();
@@ -627,7 +626,6 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
     await page.keyboard.press(`${modifier}+X`);
-    await waitForIdle(page);
 
     const cutToast = toastRoot.getByTestId("toast").last();
     await expect(cutToast).toBeVisible();
