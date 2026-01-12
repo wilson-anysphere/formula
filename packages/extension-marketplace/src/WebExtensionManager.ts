@@ -188,6 +188,12 @@ function removeContributedPanelSeedsForExtension(storage: Storage, extensionId: 
     next[panelId] = seed;
   }
   if (!changed) return;
+  if (Object.keys(next).length === 0) {
+    // If we removed the final contributed panel seed, delete the key entirely so uninstall
+    // behaves like a clean slate.
+    storage.removeItem(CONTRIBUTED_PANELS_SEED_STORE_KEY);
+    return;
+  }
   writeContributedPanelSeedStore(storage, next);
 }
 
@@ -209,6 +215,44 @@ function removePermissionGrantsForExtension(storage: Storage, extensionId: strin
   } catch {
     // ignore
   }
+}
+
+function deleteAllPackagesForExtension(packagesStore: IDBObjectStore, extensionId: string): Promise<void> {
+  const id = String(extensionId);
+  if (!id) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    let index: IDBIndex;
+    try {
+      index = packagesStore.index("byId");
+    } catch {
+      // Older DB schema without the index; best-effort fallback is handled by callers.
+      resolve();
+      return;
+    }
+
+    let req: IDBRequest<IDBCursorWithValue | null>;
+    try {
+      req = index.openCursor(id);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    req.onerror = () => reject(req.error ?? new Error("Failed to iterate extension packages"));
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (!cursor) {
+        resolve();
+        return;
+      }
+      try {
+        cursor.delete();
+      } catch {
+        // ignore
+      }
+      cursor.continue();
+    };
+  });
 }
 
 function prepareContributedPanelSeedsUpdate(
@@ -903,7 +947,16 @@ export class WebExtensionManager {
     try {
       const tx = db.transaction([STORE_INSTALLED, STORE_PACKAGES], "readwrite");
       tx.objectStore(STORE_INSTALLED).delete(String(id));
-      tx.objectStore(STORE_PACKAGES).delete(`${id}@${existing.version}`);
+      const packagesStore = tx.objectStore(STORE_PACKAGES);
+      // Best-effort: uninstall should remove *all* stored package records for this extension id,
+      // not only the currently-installed version. This avoids leaving behind orphaned IndexedDB
+      // blobs if the install/update flow previously crashed mid-write.
+      try {
+        await deleteAllPackagesForExtension(packagesStore, String(id));
+      } catch {
+        // ignore and fall back to deleting the expected version key
+      }
+      packagesStore.delete(`${id}@${existing.version}`);
       await txDone(tx);
     } finally {
       db.close();

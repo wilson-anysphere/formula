@@ -1394,6 +1394,91 @@ test("uninstall removes permissions store key when the last extension is removed
   await manager.dispose();
 });
 
+test("uninstall removes contributed panel seed store key when empty", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+  });
+
+  const manager = new WebExtensionManager({ marketplaceClient, host: null, engineVersion: "1.0.0" });
+
+  await manager.install("formula.sample-hello");
+
+  expect(globalThis.localStorage.getItem("formula.extensions.contributedPanels.v1")).not.toBeNull();
+
+  await manager.uninstall("formula.sample-hello");
+
+  expect(globalThis.localStorage.getItem("formula.extensions.contributedPanels.v1")).toBeNull();
+
+  await manager.dispose();
+});
+
+test("uninstall removes all IndexedDB package records for an extension id", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+  });
+
+  const manager = new WebExtensionManager({ marketplaceClient, host: null, engineVersion: "1.0.0" });
+
+  await manager.install("formula.sample-hello");
+
+  // Inject an extra package record (simulating an older/orphaned version left behind after a crash).
+  const db = await requestToPromise(indexedDB.open("formula.webExtensions"));
+  try {
+    const tx = db.transaction(["packages"], "readwrite");
+    const store = tx.objectStore("packages");
+    const primaryKey = "formula.sample-hello@1.0.0";
+    const existing = await requestToPromise<any>(store.get(primaryKey));
+    expect(existing).toBeTruthy();
+    store.put({ ...existing, key: "formula.sample-hello@0.9.0", version: "0.9.0" });
+    await txDone(tx);
+  } finally {
+    db.close();
+  }
+
+  const dbBefore = await requestToPromise(indexedDB.open("formula.webExtensions"));
+  try {
+    const tx = dbBefore.transaction(["packages"], "readonly");
+    const index = tx.objectStore("packages").index("byId");
+    const count = await requestToPromise(index.count("formula.sample-hello"));
+    expect(count).toBe(2);
+    await txDone(tx);
+  } finally {
+    dbBefore.close();
+  }
+
+  await manager.uninstall("formula.sample-hello");
+
+  const dbAfter = await requestToPromise(indexedDB.open("formula.webExtensions"));
+  try {
+    const tx = dbAfter.transaction(["packages"], "readonly");
+    const store = tx.objectStore("packages");
+    const index = store.index("byId");
+    const count = await requestToPromise(index.count("formula.sample-hello"));
+    expect(count).toBe(0);
+    expect(await requestToPromise(store.get("formula.sample-hello@1.0.0"))).toBeUndefined();
+    expect(await requestToPromise(store.get("formula.sample-hello@0.9.0"))).toBeUndefined();
+    await txDone(tx);
+  } finally {
+    dbAfter.close();
+  }
+
+  await manager.dispose();
+});
+
 test("detects IndexedDB corruption on load and supports repair()", async () => {
   const keys = generateEd25519KeyPair();
   const extensionDir = path.resolve("extensions/sample-hello");
