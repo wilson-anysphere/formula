@@ -10,7 +10,8 @@ import WebSocket from "ws";
 import { CollabVersioning } from "../../../packages/collab/versioning/src/index.ts";
 import { YjsVersionStore } from "../../../packages/versioning/src/store/yjsVersionStore.js";
 
-import { WebsocketProvider, Y } from "./yjs-interop.ts";
+import * as Y from "yjs";
+import { WebsocketProvider } from "y-websocket";
 import { startSyncServer, waitForCondition, waitForProviderSync } from "./test-helpers.ts";
 
 test("streams large version snapshots without exceeding SYNC_SERVER_MAX_MESSAGE_BYTES", async (t) => {
@@ -130,4 +131,3 @@ test("streams large version snapshots without exceeding SYNC_SERVER_MAX_MESSAGE_
   assert.equal(Number(match[1]), 0);
   assert.equal(saw1009, false);
 });
-
