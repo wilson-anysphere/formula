@@ -124,6 +124,15 @@ async fn autosave_persists_sheet_visibility_and_tab_color() {
     workbook.add_sheet("Sheet1".to_string());
     workbook.add_sheet("Sheet2".to_string());
     workbook.add_sheet("Sheet3".to_string());
+    // `AppState::set_sheet_visibility` intentionally does not allow setting `veryHidden` via the
+    // UI-facing API. Simulate an imported workbook that already contains a veryHidden sheet so we
+    // can validate that persistence/export round-trips preserve it.
+    workbook
+        .sheets
+        .iter_mut()
+        .find(|s| s.name == "Sheet3")
+        .expect("Sheet3")
+        .visibility = formula_model::SheetVisibility::VeryHidden;
 
     let mut state = AppState::new();
     state
@@ -136,9 +145,6 @@ async fn autosave_persists_sheet_visibility_and_tab_color() {
     state
         .set_sheet_visibility("Sheet2", formula_model::SheetVisibility::Hidden)
         .expect("set Sheet2 visibility");
-    state
-        .set_sheet_visibility("Sheet3", formula_model::SheetVisibility::VeryHidden)
-        .expect("set Sheet3 visibility");
 
     state
         .autosave_manager()
