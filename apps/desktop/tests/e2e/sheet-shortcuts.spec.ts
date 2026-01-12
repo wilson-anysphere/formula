@@ -74,6 +74,48 @@ test.describe("sheet navigation shortcuts", () => {
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
   });
 
+  test("Ctrl/Cmd+PageUp/PageDown works while the formula bar is editing a formula (keeps focus)", async ({ page }) => {
+    await gotoDesktop(page);
+    await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
+
+    // Lazily create Sheet2 so sheet navigation is observable.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().setCellValue("Sheet2", "A1", "Hello from Sheet2");
+    });
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 2");
+
+    const formulaInput = page.getByTestId("formula-input");
+    await expect(formulaInput).toBeVisible();
+    await formulaInput.click();
+    await expect(formulaInput).toBeFocused();
+    await formulaInput.fill("=");
+    await expect(formulaInput).toHaveValue("=");
+
+    // While editing a formula, Ctrl/Cmd+PgDn should still switch sheets (Excel-like cross-sheet reference building).
+    await page.evaluate((isMac) => {
+      const input = document.querySelector('[data-testid="formula-input"]') as HTMLTextAreaElement | null;
+      if (!input) throw new Error("Missing formula input");
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "PageDown",
+          metaKey: isMac,
+          ctrlKey: !isMac,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    }, process.platform === "darwin");
+
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toHaveAttribute("data-active", "true");
+    await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 2");
+
+    // Sheet switching should not interrupt formula editing; focus remains in the formula bar.
+    await expect(formulaInput).toBeFocused();
+    await expect(formulaInput).toHaveValue("=");
+  });
+
   test("Ctrl/Cmd+PageUp/PageDown is global (works from ribbon focus) and restores grid focus", async ({ page }) => {
     await gotoDesktop(page);
     await expect(page.getByTestId("sheet-tab-Sheet1")).toBeVisible();
