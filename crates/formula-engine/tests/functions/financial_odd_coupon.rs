@@ -3901,6 +3901,76 @@ fn odd_coupon_bond_functions_return_value_for_unparseable_frequency_and_basis_te
 }
 
 #[test]
+fn odd_coupon_bond_functions_coerce_date_text_in_frequency_and_basis_like_value() {
+    let mut sheet = TestSheet::new();
+
+    // Excel's numeric coercion (VALUE-like) can interpret some text as a date serial. If so, the
+    // odd-coupon bond functions should validate the resulting integer and surface #NUM! (not
+    // #VALUE!) when it is out of the allowed domain.
+    //
+    // Example: "2020-01-01" -> date serial (~43831) -> frequency not in {1,2,4} => #NUM!
+    match sheet.eval(
+        r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,"2020-01-01",0)"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,98,100,"2020-01-01",0)"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,"2020-01-01",0)"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,"2020-01-01",0)"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+
+    // The same applies to basis: parseable date text yields a large integer which is invalid for
+    // basis {0..4} and should return #NUM!.
+    match sheet.eval(
+        r#"=ODDFPRICE(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,0.0625,100,2,"2020-01-01")"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDFYIELD(DATE(2008,11,11),DATE(2021,3,1),DATE(2008,10,15),DATE(2009,3,1),0.0785,98,100,2,"2020-01-01")"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,"2020-01-01")"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+    match sheet.eval(
+        r#"=ODDLYIELD(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,98,100,2,"2020-01-01")"#,
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Error(ErrorKind::Num) => {}
+        other => panic!("expected #NUM!, got {other:?}"),
+    }
+}
+
+#[test]
 fn oddfprice_day_count_basis_relationships() {
     let system = ExcelDateSystem::EXCEL_1900;
 
