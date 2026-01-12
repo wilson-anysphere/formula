@@ -251,7 +251,7 @@ fn parse_name_record_best_effort(
 
     let is_builtin = (grbit & NAME_FLAG_BUILTIN) != 0;
 
-    let name = if is_builtin {
+    let mut name = if is_builtin {
         // Built-in name: `cch` is usually 1 and the name field is a 1-byte built-in id.
         let code = *data
             .get(pos)
@@ -282,6 +282,12 @@ fn parse_name_record_best_effort(
             }
         }
     };
+
+    // Best-effort: BIFF Unicode strings can contain embedded NUL bytes in the wild; strip them so
+    // name matching behaves like Excel UI semantics.
+    if name.contains('\0') {
+        name.retain(|ch| ch != '\0');
+    }
 
     let rest = data.get(pos..).unwrap_or_default();
 
@@ -809,6 +815,48 @@ mod tests {
         rgce.extend_from_slice(&2u16.to_le_bytes()); // colLast
 
         let name_str = FILTER_DATABASE_NAME_ALIAS;
+        let cch = name_str.len() as u8;
+
+        let mut name_data = Vec::new();
+        name_data.extend_from_slice(&0u16.to_le_bytes()); // grbit (not builtin)
+        name_data.push(0); // chKey
+        name_data.push(cch); // cch
+        name_data.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        name_data.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        name_data.extend_from_slice(&1u16.to_le_bytes()); // itab (sheet 1)
+        name_data.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu..cchStatusText
+        name_data.push(0); // flags (compressed XLUnicodeStringNoCch)
+        name_data.extend_from_slice(name_str.as_bytes());
+        name_data.extend_from_slice(&rgce);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_globals()),
+            record(RECORD_NAME, &name_data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(1))
+            .expect("parse");
+
+        assert_eq!(
+            parsed.by_sheet.get(&0).copied(),
+            Some(Range::new(CellRef::new(0, 0), CellRef::new(4, 2)))
+        );
+    }
+
+    #[test]
+    fn strips_embedded_nuls_from_filter_database_name_string() {
+        // BIFF string payloads can contain embedded NUL bytes in the wild (and calamine can surface
+        // them). Strip them so `_FilterDatabase` name matching works.
+        let mut rgce = Vec::new();
+        rgce.push(0x25); // PtgArea
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        rgce.extend_from_slice(&4u16.to_le_bytes()); // rwLast
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        rgce.extend_from_slice(&2u16.to_le_bytes()); // colLast
+
+        let name_str = "_FilterDatabase\0";
         let cch = name_str.len() as u8;
 
         let mut name_data = Vec::new();
