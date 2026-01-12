@@ -61,8 +61,8 @@ success/failure after evaluating `globalThis.crossOriginIsolated` and `SharedArr
 
    ```bash
    pnpm -C apps/desktop build
-   cd apps/desktop/src-tauri
-   cargo tauri build --no-bundle
+   cd apps/desktop
+   bash ../../scripts/cargo_agent.sh tauri build --no-bundle
    ```
 
 2. Launch the built app (platform-specific binary path under `target/release/`).

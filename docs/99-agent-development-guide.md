@@ -290,11 +290,12 @@ sudo apt-get install -y \
   libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev \
   librsvg2-dev patchelf
 
-# Build works headless
-cargo tauri build
+# Build works headless (ALWAYS use the cargo wrapper in agent environments)
+cd apps/desktop
+bash ../../scripts/cargo_agent.sh tauri build
 
 # Dev server needs virtual display for window
-xvfb-run cargo tauri dev
+xvfb-run --auto-servernum bash ../../scripts/cargo_agent.sh tauri dev
 ```
 
 ---

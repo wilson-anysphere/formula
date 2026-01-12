@@ -277,11 +277,11 @@ Where it’s defined:
   - The desktop binary (`[[bin]]`) has `required-features = ["desktop"]`.
   - The `desktop` feature enables the optional deps: `tauri`, `tauri-build`, and Tauri plugins.
 - `apps/desktop/src-tauri/tauri.conf.json`
-  - `build.features: ["desktop"]` ensures `cargo tauri dev/build` compiles the real desktop binary with the correct feature set.
+  - `build.features: ["desktop"]` ensures `tauri dev` / `tauri build` compiles the real desktop binary with the correct feature set.
 
 Practical effect:
 
-- `cargo test -p formula-desktop-tauri` can run in CI without installing WebView toolchains.
+- `bash scripts/cargo_agent.sh test -p formula-desktop-tauri` can run in CI without installing WebView toolchains.
 - Building/running the app uses the `desktop` feature and therefore requires the platform WebView dependencies.
 
 ---

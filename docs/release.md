@@ -24,12 +24,16 @@ Tauri's updater verifies update artifacts using an Ed25519 signature.
 
 ### Generate a keypair
 
-Run this from the Tauri crate directory (requires the Tauri CLI via `cargo tauri`):
+Run this from the repo root (requires the Tauri CLI, `cargo-tauri`). In agent environments, use
+the repo cargo wrapper (`scripts/cargo_agent.sh`) instead of bare `cargo`:
 
 ```bash
-cargo install cargo-tauri --locked
+# (Agents) Initialize safe defaults (memory limits, isolated CARGO_HOME, etc.)
+source scripts/agent-init.sh
+
+bash scripts/cargo_agent.sh install cargo-tauri --locked
 cd apps/desktop/src-tauri
-cargo tauri signer generate
+bash ../../../scripts/cargo_agent.sh tauri signer generate
 ```
 
 This prints:
@@ -51,7 +55,7 @@ toolchain.
 
 Add the following repository secrets:
 
-- `TAURI_PRIVATE_KEY` – the private key string printed by `cargo tauri signer generate`
+- `TAURI_PRIVATE_KEY` – the private key string printed by `tauri signer generate` (see above)
 - `TAURI_KEY_PASSWORD` – the password used to encrypt the private key (if prompted)
 
 The release workflow passes these to `tauri-apps/tauri-action`, which signs the update artifacts.
@@ -122,7 +126,7 @@ These dependencies are declared in `apps/desktop/src-tauri/tauri.conf.json` unde
 
 ### Validating the `.deb`
 
-After `cargo tauri build` (or after CI produces an artifact), verify the dependency list and shared
+After `tauri build` (or after CI produces an artifact), verify the dependency list and shared
 library resolution.
 
 From `apps/desktop/src-tauri`:

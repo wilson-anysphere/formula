@@ -4,7 +4,7 @@
 #
 # Examples:
 #   ./scripts/xvfb-run-safe.sh npm run test:e2e
-#   ./scripts/xvfb-run-safe.sh cargo tauri dev
+#   cd apps/desktop && ../../scripts/xvfb-run-safe.sh bash ../../scripts/cargo_agent.sh tauri dev
 
 set -e
 
