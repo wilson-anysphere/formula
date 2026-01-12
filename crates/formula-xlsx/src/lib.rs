@@ -43,6 +43,7 @@ pub mod merge_cells;
 pub mod metadata;
 pub mod minimal;
 pub mod outline;
+pub mod rich_data;
 mod package;
 pub mod patch;
 mod path;
