@@ -251,7 +251,15 @@ fn project_normalized_data_v3_appends_padded_forms_normalized_data_when_designer
     expected_forms.extend(std::iter::repeat(0u8).take(1020));
     assert_eq!(forms, expected_forms);
 
-    let expected_project = [expected_content_v3.as_slice(), expected_forms.as_slice()].concat();
+    // ProjectNormalizedData v3 includes filtered PROJECT stream properties before the v3 dir/module
+    // transcript.
+    let expected_project_prefix = b"Name=\"VBAProject\"\r\nBaseClass=\"UserForm1\"\r\n".to_vec();
+    let expected_project = [
+        expected_project_prefix.as_slice(),
+        expected_content_v3.as_slice(),
+        expected_forms.as_slice(),
+    ]
+    .concat();
     assert_eq!(project, expected_project);
 }
 

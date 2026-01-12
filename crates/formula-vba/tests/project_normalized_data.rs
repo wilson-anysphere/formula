@@ -1,7 +1,7 @@
 use std::io::{Cursor, Write};
 
 use formula_vba::{
-    compress_container, project_normalized_data, project_normalized_data_v3,
+    compress_container, contents_hash_v3, project_normalized_data, project_normalized_data_v3,
     project_normalized_data_v3_dir_records, DirParseError, ParseError,
 };
 
@@ -16,6 +16,11 @@ fn build_vba_bin_with_dir_decompressed(dir_decompressed: &[u8]) -> Vec<u8> {
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"Name=\"VBAProject\"\r\n")
+            .expect("write PROJECT");
+    }
     ole.create_storage("VBA").expect("VBA storage");
     {
         let mut s = ole.create_stream("VBA/dir").expect("dir stream");
@@ -88,6 +93,8 @@ fn project_normalized_data_includes_expected_dir_records_and_prefers_unicode_var
         b"MyProject".as_slice(),
         utf16le_bytes("Doc").as_slice(),
         utf16le_bytes("Const=1").as_slice(),
+        // PROJECT stream ProjectProperties contribution: key bytes + value bytes (no separators).
+        b"NameVBAProject".as_slice(),
     ]
     .concat();
 
@@ -249,6 +256,11 @@ fn project_normalized_data_ignores_workspace_section_from_project_stream() {
 fn project_normalized_data_v3_missing_vba_dir_stream() {
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"Name=\"VBAProject\"\r\n")
+            .expect("write PROJECT");
+    }
     ole.create_storage("VBA").expect("VBA storage");
 
     let vba_bin = ole.into_inner().into_inner();
@@ -257,6 +269,188 @@ fn project_normalized_data_v3_missing_vba_dir_stream() {
         ParseError::MissingStream("VBA/dir") => {}
         other => panic!("expected MissingStream(\"VBA/dir\"), got {other:?}"),
     }
+}
+
+#[test]
+fn project_normalized_data_v3_filters_project_stream_properties_and_includes_designer_bytes() {
+    // Build a minimal vbaProject.bin with a `PROJECT` stream containing both excluded and included
+    // properties per MS-OVBA §2.4.2.6. Also include a `BaseClass=` line so FormsNormalizedData is
+    // incorporated.
+    let project_stream = concat!(
+        "ID=\"{00000000-0000-0000-0000-000000000000}\"\r\n",
+        "Document=ThisWorkbook/&H00000000\r\n",
+        "CMG=\"CMGSECRET\"\r\n",
+        "DPB=\"DPBSECRET\"\r\n",
+        "GC=\"GCSECRET\"\r\n",
+        "Name=\"VBAProject\"\r\n",
+        "Package={11111111-2222-3333-4444-555555555555}\r\n",
+        "BaseClass=UserForm1\r\n",
+    )
+    .as_bytes();
+
+    let userform_source = b"Sub FormHello()\r\nEnd Sub\r\n";
+    let userform_container = compress_container(userform_source);
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        // MODULENAME
+        push_record(&mut out, 0x0019, b"UserForm1");
+        // MODULESTREAMNAME + reserved u16
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"UserForm1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        // MODULETYPE = UserForm (0x0003 per MS-OVBA)
+        push_record(&mut out, 0x0021, &0x0003u16.to_le_bytes());
+        // MODULETEXTOFFSET (0)
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let designer_bytes = b"DESIGNER-STORAGE-BYTES";
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    ole.create_storage("UserForm1").expect("designer storage");
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream).expect("write PROJECT");
+    }
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole
+            .create_stream("VBA/UserForm1")
+            .expect("userform module stream");
+        s.write_all(&userform_container)
+            .expect("write userform module bytes");
+    }
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Payload")
+            .expect("designer stream");
+        s.write_all(designer_bytes).expect("write designer bytes");
+    }
+
+    let vba_bin = ole.into_inner().into_inner();
+    let normalized = project_normalized_data_v3(&vba_bin).expect("ProjectNormalizedData v3");
+
+    // Excluded PROJECT properties must not contribute.
+    for needle in [
+        b"ID=" as &[u8],
+        b"Document=" as &[u8],
+        b"CMG=" as &[u8],
+        b"DPB=" as &[u8],
+        b"GC=" as &[u8],
+        b"CMGSECRET" as &[u8],
+        b"DPBSECRET" as &[u8],
+        b"GCSECRET" as &[u8],
+    ] {
+        assert!(
+            find_subslice(&normalized, needle).is_none(),
+            "did not expect ProjectNormalizedData to contain excluded property bytes: {:?}",
+            std::str::from_utf8(needle).unwrap_or("<non-utf8>"),
+        );
+    }
+
+    // At least one included property should be present.
+    assert!(
+        find_subslice(&normalized, b"Name=\"VBAProject\"").is_some(),
+        "expected included Name property to be present"
+    );
+    assert!(
+        find_subslice(&normalized, b"Package={11111111-2222-3333-4444-555555555555}").is_some(),
+        "expected included Package property to be present"
+    );
+
+    // Designer storage bytes must be included when BaseClass= is present.
+    assert!(
+        find_subslice(&normalized, designer_bytes).is_some(),
+        "expected ProjectNormalizedData to include designer stream bytes when BaseClass= is present"
+    );
+
+    // Regression guard: changing excluded PROJECT properties must not affect ContentsHashV3.
+    let project_stream_changed_excluded = std::str::from_utf8(project_stream)
+        .expect("PROJECT stream is valid UTF-8 for this test")
+        .replace("CMGSECRET", "CMGCHANGED")
+        .into_bytes();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole2 = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole2.create_storage("VBA").expect("VBA storage");
+    ole2.create_storage("UserForm1").expect("designer storage");
+    {
+        let mut s = ole2.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(&project_stream_changed_excluded)
+            .expect("write PROJECT");
+    }
+    {
+        let mut s = ole2.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole2
+            .create_stream("VBA/UserForm1")
+            .expect("userform module stream");
+        s.write_all(&userform_container)
+            .expect("write userform module bytes");
+    }
+    {
+        let mut s = ole2
+            .create_stream("UserForm1/Payload")
+            .expect("designer stream");
+        s.write_all(designer_bytes).expect("write designer bytes");
+    }
+    let vba_bin2 = ole2.into_inner().into_inner();
+
+    let digest1 = contents_hash_v3(&vba_bin).expect("ContentsHashV3");
+    let digest2 = contents_hash_v3(&vba_bin2).expect("ContentsHashV3 (excluded props changed)");
+    assert_eq!(
+        digest2, digest1,
+        "excluded PROJECT properties must not influence ContentsHashV3"
+    );
+
+    // Changing an included property should affect the hash.
+    let project_stream_changed_included = std::str::from_utf8(project_stream)
+        .expect("PROJECT stream is valid UTF-8 for this test")
+        .replace("VBAProject", "VBAProject2")
+        .into_bytes();
+    let cursor = Cursor::new(Vec::new());
+    let mut ole3 = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole3.create_storage("VBA").expect("VBA storage");
+    ole3.create_storage("UserForm1").expect("designer storage");
+    {
+        let mut s = ole3.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(&project_stream_changed_included)
+            .expect("write PROJECT");
+    }
+    {
+        let mut s = ole3.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole3
+            .create_stream("VBA/UserForm1")
+            .expect("userform module stream");
+        s.write_all(&userform_container)
+            .expect("write userform module bytes");
+    }
+    {
+        let mut s = ole3
+            .create_stream("UserForm1/Payload")
+            .expect("designer stream");
+        s.write_all(designer_bytes).expect("write designer bytes");
+    }
+    let vba_bin3 = ole3.into_inner().into_inner();
+    let digest3 = contents_hash_v3(&vba_bin3).expect("ContentsHashV3 (included props changed)");
+    assert_ne!(
+        digest3, digest1,
+        "included PROJECT properties must influence ContentsHashV3"
+    );
 }
 
 #[test]

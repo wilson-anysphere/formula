@@ -1326,16 +1326,141 @@ fn append_v3_module(
 ///
 /// Spec reference: MS-OVBA §2.4.2 ("Contents Hash" version 3).
 pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseError> {
-    let mut out = v3_content_normalized_data(vba_project_bin)?;
+    // MS-OVBA v3 binds the signature not just to module content, but also to a filtered subset of
+    // the textual `PROJECT` stream properties (see §2.4.2.6 "ProjectNormalizedData").
+    //
+    // Some `PROJECT` properties MUST be excluded because they are either security-sensitive or
+    // can change without affecting the macro semantics (e.g. CMG/DPB/GC protection fields).
+    let mut ole = OleFile::open(vba_project_bin)?;
+    let project_stream_bytes = ole
+        .read_stream_opt("PROJECT")?
+        .ok_or(ParseError::MissingStream("PROJECT"))?;
+
+    let mut out = normalize_project_stream_properties_v3(&project_stream_bytes);
+
+    out.extend_from_slice(&v3_content_normalized_data(vba_project_bin)?);
     let forms = forms_normalized_data(vba_project_bin)?;
     out.extend_from_slice(&forms);
     Ok(out)
 }
 
+fn normalize_project_stream_properties_v3(project_stream_bytes: &[u8]) -> Vec<u8> {
+    // The `PROJECT` stream is line-oriented ASCII/MBCS text. We normalize by:
+    // - splitting on CR, LF, or CRLF
+    // - filtering out excluded property keys (case-insensitive)
+    // - emitting each included line terminated with CRLF
+
+    fn trim_ascii_whitespace(mut bytes: &[u8]) -> &[u8] {
+        while let Some(b) = bytes.first() {
+            if b.is_ascii_whitespace() {
+                bytes = &bytes[1..];
+            } else {
+                break;
+            }
+        }
+        while let Some(b) = bytes.last() {
+            if b.is_ascii_whitespace() {
+                bytes = &bytes[..bytes.len() - 1];
+            } else {
+                break;
+            }
+        }
+        bytes
+    }
+
+    fn is_excluded_key(key: &[u8]) -> bool {
+        // MS-OVBA §2.4.2.6 exclusions (PROJECT stream properties that MUST NOT contribute).
+        key.eq_ignore_ascii_case(b"ID")
+            || key.eq_ignore_ascii_case(b"Document")
+            || key.eq_ignore_ascii_case(b"CMG")
+            || key.eq_ignore_ascii_case(b"DPB")
+            || key.eq_ignore_ascii_case(b"GC")
+    }
+
+    let mut out = Vec::new();
+
+    let mut line_start = 0usize;
+    let mut i = 0usize;
+    while i < project_stream_bytes.len() {
+        match project_stream_bytes[i] {
+            b'\r' => {
+                append_project_line(
+                    &project_stream_bytes[line_start..i],
+                    &mut out,
+                    &trim_ascii_whitespace,
+                    &is_excluded_key,
+                );
+                i += 1;
+                if i < project_stream_bytes.len() && project_stream_bytes[i] == b'\n' {
+                    i += 1;
+                }
+                line_start = i;
+            }
+            b'\n' => {
+                append_project_line(
+                    &project_stream_bytes[line_start..i],
+                    &mut out,
+                    &trim_ascii_whitespace,
+                    &is_excluded_key,
+                );
+                i += 1;
+                line_start = i;
+            }
+            _ => i += 1,
+        }
+    }
+    if line_start < project_stream_bytes.len() {
+        append_project_line(
+            &project_stream_bytes[line_start..],
+            &mut out,
+            &trim_ascii_whitespace,
+            &is_excluded_key,
+        );
+    }
+
+    out
+}
+
+fn append_project_line(
+    line: &[u8],
+    out: &mut Vec<u8>,
+    trim_ascii_whitespace: &dyn Fn(&[u8]) -> &[u8],
+    is_excluded_key: &dyn Fn(&[u8]) -> bool,
+) {
+    let mut line = trim_ascii_whitespace(line);
+    if line.is_empty() {
+        return;
+    }
+
+    // Some writers may include a UTF-8 BOM at the start of the stream. Strip it for key matching
+    // and output stability.
+    if line.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        line = &line[3..];
+        line = trim_ascii_whitespace(line);
+    }
+
+    let Some(eq) = line.iter().position(|&b| b == b'=') else {
+        return;
+    };
+
+    let key = trim_ascii_whitespace(&line[..eq]);
+    if key.is_empty() {
+        return;
+    }
+    if is_excluded_key(key) {
+        return;
+    }
+
+    // Preserve the full key/value bytes as written, but normalize line endings to CRLF so that
+    // CR-only or LF-only `PROJECT` streams still hash consistently.
+    out.extend_from_slice(line);
+    out.extend_from_slice(b"\r\n");
+}
+
 /// Compute the MS-OVBA §2.4.2.7 `ContentsHashV3` value (SHA-256) over v3 `ProjectNormalizedData`.
 ///
 /// `ContentsHashV3 = SHA-256(ProjectNormalizedData)` where:
-/// `ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData`.
+/// `ProjectNormalizedData = (filtered PROJECT stream properties) || V3ContentNormalizedData || FormsNormalizedData`.
 ///
 /// Note: signature binding helpers use [`crate::compute_vba_project_digest_v3`] to support
 /// best-effort/non-standard digest algorithms seen in the wild; this function always computes the

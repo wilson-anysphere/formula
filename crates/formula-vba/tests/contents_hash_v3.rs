@@ -313,74 +313,8 @@ fn v3_content_normalized_data_respects_module_text_offset_when_stream_has_prefix
 }
 
 #[test]
-fn project_normalized_data_v3_is_v3_content_plus_forms_normalized_data() {
-    // Minimal VBA project with:
-    // - one module
-    // - one designer stream, so FormsNormalizedData is non-empty
-    let module_code = b"Sub Hello()\r\nEnd Sub\r\n";
-    let module_container = compress_container(module_code);
-    let userform_code = b"Sub FormHello()\r\nEnd Sub\r\n";
-    let userform_container = compress_container(userform_code);
-
-    let dir_decompressed = {
-        let mut out = Vec::new();
-
-        // Standard module.
-        push_record(&mut out, 0x0019, b"Module1");
-        let mut stream_name = Vec::new();
-        stream_name.extend_from_slice(b"Module1");
-        stream_name.extend_from_slice(&0u16.to_le_bytes());
-        push_record(&mut out, 0x001A, &stream_name);
-        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
-        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
-
-        // UserForm (designer) module. The PROJECT stream references this by `BaseClass=`.
-        push_record(&mut out, 0x0019, b"UserForm1");
-        let mut stream_name = Vec::new();
-        stream_name.extend_from_slice(b"UserForm1");
-        stream_name.extend_from_slice(&0u16.to_le_bytes());
-        push_record(&mut out, 0x001A, &stream_name);
-        // MODULETYPE = UserForm (0x0003 per MS-OVBA).
-        push_record(&mut out, 0x0021, &0x0003u16.to_le_bytes());
-        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
-        out
-    };
-    let dir_container = compress_container(&dir_decompressed);
-
-    let cursor = Cursor::new(Vec::new());
-    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
-    ole.create_storage("VBA").expect("VBA storage");
-    ole.create_storage("UserForm1").expect("designer storage");
-
-    {
-        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
-        s.write_all(b"Name=\"VBAProject\"\r\nBaseClass=\"UserForm1\"\r\n")
-            .expect("write PROJECT");
-    }
-
-    {
-        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
-        s.write_all(&dir_container).expect("write dir");
-    }
-    {
-        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
-        s.write_all(&module_container).expect("write module");
-    }
-    {
-        let mut s = ole
-            .create_stream("VBA/UserForm1")
-            .expect("userform module stream");
-        s.write_all(&userform_container)
-            .expect("write userform module stream");
-    }
-    {
-        let mut s = ole
-            .create_stream("UserForm1/Payload")
-            .expect("designer stream");
-        s.write_all(b"ABC").expect("write designer payload");
-    }
-
-    let vba_bin = ole.into_inner().into_inner();
+fn project_normalized_data_v3_includes_project_stream_properties_v3_content_and_forms() {
+    let vba_bin = build_contents_hash_v3_project(b"Sub Hello()\r\nEnd Sub\r\n", b"ABC");
 
     let content = v3_content_normalized_data(&vba_bin).expect("V3ContentNormalizedData");
     let forms = forms_normalized_data(&vba_bin).expect("FormsNormalizedData");
@@ -390,7 +324,10 @@ fn project_normalized_data_v3_is_v3_content_plus_forms_normalized_data() {
     );
     let project = project_normalized_data_v3(&vba_bin).expect("ProjectNormalizedData v3");
 
+    // ProjectNormalizedData v3 includes filtered PROJECT stream properties before the v3
+    // dir/module transcript.
     let mut expected = Vec::new();
+    expected.extend_from_slice(b"Name=\"VBAProject\"\r\nBaseClass=\"UserForm1\"\r\n");
     expected.extend_from_slice(&content);
     expected.extend_from_slice(&forms);
     assert_eq!(project, expected);
@@ -417,19 +354,19 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
 
     // ---- Expected normalized transcript ----
     //
-    // This test targets the current `contents_hash_v3` helper, which computes a legacy SHA-256
-    // digest over the v3 `ProjectNormalizedData` transcript:
-    //
     // `legacy_contents_hash_v3 = SHA-256(ProjectNormalizedData)`
-    // `ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData`
+    // `ProjectNormalizedData = (filtered PROJECT stream properties) || V3ContentNormalizedData || FormsNormalizedData`
     //
-    // Note: MS-OVBA §2.4.2.7 defines the V3 Content Hash used for VBA signature binding as an
-    // MD5-based value; see `docs/vba-digital-signatures.md` and MS-OSHARED §4.3.
+    // Note: MS-OVBA/MS-OSHARED describe an MD5-based digest used for VBA signature binding in some
+    // contexts; this test targets the current SHA-256-based helper.
     //
     // V3ContentNormalizedData includes (for procedural modules) `MODULETYPE.Id || MODULETYPE.Reserved`
     // followed by LF-normalized module source (Attribute filtering per MS-OVBA §2.4.2.5), and the
     // module name + LF when `HashModuleNameFlag` becomes true.
     let mut expected = Vec::new();
+
+    // PROJECT stream prefix: Name + BaseClass (both included by the filter).
+    expected.extend_from_slice(b"Name=\"VBAProject\"\r\nBaseClass=\"UserForm1\"\r\n");
 
     // Module1 prefix: (TypeRecord.Id || Reserved)
     expected.extend_from_slice(&0x0021u16.to_le_bytes());
@@ -471,9 +408,9 @@ fn contents_hash_v3_matches_explicit_normalized_transcript_sha256() {
     // Hard-coded expected digest bytes to keep this test deterministic and to catch
     // accidental transcript changes.
     let expected_digest: [u8; 32] = [
-        0x77, 0xa1, 0x5f, 0xfb, 0xd5, 0x8b, 0x3e, 0xb6, 0xfc, 0x09, 0x2d, 0x11, 0x01, 0x03,
-        0xa3, 0xdd, 0xe3, 0x73, 0xf0, 0x5b, 0x51, 0xb9, 0xf1, 0xc2, 0xb0, 0x97, 0x1e, 0xe4,
-        0x99, 0x27, 0x27, 0x7c,
+        0x17, 0x17, 0x57, 0x02, 0x34, 0xf6, 0xf0, 0x2f, 0x26, 0x15, 0x60, 0xef, 0xfd, 0xe2,
+        0x37, 0x31, 0x33, 0x75, 0x0d, 0x72, 0x4b, 0x0c, 0x99, 0x1c, 0x5d, 0x99, 0xf7, 0xe6,
+        0x7f, 0xe3, 0xb6, 0xea,
     ];
     assert_eq!(
         expected_digest_from_transcript.as_slice(),

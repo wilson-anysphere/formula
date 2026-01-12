@@ -100,14 +100,15 @@ pub fn compute_vba_project_digest(
 
 /// Compute a digest over the MS-OVBA §2.4.2 v3 `ProjectNormalizedData` transcript of a `vbaProject.bin`.
 ///
-/// Transcript:
+/// This is computed over the v3 `ProjectNormalizedData` transcript produced by
+/// [`project_normalized_data_v3`], which incorporates:
+/// - filtered `PROJECT` stream properties (excluding `ID`, `Document`, `CMG`, `DPB`, `GC`)
+/// - `V3ContentNormalizedData`
+/// - `FormsNormalizedData`
 ///
-/// `ProjectNormalizedData = V3ContentNormalizedData || FormsNormalizedData`
-///
-/// This transcript is used for `ContentsHashV3` (see [`crate::contents_hash_v3`]) and for
-/// `\x05DigitalSignatureExt` binding verification. MS-OVBA specifies SHA-256 for `ContentsHashV3`,
-/// but in the wild the `DigestInfo` algorithm OID can vary; callers verifying signature binding
-/// should use the algorithm indicated by the signature stream.
+/// The transcript is hashed using the requested `alg` (MD5/SHA-1/SHA-256). For v3 signature binding
+/// verification, callers should use the algorithm indicated by the signature stream (digest length
+/// is often a reliable signal).
 pub fn compute_vba_project_digest_v3(
     vba_project_bin: &[u8],
     alg: DigestAlg,
