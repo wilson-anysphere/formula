@@ -53,7 +53,13 @@ fn days_between(start: i32, end: i32, basis: i32, system: ExcelDateSystem) -> f6
     }
 }
 
-fn coupon_period_e(pcd: i32, ncd: i32, basis: i32, frequency: i32, system: ExcelDateSystem) -> f64 {
+fn coupon_period_e(
+    pcd: i32,
+    ncd: i32,
+    basis: i32,
+    frequency: i32,
+    system: ExcelDateSystem,
+) -> f64 {
     let freq = frequency as f64;
     match basis {
         0 | 2 => 360.0 / freq,
