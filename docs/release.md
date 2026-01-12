@@ -64,10 +64,8 @@ Update `apps/desktop/src-tauri/tauri.conf.json`:
 - `plugins.updater.pubkey` → paste the public key (base64 string)
 - `plugins.updater.endpoints` → point at your update JSON endpoint(s)
 
-CI note: tagged releases will fail if `plugins.updater.pubkey` is still set to the placeholder
-value (`REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY`) or if `plugins.updater.endpoints` contain placeholder
-URLs (for example `example.com`, `localhost`, or the documented
-`https://releases.formula.app/{{target}}/{{current_version}}`). Run the preflight locally with:
+CI note: tagged releases will fail if `plugins.updater.pubkey` or `plugins.updater.endpoints` are
+still set to placeholder values. Verify locally with:
 
 ```bash
 node scripts/check-updater-config.mjs
@@ -110,32 +108,36 @@ Secrets:
 
 ## 4) Hosting updater endpoints
 
-`apps/desktop/src-tauri/tauri.conf.json` currently uses a placeholder updater endpoint:
+The desktop app is configured to use **GitHub Releases** as the updater source.
+
+`apps/desktop/src-tauri/tauri.conf.json` points at the `latest.json` manifest generated and uploaded
+by `tauri-apps/tauri-action@v0`:
 
 ```
-https://releases.formula.app/{{target}}/{{current_version}}
+https://github.com/wilson-anysphere/formula/releases/latest/download/latest.json
 ```
 
-Tagged releases will fail while this is still a placeholder (or if the endpoint list contains other
-obvious placeholders). Update `plugins.updater.endpoints` to real, reachable update JSON URL(s)
-before tagging a release and verify locally:
+To sanity-check your updater configuration before tagging a release, run:
 
 ```bash
 node scripts/check-updater-config.mjs
 ```
 
-Tauri expects each endpoint to return an `update.json`-style payload (see Tauri updater docs)
-describing the latest version for a given target, along with download URLs and signatures.
+Notes:
 
-Two common approaches:
+- The GitHub `/releases/latest` URL only tracks the **latest published** (non-draft) release.
+  Draft releases created by the workflow are for QA and will not be picked up by auto-update until
+  you click **Publish release**.
+- `tauri-action` also uploads a corresponding signature file (`latest.json.sig`), which the updater
+  verifies using the `plugins.updater.pubkey` embedded in the app.
 
-1. **GitHub Releases as the update source**
-   - Publish the draft release once validated.
-   - Serve the generated update JSON and signature directly from release assets.
+If you fork this repo, change the endpoint to match your GitHub org/repo.
 
-2. **Custom update server / CDN**
-   - Mirror the update JSON and artifacts from GitHub Releases to `releases.formula.app`.
-   - Keep the URL scheme stable so older clients can always resolve update metadata.
+### Optional: custom update server / CDN
+
+If you don't want clients to fetch update metadata from GitHub directly, you can mirror the release
+assets (including `latest.json` + `latest.json.sig`) to your own host and update
+`plugins.updater.endpoints` accordingly.
 
 ## Linux: `.deb` runtime dependencies (WebView + tray)
 

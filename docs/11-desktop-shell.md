@@ -140,8 +140,18 @@ Notable keys:
 Auto-update is configured under `plugins.updater` (Tauri v2 plugin config). In this repo it is enabled, but the public key is intentionally a placeholder:
 
 - `plugins.updater.pubkey` → set this for real releases (see `docs/release.md`)
-- `plugins.updater.endpoints` → update JSON endpoint(s)
-- `plugins.updater.dialog: false` → the Rust host emits an event instead of showing a built-in dialog
+- `plugins.updater.endpoints` → update JSON endpoint(s). This repo defaults to the GitHub Releases manifest:
+  - `https://github.com/wilson-anysphere/formula/releases/latest/download/latest.json`
+  - (The matching signature, `latest.json.sig`, is uploaded by `tauri-action` and verified using `pubkey`.)
+- `plugins.updater.dialog: false` → the Rust host emits events instead of showing a built-in dialog (custom UI in the frontend)
+
+Frontend event contract (emitted by `apps/desktop/src-tauri/src/updater.rs`):
+
+- `update-check-started` – payload: `{ source: "startup" | "manual" }`
+- `update-check-already-running` – payload: `{ source: "manual" }`
+- `update-available` – payload: `{ source, version, body? }`
+- `update-not-available` – payload: `{ source }`
+- `update-check-error` – payload: `{ source, message }`
 
 Release CI note: when `plugins.updater.active=true`, tagged releases will fail if `pubkey`/`endpoints`
 are still placeholders. You can validate locally with `node scripts/check-updater-config.mjs`.
@@ -174,7 +184,12 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
     "fileAssociations": [{ "ext": ["xlsx"], "name": "Excel Spreadsheet", "role": "Editor" }]
   },
   "plugins": {
-    "updater": { "active": true, "dialog": false, "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY" }
+    "updater": {
+      "active": true,
+      "dialog": false,
+      "endpoints": ["https://github.com/wilson-anysphere/formula/releases/latest/download/latest.json"],
+      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY"
+    }
   }
 }
 ```

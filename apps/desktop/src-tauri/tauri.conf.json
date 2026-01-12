@@ -100,7 +100,7 @@
     "updater": {
       "active": true,
       "dialog": false,
-      "endpoints": ["https://releases.formula.app/{{target}}/{{current_version}}"],
+      "endpoints": ["https://github.com/wilson-anysphere/formula/releases/latest/download/latest.json"],
       "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY",
       "windows": {
         "installMode": "passive"
