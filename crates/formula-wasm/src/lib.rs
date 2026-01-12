@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use formula_engine::{
-    EditError as EngineEditError, Engine, EditOp as EngineEditOp, EditResult as EngineEditResult,
-    ErrorKind, NameDefinition, NameScope, Value as EngineValue,
+    Coord, EditError as EngineEditError, EditOp as EngineEditOp, EditResult as EngineEditResult,
+    Engine, ErrorKind, NameDefinition, NameScope, ParseOptions, Span as EngineSpan, Token,
+    TokenKind, Value as EngineValue,
 };
 use formula_engine::locale::{
     canonicalize_formula, get_locale, FormulaLocale, ValueLocaleConfig, EN_US,
@@ -45,6 +46,16 @@ fn edit_error_to_string(err: EngineEditError) -> String {
         EngineEditError::OverlappingMove => "overlapping move".to_string(),
         EngineEditError::Engine(message) => message,
     }
+}
+
+fn parse_options_from_js(options: Option<JsValue>) -> Result<ParseOptions, JsValue> {
+    let Some(value) = options else {
+        return Ok(ParseOptions::default());
+    };
+    if value.is_undefined() || value.is_null() {
+        return Ok(ParseOptions::default());
+    }
+    serde_wasm_bindgen::from_value(value).map_err(|err| js_err(err.to_string()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -92,6 +103,228 @@ fn ensure_rust_constructors_run() {}
 #[wasm_bindgen(start)]
 pub fn wasm_start() {
     ensure_rust_constructors_run();
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Utf16Span {
+    pub start: u32,
+    pub end: u32,
+}
+
+#[derive(Clone, Debug)]
+struct Utf16IndexMap {
+    /// Monotonic mapping from UTF-8 byte offsets (Rust) to UTF-16 code-unit offsets (JS).
+    ///
+    /// Contains `(0, 0)` and `(s.len(), s.encode_utf16().count())`, plus an entry at every UTF-8
+    /// character boundary.
+    byte_to_utf16: Vec<(usize, usize)>,
+}
+
+impl Utf16IndexMap {
+    fn new(s: &str) -> Self {
+        let mut byte_to_utf16 = Vec::with_capacity(s.chars().count() + 2);
+        byte_to_utf16.push((0, 0));
+        let mut utf16: usize = 0;
+        for (byte_idx, ch) in s.char_indices() {
+            if byte_idx != 0 {
+                byte_to_utf16.push((byte_idx, utf16));
+            }
+            utf16 = utf16.saturating_add(ch.len_utf16());
+        }
+        byte_to_utf16.push((s.len(), utf16));
+        Self { byte_to_utf16 }
+    }
+
+    fn byte_to_utf16(&self, byte_offset: usize) -> usize {
+        match self
+            .byte_to_utf16
+            .binary_search_by_key(&byte_offset, |(byte, _)| *byte)
+        {
+            Ok(idx) => self.byte_to_utf16[idx].1,
+            Err(idx) => {
+                // Token spans should always land on UTF-8 boundaries, but prefer a best-effort
+                // fallback rather than panicking in production.
+                if idx == 0 {
+                    0
+                } else {
+                    self.byte_to_utf16[idx - 1].1
+                }
+            }
+        }
+    }
+}
+
+fn engine_span_to_utf16(span: EngineSpan, utf16_map: &Utf16IndexMap) -> Utf16Span {
+    Utf16Span {
+        start: utf16_map.byte_to_utf16(span.start) as u32,
+        end: utf16_map.byte_to_utf16(span.end) as u32,
+    }
+}
+
+fn add_byte_offset(span: EngineSpan, delta: usize) -> EngineSpan {
+    EngineSpan {
+        start: span.start.saturating_add(delta),
+        end: span.end.saturating_add(delta),
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind")]
+enum LexTokenDto {
+    Number { span: Utf16Span, value: String },
+    String { span: Utf16Span, value: String },
+    Boolean { span: Utf16Span, value: bool },
+    Error { span: Utf16Span, value: String },
+    Cell {
+        span: Utf16Span,
+        row: u32,
+        col: u32,
+        row_abs: bool,
+        col_abs: bool,
+    },
+    R1C1Cell {
+        span: Utf16Span,
+        row: CoordDto,
+        col: CoordDto,
+    },
+    R1C1Row { span: Utf16Span, row: CoordDto },
+    R1C1Col { span: Utf16Span, col: CoordDto },
+    Ident { span: Utf16Span, value: String },
+    QuotedIdent { span: Utf16Span, value: String },
+    Whitespace { span: Utf16Span, value: String },
+    Intersect { span: Utf16Span, value: String },
+    LParen { span: Utf16Span },
+    RParen { span: Utf16Span },
+    LBrace { span: Utf16Span },
+    RBrace { span: Utf16Span },
+    LBracket { span: Utf16Span },
+    RBracket { span: Utf16Span },
+    Bang { span: Utf16Span },
+    Colon { span: Utf16Span },
+    Dot { span: Utf16Span },
+    ArgSep { span: Utf16Span },
+    Union { span: Utf16Span },
+    ArrayRowSep { span: Utf16Span },
+    ArrayColSep { span: Utf16Span },
+    Plus { span: Utf16Span },
+    Minus { span: Utf16Span },
+    Star { span: Utf16Span },
+    Slash { span: Utf16Span },
+    Caret { span: Utf16Span },
+    Amp { span: Utf16Span },
+    Percent { span: Utf16Span },
+    Hash { span: Utf16Span },
+    Eq { span: Utf16Span },
+    Ne { span: Utf16Span },
+    Lt { span: Utf16Span },
+    Gt { span: Utf16Span },
+    Le { span: Utf16Span },
+    Ge { span: Utf16Span },
+    At { span: Utf16Span },
+    Eof { span: Utf16Span },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind")]
+enum CoordDto {
+    A1 { index: u32, abs: bool },
+    Offset { delta: i32 },
+}
+
+impl From<Coord> for CoordDto {
+    fn from(coord: Coord) -> Self {
+        match coord {
+            Coord::A1 { index, abs } => CoordDto::A1 { index, abs },
+            Coord::Offset(delta) => CoordDto::Offset { delta },
+        }
+    }
+}
+
+fn token_to_dto(token: Token, byte_offset: usize, utf16_map: &Utf16IndexMap) -> LexTokenDto {
+    let span = engine_span_to_utf16(add_byte_offset(token.span, byte_offset), utf16_map);
+    match token.kind {
+        TokenKind::Number(raw) => LexTokenDto::Number { span, value: raw },
+        TokenKind::String(value) => LexTokenDto::String { span, value },
+        TokenKind::Boolean(value) => LexTokenDto::Boolean { span, value },
+        TokenKind::Error(value) => LexTokenDto::Error { span, value },
+        TokenKind::Cell(cell) => LexTokenDto::Cell {
+            span,
+            row: cell.row,
+            col: cell.col,
+            row_abs: cell.row_abs,
+            col_abs: cell.col_abs,
+        },
+        TokenKind::R1C1Cell(cell) => LexTokenDto::R1C1Cell {
+            span,
+            row: cell.row.into(),
+            col: cell.col.into(),
+        },
+        TokenKind::R1C1Row(row) => LexTokenDto::R1C1Row {
+            span,
+            row: row.row.into(),
+        },
+        TokenKind::R1C1Col(col) => LexTokenDto::R1C1Col {
+            span,
+            col: col.col.into(),
+        },
+        TokenKind::Ident(value) => LexTokenDto::Ident { span, value },
+        TokenKind::QuotedIdent(value) => LexTokenDto::QuotedIdent { span, value },
+        TokenKind::Whitespace(value) => LexTokenDto::Whitespace { span, value },
+        TokenKind::Intersect(value) => LexTokenDto::Intersect { span, value },
+        TokenKind::LParen => LexTokenDto::LParen { span },
+        TokenKind::RParen => LexTokenDto::RParen { span },
+        TokenKind::LBrace => LexTokenDto::LBrace { span },
+        TokenKind::RBrace => LexTokenDto::RBrace { span },
+        TokenKind::LBracket => LexTokenDto::LBracket { span },
+        TokenKind::RBracket => LexTokenDto::RBracket { span },
+        TokenKind::Bang => LexTokenDto::Bang { span },
+        TokenKind::Colon => LexTokenDto::Colon { span },
+        TokenKind::Dot => LexTokenDto::Dot { span },
+        TokenKind::ArgSep => LexTokenDto::ArgSep { span },
+        TokenKind::Union => LexTokenDto::Union { span },
+        TokenKind::ArrayRowSep => LexTokenDto::ArrayRowSep { span },
+        TokenKind::ArrayColSep => LexTokenDto::ArrayColSep { span },
+        TokenKind::Plus => LexTokenDto::Plus { span },
+        TokenKind::Minus => LexTokenDto::Minus { span },
+        TokenKind::Star => LexTokenDto::Star { span },
+        TokenKind::Slash => LexTokenDto::Slash { span },
+        TokenKind::Caret => LexTokenDto::Caret { span },
+        TokenKind::Amp => LexTokenDto::Amp { span },
+        TokenKind::Percent => LexTokenDto::Percent { span },
+        TokenKind::Hash => LexTokenDto::Hash { span },
+        TokenKind::Eq => LexTokenDto::Eq { span },
+        TokenKind::Ne => LexTokenDto::Ne { span },
+        TokenKind::Lt => LexTokenDto::Lt { span },
+        TokenKind::Gt => LexTokenDto::Gt { span },
+        TokenKind::Le => LexTokenDto::Le { span },
+        TokenKind::Ge => LexTokenDto::Ge { span },
+        TokenKind::At => LexTokenDto::At { span },
+        TokenKind::Eof => LexTokenDto::Eof { span },
+    }
+}
+
+#[wasm_bindgen(js_name = "lexFormula")]
+pub fn lex_formula(formula: &str, opts: Option<JsValue>) -> Result<JsValue, JsValue> {
+    // `parseFormulaPartial`/`lexFormula` can be used without instantiating a workbook. Ensure the
+    // function registry constructors ran for wasm-bindgen-test environments.
+    ensure_rust_constructors_run();
+
+    let opts = parse_options_from_js(opts)?;
+    let (expr_src, byte_offset) = if let Some(rest) = formula.strip_prefix('=') {
+        (rest, 1usize)
+    } else {
+        (formula, 0usize)
+    };
+
+    let utf16_map = Utf16IndexMap::new(formula);
+
+    let tokens = formula_engine::lex(expr_src, &opts).map_err(|err| js_err(err.to_string()))?;
+    let out: Vec<LexTokenDto> = tokens
+        .into_iter()
+        .map(|tok| token_to_dto(tok, byte_offset, &utf16_map))
+        .collect();
+
+    serde_wasm_bindgen::to_value(&out).map_err(|err| js_err(err.to_string()))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -1368,14 +1601,6 @@ struct WasmSpan {
 }
 
 #[derive(Debug, Serialize)]
-struct WasmToken {
-    kind: String,
-    span: WasmSpan,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    value: Option<JsonValue>,
-}
-
-#[derive(Debug, Serialize)]
 struct WasmParseError {
     message: String,
     span: WasmSpan,
@@ -1398,153 +1623,6 @@ struct WasmPartialParse {
     ast: formula_engine::Ast,
     error: Option<WasmParseError>,
     context: WasmParseContext,
-}
-
-#[wasm_bindgen(js_name = "lexFormula")]
-pub fn lex_formula(formula: String, opts: Option<JsValue>) -> Result<JsValue, JsValue> {
-    ensure_rust_constructors_run();
-
-    let opts: formula_engine::ParseOptions = match opts {
-        Some(value) if !value.is_undefined() && !value.is_null() => {
-            serde_wasm_bindgen::from_value(value).map_err(|err| js_err(err.to_string()))?
-        }
-        _ => formula_engine::ParseOptions::default(),
-    };
-
-    let (expr_src, span_offset) = if let Some(rest) = formula.strip_prefix('=') {
-        (rest, 1usize)
-    } else {
-        (formula.as_str(), 0usize)
-    };
-
-    let mut fallback_error: Option<(formula_engine::ParseError, usize)> = None;
-    let mut tokens = match formula_engine::lex(expr_src, &opts) {
-        Ok(tokens) => tokens,
-        Err(err) => {
-            // Best-effort fallback: return tokens up to the error span start, and surface the
-            // remainder as a final token so editor highlighting can still function during
-            // incomplete input (e.g. unterminated strings).
-            let mut error_start = err.span.start.min(expr_src.len());
-            while error_start > 0 && !expr_src.is_char_boundary(error_start) {
-                error_start -= 1;
-            }
-            fallback_error = Some((err, error_start));
-
-            let prefix = &expr_src[..error_start];
-            formula_engine::lex(prefix, &opts).unwrap_or_default()
-        }
-    };
-
-    // Drop EOF: editor consumers care about concrete spans within the input.
-    tokens.retain(|t| !matches!(&t.kind, formula_engine::TokenKind::Eof));
-
-    let mut wasm_tokens: Vec<WasmToken> = tokens
-        .into_iter()
-        .map(|token| {
-            let span = token.span;
-            let (kind, value) = match token.kind {
-                formula_engine::TokenKind::Number(raw) => ("number".to_string(), Some(JsonValue::String(raw))),
-                formula_engine::TokenKind::String(value) => ("string".to_string(), Some(JsonValue::String(value))),
-                formula_engine::TokenKind::Boolean(v) => ("boolean".to_string(), Some(JsonValue::Bool(v))),
-                formula_engine::TokenKind::Error(code) => ("error".to_string(), Some(JsonValue::String(code))),
-                formula_engine::TokenKind::Cell(cell) => (
-                    "cell".to_string(),
-                    Some(serde_json::json!({
-                        "col": cell.col,
-                        "row": cell.row,
-                        "colAbs": cell.col_abs,
-                        "rowAbs": cell.row_abs,
-                    })),
-                ),
-                formula_engine::TokenKind::R1C1Cell(cell) => (
-                    "r1c1Cell".to_string(),
-                    Some(serde_json::json!({
-                        "row": cell.row,
-                        "col": cell.col,
-                    })),
-                ),
-                formula_engine::TokenKind::R1C1Row(row) => {
-                    ("r1c1Row".to_string(), Some(serde_json::json!({ "row": row.row })))
-                }
-                formula_engine::TokenKind::R1C1Col(col) => {
-                    ("r1c1Col".to_string(), Some(serde_json::json!({ "col": col.col })))
-                }
-                formula_engine::TokenKind::Ident(name) => ("ident".to_string(), Some(JsonValue::String(name))),
-                formula_engine::TokenKind::QuotedIdent(name) => {
-                    ("quotedIdent".to_string(), Some(JsonValue::String(name)))
-                }
-                formula_engine::TokenKind::Whitespace(raw) => {
-                    ("whitespace".to_string(), Some(JsonValue::String(raw)))
-                }
-                formula_engine::TokenKind::Intersect(raw) => {
-                    ("intersect".to_string(), Some(JsonValue::String(raw)))
-                }
-                formula_engine::TokenKind::Dot => ("dot".to_string(), None),
-                formula_engine::TokenKind::LParen => ("lParen".to_string(), None),
-                formula_engine::TokenKind::RParen => ("rParen".to_string(), None),
-                formula_engine::TokenKind::LBrace => ("lBrace".to_string(), None),
-                formula_engine::TokenKind::RBrace => ("rBrace".to_string(), None),
-                formula_engine::TokenKind::LBracket => ("lBracket".to_string(), None),
-                formula_engine::TokenKind::RBracket => ("rBracket".to_string(), None),
-                formula_engine::TokenKind::Bang => ("bang".to_string(), None),
-                formula_engine::TokenKind::Colon => ("colon".to_string(), None),
-                formula_engine::TokenKind::ArgSep => ("argSep".to_string(), None),
-                formula_engine::TokenKind::Union => ("union".to_string(), None),
-                formula_engine::TokenKind::ArrayRowSep => ("arrayRowSep".to_string(), None),
-                formula_engine::TokenKind::ArrayColSep => ("arrayColSep".to_string(), None),
-                formula_engine::TokenKind::Plus => ("plus".to_string(), None),
-                formula_engine::TokenKind::Minus => ("minus".to_string(), None),
-                formula_engine::TokenKind::Star => ("star".to_string(), None),
-                formula_engine::TokenKind::Slash => ("slash".to_string(), None),
-                formula_engine::TokenKind::Caret => ("caret".to_string(), None),
-                formula_engine::TokenKind::Amp => ("amp".to_string(), None),
-                formula_engine::TokenKind::Percent => ("percent".to_string(), None),
-                formula_engine::TokenKind::Hash => ("hash".to_string(), None),
-                formula_engine::TokenKind::Eq => ("eq".to_string(), None),
-                formula_engine::TokenKind::Ne => ("ne".to_string(), None),
-                formula_engine::TokenKind::Lt => ("lt".to_string(), None),
-                formula_engine::TokenKind::Gt => ("gt".to_string(), None),
-                formula_engine::TokenKind::Le => ("le".to_string(), None),
-                formula_engine::TokenKind::Ge => ("ge".to_string(), None),
-                formula_engine::TokenKind::At => ("at".to_string(), None),
-                formula_engine::TokenKind::Eof => ("eof".to_string(), None),
-            };
-
-            let start_byte = span.start.saturating_add(span_offset);
-            let end_byte = span.end.saturating_add(span_offset);
-            WasmToken {
-                kind,
-                span: WasmSpan {
-                    start: byte_index_to_utf16_cursor(&formula, start_byte),
-                    end: byte_index_to_utf16_cursor(&formula, end_byte),
-                },
-                value,
-            }
-        })
-        .collect();
-
-    if let Some((err, error_start)) = fallback_error {
-        if error_start < expr_src.len() {
-            let kind = match err.message.as_str() {
-                "Unterminated string literal" => "string".to_string(),
-                "Unterminated quoted identifier" => "quotedIdent".to_string(),
-                _ => "lexError".to_string(),
-            };
-
-            let start_byte = error_start.saturating_add(span_offset);
-            let end_byte = formula.len();
-            wasm_tokens.push(WasmToken {
-                kind,
-                span: WasmSpan {
-                    start: byte_index_to_utf16_cursor(&formula, start_byte),
-                    end: byte_index_to_utf16_cursor(&formula, end_byte),
-                },
-                value: Some(JsonValue::String(err.message)),
-            });
-        }
-    }
-
-    serde_wasm_bindgen::to_value(&wasm_tokens).map_err(|err| js_err(err.to_string()))
 }
 
 #[wasm_bindgen(js_name = "parseFormulaPartial")]
@@ -1607,7 +1685,6 @@ pub fn parse_formula_partial(
     out.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
         .map_err(|err| js_err(err.to_string()))
 }
-
 #[wasm_bindgen]
 pub struct WasmWorkbook {
     inner: WorkbookState,
