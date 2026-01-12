@@ -1596,11 +1596,8 @@ fn bytecode_backend_choose_preserves_reference_semantics_for_sum() {
 
 #[test]
 fn bytecode_backend_choose_is_scalar_safe_for_concat() {
-    // When CHOOSE is used in a scalar-only context (e.g. CONCAT), the selected value must behave
-    // like a scalar value (not a reference/range). Otherwise CONCAT would reject the argument.
-    //
-    // Also verify the bytecode backend keeps CHOOSE lazy in this scalar context: the unselected
-    // `1/0` branch must not be evaluated.
+    // CONCAT evaluates its arguments in a scalar/value context in the bytecode compiler. Ensure
+    // CHOOSE remains lazy in that context: the unselected `1/0` branch must not be evaluated.
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", "hello").unwrap();
     engine
@@ -1693,9 +1690,8 @@ fn bytecode_backend_let_single_cell_reference_local_is_scalar_safe_for_concat() 
     engine.set_cell_value("Sheet1", "A1", "hello").unwrap();
 
     // LET binding values are evaluated in a reference context by the bytecode compiler, so `x`
-    // is stored as a single-cell reference. CONCAT is scalar-only in bytecode, so it must apply
-    // implicit intersection when consuming `x` (otherwise the runtime would see a range and
-    // return #VALUE!).
+    // is stored as a single-cell reference. CONCAT should still be able to consume that local
+    // binding without forcing an AST fallback.
     let formula = "=LET(x, A1, CONCAT(x))";
     engine.set_cell_formula("Sheet1", "B1", formula).unwrap();
     assert_eq!(engine.bytecode_program_count(), 1);

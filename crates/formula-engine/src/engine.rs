@@ -8004,8 +8004,8 @@ fn bytecode_expr_is_eligible_inner(
                     //
                     // LET bindings are always validated in a "range + array literal" context, so
                     // we must conservatively tag potentially-spilling XLOOKUP expressions as array
-                    // values. This prevents scalar-only bytecode functions (like CONCAT) from
-                    // incorrectly accepting LET locals that may spill at runtime.
+                    // values. This prevents scalar-only bytecode contexts (e.g. ABS / CONCAT_OP)
+                    // from incorrectly accepting LET locals that may spill at runtime.
                     let lookup_value_is_array = matches!(
                         args.get(0).map(|arg| infer_binding_kind(arg, scopes)),
                         Some(BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::ArrayLiteral)
