@@ -15,7 +15,7 @@ fn assert_close(actual: f64, expected: f64, tol: f64) {
 fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<f64> {
     match sheet.eval(formula) {
         Value::Number(n) => Some(n),
-        // These bond functions may not be registered in every build of the engine yet.
+        // ODDF*/ODDL* bond functions may not be registered in every build of the engine yet.
         Value::Error(ErrorKind::Name) => None,
         other => panic!("expected number, got {other:?} from {formula}"),
     }
@@ -375,6 +375,21 @@ fn odd_coupon_functions_coerce_frequency_like_excel() {
         Value::Error(ErrorKind::Num) => {}
         other => panic!("expected #NUM! for frequency=FALSE (0), got {other:?}"),
     }
+
+    // Spot-check ODDLPRICE as well (odd last coupon) to ensure the coercion behavior is consistent
+    // across ODDF*/ODDL*.
+    let oddl_baseline_semiannual =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)";
+    let oddl_baseline_semiannual_value =
+        match eval_number_or_skip(&mut sheet, oddl_baseline_semiannual) {
+            Some(v) => v,
+            None => return,
+        };
+    let oddl_text_freq =
+        r#"=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,"2",0)"#;
+    let oddl_text_freq_value = eval_number_or_skip(&mut sheet, oddl_text_freq)
+        .expect("ODDLPRICE should accept frequency supplied as numeric text");
+    assert_close(oddl_text_freq_value, oddl_baseline_semiannual_value, 1e-9);
 }
 
 #[test]
@@ -414,6 +429,30 @@ fn odd_coupon_functions_coerce_basis_like_excel() {
     let true_basis_value = eval_number_or_skip(&mut sheet, true_basis)
         .expect("ODDFPRICE should accept TRUE basis (TRUE->1)");
     assert_close(true_basis_value, baseline_basis_1_value, 1e-9);
+
+    // Spot-check ODDLPRICE for blank/boolean basis coercions.
+    let oddl_baseline_basis_0 =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,0)";
+    let oddl_baseline_basis_0_value =
+        match eval_number_or_skip(&mut sheet, oddl_baseline_basis_0) {
+            Some(v) => v,
+            None => return,
+        };
+    let oddl_blank_basis =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,A1)";
+    let oddl_blank_basis_value = eval_number_or_skip(&mut sheet, oddl_blank_basis)
+        .expect("ODDLPRICE should treat blank basis as 0");
+    assert_close(oddl_blank_basis_value, oddl_baseline_basis_0_value, 1e-9);
+
+    let oddl_baseline_basis_1 =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,1)";
+    let oddl_baseline_basis_1_value = eval_number_or_skip(&mut sheet, oddl_baseline_basis_1)
+        .expect("ODDLPRICE should accept explicit basis=1");
+    let oddl_true_basis =
+        "=ODDLPRICE(DATE(2020,11,11),DATE(2021,3,1),DATE(2020,10,15),0.0785,0.0625,100,2,TRUE)";
+    let oddl_true_basis_value = eval_number_or_skip(&mut sheet, oddl_true_basis)
+        .expect("ODDLPRICE should accept TRUE basis (TRUE->1)");
+    assert_close(oddl_true_basis_value, oddl_baseline_basis_1_value, 1e-9);
 }
 
 #[test]
