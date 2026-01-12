@@ -68,7 +68,8 @@ fn coupon_period_e(
     // This can differ from `360/frequency` for some end-of-month schedules involving February
     // (e.g. Feb 28 -> Aug 31 yields 182, not 180).
     match basis {
-        // Keep in sync with the source-of-truth:
+        // NOTE: Keep this test-side model aligned with the engine's COUP* helper
+        // (`coupon_schedule::coupon_period_e`). Source-of-truth:
         // `crates/formula-engine/src/functions/financial/coupon_schedule.rs::coupon_period_e`.
         1 => (ncd - pcd) as f64,
         0 | 2 => 360.0 / freq,
@@ -4173,10 +4174,11 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
     let frequency = 2;
 
     // Guard: ensure this scenario actually exercises basis=4's coupon-period length
-    // `E = DAYS360(PCD, NCD, TRUE)` (European 30/360; can differ from `360/frequency`).
+    // `E = DAYS360(PCD, NCD, TRUE)` (European 30/360), which can differ from `360/frequency`
+    // for an end-of-month schedule.
     //
     // last_interest is EOM Feb 28, so the EOM-pinned prior coupon date is Aug 31.
-    // DAYS360_EU(Aug 31, Feb 28) = 178.
+    // DAYS360_EU(Aug 31, Feb 28) = 178 (while 360/frequency would be 180 for semiannual).
     let months_per_period = 12 / frequency;
     let eom = is_end_of_month(last_interest, system);
     assert!(eom, "expected last_interest to be EOM for this scenario");

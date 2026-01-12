@@ -272,6 +272,39 @@ fn coupon_period_e(
     super::coupon_schedule::coupon_period_e(pcd, ncd, frequency, basis, system)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::date::{ymd_to_serial, ExcelDate};
+
+    #[test]
+    fn odd_coupon_e_matches_coupdays_convention_for_basis_4() {
+        // Regression test for basis=4 (30E/360): `E` should match the European DAYS360 day-count
+        // between coupon dates (PCD->NCD), consistent with COUPDAYS.
+        let system = ExcelDateSystem::EXCEL_1900;
+        let pcd = ymd_to_serial(ExcelDate::new(2001, 2, 28), system).unwrap();
+        let ncd = ymd_to_serial(ExcelDate::new(2001, 8, 31), system).unwrap();
+        let basis = 4;
+        let frequency = 2;
+        let freq = normalize_frequency(frequency).unwrap();
+
+        // European 30/360 between these dates is 182 days.
+        let days360 = super::super::coupon_schedule::days_between(pcd, ncd, basis, system).unwrap();
+        assert_eq!(days360, 182);
+
+        let e = coupon_period_e(pcd, ncd, basis, freq, system).unwrap();
+        assert_eq!(e, 182.0);
+
+        // COUPDAYS uses the same helper (`coupon_schedule::coupon_period_e`); ensure odd-coupon
+        // pricing stays aligned for basis=4.
+        let settlement = ymd_to_serial(ExcelDate::new(2001, 5, 1), system).unwrap();
+        let e_coupdays =
+            super::super::coupon_schedule::coupdays(settlement, ncd, frequency, basis, system)
+                .unwrap();
+        assert_eq!(e_coupdays, e);
+    }
+}
+
 fn oddf_equation(
     settlement: i32,
     maturity: i32,
