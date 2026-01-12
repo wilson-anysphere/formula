@@ -157,10 +157,10 @@ const parityDocPath = path.join(repoRoot, "docs", "15-excel-feature-parity.md");
 try {
   const rawDoc = await readFile(parityDocPath, "utf8");
   const markerRe =
-    /(Current implemented function count \\(from `shared\\/functionCatalog\\.json`\\): \\*\\*)\\d+(\\*\\*)/;
+    /(Catalog functions \(shared\/functionCatalog\.json\): )\d+/;
   const updatedDoc = rawDoc.replace(
     markerRe,
-    `$1${parsed.functions.length}$2`
+    `$1${parsed.functions.length}`
   );
   if (updatedDoc !== rawDoc) {
     await writeFile(parityDocPath, updatedDoc, "utf8");
