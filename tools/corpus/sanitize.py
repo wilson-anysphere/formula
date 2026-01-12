@@ -1199,6 +1199,16 @@ def sanitize_xlsx_bytes(data: bytes, *, options: SanitizeOptions) -> tuple[bytes
             removed_parts |= {n for n in names if n.startswith("xl/controls/")}
             removed_parts |= {n for n in names if n.startswith("xl/ctrlProps/")}
             removed_parts |= {n for n in names if n.startswith("xl/media/")}
+            # Excel "Images in Cell" feature (cellImages.xml) can reference raster parts in
+            # xl/media/**. When secrets are removed we drop media, so remove cellImages parts
+            # too to avoid leaving dangling image references.
+            #
+            # Use case-insensitive matching because some producers vary casing.
+            removed_parts |= {
+                n
+                for n in names
+                if n.lower().startswith(("xl/cellimages", "xl/_rels/cellimages"))
+            }
             removed_parts |= {n for n in names if n.startswith("xl/embeddings/")}
             removed_parts |= {n for n in names if n == "xl/vbaProject.bin"}
             removed_parts |= {n for n in names if n == "xl/vbaProjectSignature.bin"}

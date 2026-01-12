@@ -614,6 +614,89 @@ def _make_minimal_xlsx_with_nested_cell_images() -> bytes:
     return buf.getvalue()
 
 
+def _make_minimal_xlsx_with_cell_images_in_cell() -> bytes:
+    """Minimal XLSX exercising Excel "Images in Cell" (xl/cellImages.xml).
+
+    When remove_secrets drops xl/media/**, the sanitizer must also remove the
+    cellImages part, its rels, and any references to it.
+    """
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/cellImages.xml" ContentType="application/vnd.ms-excel.cellimage+xml"/>
+</Types>
+""",
+        )
+        z.writestr(
+            "_rels/.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>
+""",
+        )
+        z.writestr(
+            "xl/workbook.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>
+""",
+        )
+        z.writestr(
+            "xl/_rels/workbook.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://example.invalid/relationships/cellImages" Target="cellImages.xml"/>
+</Relationships>
+""",
+        )
+        z.writestr(
+            "xl/worksheets/sheet1.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1"><v>1</v></c></row>
+  </sheetData>
+</worksheet>
+""",
+        )
+
+        z.writestr(
+            "xl/cellImages.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cellImages xmlns="http://schemas.microsoft.com/office/spreadsheetml/2019/11/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cellImage r:id="rId1"/>
+</cellImages>
+""",
+        )
+        z.writestr(
+            "xl/_rels/cellImages.xml.rels",
+            """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+</Relationships>
+""",
+        )
+        z.writestr("xl/media/image1.png", b"PNGDATA")
+
+    return buf.getvalue()
+
+
 def _make_minimal_xlsx_with_dialogsheet_inline_str() -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
@@ -1034,6 +1117,29 @@ class SanitizeTests(unittest.TestCase):
             self.assertNotIn("richdata/cellimages.xml", wb_rels.lower())
             ct = z.read("[Content_Types].xml").decode("utf-8", errors="ignore")
             self.assertNotIn("/xl/richdata/cellimages.xml", ct.lower())
+
+    def test_remove_secrets_removes_cell_images_in_cell_parts(self) -> None:
+        original = _make_minimal_xlsx_with_cell_images_in_cell()
+        sanitized, _ = sanitize_xlsx_bytes(original, options=SanitizeOptions(remove_secrets=True))
+
+        with zipfile.ZipFile(io.BytesIO(sanitized), "r") as z:
+            names = set(z.namelist())
+            self.assertNotIn("xl/cellImages.xml", names)
+            self.assertNotIn("xl/_rels/cellImages.xml.rels", names)
+            self.assertNotIn("xl/media/image1.png", names)
+
+            from xml.etree import ElementTree as ET
+
+            ct_root = ET.fromstring(z.read("[Content_Types].xml"))
+            ct_ns = {"ct": "http://schemas.openxmlformats.org/package/2006/content-types"}
+            overrides = ct_root.findall("ct:Override", ct_ns)
+            part_names = {o.attrib.get("PartName", "") for o in overrides}
+            self.assertNotIn("/xl/cellImages.xml", part_names)
+
+            wb_rels_root = ET.fromstring(z.read("xl/_rels/workbook.xml.rels"))
+            rel_ns = {"r": "http://schemas.openxmlformats.org/package/2006/relationships"}
+            targets = {rel.attrib.get("Target", "") for rel in wb_rels_root.findall("r:Relationship", rel_ns)}
+            self.assertNotIn("cellImages.xml", targets)
 
     def test_dialogsheet_cell_values_are_sanitized(self) -> None:
         original = _make_minimal_xlsx_with_dialogsheet_inline_str()
