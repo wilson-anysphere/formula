@@ -85,7 +85,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const commitRename = (sheetId: string) => {
+  const commitRename = (sheetId: string): boolean => {
     try {
       store.rename(sheetId, draftName);
     } catch (err) {
@@ -94,10 +94,11 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
       onError?.(message);
       // Keep editing: refocus the input.
       requestAnimationFrame(() => renameInputRef.current?.focus());
-      return;
+      return false;
     }
     setRenameError(null);
     setEditingSheetId(null);
+    return true;
   };
 
   const moveVisibleSheet = (sheetId: string, targetVisibleIndex: number) => {
@@ -134,6 +135,14 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
       const message = err instanceof Error ? err.message : String(err);
       onError?.(message);
     }
+  };
+
+  const activateSheetWithRenameGuard = (sheetId: string) => {
+    if (editingSheetId && editingSheetId !== sheetId) {
+      const ok = commitRename(editingSheetId);
+      if (!ok) return;
+    }
+    onActivateSheet(sheetId);
   };
 
   const updateScrollButtons = useCallback(() => {
@@ -228,7 +237,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
           if (idx === -1) return;
           const delta = e.key === "PageUp" ? -1 : 1;
           const next = visibleSheets[(idx + delta + visibleSheets.length) % visibleSheets.length];
-          if (next) onActivateSheet(next.id);
+          if (next) activateSheetWithRenameGuard(next.id);
         }}
         onDragOver={(e) => {
           if (!isSheetDrag(e.dataTransfer)) return;
@@ -259,7 +268,7 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
             renameError={editingSheetId === sheet.id ? renameError : null}
             renameInputRef={renameInputRef}
             tabRef={sheet.id === activeSheetId ? activeTabRef : undefined}
-            onActivate={() => onActivateSheet(sheet.id)}
+            onActivate={() => activateSheetWithRenameGuard(sheet.id)}
             onBeginRename={() => {
               setEditingSheetId(sheet.id);
               setDraftName(sheet.name);
@@ -299,7 +308,13 @@ export function SheetTabStrip({ store, activeSheetId, onActivateSheet, onAddShee
         type="button"
         className="sheet-add"
         data-testid="sheet-add"
-        onClick={() => void onAddSheet()}
+        onClick={() => {
+          if (editingSheetId) {
+            const ok = commitRename(editingSheetId);
+            if (!ok) return;
+          }
+          void onAddSheet();
+        }}
         aria-label="Add sheet"
       >
         +
