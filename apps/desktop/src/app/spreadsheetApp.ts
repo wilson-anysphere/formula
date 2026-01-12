@@ -44,6 +44,7 @@ import { showToast } from "../extensions/ui.js";
 import { applyNumberFormatPreset, toggleBold, toggleItalic, toggleUnderline } from "../formatting/toolbar.js";
 import { createDesktopDlpContext } from "../dlp/desktopDlp.js";
 import { enforceClipboardCopy } from "../dlp/enforceClipboardCopy.js";
+import { DlpViolationError } from "../../../../packages/security/dlp/src/errors.js";
 import {
   createEngineClient,
   engineApplyDeltas,
@@ -6987,7 +6988,15 @@ export class SpreadsheetApp {
       const provider = await this.getClipboardProvider();
       await provider.write(payload);
       this.clipboardCopyContext = { range, payload, cells };
-    } catch {
+    } catch (err) {
+      if (err instanceof DlpViolationError) {
+        try {
+          showToast(err.message, "warning");
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
+        return;
+      }
       // Ignore clipboard failures (permissions, platform restrictions).
     }
   }
@@ -7108,7 +7117,15 @@ export class SpreadsheetApp {
       this.syncEngineNow();
       this.refresh();
       this.focus();
-    } catch {
+    } catch (err) {
+      if (err instanceof DlpViolationError) {
+        try {
+          showToast(err.message, "warning");
+        } catch {
+          // `showToast` requires a #toast-root; unit tests don't always include it.
+        }
+        return;
+      }
       // Ignore clipboard failures (permissions, platform restrictions).
     }
   }
