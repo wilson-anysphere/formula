@@ -293,6 +293,14 @@ export const defaultRibbonSchema: RibbonSchema = {
           ],
         },
         {
+          id: "insert.pivotcharts",
+          label: "PivotCharts",
+          buttons: [
+            { id: "insert.pivotcharts.pivotChart", label: "PivotChart", ariaLabel: "PivotChart", icon: "📈", kind: "dropdown", size: "large" },
+            { id: "insert.pivotcharts.recommendedPivotCharts", label: "Recommended PivotCharts", ariaLabel: "Recommended PivotCharts", icon: "✨", kind: "dropdown" },
+          ],
+        },
+        {
           id: "insert.illustrations",
           label: "Illustrations",
           buttons: [
@@ -368,6 +376,14 @@ export const defaultRibbonSchema: RibbonSchema = {
           buttons: [{ id: "insert.links.link", label: "Link", ariaLabel: "Insert Link", icon: "🔗", kind: "dropdown", size: "large" }],
         },
         {
+          id: "insert.comments",
+          label: "Comments",
+          buttons: [
+            { id: "insert.comments.comment", label: "Comment", ariaLabel: "Insert Comment", icon: "💬", kind: "dropdown", size: "large" },
+            { id: "insert.comments.note", label: "Note", ariaLabel: "Insert Note", icon: "🗒", kind: "dropdown" },
+          ],
+        },
+        {
           id: "insert.text",
           label: "Text",
           buttons: [
@@ -376,6 +392,14 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "insert.text.wordArt", label: "WordArt", ariaLabel: "WordArt", icon: "𝒜", kind: "dropdown" },
             { id: "insert.text.signatureLine", label: "Signature Line", ariaLabel: "Signature Line", icon: "✍️", kind: "dropdown" },
             { id: "insert.text.object", label: "Object", ariaLabel: "Object", icon: "🧱", kind: "dropdown" },
+          ],
+        },
+        {
+          id: "insert.equations",
+          label: "Equations",
+          buttons: [
+            { id: "insert.equations.equation", label: "Equation", ariaLabel: "Insert Equation", icon: "∑", kind: "dropdown", size: "large" },
+            { id: "insert.equations.inkEquation", label: "Ink Equation", ariaLabel: "Ink Equation", icon: "✒️", kind: "dropdown" },
           ],
         },
         {
