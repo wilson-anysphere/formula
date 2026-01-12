@@ -190,3 +190,26 @@ fn preserves_external_hyperlink_location_as_fragment() {
         }
     );
 }
+
+#[test]
+fn imports_biff_file_hyperlinks_with_location() {
+    let bytes = xls_fixture_builder::build_file_hyperlink_with_location_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("FileLink")
+        .expect("FileLink missing");
+    assert_eq!(sheet.hyperlinks.len(), 1);
+    let link = &sheet.hyperlinks[0];
+
+    assert_eq!(link.range, Range::from_a1("A1").unwrap());
+    assert_eq!(
+        link.target,
+        HyperlinkTarget::ExternalUrl {
+            uri: "file:///C:/Temp/foo.txt#Sheet2!A1".to_string()
+        }
+    );
+    assert_eq!(link.display.as_deref(), Some("File"));
+    assert_eq!(link.tooltip.as_deref(), Some("File tooltip"));
+}

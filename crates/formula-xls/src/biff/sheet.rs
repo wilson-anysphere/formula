@@ -934,20 +934,17 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
 
     // File moniker: not fully supported yet. Preserve as best-effort file:// URL when we can.
     if clsid == CLSID_FILE_MONIKER {
-        // The file moniker payload is more complex (short/long paths, UNC). We attempt a minimal
-        // parse that recovers an ANSI/Unicode path string when possible.
-        //
-        // Best-effort strategy:
-        // - The first dword is the length in bytes of the following ANSI path (including NUL).
-        // - The ANSI path is followed by optional Unicode extended path data.
-        //
-        // If this fails, treat as unsupported.
+        // The file moniker payload is more complex (short/long paths, UNC). We attempt a
+        // best-effort parse that recovers both the path and the correct payload length so the
+        // caller can continue parsing subsequent fields in the HLINK record (tooltip, location,
+        // etc) without becoming misaligned.
         if input.len() < 20 {
             return Err("truncated file moniker".to_string());
         }
         let ansi_len = u32::from_le_bytes([input[16], input[17], input[18], input[19]]) as usize;
         let mut pos = 20usize;
-        if ansi_len > 0 {
+
+        let ansi_path = if ansi_len > 0 {
             if input.len() < pos + ansi_len {
                 return Err("truncated file moniker ANSI path".to_string());
             }
@@ -955,16 +952,86 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
             pos += ansi_len;
             let mut path = strings::decode_ansi(codepage, bytes);
             path = path.trim_end_matches('\0').to_string();
-            if !path.is_empty() {
-                // Use a best-effort file URI; Excel will often store DOS paths.
-                let uri = format!("file:///{path}");
-                return Ok((Some(uri), pos));
+            (!path.is_empty()).then_some(path)
+        } else {
+            None
+        };
+
+        // The remaining part of the file moniker often contains:
+        // - endServer (u16)
+        // - reserved (u16)
+        // - unicode_len (u32) in bytes, followed by UTF-16LE (NUL terminated)
+        //
+        // Not all producers include the Unicode section, but when present we should consume it so
+        // subsequent HLINK fields parse correctly.
+        let mut unicode_path: Option<String> = None;
+        if input.len() >= pos + 8 {
+            // endServer + reserved
+            pos += 4;
+
+            let unicode_len = u32::from_le_bytes([
+                input[pos],
+                input[pos + 1],
+                input[pos + 2],
+                input[pos + 3],
+            ]) as usize;
+            pos += 4;
+
+            if unicode_len > 0 {
+                if input.len() < pos + unicode_len {
+                    return Err("truncated file moniker Unicode path".to_string());
+                }
+                let bytes = &input[pos..pos + unicode_len];
+                pos += unicode_len;
+                let s = decode_utf16le(bytes)?;
+                let s = trim_trailing_nuls(s);
+                if !s.is_empty() {
+                    unicode_path = Some(s);
+                }
             }
         }
+
+        if let Some(path) = unicode_path.or(ansi_path) {
+            let uri = file_path_to_uri(&path);
+            return Ok((Some(uri), pos));
+        }
+
         return Err("unsupported file moniker".to_string());
     }
 
     Err(format!("unsupported hyperlink moniker CLSID {:02X?}", clsid))
+}
+
+fn file_path_to_uri(path: &str) -> String {
+    let normalized = path.trim().replace('\\', "/");
+    if normalized.is_empty() {
+        return normalized;
+    }
+
+    // If the path already looks like a URI, preserve it.
+    if normalized.contains("://") {
+        return normalized;
+    }
+
+    // UNC paths are stored as `\\server\share\...`, which becomes `//server/share/...` after
+    // normalization. `file:` + that string yields a valid UNC file URI (`file://server/share/...`).
+    if normalized.starts_with("//") {
+        return format!("file:{normalized}");
+    }
+
+    // Absolute POSIX path.
+    if normalized.starts_with('/') {
+        return format!("file://{normalized}");
+    }
+
+    // Windows drive letter path.
+    if normalized.as_bytes().get(1) == Some(&b':') {
+        // `file:///C:/path` is represented as `file://` + `/C:/path`.
+        return format!("file:///{normalized}");
+    }
+
+    // Relative path. Preserve as a relative Target for XLSX compatibility.
+    normalized
 }
 
 fn parse_utf16_prefixed_string(input: &[u8], len: usize) -> Result<(String, usize), String> {
