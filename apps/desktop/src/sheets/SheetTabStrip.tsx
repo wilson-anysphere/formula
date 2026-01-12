@@ -33,6 +33,10 @@ export function SheetTabStrip({ workbook, activeSheetId, onActivateSheet }: Prop
         if (!primary) return;
         if (e.shiftKey || e.altKey) return;
         if (e.key !== "PageUp" && e.key !== "PageDown") return;
+
+        const target = e.target as HTMLElement | null;
+        if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+
         e.preventDefault();
 
         const idx = visibleSheets.findIndex((s) => s.id === activeSheetId);
