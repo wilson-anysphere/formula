@@ -84,34 +84,29 @@ describe("SIEM sender TLS failures", () => {
   });
 
   it("rejects http endpoints in production without attempting a request", async () => {
-    const previousEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = "production";
-    try {
-      (fetchWithOrgTls as unknown as ReturnType<typeof vi.fn>).mockClear();
+    (fetchWithOrgTls as unknown as ReturnType<typeof vi.fn>).mockClear();
 
-      const config = {
-        endpointUrl: "http://example.invalid/ingest",
-        format: "json",
-        retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 1, jitter: false }
-      };
+    const config = {
+      endpointUrl: "http://example.invalid/ingest",
+      format: "json",
+      retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 1, jitter: false }
+    };
 
-      const event = createAuditEvent({
-        eventType: "test.http_in_production",
-        actor: { type: "system", id: "unit-test" },
-        context: { orgId: null },
-        resource: { type: "integration", id: "siem", name: "siem" },
-        success: true
-      });
+    const event = createAuditEvent({
+      eventType: "test.http_in_production",
+      actor: { type: "system", id: "unit-test" },
+      context: { orgId: null },
+      resource: { type: "integration", id: "siem", name: "siem" },
+      success: true
+    });
 
-      await expect(
-        sendSiemBatch(config as any, [event], {
-          tls: { certificatePinningEnabled: false, certificatePins: [] }
-        })
-      ).rejects.toMatchObject({ retriable: false, siemErrorLabel: "insecure_http_endpoint" });
+    await expect(
+      sendSiemBatch(config as any, [event], {
+        tls: { certificatePinningEnabled: false, certificatePins: [] },
+        env: { NODE_ENV: "production" }
+      })
+    ).rejects.toMatchObject({ retriable: false, siemErrorLabel: "insecure_http_endpoint" });
 
-      expect(fetchWithOrgTls).not.toHaveBeenCalled();
-    } finally {
-      process.env.NODE_ENV = previousEnv;
-    }
+    expect(fetchWithOrgTls).not.toHaveBeenCalled();
   });
 });

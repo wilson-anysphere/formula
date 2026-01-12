@@ -71,6 +71,11 @@ export interface SiemExportWorkerOptions {
     error: (...args: any[]) => void;
     debug?: (...args: any[]) => void;
   };
+  /**
+   * Optional environment override (primarily for tests). When unset, production
+   * behavior is derived from `process.env`.
+   */
+  env?: NodeJS.ProcessEnv;
   pollIntervalMs?: number;
   maxConcurrentOrgs?: number;
   maxBatchesPerOrgRun?: number;
@@ -254,12 +259,12 @@ export class SiemExportWorker {
               { attributes: { orgId: org.orgId, events: events.length } },
               async (sendSpan) => {
                 try {
-                  const payload = events.map(({ event }) => event);
-                  await sendSiemBatch(org.config, payload, { tls: tlsPolicy });
-                  sendSpan.setStatus({ code: SpanStatusCode.OK });
-                } catch (err) {
-                  sendSpan.recordException(err as Error);
-                  sendSpan.setStatus({ code: SpanStatusCode.ERROR });
+                   const payload = events.map(({ event }) => event);
+                   await sendSiemBatch(org.config, payload, { tls: tlsPolicy, env: this.options.env });
+                   sendSpan.setStatus({ code: SpanStatusCode.OK });
+                 } catch (err) {
+                   sendSpan.recordException(err as Error);
+                   sendSpan.setStatus({ code: SpanStatusCode.ERROR });
                   throw err;
                 } finally {
                   sendSpan.end();

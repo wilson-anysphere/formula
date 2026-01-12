@@ -206,12 +206,12 @@ async function postBatch(options: {
 export async function sendSiemBatch(
   config: SiemEndpointConfig,
   events: AuditEvent[],
-  options: { tls?: OrgTlsPolicy } = {}
+  options: { tls?: OrgTlsPolicy; env?: NodeJS.ProcessEnv } = {}
 ): Promise<void> {
   if (!events || events.length === 0) return;
 
   const endpoint = new URL(config.endpointUrl);
-  if (endpoint.protocol !== "https:" && isProductionEnv()) {
+  if (endpoint.protocol !== "https:" && isProductionEnv(options.env)) {
     const error: RetriableError = new Error("SIEM endpoint must use https in production");
     error.retriable = false;
     error.siemErrorLabel = SIEM_ERROR_INSECURE_HTTP;
