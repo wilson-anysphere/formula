@@ -64,6 +64,23 @@ describe("desktop spreadsheetApi adapter helpers", () => {
       expect(map.get("Sheet2")).toBe("sheet-2");
     });
 
+    it("resolves sheet ids by name case-insensitively (Unicode-aware)", () => {
+      const sheetStore = {
+        getName(sheetId: string) {
+          if (sheetId === "sheet-1") return "Å";
+          if (sheetId === "sheet-2") return "Sheet2";
+          return undefined;
+        },
+      };
+
+      expect(
+        resolveSheetIdByName({ sheetName: "Å", sheetIds: ["sheet-1", "sheet-2"], sheetStore }),
+      ).toBe("sheet-1");
+      expect(
+        resolveSheetIdByName({ sheetName: "sheet2", sheetIds: ["sheet-1", "sheet-2"], sheetStore }),
+      ).toBe("sheet-2");
+    });
+
     it("falls back to ids when display names are missing", () => {
       const sheetStore = {
         getName(_sheetId: string) {
