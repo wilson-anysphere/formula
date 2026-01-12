@@ -230,18 +230,18 @@ Note on `IMAGE()` vs “Place in Cell”:
 
 The exact element vocabulary inside each rich value varies by Excel version and feature, but for in-cell images the rich value ultimately encodes a **relationship slot index** (an integer) that points into `xl/richData/richValueRel.xml`.
 
-Representative (synthetic) shape:
+Representative shape (observed in the real Excel fixture `fixtures/xlsx/basic/image-in-cell.xlsx`):
 
 ```xml
-<rv:richData xmlns:rv="http://schemas.microsoft.com/office/spreadsheetml/2017/06/main">
-  <rv:richValues count="1">
-    <!-- rich value index 0 -->
-    <rv:rv>
-      <!-- relationship slot index into richValueRel.xml -->
-      <rv:rel>0</rv:rel>
-    </rv:rv>
-  </rv:richValues>
-</rv:richData>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata" count="1">
+  <!-- rich value index 0 -->
+  <rv s="0">
+    <!-- `_rvRel:LocalImageIdentifier` (relationship-slot index into richValueRel.xml) -->
+    <v>0</v>
+    <!-- `CalcOrigin` (Excel flag; preserve) -->
+    <v>5</v>
+  </rv>
+</rvData>
 ```
 
 ##### 1) `vm="N"` maps into `xl/metadata.xml`
