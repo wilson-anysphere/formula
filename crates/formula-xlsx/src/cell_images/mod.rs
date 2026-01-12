@@ -4,6 +4,10 @@
 //! appear to rely on a workbook-level `xl/cellimages*.xml` part containing
 //! DrawingML `<pic>` payloads that reference media via relationships.
 
+mod part_info;
+
+pub use part_info::{CellImageEmbed, CellImagesPartInfo};
+
 use std::collections::{BTreeMap, HashMap};
 
 use formula_model::drawings::{ImageData, ImageId};

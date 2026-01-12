@@ -11,6 +11,7 @@ const XL_FN_REQUIRED_FUNCTIONS: &[&str] = &[
     "ACOT",
     "ACOTH",
     "AGGREGATE",
+    "ARABIC",
     "BASE",
     "BETA.DIST",
     "BETA.INV",
