@@ -1321,6 +1321,12 @@ export class ToolExecutor {
       }
     }
 
+    // Sort range selectors by rank descending so per-cell evaluation can break early once the
+    // remaining records can no longer increase the effective classification.
+    if (rangeRecords.length > 1) {
+      rangeRecords.sort((a, b) => b.rank - a.rank);
+    }
+
     return {
       docRankMax,
       sheetRankMax,
@@ -1404,7 +1410,9 @@ export class ToolExecutor {
       index.rangeRankMax > maxAllowedRank || (!restrictedAllowed && index.rangeRankMax === RESTRICTED_CLASSIFICATION_RANK);
     if (rangeCanAffectDecision && index.rangeRankMax > rank) {
       for (const record of index.rangeRecords) {
-        if (record.rank <= rank) continue;
+        // Records are sorted by rank desc in the index builder: once we reach a record that
+        // cannot increase the effective rank, we can stop scanning.
+        if (record.rank <= rank) break;
         if (row0 < record.startRow || row0 > record.endRow || col0 < record.startCol || col0 > record.endCol) continue;
         rank = record.rank;
         if (rank === RESTRICTED_CLASSIFICATION_RANK) {
