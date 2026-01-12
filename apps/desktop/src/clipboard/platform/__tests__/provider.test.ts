@@ -106,6 +106,31 @@ describe("clipboard/platform/provider (desktop Tauri multi-format path)", () => 
     expect(readText).not.toHaveBeenCalled();
   });
 
+  it("read() drops oversized pngBase64 payloads from clipboard_read (size guard)", async () => {
+    // 5MB raw bytes => ~6.7MB base64. Use a ~7MB base64 string to exceed the limit without relying
+    // on a real image payload.
+    const oversizedBase64 = "A".repeat(7_000_000);
+
+    const invoke = vi.fn().mockResolvedValue({
+      text: "hello",
+      html: "<p>hello</p>",
+      pngBase64: oversizedBase64,
+    });
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const readText = vi.fn().mockResolvedValue("web-fallback");
+    setMockNavigatorClipboard({ readText });
+
+    const provider = await createClipboardProvider();
+    const content = await provider.read();
+
+    expect(content.text).toBe("hello");
+    expect(content.html).toBe("<p>hello</p>");
+    expect(content.imagePng).toBeUndefined();
+    expect((content as any).pngBase64).toBeUndefined();
+    expect(readText).not.toHaveBeenCalled();
+  });
+
   it("write() uses __TAURI__.core.invoke('clipboard_write', payload) when available", async () => {
     const invoke = vi.fn().mockResolvedValue(undefined);
     const legacyWriteText = vi.fn().mockResolvedValue(undefined);
@@ -150,6 +175,18 @@ describe("clipboard/platform/provider (desktop Tauri multi-format path)", () => 
 
     expect(legacyWriteText).not.toHaveBeenCalled();
     expect(webWriteText).not.toHaveBeenCalled();
+  });
+
+  it("write() omits oversized imagePng payloads (size guard)", async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined);
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const provider = await createClipboardProvider();
+    const oversized = new Uint8Array(6 * 1024 * 1024);
+    await provider.write({ text: "hello", imagePng: oversized });
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("clipboard_write", { payload: { text: "hello" } });
   });
 
   it("write() strips data: URL prefixes from payload.pngBase64 before sending to clipboard_write", async () => {
