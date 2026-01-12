@@ -159,14 +159,16 @@ pub fn patch_xlsx_streaming_with_recalc_policy<R: Read + Seek, W: Write + Seek>(
     }
 
     let mut archive = ZipArchive::new(input)?;
-    // `vm` points into `xl/metadata.xml` value metadata (rich values / images-in-cell). The
-    // low-level streaming patcher (`patch_xlsx_streaming`) is sometimes used on "partial" ZIPs
+    // `vm` points into `xl/metadata.xml` value metadata (rich values / images-in-cell).
+    //
+    // The low-level streaming patcher (`patch_xlsx_streaming`) is sometimes used on "partial" ZIPs
     // that only contain worksheet XML (no `xl/workbook.xml` / root rels). In those cases, we
     // preserve `vm` for maximum fidelity (callers may be patching an extracted worksheet part to
     // reinsert into the original package).
     //
-    // When patching a real workbook package we drop `vm` on patched cells to avoid leaving a
-    // dangling metadata pointer (we preserve `cm` and all other unrelated attributes).
+    // When patching a workbook package (detected by the presence of `xl/workbook.xml`), drop `vm`
+    // on patched cells to avoid leaving a dangling metadata pointer (we still preserve `cm` and all
+    // other unrelated attributes).
     let drop_vm_on_patched_cells = zip_part_exists(&mut archive, "xl/workbook.xml")?;
     let mut formula_changed = cell_patches
         .iter()
