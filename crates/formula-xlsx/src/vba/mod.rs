@@ -76,10 +76,8 @@ impl XlsxPackage {
             .and_then(|name| get_part(parts, &name))
             .unwrap_or(project_ole);
 
-        Ok(Some(formula_vba::verify_vba_project_signature_binding(
-            project_ole,
-            signature_bytes,
-        )?))
+        let binding = formula_vba::verify_vba_project_signature_binding(project_ole, signature_bytes)?;
+        Ok(Some(upgrade_vba_project_signature_binding(project_ole, binding)))
     }
 }
 
@@ -132,10 +130,8 @@ impl XlsxDocument {
             .and_then(|name| get_part(parts, &name))
             .unwrap_or(project_ole);
 
-        Ok(Some(formula_vba::verify_vba_project_signature_binding(
-            project_ole,
-            signature_bytes,
-        )?))
+        let binding = formula_vba::verify_vba_project_signature_binding(project_ole, signature_bytes)?;
+        Ok(Some(upgrade_vba_project_signature_binding(project_ole, binding)))
     }
 }
 
@@ -231,11 +227,8 @@ fn verify_vba_digital_signature_from_parts(
             // to verify MS-OVBA Contents Hash binding against the actual `vbaProject.bin`.
             if sig.binding == formula_vba::VbaSignatureBinding::Unknown {
                 if let Some(vba_project_bin) = vba_project_bin {
-                    sig.binding = match formula_vba::verify_vba_project_signature_binding(
-                        vba_project_bin,
-                        &sig.signature,
-                    ) {
-                        Ok(binding) => match binding {
+                    sig.binding = match formula_vba::verify_vba_project_signature_binding(vba_project_bin, &sig.signature) {
+                        Ok(binding) => match upgrade_vba_project_signature_binding(vba_project_bin, binding) {
                             VbaProjectBindingVerification::BoundVerified(_) => {
                                 formula_vba::VbaSignatureBinding::Bound
                             }
@@ -319,9 +312,8 @@ fn verify_vba_digital_signature_with_trust_from_parts(
                     let (verification, signer_subject) = formula_vba::verify_vba_signature_blob(bytes);
 
                     let binding = if verification == VbaSignatureVerification::SignedVerified {
-                        match formula_vba::verify_vba_project_signature_binding(vba_project_bin, bytes)
-                        {
-                            Ok(binding) => match binding {
+                        match formula_vba::verify_vba_project_signature_binding(vba_project_bin, bytes) {
+                            Ok(binding) => match upgrade_vba_project_signature_binding(vba_project_bin, binding) {
                                 VbaProjectBindingVerification::BoundVerified(_) => {
                                     formula_vba::VbaSignatureBinding::Bound
                                 }
@@ -421,6 +413,59 @@ fn resolve_vba_signature_part_name(parts: &BTreeMap<String, Vec<u8>>) -> Option<
     }
 
     None
+}
+
+fn upgrade_vba_project_signature_binding(
+    project_ole: &[u8],
+    binding: formula_vba::VbaProjectBindingVerification,
+) -> formula_vba::VbaProjectBindingVerification {
+    let formula_vba::VbaProjectBindingVerification::BoundUnknown(mut debug) = binding else {
+        return binding;
+    };
+
+    let Some(signed_digest) = debug.signed_digest.as_deref() else {
+        return formula_vba::VbaProjectBindingVerification::BoundUnknown(debug);
+    };
+
+    match signed_digest.len() {
+        16 => {
+            let Ok(content_hash_md5) = formula_vba::content_hash_md5(project_ole) else {
+                return formula_vba::VbaProjectBindingVerification::BoundUnknown(debug);
+            };
+            let Ok(agile_hash_md5) = formula_vba::agile_content_hash_md5(project_ole) else {
+                return formula_vba::VbaProjectBindingVerification::BoundUnknown(debug);
+            };
+            let Some(agile_hash_md5) = agile_hash_md5 else {
+                // If we can't compute FormsNormalizedData, we can't definitively rule out an
+                // Agile binding mismatch/match.
+                return formula_vba::VbaProjectBindingVerification::BoundUnknown(debug);
+            };
+
+            let content_bytes = content_hash_md5.as_slice();
+            let agile_bytes = agile_hash_md5.as_slice();
+
+            if signed_digest == content_bytes || signed_digest == agile_bytes {
+                // Use the matching digest as the "computed" value for debug display.
+                debug.computed_digest = Some(signed_digest.to_vec());
+                formula_vba::VbaProjectBindingVerification::BoundVerified(debug)
+            } else {
+                debug.computed_digest = Some(content_hash_md5.to_vec());
+                formula_vba::VbaProjectBindingVerification::BoundMismatch(debug)
+            }
+        }
+        32 => {
+            let Ok(computed) = formula_vba::contents_hash_v3(project_ole) else {
+                return formula_vba::VbaProjectBindingVerification::BoundUnknown(debug);
+            };
+            debug.computed_digest = Some(computed.clone());
+            if signed_digest == computed.as_slice() {
+                formula_vba::VbaProjectBindingVerification::BoundVerified(debug)
+            } else {
+                formula_vba::VbaProjectBindingVerification::BoundMismatch(debug)
+            }
+        }
+        _ => formula_vba::VbaProjectBindingVerification::BoundUnknown(debug),
+    }
 }
 
 fn strip_fragment(target: &str) -> &str {

@@ -380,12 +380,9 @@ mod tests {
   </rels>
 </rvRel>"#;
 
-        // Target is relative to `xl/`, not `xl/richData/`.
         let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId7"
-    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-    Target="media/image1.png#fragment"/>
+  <Relationship Id="rId7" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
 </Relationships>"#;
 
         let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();

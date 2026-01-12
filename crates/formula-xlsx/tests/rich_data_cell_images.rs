@@ -9,8 +9,15 @@ fn build_rich_image_xlsx(
     include_metadata: bool,
     include_rich_value_rels: bool,
     fragmented_target: bool,
+    media_relative_target: bool,
 ) -> Vec<u8> {
-    build_rich_image_xlsx_with_rel_slot_index(0, include_metadata, include_rich_value_rels, fragmented_target)
+    build_rich_image_xlsx_with_rel_slot_index(
+        0,
+        include_metadata,
+        include_rich_value_rels,
+        fragmented_target,
+        media_relative_target,
+    )
 }
 
 fn build_rich_image_xlsx_with_rel_slot_index(
@@ -18,6 +25,7 @@ fn build_rich_image_xlsx_with_rel_slot_index(
     include_metadata: bool,
     include_rich_value_rels: bool,
     fragmented_target: bool,
+    media_relative_target: bool,
 ) -> Vec<u8> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -81,12 +89,17 @@ fn build_rich_image_xlsx_with_rel_slot_index(
 </richValueRel>"#;
 
     let fragment = if fragmented_target { "#fragment" } else { "" };
+    let target = if media_relative_target {
+        format!("media/image1.png{fragment}")
+    } else {
+        format!("../media/image1.png{fragment}")
+    };
     let rich_value_rel_rels = format!(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png{}"/>
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="{}"/>
 </Relationships>"#,
-        fragment
+        target
     );
 
     let cursor = Cursor::new(Vec::new());
@@ -667,7 +680,7 @@ fn build_rich_image_xlsx_with_rich_value_rel1_referenced_from_rich_value_rels() 
 
 #[test]
 fn extracts_rich_cell_image_bytes_from_vm_chain() {
-    let bytes = build_rich_image_xlsx(true, true, false);
+    let bytes = build_rich_image_xlsx(true, true, false, false);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
     let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
 
@@ -684,7 +697,7 @@ fn extracts_rich_cell_image_bytes_from_vm_chain() {
 fn extracts_rich_cell_image_bytes_with_1_based_rel_slot_index() {
     // Some third-party producers encode the relationship slot stored inside `<rv>` as 1-based.
     // Excel uses 0-based indices, so this should still resolve to the first `<rel>`.
-    let bytes = build_rich_image_xlsx_with_rel_slot_index(1, true, true, false);
+    let bytes = build_rich_image_xlsx_with_rel_slot_index(1, true, true, false, false);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
     let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
 
@@ -714,7 +727,7 @@ fn extracts_rich_cell_image_bytes_from_structure_schema() {
 
 #[test]
 fn missing_metadata_xml_returns_empty_map() {
-    let bytes = build_rich_image_xlsx(false, true, false);
+    let bytes = build_rich_image_xlsx(false, true, false, false);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
     let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
     assert!(images.is_empty());
@@ -722,7 +735,7 @@ fn missing_metadata_xml_returns_empty_map() {
 
 #[test]
 fn missing_rich_value_rels_returns_empty_map() {
-    let bytes = build_rich_image_xlsx(true, false, false);
+    let bytes = build_rich_image_xlsx(true, false, false, false);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
     let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
     assert!(images.is_empty());
@@ -730,7 +743,22 @@ fn missing_rich_value_rels_returns_empty_map() {
 
 #[test]
 fn extracts_rich_cell_image_bytes_when_relationship_target_has_fragment() {
-    let bytes = build_rich_image_xlsx(true, true, true);
+    let bytes = build_rich_image_xlsx(true, true, true, false);
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
+    let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
+
+    let mut expected: HashMap<(String, CellRef), Vec<u8>> = HashMap::new();
+    expected.insert(
+        ("Sheet1".to_string(), CellRef::from_a1("A1").unwrap()),
+        b"fakepng".to_vec(),
+    );
+
+    assert_eq!(images, expected);
+}
+
+#[test]
+fn extracts_rich_cell_image_bytes_when_relationship_target_is_media_relative() {
+    let bytes = build_rich_image_xlsx(true, true, false, true);
     let pkg = XlsxPackage::from_bytes(&bytes).expect("read pkg");
     let images = pkg.extract_rich_cell_images_by_cell().expect("extract images");
 
