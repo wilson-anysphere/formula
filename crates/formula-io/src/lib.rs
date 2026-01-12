@@ -17,6 +17,8 @@ pub enum Error {
         "encrypted workbook not supported: workbook `{path}` is password-protected/encrypted; remove password protection in Excel and try again"
     )]
     EncryptedWorkbook { path: PathBuf },
+    #[error("parquet support not enabled; enable formula-io feature `parquet`")]
+    ParquetSupportNotEnabled { path: PathBuf },
     #[error("failed to open workbook `{path}`: {source}")]
     OpenIo {
         path: PathBuf,
@@ -59,6 +61,12 @@ pub enum Error {
         #[source]
         source: CsvImportError,
     },
+    #[error("failed to open `.parquet` workbook `{path}`: {source}")]
+    OpenParquet {
+        path: PathBuf,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("failed to save workbook `{path}`: {source}")]
     SaveIo {
         path: PathBuf,
@@ -100,7 +108,7 @@ pub enum Workbook {
     Xlsx(xlsx::XlsxPackage),
     Xls(xls::XlsImportResult),
     Xlsb(xlsb::XlsbWorkbook),
-    /// A workbook represented as an in-memory model (e.g. imported from a non-OPC format like CSV).
+    /// A workbook represented as an in-memory model (e.g. imported from a non-OPC format like CSV/Parquet).
     Model(formula_model::Workbook),
 }
 
@@ -221,6 +229,7 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
         "xls" => Some(WorkbookFormat::Xls),
         "xlsb" => Some(WorkbookFormat::Xlsb),
         "csv" => Some(WorkbookFormat::Csv),
+        "parquet" => Some(WorkbookFormat::Parquet),
         _ => None,
     };
 
@@ -248,12 +257,18 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
 
     // ZIP local file header signature (XLSX/XLSM/XLSB).
     const ZIP_MAGIC: [u8; 4] = [0x50, 0x4B, 0x03, 0x04];
+    // Parquet files start with "PAR1".
+    const PARQUET_MAGIC: [u8; 4] = *b"PAR1";
 
     let mut header = [0u8; 8];
     let n = file.read(&mut header).map_err(|source| Error::OpenIo {
         path: path.to_path_buf(),
         source,
     })?;
+
+    if n >= PARQUET_MAGIC.len() && header[..PARQUET_MAGIC.len()] == PARQUET_MAGIC {
+        return Ok(WorkbookFormat::Parquet);
+    }
 
     if n >= OLE_MAGIC.len() && header[..OLE_MAGIC.len()] == OLE_MAGIC {
         // OLE compound files can either be legacy `.xls` BIFF workbooks, or Office-encrypted
@@ -266,8 +281,7 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
             source,
         })?;
         if let Ok(mut ole) = cfb::CompoundFile::open(file) {
-            if stream_exists(&mut ole, "EncryptionInfo")
-                && stream_exists(&mut ole, "EncryptedPackage")
+            if stream_exists(&mut ole, "EncryptionInfo") && stream_exists(&mut ole, "EncryptedPackage")
             {
                 return Err(Error::EncryptedWorkbook {
                     path: path.to_path_buf(),
@@ -339,6 +353,8 @@ fn workbook_format(path: &Path) -> Result<WorkbookFormat, Error> {
 /// - For `.xls`, this returns the imported model workbook from `formula-xls`.
 /// - For `.xlsb`, this converts the parsed workbook into a model workbook.
 /// - For `.csv`, this imports the CSV into a columnar-backed worksheet.
+/// - For `.parquet`, this imports the Parquet file into a columnar-backed worksheet (requires the
+///   `formula-io` crate feature `parquet`).
 pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Workbook, Error> {
     use std::fs::File;
     use std::io::BufReader;
@@ -417,6 +433,7 @@ pub fn open_workbook_model(path: impl AsRef<Path>) -> Result<formula_model::Work
 
             Ok(workbook)
         }
+        WorkbookFormat::Parquet => open_parquet_model_workbook(path),
         _ => Err(Error::UnsupportedExtension {
             path: path.to_path_buf(),
             extension: ext.to_string(),
@@ -446,6 +463,7 @@ fn stream_exists<R: std::io::Read + std::io::Write + std::io::Seek>(
 /// - `.xlsb` (via `formula-xlsb`)
 /// - `.xlsx` / `.xlsm` (via `formula-xlsx`)
 /// - `.csv` (via `formula-model` CSV import)
+/// - `.parquet` (via `formula-columnar`, requires the `formula-io` crate feature `parquet`)
 pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
     let path = path.as_ref();
     let ext = path
@@ -509,11 +527,59 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
 
             Ok(Workbook::Model(workbook))
         }
+        WorkbookFormat::Parquet => open_parquet_model_workbook(path).map(Workbook::Model),
         _ => Err(Error::UnsupportedExtension {
             path: path.to_path_buf(),
             extension: ext.to_string(),
         }),
     }
+}
+
+#[cfg(not(feature = "parquet"))]
+fn open_parquet_model_workbook(path: &Path) -> Result<formula_model::Workbook, Error> {
+    Err(Error::ParquetSupportNotEnabled {
+        path: path.to_path_buf(),
+    })
+}
+
+#[cfg(feature = "parquet")]
+fn open_parquet_model_workbook(path: &Path) -> Result<formula_model::Workbook, Error> {
+    use formula_model::CellRef;
+    use std::sync::Arc;
+
+    let bytes = std::fs::read(path).map_err(|source| Error::OpenIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    let table = formula_columnar::parquet::read_parquet_bytes_to_columnar(&bytes).map_err(|source| {
+        Error::OpenParquet {
+            path: path.to_path_buf(),
+            source: Box::new(source),
+        }
+    })?;
+
+    let mut workbook = formula_model::Workbook::new();
+
+    let default_sheet_name = "Sheet1".to_string();
+    let candidate_name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| default_sheet_name.clone());
+
+    let sheet_id = workbook
+        .add_sheet(candidate_name.clone())
+        .or_else(|_| workbook.add_sheet(default_sheet_name.clone()))
+        .expect("Sheet1 is always a valid sheet name");
+
+    let sheet = workbook
+        .sheet_mut(sheet_id)
+        .expect("sheet must exist immediately after add_sheet");
+    sheet.set_columnar_table(CellRef::new(0, 0), Arc::new(table));
+
+    Ok(workbook)
 }
 
 /// Save a workbook to disk.
@@ -524,7 +590,8 @@ pub fn open_workbook(path: impl AsRef<Path>) -> Result<Workbook, Error> {
 /// - [`Workbook::Xls`] is exported as `.xlsx` (writing `.xls` is out of scope).
 /// - [`Workbook::Xlsb`] can be saved losslessly back to `.xlsb` (package copy),
 ///   or exported to `.xlsx` depending on the output extension.
-/// - [`Workbook::Model`] is exported as `.xlsx`.
+/// - [`Workbook::Model`] is exported as `.xlsx` via [`formula_xlsx::write_workbook`] after
+///   materializing any columnar-backed data.
 pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), Error> {
     let path = path.as_ref();
     let ext = path
@@ -619,16 +686,64 @@ pub fn save_workbook(workbook: &Workbook, path: impl AsRef<Path>) -> Result<(), 
             }),
         },
         Workbook::Model(model) => match ext.as_str() {
-            "xlsx" => xlsx::write_workbook(model, path).map_err(|source| Error::SaveXlsxExport {
-                path: path.to_path_buf(),
-                source,
-            }),
+            "xlsx" => {
+                let export = materialize_columnar_tables_for_export(model);
+                xlsx::write_workbook(&export, path).map_err(|source| Error::SaveXlsxExport {
+                    path: path.to_path_buf(),
+                    source,
+                })
+            }
             other => Err(Error::UnsupportedExtension {
                 path: path.to_path_buf(),
                 extension: other.to_string(),
             }),
         },
     }
+}
+
+fn materialize_columnar_tables_for_export(
+    workbook: &formula_model::Workbook,
+) -> formula_model::Workbook {
+    use formula_model::{CellRef, CellValue};
+
+    let mut out = workbook.clone();
+    for sheet in &mut out.sheets {
+        let Some((origin, rows, cols)) = sheet.columnar_table_extent() else {
+            continue;
+        };
+
+        // The columnar backend is currently used for imported data. To export to
+        // XLSX, materialize values into the sparse cell map, preserving any
+        // existing overlay cells (edits / formulas / styles).
+        for r in 0..rows {
+            let Ok(r_u32) = u32::try_from(r) else {
+                break;
+            };
+            let row = origin.row.saturating_add(r_u32);
+            for c in 0..cols {
+                let Ok(c_u32) = u32::try_from(c) else {
+                    break;
+                };
+                let col = origin.col.saturating_add(c_u32);
+                let cell_ref = CellRef::new(row, col);
+
+                if sheet.cell(cell_ref).is_some() {
+                    continue;
+                }
+
+                let value = sheet.value(cell_ref);
+                if value != CellValue::Empty {
+                    sheet.set_value(cell_ref, value);
+                }
+            }
+        }
+
+        // Drop the columnar reference from the exported workbook so callers don't
+        // accidentally treat the output as still virtualized.
+        sheet.clear_columnar_table();
+    }
+
+    out
 }
 
 fn xlsb_to_model_workbook(wb: &xlsb::XlsbWorkbook) -> Result<formula_model::Workbook, xlsb::Error> {
