@@ -48,7 +48,8 @@ pub fn workbook_to_model(workbook: &AppWorkbook) -> anyhow::Result<ModelWorkbook
     let mut number_format_style_ids: HashMap<String, u32> = HashMap::new();
 
     for sheet in &workbook.sheets {
-        let sheet_id = model.add_sheet(sheet.name.clone())?;
+        let _sheet_id = model.add_sheet(sheet.name.clone())?;
+        let sheet_idx = model.sheets.len().saturating_sub(1);
 
         for ((row, col), cell) in sheet.cells_iter() {
             let cell_ref = CellRef::new(row as u32, col as u32);
@@ -86,7 +87,7 @@ pub fn workbook_to_model(workbook: &AppWorkbook) -> anyhow::Result<ModelWorkbook
                 continue;
             }
 
-            if let Some(model_sheet) = model.sheet_mut(sheet_id) {
+            if let Some(model_sheet) = model.sheets.get_mut(sheet_idx) {
                 model_sheet.set_cell(cell_ref, out);
             }
         }

@@ -1887,6 +1887,7 @@ fn scalar_to_model_value(value: &CellScalar) -> formula_model::CellValue {
 fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_model::Workbook> {
     let mut out = formula_model::Workbook::new();
     out.date_system = workbook.date_system;
+    let mut number_format_style_ids: HashMap<String, u32> = HashMap::new();
 
     let mut sheet_id_by_app_id: HashMap<String, WorksheetId> = HashMap::new();
     let mut sheet_id_by_name: HashMap<String, WorksheetId> = HashMap::new();
@@ -1904,14 +1905,14 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
             .get(&sheet.id)
             .copied()
             .ok_or_else(|| anyhow::anyhow!("missing sheet id for {}", sheet.id))?;
-        let model_sheet = out
-            .sheet_mut(model_sheet_id)
-            .ok_or_else(|| anyhow::anyhow!("sheet missing from model: {}", sheet.id))?;
 
         if let Some(columnar) = sheet.columnar.as_ref() {
             // Preserve columnar-backed worksheets without materializing the full dataset
             // into the sparse cell map. The XLSX writer can stream from the columnar
             // table, while `sheet.cells` acts as an overlay for edits/formulas.
+            let model_sheet = out
+                .sheet_mut(model_sheet_id)
+                .ok_or_else(|| anyhow::anyhow!("sheet missing from model: {}", sheet.id))?;
             model_sheet.set_columnar_table(formula_model::CellRef::new(0, 0), columnar.clone());
         }
 
@@ -1934,6 +1935,28 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
 
             let mut model_cell = formula_model::Cell::new(scalar_to_model_value(&scalar));
             model_cell.formula = formula;
+            if let Some(fmt) = cell
+                .number_format
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                if let Some(existing) = number_format_style_ids.get(fmt) {
+                    model_cell.style_id = *existing;
+                } else {
+                    let fmt = fmt.to_string();
+                    let style_id = out.intern_style(formula_model::Style {
+                        number_format: Some(fmt.clone()),
+                        ..Default::default()
+                    });
+                    number_format_style_ids.insert(fmt, style_id);
+                    model_cell.style_id = style_id;
+                }
+            }
+
+            let model_sheet = out
+                .sheet_mut(model_sheet_id)
+                .ok_or_else(|| anyhow::anyhow!("sheet missing from model: {}", sheet.id))?;
             model_sheet.set_cell(cell_ref, model_cell);
         }
     }
@@ -2927,6 +2950,27 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
             model_sheet.value(b1),
             ModelCellValue::String("override".to_string())
         );
+    }
+
+    #[test]
+    fn app_workbook_to_formula_model_roundtrip_preserves_number_formats() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        let mut cell = Cell::from_literal(Some(CellScalar::Number(44927.0)));
+        cell.number_format = Some("m/d/yyyy".to_string());
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(0, 0, cell);
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let out_path = tmp.path().join("roundtrip.xlsx");
+        write_xlsx_blocking(&out_path, &workbook).expect("write workbook");
+
+        let loaded = read_xlsx_blocking(&out_path).expect("read workbook");
+        let sheet = &loaded.sheets[0];
+        let loaded_cell = sheet.get_cell(0, 0);
+        assert_eq!(loaded_cell.computed_value, CellScalar::Number(44927.0));
+        assert_eq!(loaded_cell.number_format.as_deref(), Some("m/d/yyyy"));
     }
 
     #[test]
