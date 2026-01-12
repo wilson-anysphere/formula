@@ -45,6 +45,17 @@ const wasm = path.join(outDir, "formula_wasm_bg.wasm");
 const buildWrapper = path.join(buildOutDir, "formula_wasm.js");
 const buildWasm = path.join(buildOutDir, "formula_wasm_bg.wasm");
 
+// If the previous run was interrupted during the final swap step, we may have a complete
+// `pkg-backup/` directory but no `pkg/` directory. Restore it so subsequent runs can still
+// short-circuit when nothing has changed.
+if (!existsSync(outDir) && existsSync(backupOutDir)) {
+  try {
+    await rename(backupOutDir, outDir);
+  } catch {
+    // ignore
+  }
+}
+
 const targets = [
   path.join(repoRoot, "apps", "web", "public", "engine"),
   path.join(repoRoot, "apps", "desktop", "public", "engine")

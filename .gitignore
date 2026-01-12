@@ -49,6 +49,8 @@ pnpm-debug.log*
 # wasm-pack output
 /pkg/
 **/pkg/
+**/pkg-build/
+**/pkg-backup/
 crates/formula-wasm/pkg-node/
 
 # Local per-repo Cargo directories (agent builds)
