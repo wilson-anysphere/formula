@@ -32,6 +32,8 @@ pub(crate) struct ExternSheetRef {
     pub(crate) itab_last: u16,
 }
 
+/// Context needed to decode BIFF8 `rgce` streams that may reference workbook-scoped metadata such
+/// as sheets (`EXTERNSHEET`) and other defined names (`NAME` table).
 #[derive(Debug, Clone)]
 pub(crate) struct DefinedNameMeta {
     pub(crate) name: String,
@@ -2084,5 +2086,120 @@ mod tests {
         assert_eq!(decoded2.text, "'Sheet 1'!LocalName");
         assert!(decoded2.warnings.is_empty(), "warnings={:?}", decoded2.warnings);
         assert_parseable(&decoded2.text);
+    }
+
+    #[test]
+    fn decodes_ptgref3d_with_sheet_prefix() {
+        // Sheet1!A1 (PtgRef3d).
+        let rgce = [
+            0x3A, // PtgRef3d
+            0x00, 0x00, // ixti=0
+            0x00, 0x00, // row=0
+            0x00, 0xC0, // col=A (relative)
+        ];
+
+        let sheet_names = vec!["Sheet1".to_string()];
+        let externsheet = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "Sheet1!A1");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptgarea3d_sheet_span_with_quoting() {
+        // 'Sheet 1:Sheet 3'!A1:B2 (PtgArea3d with sheet span).
+        let rgce = [
+            0x3B, // PtgArea3d
+            0x00, 0x00, // ixti=0
+            0x00, 0x00, // rowFirst=0
+            0x01, 0x00, // rowLast=1
+            0x00, 0xC0, // colFirst=A
+            0x01, 0xC0, // colLast=B
+        ];
+
+        let sheet_names = vec![
+            "Sheet 1".to_string(),
+            "Sheet2".to_string(),
+            "Sheet 3".to_string(),
+        ];
+        let externsheet = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 2,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'Sheet 1:Sheet 3'!A1:B2");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptgname_workbook_and_sheet_scoped() {
+        let sheet_names = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names = vec![
+            DefinedNameMeta {
+                name: "GlobalName".to_string(),
+                scope_sheet: None,
+            },
+            DefinedNameMeta {
+                name: "LocalName".to_string(),
+                scope_sheet: Some(0),
+            },
+        ];
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        let rgce1 = [
+            0x23, // PtgName
+            0x01, 0x00, 0x00, 0x00, // nameId=1
+            0x00, 0x00, // reserved
+        ];
+        let decoded1 = decode_biff8_rgce(&rgce1, &ctx);
+        assert_eq!(decoded1.text, "GlobalName");
+        assert!(decoded1.warnings.is_empty(), "warnings={:?}", decoded1.warnings);
+        assert_parseable(&decoded1.text);
+
+        let rgce2 = [
+            0x23, // PtgName
+            0x02, 0x00, 0x00, 0x00, // nameId=2
+            0x00, 0x00, // reserved
+        ];
+        let decoded2 = decode_biff8_rgce(&rgce2, &ctx);
+        assert_eq!(decoded2.text, "Sheet1!LocalName");
+        assert!(decoded2.warnings.is_empty(), "warnings={:?}", decoded2.warnings);
+        assert_parseable(&decoded2.text);
+    }
+
+    #[test]
+    fn quotes_sheet_names_that_look_like_cell_refs() {
+        // Sheet name "A1" must be quoted or it will lex as a Cell token instead of a sheet prefix.
+        let rgce = [
+            0x3A, // PtgRef3d
+            0x00, 0x00, // ixti=0
+            0x00, 0x00, // row=0
+            0x00, 0xC0, // col=A (relative)
+        ];
+
+        let sheet_names = vec!["A1".to_string()];
+        let externsheet = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "'A1'!A1");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
     }
 }
