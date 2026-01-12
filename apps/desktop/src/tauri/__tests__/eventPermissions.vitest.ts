@@ -12,7 +12,7 @@ type CapabilityPermission =
 
 describe("tauri capability event permissions", () => {
   it("scopes event.listen / event.emit (no allow-all event permissions)", () => {
-    const capabilityUrl = new URL("../../../../src-tauri/capabilities/main.json", import.meta.url);
+    const capabilityUrl = new URL("../../../src-tauri/capabilities/main.json", import.meta.url);
     const capability = JSON.parse(readFileSync(capabilityUrl, "utf8")) as {
       permissions?: CapabilityPermission[];
     };
@@ -49,4 +49,3 @@ describe("tauri capability event permissions", () => {
     }
   });
 });
-
