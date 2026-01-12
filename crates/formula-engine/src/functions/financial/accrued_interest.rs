@@ -6,6 +6,24 @@ use super::coupon_schedule::{coupon_period_e, days_between, validate_basis, vali
 
 const MAX_COUPON_STEPS: usize = 50_000;
 
+fn is_eom(date_serial: i32, system: ExcelDateSystem) -> ExcelResult<bool> {
+    Ok(date_time::eomonth(date_serial, 0, system)? == date_serial)
+}
+
+fn shift_coupon_months_eom(
+    anchor: i32,
+    months: i32,
+    eom: bool,
+    system: ExcelDateSystem,
+) -> ExcelResult<i32> {
+    let shifted = date_time::edate(anchor, months, system)?;
+    if eom {
+        date_time::eomonth(shifted, 0, system)
+    } else {
+        Ok(shifted)
+    }
+}
+
 /// ACCRINTM(issue, settlement, rate, par, [basis])
 ///
 /// Accrued interest for a security that pays interest at maturity.
@@ -69,16 +87,21 @@ pub fn accrint(
         return Err(ExcelError::Num);
     }
 
-    // Coupon schedule is anchored at `first_interest` (not maturity), stepping by ±`months` via EDATE.
+    // Coupon schedule is anchored at `first_interest` (not maturity).
+    //
+    // Excel applies an end-of-month (EOM) pinning rule for coupon schedules: if the anchor date is
+    // month-end (even if not the 31st, e.g. Apr 30 or Feb 28/29), subsequent coupon dates are pinned
+    // to month-end.
+    let eom = is_eom(first_interest, system)?;
     let (pcd, ncd) = if settlement < first_interest {
-        let pcd = date_time::edate(first_interest, -months, system)?;
+        let pcd = shift_coupon_months_eom(first_interest, -months, eom, system)?;
         (pcd, first_interest)
     } else {
         // IMPORTANT: EDATE month-stepping is not invertible due to end-of-month clamping.
         // Compute each coupon date as an offset from `first_interest` to avoid day-of-month drift
         // (matching how Excel's COUP* functions behave when anchored at maturity).
         let mut pcd = first_interest;
-        let mut ncd = date_time::edate(first_interest, months, system)?;
+        let mut ncd = shift_coupon_months_eom(first_interest, months, eom, system)?;
         let mut k: i32 = 0;
 
         for _ in 0..MAX_COUPON_STEPS {
@@ -90,7 +113,7 @@ pub fn accrint(
 
             let next_k = k.checked_add(1).ok_or(ExcelError::Num)?;
             let months_fwd = next_k.checked_mul(months).ok_or(ExcelError::Num)?;
-            ncd = date_time::edate(first_interest, months_fwd, system)?;
+            ncd = shift_coupon_months_eom(first_interest, months_fwd, eom, system)?;
         }
 
         if settlement >= ncd {

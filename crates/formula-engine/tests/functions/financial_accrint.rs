@@ -134,6 +134,40 @@ fn accrint_coupon_schedule_is_anchored_to_first_interest_to_avoid_edate_drift() 
 }
 
 #[test]
+fn accrint_coupon_schedule_pins_month_end_when_first_interest_is_month_end() {
+    let mut sheet = TestSheet::new();
+
+    // Similar to the drift regression above, but with an anchor date that is month-end but not the
+    // 31st (April 30). Excel's coupon schedule rules treat this as an end-of-month schedule and pin
+    // subsequent coupon dates to month-end (Jul 31, Oct 31, ...), which affects basis=1 computations.
+
+    // Settlement after first interest date => accrue from PCD regardless of calc_method.
+    // first_interest=2020-04-30, frequency=4 => coupon dates: 2020-04-30, 2020-07-31, 2020-10-31, ...
+    // Settlement 2020-08-15 is in the period 2020-07-31..2020-10-31.
+    // Coupon payment C = par * rate / f = 1000 * 0.12 / 4 = 30.
+    // Basis 1 => A = 15 days, E = 92 days.
+    let expected = 30.0 * (15.0 / 92.0);
+    assert_number(
+        &sheet.eval("=ACCRINT(DATE(2019,12,15),DATE(2020,4,30),DATE(2020,8,15),0.12,1000,4,1)"),
+        expected,
+    );
+
+    // Settlement before first interest date => calc_method controls whether we accrue from issue
+    // or from the start of the regular coupon period (PCD). Under the EOM schedule:
+    // PCD = 2020-01-31, E = 90.
+    let from_issue = 30.0 * (31.0 / 90.0);
+    let from_pcd = 30.0 * (15.0 / 90.0);
+    assert_number(
+        &sheet.eval("=ACCRINT(DATE(2020,1,15),DATE(2020,4,30),DATE(2020,2,15),0.12,1000,4,1,FALSE)"),
+        from_issue,
+    );
+    assert_number(
+        &sheet.eval("=ACCRINT(DATE(2020,1,15),DATE(2020,4,30),DATE(2020,2,15),0.12,1000,4,1,TRUE)"),
+        from_pcd,
+    );
+}
+
+#[test]
 fn accrint_calc_method_affects_only_stub_period_before_first_interest() {
     let mut sheet = TestSheet::new();
 
