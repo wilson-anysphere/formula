@@ -5,8 +5,8 @@ use std::io::{Cursor, Write};
 use formula_vba::{
     compress_container, compute_vba_project_digest_v3, content_normalized_data,
     forms_normalized_data, list_vba_digital_signatures, verify_vba_digital_signature,
-    verify_vba_signature_binding_with_stream_path, DigestAlg, VbaSignatureBinding,
-    VbaSignatureStreamKind, VbaSignatureVerification,
+    verify_vba_digital_signature_with_project, verify_vba_signature_binding_with_stream_path,
+    DigestAlg, VbaSignatureBinding, VbaSignatureStreamKind, VbaSignatureVerification,
 };
 use md5::{Digest as _, Md5};
 
@@ -372,4 +372,55 @@ fn prefers_bound_verified_digital_signature_ext_over_unbound_verified_ex_candida
         "expected bound DigitalSignatureExt stream to be selected, got {}",
         chosen.stream_path
     );
+}
+
+#[test]
+fn prefers_bound_verified_digital_signature_ext_when_signatures_are_in_separate_container() {
+    // Some XLSM producers store signature streams in a dedicated OLE part
+    // (`xl/vbaProjectSignature.bin`) instead of embedding them in `vbaProject.bin`. Ensure the
+    // selection logic remains consistent in that configuration.
+    let project = build_minimal_vba_project_bin_v3_with_signature_streams(&[], b"ABC");
+    let digest = compute_vba_project_digest_v3(&project, DigestAlg::Sha256).expect("digest v3");
+
+    // Bound `DigitalSignatureExt` stream (v3 digest matches the project).
+    let bound_content = build_spc_indirect_data_content_sha256(&digest);
+    let bound_pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&bound_content);
+    let mut bound_stream = bound_content.clone();
+    bound_stream.extend_from_slice(&bound_pkcs7);
+
+    // Verified but unbound `DigitalSignatureEx` stream (wrong legacy MD5 digest).
+    let content_normalized = content_normalized_data(&project).expect("content normalized data");
+    let content_hash_md5: [u8; 16] = Md5::digest(&content_normalized).into();
+    let forms = forms_normalized_data(&project).expect("forms normalized data");
+    let mut h = Md5::new();
+    h.update(&content_normalized);
+    h.update(&forms);
+    let agile_hash_md5: [u8; 16] = h.finalize().into();
+
+    let mut wrong_md5 = content_hash_md5;
+    wrong_md5[0] = wrong_md5[0].wrapping_add(1);
+    if wrong_md5 == content_hash_md5 || wrong_md5 == agile_hash_md5 {
+        wrong_md5[1] ^= 0xFF;
+    }
+    if wrong_md5[0] == 0x30 {
+        wrong_md5[0] = 0x31;
+    }
+
+    let unbound_content = build_spc_indirect_data_content_sha256(&wrong_md5);
+    let unbound_pkcs7 = signature_test_utils::make_pkcs7_detached_signature(&unbound_content);
+    let mut unbound_stream = unbound_content.clone();
+    unbound_stream.extend_from_slice(&unbound_pkcs7);
+
+    let signature_container = signature_test_utils::build_vba_project_bin_with_signature_streams(&[
+        ("\u{0005}DigitalSignatureEx", unbound_stream.as_slice()),
+        ("\u{0005}DigitalSignatureExt", bound_stream.as_slice()),
+    ]);
+
+    let chosen = verify_vba_digital_signature_with_project(&project, &signature_container)
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(chosen.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(chosen.binding, VbaSignatureBinding::Bound);
+    assert_eq!(chosen.stream_kind, VbaSignatureStreamKind::DigitalSignatureExt);
 }
