@@ -679,6 +679,34 @@ fn bytecode_backend_matches_ast_for_concat_operator() {
 }
 
 #[test]
+fn bytecode_lower_flattens_concat_operator_chains() {
+    use formula_engine::bytecode;
+    use formula_engine::{LocaleConfig, ParseOptions, ReferenceStyle};
+
+    let origin = parse_a1("A1").expect("origin");
+    let origin = formula_engine::CellAddr::new(origin.row, origin.col);
+    let ast = formula_engine::parse_formula(
+        "=\"a\"&\"b\"&\"c\"",
+        ParseOptions {
+            locale: LocaleConfig::en_us(),
+            reference_style: ReferenceStyle::A1,
+            normalize_relative_to: Some(origin),
+        },
+    )
+    .expect("parse canonical formula");
+
+    let mut resolve_sheet = |_name: &str| Some(0usize);
+    let expr = bytecode::lower_canonical_expr(&ast.expr, origin, 0, &mut resolve_sheet)
+        .expect("lower to bytecode expr");
+
+    let bytecode::Expr::FuncCall { func, args } = expr else {
+        panic!("expected FuncCall");
+    };
+    assert_eq!(func, bytecode::ast::Function::Concat);
+    assert_eq!(args.len(), 3, "expected concat chain to flatten");
+}
+
+#[test]
 fn bytecode_cache_reuses_filled_formula_patterns_for_concat_operator() {
     let mut engine = Engine::new();
 
@@ -705,6 +733,26 @@ fn bytecode_backend_matches_ast_for_postfix_percent_operator() {
 
     assert_engine_matches_ast(&engine, "=10%", "A1");
     assert_engine_matches_ast(&engine, "=A2%", "B2");
+}
+
+#[test]
+fn bytecode_backend_matches_ast_for_double_percent_postfix() {
+    let mut engine = Engine::new();
+    engine.set_cell_formula("Sheet1", "A1", "=10%%").unwrap();
+
+    // Ensure we're exercising the bytecode path.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, "=10%%", "A1");
+
+    // Also check a locale-sensitive numeric text with a trailing percent.
+    engine
+        .set_cell_formula("Sheet1", "A2", r#"="10%"%"#)
+        .unwrap();
+    assert_eq!(engine.bytecode_program_count(), 2);
+    engine.recalculate_single_threaded();
+    assert_engine_matches_ast(&engine, r#"="10%"%"#, "A2");
 }
 
 #[test]
