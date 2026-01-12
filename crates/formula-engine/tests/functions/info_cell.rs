@@ -118,6 +118,21 @@ fn info_recalc_reflects_calc_settings() {
 }
 
 #[test]
+fn info_and_cell_keys_are_trimmed_and_case_insensitive() {
+    let mut sheet = TestSheet::new();
+
+    assert_eq!(
+        sheet.eval("=INFO(\" ReCaLc \")"),
+        Value::Text("Manual".to_string())
+    );
+    assert_number(&sheet.eval("=CELL(\" rOw \",A10)"), 10.0);
+    assert_number(&sheet.eval("=CELL(\" cOl \",C1)"), 3.0);
+
+    assert_eq!(sheet.eval("=INFO(\"\")"), Value::Error(ErrorKind::Value));
+    assert_eq!(sheet.eval("=CELL(\" \",A1)"), Value::Error(ErrorKind::Value));
+}
+
+#[test]
 fn info_numfile_counts_sheets() {
     use formula_engine::Engine;
 
