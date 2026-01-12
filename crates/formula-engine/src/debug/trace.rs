@@ -3,7 +3,7 @@ use crate::eval::{
     parse_a1, CellAddr, CompareOp, EvalContext, FormulaParseError, SheetReference, UnaryOp,
 };
 use crate::functions::{ArgValue as FnArgValue, FunctionContext, SheetId as FnSheetId};
-use crate::value::{ErrorKind, Value};
+use crate::value::{Array, ErrorKind, NumberLocale, Value};
 use std::cmp::Ordering;
 
 /// Half-open byte span into the original formula string.
@@ -192,7 +192,7 @@ pub(crate) fn evaluate_with_trace<R: crate::eval::ValueResolver>(
         ctx,
         recalc_ctx: &recalc_ctx,
     };
-    evaluator.eval_scalar(expr)
+    evaluator.eval_formula(expr)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -223,6 +223,7 @@ enum TokenKind {
     Star,
     Slash,
     Caret,
+    Amp,
     Eq,
     Ne,
     Lt,
@@ -323,6 +324,10 @@ impl<'a> Lexer<'a> {
                 '^' => {
                     self.pos += 1;
                     TokenKind::Caret
+                }
+                '&' => {
+                    self.pos += 1;
+                    TokenKind::Amp
                 }
                 '=' => {
                     self.pos += 1;
@@ -550,7 +555,7 @@ impl ParserImpl {
     }
 
     fn parse_compare(&mut self) -> Result<SpannedExpr<String>, FormulaParseError> {
-        let mut left = self.parse_add_sub()?;
+        let mut left = self.parse_concat()?;
         loop {
             let op = match self.peek().kind {
                 TokenKind::Eq => CompareOp::Eq,
@@ -562,12 +567,33 @@ impl ParserImpl {
                 _ => break,
             };
             self.next();
-            let right = self.parse_add_sub()?;
+            let right = self.parse_concat()?;
             let span = Span::new(left.span.start, right.span.end);
             left = SpannedExpr {
                 span,
                 kind: SpannedExprKind::Compare {
                     op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+            };
+        }
+        Ok(left)
+    }
+
+    fn parse_concat(&mut self) -> Result<SpannedExpr<String>, FormulaParseError> {
+        let mut left = self.parse_add_sub()?;
+        loop {
+            if !matches!(self.peek().kind, TokenKind::Amp) {
+                break;
+            }
+            self.next();
+            let right = self.parse_add_sub()?;
+            let span = Span::new(left.span.start, right.span.end);
+            left = SpannedExpr {
+                span,
+                kind: SpannedExprKind::Binary {
+                    op: crate::eval::BinaryOp::Concat,
                     left: Box::new(left),
                     right: Box::new(right),
                 },
@@ -1135,6 +1161,18 @@ struct TracedEvaluator<'a, R: crate::eval::ValueResolver> {
 }
 
 impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
+    fn eval_formula(&self, expr: &SpannedExpr<usize>) -> (Value, TraceNode) {
+        let (v, mut trace) = self.eval_value(expr);
+        match v {
+            EvalValue::Scalar(v) => (v, trace),
+            EvalValue::Reference(ranges) => {
+                let value = self.deref_reference_dynamic(ranges);
+                trace.value = value.clone();
+                (value, trace)
+            }
+        }
+    }
+
     fn eval_scalar(&self, expr: &SpannedExpr<usize>) -> (Value, TraceNode) {
         let (v, mut trace) = self.eval_value(expr);
         match v {
@@ -1145,6 +1183,37 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 (scalar, trace)
             }
         }
+    }
+
+    fn deref_eval_value_dynamic(&self, value: EvalValue) -> Value {
+        match value {
+            EvalValue::Scalar(v) => v,
+            EvalValue::Reference(ranges) => self.deref_reference_dynamic(ranges),
+        }
+    }
+
+    fn deref_reference_dynamic(&self, ranges: Vec<ResolvedRange>) -> Value {
+        match ranges.as_slice() {
+            [] => Value::Error(ErrorKind::Ref),
+            [only] => self.deref_reference_dynamic_single(only),
+            _ => Value::Error(ErrorKind::Value),
+        }
+    }
+
+    fn deref_reference_dynamic_single(&self, range: &ResolvedRange) -> Value {
+        if range.is_single_cell() {
+            return self.get_sheet_cell_value(&range.sheet_id, range.start);
+        }
+        let range = range.normalized();
+        let rows = (range.end.row - range.start.row + 1) as usize;
+        let cols = (range.end.col - range.start.col + 1) as usize;
+        let mut values = Vec::with_capacity(rows.saturating_mul(cols));
+        for row in range.start.row..=range.end.row {
+            for col in range.start.col..=range.end.col {
+                values.push(self.get_sheet_cell_value(&range.sheet_id, CellAddr { row, col }));
+            }
+        }
+        Value::Array(Array::new(rows, cols, values))
     }
 
     fn get_sheet_cell_value(&self, sheet_id: &FnSheetId, addr: CellAddr) -> Value {
@@ -1592,17 +1661,10 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 )
             }
             SpannedExprKind::Unary { op, expr: inner } => {
-                let (v, child) = self.eval_scalar(inner);
-                let out = match v {
-                    Value::Error(e) => Value::Error(e),
-                    other => match other.coerce_to_number() {
-                        Ok(n) => match op {
-                            UnaryOp::Plus => Value::Number(n),
-                            UnaryOp::Minus => Value::Number(-n),
-                        },
-                        Err(e) => Value::Error(e),
-                    },
-                };
+                let (ev, child) = self.eval_value(inner);
+                let value = self.deref_eval_value_dynamic(ev);
+                let locale = self.recalc_ctx.number_locale;
+                let out = elementwise_unary(&value, |elem| numeric_unary(*op, elem, locale));
                 (
                     EvalValue::Scalar(out.clone()),
                     TraceNode {
@@ -1615,87 +1677,25 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 )
             }
             SpannedExprKind::Binary { op, left, right } => {
-                let (l, ltrace) = self.eval_scalar(left);
-                if let Value::Error(e) = l {
-                    return (
-                        EvalValue::Scalar(Value::Error(e)),
-                        TraceNode {
-                            kind: TraceKind::Binary { op: *op },
-                            span: expr.span,
-                            value: Value::Error(e),
-                            reference: None,
-                            children: vec![ltrace],
-                        },
-                    );
-                }
-                let (r, rtrace) = self.eval_scalar(right);
-                if let Value::Error(e) = r {
-                    return (
-                        EvalValue::Scalar(Value::Error(e)),
-                        TraceNode {
-                            kind: TraceKind::Binary { op: *op },
-                            span: expr.span,
-                            value: Value::Error(e),
-                            reference: None,
-                            children: vec![ltrace, rtrace],
-                        },
-                    );
-                }
-                let ln = match l.coerce_to_number() {
-                    Ok(n) => n,
-                    Err(e) => {
-                        let out = Value::Error(e);
-                        return (
-                            EvalValue::Scalar(out.clone()),
-                            TraceNode {
-                                kind: TraceKind::Binary { op: *op },
-                                span: expr.span,
-                                value: out,
-                                reference: None,
-                                children: vec![ltrace, rtrace],
-                            },
-                        );
-                    }
-                };
-                let rn = match r.coerce_to_number() {
-                    Ok(n) => n,
-                    Err(e) => {
-                        let out = Value::Error(e);
-                        return (
-                            EvalValue::Scalar(out.clone()),
-                            TraceNode {
-                                kind: TraceKind::Binary { op: *op },
-                                span: expr.span,
-                                value: out,
-                                reference: None,
-                                children: vec![ltrace, rtrace],
-                            },
-                        );
-                    }
-                };
+                let (l_ev, ltrace) = self.eval_value(left);
+                let (r_ev, rtrace) = self.eval_value(right);
+
+                let l = self.deref_eval_value_dynamic(l_ev);
+                let r = self.deref_eval_value_dynamic(r_ev);
+                let locale = self.recalc_ctx.number_locale;
+
                 let out = match op {
-                    crate::eval::BinaryOp::Add => Value::Number(ln + rn),
-                    crate::eval::BinaryOp::Sub => Value::Number(ln - rn),
-                    crate::eval::BinaryOp::Mul => Value::Number(ln * rn),
-                    crate::eval::BinaryOp::Div => {
-                        if rn == 0.0 {
-                            Value::Error(ErrorKind::Div0)
-                        } else {
-                            Value::Number(ln / rn)
-                        }
+                    crate::eval::BinaryOp::Add
+                    | crate::eval::BinaryOp::Sub
+                    | crate::eval::BinaryOp::Mul
+                    | crate::eval::BinaryOp::Div
+                    | crate::eval::BinaryOp::Pow => {
+                        elementwise_binary(&l, &r, |a, b| numeric_binary(*op, a, b, locale))
                     }
-                    crate::eval::BinaryOp::Pow => match crate::functions::math::power(ln, rn) {
-                        Ok(n) => Value::Number(n),
-                        Err(e) => Value::Error(match e {
-                            ExcelError::Div0 => ErrorKind::Div0,
-                            ExcelError::Value => ErrorKind::Value,
-                            ExcelError::Num => ErrorKind::Num,
-                        }),
-                    },
+                    crate::eval::BinaryOp::Concat => elementwise_binary(&l, &r, concat_binary),
                     crate::eval::BinaryOp::Range
                     | crate::eval::BinaryOp::Intersect
-                    | crate::eval::BinaryOp::Union
-                    | crate::eval::BinaryOp::Concat => Value::Error(ErrorKind::Value),
+                    | crate::eval::BinaryOp::Union => Value::Error(ErrorKind::Value),
                 };
                 (
                     EvalValue::Scalar(out.clone()),
@@ -1709,33 +1709,12 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 )
             }
             SpannedExprKind::Compare { op, left, right } => {
-                let (l, ltrace) = self.eval_scalar(left);
-                if let Value::Error(e) = l {
-                    return (
-                        EvalValue::Scalar(Value::Error(e)),
-                        TraceNode {
-                            kind: TraceKind::Compare { op: *op },
-                            span: expr.span,
-                            value: Value::Error(e),
-                            reference: None,
-                            children: vec![ltrace],
-                        },
-                    );
-                }
-                let (r, rtrace) = self.eval_scalar(right);
-                if let Value::Error(e) = r {
-                    return (
-                        EvalValue::Scalar(Value::Error(e)),
-                        TraceNode {
-                            kind: TraceKind::Compare { op: *op },
-                            span: expr.span,
-                            value: Value::Error(e),
-                            reference: None,
-                            children: vec![ltrace, rtrace],
-                        },
-                    );
-                }
-                let out = excel_compare(&l, &r, *op);
+                let (l_ev, ltrace) = self.eval_value(left);
+                let (r_ev, rtrace) = self.eval_value(right);
+
+                let l = self.deref_eval_value_dynamic(l_ev);
+                let r = self.deref_eval_value_dynamic(r_ev);
+                let out = elementwise_binary(&l, &r, |a, b| excel_compare(a, b, *op));
                 (
                     EvalValue::Scalar(out.clone()),
                     TraceNode {
@@ -2128,6 +2107,139 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                 (Value::Error(ErrorKind::NA), traces)
             }
         }
+    }
+}
+
+fn numeric_unary(op: UnaryOp, value: &Value, locale: NumberLocale) -> Value {
+    match value {
+        Value::Error(e) => Value::Error(*e),
+        other => {
+            let n = match other.coerce_to_number_with_locale(locale) {
+                Ok(n) => n,
+                Err(e) => return Value::Error(e),
+            };
+            match op {
+                UnaryOp::Plus => Value::Number(n),
+                UnaryOp::Minus => Value::Number(-n),
+            }
+        }
+    }
+}
+
+fn concat_binary(left: &Value, right: &Value) -> Value {
+    if let Value::Error(e) = left {
+        return Value::Error(*e);
+    }
+    if let Value::Error(e) = right {
+        return Value::Error(*e);
+    }
+
+    let ls = match left.coerce_to_string() {
+        Ok(s) => s,
+        Err(e) => return Value::Error(e),
+    };
+    let rs = match right.coerce_to_string() {
+        Ok(s) => s,
+        Err(e) => return Value::Error(e),
+    };
+    Value::Text(format!("{ls}{rs}"))
+}
+
+fn numeric_binary(op: crate::eval::BinaryOp, left: &Value, right: &Value, locale: NumberLocale) -> Value {
+    if let Value::Error(e) = left {
+        return Value::Error(*e);
+    }
+    if let Value::Error(e) = right {
+        return Value::Error(*e);
+    }
+
+    let ln = match left.coerce_to_number_with_locale(locale) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+    let rn = match right.coerce_to_number_with_locale(locale) {
+        Ok(n) => n,
+        Err(e) => return Value::Error(e),
+    };
+
+    match op {
+        crate::eval::BinaryOp::Add => Value::Number(ln + rn),
+        crate::eval::BinaryOp::Sub => Value::Number(ln - rn),
+        crate::eval::BinaryOp::Mul => Value::Number(ln * rn),
+        crate::eval::BinaryOp::Div => {
+            if rn == 0.0 {
+                Value::Error(ErrorKind::Div0)
+            } else {
+                Value::Number(ln / rn)
+            }
+        }
+        crate::eval::BinaryOp::Pow => match crate::functions::math::power(ln, rn) {
+            Ok(n) => Value::Number(n),
+            Err(e) => Value::Error(match e {
+                ExcelError::Div0 => ErrorKind::Div0,
+                ExcelError::Value => ErrorKind::Value,
+                ExcelError::Num => ErrorKind::Num,
+            }),
+        },
+        _ => Value::Error(ErrorKind::Value),
+    }
+}
+
+fn elementwise_unary(value: &Value, f: impl Fn(&Value) -> Value) -> Value {
+    match value {
+        Value::Array(arr) => Value::Array(Array::new(arr.rows, arr.cols, arr.iter().map(f).collect())),
+        other => f(other),
+    }
+}
+
+fn elementwise_binary(left: &Value, right: &Value, f: impl Fn(&Value, &Value) -> Value) -> Value {
+    match (left, right) {
+        (Value::Array(left_arr), Value::Array(right_arr)) => {
+            let out_rows = if left_arr.rows == right_arr.rows {
+                left_arr.rows
+            } else if left_arr.rows == 1 {
+                right_arr.rows
+            } else if right_arr.rows == 1 {
+                left_arr.rows
+            } else {
+                return Value::Error(ErrorKind::Value);
+            };
+
+            let out_cols = if left_arr.cols == right_arr.cols {
+                left_arr.cols
+            } else if left_arr.cols == 1 {
+                right_arr.cols
+            } else if right_arr.cols == 1 {
+                left_arr.cols
+            } else {
+                return Value::Error(ErrorKind::Value);
+            };
+
+            let mut out = Vec::with_capacity(out_rows.saturating_mul(out_cols));
+            for row in 0..out_rows {
+                let l_row = if left_arr.rows == 1 { 0 } else { row };
+                let r_row = if right_arr.rows == 1 { 0 } else { row };
+                for col in 0..out_cols {
+                    let l_col = if left_arr.cols == 1 { 0 } else { col };
+                    let r_col = if right_arr.cols == 1 { 0 } else { col };
+                    let l = left_arr.get(l_row, l_col).unwrap_or(&Value::Blank);
+                    let r = right_arr.get(r_row, r_col).unwrap_or(&Value::Blank);
+                    out.push(f(l, r));
+                }
+            }
+            Value::Array(Array::new(out_rows, out_cols, out))
+        }
+        (Value::Array(left_arr), right_scalar) => Value::Array(Array::new(
+            left_arr.rows,
+            left_arr.cols,
+            left_arr.values.iter().map(|a| f(a, right_scalar)).collect(),
+        )),
+        (left_scalar, Value::Array(right_arr)) => Value::Array(Array::new(
+            right_arr.rows,
+            right_arr.cols,
+            right_arr.values.iter().map(|b| f(left_scalar, b)).collect(),
+        )),
+        (left_scalar, right_scalar) => f(left_scalar, right_scalar),
     }
 }
 

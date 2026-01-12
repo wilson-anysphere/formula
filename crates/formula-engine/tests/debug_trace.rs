@@ -221,6 +221,35 @@ fn debug_trace_supports_array_literals() {
 }
 
 #[test]
+fn debug_trace_supports_array_arithmetic_broadcasting() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "={1;2}+{10,20,30}")
+        .unwrap();
+
+    let dbg = engine.debug_evaluate("Sheet1", "A1").unwrap();
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), "{1;2}+{10,20,30}");
+    assert_eq!(
+        dbg.trace.kind,
+        TraceKind::Binary {
+            op: formula_engine::eval::BinaryOp::Add
+        }
+    );
+
+    let Value::Array(arr) = dbg.value else {
+        panic!("expected Value::Array from debug evaluation, got {:?}", dbg.value);
+    };
+    assert_eq!(arr.rows, 2);
+    assert_eq!(arr.cols, 3);
+    assert_eq!(arr.get(0, 0), Some(&Value::Number(11.0)));
+    assert_eq!(arr.get(0, 1), Some(&Value::Number(21.0)));
+    assert_eq!(arr.get(0, 2), Some(&Value::Number(31.0)));
+    assert_eq!(arr.get(1, 0), Some(&Value::Number(12.0)));
+    assert_eq!(arr.get(1, 1), Some(&Value::Number(22.0)));
+    assert_eq!(arr.get(1, 2), Some(&Value::Number(32.0)));
+}
+
+#[test]
 fn debug_trace_supports_3d_sheet_range_refs() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
