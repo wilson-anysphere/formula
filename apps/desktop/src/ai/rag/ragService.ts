@@ -95,8 +95,12 @@ function storageNamespaceForEmbedder(params: {
 function resolveEmbedder(
   config: DesktopRagEmbedderConfig | undefined,
 ): { embedder: HashEmbedder; dimension: number } {
-  // Ignore unknown/legacy config types (Formula only supports deterministic hash embeddings).
-  const dimension = config?.type && config.type !== "hash" ? 384 : (config?.dimension ?? 384);
+  if (config?.type && config.type !== "hash") {
+    throw new Error(
+      `Desktop workbook RAG only supports deterministic hash embeddings (HashEmbedder). Received embedder.type="${config.type}".`,
+    );
+  }
+  const dimension = config?.dimension ?? 384;
   return { embedder: new HashEmbedder({ dimension }), dimension };
 }
 
