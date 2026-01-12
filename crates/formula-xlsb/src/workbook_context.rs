@@ -512,6 +512,32 @@ impl WorkbookContext {
             .and_then(|t| t.columns.get(&column_id))
             .map(|s| s.as_str())
     }
+
+    /// Returns the table id for a display name.
+    ///
+    /// Table names are treated case-insensitively to match Excel.
+    pub fn table_id_by_name(&self, name: &str) -> Option<u32> {
+        let wanted = normalize_key(name);
+        // HashMap iteration order is nondeterministic; pick the lowest id so encoding is stable.
+        self.tables
+            .iter()
+            .filter_map(|(&id, info)| (normalize_key(&info.name) == wanted).then_some(id))
+            .min()
+    }
+
+    /// Returns a column id for a column display name within a table.
+    ///
+    /// Column names are treated case-insensitively to match Excel.
+    pub fn table_column_id_by_name(&self, table_id: u32, name: &str) -> Option<u32> {
+        let wanted = normalize_key(name);
+        let table = self.tables.get(&table_id)?;
+        // HashMap iteration order is nondeterministic; pick the lowest id so encoding is stable.
+        table
+            .columns
+            .iter()
+            .filter_map(|(&id, col_name)| (normalize_key(col_name) == wanted).then_some(id))
+            .min()
+    }
 }
 
 fn normalize_key(s: &str) -> String {

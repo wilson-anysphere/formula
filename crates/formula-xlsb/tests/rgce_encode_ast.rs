@@ -8,6 +8,16 @@ use formula_xlsb::workbook_context::WorkbookContext;
 use formula_xlsb::XlsbWorkbook;
 use pretty_assertions::assert_eq;
 
+fn ctx_table1() -> WorkbookContext {
+    let mut ctx = WorkbookContext::default();
+    ctx.add_table(1, "Table1");
+    ctx.add_table_column(1, 1, "Item");
+    ctx.add_table_column(1, 2, "Qty");
+    ctx.add_table_column(1, 3, "Price");
+    ctx.add_table_column(1, 4, "Total");
+    ctx
+}
+
 #[test]
 fn ast_encoder_roundtrips_3d_ref() {
     let mut ctx = WorkbookContext::default();
@@ -175,6 +185,59 @@ fn ast_encoder_roundtrips_defined_name() {
 
     let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
     assert_eq!(decoded, "MyNamedRange");
+}
+
+#[test]
+fn ast_encoder_roundtrips_structured_ref_table_column() {
+    let ctx = ctx_table1();
+    let encoded =
+        encode_rgce_with_context_ast("=Table1[Qty]", &ctx, CellCoord::new(0, 0)).expect("encode");
+
+    assert_eq!(
+        encoded.rgce,
+        vec![
+            0x18, 0x19, // PtgExtend + etpg=PtgList
+            1, 0, 0, 0, // table id
+            0, 0, // flags
+            2, 0, // col_first
+            2, 0, // col_last
+            0, 0, // reserved
+        ]
+    );
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "Table1[Qty]");
+}
+
+#[test]
+fn ast_encoder_roundtrips_structured_ref_headers_column() {
+    let ctx = ctx_table1();
+    let encoded = encode_rgce_with_context_ast("=Table1[[#Headers],[Qty]]", &ctx, CellCoord::new(0, 0))
+        .expect("encode");
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "Table1[[#Headers],[Qty]]");
+}
+
+#[test]
+fn ast_encoder_roundtrips_structured_ref_column_range() {
+    let ctx = ctx_table1();
+    let encoded =
+        encode_rgce_with_context_ast("=Table1[[Qty]:[Total]]", &ctx, CellCoord::new(0, 0))
+            .expect("encode");
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "Table1[[Qty]:[Total]]");
+}
+
+#[test]
+fn ast_encoder_roundtrips_implicit_intersection_on_structured_ref() {
+    let ctx = ctx_table1();
+    let encoded =
+        encode_rgce_with_context_ast("=@Table1[Qty]", &ctx, CellCoord::new(0, 0)).expect("encode");
+
+    let decoded = decode_rgce_with_context(&encoded.rgce, &ctx).expect("decode");
+    assert_eq!(decoded, "@Table1[Qty]");
 }
 
 #[test]
