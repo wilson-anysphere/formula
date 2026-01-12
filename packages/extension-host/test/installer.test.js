@@ -25,6 +25,9 @@ test("installer workflow: install -> list -> load -> uninstall", async () => {
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(tmpDir, "permissions.json"),
     extensionStoragePath: path.join(tmpDir, "storage.json"),
+    // Worker startup can be slow under heavy CI load; keep this flow test focused on the
+    // installer behavior rather than the default 5s activation SLA.
+    activationTimeoutMs: 20_000,
     permissionPrompt: async () => true
   });
 

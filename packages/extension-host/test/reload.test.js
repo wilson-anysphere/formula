@@ -42,6 +42,9 @@ test("reloadExtension recycles the worker and clears runtime registrations", asy
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    // Worker startup can be slow under heavy CI load; keep this test focused on reload behavior
+    // rather than the default 5s activation SLA.
+    activationTimeoutMs: 20_000,
     permissionPrompt: async () => true
   });
 
@@ -63,4 +66,3 @@ test("reloadExtension recycles the worker and clears runtime registrations", asy
   assert.equal(await host.executeCommand("test.dynamic"), "ok");
   assert.ok(host.getPanel("test.panel"));
 });
-

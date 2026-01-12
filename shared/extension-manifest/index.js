@@ -270,6 +270,9 @@ function validateActivationEvents(activationEvents, contributes) {
 
     if (ev.startsWith("onView:")) {
       const id = ev.slice("onView:".length);
+      if (id.trim().length === 0) {
+        throw new ManifestError(`activationEvents references empty view/panel id`);
+      }
       if (!knownPanels.has(id)) {
         throw new ManifestError(`activationEvents references unknown view/panel: ${id}`);
       }
