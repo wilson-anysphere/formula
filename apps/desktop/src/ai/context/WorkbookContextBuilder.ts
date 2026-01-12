@@ -896,7 +896,7 @@ export class WorkbookContextBuilder {
     // Keep the prompt context JSON compact (minified) for:
     // - Smaller prompts (more room for relevant workbook data).
     // - Easier machine parsing (systems can reliably scan for `"kind":"selection"`, etc).
-    const stableCompactJson = (value: unknown): string => stableJsonStringify(value);
+    const stableCompactJson = stableJsonStringify;
 
     const sections = [
       {
