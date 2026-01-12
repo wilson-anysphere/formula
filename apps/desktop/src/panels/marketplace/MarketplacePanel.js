@@ -645,14 +645,22 @@ export function createMarketplacePanel({
       dataset: { testid: "marketplace-search-button" },
       onClick: async () => {
         transientStatusById.clear();
-        await renderSearchResults({
-          container: resultsContainer,
-          marketplaceClient,
-          extensionManager,
-          extensionHostManager,
-          query: queryInput.value,
-          transientStatusById,
-        });
+        try {
+          await renderSearchResults({
+            container: resultsContainer,
+            marketplaceClient,
+            extensionManager,
+            extensionHostManager,
+            query: queryInput.value,
+            transientStatusById,
+          });
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.error(error);
+          const msg = String(error?.message ?? error);
+          tryShowToast(msg, "error");
+          resultsContainer.textContent = `Error: ${msg}`;
+        }
       },
     },
     [document.createTextNode("Search")],

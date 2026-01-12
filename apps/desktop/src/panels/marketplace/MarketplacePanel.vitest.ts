@@ -267,6 +267,54 @@ describe("MarketplacePanel", () => {
     await waitFor(() => Boolean(container.querySelector('[data-testid="marketplace-install-formula.sample-hello"]')));
   });
 
+  it("surfaces marketplace search failures via toast + error message", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const toastRoot = document.createElement("div");
+    toastRoot.id = "toast-root";
+    document.body.appendChild(toastRoot);
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const marketplaceClient = {
+      search: vi.fn(async () => {
+        throw new Error("Search failed");
+      }),
+      getExtension: vi.fn(async () => null),
+    };
+
+    const extensionManager = {
+      getInstalled: vi.fn(async () => null),
+      install: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
+      uninstall: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
+      checkForUpdates: vi.fn(async () => []),
+      update: vi.fn(async () => {
+        throw new Error("not implemented");
+      }),
+    };
+
+    createMarketplacePanel({ container, marketplaceClient: marketplaceClient as any, extensionManager: extensionManager as any });
+
+    const searchInput = container.querySelector<HTMLInputElement>('input[type="search"]');
+    expect(searchInput).toBeInstanceOf(HTMLInputElement);
+    searchInput!.value = "sample";
+
+    const searchButton = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Search");
+    expect(searchButton).toBeInstanceOf(HTMLButtonElement);
+    searchButton!.click();
+
+    await waitFor(() => Boolean(document.querySelector('[data-testid="toast"][data-type="error"]')));
+    const toast = document.querySelector<HTMLElement>('[data-testid="toast"][data-type="error"]');
+    expect(toast?.textContent).toContain("Search failed");
+
+    await waitFor(() => container.textContent?.includes("Error: Search failed") ?? false);
+  });
+
   it("restores action buttons when the update check finds no updates", async () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
