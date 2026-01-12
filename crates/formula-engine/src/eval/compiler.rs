@@ -48,6 +48,14 @@ pub fn lower_expr(expr: &crate::Expr, origin: Option<crate::CellAddr>) -> Expr<S
             sheet: lower_sheet_reference(&r.workbook, &r.sheet),
             name: r.name.clone(),
         }),
+        crate::Expr::FieldAccess(access) => Expr::FunctionCall {
+            name: "_FIELDACCESS".to_string(),
+            original_name: "_FIELDACCESS".to_string(),
+            args: vec![
+                lower_expr(access.base.as_ref(), origin),
+                Expr::Text(access.field.clone()),
+            ],
+        },
         crate::Expr::CellRef(r) => {
             let sheet = lower_sheet_reference(&r.workbook, &r.sheet);
             let Some(col) = coord_to_index_opt(&r.col, origin.map(|o| o.col), MAX_COL) else {
@@ -421,6 +429,19 @@ fn compile_expr_inner(
                 name: r.name.clone(),
             })
         }
+        crate::Expr::FieldAccess(access) => Expr::FunctionCall {
+            name: "_FIELDACCESS".to_string(),
+            original_name: "_FIELDACCESS".to_string(),
+            args: vec![
+                compile_expr_inner(
+                    access.base.as_ref(),
+                    current_sheet,
+                    current_cell,
+                    resolve_sheet,
+                ),
+                Expr::Text(access.field.clone()),
+            ],
+        },
         crate::Expr::CellRef(r) => {
             let sheet =
                 compile_sheet_reference(&r.workbook, &r.sheet, current_sheet, resolve_sheet);

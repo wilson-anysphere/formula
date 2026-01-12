@@ -2,8 +2,8 @@ use std::cmp::{max, min};
 
 use crate::{
     parse_formula, ArrayLiteral, Ast, BinaryExpr, BinaryOp, CallExpr, CellAddr,
-    CellRef as AstCellRef, ColRef as AstColRef, Coord, Expr, FunctionCall, ParseOptions,
-    PostfixExpr, RowRef as AstRowRef, SerializeOptions, SheetRef, UnaryExpr,
+    CellRef as AstCellRef, ColRef as AstColRef, Coord, Expr, FieldAccessExpr, FunctionCall,
+    ParseOptions, PostfixExpr, RowRef as AstRowRef, SerializeOptions, SheetRef, UnaryExpr,
 };
 
 const REF_ERROR: &str = "#REF!";
@@ -188,6 +188,24 @@ fn rewrite_expr_for_structural_edit(
     resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> (Expr, bool) {
     match expr {
+        Expr::FieldAccess(access) => {
+            let (base, changed) = rewrite_expr_for_structural_edit(
+                access.base.as_ref(),
+                ctx_sheet,
+                edit,
+                resolve_sheet_id,
+            );
+            if !changed {
+                return (expr.clone(), false);
+            }
+            (
+                Expr::FieldAccess(FieldAccessExpr {
+                    base: Box::new(base),
+                    field: access.field.clone(),
+                }),
+                true,
+            )
+        }
         Expr::CellRef(r) => {
             rewrite_cell_ref_for_structural_edit(r, ctx_sheet, edit, resolve_sheet_id)
         }
@@ -215,6 +233,20 @@ fn rewrite_expr_for_structural_edit(
 
 fn rewrite_expr_for_copy_delta(expr: &Expr, delta_row: i32, delta_col: i32) -> (Expr, bool) {
     match expr {
+        Expr::FieldAccess(access) => {
+            let (base, changed) =
+                rewrite_expr_for_copy_delta(access.base.as_ref(), delta_row, delta_col);
+            if !changed {
+                return (expr.clone(), false);
+            }
+            (
+                Expr::FieldAccess(FieldAccessExpr {
+                    base: Box::new(base),
+                    field: access.field.clone(),
+                }),
+                true,
+            )
+        }
         Expr::CellRef(r) => rewrite_cell_ref_for_copy_delta(r, delta_row, delta_col),
         Expr::RowRef(r) => rewrite_row_ref_for_copy_delta(r, delta_row),
         Expr::ColRef(r) => rewrite_col_ref_for_copy_delta(r, delta_col),
@@ -242,6 +274,20 @@ fn rewrite_expr_for_range_map(
     resolve_sheet_id: &mut impl FnMut(&str) -> Option<usize>,
 ) -> (Expr, bool) {
     match expr {
+        Expr::FieldAccess(access) => {
+            let (base, changed) =
+                rewrite_expr_for_range_map(access.base.as_ref(), ctx_sheet, edit, resolve_sheet_id);
+            if !changed {
+                return (expr.clone(), false);
+            }
+            (
+                Expr::FieldAccess(FieldAccessExpr {
+                    base: Box::new(base),
+                    field: access.field.clone(),
+                }),
+                true,
+            )
+        }
         Expr::CellRef(r) => rewrite_cell_ref_for_range_map(r, ctx_sheet, edit, resolve_sheet_id),
         Expr::Binary(b) if b.op == BinaryOp::Range => {
             if let Some(result) =
@@ -264,6 +310,19 @@ where
     F: FnMut(&Expr) -> (Expr, bool),
 {
     match expr {
+        Expr::FieldAccess(FieldAccessExpr { base, field }) => {
+            let (base, changed) = f(base);
+            if !changed {
+                return (expr.clone(), false);
+            }
+            (
+                Expr::FieldAccess(FieldAccessExpr {
+                    base: Box::new(base),
+                    field: field.clone(),
+                }),
+                true,
+            )
+        }
         Expr::FunctionCall(FunctionCall { name, args }) => {
             let mut changed = false;
             let args: Vec<Expr> = args
@@ -1801,5 +1860,35 @@ mod tests {
         );
         assert!(changed);
         assert_eq!(out, "=LAMBDA(x,A2+x)(1)");
+    }
+
+    #[test]
+    fn structural_edit_rewrites_references_inside_field_access() {
+        let edit = StructuralEdit::InsertRows {
+            sheet: "Sheet1".to_string(),
+            row: 0,
+            count: 1,
+        };
+        let (out, changed) =
+            rewrite_formula_for_structural_edit("=A1.Price", "Sheet1", CellAddr::new(0, 1), &edit);
+        assert!(changed);
+        assert_eq!(out, "=A2.Price");
+
+        let (out, changed) = rewrite_formula_for_structural_edit(
+            "=A1.[Unit Price]",
+            "Sheet1",
+            CellAddr::new(0, 1),
+            &edit,
+        );
+        assert!(changed);
+        assert_eq!(out, "=A2.[Unit Price]");
+    }
+
+    #[test]
+    fn copy_delta_rewrites_references_inside_field_access() {
+        let (out, changed) =
+            rewrite_formula_for_copy_delta("=A1.Price", "Sheet1", CellAddr::new(0, 1), 1, 0);
+        assert!(changed);
+        assert_eq!(out, "=A2.Price");
     }
 }

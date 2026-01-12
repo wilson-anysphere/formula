@@ -225,7 +225,10 @@ fn split_numeric_exponent(raw: &str) -> (&str, &str) {
             continue;
         }
         let rest = &raw[idx + ch.len_utf8()..];
-        let rest = rest.strip_prefix('+').or_else(|| rest.strip_prefix('-')).unwrap_or(rest);
+        let rest = rest
+            .strip_prefix('+')
+            .or_else(|| rest.strip_prefix('-'))
+            .unwrap_or(rest);
         if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
@@ -352,6 +355,11 @@ pub enum Expr {
     ColRef(ColRef),
     RowRef(RowRef),
     StructuredRef(StructuredRef),
+    /// Field access on a base expression, e.g. `A1.Price` or `A1.[Market Cap]`.
+    ///
+    /// The `field` string is preserved as-is from the input, and should not include the leading
+    /// dot. For bracket-quoted fields, `field` includes the brackets (e.g. `[Market Cap]`).
+    FieldAccess(FieldAccessExpr),
     Array(ArrayLiteral),
     FunctionCall(FunctionCall),
     Call(CallExpr),
@@ -362,6 +370,12 @@ pub enum Expr {
     Missing,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldAccessExpr {
+    pub base: Box<Expr>,
+    pub field: String,
+}
+
 impl Expr {
     fn normalize_relative(&self, origin: CellAddr) -> Self {
         match self {
@@ -369,6 +383,10 @@ impl Expr {
             Expr::ColRef(r) => Expr::ColRef(r.normalize_relative(origin)),
             Expr::RowRef(r) => Expr::RowRef(r.normalize_relative(origin)),
             Expr::StructuredRef(r) => Expr::StructuredRef(r.clone()),
+            Expr::FieldAccess(access) => Expr::FieldAccess(FieldAccessExpr {
+                base: Box::new(access.base.normalize_relative(origin)),
+                field: access.field.clone(),
+            }),
             Expr::Number(v) => Expr::Number(v.clone()),
             Expr::String(v) => Expr::String(v.clone()),
             Expr::Boolean(v) => Expr::Boolean(*v),
@@ -414,6 +432,7 @@ impl Expr {
             Expr::Unary(_) => 70,
             Expr::Postfix(_) => 60,
             Expr::Call(_) => 90,
+            Expr::FieldAccess(_) => 95,
             _ => 100,
         }
     }
@@ -450,6 +469,11 @@ impl Expr {
             Expr::ColRef(r) => r.fmt(out, opts)?,
             Expr::RowRef(r) => r.fmt(out, opts)?,
             Expr::StructuredRef(r) => r.fmt(out, opts)?,
+            Expr::FieldAccess(access) => {
+                access.base.fmt(out, opts, Some(my_prec))?;
+                out.push('.');
+                out.push_str(&access.field);
+            }
             Expr::Array(arr) => arr.fmt(out, opts)?,
             Expr::FunctionCall(call) => call.fmt(out, opts)?,
             Expr::Call(call) => {
@@ -499,6 +523,7 @@ impl Expr {
             }
             Expr::Unary(u) => u.expr.contains_union(),
             Expr::Postfix(p) => p.expr.contains_union(),
+            Expr::FieldAccess(access) => access.base.contains_union(),
             Expr::FunctionCall(call) => call.args.iter().any(Expr::contains_union),
             Expr::Call(call) => {
                 call.callee.contains_union() || call.args.iter().any(Expr::contains_union)
@@ -764,7 +789,10 @@ impl Coord {
 pub enum SheetRef {
     Sheet(String),
     /// 3D sheet span reference like `Sheet1:Sheet3!A1`.
-    SheetRange { start: String, end: String },
+    SheetRange {
+        start: String,
+        end: String,
+    },
 }
 
 impl SheetRef {
@@ -1000,12 +1028,7 @@ fn fmt_sheet_name_escaped(out: &mut String, sheet: &str) {
     }
 }
 
-fn fmt_sheet_range_name(
-    out: &mut String,
-    start: &str,
-    end: &str,
-    reference_style: ReferenceStyle,
-) {
+fn fmt_sheet_range_name(out: &mut String, start: &str, end: &str, reference_style: ReferenceStyle) {
     let needs_quotes = sheet_name_needs_quotes(start, reference_style)
         || sheet_name_needs_quotes(end, reference_style);
     if needs_quotes {

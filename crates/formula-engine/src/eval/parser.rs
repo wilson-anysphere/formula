@@ -55,6 +55,14 @@ fn lower_expr(expr: &crate::Expr) -> ParsedExpr {
             sheet: lower_sheet_reference(&r.workbook, &r.sheet),
             name: r.name.clone(),
         }),
+        crate::Expr::FieldAccess(access) => Expr::FunctionCall {
+            name: "_FIELDACCESS".to_string(),
+            original_name: "_FIELDACCESS".to_string(),
+            args: vec![
+                lower_expr(access.base.as_ref()),
+                Expr::Text(access.field.clone()),
+            ],
+        },
 
         crate::Expr::CellRef(r) => lower_cell_ref(r)
             .map(Expr::CellRef)
@@ -330,7 +338,9 @@ fn lower_sheet_reference(
             SheetRef::SheetRange { start, end } if start.eq_ignore_ascii_case(end) => {
                 SheetReference::Sheet(start.clone())
             }
-            SheetRef::SheetRange { start, end } => SheetReference::SheetRange(start.clone(), end.clone()),
+            SheetRef::SheetRange { start, end } => {
+                SheetReference::SheetRange(start.clone(), end.clone())
+            }
         },
         (Some(book), Some(sheet_ref)) => match sheet_ref {
             SheetRef::Sheet(sheet) => SheetReference::External(format!("[{book}]{sheet}")),

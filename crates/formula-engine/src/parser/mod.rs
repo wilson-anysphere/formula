@@ -1,9 +1,10 @@
 //! Formula lexer and parser.
 
 use crate::{
-    ArrayLiteral, Ast, BinaryExpr, BinaryOp, CallExpr, CellRef, ColRef, Coord, Expr, FunctionCall,
-    FunctionName, LocaleConfig, NameRef, ParseError, ParseOptions, PostfixExpr, PostfixOp,
-    ReferenceStyle, RowRef, SheetRef, Span, StructuredRef, UnaryExpr, UnaryOp,
+    ArrayLiteral, Ast, BinaryExpr, BinaryOp, CallExpr, CellRef, ColRef, Coord, Expr,
+    FieldAccessExpr, FunctionCall, FunctionName, LocaleConfig, NameRef, ParseError, ParseOptions,
+    PostfixExpr, PostfixOp, ReferenceStyle, RowRef, SheetRef, Span, StructuredRef, UnaryExpr,
+    UnaryOp,
 };
 
 /// Excel formula limits enforced by this parser.
@@ -40,6 +41,7 @@ pub enum TokenKind {
     RBracket,
     Bang,
     Colon,
+    Dot,
     ArgSep,
     Union,
     ArrayRowSep,
@@ -810,6 +812,10 @@ impl<'a> Lexer<'a> {
                     let raw = self.lex_number();
                     self.push(TokenKind::Number(raw), start, self.idx);
                 }
+                '.' => {
+                    self.bump();
+                    self.push(TokenKind::Dot, start, self.idx);
+                }
                 c if is_ident_start_char(c) => {
                     if self.reference_style == ReferenceStyle::R1C1 {
                         if let Some(cell) = self.try_lex_r1c1_cell_ref() {
@@ -1043,7 +1049,11 @@ impl<'a> Lexer<'a> {
         // reference grammar. If we accept the `A1` prefix as a cell token, the remaining `FOO`
         // becomes an adjacent identifier token which is invalid formula syntax and results in
         // confusing parse errors.
-        if matches!(self.peek_char(), Some(c) if is_ident_cont_char(c) || c == '(') {
+        // If the next character continues an identifier (e.g. `A1FOO`), treat this as a name
+        // rather than a cell reference to avoid confusing parse errors.
+        //
+        // Special case: allow `.` so we can parse field access expressions like `A1.Price`.
+        if matches!(self.peek_char(), Some(c) if (is_ident_cont_char(c) && c != '.') || c == '(') {
             self.idx = save_idx;
             self.chars = save_chars;
             return None;
@@ -1436,6 +1446,13 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
+            // Field access expressions: `expr.field` / `expr.[field name]`.
+            let field_bp = 95;
+            if matches!(self.peek_kind(), TokenKind::Dot) && field_bp >= min_bp {
+                lhs = self.parse_field_access(lhs)?;
+                continue;
+            }
+
             // Postfix operators (`%` and spill-range `#`).
             let postfix_bp = 60;
             if matches!(self.peek_kind(), TokenKind::Percent) && postfix_bp >= min_bp {
@@ -1565,6 +1582,13 @@ impl<'a> Parser<'a> {
             let call_bp = 90;
             if matches!(self.peek_kind(), TokenKind::LParen) && call_bp >= min_bp {
                 lhs = self.parse_call_best_effort(lhs);
+                continue;
+            }
+
+            // Field access expressions: `expr.field` / `expr.[field name]`.
+            let field_bp = 95;
+            if matches!(self.peek_kind(), TokenKind::Dot) && field_bp >= min_bp {
+                lhs = self.parse_field_access_best_effort(lhs);
                 continue;
             }
 
@@ -2699,6 +2723,176 @@ impl<'a> Parser<'a> {
 
         self.call_depth = self.call_depth.saturating_sub(1);
         result
+    }
+
+    fn parse_field_access(&mut self, base: Expr) -> Result<Expr, ParseError> {
+        self.expect(TokenKind::Dot)?;
+        self.skip_trivia();
+
+        let field = match self.peek_kind() {
+            TokenKind::LBracket => {
+                let open_span = self.current_span();
+                self.next(); // '['
+
+                let mut depth: i32 = 1;
+                let mut field_end: Option<usize> = None;
+                while depth > 0 {
+                    match self.peek_kind() {
+                        TokenKind::LBracket => {
+                            depth += 1;
+                            self.next();
+                        }
+                        TokenKind::RBracket => {
+                            // Excel escapes `]` inside brackets as `]]` for structured references,
+                            // which can also appear in field names.
+                            if depth == 1
+                                && matches!(
+                                    self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                                    Some(TokenKind::RBracket)
+                                )
+                            {
+                                self.next();
+                                self.next();
+                                continue;
+                            }
+
+                            let close_span = self.current_span();
+                            self.next();
+                            depth -= 1;
+                            if depth == 0 {
+                                field_end = Some(close_span.end);
+                            }
+                        }
+                        TokenKind::Eof => {
+                            return Err(ParseError::new(
+                                "Unterminated field access",
+                                self.current_span(),
+                            ));
+                        }
+                        _ => {
+                            self.next();
+                        }
+                    }
+                }
+
+                let field_end =
+                    field_end.expect("loop should set field_end when depth reaches zero");
+                self.src[open_span.start..field_end].to_string()
+            }
+            TokenKind::Ident(_)
+            | TokenKind::QuotedIdent(_)
+            | TokenKind::Cell(_)
+            | TokenKind::R1C1Cell(_)
+            | TokenKind::R1C1Row(_)
+            | TokenKind::R1C1Col(_) => {
+                let span = self.current_span();
+                self.next();
+                self.src[span.start..span.end].to_string()
+            }
+            _ => {
+                return Err(ParseError::new(
+                    "Expected field name after `.`",
+                    self.current_span(),
+                ));
+            }
+        };
+
+        Ok(Expr::FieldAccess(FieldAccessExpr {
+            base: Box::new(base),
+            field,
+        }))
+    }
+
+    fn parse_field_access_best_effort(&mut self, base: Expr) -> Expr {
+        if let Err(e) = self.expect(TokenKind::Dot) {
+            self.record_error(e);
+            return base;
+        }
+        self.skip_trivia();
+
+        let field = match self.peek_kind() {
+            TokenKind::LBracket => {
+                let open_span = self.current_span();
+                self.next(); // '['
+
+                let mut depth: i32 = 1;
+                let mut field_end: Option<usize> = None;
+                while depth > 0 {
+                    match self.peek_kind() {
+                        TokenKind::LBracket => {
+                            depth += 1;
+                            self.next();
+                        }
+                        TokenKind::RBracket => {
+                            if depth == 1
+                                && matches!(
+                                    self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                                    Some(TokenKind::RBracket)
+                                )
+                            {
+                                self.next();
+                                self.next();
+                                continue;
+                            }
+
+                            let close_span = self.current_span();
+                            self.next();
+                            depth -= 1;
+                            if depth == 0 {
+                                field_end = Some(close_span.end);
+                            }
+                        }
+                        TokenKind::Eof => {
+                            self.record_error(ParseError::new(
+                                "Unterminated field access",
+                                self.current_span(),
+                            ));
+                            field_end = Some(self.src.len());
+                            break;
+                        }
+                        _ => {
+                            self.next();
+                        }
+                    }
+                }
+
+                let end = field_end.unwrap_or_else(|| self.src.len());
+                self.src[open_span.start..end].to_string()
+            }
+            TokenKind::Ident(_)
+            | TokenKind::QuotedIdent(_)
+            | TokenKind::Cell(_)
+            | TokenKind::R1C1Cell(_)
+            | TokenKind::R1C1Row(_)
+            | TokenKind::R1C1Col(_) => {
+                let span = self.current_span();
+                self.next();
+                self.src[span.start..span.end].to_string()
+            }
+            TokenKind::Eof | TokenKind::ArgSep | TokenKind::RParen => {
+                self.record_error(ParseError::new(
+                    "Expected field name after `.`",
+                    self.current_span(),
+                ));
+                String::new()
+            }
+            _ => {
+                self.record_error(ParseError::new(
+                    "Expected field name after `.`",
+                    self.current_span(),
+                ));
+                // Consume one token to avoid loops.
+                if !matches!(self.peek_kind(), TokenKind::Eof) {
+                    self.next();
+                }
+                String::new()
+            }
+        };
+
+        Expr::FieldAccess(FieldAccessExpr {
+            base: Box::new(base),
+            field,
+        })
     }
 
     fn parse_array_literal(&mut self) -> Result<Expr, ParseError> {
