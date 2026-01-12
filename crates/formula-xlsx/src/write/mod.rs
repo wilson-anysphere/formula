@@ -712,8 +712,15 @@ fn build_parts(
             .transpose()
             .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
 
-        let (orig_tab_color, orig_merges, orig_hyperlinks, orig_views, orig_cols, orig_autofilter) =
-            if let Some(orig) = orig {
+        let (
+            orig_tab_color,
+            orig_merges,
+            orig_hyperlinks,
+            orig_views,
+            orig_cols,
+            orig_autofilter,
+            orig_sheet_protection,
+        ) = if let Some(orig) = orig {
                 let orig_xml = std::str::from_utf8(orig).map_err(|e| {
                     WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
                 })?;
@@ -721,6 +728,7 @@ fn build_parts(
 
                 let orig_views = parse_sheet_view_settings(orig_xml)?;
                 let orig_cols = parse_col_properties(orig_xml)?;
+                let orig_sheet_protection = parse_sheet_protection(orig_xml)?;
 
                 let orig_merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(orig_xml)
                     .map_err(|err| match err {
@@ -759,6 +767,7 @@ fn build_parts(
                     orig_views,
                     orig_cols,
                     orig_autofilter,
+                    orig_sheet_protection,
                 )
             } else {
                 (
@@ -768,6 +777,7 @@ fn build_parts(
                     SheetViewSettings::default(),
                     BTreeMap::new(),
                     None,
+                    SheetProtection::default(),
                 )
             };
 
@@ -788,6 +798,8 @@ fn build_parts(
 
         let autofilter_changed = sheet.auto_filter.as_ref() != orig_autofilter.as_ref();
 
+        let sheet_protection_changed = sheet.sheet_protection != orig_sheet_protection;
+
         let sheet_xml_bytes = write_worksheet_xml(
             doc,
             sheet_meta,
@@ -805,6 +817,7 @@ fn build_parts(
             && !views_changed
             && !cols_changed
             && !autofilter_changed
+            && !sheet_protection_changed
         {
             parts.insert(sheet_meta.path.clone(), sheet_xml_bytes);
             continue;
@@ -827,6 +840,9 @@ fn build_parts(
         }
         if is_new_sheet || merges_changed {
             sheet_xml = crate::merge_cells::update_worksheet_xml(&sheet_xml, &current_merges)?;
+        }
+        if is_new_sheet || sheet_protection_changed {
+            sheet_xml = update_sheet_protection_xml(&sheet_xml, &sheet.sheet_protection)?;
         }
         if is_new_sheet || hyperlinks_changed {
             sheet_xml = crate::update_worksheet_xml(&sheet_xml, &current_hyperlinks)?;
@@ -1094,6 +1110,146 @@ fn update_sheet_views_xml(sheet_xml: &str, views: SheetViewSettings) -> Result<S
 
 fn parse_xml_bool(val: &str) -> bool {
     val == "1" || val.eq_ignore_ascii_case("true")
+}
+
+fn parse_xml_u16_hex(val: &str) -> Option<u16> {
+    u16::from_str_radix(val.trim(), 16).ok()
+}
+
+fn parse_sheet_protection(xml: &str) -> Result<SheetProtection, WriteError> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf)? {
+            Event::Eof => break,
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"sheetProtection" => {
+                // Mirror the parser behavior from `read`: the presence of the element implies
+                // protection is enabled unless `sheet="0"` overrides it.
+                let mut protection = SheetProtection::default();
+                protection.enabled = true;
+                for attr in e.attributes() {
+                    let attr = attr?;
+                    let val = attr.unescape_value()?.into_owned();
+                    match attr.key.as_ref() {
+                        b"sheet" => protection.enabled = parse_xml_bool(&val),
+                        b"selectLockedCells" => protection.select_locked_cells = parse_xml_bool(&val),
+                        b"selectUnlockedCells" => {
+                            protection.select_unlocked_cells = parse_xml_bool(&val)
+                        }
+                        b"formatCells" => protection.format_cells = parse_xml_bool(&val),
+                        b"formatColumns" => protection.format_columns = parse_xml_bool(&val),
+                        b"formatRows" => protection.format_rows = parse_xml_bool(&val),
+                        b"insertColumns" => protection.insert_columns = parse_xml_bool(&val),
+                        b"insertRows" => protection.insert_rows = parse_xml_bool(&val),
+                        b"insertHyperlinks" => protection.insert_hyperlinks = parse_xml_bool(&val),
+                        b"deleteColumns" => protection.delete_columns = parse_xml_bool(&val),
+                        b"deleteRows" => protection.delete_rows = parse_xml_bool(&val),
+                        b"sort" => protection.sort = parse_xml_bool(&val),
+                        b"autoFilter" => protection.auto_filter = parse_xml_bool(&val),
+                        b"pivotTables" => protection.pivot_tables = parse_xml_bool(&val),
+                        // Inverted "protected" flags.
+                        b"objects" => protection.edit_objects = !parse_xml_bool(&val),
+                        b"scenarios" => protection.edit_scenarios = !parse_xml_bool(&val),
+                        b"password" => {
+                            protection.password_hash =
+                                parse_xml_u16_hex(&val).filter(|hash| *hash != 0);
+                        }
+                        _ => {}
+                    }
+                }
+                return Ok(protection);
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(SheetProtection::default())
+}
+
+fn update_sheet_protection_xml(
+    sheet_xml: &str,
+    protection: &SheetProtection,
+) -> Result<String, WriteError> {
+    let worksheet_prefix = crate::xml::worksheet_spreadsheetml_prefix(sheet_xml)?;
+    let new_section = render_sheet_protection(protection, worksheet_prefix.as_deref());
+
+    let mut reader = Reader::from_str(sheet_xml);
+    reader.config_mut().trim_text(false);
+
+    let mut writer = Writer::new(Vec::new());
+    let mut buf = Vec::new();
+
+    let mut skip_depth: usize = 0;
+    let mut replaced = false;
+    let mut inserted = false;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Eof => break,
+            _ if skip_depth > 0 => match event {
+                Event::Start(_) => skip_depth += 1,
+                Event::End(_) => skip_depth = skip_depth.saturating_sub(1),
+                Event::Empty(_) => {}
+                _ => {}
+            },
+            Event::Start(ref e) if e.local_name().as_ref() == b"sheetProtection" => {
+                replaced = true;
+                if !new_section.is_empty() {
+                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                }
+                // Skip any nested content so we fully replace the element even if it's written as
+                // `<sheetProtection>...</sheetProtection>`.
+                skip_depth = 1;
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"sheetProtection" => {
+                replaced = true;
+                if !new_section.is_empty() {
+                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                }
+            }
+            Event::End(ref e) if e.local_name().as_ref() == b"sheetData" => {
+                writer.write_event(Event::End(e.to_owned()))?;
+                if !replaced && !inserted && !new_section.is_empty() {
+                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                    inserted = true;
+                }
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"sheetData" => {
+                writer.write_event(Event::Empty(e.to_owned()))?;
+                if !replaced && !inserted && !new_section.is_empty() {
+                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                    inserted = true;
+                }
+            }
+            Event::Start(ref e) | Event::Empty(ref e) if e.local_name().as_ref() == b"autoFilter" => {
+                // If `sheetData` is missing (unexpected), fall back to inserting before autoFilter
+                // so the worksheet remains schema-valid.
+                if !replaced && !inserted && !new_section.is_empty() {
+                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                    inserted = true;
+                }
+                writer.write_event(event.to_owned())?;
+            }
+            Event::End(ref e) if e.local_name().as_ref() == b"worksheet" => {
+                if !replaced && !inserted && !new_section.is_empty() {
+                    writer.get_mut().extend_from_slice(new_section.as_bytes());
+                    inserted = true;
+                }
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
+            _ => {
+                writer.write_event(event.to_owned())?;
+            }
+        }
+        buf.clear();
+    }
+
+    String::from_utf8(writer.into_inner())
+        .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))
 }
 
 fn parse_col_properties(
@@ -1796,6 +1952,12 @@ fn patch_workbook_xml(
     let mut spreadsheetml_prefix: Option<String> = None;
     let mut office_rels_prefix: Option<String> = None;
 
+    let want_workbook_protection =
+        !WorkbookProtection::is_default(&doc.workbook.workbook_protection);
+    let mut saw_workbook_protection = false;
+    let mut inserted_workbook_protection = false;
+    let mut skipping_workbook_protection = false;
+
     let mut skipping_sheets = false;
     let mut skipping_workbook_pr = false;
     let mut skipping_calc_pr = false;
@@ -1850,6 +2012,31 @@ fn patch_workbook_xml(
                 }
             }
 
+            Event::Start(e) if e.local_name().as_ref() == b"workbookProtection" => {
+                saw_workbook_protection = true;
+                skipping_workbook_protection = true;
+                if want_workbook_protection && !inserted_workbook_protection {
+                    let empty = Event::Empty(e.into_owned());
+                    match empty {
+                        Event::Empty(e) => write_workbook_protection(doc, &mut writer, &e)?,
+                        _ => unreachable!(),
+                    }
+                }
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"workbookProtection" => {
+                saw_workbook_protection = true;
+                if want_workbook_protection && !inserted_workbook_protection {
+                    write_workbook_protection(doc, &mut writer, &e)?;
+                }
+            }
+            Event::End(e) if e.local_name().as_ref() == b"workbookProtection" => {
+                if skipping_workbook_protection {
+                    skipping_workbook_protection = false;
+                } else {
+                    writer.write_event(Event::End(e.into_owned()))?;
+                }
+            }
+
             Event::Start(e) if e.local_name().as_ref() == b"calcPr" => {
                 skipping_calc_pr = true;
                 let empty = Event::Empty(e.into_owned());
@@ -1867,6 +2054,29 @@ fn patch_workbook_xml(
                 } else {
                     writer.write_event(Event::End(e.into_owned()))?;
                 }
+            }
+
+            Event::Start(e) if e.local_name().as_ref() == b"bookViews" => {
+                if want_workbook_protection
+                    && !saw_workbook_protection
+                    && !inserted_workbook_protection
+                {
+                    let tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookProtection");
+                    write_new_workbook_protection(doc, &mut writer, tag.as_str())?;
+                    inserted_workbook_protection = true;
+                }
+                writer.write_event(Event::Start(e.into_owned()))?;
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"bookViews" => {
+                if want_workbook_protection
+                    && !saw_workbook_protection
+                    && !inserted_workbook_protection
+                {
+                    let tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookProtection");
+                    write_new_workbook_protection(doc, &mut writer, tag.as_str())?;
+                    inserted_workbook_protection = true;
+                }
+                writer.write_event(Event::Empty(e.into_owned()))?;
             }
 
             Event::Start(e) if e.local_name().as_ref() == b"workbookView" => {
@@ -1941,6 +2151,14 @@ fn patch_workbook_xml(
             }
 
             Event::Start(e) if e.local_name().as_ref() == b"sheets" => {
+                if want_workbook_protection
+                    && !saw_workbook_protection
+                    && !inserted_workbook_protection
+                {
+                    let tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookProtection");
+                    write_new_workbook_protection(doc, &mut writer, tag.as_str())?;
+                    inserted_workbook_protection = true;
+                }
                 skipping_sheets = true;
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 let sheet_tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "sheet");
@@ -2000,6 +2218,14 @@ fn patch_workbook_xml(
                 }
             }
             Event::Empty(e) if e.local_name().as_ref() == b"sheets" => {
+                if want_workbook_protection
+                    && !saw_workbook_protection
+                    && !inserted_workbook_protection
+                {
+                    let tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "workbookProtection");
+                    write_new_workbook_protection(doc, &mut writer, tag.as_str())?;
+                    inserted_workbook_protection = true;
+                }
                 // Replace `<sheets/>` with a full section.
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 let sheet_tag = prefixed_tag(spreadsheetml_prefix.as_deref(), "sheet");
@@ -2148,7 +2374,9 @@ fn patch_workbook_xml(
             }
 
             Event::Eof => break,
-            ev if skipping_workbook_pr || skipping_calc_pr => drop(ev),
+            ev if skipping_workbook_pr || skipping_workbook_protection || skipping_calc_pr => {
+                drop(ev)
+            }
             ev if skipping_sheets => drop(ev),
             ev => writer.write_event(ev.into_owned())?,
         }
@@ -2236,6 +2464,153 @@ fn write_calc_pr(
         writer
             .get_mut()
             .extend_from_slice(if full { b"1" } else { b"0" });
+        writer.get_mut().push(b'"');
+    }
+    writer.get_mut().extend_from_slice(b"/>");
+    Ok(())
+}
+
+fn write_workbook_protection(
+    doc: &XlsxDocument,
+    writer: &mut Writer<Vec<u8>>,
+    e: &quick_xml::events::BytesStart<'_>,
+) -> Result<(), WriteError> {
+    let protection = &doc.workbook.workbook_protection;
+    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+
+    let mut wrote_lock_structure = false;
+    let mut wrote_lock_windows = false;
+    let mut wrote_password = false;
+
+    writer.get_mut().extend_from_slice(b"<");
+    writer.get_mut().extend_from_slice(tag.as_bytes());
+    for attr in e.attributes() {
+        let attr = attr?;
+        match attr.key.as_ref() {
+            b"lockStructure" => {
+                wrote_lock_structure = true;
+                let val = attr.unescape_value()?.into_owned();
+                let original = parse_xml_bool(&val);
+                let desired = protection.lock_structure;
+
+                writer.get_mut().push(b' ');
+                writer.get_mut().extend_from_slice(attr.key.as_ref());
+                writer.get_mut().extend_from_slice(b"=\"");
+                if original == desired {
+                    writer
+                        .get_mut()
+                        .extend_from_slice(escape_attr(&val).as_bytes());
+                } else {
+                    writer
+                        .get_mut()
+                        .extend_from_slice(if desired { b"1" } else { b"0" });
+                }
+                writer.get_mut().push(b'"');
+            }
+            b"lockWindows" => {
+                wrote_lock_windows = true;
+                let val = attr.unescape_value()?.into_owned();
+                let original = parse_xml_bool(&val);
+                let desired = protection.lock_windows;
+
+                writer.get_mut().push(b' ');
+                writer.get_mut().extend_from_slice(attr.key.as_ref());
+                writer.get_mut().extend_from_slice(b"=\"");
+                if original == desired {
+                    writer
+                        .get_mut()
+                        .extend_from_slice(escape_attr(&val).as_bytes());
+                } else {
+                    writer
+                        .get_mut()
+                        .extend_from_slice(if desired { b"1" } else { b"0" });
+                }
+                writer.get_mut().push(b'"');
+            }
+            b"workbookPassword" => {
+                wrote_password = true;
+                let val = attr.unescape_value()?.into_owned();
+                let original_hash = parse_xml_u16_hex(&val).filter(|hash| *hash != 0);
+                match protection.password_hash {
+                    Some(hash) => {
+                        writer.get_mut().extend_from_slice(b" workbookPassword=\"");
+                        if original_hash == Some(hash) {
+                            writer
+                                .get_mut()
+                                .extend_from_slice(escape_attr(&val).as_bytes());
+                        } else {
+                            writer
+                                .get_mut()
+                                .extend_from_slice(format!("{:04X}", hash).as_bytes());
+                        }
+                        writer.get_mut().push(b'"');
+                    }
+                    None => {
+                        // Preserve the attribute if it was already semantically equivalent to
+                        // `None` (e.g. `0000`), but drop it when clearing a real password hash.
+                        if original_hash.is_none() {
+                            writer.get_mut().push(b' ');
+                            writer.get_mut().extend_from_slice(attr.key.as_ref());
+                            writer.get_mut().extend_from_slice(b"=\"");
+                            writer
+                                .get_mut()
+                                .extend_from_slice(escape_attr(&val).as_bytes());
+                            writer.get_mut().push(b'"');
+                        }
+                    }
+                }
+            }
+            _ => {
+                writer.get_mut().push(b' ');
+                writer.get_mut().extend_from_slice(attr.key.as_ref());
+                writer.get_mut().extend_from_slice(b"=\"");
+                writer.get_mut().extend_from_slice(
+                    escape_attr(&attr.unescape_value()?.into_owned()).as_bytes(),
+                );
+                writer.get_mut().push(b'"');
+            }
+        }
+    }
+
+    if protection.lock_structure && !wrote_lock_structure {
+        writer.get_mut().extend_from_slice(br#" lockStructure="1""#);
+    }
+    if protection.lock_windows && !wrote_lock_windows {
+        writer.get_mut().extend_from_slice(br#" lockWindows="1""#);
+    }
+    if let Some(hash) = protection.password_hash {
+        if !wrote_password {
+            writer.get_mut().extend_from_slice(br#" workbookPassword=""#);
+            writer
+                .get_mut()
+                .extend_from_slice(format!("{:04X}", hash).as_bytes());
+            writer.get_mut().push(b'"');
+        }
+    }
+
+    writer.get_mut().extend_from_slice(b"/>");
+    Ok(())
+}
+
+fn write_new_workbook_protection(
+    doc: &XlsxDocument,
+    writer: &mut Writer<Vec<u8>>,
+    tag: &str,
+) -> Result<(), WriteError> {
+    let protection = &doc.workbook.workbook_protection;
+    writer.get_mut().extend_from_slice(b"<");
+    writer.get_mut().extend_from_slice(tag.as_bytes());
+    if protection.lock_structure {
+        writer.get_mut().extend_from_slice(br#" lockStructure="1""#);
+    }
+    if protection.lock_windows {
+        writer.get_mut().extend_from_slice(br#" lockWindows="1""#);
+    }
+    if let Some(hash) = protection.password_hash {
+        writer.get_mut().extend_from_slice(br#" workbookPassword=""#);
+        writer
+            .get_mut()
+            .extend_from_slice(format!("{:04X}", hash).as_bytes());
         writer.get_mut().push(b'"');
     }
     writer.get_mut().extend_from_slice(b"/>");
