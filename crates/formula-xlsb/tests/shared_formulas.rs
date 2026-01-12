@@ -474,11 +474,11 @@ fn materializes_shared_formulas_out_of_bounds_refs_as_ref_error() {
 #[test]
 fn materializes_shared_formulas_with_ptgref3d() {
     // Record IDs follow the conventions used by `formula-xlsb`'s BIFF12 reader.
-    const WORKSHEET_BEGIN: u32 = 0x0181;
-    const WORKSHEET_END: u32 = 0x0182;
-    const SHEETDATA_BEGIN: u32 = 0x0191;
-    const SHEETDATA_END: u32 = 0x0192;
-    const DIMENSION: u32 = 0x0194;
+    const WORKSHEET_BEGIN: u32 = 0x0081;
+    const WORKSHEET_END: u32 = 0x0082;
+    const SHEETDATA_BEGIN: u32 = 0x0091;
+    const SHEETDATA_END: u32 = 0x0092;
+    const DIMENSION: u32 = 0x0094;
 
     const ROW: u32 = 0x0000;
     const FMLA_NUM: u32 = 0x0009;
