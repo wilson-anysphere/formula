@@ -1052,6 +1052,8 @@ hardcoding assumptions.
 | `cellimages.xml` content type override | `application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml` | `fixtures/xlsx/rich-data/images-in-cell.xlsx` |
 | `metadata.xml` content type override | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml` | `fixtures/xlsx/metadata/rich-values-vm.xlsx`, `fixtures/xlsx/rich-data/images-in-cell.xlsx`, `fixtures/xlsx/rich-data/richdata-minimal.xlsx`, `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`, `fixtures/xlsx/basic/image-in-cell.xlsx` |
 | `metadata.xml` content type override | `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml` | `crates/formula-xlsx/tests/metadata_rich_value_roundtrip.rs` |
+| `metadata.xml` content type override | `application/vnd.ms-excel.metadata+xml` | `crates/formula-xlsx/tests/sheet_edits_preserve_richdata.rs` |
+| `metadata.xml` content type override | `application/xml` | `crates/formula-xlsx/tests/metadata_and_richdata_preservation.rs` |
 
 #### Minimal `.rels` skeletons (best-effort)
 
@@ -1116,6 +1118,8 @@ explicit `[Content_Types].xml` `<Override>` entries for those parts. Observed pa
   * `<Override PartName="/xl/metadata.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheetMetadata+xml"/>`
 * Some tests construct workbooks that use:
   * `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml` for `/xl/metadata.xml`
+  * `application/vnd.ms-excel.metadata+xml` for `/xl/metadata.xml`
+  * `application/xml` for `/xl/metadata.xml` and `xl/richData/*` parts
 
 For the richData tables themselves, Excel emits Microsoft-specific content types in the real Excel fixture
 `fixtures/xlsx/rich-data/images-in-cell.xlsx` and the synthetic regression fixture
