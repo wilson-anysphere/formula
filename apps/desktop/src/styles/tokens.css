@@ -254,6 +254,20 @@
   --formula-operator-color: var(--text-primary);
   --formula-punctuation-color: var(--text-secondary);
   --formula-error-color: var(--error);
+
+  /* Remote presence palette (collaboration cursors/selections) should follow system accent colors. */
+  --formula-grid-remote-presence-1: var(--accent);
+  --formula-grid-remote-presence-2: var(--accent);
+  --formula-grid-remote-presence-3: var(--accent);
+  --formula-grid-remote-presence-4: var(--accent);
+  --formula-grid-remote-presence-5: var(--accent);
+  --formula-grid-remote-presence-6: var(--accent);
+  --formula-grid-remote-presence-7: var(--accent);
+  --formula-grid-remote-presence-8: var(--accent);
+  --formula-grid-remote-presence-9: var(--accent);
+  --formula-grid-remote-presence-10: var(--accent);
+  --formula-grid-remote-presence-11: var(--accent);
+  --formula-grid-remote-presence-12: var(--accent);
 }
 
 @media (forced-colors: active), (prefers-contrast: more) {
@@ -315,6 +329,19 @@
     --formula-operator-color: CanvasText;
     --formula-punctuation-color: CanvasText;
     --formula-error-color: CanvasText;
+
+    --formula-grid-remote-presence-1: var(--accent);
+    --formula-grid-remote-presence-2: var(--accent);
+    --formula-grid-remote-presence-3: var(--accent);
+    --formula-grid-remote-presence-4: var(--accent);
+    --formula-grid-remote-presence-5: var(--accent);
+    --formula-grid-remote-presence-6: var(--accent);
+    --formula-grid-remote-presence-7: var(--accent);
+    --formula-grid-remote-presence-8: var(--accent);
+    --formula-grid-remote-presence-9: var(--accent);
+    --formula-grid-remote-presence-10: var(--accent);
+    --formula-grid-remote-presence-11: var(--accent);
+    --formula-grid-remote-presence-12: var(--accent);
   }
 }
 
