@@ -1042,7 +1042,15 @@ export class CollabSession {
         // eslint-disable-next-line no-undef
         /* @vite-ignore */ specifier
       );
-      const dir = this.dirnameForOfflineFilePath(offline.filePath);
+      // Use node:path.dirname for correctness (handles POSIX roots, Windows drive
+      // roots, etc) without a static Node import that would break browser bundlers.
+      const pathSpecifier = ["node", "path"].join(":");
+      // eslint-disable-next-line no-undef
+      const path = await import(
+        // eslint-disable-next-line no-undef
+        /* @vite-ignore */ pathSpecifier
+      );
+      const dir = typeof path.dirname === "function" ? path.dirname(offline.filePath) : this.dirnameForOfflineFilePath(offline.filePath);
 
       // Best-effort migration: older `@formula/collab-offline` used `offline.filePath`
       // as the *actual* append-only log file. `FileCollabPersistence` stores one file
