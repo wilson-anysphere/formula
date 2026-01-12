@@ -221,10 +221,10 @@ fn model_cell_value_to_sort_value(value: &ModelCellValue) -> CellValue {
         ModelCellValue::RichText(rt) => CellValue::Text(rt.plain_text().to_string()),
         ModelCellValue::Array(_) => CellValue::Blank,
         ModelCellValue::Spill(_) => CellValue::Blank,
-        // Rich value variants (Entity/Record) are not part of `formula-model` yet on older
-        // versions of this repository. Once added, this wildcard arm prevents the match from
-        // becoming non-exhaustive, while still allowing us to map those values for sorting and
-        // filtering by inspecting their stable `{type, value}` serialized representation.
+        // Rich value variants are represented as `{type, value}` in `formula-model` for stable IPC.
+        //
+        // Keep a wildcard arm for forward-compatibility with new `formula-model::CellValue`
+        // variants. Best-effort: attempt to degrade the value to a scalar sort/filter value.
         _ => rich_model_cell_value_to_sort_value(value).unwrap_or(CellValue::Blank),
     }
 }
@@ -235,15 +235,24 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
 
     match value_type {
         "entity" => {
-            let display_value = serialized
-                .get("value")?
-                .get("display_value")?
-                .as_str()?
+            let value = serialized.get("value")?;
+            let display_value = value
+                .get("display")
+                .or_else(|| value.get("display_value"))
+                .and_then(|v| v.as_str())?
                 .to_string();
             Some(CellValue::Text(display_value))
         }
         "record" => {
             let record = serialized.get("value")?;
+
+            // Current `formula-model` record values are a simple display string.
+            if let Some(display) = record.get("display").and_then(|v| v.as_str()) {
+                return Some(CellValue::Text(display.to_string()));
+            }
+
+            // Backwards/forwards compatible fallback: treat record values like the old
+            // rich-data record structure (display_field + fields map) when present.
             let display_field = record.get("display_field")?.as_str()?;
             let fields = record.get("fields")?.as_object()?;
             let display_value = fields.get(display_field)?;
@@ -281,7 +290,6 @@ mod tests {
     use super::model_cell_value_to_sort_value;
     use crate::sort_filter::CellValue;
     use formula_model::CellValue as ModelCellValue;
-    use formula_model::ErrorValue;
     use serde_json::json;
 
     #[test]
@@ -303,7 +311,7 @@ mod tests {
         let Some(entity) = from_json_or_skip_unknown_variant(json!({
             "type": "entity",
             "value": {
-                "display_value": "Entity display"
+                "display": "Entity display"
             }
         })) else {
             // Older versions of `formula-model` won't have Entity/Record variants yet.
@@ -315,116 +323,17 @@ mod tests {
             CellValue::Text("Entity display".to_string())
         );
 
-        let Some(record_string) = from_json_or_skip_unknown_variant(json!({
+        let Some(record) = from_json_or_skip_unknown_variant(json!({
             "type": "record",
             "value": {
-                "display_field": "name",
-                "fields": {
-                    "name": { "type": "string", "value": "Alice" },
-                    "age": { "type": "number", "value": 42.0 }
-                }
+                "display": "Record display"
             }
         })) else {
             return;
         };
         assert_eq!(
-            model_cell_value_to_sort_value(&record_string),
-            CellValue::Text("Alice".to_string())
-        );
-
-        let Some(record_number) = from_json_or_skip_unknown_variant(json!({
-            "type": "record",
-            "value": {
-                "display_field": "age",
-                "fields": {
-                    "name": { "type": "string", "value": "Alice" },
-                    "age": { "type": "number", "value": 42.0 }
-                }
-            }
-        })) else {
-            return;
-        };
-        assert_eq!(
-            model_cell_value_to_sort_value(&record_number),
-            CellValue::Number(42.0)
-        );
-
-        let Some(record_bool) = from_json_or_skip_unknown_variant(json!({
-            "type": "record",
-            "value": {
-                "display_field": "active",
-                "fields": {
-                    "active": { "type": "boolean", "value": true }
-                }
-            }
-        })) else {
-            return;
-        };
-        assert_eq!(model_cell_value_to_sort_value(&record_bool), CellValue::Bool(true));
-
-        let Some(record_error) = from_json_or_skip_unknown_variant(json!({
-            "type": "record",
-            "value": {
-                "display_field": "err",
-                "fields": {
-                    "err": { "type": "error", "value": "#REF!" }
-                }
-            }
-        })) else {
-            return;
-        };
-        assert_eq!(
-            model_cell_value_to_sort_value(&record_error),
-            CellValue::Error(ErrorValue::Ref)
-        );
-
-        let Some(record_rich_text) = from_json_or_skip_unknown_variant(json!({
-            "type": "record",
-            "value": {
-                "display_field": "rt",
-                "fields": {
-                    "rt": { "type": "rich_text", "value": { "text": "Hello", "runs": [] } }
-                }
-            }
-        })) else {
-            return;
-        };
-        assert_eq!(
-            model_cell_value_to_sort_value(&record_rich_text),
-            CellValue::Text("Hello".to_string())
-        );
-
-        // Records only use the display field if it's a primitive sort/filter value.
-        // Rich values fall back to blank.
-        let record_entity_display_field: ModelCellValue = serde_json::from_value(json!({
-            "type": "record",
-            "value": {
-                "display_field": "entity",
-                "fields": {
-                    "entity": { "type": "entity", "value": { "display_value": "Nested entity" } }
-                }
-            }
-        }))
-        .expect("record should deserialize");
-        assert_eq!(
-            model_cell_value_to_sort_value(&record_entity_display_field),
-            CellValue::Blank
-        );
-
-        // Missing display field should fall back to blank.
-        let record_missing_display_field: ModelCellValue = serde_json::from_value(json!({
-            "type": "record",
-            "value": {
-                "display_field": "missing",
-                "fields": {
-                    "name": { "type": "string", "value": "Alice" }
-                }
-            }
-        }))
-        .expect("record should deserialize");
-        assert_eq!(
-            model_cell_value_to_sort_value(&record_missing_display_field),
-            CellValue::Blank
+            model_cell_value_to_sort_value(&record),
+            CellValue::Text("Record display".to_string())
         );
     }
 }
