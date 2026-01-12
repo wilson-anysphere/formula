@@ -328,8 +328,11 @@ mod tests {
     use zip::write::FileOptions;
 
     use super::parse_rich_value_store;
-    use super::{extract_linked_data_types, DEFAULT_RICH_VALUE_STRUCTURE_PART, DEFAULT_RICH_VALUE_TYPES_PART};
+    use super::{
+        extract_linked_data_types, DEFAULT_RICH_VALUE_STRUCTURE_PART, DEFAULT_RICH_VALUE_TYPES_PART,
+    };
     use formula_model::CellRef;
+    use super::RichDataError;
 
     #[test]
     fn rich_value_store_collects_nested_v_elements_in_document_order() {
@@ -499,6 +502,155 @@ mod tests {
         let entry = extracted.get(&key).expect("missing extracted entry");
         assert_eq!(entry.type_name.as_deref(), Some("com.microsoft.excel.stocks"));
         assert_eq!(entry.display.as_deref(), Some("MSFT"));
+    }
+
+    fn build_zip(parts: &[(&str, &[u8])]) -> Vec<u8> {
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options =
+            FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+        for (name, bytes) in parts {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+
+        zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn returns_empty_when_metadata_is_missing() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+        let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+    Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"
+    Target="metadata.xml"/>
+</Relationships>"#;
+        let sheet1_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="1"/>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let bytes = build_zip(&[
+            ("xl/workbook.xml", workbook_xml),
+            ("xl/_rels/workbook.xml.rels", workbook_rels),
+            ("xl/worksheets/sheet1.xml", sheet1_xml),
+            // metadata.xml intentionally missing
+        ]);
+        let pkg = crate::XlsxPackage::from_bytes(&bytes).unwrap();
+        let extracted = extract_linked_data_types(&pkg).unwrap();
+        assert!(extracted.is_empty());
+    }
+
+    #[test]
+    fn returns_empty_when_rich_value_tables_are_missing() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+        let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+    Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"
+    Target="metadata.xml"/>
+</Relationships>"#;
+        let sheet1_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="1"/>
+    </row>
+  </sheetData>
+</worksheet>"#;
+        let metadata_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="1">
+    <metadataType name="XLRICHVALUE"/>
+  </metadataTypes>
+  <futureMetadata name="XLRICHVALUE" count="1">
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000000}">
+          <xlrd:rvb i="0"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+  <valueMetadata count="1">
+    <bk><rc t="1" v="0"/></bk>
+  </valueMetadata>
+</metadata>"#;
+
+        // Missing richValueTypes.xml and richValueStructure.xml => empty.
+        let bytes = build_zip(&[
+            ("xl/workbook.xml", workbook_xml),
+            ("xl/_rels/workbook.xml.rels", workbook_rels),
+            ("xl/worksheets/sheet1.xml", sheet1_xml),
+            ("xl/metadata.xml", metadata_xml),
+            ("xl/richData/richValue.xml", br#"<rvData/>"#),
+        ]);
+        let pkg = crate::XlsxPackage::from_bytes(&bytes).unwrap();
+        let extracted = extract_linked_data_types(&pkg).unwrap();
+        assert!(extracted.is_empty());
+    }
+
+    #[test]
+    fn returns_error_on_malformed_metadata_xml() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+        let workbook_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
+    Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"
+    Target="metadata.xml"/>
+</Relationships>"#;
+        let sheet1_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1" vm="1"/>
+    </row>
+  </sheetData>
+</worksheet>"#;
+
+        let bytes = build_zip(&[
+            ("xl/workbook.xml", workbook_xml),
+            ("xl/_rels/workbook.xml.rels", workbook_rels),
+            ("xl/worksheets/sheet1.xml", sheet1_xml),
+            ("xl/metadata.xml", br#"<metadata"#), // malformed xml
+        ]);
+        let pkg = crate::XlsxPackage::from_bytes(&bytes).unwrap();
+        let err = extract_linked_data_types(&pkg).unwrap_err();
+        assert!(matches!(err, RichDataError::XmlParse { part, .. } if part == "xl/metadata.xml"));
     }
 }
 
