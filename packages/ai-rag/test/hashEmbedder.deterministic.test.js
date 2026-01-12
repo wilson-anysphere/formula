@@ -11,6 +11,14 @@ test("HashEmbedder is deterministic for identical inputs", async () => {
   assert.deepEqual(Array.from(a), Array.from(b));
 });
 
+test("HashEmbedder is deterministic across instances", async () => {
+  const a = new HashEmbedder({ dimension: 64 });
+  const b = new HashEmbedder({ dimension: 64 });
+  const [va] = await a.embedTexts(["hello world"]);
+  const [vb] = await b.embedTexts(["hello world"]);
+  assert.deepEqual(Array.from(va), Array.from(vb));
+});
+
 test("HashEmbedder produces approximately unit-normalized vectors for non-empty inputs", async () => {
   const embedder = new HashEmbedder({ dimension: 64 });
   const [vec] = await embedder.embedTexts(["hello world"]);
