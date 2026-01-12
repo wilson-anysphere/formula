@@ -3455,6 +3455,212 @@ mod tests {
     }
 
     #[test]
+    fn apply_operation_insert_cells_shift_right_moves_cells_and_rewrites_references() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "C1", json!(3.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "D1", json!("=A1+C1"))
+            .unwrap();
+
+        let result = wb
+            .apply_operation_internal(EditOpDto::InsertCellsShiftRight {
+                sheet: DEFAULT_SHEET.to_string(),
+                range: "A1:B1".to_string(),
+            })
+            .unwrap();
+
+        // A1 moved to C1, and C1 moved to E1.
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "C1"),
+            EngineValue::Number(1.0)
+        );
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "E1"),
+            EngineValue::Number(3.0)
+        );
+        // Formula moved from D1 -> F1 and should track the moved cells.
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "F1"),
+            Some("=C1+E1")
+        );
+
+        let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
+        assert_eq!(sheet_cells.get("C1"), Some(&json!(1.0)));
+        assert_eq!(sheet_cells.get("E1"), Some(&json!(3.0)));
+        assert_eq!(sheet_cells.get("F1"), Some(&json!("=C1+E1")));
+        assert!(!sheet_cells.contains_key("A1"));
+        assert!(!sheet_cells.contains_key("D1"));
+
+        assert!(
+            result.formula_rewrites.contains(&EditFormulaRewriteDto {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "F1".to_string(),
+                before: "=A1+C1".to_string(),
+                after: "=C1+E1".to_string(),
+            }),
+            "expected formula rewrite for shifted formula cell"
+        );
+    }
+
+    #[test]
+    fn apply_operation_delete_cells_shift_left_creates_ref_errors_and_updates_shifted_references() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(1.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!(2.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "C1", json!(3.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "D1", json!(4.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "E1", json!("=A1+D1"))
+            .unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "A2", json!("=B1")).unwrap();
+
+        let result = wb
+            .apply_operation_internal(EditOpDto::DeleteCellsShiftLeft {
+                sheet: DEFAULT_SHEET.to_string(),
+                range: "B1:C1".to_string(),
+            })
+            .unwrap();
+
+        // D1 moved into B1.
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "B1"),
+            EngineValue::Number(4.0)
+        );
+        // Formula moved from E1 -> C1 and should track the moved cell (D1 -> B1).
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "C1"),
+            Some("=A1+B1")
+        );
+        // Reference into deleted region becomes #REF!, even though another cell moved into B1.
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "A2"),
+            Some("=#REF!")
+        );
+
+        let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
+        assert_eq!(sheet_cells.get("A1"), Some(&json!(1.0)));
+        assert_eq!(sheet_cells.get("B1"), Some(&json!(4.0)));
+        assert_eq!(sheet_cells.get("C1"), Some(&json!("=A1+B1")));
+        assert_eq!(sheet_cells.get("A2"), Some(&json!("=#REF!")));
+        assert!(!sheet_cells.contains_key("D1"));
+        assert!(!sheet_cells.contains_key("E1"));
+
+        assert!(
+            result.formula_rewrites.contains(&EditFormulaRewriteDto {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "C1".to_string(),
+                before: "=A1+D1".to_string(),
+                after: "=A1+B1".to_string(),
+            }),
+            "expected formula rewrite for shifted formula cell"
+        );
+        assert!(
+            result.formula_rewrites.contains(&EditFormulaRewriteDto {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "A2".to_string(),
+                before: "=B1".to_string(),
+                after: "=#REF!".to_string(),
+            }),
+            "expected formula rewrite for deleted reference"
+        );
+    }
+
+    #[test]
+    fn apply_operation_insert_cells_shift_down_rewrites_references_into_shifted_region() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A1", json!(42.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1")).unwrap();
+
+        let result = wb
+            .apply_operation_internal(EditOpDto::InsertCellsShiftDown {
+                sheet: DEFAULT_SHEET.to_string(),
+                range: "A1".to_string(),
+            })
+            .unwrap();
+
+        // A1 moved down to A2; formula should follow it.
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "A2"),
+            EngineValue::Number(42.0)
+        );
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "B1"),
+            Some("=A2")
+        );
+
+        let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
+        assert_eq!(sheet_cells.get("A2"), Some(&json!(42.0)));
+        assert_eq!(sheet_cells.get("B1"), Some(&json!("=A2")));
+        assert!(!sheet_cells.contains_key("A1"));
+
+        assert!(
+            result.formula_rewrites.contains(&EditFormulaRewriteDto {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "B1".to_string(),
+                before: "=A1".to_string(),
+                after: "=A2".to_string(),
+            }),
+            "expected formula rewrite for shifted reference"
+        );
+    }
+
+    #[test]
+    fn apply_operation_delete_cells_shift_up_rewrites_moved_references_and_invalidates_deleted_targets(
+    ) {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        wb.set_cell_internal(DEFAULT_SHEET, "A3", json!(3.0)).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A3")).unwrap();
+        wb.set_cell_internal(DEFAULT_SHEET, "B2", json!("=A2")).unwrap();
+
+        let result = wb
+            .apply_operation_internal(EditOpDto::DeleteCellsShiftUp {
+                sheet: DEFAULT_SHEET.to_string(),
+                range: "A1:A2".to_string(),
+            })
+            .unwrap();
+
+        // A3 moved up to A1; B1 should follow that move.
+        assert_eq!(
+            wb.engine.get_cell_value(DEFAULT_SHEET, "A1"),
+            EngineValue::Number(3.0)
+        );
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "B1"),
+            Some("=A1")
+        );
+
+        // Reference directly into deleted region becomes #REF!
+        assert_eq!(
+            wb.engine.get_cell_formula(DEFAULT_SHEET, "B2"),
+            Some("=#REF!")
+        );
+
+        let sheet_cells = wb.sheets.get(DEFAULT_SHEET).unwrap();
+        assert_eq!(sheet_cells.get("A1"), Some(&json!(3.0)));
+        assert_eq!(sheet_cells.get("B1"), Some(&json!("=A1")));
+        assert_eq!(sheet_cells.get("B2"), Some(&json!("=#REF!")));
+        assert!(!sheet_cells.contains_key("A3"));
+
+        assert!(
+            result.formula_rewrites.contains(&EditFormulaRewriteDto {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "B1".to_string(),
+                before: "=A3".to_string(),
+                after: "=A1".to_string(),
+            }),
+            "expected formula rewrite for shifted reference"
+        );
+        assert!(
+            result.formula_rewrites.contains(&EditFormulaRewriteDto {
+                sheet: DEFAULT_SHEET.to_string(),
+                address: "B2".to_string(),
+                before: "=A2".to_string(),
+                after: "=#REF!".to_string(),
+            }),
+            "expected formula rewrite for deleted reference"
+        );
+    }
+
+    #[test]
     fn cell_value_to_engine_converts_entity_and_record_values() {
         let mut record_fields = BTreeMap::new();
         record_fields.insert("Name".to_string(), CellValue::String("Alice".to_string()));
