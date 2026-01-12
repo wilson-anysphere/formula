@@ -19,6 +19,16 @@ function normalizeFormula(formula) {
   return `=${stripped}`;
 }
 
+function normalizeSheetNameForCaseInsensitiveCompare(name) {
+  // Excel compares sheet names case-insensitively with Unicode NFKC normalization.
+  // Match the semantics used by the desktop backend + workbook-backend shared validator.
+  try {
+    return String(name ?? "").normalize("NFKC").toUpperCase();
+  } catch {
+    return String(name ?? "").toUpperCase();
+  }
+}
+
 /**
  * Adapter that exposes a DocumentController-like model through the interface expected
  * by `packages/search` (workbook -> sheets -> cells).
@@ -120,16 +130,22 @@ export class DocumentWorkbookAdapter {
     // DocumentController's metadata name (useful when callers haven't provided a separate
     // sheetNameResolver but the document still has user-facing names stored in sheet meta).
     const ids = typeof this.document.getSheetIds === "function" ? this.document.getSheetIds() : [];
-    const needle = trimmed.toLowerCase();
+    const needleIdCi = trimmed.toLowerCase();
+    const needleNameCi = normalizeSheetNameForCaseInsensitiveCompare(trimmed);
 
-    const byId = ids.find((id) => id.toLowerCase() === needle) ?? null;
+    const byId = ids.find((id) => String(id).toLowerCase() === needleIdCi) ?? null;
     if (byId) return byId;
 
     if (typeof this.document.getSheetMeta === "function") {
       for (const id of ids) {
         const meta = this.document.getSheetMeta(id);
         const name = meta?.name;
-        if (typeof name === "string" && name.trim().toLowerCase() === needle) return id;
+        if (
+          typeof name === "string" &&
+          normalizeSheetNameForCaseInsensitiveCompare(name.trim()) === needleNameCi
+        ) {
+          return id;
+        }
       }
     }
 

@@ -226,3 +226,17 @@ test("DocumentWorkbookAdapter resolves display names for unmaterialized sheets w
   assert.equal(sheet.getUsedRange(), null);
   assert.deepEqual(doc.getSheetIds(), []);
 });
+
+test("DocumentWorkbookAdapter resolves DocumentController sheet meta names with Unicode NFKC + case-insensitive compare", () => {
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.renameSheet("Sheet1", "Å");
+
+  // No explicit `sheetNameResolver` passed, so the adapter falls back to DocumentController metadata.
+  const workbook = new DocumentWorkbookAdapter({ document: doc });
+
+  // Angstrom sign (U+212B) normalizes to Å (U+00C5) under NFKC.
+  const sheet = workbook.getSheet("Å");
+  assert.equal(sheet.sheetId, "Sheet1");
+  assert.equal(sheet.name, "Å");
+});

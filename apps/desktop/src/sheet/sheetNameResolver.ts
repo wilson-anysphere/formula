@@ -14,6 +14,16 @@ export type SheetNameResolver = {
   getSheetIdByName(name: string): string | null;
 };
 
+function normalizeSheetNameForCaseInsensitiveCompare(name: string): string {
+  // Excel compares sheet names case-insensitively with Unicode NFKC normalization.
+  // Match the semantics used by `@formula/workbook-backend` and the Rust backend.
+  try {
+    return String(name ?? "").normalize("NFKC").toUpperCase();
+  } catch {
+    return String(name ?? "").toUpperCase();
+  }
+}
+
 /**
  * Creates a {@link SheetNameResolver} backed by a live `Map<sheetId, sheetName>`.
  *
@@ -21,19 +31,21 @@ export type SheetNameResolver = {
  * mutate the map (e.g. on workbook load / rename) without rebuilding the resolver.
  *
  * Both id and name lookups are case-insensitive and return the canonical id/name
- * stored in the map.
+ * stored in the map. Sheet name comparisons use Unicode NFKC normalization to
+ * match Excel-like semantics.
  */
 export function createSheetNameResolverFromIdToNameMap(sheetIdToName: Map<string, string>): SheetNameResolver {
   return {
     getSheetIdByName(name: string): string | null {
       const needle = String(name ?? "").trim();
       if (!needle) return null;
-      const needleCi = needle.toLowerCase();
+      const needleIdCi = needle.toLowerCase();
+      const needleNameCi = normalizeSheetNameForCaseInsensitiveCompare(needle);
 
       for (const [id, displayName] of sheetIdToName.entries()) {
         // Accept ids directly too so callers can canonicalize case ("sheet2" -> "Sheet2").
-        if (String(id).toLowerCase() === needleCi) return id;
-        if (String(displayName).toLowerCase() === needleCi) return id;
+        if (String(id).toLowerCase() === needleIdCi) return id;
+        if (normalizeSheetNameForCaseInsensitiveCompare(displayName) === needleNameCi) return id;
       }
 
       return null;
