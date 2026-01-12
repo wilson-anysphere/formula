@@ -417,6 +417,7 @@ impl AppState {
         after_sheet_id: Option<String>,
         index: Option<usize>,
     ) -> Result<SheetInfoData, AppStateError> {
+        let ctx = self.macro_host.runtime_context();
         let (candidate_id, candidate_name, insert_index, sheet_count_before) = {
             let workbook = self.get_workbook()?;
             let sheet_count_before = workbook.sheets.len();
@@ -540,6 +541,25 @@ impl AppState {
             workbook.origin_xlsb_path = None;
         }
 
+        // The macro runtime context stores sheet indices; keep them stable so it continues to point
+        // at the same sheet(s) after inserting a new sheet before them.
+        if insert_index <= ctx.active_sheet || ctx.selection.is_some() {
+            let mut next_ctx = ctx;
+            if insert_index <= ctx.active_sheet {
+                next_ctx.active_sheet = ctx.active_sheet.saturating_add(1);
+            }
+            if let Some(sel) = ctx.selection {
+                let mut next_sel = sel;
+                if sel.sheet >= insert_index {
+                    next_sel.sheet = sel.sheet.saturating_add(1);
+                }
+                next_ctx.selection = Some(next_sel);
+            }
+            if next_ctx != ctx {
+                self.macro_host.set_runtime_context(next_ctx);
+            }
+        }
+
         // The formula engine indexes sheets by insertion order. When we insert a new sheet into
         // the middle of the workbook, we need to rebuild the engine so:
         // - sheet indices match the workbook order (important for 3D references)
@@ -569,6 +589,7 @@ impl AppState {
         after_sheet_id: Option<String>,
         index: Option<usize>,
     ) -> Result<(), AppStateError> {
+        let ctx = self.macro_host.runtime_context();
         let (sheet_id, name, insert_index, sheet_count_before) = {
             let workbook = self.get_workbook()?;
             let sheet_count_before = workbook.sheets.len();
@@ -642,6 +663,25 @@ impl AppState {
             // Drop the origin bytes so the next save/export regenerates from storage.
             workbook.origin_xlsx_bytes = None;
             workbook.origin_xlsb_path = None;
+        }
+
+        // The macro runtime context stores sheet indices; keep them stable so it continues to point
+        // at the same sheet(s) after inserting a new sheet before them.
+        if insert_index <= ctx.active_sheet || ctx.selection.is_some() {
+            let mut next_ctx = ctx;
+            if insert_index <= ctx.active_sheet {
+                next_ctx.active_sheet = ctx.active_sheet.saturating_add(1);
+            }
+            if let Some(sel) = ctx.selection {
+                let mut next_sel = sel;
+                if sel.sheet >= insert_index {
+                    next_sel.sheet = sel.sheet.saturating_add(1);
+                }
+                next_ctx.selection = Some(next_sel);
+            }
+            if next_ctx != ctx {
+                self.macro_host.set_runtime_context(next_ctx);
+            }
         }
 
         // The formula engine indexes sheets by insertion order. When we insert a new sheet into
@@ -4683,6 +4723,7 @@ mod tests {
             .unwrap()
             .set_cell(0, 0, Cell::from_literal(Some(CellScalar::Number(3.0))));
 
+        // A 3D reference should include any sheets inserted between the two endpoints.
         workbook
             .sheet_mut(&sheet1_id)
             .unwrap()
@@ -4714,6 +4755,77 @@ mod tests {
 
         let b1_after = state.get_cell(&sheet1_id, 0, 1).expect("read Sheet1!B1 after insert");
         assert_eq!(b1_after.value, CellScalar::Number(16.0));
+    }
+
+    #[test]
+    fn add_sheet_inserting_before_existing_sheets_shifts_macro_runtime_context() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        state
+            .set_macro_runtime_context(MacroRuntimeContext {
+                active_sheet: 2,
+                active_cell: (1, 1),
+                selection: Some(formula_vba_runtime::VbaRangeRef {
+                    sheet: 1,
+                    start_row: 1,
+                    start_col: 1,
+                    end_row: 1,
+                    end_col: 1,
+                }),
+            })
+            .expect("set macro runtime context");
+
+        state
+            .add_sheet("Inserted".to_string(), None, None, Some(0))
+            .expect("add sheet succeeds");
+
+        let ctx = state.macro_runtime_context();
+        assert_eq!(ctx.active_sheet, 3);
+        assert_eq!(ctx.selection.expect("selection").sheet, 2);
+    }
+
+    #[test]
+    fn add_sheet_with_id_inserting_before_existing_sheets_shifts_macro_runtime_context() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        state
+            .set_macro_runtime_context(MacroRuntimeContext {
+                active_sheet: 2,
+                active_cell: (1, 1),
+                selection: Some(formula_vba_runtime::VbaRangeRef {
+                    sheet: 1,
+                    start_row: 1,
+                    start_col: 1,
+                    end_row: 1,
+                    end_col: 1,
+                }),
+            })
+            .expect("set macro runtime context");
+
+        state
+            .add_sheet_with_id(
+                "InsertedSheet".to_string(),
+                "Inserted".to_string(),
+                None,
+                Some(0),
+            )
+            .expect("add sheet succeeds");
+
+        let ctx = state.macro_runtime_context();
+        assert_eq!(ctx.active_sheet, 3);
+        assert_eq!(ctx.selection.expect("selection").sheet, 2);
     }
 
     #[test]
