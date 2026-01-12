@@ -130,3 +130,21 @@ fn skips_note_comment_when_txo_payload_is_missing() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn imports_note_comment_text_split_across_continue_records_with_mixed_encoding_flags() {
+    let bytes =
+        xls_fixture_builder::build_note_comment_split_across_continues_mixed_encoding_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("NotesSplitMixed")
+        .expect("NotesSplitMixed missing");
+
+    let a1 = CellRef::from_a1("A1").unwrap();
+    let comments = sheet.comments_for_cell(a1);
+    assert_eq!(comments.len(), 1, "expected 1 comment on A1");
+    assert_eq!(comments[0].content, "ABCDE");
+    assert_eq!(comments[0].id, "xls-note:A1:1");
+}
