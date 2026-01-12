@@ -187,13 +187,15 @@ test.describe("Extension clipboard DLP (taint tracking)", () => {
     await gotoDesktop(page);
     await assertClipboardSupportedOrSkip(page);
 
-    // Keep the active cell on the Restricted range; clipboard should still be allowed because the
-    // extension never reads any cell data (no taint).
+    // Move the selection away and back before loading the extension. This ensures any host-side
+    // bookkeeping that keys off "selection changed at least once" is exercised, while still
+    // keeping the extension untainted (it isn't loaded yet).
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const app: any = (window as any).__formulaApp;
       const sheetId = app.getCurrentSheetId();
-      app.activateCell({ sheetId, row: 0, col: 0 }); // A1
+      app.activateCell({ sheetId, row: 0, col: 1 }); // B1
+      app.activateCell({ sheetId, row: 0, col: 0 }); // A1 (Restricted)
     });
 
     const marker = `__formula_clipboard_marker__${Math.random().toString(16).slice(2)}`;

@@ -508,13 +508,15 @@ test.describe("BrowserExtensionHost", () => {
     });
     await page.evaluate(() => (window as any).__formulaApp.whenIdle());
 
-    // Keep selection on the Restricted cell. Clipboard writes should still be allowed because the
-    // extension never reads any spreadsheet cells (no taint).
+    // Move selection away and back before loading the extension. This ensures any host-side
+    // bookkeeping that keys off "selection changed at least once" is exercised, while still
+    // keeping the extension untainted (it isn't loaded yet).
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const app: any = (window as any).__formulaApp;
       const sheetId = app.getCurrentSheetId();
-      app.activateCell({ sheetId, row: 0, col: 0 }); // A1
+      app.activateCell({ sheetId, row: 0, col: 1 }); // B1
+      app.activateCell({ sheetId, row: 0, col: 0 }); // A1 (Restricted)
     });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 

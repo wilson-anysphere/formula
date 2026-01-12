@@ -3726,14 +3726,6 @@ if (
   let lastSelectionEventKey = "";
   let lastSelectionEventSheetId = app.getCurrentSheetId();
   let selectionSubscriptionInitialized = false;
-  // Track whether the selection has *ever* changed after the initial subscription.
-  //
-  // Some extension-host clipboard DLP enforcement is keyed off the user changing the selection
-  // (which is also when the host will broadcast `selectionChanged` events and therefore expose
-  // cell data to extensions). We intentionally treat the initial selection as "not yet exposed"
-  // so extensions that haven't read any cells (and haven't observed any selectionChanged events)
-  // can still write to the clipboard.
-  let extensionClipboardSelectionChanged = false;
 
   const recordLastExtensionSelection = (
     _sheetId: string,
@@ -3767,7 +3759,6 @@ if (
 
       if (key === lastSelectionEventKey) return;
       lastSelectionEventKey = key;
-      extensionClipboardSelectionChanged = true;
 
       let values: Array<Array<string | number | boolean | null>> = [];
       let formulas: Array<Array<string | null>> | undefined;
@@ -3899,15 +3890,6 @@ if (
 
   const extensionClipboardWriteGuard = async (params: { extensionId: string; taintedRanges: any[] }) => {
     try {
-      // Conservatively apply selection-based clipboard DLP only after the user has changed the
-      // selection at least once. This matches the moment when the host will have broadcast at
-      // least one `selectionChanged` event (and therefore could have exposed selection values
-      // to extension workers, which can observe raw message events).
-      if (extensionClipboardSelectionChanged) {
-        const selection = getClipboardDlpSelection();
-        enforceExtensionClipboardDlpForRange({ sheetId: selection.sheetId, range: selection.range });
-      }
-
       const taintedRanges = Array.isArray(params.taintedRanges) ? params.taintedRanges : [];
       for (const raw of taintedRanges) {
         if (!raw || typeof raw !== "object") continue;
