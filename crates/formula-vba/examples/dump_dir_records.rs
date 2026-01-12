@@ -269,7 +269,9 @@ fn looks_like_utf16le(bytes: &[u8]) -> bool {
     // UTF-16LE for ASCII-range characters.
     let total = bytes.len() / 2;
     let nul_high = bytes.iter().skip(1).step_by(2).filter(|&&b| b == 0).count();
-    nul_high >= total / 2
+    // Use a ceiling-half threshold: for very short inputs (e.g. 2 bytes), `total / 2` is 0 and
+    // would incorrectly classify any 2-byte MBCS string as UTF-16LE.
+    nul_high * 2 >= total
 }
 
 fn escape_str(s: &str) -> String {
