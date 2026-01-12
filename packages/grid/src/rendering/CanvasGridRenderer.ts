@@ -3556,14 +3556,21 @@ export class CanvasGridRenderer {
       // - Merged ranges are drawn as a single rect using the anchor cell's border specs.
       // - Segments are batched by stroke config (color/width/dash/double) to avoid per-segment strokes.
 
-      type BorderSegment = { x1: number; y1: number; x2: number; y2: number; orientation: "h" | "v" };
+      const ORIENT_H = 0 as const;
+      const ORIENT_V = 1 as const;
+      type BorderOrientation = typeof ORIENT_H | typeof ORIENT_V;
+
       type BorderWinner = {
         spec: CellBorderSpec;
         totalWidth: number;
         styleRank: number;
         sourceRow: number;
         sourceCol: number;
-        segment: BorderSegment;
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+        orientation: BorderOrientation;
       };
 
       const isCellBorder = (value: unknown): value is CellBorderSpec => {
@@ -3628,34 +3635,65 @@ export class CanvasGridRenderer {
         styleRankValue: number,
         sourceRow: number,
         sourceCol: number,
-        segment: BorderSegment
+        x1: number,
+        y1: number,
+        x2: number,
+        y2: number,
+        orientation: BorderOrientation
       ) => {
         const existing = winners.get(key);
         if (!existing) {
-          winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, segment });
+          winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, x1, y1, x2, y2, orientation });
           return;
         }
 
         if (totalWidth !== existing.totalWidth) {
           if (totalWidth > existing.totalWidth) {
-            winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, segment });
+            existing.spec = spec;
+            existing.totalWidth = totalWidth;
+            existing.styleRank = styleRankValue;
+            existing.sourceRow = sourceRow;
+            existing.sourceCol = sourceCol;
+            existing.x1 = x1;
+            existing.y1 = y1;
+            existing.x2 = x2;
+            existing.y2 = y2;
+            existing.orientation = orientation;
           }
           return;
         }
 
         if (styleRankValue !== existing.styleRank) {
           if (styleRankValue > existing.styleRank) {
-            winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, segment });
+            existing.spec = spec;
+            existing.totalWidth = totalWidth;
+            existing.styleRank = styleRankValue;
+            existing.sourceRow = sourceRow;
+            existing.sourceCol = sourceCol;
+            existing.x1 = x1;
+            existing.y1 = y1;
+            existing.x2 = x2;
+            existing.y2 = y2;
+            existing.orientation = orientation;
           }
           return;
         }
 
         // Final tie-breaker: prefer the bottom/right cell (deterministic).
-        const candidateTie = segment.orientation === "h" ? sourceRow /* bottom cell */ : sourceCol /* right cell */;
-        const existingTie = existing.segment.orientation === "h" ? existing.sourceRow : existing.sourceCol;
+        const candidateTie = orientation === ORIENT_H ? sourceRow /* bottom cell */ : sourceCol /* right cell */;
+        const existingTie = existing.orientation === ORIENT_H ? existing.sourceRow : existing.sourceCol;
         if (candidateTie !== existingTie) {
           if (candidateTie > existingTie) {
-            winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, segment });
+            existing.spec = spec;
+            existing.totalWidth = totalWidth;
+            existing.styleRank = styleRankValue;
+            existing.sourceRow = sourceRow;
+            existing.sourceCol = sourceCol;
+            existing.x1 = x1;
+            existing.y1 = y1;
+            existing.x2 = x2;
+            existing.y2 = y2;
+            existing.orientation = orientation;
           }
           return;
         }
@@ -3663,40 +3701,75 @@ export class CanvasGridRenderer {
         // Fully deterministic fallback (should rarely/never happen).
         if (sourceRow !== existing.sourceRow) {
           if (sourceRow > existing.sourceRow) {
-            winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, segment });
+            existing.spec = spec;
+            existing.totalWidth = totalWidth;
+            existing.styleRank = styleRankValue;
+            existing.sourceRow = sourceRow;
+            existing.sourceCol = sourceCol;
+            existing.x1 = x1;
+            existing.y1 = y1;
+            existing.x2 = x2;
+            existing.y2 = y2;
+            existing.orientation = orientation;
           }
           return;
         }
         if (sourceCol !== existing.sourceCol) {
           if (sourceCol > existing.sourceCol) {
-            winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, segment });
+            existing.spec = spec;
+            existing.totalWidth = totalWidth;
+            existing.styleRank = styleRankValue;
+            existing.sourceRow = sourceRow;
+            existing.sourceCol = sourceCol;
+            existing.x1 = x1;
+            existing.y1 = y1;
+            existing.x2 = x2;
+            existing.y2 = y2;
+            existing.orientation = orientation;
           }
           return;
         }
         if (spec.color !== existing.spec.color) {
           if (spec.color > existing.spec.color) {
-            winners.set(key, { spec, totalWidth, styleRank: styleRankValue, sourceRow, sourceCol, segment });
+            existing.spec = spec;
+            existing.totalWidth = totalWidth;
+            existing.styleRank = styleRankValue;
+            existing.sourceRow = sourceRow;
+            existing.sourceCol = sourceCol;
+            existing.x1 = x1;
+            existing.y1 = y1;
+            existing.x2 = x2;
+            existing.y2 = y2;
+            existing.orientation = orientation;
           }
         }
       };
 
-      const addBorder = (options: {
-        key: number;
-        spec: CellBorderSpec;
-        sourceRow: number;
-        sourceCol: number;
-        segment: BorderSegment;
-      }) => {
-        const totalWidth = options.spec.width * zoom;
+      const addBorder = (
+        key: number,
+        spec: CellBorderSpec,
+        sourceRow: number,
+        sourceCol: number,
+        x1: number,
+        y1: number,
+        x2: number,
+        y2: number,
+        orientation: BorderOrientation
+      ) => {
+        const totalWidth = spec.width * zoom;
         if (!Number.isFinite(totalWidth) || totalWidth <= 0) return;
         consider(
-          options.key,
-          options.spec,
+          key,
+          spec,
           totalWidth,
-          styleRank(options.spec.style),
-          options.sourceRow,
-          options.sourceCol,
-          options.segment
+          styleRank(spec.style),
+          sourceRow,
+          sourceCol,
+          x1,
+          y1,
+          x2,
+          y2,
+          orientation
         );
       };
 
@@ -3725,40 +3798,16 @@ export class CanvasGridRenderer {
             const left = borders.left;
 
             if (isCellBorder(top)) {
-              addBorder({
-                key: hKey(row, col),
-                spec: top,
-                sourceRow: row,
-                sourceCol: col,
-                segment: { x1: x, y1: y, x2: x + colWidth, y2: y, orientation: "h" }
-              });
+              addBorder(hKey(row, col), top, row, col, x, y, x + colWidth, y, ORIENT_H);
             }
             if (isCellBorder(bottom)) {
-              addBorder({
-                key: hKey(row + 1, col),
-                spec: bottom,
-                sourceRow: row,
-                sourceCol: col,
-                segment: { x1: x, y1: y + rowHeight, x2: x + colWidth, y2: y + rowHeight, orientation: "h" }
-              });
+              addBorder(hKey(row + 1, col), bottom, row, col, x, y + rowHeight, x + colWidth, y + rowHeight, ORIENT_H);
             }
             if (isCellBorder(left)) {
-              addBorder({
-                key: vKey(row, col),
-                spec: left,
-                sourceRow: row,
-                sourceCol: col,
-                segment: { x1: x, y1: y, x2: x, y2: y + rowHeight, orientation: "v" }
-              });
+              addBorder(vKey(row, col), left, row, col, x, y, x, y + rowHeight, ORIENT_V);
             }
             if (isCellBorder(right)) {
-              addBorder({
-                key: vKey(row, col + 1),
-                spec: right,
-                sourceRow: row,
-                sourceCol: col,
-                segment: { x1: x + colWidth, y1: y, x2: x + colWidth, y2: y + rowHeight, orientation: "v" }
-              });
+              addBorder(vKey(row, col + 1), right, row, col, x + colWidth, y, x + colWidth, y + rowHeight, ORIENT_V);
             }
           }
 
@@ -3795,13 +3844,7 @@ export class CanvasGridRenderer {
             for (let col = segStartCol; col < segEndCol; col++) {
               const colWidth = colAxis.getSize(col);
               const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
-              addBorder({
-                key: hKey(range.startRow, col),
-                spec: top,
-                sourceRow: anchorRow,
-                sourceCol: anchorCol,
-                segment: { x1: x, y1: yTop, x2: x + colWidth, y2: yTop, orientation: "h" }
-              });
+              addBorder(hKey(range.startRow, col), top, anchorRow, anchorCol, x, yTop, x + colWidth, yTop, ORIENT_H);
               xSheet += colWidth;
             }
           }
@@ -3814,13 +3857,7 @@ export class CanvasGridRenderer {
             for (let col = segStartCol; col < segEndCol; col++) {
               const colWidth = colAxis.getSize(col);
               const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
-              addBorder({
-                key: hKey(range.endRow, col),
-                spec: bottom,
-                sourceRow: anchorRow,
-                sourceCol: anchorCol,
-                segment: { x1: x, y1: yBottom, x2: x + colWidth, y2: yBottom, orientation: "h" }
-              });
+              addBorder(hKey(range.endRow, col), bottom, anchorRow, anchorCol, x, yBottom, x + colWidth, yBottom, ORIENT_H);
               xSheet += colWidth;
             }
           }
@@ -3833,13 +3870,7 @@ export class CanvasGridRenderer {
             for (let row = segStartRow; row < segEndRow; row++) {
               const rowHeight = rowAxis.getSize(row);
               const y = ySheet - quadrant.scrollBaseY + quadrant.originY;
-              addBorder({
-                key: vKey(row, range.startCol),
-                spec: left,
-                sourceRow: anchorRow,
-                sourceCol: anchorCol,
-                segment: { x1: xLeft, y1: y, x2: xLeft, y2: y + rowHeight, orientation: "v" }
-              });
+              addBorder(vKey(row, range.startCol), left, anchorRow, anchorCol, xLeft, y, xLeft, y + rowHeight, ORIENT_V);
               ySheet += rowHeight;
             }
           }
@@ -3852,13 +3883,7 @@ export class CanvasGridRenderer {
             for (let row = segStartRow; row < segEndRow; row++) {
               const rowHeight = rowAxis.getSize(row);
               const y = ySheet - quadrant.scrollBaseY + quadrant.originY;
-              addBorder({
-                key: vKey(row, range.endCol),
-                spec: right,
-                sourceRow: anchorRow,
-                sourceCol: anchorCol,
-                segment: { x1: xRight, y1: y, x2: xRight, y2: y + rowHeight, orientation: "v" }
-              });
+              addBorder(vKey(row, range.endCol), right, anchorRow, anchorCol, xRight, y, xRight, y + rowHeight, ORIENT_V);
               ySheet += rowHeight;
             }
           }
@@ -3875,7 +3900,7 @@ export class CanvasGridRenderer {
         dashKey: string;
         lineCap: CanvasLineCap;
         double: boolean;
-        segments: BorderSegment[];
+        segments: BorderWinner[];
       };
 
       const groups = new Map<string, StrokeGroup>();
@@ -3891,7 +3916,7 @@ export class CanvasGridRenderer {
             group = { strokeStyle, lineWidth, lineDash: [], dashKey, lineCap: "butt", double: true, segments: [] };
             groups.set(key, group);
           }
-          group.segments.push(winner.segment);
+          group.segments.push(winner);
         } else {
           const lineWidth = winner.totalWidth;
           if (!Number.isFinite(lineWidth) || lineWidth <= 0) continue;
@@ -3911,7 +3936,7 @@ export class CanvasGridRenderer {
             };
             groups.set(key, group);
           }
-          group.segments.push(winner.segment);
+          group.segments.push(winner);
         }
       }
 
@@ -3951,7 +3976,7 @@ export class CanvasGridRenderer {
         if (!group.double) {
           gridCtx.beginPath();
           for (const seg of group.segments) {
-            if (seg.orientation === "h") {
+            if (seg.orientation === ORIENT_H) {
               const y = alignPos(seg.y1, group.lineWidth);
               gridCtx.moveTo(seg.x1, y);
               gridCtx.lineTo(seg.x2, y);
@@ -3968,7 +3993,7 @@ export class CanvasGridRenderer {
         const offset = group.lineWidth;
         gridCtx.beginPath();
         for (const seg of group.segments) {
-          if (seg.orientation === "h") {
+          if (seg.orientation === ORIENT_H) {
             const y1 = alignPos(seg.y1 - offset, group.lineWidth);
             const y2 = alignPos(seg.y1 + offset, group.lineWidth);
             gridCtx.moveTo(seg.x1, y1);
