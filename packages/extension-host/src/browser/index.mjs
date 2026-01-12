@@ -2871,6 +2871,55 @@ class BrowserExtensionHost {
     }
   }
 
+  _sanitizeEventPayload(event, data) {
+    try {
+      const evt = String(event ?? "");
+      if (evt !== "selectionChanged") return data;
+      if (!data || typeof data !== "object") return data;
+      const selection = data.selection;
+      if (!selection || typeof selection !== "object") return data;
+
+      // Prefer numeric coords, but fall back to parsing A1 address when needed.
+      let coords = null;
+      const looksLikeRange =
+        Object.prototype.hasOwnProperty.call(selection, "startRow") &&
+        Object.prototype.hasOwnProperty.call(selection, "startCol") &&
+        Object.prototype.hasOwnProperty.call(selection, "endRow") &&
+        Object.prototype.hasOwnProperty.call(selection, "endCol");
+      if (looksLikeRange) {
+        coords = {
+          startRow: selection.startRow,
+          startCol: selection.startCol,
+          endRow: selection.endRow,
+          endCol: selection.endCol
+        };
+      } else if (typeof selection?.address === "string" && selection.address.trim()) {
+        try {
+          const { ref: addrRef } = this._splitSheetQualifier(selection.address);
+          coords = this._parseA1RangeRef(addrRef);
+        } catch {
+          coords = null;
+        }
+      }
+      if (!coords) return data;
+
+      const size = getRangeSize(coords);
+      if (!size || size.cellCount <= DEFAULT_EXTENSION_RANGE_CELL_LIMIT) return data;
+
+      return {
+        ...(data ?? {}),
+        selection: {
+          ...(selection ?? {}),
+          values: [],
+          formulas: [],
+          truncated: true
+        }
+      };
+    } catch {
+      return data;
+    }
+  }
+
   _sendEventToExtension(extension, event, data, options = {}) {
     try {
       try {
@@ -2898,13 +2947,20 @@ class BrowserExtensionHost {
       // ignore
     }
 
+    let payload = data;
+    try {
+      payload = this._sanitizeEventPayload(event, data);
+    } catch {
+      payload = data;
+    }
+
     for (const extension of this._extensions.values()) {
       // Only deliver events to active extensions. Workers are spawned eagerly on load, but
       // the extension entrypoint is not imported/executed until activation. Broadcasting
       // selection/cell events to inactive extensions would taint ranges that the extension
       // never had a chance to read, causing false positives in clipboard DLP enforcement.
       if (!extension.active) continue;
-      this._sendEventToExtension(extension, event, data, { skipHostSync: true });
+      this._sendEventToExtension(extension, event, payload, { skipHostSync: true });
     }
   }
 }
