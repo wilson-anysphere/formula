@@ -188,7 +188,8 @@ test("getUsedRange can include format-only cells", () => {
 test("setRangeFormat for full-height columns does not materialize 1M cell entries", () => {
   const doc = new DocumentController();
 
-  doc.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } });
+  const applied = doc.setRangeFormat("Sheet1", "A1:A1048576", { font: { bold: true } });
+  assert.equal(applied, true);
 
   const sheet = doc.model.sheets.get("Sheet1");
   assert.ok(sheet);
@@ -217,7 +218,8 @@ test("setRangeFormat for full-height columns does not materialize 1M cell entrie
 test("setRangeFormat for full-width rows does not materialize 16k cell entries", () => {
   const doc = new DocumentController();
 
-  doc.setRangeFormat("Sheet1", "A2:XFD2", { font: { italic: true } });
+  const applied = doc.setRangeFormat("Sheet1", "A2:XFD2", { font: { italic: true } });
+  assert.equal(applied, true);
 
   const sheet = doc.model.sheets.get("Sheet1");
   assert.ok(sheet);
@@ -241,6 +243,87 @@ test("setRangeFormat for full-width rows does not materialize 16k cell entries",
 
   doc.redo();
   assert.deepEqual(doc.getCellFormat("Sheet1", "Z2"), { font: { italic: true } });
+});
+
+test("setRangeFormat skips huge full-width row ranges (performance caps)", () => {
+  const doc = new DocumentController();
+
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => {
+    warnings.push(args.join(" "));
+  };
+
+  try {
+    // 100,001 full-width rows should exceed the default maxEnumeratedRows (50,000).
+    const applied = doc.setRangeFormat("Sheet1", "A1:XFD100001", { font: { bold: true } });
+    assert.equal(applied, false);
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /Skipping row formatting/);
+  assert.match(warnings[0], /sheetId=Sheet1/);
+  assert.match(warnings[0], /rows=100001/);
+  assert.match(warnings[0], /maxEnumeratedRows=50000/);
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 0);
+  assert.equal(sheet.rowStyleIds.size, 0);
+  assert.deepEqual(doc.getStackDepths(), { undo: 0, redo: 0 });
+});
+
+test("setRangeFormat skips rectangles that would enumerate too many cells (performance caps)", () => {
+  const doc = new DocumentController();
+
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => {
+    warnings.push(args.join(" "));
+  };
+
+  try {
+    // 200 x 200 = 40,000 cells. This is below the range-run threshold (50,000), so it would normally
+    // fall back to per-cell enumeration. Force a smaller cap so we can verify the guard rail.
+    const applied = doc.setRangeFormat(
+      "Sheet1",
+      { start: { row: 0, col: 0 }, end: { row: 199, col: 199 } },
+      { font: { bold: true } },
+      { maxEnumeratedCells: 10_000 },
+    );
+    assert.equal(applied, false);
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /Skipping cell formatting/);
+  assert.match(warnings[0], /rows=200/);
+  assert.match(warnings[0], /cols=200/);
+  assert.match(warnings[0], /area=40000/);
+  assert.match(warnings[0], /maxEnumeratedCells=10000/);
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 0);
+  assert.equal(sheet.formatRunsByCol.size, 0);
+  assert.deepEqual(doc.getStackDepths(), { undo: 0, redo: 0 });
+});
+
+test("setRangeFormat applies formatting to small rectangles (fallback enumeration)", () => {
+  const doc = new DocumentController();
+
+  const applied = doc.setRangeFormat("Sheet1", "A1:B2", { font: { italic: true } });
+  assert.equal(applied, true);
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 4);
+
+  assert.deepEqual(doc.getCellFormat("Sheet1", "A1"), { font: { italic: true } });
+  assert.deepEqual(doc.getCellFormat("Sheet1", "B2"), { font: { italic: true } });
 });
 
 test("getUsedRange maintains separate content and format bounds", () => {

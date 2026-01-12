@@ -3,7 +3,7 @@ import {
   cloneCellState,
   emptyCellState,
 } from "./cell.js";
-import { normalizeRange, parseA1, parseRangeA1 } from "./coords.js";
+import { formatA1, normalizeRange, parseA1, parseRangeA1 } from "./coords.js";
 import { applyStylePatch, StyleTable } from "../formatting/styleTable.js";
 
 /**
@@ -2148,18 +2148,27 @@ export class DocumentController {
    * @param {string} sheetId
    * @param {CellRange | string} range
    * @param {Record<string, any> | null} stylePatch
-   * @param {{ label?: string }} [options]
+   * @param {{ label?: string, maxEnumeratedCells?: number, maxEnumeratedRows?: number }} [options]
+   * @returns {boolean} True when formatting was applied; false when skipped (e.g. safety caps).
    */
   setRangeFormat(sheetId, range, stylePatch, options = {}) {
+    const maxEnumeratedCells = Number.isFinite(options?.maxEnumeratedCells) ? options.maxEnumeratedCells : 200_000;
+    const maxEnumeratedRows = Number.isFinite(options?.maxEnumeratedRows) ? options.maxEnumeratedRows : 50_000;
+
     const r = typeof range === "string" ? parseRangeA1(range) : normalizeRange(range);
     const isFullSheet = r.start.row === 0 && r.end.row === EXCEL_MAX_ROW && r.start.col === 0 && r.end.col === EXCEL_MAX_COL;
     const isFullHeightCols = r.start.row === 0 && r.end.row === EXCEL_MAX_ROW;
     const isFullWidthRows = r.start.col === 0 && r.end.col === EXCEL_MAX_COL;
+    const rowCount = r.end.row - r.start.row + 1;
+    const colCount = r.end.col - r.start.col + 1;
+    const area = rowCount * colCount;
+
+    const formatRangeDebug = `${formatA1(r.start)}:${formatA1(r.end)}`;
 
     // Ensure sheet exists so we can mutate format layers without materializing cells.
     this.model.getCell(sheetId, 0, 0);
     const sheet = this.model.sheets.get(sheetId);
-    if (!sheet) return;
+    if (!sheet) return false;
 
     /** @type {CellDelta[]} */
     const cellDeltas = [];
@@ -2181,7 +2190,7 @@ export class DocumentController {
     };
 
     if (isFullSheet) {
-      if (this.canEditCell && !this.canEditCell({ sheetId, row: 0, col: 0 })) return;
+      if (this.canEditCell && !this.canEditCell({ sheetId, row: 0, col: 0 })) return false;
 
       // Patch sheet default.
       const beforeStyleId = sheet.defaultStyleId ?? 0;
@@ -2228,11 +2237,11 @@ export class DocumentController {
       }
 
       this.#applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, rangeRunDeltas, { label: options.label });
-      return;
+      return true;
     }
 
     if (isFullHeightCols) {
-      if (this.canEditCell && !this.canEditCell({ sheetId, row: 0, col: r.start.col })) return;
+      if (this.canEditCell && !this.canEditCell({ sheetId, row: 0, col: r.start.col })) return false;
 
       for (let col = r.start.col; col <= r.end.col; col++) {
         const beforeStyleId = sheet.colStyleIds.get(col) ?? 0;
@@ -2270,11 +2279,20 @@ export class DocumentController {
       }
 
       this.#applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, rangeRunDeltas, { label: options.label });
-      return;
+      return true;
     }
 
     if (isFullWidthRows) {
-      if (this.canEditCell && !this.canEditCell({ sheetId, row: r.start.row, col: 0 })) return;
+      if (this.canEditCell && !this.canEditCell({ sheetId, row: r.start.row, col: 0 })) return false;
+
+      // Formatting full-width row ranges requires enumerating each row to update the row formatting layer.
+      // For huge selections this can freeze the UI and allocate enormous delta arrays; cap the work.
+      if (rowCount > maxEnumeratedRows) {
+        console.warn(
+          `[DocumentController.setRangeFormat] Skipping row formatting (too many rows): sheetId=${sheetId}, range=${formatRangeDebug}, rows=${rowCount}, cols=${colCount}, area=${area}, maxEnumeratedRows=${maxEnumeratedRows}, maxEnumeratedCells=${maxEnumeratedCells}`,
+        );
+        return false;
+      }
 
       for (let row = r.start.row; row <= r.end.row; row++) {
         const beforeStyleId = sheet.rowStyleIds.get(row) ?? 0;
@@ -2312,12 +2330,8 @@ export class DocumentController {
       }
 
       this.#applyUserCellAndFormatDeltas(cellDeltas, formatDeltas, rangeRunDeltas, { label: options.label });
-      return;
+      return true;
     }
-
-    const rowCount = r.end.row - r.start.row + 1;
-    const colCount = r.end.col - r.start.col + 1;
-    const area = rowCount * colCount;
 
     // Large rectangular ranges should not enumerate every cell. Instead, store the
     // patch as compressed per-column row interval runs (`sheet.formatRunsByCol`).
@@ -2357,9 +2371,16 @@ export class DocumentController {
         cellDeltas.push({ sheetId, row, col, before, after: cloneCellState(after) });
       }
 
-      if (rangeRunDeltas.length === 0 && cellDeltas.length === 0) return;
+      if (rangeRunDeltas.length === 0 && cellDeltas.length === 0) return false;
       this.#applyUserRangeRunDeltas(cellDeltas, rangeRunDeltas, { label: options.label });
-      return;
+      return true;
+    }
+
+    if (area > maxEnumeratedCells) {
+      console.warn(
+        `[DocumentController.setRangeFormat] Skipping cell formatting (too many cells): sheetId=${sheetId}, range=${formatRangeDebug}, rows=${rowCount}, cols=${colCount}, area=${area}, maxEnumeratedCells=${maxEnumeratedCells}, maxEnumeratedRows=${maxEnumeratedRows}`,
+      );
+      return false;
     }
 
     // Fallback: sparse per-cell overrides.
@@ -2393,6 +2414,7 @@ export class DocumentController {
     }
 
     this.#applyUserCellAndFormatDeltas(cellDeltas, [], rangeRunDeltas, { label: options.label });
+    return true;
   }
 
   /**
