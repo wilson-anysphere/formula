@@ -42,6 +42,20 @@ export class CursorTabCompletionClient implements TabCompletionClient {
   completeTabCompletion(req: TabCompletionRequest): Promise<string>;
 }
 
+/**
+ * Backwards-compatible alias for {@link CursorTabCompletionClient}.
+ *
+ * Prefer {@link CursorTabCompletionClient} for new code.
+ */
+export { CursorTabCompletionClient as CursorCompletionClient };
+
+/**
+ * Backwards-compatible alias for {@link TabCompletionClient}.
+ *
+ * Prefer {@link TabCompletionClient} for new code.
+ */
+export type CompletionClient = TabCompletionClient;
+
 export class TabCompletionEngine {
   constructor(options?: {
     functionRegistry?: FunctionRegistry;

@@ -1,4 +1,5 @@
 export * from "./a1.js";
+export * from "./cursorCompletionClient.js";
 export * from "./cursorTabCompletionClient.js";
 export * from "./functionRegistry.js";
 export * from "./formulaPartialParser.js";
