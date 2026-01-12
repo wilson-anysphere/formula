@@ -146,6 +146,12 @@ describe("tauri capability event permissions", () => {
       expect(emitEvents.has(event)).toBe(true);
     }
 
+    // Keep the allowlists as small as possible: if you add a new desktop event, update both
+    // `src-tauri/capabilities/main.json` and this test. This prevents accidental over-broad
+    // capability grants (e.g. "just allow one more event" turning into allow-all).
+    expect(Array.from(listenEvents).sort()).toEqual(Array.from(new Set(requiredListen)).sort());
+    expect(Array.from(emitEvents).sort()).toEqual(Array.from(new Set(requiredEmit)).sort());
+
     // Sanity check: events outside the allowlist should be denied by Tauri's permission system.
     // (We can't assert the runtime error message here without running the desktop shell, but we
     // can assert the capability file does not include arbitrary names.)
