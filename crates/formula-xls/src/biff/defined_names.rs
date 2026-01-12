@@ -10,7 +10,7 @@
 
 #![allow(dead_code)]
 
-use super::{externsheet, records, rgce, strings, BiffVersion};
+use super::{externsheet, records, rgce, strings, supbook, BiffVersion};
 
 // Record ids used by workbook-global defined name parsing.
 // See [MS-XLS] sections:
@@ -82,6 +82,17 @@ pub(crate) fn parse_biff_defined_names(
         return Ok(out);
     }
 
+    // Parse `SUPBOOK` records so `PtgRef3d` / `PtgArea3d` can resolve external workbook references
+    // (iSupBook != 0) into Excel-style text like `'[Book.xlsx]Sheet1'!A1`.
+    //
+    // Best-effort: if SUPBOOK data is missing/malformed, the decoder will fall back to
+    // `'#SHEET(ixti=...)'!` placeholders with warnings.
+    let supbook::SupBookTable {
+        supbooks,
+        warnings: supbook_warnings,
+    } = supbook::parse_biff8_supbook_table(workbook_stream, codepage);
+    out.warnings.extend(supbook_warnings);
+
     let externsheet::ExternSheetTable {
         entries: externsheet_entries,
         warnings,
@@ -132,6 +143,7 @@ pub(crate) fn parse_biff_defined_names(
         codepage,
         sheet_names,
         externsheet: &externsheet_entries,
+        supbooks: &supbooks,
         defined_names: &metas,
     };
 

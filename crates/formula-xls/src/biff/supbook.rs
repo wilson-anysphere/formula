@@ -1,0 +1,516 @@
+//! BIFF8 `SUPBOOK` (0x01AE) / `EXTERNNAME` (0x0023) parsing.
+//!
+//! External workbook references in BIFF8 3D reference tokens (`PtgRef3d`, `PtgArea3d`) are
+//! resolved via the workbook-global `EXTERNSHEET` table (XTI structures). Each XTI entry points at
+//! a `SUPBOOK` record (`iSupBook`) that contains the referenced workbook name and sheet names.
+//!
+//! This module provides a minimal, best-effort parser for:
+//! - `SUPBOOK` records (including continued BIFF8 strings across `CONTINUE` records)
+//! - `EXTERNNAME` records (captured and associated with the preceding `SUPBOOK`)
+//!
+//! The `.xls` importer must never hard-fail due to malformed external reference metadata. All
+//! parsing is best-effort and any issues are reported as warnings.
+
+#![allow(dead_code)]
+
+use super::{records, strings};
+
+/// BIFF8 `SUPBOOK` record id.
+///
+/// See [MS-XLS] 2.4.271 (SUPBOOK).
+const RECORD_SUPBOOK: u16 = 0x01AE;
+
+/// BIFF8 `EXTERNNAME` record id.
+///
+/// See [MS-XLS] 2.4.106 (EXTERNNAME).
+const RECORD_EXTERNNAME: u16 = 0x0023;
+
+// BIFF8 string option flags used by XLUnicodeString.
+// See [MS-XLS] 2.5.268.
+const STR_FLAG_HIGH_BYTE: u8 = 0x01;
+const STR_FLAG_EXT: u8 = 0x04;
+const STR_FLAG_RICH_TEXT: u8 = 0x08;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SupBookKind {
+    /// Internal workbook marker (`virtPath` is a single control character).
+    Internal,
+    /// An external workbook reference with a file name/path and sheet name list.
+    ExternalWorkbook,
+    /// An add-in function library (XLL) or other special supbook type.
+    Other,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SupBookInfo {
+    pub(crate) ctab: u16,
+    /// Raw `virtPath` string.
+    pub(crate) virt_path: String,
+    pub(crate) kind: SupBookKind,
+    /// Best-effort extracted workbook base name (without path), used for formula rendering.
+    ///
+    /// Only populated for `ExternalWorkbook` supbooks.
+    pub(crate) workbook_name: Option<String>,
+    /// Sheet names stored in `SUPBOOK` (for external workbooks).
+    pub(crate) sheet_names: Vec<String>,
+    /// External names (`EXTERNNAME`) belonging to this supbook, in record order.
+    pub(crate) extern_names: Vec<String>,
+}
+
+impl SupBookInfo {
+    pub(crate) fn is_internal(&self) -> bool {
+        self.kind == SupBookKind::Internal
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct SupBookTable {
+    pub(crate) supbooks: Vec<SupBookInfo>,
+    pub(crate) warnings: Vec<String>,
+}
+
+pub(crate) fn parse_biff8_supbook_table(workbook_stream: &[u8], codepage: u16) -> SupBookTable {
+    let mut out = SupBookTable::default();
+
+    let allows_continuation = |id: u16| id == RECORD_SUPBOOK || id == RECORD_EXTERNNAME;
+    let iter = records::LogicalBiffRecordIter::new(workbook_stream, allows_continuation);
+
+    let mut current_supbook: Option<usize> = None;
+
+    for record in iter {
+        let record = match record {
+            Ok(record) => record,
+            Err(err) => {
+                out.warnings.push(format!(
+                    "malformed BIFF record while scanning for SUPBOOK/EXTERNNAME: {err}"
+                ));
+                break;
+            }
+        };
+
+        // Stop scanning at the start of the next substream (worksheet BOF), even if the workbook
+        // globals are missing the expected EOF record.
+        if record.offset != 0 && records::is_bof_record(record.record_id) {
+            break;
+        }
+
+        match record.record_id {
+            RECORD_SUPBOOK => {
+                let (info, warnings) = parse_supbook_record(&record, codepage);
+                out.warnings.extend(warnings);
+                out.supbooks.push(info);
+                current_supbook = Some(out.supbooks.len().saturating_sub(1));
+            }
+            RECORD_EXTERNNAME => {
+                let Some(idx) = current_supbook else {
+                    out.warnings.push(format!(
+                        "EXTERNNAME record at offset {} without preceding SUPBOOK",
+                        record.offset
+                    ));
+                    continue;
+                };
+
+                match parse_externname_record(&record, codepage) {
+                    Ok(name) => out.supbooks[idx].extern_names.push(name),
+                    Err(err) => out.warnings.push(format!(
+                        "failed to parse EXTERNNAME record at offset {}: {err}",
+                        record.offset
+                    )),
+                }
+            }
+            records::RECORD_EOF => break,
+            _ => {}
+        }
+    }
+
+    out
+}
+
+fn parse_supbook_record(
+    record: &records::LogicalBiffRecord<'_>,
+    codepage: u16,
+) -> (SupBookInfo, Vec<String>) {
+    let mut warnings = Vec::new();
+
+    let fragments: Vec<&[u8]> = record.fragments().collect();
+    let mut cursor = FragmentCursor::new(&fragments, 0, 0);
+
+    let ctab = match cursor.read_u16_le() {
+        Ok(v) => v,
+        Err(err) => {
+            warnings.push(format!(
+                "truncated SUPBOOK record at offset {}: {err}",
+                record.offset
+            ));
+            return (
+                SupBookInfo {
+                    ctab: 0,
+                    virt_path: String::new(),
+                    kind: SupBookKind::Other,
+                    workbook_name: None,
+                    sheet_names: Vec::new(),
+                    extern_names: Vec::new(),
+                },
+                warnings,
+            );
+        }
+    };
+
+    let virt_path = match cursor.read_biff8_unicode_string(codepage) {
+        Ok(v) => v,
+        Err(err) => {
+            warnings.push(format!(
+                "failed to decode SUPBOOK virtPath at offset {}: {err}",
+                record.offset
+            ));
+            String::new()
+        }
+    };
+
+    let kind = if is_internal_virt_path(&virt_path) {
+        SupBookKind::Internal
+    } else if is_addin_virt_path(&virt_path) {
+        SupBookKind::Other
+    } else {
+        SupBookKind::ExternalWorkbook
+    };
+
+    let workbook_name = (kind == SupBookKind::ExternalWorkbook)
+        .then(|| workbook_name_from_virt_path(&virt_path))
+        .filter(|s| !s.is_empty());
+
+    // External workbook supbooks store ctab sheet names after virtPath.
+    let mut sheet_names: Vec<String> = Vec::new();
+    if kind == SupBookKind::ExternalWorkbook {
+        // Defend against absurd `ctab` values from corrupt files.
+        const MAX_SHEETS: u16 = 4096;
+        let sheet_count = if ctab > MAX_SHEETS {
+            warnings.push(format!(
+                "SUPBOOK record at offset {} has implausible ctab={ctab}; capping to {MAX_SHEETS}",
+                record.offset
+            ));
+            MAX_SHEETS
+        } else {
+            ctab
+        };
+
+        sheet_names.reserve(sheet_count as usize);
+
+        for sheet_idx in 0..sheet_count {
+            match cursor.read_biff8_unicode_string(codepage) {
+                Ok(name) => sheet_names.push(name),
+                Err(err) => {
+                    warnings.push(format!(
+                        "failed to decode SUPBOOK sheet name {sheet_idx} at offset {}: {err}",
+                        record.offset
+                    ));
+                    break;
+                }
+            }
+        }
+    }
+
+    (
+        SupBookInfo {
+            ctab,
+            virt_path,
+            kind,
+            workbook_name,
+            sheet_names,
+            extern_names: Vec::new(),
+        },
+        warnings,
+    )
+}
+
+fn is_internal_virt_path(virt_path: &str) -> bool {
+    // There are multiple conventions in the wild for internal marker strings. Excel typically uses
+    // a single 0x0001 character, but some writers appear to use NUL.
+    virt_path == "\u{0001}" || virt_path == "\u{0000}"
+}
+
+fn is_addin_virt_path(virt_path: &str) -> bool {
+    // Excel uses a single 0x0002 character for add-in references.
+    virt_path == "\u{0002}"
+}
+
+fn workbook_name_from_virt_path(virt_path: &str) -> String {
+    // Best-effort conversion:
+    // - strip embedded NULs
+    // - take basename after path separators
+    // - strip surrounding brackets if present
+    let without_nuls = virt_path.replace('\0', "");
+
+    let basename = without_nuls
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(&without_nuls);
+
+    let trimmed = basename.trim();
+    let inner = trimmed
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    inner.to_string()
+}
+
+fn parse_externname_record(record: &records::LogicalBiffRecord<'_>, codepage: u16) -> Result<String, String> {
+    // Best-effort EXTERNNAME parsing.
+    //
+    // The record structure is complex and varies depending on flags (add-in, OLE/DDE, etc). For
+    // the purposes of `PtgNameX` rendering we only need the name text. Most common producers store
+    // an `XLUnicodeStringNoCch` after a small fixed header:
+    //   [grbit: u16][reserved: u32][cch: u8][rgchName: XLUnicodeStringNoCch]
+    //
+    // Since we cannot rely on all variants, we implement a conservative heuristic:
+    // - attempt the common header layout first
+    // - if that fails, attempt to locate a plausible `XLUnicodeString` at the end of the record
+    //
+    // If decoding fails, callers should treat the name as unavailable and fall back to `#REF!`.
+    let fragments: Vec<&[u8]> = record.fragments().collect();
+    let mut cursor = FragmentCursor::new(&fragments, 0, 0);
+
+    // Try common layout: [grbit: u16][reserved: u32][cch: u8]...
+    let _grbit = cursor.read_u16_le()?;
+    let _reserved = cursor.read_u32_le()?;
+    let cch = cursor.read_u8()? as usize;
+    let name = cursor.read_biff8_unicode_string_no_cch(cch, codepage)?;
+    if !name.is_empty() {
+        return Ok(name);
+    }
+
+    // Fallback: scan the first fragment for a trailing XLUnicodeString (u16 cch + flags).
+    // This is intentionally best-effort and may return an empty string.
+    let raw = record.data.as_ref();
+    if raw.len() < 3 {
+        return Err("truncated EXTERNNAME record".to_string());
+    }
+    if let Some(name) = strings::parse_biff8_unicode_string_best_effort(raw, codepage) {
+        return Ok(name);
+    }
+
+    Err("failed to decode EXTERNNAME string".to_string())
+}
+
+struct FragmentCursor<'a> {
+    fragments: &'a [&'a [u8]],
+    frag_idx: usize,
+    offset: usize,
+}
+
+impl<'a> FragmentCursor<'a> {
+    fn new(fragments: &'a [&'a [u8]], frag_idx: usize, offset: usize) -> Self {
+        Self {
+            fragments,
+            frag_idx,
+            offset,
+        }
+    }
+
+    fn remaining_in_fragment(&self) -> usize {
+        self.fragments
+            .get(self.frag_idx)
+            .map(|f| f.len().saturating_sub(self.offset))
+            .unwrap_or(0)
+    }
+
+    fn advance_fragment(&mut self) -> Result<(), String> {
+        self.frag_idx = self
+            .frag_idx
+            .checked_add(1)
+            .ok_or_else(|| "fragment index overflow".to_string())?;
+        self.offset = 0;
+        if self.frag_idx >= self.fragments.len() {
+            return Err("unexpected end of record".to_string());
+        }
+        Ok(())
+    }
+
+    fn read_u8(&mut self) -> Result<u8, String> {
+        loop {
+            let frag = self
+                .fragments
+                .get(self.frag_idx)
+                .ok_or_else(|| "unexpected end of record".to_string())?;
+            if self.offset < frag.len() {
+                let b = frag[self.offset];
+                self.offset += 1;
+                return Ok(b);
+            }
+            self.advance_fragment()?;
+        }
+    }
+
+    fn read_u16_le(&mut self) -> Result<u16, String> {
+        let lo = self.read_u8()?;
+        let hi = self.read_u8()?;
+        Ok(u16::from_le_bytes([lo, hi]))
+    }
+
+    fn read_u32_le(&mut self) -> Result<u32, String> {
+        let b0 = self.read_u8()?;
+        let b1 = self.read_u8()?;
+        let b2 = self.read_u8()?;
+        let b3 = self.read_u8()?;
+        Ok(u32::from_le_bytes([b0, b1, b2, b3]))
+    }
+
+    fn read_exact_from_current(&mut self, n: usize) -> Result<&'a [u8], String> {
+        let frag = self
+            .fragments
+            .get(self.frag_idx)
+            .ok_or_else(|| "unexpected end of record".to_string())?;
+        let end = self
+            .offset
+            .checked_add(n)
+            .ok_or_else(|| "offset overflow".to_string())?;
+        if end > frag.len() {
+            return Err("unexpected end of record".to_string());
+        }
+        let out = &frag[self.offset..end];
+        self.offset = end;
+        Ok(out)
+    }
+
+    fn skip_bytes(&mut self, mut n: usize) -> Result<(), String> {
+        while n > 0 {
+            let available = self.remaining_in_fragment();
+            if available == 0 {
+                self.advance_fragment()?;
+                continue;
+            }
+            let take = n.min(available);
+            self.offset += take;
+            n -= take;
+        }
+        Ok(())
+    }
+
+    fn read_biff8_unicode_string(&mut self, codepage: u16) -> Result<String, String> {
+        // XLUnicodeString [MS-XLS 2.5.268]
+        let cch = self.read_u16_le()? as usize;
+        let flags = self.read_u8()?;
+
+        let richtext_runs = if flags & STR_FLAG_RICH_TEXT != 0 {
+            self.read_u16_le()? as usize
+        } else {
+            0
+        };
+
+        let ext_size = if flags & STR_FLAG_EXT != 0 {
+            self.read_u32_le()? as usize
+        } else {
+            0
+        };
+
+        let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
+        let mut remaining_chars = cch;
+        let mut out = String::new();
+
+        while remaining_chars > 0 {
+            if self.remaining_in_fragment() == 0 {
+                // Continuing character bytes into a new CONTINUE fragment: first byte is option
+                // flags for the continued segment (fHighByte).
+                self.advance_fragment()?;
+                let cont_flags = self.read_u8()?;
+                is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+                continue;
+            }
+
+            let bytes_per_char = if is_unicode { 2 } else { 1 };
+            let available_bytes = self.remaining_in_fragment();
+            let available_chars = available_bytes / bytes_per_char;
+            if available_chars == 0 {
+                return Err("string continuation split mid-character".to_string());
+            }
+
+            let take_chars = remaining_chars.min(available_chars);
+            let take_bytes = take_chars * bytes_per_char;
+            let bytes = self.read_exact_from_current(take_bytes)?;
+
+            if is_unicode {
+                let mut u16s = Vec::with_capacity(take_chars);
+                for chunk in bytes.chunks_exact(2) {
+                    u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+                }
+                out.push_str(&String::from_utf16_lossy(&u16s));
+            } else {
+                out.push_str(&strings::decode_ansi(codepage, bytes));
+            }
+
+            remaining_chars -= take_chars;
+        }
+
+        let richtext_bytes = richtext_runs
+            .checked_mul(4)
+            .ok_or_else(|| "rich text run count overflow".to_string())?;
+        self.skip_bytes(richtext_bytes + ext_size)?;
+
+        Ok(out)
+    }
+
+    fn read_biff8_unicode_string_no_cch(
+        &mut self,
+        cch: usize,
+        codepage: u16,
+    ) -> Result<String, String> {
+        // XLUnicodeStringNoCch [MS-XLS 2.5.277] (used by NAME/EXTERNNAME).
+        let flags = self.read_u8()?;
+
+        let richtext_runs = if flags & STR_FLAG_RICH_TEXT != 0 {
+            self.read_u16_le()? as usize
+        } else {
+            0
+        };
+
+        let ext_size = if flags & STR_FLAG_EXT != 0 {
+            self.read_u32_le()? as usize
+        } else {
+            0
+        };
+
+        let mut is_unicode = (flags & STR_FLAG_HIGH_BYTE) != 0;
+        let mut remaining_chars = cch;
+        let mut out = String::new();
+
+        while remaining_chars > 0 {
+            if self.remaining_in_fragment() == 0 {
+                self.advance_fragment()?;
+                let cont_flags = self.read_u8()?;
+                is_unicode = (cont_flags & STR_FLAG_HIGH_BYTE) != 0;
+                continue;
+            }
+
+            let bytes_per_char = if is_unicode { 2 } else { 1 };
+            let available_bytes = self.remaining_in_fragment();
+            let available_chars = available_bytes / bytes_per_char;
+            if available_chars == 0 {
+                return Err("string continuation split mid-character".to_string());
+            }
+
+            let take_chars = remaining_chars.min(available_chars);
+            let take_bytes = take_chars * bytes_per_char;
+            let bytes = self.read_exact_from_current(take_bytes)?;
+
+            if is_unicode {
+                let mut u16s = Vec::with_capacity(take_chars);
+                for chunk in bytes.chunks_exact(2) {
+                    u16s.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+                }
+                out.push_str(&String::from_utf16_lossy(&u16s));
+            } else {
+                out.push_str(&strings::decode_ansi(codepage, bytes));
+            }
+
+            remaining_chars -= take_chars;
+        }
+
+        let richtext_bytes = richtext_runs
+            .checked_mul(4)
+            .ok_or_else(|| "rich text run count overflow".to_string())?;
+        self.skip_bytes(richtext_bytes + ext_size)?;
+
+        Ok(out)
+    }
+}
+

@@ -164,6 +164,28 @@ fn defined_name_formulas_quote_sheet_names() {
 }
 
 #[test]
+fn imports_defined_names_with_external_workbook_3d_refs() {
+    let bytes = xls_fixture_builder::build_defined_names_external_workbook_refs_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let ext_single = result
+        .workbook
+        .defined_names
+        .iter()
+        .find(|n| n.name == "ExtSingle")
+        .expect("ExtSingle missing");
+    assert_eq!(ext_single.refers_to, "'[Book1.xlsx]SheetA'!$A$1");
+
+    let ext_span = result
+        .workbook
+        .defined_names
+        .iter()
+        .find(|n| n.name == "ExtSpan")
+        .expect("ExtSpan missing");
+    assert_eq!(ext_span.refers_to, "'[Book1.xlsx]SheetA:SheetC'!$A$1");
+}
+
+#[test]
 fn imports_workbook_defined_names_via_calamine_fallback_when_biff_unavailable() {
     let bytes = xls_fixture_builder::build_defined_name_calamine_fixture_xls();
     let result = import_fixture_without_biff(&bytes);

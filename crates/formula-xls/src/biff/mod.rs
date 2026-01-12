@@ -18,6 +18,7 @@ pub(crate) mod externsheet;
 pub(crate) mod rgce;
 pub(crate) mod records;
 pub(crate) mod sheet;
+pub(crate) mod supbook;
 pub(crate) mod strings;
 
 pub(crate) use comments::parse_biff_sheet_notes;

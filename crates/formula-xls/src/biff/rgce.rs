@@ -19,7 +19,7 @@
 //! base is known, the decoder defaults to `(0,0)` (A1) but still preserves `$` absolute/relative
 //! markers in the rendered A1 text.
 
-use super::{externsheet::ExternSheetEntry, strings};
+use super::{externsheet::ExternSheetEntry, strings, supbook::SupBookInfo};
 
 // BIFF8 supports 65,536 rows (0-based 0..=65,535).
 const BIFF8_MAX_ROW0: i64 = u16::MAX as i64;
@@ -39,6 +39,7 @@ pub(crate) struct RgceDecodeContext<'a> {
     pub(crate) codepage: u16,
     pub(crate) sheet_names: &'a [String],
     pub(crate) externsheet: &'a [ExternSheetEntry],
+    pub(crate) supbooks: &'a [SupBookInfo],
     pub(crate) defined_names: &'a [DefinedNameMeta],
 }
 
@@ -76,11 +77,13 @@ pub(crate) type DecodedRgce = DecodeRgceResult;
 pub(crate) fn decode_defined_name_rgce(rgce: &[u8], codepage: u16) -> DecodedRgce {
     let sheet_names: &[String] = &[];
     let externsheet: &[ExternSheetEntry] = &[];
+    let supbooks: &[SupBookInfo] = &[];
     let defined_names: &[DefinedNameMeta] = &[];
     let ctx = RgceDecodeContext {
         codepage,
         sheet_names,
         externsheet,
+        supbooks,
         defined_names,
     };
     decode_defined_name_rgce_with_context(rgce, codepage, &ctx)
@@ -102,6 +105,7 @@ pub(crate) fn decode_defined_name_rgce_with_context(
         codepage,
         sheet_names: ctx.sheet_names,
         externsheet: ctx.externsheet,
+        supbooks: ctx.supbooks,
         defined_names: ctx.defined_names,
     };
     decode_biff8_rgce(rgce, &ctx)
@@ -1220,22 +1224,95 @@ fn format_sheet_ref(ixti: u16, ctx: &RgceDecodeContext<'_>) -> Result<String, St
         ));
     };
 
-    if entry.supbook != 0 {
+    // Internal workbook reference.
+    if entry.supbook == 0 {
+        return format_internal_sheet_ref(ixti, entry.itab_first, entry.itab_last, ctx);
+    }
+
+    // Some writers may still reference the internal workbook SUPBOOK explicitly; detect it via
+    // virtPath marker if present.
+    if let Some(sb) = ctx.supbooks.get(entry.supbook as usize) {
+        if sb.is_internal() {
+            return format_internal_sheet_ref(ixti, entry.itab_first, entry.itab_last, ctx);
+        }
+    }
+
+    // External workbook reference. Best-effort: if SUPBOOK metadata is missing or incomplete,
+    // surface an error so the caller falls back to a `'#SHEET(ixti=...)'!` placeholder.
+    let sb = ctx
+        .supbooks
+        .get(entry.supbook as usize)
+        .ok_or_else(|| {
+            format!(
+                "EXTERNSHEET entry ixti={ixti} references missing SUPBOOK index {} (supbook count={})",
+                entry.supbook,
+                ctx.supbooks.len()
+            )
+        })?;
+
+    let workbook_raw = sb
+        .workbook_name
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| sb.virt_path.as_str());
+    if workbook_raw.is_empty() {
         return Err(format!(
-            "EXTERNSHEET entry ixti={ixti} references external workbook (iSupBook={})",
+            "SUPBOOK index {} referenced by EXTERNSHEET ixti={ixti} has empty workbook name",
             entry.supbook
         ));
     }
 
     if entry.itab_first < 0 || entry.itab_last < 0 {
         return Err(format!(
-            "EXTERNSHEET entry ixti={ixti} has negative sheet indices itabFirst={} itabLast={}",
+            "EXTERNSHEET entry ixti={ixti} has negative sheet indices itabFirst={} itabLast={} for external workbook",
             entry.itab_first, entry.itab_last
         ));
     }
 
     let itab_first = entry.itab_first as usize;
     let itab_last = entry.itab_last as usize;
+
+    let Some(sheet_first) = sb.sheet_names.get(itab_first) else {
+        return Err(format!(
+            "EXTERNSHEET entry ixti={ixti} refers to out-of-range external itabFirst={itab_first} (SUPBOOK sheet count={})",
+            sb.sheet_names.len()
+        ));
+    };
+    let Some(sheet_last) = sb.sheet_names.get(itab_last) else {
+        return Err(format!(
+            "EXTERNSHEET entry ixti={ixti} refers to out-of-range external itabLast={itab_last} (SUPBOOK sheet count={})",
+            sb.sheet_names.len()
+        ));
+    };
+
+    let workbook = format_external_workbook_name(workbook_raw);
+    let start = format!("{workbook}{sheet_first}");
+    if itab_first == itab_last {
+        Ok(format!("{}!", quote_sheet_name_if_needed(&start)))
+    } else {
+        // External 3D sheet ranges only include the workbook prefix once:
+        // `'[Book.xlsx]SheetA:SheetC'!A1`
+        Ok(format!(
+            "{}!",
+            quote_sheet_range_name_if_needed(&start, sheet_last)
+        ))
+    }
+}
+
+fn format_internal_sheet_ref(
+    ixti: u16,
+    itab_first: i16,
+    itab_last: i16,
+    ctx: &RgceDecodeContext<'_>,
+) -> Result<String, String> {
+    if itab_first < 0 || itab_last < 0 {
+        return Err(format!(
+            "EXTERNSHEET entry ixti={ixti} has negative sheet indices itabFirst={itab_first} itabLast={itab_last}"
+        ));
+    }
+
+    let itab_first = itab_first as usize;
+    let itab_last = itab_last as usize;
 
     let Some(first) = ctx.sheet_names.get(itab_first) else {
         return Err(format!(
@@ -1253,11 +1330,20 @@ fn format_sheet_ref(ixti: u16, ctx: &RgceDecodeContext<'_>) -> Result<String, St
     if itab_first == itab_last {
         Ok(format!("{}!", quote_sheet_name_if_needed(first)))
     } else {
-        Ok(format!(
-            "{}!",
-            quote_sheet_range_name_if_needed(first, last)
-        ))
+        Ok(format!("{}!", quote_sheet_range_name_if_needed(first, last)))
     }
+}
+
+fn format_external_workbook_name(workbook: &str) -> String {
+    // Excel external workbook refs wrap the workbook in brackets: `[Book1.xlsx]`.
+    //
+    // Some producers may already include brackets; normalize to a single set.
+    let trimmed = workbook.trim();
+    let inner = trimmed
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    format!("[{inner}]")
 }
 
 fn sheet_prefix_or_placeholder(
@@ -1460,6 +1546,7 @@ mod tests {
             codepage: 1252,
             sheet_names,
             externsheet,
+            supbooks: &[],
             defined_names,
         }
     }

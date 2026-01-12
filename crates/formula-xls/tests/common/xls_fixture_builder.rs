@@ -327,6 +327,26 @@ pub fn build_defined_names_quoting_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing workbook-scoped defined names that reference an
+/// *external* workbook via `SUPBOOK`/`EXTERNSHEET`.
+///
+/// This validates our best-effort rendering of external 3D references into Excel-style text like:
+/// - `'[Book1.xlsx]SheetA'!$A$1`
+/// - `'[Book1.xlsx]SheetA:SheetC'!$A$1`
+pub fn build_defined_names_external_workbook_refs_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_defined_names_external_workbook_refs_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a minimal BIFF8 `.xls` fixture containing a single workbook-scoped defined name.
 ///
 /// This fixture is intended to validate the importer’s calamine `Reader::defined_names()` fallback
@@ -1852,6 +1872,86 @@ fn build_defined_names_quoting_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_defined_names_external_workbook_refs_workbook_stream() -> Vec<u8> {
+    // This workbook contains:
+    // - One internal sheet (`Local`) so calamine considers the workbook valid.
+    // - SUPBOOK[0]: internal workbook marker
+    // - SUPBOOK[1]: external workbook `Book1.xlsx` with sheets SheetA/SheetB/SheetC
+    // - EXTERNSHEET entries pointing at SUPBOOK[1]
+    // - Defined names referencing those EXTERNSHEET entries via PtgRef3d
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet (internal).
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Local");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // External reference tables.
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(1)); // internal workbook marker
+    push_record(
+        &mut globals,
+        RECORD_SUPBOOK,
+        &supbook_external("Book1.xlsx", &["SheetA", "SheetB", "SheetC"]),
+    );
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record_with_supbook(&[
+            // ixti=0 => [Book1.xlsx]SheetA
+            (1, 0, 0),
+            // ixti=1 => [Book1.xlsx]SheetA:SheetC
+            (1, 0, 2),
+        ]),
+    );
+
+    // Defined names referencing external sheets via PtgRef3d.
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("ExtSingle", 0, false, None, &ptg_ref3d(0, 0, 0)),
+    );
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("ExtSpan", 0, false, None, &ptg_ref3d(1, 0, 0)),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_empty_sheet_stream(xf_general);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_defined_name_calamine_workbook_stream() -> Vec<u8> {
+    build_defined_name_calamine_workbook_stream_with_sheet_name("Sheet1")
+}
+
 fn build_defined_name_calamine_workbook_stream_with_sheet_name(sheet_name: &str) -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -2116,12 +2216,22 @@ fn build_name_reference_formula_sheet_stream(xf_cell: u16, name_index: u32) -> V
 }
 
 fn externsheet_record(entries: &[(u16, u16)]) -> Vec<u8> {
+    // Convenience wrapper for internal-workbook XTI entries (iSupBook=0).
+    let entries: Vec<(u16, u16, u16)> = entries
+        .iter()
+        .copied()
+        .map(|(itab_first, itab_last)| (0u16, itab_first, itab_last))
+        .collect();
+    externsheet_record_with_supbook(&entries)
+}
+
+fn externsheet_record_with_supbook(entries: &[(u16, u16, u16)]) -> Vec<u8> {
     // EXTERNSHEET payload: [cXTI: u16][rgXTI: cXTI * 6 bytes]
     // Each XTI: [iSupBook: u16][itabFirst: u16][itabLast: u16]
     let mut out = Vec::<u8>::new();
     out.extend_from_slice(&(entries.len() as u16).to_le_bytes());
-    for &(itab_first, itab_last) in entries {
-        out.extend_from_slice(&0u16.to_le_bytes()); // iSupBook (internal)
+    for &(i_sup_book, itab_first, itab_last) in entries {
+        out.extend_from_slice(&i_sup_book.to_le_bytes());
         out.extend_from_slice(&itab_first.to_le_bytes());
         out.extend_from_slice(&itab_last.to_le_bytes());
     }
@@ -4646,6 +4756,26 @@ fn supbook_internal(sheet_count: u16) -> Vec<u8> {
     let mut out = Vec::<u8>::new();
     out.extend_from_slice(&sheet_count.to_le_bytes()); // ctab
     write_unicode_string(&mut out, "\u{0001}");
+    out
+}
+
+fn supbook_external(workbook_name: &str, sheet_names: &[&str]) -> Vec<u8> {
+    // SUPBOOK record payload for an external workbook.
+    //
+    // Layout:
+    //   [ctab: u16]
+    //   [virtPath: XLUnicodeString]
+    //   ctab * [sheetName: XLUnicodeString]
+    let mut out = Vec::<u8>::new();
+    let ctab: u16 = sheet_names
+        .len()
+        .try_into()
+        .expect("external sheet name count too large for u16");
+    out.extend_from_slice(&ctab.to_le_bytes());
+    write_unicode_string(&mut out, workbook_name);
+    for &sheet in sheet_names {
+        write_unicode_string(&mut out, sheet);
+    }
     out
 }
 
