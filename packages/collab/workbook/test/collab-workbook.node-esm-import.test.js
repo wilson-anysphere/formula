@@ -4,10 +4,10 @@ import test from "node:test";
 import * as Y from "yjs";
 
 // Include an explicit `.ts` import specifier so the repo's node:test runner can
-// automatically skip this suite when `--experimental-strip-types` is not available.
+// automatically skip this suite when TypeScript execution isn't available.
 import { ensureWorkbookSchema as ensureFromTs } from "../src/index.ts";
 
-test("collab-workbook is importable under Node ESM when executing TS sources (strip-types)", async () => {
+test("collab-workbook is importable under Node ESM when executing TS sources directly", async () => {
   const mod = await import("@formula/collab-workbook");
 
   assert.equal(typeof mod.ensureWorkbookSchema, "function");
@@ -19,4 +19,3 @@ test("collab-workbook is importable under Node ESM when executing TS sources (st
   assert.ok(roots);
   assert.equal(typeof roots.cells?.get, "function");
 });
-
