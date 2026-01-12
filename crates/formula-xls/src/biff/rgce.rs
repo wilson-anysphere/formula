@@ -859,6 +859,8 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let iname = u16::from_le_bytes([input[2], input[3]]);
                 input = &input[6..];
 
+                let is_value_class = (ptg & 0x60) == 0x40;
+
                 // Excel uses `PtgNameX` for external workbook defined names and for add-in/UDF
                 // function calls. For UDF calls, the token sequence is typically:
                 //
@@ -869,7 +871,21 @@ pub(crate) fn decode_biff8_rgce_with_base(
                 let is_udf_call = namex_is_udf_call(input);
 
                 match format_namex_ref(ixti, iname, is_udf_call, ctx) {
-                    Ok(txt) => stack.push(ExprFragment::new(txt)),
+                    Ok(txt) => {
+                        if is_value_class && !is_udf_call {
+                            // Like value-class range/name tokens, a value-class NameX can represent
+                            // legacy implicit intersection. Emit an explicit `@` to preserve scalar
+                            // semantics.
+                            stack.push(ExprFragment {
+                                text: format!("@{txt}"),
+                                precedence: 70,
+                                contains_union: false,
+                                is_missing: false,
+                            });
+                        } else {
+                            stack.push(ExprFragment::new(txt));
+                        }
+                    }
                     Err(err) => {
                         warnings.push(err);
                         stack.push(ExprFragment::new("#REF!".to_string()));
@@ -4067,6 +4083,51 @@ mod tests {
     }
 
     #[test]
+    fn decodes_ptg_namex_value_class_external_workbook_workbook_scoped_name_with_at() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 1,
+            itab_first: -1,
+            itab_last: -1,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+
+        let supbooks = vec![
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0001}".to_string(),
+                kind: SupBookKind::Internal,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: Vec::new(),
+            },
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "Book2.xlsx".to_string(),
+                kind: SupBookKind::ExternalWorkbook,
+                workbook_name: Some("Book2.xlsx".to_string()),
+                sheet_names: vec!["Sheet1".to_string()],
+                extern_names: vec!["MyName".to_string()],
+            },
+        ];
+
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        // PtgNameXV (value class).
+        let rgce = [0x59, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "@'[Book2.xlsx]MyName'");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn decodes_ptg_namex_external_workbook_sheet_scoped_name() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
@@ -4588,6 +4649,56 @@ mod tests {
             "warnings={:?}",
             decoded.warnings
         );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_namex_value_class_udf_function_name_does_not_add_at() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 1,
+            itab_first: -1,
+            itab_last: -1,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+
+        let supbooks = vec![
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0001}".to_string(),
+                kind: SupBookKind::Internal,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: Vec::new(),
+            },
+            SupBookInfo {
+                ctab: 0,
+                virt_path: "\u{0002}".to_string(),
+                kind: SupBookKind::Other,
+                workbook_name: None,
+                sheet_names: Vec::new(),
+                extern_names: vec!["MyFunc".to_string()],
+            },
+        ];
+
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &supbooks,
+            defined_names: &defined_names,
+        };
+
+        // MyFunc(1) encoded as: [PtgInt 1][PtgNameXV][PtgFuncVar argc=2 iftab=0x00FF]
+        let rgce = vec![
+            0x1E, 0x01, 0x00, // PtgInt 1
+            0x59, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // PtgNameXV (ixti=0, iname=1)
+            0x22, 0x02, 0xFF, 0x00, // PtgFuncVar(argc=2, iftab=0x00FF)
+        ];
+
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "MyFunc(1)");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
         assert_parseable(&decoded.text);
     }
 
