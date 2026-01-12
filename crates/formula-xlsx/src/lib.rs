@@ -458,6 +458,14 @@ impl XlsxDocument {
             }
         }
 
+        // `vm` (value metadata) indices point into `xl/metadata.xml` and are tied to the stored
+        // cell value. When the caller edits the cell value we do not currently update
+        // `xl/metadata.xml`, so keep `vm` only when the cell remains a rich-value placeholder
+        // (`#VALUE!`).
+        if !matches!(cell_record.value, CellValue::Error(ErrorValue::Value)) {
+            meta.vm = None;
+        }
+
         if meta.value_kind.is_none()
             && meta.raw_value.is_none()
             && meta.formula.is_none()
