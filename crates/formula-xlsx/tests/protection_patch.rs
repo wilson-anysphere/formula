@@ -349,6 +349,44 @@ fn patches_non_empty_protection_elements() -> Result<(), Box<dyn std::error::Err
 }
 
 #[test]
+fn removes_sheet_protection_when_present_but_disabled() -> Result<(), Box<dyn std::error::Error>> {
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <workbookPr/>
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    // Some writers store a disabled protection element as `<sheetProtection sheet="0"/>`.
+    // We canonicalize disabled protection by removing the element entirely.
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheetData/>
+  <sheetProtection sheet="0"/>
+</worksheet>"#;
+
+    let bytes = build_minimal_xlsx(workbook_xml, sheet_xml);
+    let doc = load_from_bytes(&bytes)?;
+    assert_eq!(doc.workbook.sheets[0].sheet_protection, SheetProtection::default());
+
+    let out = doc.save_to_vec()?;
+    let roundtrip = read_workbook_model_from_bytes(&out)?;
+    assert_eq!(roundtrip.sheets[0].sheet_protection, SheetProtection::default());
+
+    let sheet_xml = read_part(&out, "xl/worksheets/sheet1.xml")?;
+    roxmltree::Document::parse(&sheet_xml)?;
+    assert!(
+        !sheet_xml.contains("sheetProtection"),
+        "expected `<sheetProtection>` removal when disabled, got:\n{sheet_xml}"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn inserts_sheet_protection_after_non_empty_sheet_data() -> Result<(), Box<dyn std::error::Error>> {
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"

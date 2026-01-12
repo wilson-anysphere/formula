@@ -781,7 +781,7 @@ fn build_parts(
                 SheetViewSettings::default(),
                 BTreeMap::new(),
                 None,
-                SheetProtection::default(),
+                None,
             )
         };
 
@@ -802,7 +802,17 @@ fn build_parts(
 
         let autofilter_changed = sheet.auto_filter.as_ref() != orig_autofilter.as_ref();
 
-        let sheet_protection_changed = sheet.sheet_protection != orig_sheet_protection;
+        let sheet_protection_changed = if sheet.sheet_protection.enabled {
+            match orig_sheet_protection.as_ref() {
+                Some(orig) => orig != &sheet.sheet_protection,
+                None => true,
+            }
+        } else {
+            // When protection is disabled, we canonicalize by removing any `<sheetProtection>`
+            // element that may still be present in the source document (including cases where it
+            // was stored as `<sheetProtection sheet="0" .../>`).
+            orig_sheet_protection.is_some()
+        };
 
         let sheet_xml_bytes = write_worksheet_xml(
             doc,
@@ -1120,7 +1130,7 @@ fn parse_xml_u16_hex(val: &str) -> Option<u16> {
     u16::from_str_radix(val.trim(), 16).ok()
 }
 
-fn parse_sheet_protection(xml: &str) -> Result<SheetProtection, WriteError> {
+fn parse_sheet_protection(xml: &str) -> Result<Option<SheetProtection>, WriteError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
@@ -1165,14 +1175,14 @@ fn parse_sheet_protection(xml: &str) -> Result<SheetProtection, WriteError> {
                         _ => {}
                     }
                 }
-                return Ok(protection);
+                return Ok(Some(protection));
             }
             _ => {}
         }
         buf.clear();
     }
 
-    Ok(SheetProtection::default())
+    Ok(None)
 }
 
 fn update_sheet_protection_xml(
