@@ -285,9 +285,10 @@ impl XlsxPackage {
                     None
                 };
 
-                // When rich value tables are missing we cannot recover `CalcOrigin`, so default to
-                // `0` (unknown).
-                let mut calc_origin: u32 = 0;
+                // When rich value tables are missing we cannot recover `CalcOrigin`. Excel commonly
+                // uses `CalcOrigin=5` for embedded in-cell images, so use that as a reasonable
+                // default.
+                let mut calc_origin: u32 = 5;
                 let mut alt_text: Option<String> = None;
 
                 // Determine which relationship-slot index to use for this cell image.
