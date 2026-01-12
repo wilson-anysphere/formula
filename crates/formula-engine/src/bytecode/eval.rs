@@ -149,7 +149,7 @@ impl Vm {
                         _ => unreachable!(),
                     };
                     self.stack
-                        .push(apply_binary(op, left, right, grid, sheet_id, base));
+                        .push(apply_binary(op, left, right, grid, self.sheet_id, base));
                 }
                 OpCode::CallFunc => {
                     let func = &program.funcs[inst.a() as usize];
