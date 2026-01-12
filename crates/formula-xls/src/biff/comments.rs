@@ -10,6 +10,8 @@
 //!   geometry/visibility are ignored.
 //! - Malformed/incomplete record sequences may yield partial output and warnings.
 //! - Modern threaded comments are an OOXML feature and are not supported in `.xls`.
+//! - Missing TXO payloads (text) are treated as a warning and the note may be
+//!   skipped by the importer.
 
 use std::collections::HashMap;
 

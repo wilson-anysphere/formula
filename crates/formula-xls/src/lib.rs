@@ -17,7 +17,8 @@
 //! We also extract workbook-global styles (including number format codes) and the
 //! workbook date system (1900 vs 1904) when possible. Anything else is preserved
 //! as metadata/warnings. In particular, comment parsing may emit warnings when
-//! BIFF NOTE/OBJ/TXO records are malformed or incomplete.
+//! BIFF NOTE/OBJ/TXO records are malformed or incomplete (and such comments may
+//! be skipped).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
