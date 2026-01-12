@@ -8528,6 +8528,19 @@ mod tests {
     }
 
     #[test]
+    fn bytecode_compile_report_classifies_unsupported_operators() {
+        let mut engine = Engine::new();
+        engine.set_cell_formula("Sheet1", "B1", "=A1#").unwrap();
+
+        let report = engine.bytecode_compile_report(10);
+        assert_eq!(report.len(), 1);
+        assert_eq!(
+            report[0].reason,
+            BytecodeCompileReason::LowerError(bytecode::LowerError::Unsupported)
+        );
+    }
+
+    #[test]
     fn bytecode_compile_report_classifies_range_size_limit_exceeded() {
         let mut engine = Engine::new();
         engine
