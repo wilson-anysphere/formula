@@ -388,7 +388,7 @@ fn discount_security_functions_coerce_basis_like_excel() {
     engine.set_cell_value("Sheet1", "B1", "2").unwrap(); // text -> number 2
     engine.set_cell_value("Sheet1", "B2", true).unwrap(); // TRUE -> 1
     engine.set_cell_value("Sheet1", "B3", false).unwrap(); // FALSE -> 0
-    // B4 intentionally left blank (missing cell) -> blank -> 0
+                                                           // B4 intentionally left blank (missing cell) -> blank -> 0
     engine.set_cell_value("Sheet1", "B5", 4.9).unwrap(); // trunc -> 4
 
     engine
@@ -513,5 +513,67 @@ fn discount_security_functions_coerce_basis_like_excel() {
     assert_eq!(
         engine.get_cell_value("Sheet1", "A10"),
         Value::Error(ErrorKind::Value)
+    );
+}
+
+#[test]
+fn discount_security_functions_coerce_date_serials_like_excel() {
+    use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+    use formula_engine::functions::financial;
+
+    let system = ExcelDateSystem::EXCEL_1900;
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+
+    let pr = 97.0;
+    let redemption = 100.0;
+    let basis = 0;
+    let expected = financial::disc(settlement, maturity, pr, redemption, basis, system).unwrap();
+
+    let mut engine = Engine::new();
+
+    // Excel ignores any time components in date serials for these security functions. We model
+    // that by flooring serials (e.g. 43831.9 -> 43831).
+    engine
+        .set_cell_value("Sheet1", "B1", f64::from(settlement) + 0.9)
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "B2", f64::from(maturity) + 0.1)
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=DISC(B1,B2,97,100)")
+        .unwrap();
+
+    // Serial must be within i32 range.
+    engine
+        .set_cell_value("Sheet1", "B3", (i32::MAX as f64) + 1.0)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=DISC(B3,B2,97,100)")
+        .unwrap();
+
+    // Non-finite serials should return #NUM!
+    engine
+        .set_cell_value("Sheet1", "B4", f64::INFINITY)
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A3", "=DISC(B4,B2,97,100)")
+        .unwrap();
+
+    engine.recalculate();
+
+    assert_close(
+        assert_number(engine.get_cell_value("Sheet1", "A1")),
+        expected,
+        1e-12,
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Error(ErrorKind::Num)
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A3"),
+        Value::Error(ErrorKind::Num)
     );
 }
