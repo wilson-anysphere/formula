@@ -55,6 +55,7 @@ mod read;
 #[cfg(not(target_arch = "wasm32"))]
 mod reader;
 mod relationships;
+mod rich_data;
 pub mod shared_strings;
 mod sheet_metadata;
 pub mod streaming;
