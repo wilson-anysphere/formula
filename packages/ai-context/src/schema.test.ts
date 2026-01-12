@@ -150,4 +150,14 @@ describe("extractSheetSchema", () => {
     expect(schema.tables[0].range).toBe("'Bob''s Sheet'!A1:B3");
     expect(schema.dataRegions[0].range).toBe("'Bob''s Sheet'!A1:B3");
   });
+
+  it("detectDataRegions treats missing cells in ragged rows as empty", () => {
+    const values = [
+      [1, 1],
+      [1]
+    ];
+
+    const regions = detectDataRegions(values);
+    expect(regions).toEqual([{ startRow: 0, startCol: 0, endRow: 1, endCol: 1 }]);
+  });
 });
