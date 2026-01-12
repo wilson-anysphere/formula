@@ -27,6 +27,7 @@ use formula_storage::{
     AutoSaveConfig, AutoSaveManager, CellChange, CellData as StorageCellData,
     CellRange as StorageCellRange, ImportModelWorkbookOptions,
 };
+use formula_model::validate_sheet_name;
 use formula_xlsx::print::{
     CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings,
 };
@@ -346,6 +347,8 @@ impl AppState {
                 "sheet name cannot be empty".to_string(),
             ));
         }
+        validate_sheet_name(trimmed)
+            .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
         if workbook
             .sheets
             .iter()
@@ -425,6 +428,8 @@ impl AppState {
                 "sheet name cannot be empty".to_string(),
             ));
         }
+        validate_sheet_name(trimmed)
+            .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
         if workbook.sheets.iter().any(|sheet| {
             sheet.id != sheet_id && sheet.name.eq_ignore_ascii_case(trimmed)
         }) {
