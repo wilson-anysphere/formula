@@ -61,6 +61,8 @@ function snapshotSheets(session) {
   return session.sheets.toArray().map((sheet) => ({
     id: String(sheet.get("id") ?? ""),
     name: sheet.get("name") == null ? null : String(sheet.get("name")),
+    visibility: sheet.get("visibility") == null ? "visible" : String(sheet.get("visibility")),
+    tabColor: sheet.get("tabColor") == null ? null : String(sheet.get("tabColor")),
   }));
 }
 
@@ -129,6 +131,75 @@ test("CollabSession workbook metadata: sheets + namedRanges sync and local undo 
   sessionA.undo?.undo();
   assert.deepEqual(snapshotSheets(sessionA).map((s) => s.id), ["Sheet1"]);
   assert.deepEqual(snapshotSheets(sessionB).map((s) => s.id), ["Sheet1"]);
+
+  sessionA.destroy();
+  sessionB.destroy();
+  disconnect();
+  docA.destroy();
+  docB.destroy();
+});
+
+test("CollabSession workbook metadata: sheet visibility + tabColor sync and local undo/redo (in-memory)", () => {
+  const docA = new Y.Doc();
+  const docB = new Y.Doc();
+  const disconnect = connectDocs(docA, docB);
+
+  const sessionA = createCollabSession({ doc: docA, undo: {} });
+  const sessionB = createCollabSession({ doc: docB, undo: {} });
+
+  const sheetsA = createSheetManagerForSession(sessionA);
+
+  // Default schema initialization should ensure at least one *visible* sheet.
+  assert.equal(sessionA.sheets.length >= 1, true);
+  assert.equal(snapshotSheets(sessionA)[0]?.visibility, "visible");
+  assert.deepEqual(snapshotSheets(sessionA), snapshotSheets(sessionB));
+
+  // Cannot hide the last visible sheet.
+  assert.throws(() => sheetsA.hideSheet("Sheet1"), /Cannot hide the last visible sheet/);
+
+  sheetsA.addSheet({ id: "Sheet2", name: "Sheet2" });
+  sessionA.undo?.stopCapturing();
+  assert.deepEqual(snapshotSheets(sessionB).map((s) => s.id), ["Sheet1", "Sheet2"]);
+
+  // Tab color sync + normalization (lowercase => uppercase).
+  sheetsA.setTabColor("Sheet2", "ffff0000");
+  sessionA.undo?.stopCapturing();
+  assert.equal(snapshotSheets(sessionB).find((s) => s.id === "Sheet2")?.tabColor, "FFFF0000");
+  assert.equal(sheetsA.list().find((s) => s.id === "Sheet2")?.tabColor, "FFFF0000");
+
+  // Undo/redo should revert and restore tabColor.
+  sessionA.undo?.undo();
+  assert.equal(snapshotSheets(sessionA).find((s) => s.id === "Sheet2")?.tabColor, null);
+  assert.equal(snapshotSheets(sessionB).find((s) => s.id === "Sheet2")?.tabColor, null);
+
+  sessionA.undo?.redo();
+  assert.equal(snapshotSheets(sessionA).find((s) => s.id === "Sheet2")?.tabColor, "FFFF0000");
+  assert.equal(snapshotSheets(sessionB).find((s) => s.id === "Sheet2")?.tabColor, "FFFF0000");
+
+  // Visibility sync.
+  sheetsA.hideSheet("Sheet2");
+  sessionA.undo?.stopCapturing();
+  assert.equal(snapshotSheets(sessionB).find((s) => s.id === "Sheet2")?.visibility, "hidden");
+  assert.deepEqual(sheetsA.listVisible().map((s) => s.id), ["Sheet1"]);
+
+  // Still can't hide the last visible sheet.
+  assert.throws(() => sheetsA.hideSheet("Sheet1"), /Cannot hide the last visible sheet/);
+
+  // Undo/redo should revert and restore visibility changes.
+  sessionA.undo?.undo();
+  assert.equal(snapshotSheets(sessionA).find((s) => s.id === "Sheet2")?.visibility, "visible");
+  assert.equal(snapshotSheets(sessionB).find((s) => s.id === "Sheet2")?.visibility, "visible");
+
+  sessionA.undo?.redo();
+  assert.equal(snapshotSheets(sessionA).find((s) => s.id === "Sheet2")?.visibility, "hidden");
+  assert.equal(snapshotSheets(sessionB).find((s) => s.id === "Sheet2")?.visibility, "hidden");
+
+  // "veryHidden" is distinct from "hidden" and should sync.
+  sheetsA.unhideSheet("Sheet2");
+  sessionA.undo?.stopCapturing();
+  sheetsA.setVisibility("Sheet2", "veryHidden");
+  sessionA.undo?.stopCapturing();
+  assert.equal(snapshotSheets(sessionB).find((s) => s.id === "Sheet2")?.visibility, "veryHidden");
 
   sessionA.destroy();
   sessionB.destroy();

@@ -10,6 +10,8 @@ export interface WorkbookSchemaOptions {
   createDefaultSheet?: boolean;
 }
 
+export type SheetVisibility = "visible" | "hidden" | "veryHidden";
+
 export type WorkbookSchemaRoots = {
   cells: Y.Map<unknown>;
   sheets: Y.Array<Y.Map<unknown>>;
@@ -178,6 +180,9 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
   const createDefaultSheet = options.createDefaultSheet ?? true;
 
   // `sheets` is a Y.Array of sheet metadata maps (with at least `{ id, name }`).
+  // Sheet metadata may also include:
+  //   - visibility: "visible" | "hidden" | "veryHidden"
+  //   - tabColor: ARGB hex string (e.g. "FFFF0000")
   // In practice we may see duplicate sheet ids when two clients concurrently
   // initialize an empty workbook. Treat ids as unique and prune duplicates so
   // downstream sheet lookups remain deterministic.
@@ -185,6 +190,7 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
     if (sheets.length === 0) return createDefaultSheet;
     const seen = new Set<string>();
     let hasSheetWithId = false;
+    let hasVisibleSheet = false;
     for (const entry of sheets.toArray()) {
       const maybe = entry as any;
       const id = coerceString(maybe?.get?.("id") ?? maybe?.id);
@@ -192,7 +198,25 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
       hasSheetWithId = true;
       if (seen.has(id)) return true;
       seen.add(id);
+
+      const visibilityRaw = maybe?.get?.("visibility") ?? maybe?.visibility;
+      const visibilityStr = coerceString(visibilityRaw);
+      const visibility = coerceSheetVisibility(visibilityStr) ?? "visible";
+      if (visibilityStr !== visibility || typeof visibilityRaw !== "string") return true;
+      if (visibility === "visible") hasVisibleSheet = true;
+
+      const tabColorRaw = maybe?.get?.("tabColor") ?? maybe?.tabColor;
+      if (tabColorRaw != null) {
+        const normalized = coerceTabColor(tabColorRaw);
+        if (!normalized) return true;
+        const tabColorStr = coerceString(tabColorRaw);
+        if (tabColorStr !== normalized || typeof tabColorRaw !== "string") return true;
+      }
     }
+
+    // Workbooks should always have at least one visible sheet.
+    if (hasSheetWithId && !hasVisibleSheet) return true;
+
     return createDefaultSheet && !hasSheetWithId;
   })();
 
@@ -260,8 +284,9 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
         const sheet = new YMapCtor();
         sheet.set("id", defaultSheetId);
         sheet.set("name", defaultSheetName);
+        sheet.set("visibility", "visible");
         sheets.push([sheet]);
-        return;
+        hasSheetWithId = true;
       }
 
       // If the workbook has sheets but none are valid (no `id` field), salvage
@@ -275,13 +300,57 @@ export function ensureWorkbookSchema(doc: Y.Doc, options: WorkbookSchemaOptions 
           if (!existingId) first.set("id", defaultSheetId);
           const existingName = coerceString(first.get("name"));
           if (!existingName) first.set("name", defaultSheetName);
-          return;
+          hasSheetWithId = true;
+        } else {
+          const sheet = new YMapCtor();
+          sheet.set("id", defaultSheetId);
+          sheet.set("name", defaultSheetName);
+          sheet.set("visibility", "visible");
+          sheets.insert(0, [sheet]);
+          hasSheetWithId = true;
         }
+      }
 
-        const sheet = new YMapCtor();
-        sheet.set("id", defaultSheetId);
-        sheet.set("name", defaultSheetName);
-        sheets.insert(0, [sheet]);
+      // Normalize per-sheet metadata now that ids are stable.
+      let hasVisibleSheet = false;
+      const entries = sheets.toArray() as any[];
+      for (const entry of entries) {
+        const id = coerceString(entry?.get?.("id") ?? entry?.id);
+        if (!id) continue;
+
+        if (!entry || typeof entry.get !== "function" || typeof entry.set !== "function") continue;
+
+        const currentVisibility = entry.get("visibility");
+        const visibilityStr = coerceString(currentVisibility);
+        const visibility = coerceSheetVisibility(visibilityStr) ?? "visible";
+        if (visibilityStr !== visibility || typeof currentVisibility !== "string") {
+          entry.set("visibility", visibility);
+        }
+        if (visibility === "visible") hasVisibleSheet = true;
+
+        const currentTabColor = entry.get("tabColor");
+        if (currentTabColor != null) {
+          const normalized = coerceTabColor(currentTabColor);
+          if (!normalized) {
+            if (typeof entry.delete === "function") entry.delete("tabColor");
+          } else {
+            const tabColorStr = coerceString(currentTabColor);
+            if (tabColorStr !== normalized || typeof currentTabColor !== "string") {
+              entry.set("tabColor", normalized);
+            }
+          }
+        }
+      }
+
+      // Ensure the workbook always has at least one visible sheet.
+      if (hasSheetWithId && !hasVisibleSheet) {
+        for (const entry of entries) {
+          const id = coerceString(entry?.get?.("id") ?? entry?.id);
+          if (!id) continue;
+          if (!entry || typeof entry.set !== "function") continue;
+          entry.set("visibility", "visible");
+          break;
+        }
       }
     });
   }
@@ -305,6 +374,19 @@ function coerceString(value: unknown): string | null {
   if (typeof value === "string") return value;
   if (value == null) return null;
   return String(value);
+}
+
+function coerceSheetVisibility(value: unknown): SheetVisibility | null {
+  if (value === "visible" || value === "hidden" || value === "veryHidden") return value;
+  return null;
+}
+
+function coerceTabColor(value: unknown): string | null {
+  const str = coerceString(value);
+  if (!str) return null;
+  if (!/^[0-9A-Fa-f]{8}$/.test(str)) return null;
+  // Canonicalize to uppercase so equality checks are stable across clients.
+  return str.toUpperCase();
 }
 
 type DocTypeConstructors = {
@@ -372,13 +454,39 @@ export class SheetManager {
     this.YTextCtor = getDocTextConstructor(opts.doc) as unknown as { new (): Y.Text };
   }
 
-  list(): Array<{ id: string; name: string | null }> {
-    const out: Array<{ id: string; name: string | null }> = [];
+  list(): Array<{ id: string; name: string | null; visibility?: SheetVisibility; tabColor?: string | null }> {
+    const out: Array<{ id: string; name: string | null; visibility?: SheetVisibility; tabColor?: string | null }> = [];
     for (const entry of this.sheets.toArray()) {
       const id = coerceString(entry?.get("id"));
       if (!id) continue;
       const name = coerceString(entry.get("name"));
-      out.push({ id, name });
+
+      const visibilityRaw = entry.get("visibility");
+      const visibility = coerceSheetVisibility(coerceString(visibilityRaw)) ?? "visible";
+
+      const tabColorRaw = entry.get("tabColor");
+      const tabColor = tabColorRaw == null ? null : coerceTabColor(tabColorRaw);
+
+      out.push({ id, name, visibility, tabColor });
+    }
+    return out;
+  }
+
+  listVisible(): Array<{ id: string; name: string | null; visibility: SheetVisibility; tabColor: string | null }> {
+    const out: Array<{ id: string; name: string | null; visibility: SheetVisibility; tabColor: string | null }> = [];
+    for (const entry of this.sheets.toArray()) {
+      const id = coerceString(entry?.get("id"));
+      if (!id) continue;
+      const name = coerceString(entry.get("name"));
+
+      const visibilityRaw = entry.get("visibility");
+      const visibility = coerceSheetVisibility(coerceString(visibilityRaw)) ?? "visible";
+      if (visibility !== "visible") continue;
+
+      const tabColorRaw = entry.get("tabColor");
+      const tabColor = tabColorRaw == null ? null : coerceTabColor(tabColorRaw);
+
+      out.push({ id, name, visibility, tabColor });
     }
     return out;
   }
@@ -401,6 +509,7 @@ export class SheetManager {
       const sheet = new this.YMapCtor();
       sheet.set("id", id);
       sheet.set("name", name);
+      sheet.set("visibility", "visible");
 
       const idx =
         typeof input.index === "number" && Number.isFinite(input.index)
@@ -416,6 +525,58 @@ export class SheetManager {
       const sheet = this.getById(id);
       if (!sheet) throw new Error(`Sheet not found: ${id}`);
       sheet.set("name", name);
+    });
+  }
+
+  setVisibility(id: string, visibility: SheetVisibility): void {
+    this.transact(() => {
+      const sheet = this.getById(id);
+      if (!sheet) throw new Error(`Sheet not found: ${id}`);
+
+      const next = visibility;
+      if (next !== "visible" && next !== "hidden" && next !== "veryHidden") {
+        throw new Error(`Invalid sheet visibility: ${String(next)}`);
+      }
+
+      const current = coerceSheetVisibility(coerceString(sheet.get("visibility"))) ?? "visible";
+      if (current === next) return;
+
+      // Match common spreadsheet semantics by preventing callers from hiding the
+      // last visible sheet.
+      if (current === "visible" && next !== "visible") {
+        const visibleCount = this.countVisibleSheets();
+        if (visibleCount <= 1) {
+          throw new Error("Cannot hide the last visible sheet");
+        }
+      }
+
+      sheet.set("visibility", next);
+    });
+  }
+
+  hideSheet(id: string): void {
+    this.setVisibility(id, "hidden");
+  }
+
+  unhideSheet(id: string): void {
+    this.setVisibility(id, "visible");
+  }
+
+  setTabColor(id: string, tabColor: string | null): void {
+    this.transact(() => {
+      const sheet = this.getById(id);
+      if (!sheet) throw new Error(`Sheet not found: ${id}`);
+
+      if (tabColor == null) {
+        sheet.delete("tabColor");
+        return;
+      }
+
+      const normalized = coerceTabColor(tabColor);
+      if (!normalized) {
+        throw new Error(`Invalid tabColor (expected 8-digit ARGB hex): ${tabColor}`);
+      }
+      sheet.set("tabColor", normalized);
     });
   }
 
@@ -468,6 +629,17 @@ export class SheetManager {
     for (const entry of this.sheets.toArray()) {
       const id = coerceString(entry?.get("id"));
       if (id) count += 1;
+    }
+    return count;
+  }
+
+  private countVisibleSheets(): number {
+    let count = 0;
+    for (const entry of this.sheets.toArray()) {
+      const id = coerceString(entry?.get("id"));
+      if (!id) continue;
+      const visibility = coerceSheetVisibility(coerceString(entry?.get("visibility"))) ?? "visible";
+      if (visibility === "visible") count += 1;
     }
     return count;
   }
