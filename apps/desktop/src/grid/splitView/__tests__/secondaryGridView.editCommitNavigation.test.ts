@@ -61,6 +61,7 @@ describe("SecondaryGridView edit commit navigation", () => {
 
   it("commits cell edits and advances selection on Enter (A1 -> A2)", () => {
     const container = document.createElement("div");
+    container.tabIndex = 0;
     Object.defineProperty(container, "clientWidth", { configurable: true, value: 800 });
     Object.defineProperty(container, "clientHeight", { configurable: true, value: 600 });
     document.body.appendChild(container);
@@ -105,5 +106,59 @@ describe("SecondaryGridView edit commit navigation", () => {
     gridView.destroy();
     container.remove();
   });
-});
 
+  it("commits in-progress edits when clicking another cell in the grid", () => {
+    const container = document.createElement("div");
+    container.tabIndex = 0;
+    Object.defineProperty(container, "clientWidth", { configurable: true, value: 800 });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 600 });
+    document.body.appendChild(container);
+
+    const doc = new DocumentController();
+    const sheetId = "Sheet1";
+
+    const gridView = new SecondaryGridView({
+      container,
+      document: doc,
+      getSheetId: () => sheetId,
+      rowCount: 10,
+      colCount: 10,
+      showFormulas: () => false,
+      getComputedValue: () => null,
+    });
+
+    // Start editing A1.
+    container.dispatchEvent(new KeyboardEvent("keydown", { key: "h", bubbles: true, cancelable: true }));
+
+    const editor = container.querySelector<HTMLTextAreaElement>("[data-testid='cell-editor']");
+    expect(editor).not.toBeNull();
+    if (!editor) throw new Error("Expected editor to exist");
+    editor.value = "hello";
+
+    // Click B1 (grid coords include header row/col at 0).
+    const selectionCanvas = container.querySelector<HTMLCanvasElement>("canvas.grid-canvas--selection");
+    expect(selectionCanvas).not.toBeNull();
+    if (!selectionCanvas) throw new Error("Expected selection canvas to exist");
+
+    selectionCanvas.dispatchEvent(
+      new MouseEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 48 + 100 + 10,
+        clientY: 24 + 10,
+        button: 0,
+      }),
+    );
+
+    // Edit should have committed into A1 (sheet coords row=0,col=0).
+    expect((doc.getCell(sheetId, { row: 0, col: 0 }) as any)?.value).toBe("hello");
+
+    // Selection should have moved to B1 (grid coords row=1,col=2).
+    expect(gridView.grid.renderer.getSelection()).toEqual({ row: 1, col: 2 });
+
+    expect(editor.classList.contains("cell-editor--open")).toBe(false);
+
+    gridView.destroy();
+    container.remove();
+  });
+});
