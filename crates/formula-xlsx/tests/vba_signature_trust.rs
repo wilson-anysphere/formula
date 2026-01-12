@@ -2,6 +2,7 @@
 
 use std::io::{Cursor, Write};
 
+use formula_vba::{compute_vba_project_digest_v3, compress_container, DigestAlg, VbaSignatureBinding};
 use formula_xlsx::vba::{VbaCertificateTrust, VbaSignatureTrustOptions, VbaSignatureVerification};
 use formula_xlsx::XlsxPackage;
 use openssl::x509::X509;
@@ -109,6 +110,160 @@ fn build_zip(parts: &[(&str, &[u8])]) -> Vec<u8> {
     }
 
     zip.finish().expect("finish zip").into_inner()
+}
+
+fn push_record(out: &mut Vec<u8>, id: u16, data: &[u8]) {
+    out.extend_from_slice(&id.to_le_bytes());
+    out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    out.extend_from_slice(data);
+}
+
+fn build_minimal_vba_project_bin_v3(designer_payload: &[u8]) -> Vec<u8> {
+    let module_source = b"Sub Hello()\r\nEnd Sub\r\n";
+    let module_container = compress_container(module_source);
+    let userform_source = b"Sub FormHello()\r\nEnd Sub\r\n";
+    let userform_container = compress_container(userform_source);
+
+    // Minimal `dir` stream (decompressed) with:
+    // - one standard module, and
+    // - one UserForm module so FormsNormalizedData is non-empty.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        // Include a v3-specific reference record so the transcript depends on it.
+        let libid_twiddled = b"REFCTRL-V3";
+        let reserved1: u32 = 0;
+        let reserved2: u16 = 0;
+        let mut reference_control = Vec::new();
+        reference_control.extend_from_slice(&(libid_twiddled.len() as u32).to_le_bytes());
+        reference_control.extend_from_slice(libid_twiddled);
+        reference_control.extend_from_slice(&reserved1.to_le_bytes());
+        reference_control.extend_from_slice(&reserved2.to_le_bytes());
+        push_record(&mut out, 0x002F, &reference_control);
+
+        // MODULENAME (standard module)
+        push_record(&mut out, 0x0019, b"Module1");
+        // MODULESTREAMNAME + reserved u16
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        // MODULETYPE (standard)
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        // MODULETEXTOFFSET
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+
+        // MODULENAME (UserForm/designer module referenced from PROJECT by BaseClass=)
+        push_record(&mut out, 0x0019, b"UserForm1");
+        // MODULESTREAMNAME + reserved u16
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"UserForm1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        // MODULETYPE = UserForm (0x0003 per MS-OVBA).
+        push_record(&mut out, 0x0021, &0x0003u16.to_le_bytes());
+        // MODULETEXTOFFSET
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    ole.create_storage("UserForm1").expect("designer storage");
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(b"Name=\"VBAProject\"\r\nModule=Module1\r\nBaseClass=\"UserForm1\"\r\n")
+            .expect("write PROJECT");
+    }
+
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+    {
+        let mut s = ole
+            .create_stream("VBA/UserForm1")
+            .expect("userform module stream");
+        s.write_all(&userform_container)
+            .expect("write userform module");
+    }
+
+    // Designer payload so FormsNormalizedData is non-empty.
+    {
+        let mut s = ole
+            .create_stream("UserForm1/Payload")
+            .expect("designer stream");
+        s.write_all(designer_payload)
+            .expect("write designer payload");
+    }
+
+    ole.into_inner().into_inner()
+}
+
+fn der_len(len: usize) -> Vec<u8> {
+    if len < 0x80 {
+        return vec![len as u8];
+    }
+    let mut buf = Vec::new();
+    let mut n = len;
+    while n > 0 {
+        buf.push((n & 0xFF) as u8);
+        n >>= 8;
+    }
+    buf.reverse();
+    let mut out = Vec::with_capacity(1 + buf.len());
+    out.push(0x80 | (buf.len() as u8));
+    out.extend_from_slice(&buf);
+    out
+}
+
+fn der_tlv(tag: u8, content: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(tag);
+    out.extend_from_slice(&der_len(content.len()));
+    out.extend_from_slice(content);
+    out
+}
+
+fn der_sequence(items: &[Vec<u8>]) -> Vec<u8> {
+    let mut content = Vec::new();
+    for item in items {
+        content.extend_from_slice(item);
+    }
+    der_tlv(0x30, &content)
+}
+
+fn der_oid(oid_content: &[u8]) -> Vec<u8> {
+    der_tlv(0x06, oid_content)
+}
+
+fn der_null() -> Vec<u8> {
+    vec![0x05, 0x00]
+}
+
+fn der_octet_string(bytes: &[u8]) -> Vec<u8> {
+    der_tlv(0x04, bytes)
+}
+
+fn build_spc_indirect_data_content_sha256(project_digest: &[u8]) -> Vec<u8> {
+    // SHA-256 OID: 2.16.840.1.101.3.4.2.1
+    let sha256_oid = der_oid(&[0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01]);
+    let alg_id = der_sequence(&[sha256_oid, der_null()]);
+
+    // DigestInfo ::= SEQUENCE { digestAlgorithm AlgorithmIdentifier, digest OCTET STRING }
+    let digest_info = der_sequence(&[alg_id, der_octet_string(project_digest)]);
+
+    // SpcIndirectDataContent ::= SEQUENCE { data, messageDigest }
+    // `data` is ignored by our parser; use NULL.
+    der_sequence(&[der_null(), digest_info])
 }
 
 fn make_unrelated_root_cert_der() -> Vec<u8> {
@@ -336,6 +491,53 @@ fn external_signature_part_trust_is_reported_with_leading_slash_part_names() {
         .expect("signature should be present");
     assert_eq!(sig.signature.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.cert_trust, VbaCertificateTrust::Untrusted);
+}
+
+#[test]
+fn external_raw_signature_part_binding_v3_and_trust_is_reported() {
+    let vba_project_bin = build_minimal_vba_project_bin_v3(b"ABC");
+    let digest =
+        compute_vba_project_digest_v3(&vba_project_bin, DigestAlg::Sha256).expect("digest v3");
+
+    let signed_content = build_spc_indirect_data_content_sha256(&digest);
+    let pkcs7 = make_pkcs7_signed_message(&signed_content);
+
+    let vba_rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProjectSignature" Target="vbaProjectSignature.bin"/>
+</Relationships>"#;
+
+    let zip_bytes = build_zip(&[
+        ("xl/vbaProject.bin", &vba_project_bin),
+        ("xl/_rels/vbaProject.bin.rels", vba_rels),
+        ("xl/vbaProjectSignature.bin", &pkcs7),
+    ]);
+    let pkg = XlsxPackage::from_bytes(&zip_bytes).expect("read package");
+
+    let signer_der = X509::from_pem(TEST_CERT_PEM.as_bytes())
+        .expect("parse test certificate")
+        .to_der()
+        .expect("convert test certificate to DER");
+
+    // No trust anchors: trust is unknown, but binding should still verify.
+    let sig = pkg
+        .verify_vba_digital_signature_with_trust(&VbaSignatureTrustOptions::default())
+        .expect("verify signature")
+        .expect("signature should be present");
+    assert_eq!(sig.signature.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.signature.binding, VbaSignatureBinding::Bound);
+    assert_eq!(sig.cert_trust, VbaCertificateTrust::Unknown);
+
+    // Trusted publisher (root matches signer): binding should still be bound and trust trusted.
+    let sig = pkg
+        .verify_vba_digital_signature_with_trust(&VbaSignatureTrustOptions {
+            trusted_root_certs_der: vec![signer_der],
+        })
+        .expect("verify signature")
+        .expect("signature should be present");
+    assert_eq!(sig.signature.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.signature.binding, VbaSignatureBinding::Bound);
+    assert_eq!(sig.cert_trust, VbaCertificateTrust::Trusted);
 }
 
 #[test]
