@@ -74,7 +74,8 @@ describe("createCommandPalette shortcut search mode", () => {
 
     const keybindingIndex = new Map<string, readonly string[]>([
       ["cmd.b", ["ctrl+shift+c"]],
-      ["cmd.a2", ["ctrl+shift+b"]],
+      // Two keybindings so we can verify shortcut search prefers displaying the matched one.
+      ["cmd.a2", ["ctrl+shift+b", "ctrl+shift+z"]],
       ["cmd.a1", ["ctrl+shift+a"]],
     ]);
 
@@ -123,6 +124,15 @@ describe("createCommandPalette shortcut search mode", () => {
     expect(betaIndex).toBeGreaterThanOrEqual(0);
     expect(alpha1Index).toBeLessThan(alpha2Index);
     expect(alpha2Index).toBeLessThan(betaIndex);
+
+    // Shortcut mode should display the shortcut that matched the query when a command has multiple bindings.
+    input.value = "/ ctrl+shift+z";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    vi.advanceTimersByTime(0);
+
+    const alpha2Row = [...list.querySelectorAll<HTMLElement>("li.command-palette__item")].find((el) => (el.textContent ?? "").includes("Alpha 2"));
+    expect(alpha2Row).toBeTruthy();
+    expect(alpha2Row!.querySelector(".command-palette__shortcut")?.textContent).toBe("ctrl+shift+z");
 
     palette.dispose();
     vi.useRealTimers();

@@ -20,6 +20,13 @@ import { formatA1Range, parseGoTo, type GoToParseResult, type GoToWorkbookLookup
 type RenderableCommand = PreparedCommandForFuzzy<CommandContribution> & {
   score: number;
   titleRanges: MatchRange[];
+  /**
+   * Optional shortcut override used by shortcut-search mode.
+   *
+   * When a command has multiple keybindings, shortcut search may prefer displaying the binding
+   * that matched the query (instead of always showing the primary binding).
+   */
+  shortcut?: string;
 };
 
 type CommandGroup = {
@@ -834,7 +841,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
           cached.description.textContent = descriptionText;
           cached.description.hidden = !descriptionText;
 
-          const shortcutFromShortcutMode = shortcutMode && typeof (cmd as any).shortcut === "string" ? ((cmd as any).shortcut as string) : null;
+          const shortcutFromShortcutMode = shortcutMode ? cmd.shortcut ?? null : null;
           const kbValue = keybindingIndex.get(cmd.commandId);
           const shortcut =
             shortcutFromShortcutMode ??
