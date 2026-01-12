@@ -305,31 +305,39 @@ fn parse_value_metadata_mappings(
             .filter(|c| *c >= 1)
             .unwrap_or(1);
 
-        let rc = bk.descendants().find(|n| {
-            n.is_element()
-                && n.tag_name().name() == "rc"
-                && n.attribute("t")
-                    .and_then(|t| t.parse::<u32>().ok())
-                    .is_some_and(|t| xlrichvalue_t_values.contains(&t))
-        });
-
-        let Some(rc) = rc else {
-            vm_start_1_based = vm_start_1_based.saturating_add(count);
-            continue;
-        };
-
-        let Some(mut v_idx) = rc.attribute("v").and_then(|v| v.parse::<u32>().ok()) else {
-            vm_start_1_based = vm_start_1_based.saturating_add(count);
-            continue;
-        };
-        if v_indexing_is_one_based {
-            let Some(one_based) = v_idx.checked_sub(1) else {
-                vm_start_1_based = vm_start_1_based.saturating_add(count);
+        // Some producers emit multiple `<rc>` entries per `<bk>` (one per metadata type). When we
+        // allow multiple `rc/@t` candidates (mixed/ambiguous indexing), the first matching `t`
+        // might not be the rich-value one. Prefer the first candidate that can be resolved to a
+        // valid rich value index.
+        let mut resolved_v: Option<u32> = None;
+        for rc in bk
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name() == "rc")
+        {
+            let Some(t) = rc.attribute("t").and_then(|t| t.parse::<u32>().ok()) else {
                 continue;
             };
-            v_idx = one_based;
+            if !xlrichvalue_t_values.contains(&t) {
+                continue;
+            }
+
+            let Some(mut v_idx) = rc.attribute("v").and_then(|v| v.parse::<u32>().ok()) else {
+                continue;
+            };
+            if v_indexing_is_one_based {
+                let Some(one_based) = v_idx.checked_sub(1) else {
+                    continue;
+                };
+                v_idx = one_based;
+            }
+
+            if let Some(v) = resolve_bk_run(future_bk_indices, v_idx).flatten() {
+                resolved_v = Some(v);
+                break;
+            }
         }
-        let Some(v) = resolve_bk_run(future_bk_indices, v_idx).flatten() else {
+
+        let Some(v) = resolved_v else {
             vm_start_1_based = vm_start_1_based.saturating_add(count);
             continue;
         };
@@ -582,6 +590,58 @@ mod tests {
     <bk><rc t="1" v="1"/></bk>
     <!-- Wrong metadata type; should be ignored. -->
     <bk><rc t="0" v="0"/></bk>
+  </valueMetadata>
+</metadata>
+"#;
+
+        let map = parse_value_metadata_vm_to_rich_value_index_map(xml.as_bytes()).unwrap();
+        assert_eq!(map.get(&1), Some(&5));
+        assert_eq!(map.get(&2), Some(&42));
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn parses_vm_to_rich_value_indices_mixed_t_indexing_multiple_rc_entries() {
+        // `<valueMetadata><bk>` can contain multiple `<rc>` entries. When we accept multiple `t`
+        // candidates (mixed indexing), we should choose an rc that can be resolved to a rich value
+        // index rather than relying on document order.
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <metadataTypes count="3">
+    <metadataType name="SOMEOTHERTYPE"/>
+    <metadataType name="XLRICHVALUE"/>
+    <metadataType name="ANOTHERTYPE"/>
+  </metadataTypes>
+  <futureMetadata name="XLRICHVALUE" count="2">
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000000}">
+          <xlrd:rvb i="5"/>
+        </ext>
+      </extLst>
+    </bk>
+    <bk>
+      <extLst>
+        <ext uri="{00000000-0000-0000-0000-000000000001}">
+          <xlrd:rvb i="42"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
+  <valueMetadata count="2">
+    <bk>
+      <!-- Force RcTIndexing::Mixed by ensuring min_t=0 and max_t=count -->
+      <rc t="0" v="0"/>
+      <!-- `t` matches one of the mixed candidates, but `v` is out-of-bounds and must be ignored. -->
+      <rc t="2" v="99"/>
+      <!-- This is the correct rich-value rc for this bk. -->
+      <rc t="1" v="0"/>
+      <rc t="3" v="0"/>
+    </bk>
+    <bk>
+      <rc t="1" v="1"/>
+    </bk>
   </valueMetadata>
 </metadata>
 "#;
