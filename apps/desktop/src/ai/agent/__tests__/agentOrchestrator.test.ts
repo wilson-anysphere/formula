@@ -16,6 +16,7 @@ import { LocalPolicyStore } from "../../../../../../packages/security/dlp/src/po
 
 import { createDesktopRagService } from "../../rag/ragService.js";
 import { getAiDlpAuditLogger, resetAiDlpAuditLoggerForTests } from "../../dlp/aiDlp.js";
+import { createSheetNameResolverFromIdToNameMap } from "../../../sheet/sheetNameResolver.js";
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
@@ -281,6 +282,65 @@ describe("runAgentTask (agent mode orchestrator)", () => {
     expect(auditEntries[0]!.mode).toBe("agent");
     expect(auditEntries[0]!.input).toMatchObject({ goal: "Set A1 to 5 then read it back." });
     expect(auditEntries[0]!.tool_calls.map((c) => c.name)).toEqual(["write_cell", "read_range"]);
+    expect(onApprovalRequired).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves display sheet names in tool calls when sheetNameResolver is provided", async () => {
+    const documentController = new DocumentController();
+    documentController.setRangeValues("Sheet2", "A1", [
+      ["Region", "Revenue"],
+      ["North", 1000],
+      ["South", 2000],
+    ]);
+
+    const sheetNameResolver = createSheetNameResolverFromIdToNameMap(new Map([["Sheet2", "Budget"]]));
+
+    let callCount = 0;
+    const llmClient = {
+      async chat() {
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            message: {
+              role: "assistant",
+              content: "",
+              toolCalls: [{ id: "call-1", name: "write_cell", arguments: { cell: "Budget!C1", value: 99 } }],
+            },
+            usage: { promptTokens: 1, completionTokens: 1 },
+          };
+        }
+        return {
+          message: {
+            role: "assistant",
+            content: "done",
+          },
+          usage: { promptTokens: 1, completionTokens: 1 },
+        };
+      },
+    };
+
+    const auditStore = new MemoryAIAuditStore();
+    const onApprovalRequired = vi.fn(async () => true);
+
+    const result = await runAgentTask({
+      goal: "Set C1 to 99",
+      workbookId: "wb_agent_display_names",
+      defaultSheetId: "Sheet2",
+      documentController,
+      sheetNameResolver,
+      llmClient: llmClient as any,
+      auditStore,
+      onApprovalRequired,
+      maxIterations: 4,
+      maxDurationMs: 10_000,
+      model: "unit-test-model",
+    });
+
+    expect(result.status).toBe("complete");
+    expect(result.final).toBe("done");
+    expect(documentController.getCell("Sheet2", "C1").value).toBe(99);
+    expect(documentController.getSheetIds()).toContain("Sheet2");
+    expect(documentController.getSheetIds()).not.toContain("Budget");
     expect(onApprovalRequired).toHaveBeenCalledTimes(1);
   });
 
