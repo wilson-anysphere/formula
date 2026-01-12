@@ -718,7 +718,7 @@ inventory::submit! {
         thread_safety: ThreadSafety::ThreadSafe,
         array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Any,
-        arg_types: &[ValueType::Any],
+        arg_types: &[ValueType::Any, ValueType::Number],
         implementation: choosecols_fn,
     }
 }
@@ -760,7 +760,7 @@ inventory::submit! {
         thread_safety: ThreadSafety::ThreadSafe,
         array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Any,
-        arg_types: &[ValueType::Any],
+        arg_types: &[ValueType::Any, ValueType::Number],
         implementation: chooserows_fn,
     }
 }

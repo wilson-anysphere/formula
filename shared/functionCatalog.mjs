@@ -214,7 +214,8 @@ export default {
       "volatility": "non_volatile",
       "return_type": "any",
       "arg_types": [
-        "any"
+        "any",
+        "number"
       ]
     },
     {
@@ -224,7 +225,8 @@ export default {
       "volatility": "non_volatile",
       "return_type": "any",
       "arg_types": [
-        "any"
+        "any",
+        "number"
       ]
     },
     {

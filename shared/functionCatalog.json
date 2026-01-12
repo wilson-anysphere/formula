@@ -213,7 +213,8 @@
       "volatility": "non_volatile",
       "return_type": "any",
       "arg_types": [
-        "any"
+        "any",
+        "number"
       ]
     },
     {
@@ -223,7 +224,8 @@
       "volatility": "non_volatile",
       "return_type": "any",
       "arg_types": [
-        "any"
+        "any",
+        "number"
       ]
     },
     {
