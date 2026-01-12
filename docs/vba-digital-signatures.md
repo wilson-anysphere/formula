@@ -358,6 +358,8 @@ Repo status:
 - `formula-vba` implements the v3 transcript and digest:
   - `formula_vba::v3_content_normalized_data` and `formula_vba::project_normalized_data_v3` in
     `crates/formula-vba/src/contents_hash.rs`
+  - `formula_vba::contents_hash_v3` (SHA-256 digest bytes for `DigitalSignatureExt`) in
+    `crates/formula-vba/src/contents_hash.rs`
   - `formula_vba::compute_vba_project_digest_v3` in `crates/formula-vba/src/project_digest.rs`
 - Binding logic in `crates/formula-vba/src/signature.rs` treats `\x05DigitalSignatureExt` as a v3
   signature stream and compares its signed digest bytes against the computed v3 project digest
