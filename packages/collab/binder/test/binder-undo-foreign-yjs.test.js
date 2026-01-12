@@ -109,6 +109,31 @@ class TestDocumentController {
       ],
     });
   }
+
+  /**
+   * Simulate a user formula edit.
+   *
+   * @param {string} sheetId
+   * @param {{ row: number, col: number }} address
+   * @param {string | null} formula
+   */
+  setCellFormula(sheetId, address, formula) {
+    const before = this.getCell(sheetId, address);
+    const after = { value: null, formula, styleId: before.styleId };
+    const key = this._key(sheetId, address);
+    this._cells.set(key, after);
+    this._emitter.emit("change", {
+      deltas: [
+        {
+          sheetId,
+          row: address.row,
+          col: address.col,
+          before,
+          after,
+        },
+      ],
+    });
+  }
 }
 
 test("binder normalizes foreign nested cell maps before mutating so collab undo works", async () => {
@@ -322,6 +347,91 @@ test("binder normalizes foreign nested cell maps when only r{row}c{col} keys exi
   assert.equal(afterUndoLegacy.get("value"), "from-cjs");
   assert.equal(undoService.canUndo(), false);
   assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).value, "from-cjs");
+
+  binder.destroy();
+  doc.destroy();
+});
+
+test("binder normalizes foreign nested cell maps for formula edits so collab undo works", async () => {
+  const Ycjs = requireYjsCjs();
+
+  const remote = new Ycjs.Doc();
+  const remoteCells = remote.getMap("cells");
+  remote.transact(() => {
+    const canonical = new Ycjs.Map();
+    canonical.set("value", "from-cjs");
+    canonical.set("formula", null);
+    canonical.set("modified", 1);
+    remoteCells.set("Sheet1:0:0", canonical);
+
+    const legacy = new Ycjs.Map();
+    legacy.set("value", "from-cjs");
+    legacy.set("formula", null);
+    legacy.set("modified", 1);
+    remoteCells.set("Sheet1:0,0", legacy);
+  });
+  const update = Ycjs.encodeStateAsUpdate(remote);
+
+  const doc = new Y.Doc();
+  const cellsRoot = getWorkbookRoots(doc).cells;
+  Ycjs.applyUpdate(doc, update);
+
+  const beforeWrite = cellsRoot.get("Sheet1:0:0");
+  assert.ok(beforeWrite);
+  assert.equal(beforeWrite instanceof Y.Map, false);
+
+  const localOrigin = { type: "local:test" };
+  const undoService = createUndoService({ mode: "collab", doc, scope: [cellsRoot], origin: localOrigin });
+
+  const documentController = new TestDocumentController();
+  const binder = bindYjsToDocumentController({
+    ydoc: doc,
+    documentController,
+    undoService,
+    defaultSheetId: "Sheet1",
+  });
+
+  await flushAsync();
+
+  assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).value, "from-cjs");
+  assert.equal(documentController.externalDeltaCount, 1);
+
+  documentController.setCellFormula("Sheet1", { row: 0, col: 0 }, "=1+1");
+  await flushAsync();
+  assert.equal(documentController.externalDeltaCount, 1);
+
+  const afterWrite = cellsRoot.get("Sheet1:0:0");
+  assert.ok(afterWrite);
+  assert.ok(afterWrite instanceof Y.Map);
+  assert.equal(afterWrite.get("formula"), "=1+1");
+  assert.equal(afterWrite.get("value"), null);
+
+  const afterWriteLegacy = cellsRoot.get("Sheet1:0,0");
+  assert.ok(afterWriteLegacy);
+  assert.ok(afterWriteLegacy instanceof Y.Map);
+  assert.equal(afterWriteLegacy.get("formula"), "=1+1");
+  assert.equal(afterWriteLegacy.get("value"), null);
+
+  assert.equal(undoService.canUndo(), true);
+  undoService.undo();
+  await flushAsync();
+  assert.equal(documentController.externalDeltaCount, 2);
+
+  const afterUndo = cellsRoot.get("Sheet1:0:0");
+  assert.ok(afterUndo);
+  assert.ok(afterUndo instanceof Y.Map);
+  assert.equal(afterUndo.get("value"), "from-cjs");
+  assert.equal(afterUndo.get("formula"), null);
+
+  const afterUndoLegacy = cellsRoot.get("Sheet1:0,0");
+  assert.ok(afterUndoLegacy);
+  assert.ok(afterUndoLegacy instanceof Y.Map);
+  assert.equal(afterUndoLegacy.get("value"), "from-cjs");
+  assert.equal(afterUndoLegacy.get("formula"), null);
+
+  assert.equal(undoService.canUndo(), false);
+  assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).value, "from-cjs");
+  assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).formula, null);
 
   binder.destroy();
   doc.destroy();
