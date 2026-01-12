@@ -454,6 +454,24 @@ class SheetModel {
     this.colStyleIds = new Map();
 
     /**
+     * Bounding box of row-level formatting overrides (rowStyleIds).
+     *
+     * This represents the used-range impact of row formatting alone (full width columns).
+     *
+     * @type {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+     */
+    this.rowStyleBounds = null;
+
+    /**
+     * Bounding box of column-level formatting overrides (colStyleIds).
+     *
+     * This represents the used-range impact of column formatting alone (full height rows).
+     *
+     * @type {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+     */
+    this.colStyleBounds = null;
+
+    /**
      * Bounding box of cells with user-visible contents (value/formula).
      *
      * This intentionally ignores format-only cells so default `getUsedRange()` preserves its
@@ -477,6 +495,8 @@ class SheetModel {
     // by lazily recomputing on demand when a boundary cell is cleared.
     this.contentBoundsDirty = false;
     this.formatBoundsDirty = false;
+    this.rowStyleBoundsDirty = false;
+    this.colStyleBoundsDirty = false;
 
     // Track the number of cells that contribute to `contentBounds` so we can fast-path the
     // empty case (common when clearing contents but preserving styles).
@@ -485,6 +505,8 @@ class SheetModel {
     // Debug counters for unit tests to verify recomputation only occurs when required.
     this.__contentBoundsRecomputeCount = 0;
     this.__formatBoundsRecomputeCount = 0;
+    this.__rowStyleBoundsRecomputeCount = 0;
+    this.__colStyleBoundsRecomputeCount = 0;
   }
 
   /**
@@ -573,6 +595,134 @@ class SheetModel {
   }
 
   /**
+   * @param {number} row
+   * @param {number} styleId
+   */
+  setRowStyleId(row, styleId) {
+    const rowIdx = Number(row);
+    if (!Number.isInteger(rowIdx) || rowIdx < 0) return;
+    const nextStyle = Number(styleId);
+    const afterStyleId = Number.isInteger(nextStyle) && nextStyle >= 0 ? nextStyle : 0;
+
+    const beforeStyleId = this.rowStyleIds.get(rowIdx) ?? 0;
+    if (beforeStyleId === afterStyleId) return;
+
+    const beforeHad = beforeStyleId !== 0;
+    const afterHas = afterStyleId !== 0;
+
+    if (afterHas) {
+      this.rowStyleIds.set(rowIdx, afterStyleId);
+    } else {
+      this.rowStyleIds.delete(rowIdx);
+    }
+
+    if (afterHas) {
+      if (!this.rowStyleBounds) {
+        this.rowStyleBounds = { startRow: rowIdx, endRow: rowIdx, startCol: 0, endCol: EXCEL_MAX_COL };
+        this.rowStyleBoundsDirty = false;
+      } else {
+        this.rowStyleBounds.startRow = Math.min(this.rowStyleBounds.startRow, rowIdx);
+        this.rowStyleBounds.endRow = Math.max(this.rowStyleBounds.endRow, rowIdx);
+      }
+      return;
+    }
+
+    if (beforeHad) {
+      if (this.rowStyleIds.size === 0) {
+        this.rowStyleBounds = null;
+        this.rowStyleBoundsDirty = false;
+      } else if (
+        this.rowStyleBounds &&
+        !this.rowStyleBoundsDirty &&
+        (rowIdx === this.rowStyleBounds.startRow || rowIdx === this.rowStyleBounds.endRow)
+      ) {
+        this.rowStyleBoundsDirty = true;
+      }
+    }
+  }
+
+  /**
+   * @param {number} col
+   * @param {number} styleId
+   */
+  setColStyleId(col, styleId) {
+    const colIdx = Number(col);
+    if (!Number.isInteger(colIdx) || colIdx < 0) return;
+    const nextStyle = Number(styleId);
+    const afterStyleId = Number.isInteger(nextStyle) && nextStyle >= 0 ? nextStyle : 0;
+
+    const beforeStyleId = this.colStyleIds.get(colIdx) ?? 0;
+    if (beforeStyleId === afterStyleId) return;
+
+    const beforeHad = beforeStyleId !== 0;
+    const afterHas = afterStyleId !== 0;
+
+    if (afterHas) {
+      this.colStyleIds.set(colIdx, afterStyleId);
+    } else {
+      this.colStyleIds.delete(colIdx);
+    }
+
+    if (afterHas) {
+      if (!this.colStyleBounds) {
+        this.colStyleBounds = { startRow: 0, endRow: EXCEL_MAX_ROW, startCol: colIdx, endCol: colIdx };
+        this.colStyleBoundsDirty = false;
+      } else {
+        this.colStyleBounds.startCol = Math.min(this.colStyleBounds.startCol, colIdx);
+        this.colStyleBounds.endCol = Math.max(this.colStyleBounds.endCol, colIdx);
+      }
+      return;
+    }
+
+    if (beforeHad) {
+      if (this.colStyleIds.size === 0) {
+        this.colStyleBounds = null;
+        this.colStyleBoundsDirty = false;
+      } else if (
+        this.colStyleBounds &&
+        !this.colStyleBoundsDirty &&
+        (colIdx === this.colStyleBounds.startCol || colIdx === this.colStyleBounds.endCol)
+      ) {
+        this.colStyleBoundsDirty = true;
+      }
+    }
+  }
+
+  /**
+   * @returns {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+   */
+  getRowStyleBounds() {
+    if (this.rowStyleIds.size === 0) {
+      this.rowStyleBounds = null;
+      this.rowStyleBoundsDirty = false;
+      return null;
+    }
+    if (this.rowStyleBoundsDirty || !this.rowStyleBounds) {
+      this.__rowStyleBoundsRecomputeCount += 1;
+      this.rowStyleBounds = this.#recomputeRowStyleBounds();
+      this.rowStyleBoundsDirty = false;
+    }
+    return this.rowStyleBounds ? { ...this.rowStyleBounds } : null;
+  }
+
+  /**
+   * @returns {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+   */
+  getColStyleBounds() {
+    if (this.colStyleIds.size === 0) {
+      this.colStyleBounds = null;
+      this.colStyleBoundsDirty = false;
+      return null;
+    }
+    if (this.colStyleBoundsDirty || !this.colStyleBounds) {
+      this.__colStyleBoundsRecomputeCount += 1;
+      this.colStyleBounds = this.#recomputeColStyleBounds();
+      this.colStyleBoundsDirty = false;
+    }
+    return this.colStyleBounds ? { ...this.colStyleBounds } : null;
+  }
+
+  /**
    * @returns {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
    */
   getContentBounds() {
@@ -643,6 +793,34 @@ class SheetModel {
 
     if (!hasData) return null;
     return { startRow: minRow, endRow: maxRow, startCol: minCol, endCol: maxCol };
+  }
+
+  /**
+   * @returns {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+   */
+  #recomputeRowStyleBounds() {
+    let minRow = Infinity;
+    let maxRow = -Infinity;
+    for (const row of this.rowStyleIds.keys()) {
+      minRow = Math.min(minRow, row);
+      maxRow = Math.max(maxRow, row);
+    }
+    if (minRow === Infinity) return null;
+    return { startRow: minRow, endRow: maxRow, startCol: 0, endCol: EXCEL_MAX_COL };
+  }
+
+  /**
+   * @returns {{ startRow: number, endRow: number, startCol: number, endCol: number } | null}
+   */
+  #recomputeColStyleBounds() {
+    let minCol = Infinity;
+    let maxCol = -Infinity;
+    for (const col of this.colStyleIds.keys()) {
+      minCol = Math.min(minCol, col);
+      maxCol = Math.max(maxCol, col);
+    }
+    if (minCol === Infinity) return null;
+    return { startRow: 0, endRow: EXCEL_MAX_ROW, startCol: minCol, endCol: maxCol };
   }
 
   /**
@@ -1123,29 +1301,8 @@ export class DocumentController {
       maxCol = Math.max(maxCol, bounds.endCol);
     };
 
-    if (sheet.colStyleIds && sheet.colStyleIds.size > 0) {
-      let minStyledCol = Infinity;
-      let maxStyledCol = -Infinity;
-      for (const col of sheet.colStyleIds.keys()) {
-        minStyledCol = Math.min(minStyledCol, col);
-        maxStyledCol = Math.max(maxStyledCol, col);
-      }
-      if (minStyledCol !== Infinity) {
-        mergeBounds({ startRow: 0, endRow: EXCEL_MAX_ROW, startCol: minStyledCol, endCol: maxStyledCol });
-      }
-    }
-
-    if (sheet.rowStyleIds && sheet.rowStyleIds.size > 0) {
-      let minStyledRow = Infinity;
-      let maxStyledRow = -Infinity;
-      for (const row of sheet.rowStyleIds.keys()) {
-        minStyledRow = Math.min(minStyledRow, row);
-        maxStyledRow = Math.max(maxStyledRow, row);
-      }
-      if (minStyledRow !== Infinity) {
-        mergeBounds({ startRow: minStyledRow, endRow: maxStyledRow, startCol: 0, endCol: EXCEL_MAX_COL });
-      }
-    }
+    mergeBounds(sheet.getColStyleBounds());
+    mergeBounds(sheet.getRowStyleBounds());
 
     // Merge in bounds from stored cell states (values/formulas/cell-level format-only entries).
     mergeBounds(sheet.getFormatBounds());
@@ -2725,13 +2882,11 @@ export class DocumentController {
       const index = delta.index;
       if (index == null) continue;
       if (delta.layer === "row") {
-        if (delta.afterStyleId === 0) sheet.rowStyleIds.delete(index);
-        else sheet.rowStyleIds.set(index, delta.afterStyleId);
+        sheet.setRowStyleId(index, delta.afterStyleId);
         continue;
       }
       if (delta.layer === "col") {
-        if (delta.afterStyleId === 0) sheet.colStyleIds.delete(index);
-        else sheet.colStyleIds.set(index, delta.afterStyleId);
+        sheet.setColStyleId(index, delta.afterStyleId);
       }
     }
     for (const delta of sheetViewDeltas) {
@@ -2768,13 +2923,11 @@ export class DocumentController {
         const index = delta.index;
         if (index == null) continue;
         if (delta.layer === "row") {
-          if (delta.beforeStyleId === 0) sheet.rowStyleIds.delete(index);
-          else sheet.rowStyleIds.set(index, delta.beforeStyleId);
+          sheet.setRowStyleId(index, delta.beforeStyleId);
           continue;
         }
         if (delta.layer === "col") {
-          if (delta.beforeStyleId === 0) sheet.colStyleIds.delete(index);
-          else sheet.colStyleIds.set(index, delta.beforeStyleId);
+          sheet.setColStyleId(index, delta.beforeStyleId);
         }
       }
       for (const delta of sheetViewDeltas) {

@@ -341,6 +341,94 @@ test("getCellFormatStyleIds exposes layered style id tuple (sheet/row/col/cell)"
   assert.equal(doc.getColStyleId("Sheet1", 0), colStyleId);
 });
 
+test("getUsedRange(includeFormat) recomputes column format bounds only when clearing a boundary column", () => {
+  const doc = new DocumentController();
+
+  doc.setColFormat("Sheet1", 1, { font: { bold: true } });
+  doc.setColFormat("Sheet1", 3, { font: { bold: true } });
+  doc.setColFormat("Sheet1", 5, { font: { bold: true } });
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 0);
+
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 0,
+    endRow: 1_048_575,
+    startCol: 1,
+    endCol: 5,
+  });
+  assert.equal(sheet.__colStyleBoundsRecomputeCount, 0);
+
+  // Clearing an interior formatted column should not trigger bounds recomputation.
+  doc.setColFormat("Sheet1", 3, null);
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 0,
+    endRow: 1_048_575,
+    startCol: 1,
+    endCol: 5,
+  });
+  assert.equal(sheet.__colStyleBoundsRecomputeCount, 0);
+
+  // Clearing the max column requires a rescan to find the next max.
+  doc.setColFormat("Sheet1", 5, null);
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 0,
+    endRow: 1_048_575,
+    startCol: 1,
+    endCol: 1,
+  });
+  assert.equal(sheet.__colStyleBoundsRecomputeCount, 1);
+
+  // Subsequent reads reuse the cached bounds.
+  doc.getUsedRange("Sheet1", { includeFormat: true });
+  assert.equal(sheet.__colStyleBoundsRecomputeCount, 1);
+});
+
+test("getUsedRange(includeFormat) recomputes row format bounds only when clearing a boundary row", () => {
+  const doc = new DocumentController();
+
+  doc.setRowFormat("Sheet1", 2, { font: { italic: true } });
+  doc.setRowFormat("Sheet1", 4, { font: { italic: true } });
+  doc.setRowFormat("Sheet1", 6, { font: { italic: true } });
+
+  const sheet = doc.model.sheets.get("Sheet1");
+  assert.ok(sheet);
+  assert.equal(sheet.cells.size, 0);
+
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 2,
+    endRow: 6,
+    startCol: 0,
+    endCol: 16_383,
+  });
+  assert.equal(sheet.__rowStyleBoundsRecomputeCount, 0);
+
+  // Clearing an interior formatted row should not trigger bounds recomputation.
+  doc.setRowFormat("Sheet1", 4, null);
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 2,
+    endRow: 6,
+    startCol: 0,
+    endCol: 16_383,
+  });
+  assert.equal(sheet.__rowStyleBoundsRecomputeCount, 0);
+
+  // Clearing the max row requires a rescan to find the next max.
+  doc.setRowFormat("Sheet1", 6, null);
+  assert.deepEqual(doc.getUsedRange("Sheet1", { includeFormat: true }), {
+    startRow: 2,
+    endRow: 2,
+    startCol: 0,
+    endCol: 16_383,
+  });
+  assert.equal(sheet.__rowStyleBoundsRecomputeCount, 1);
+
+  // Subsequent reads reuse the cached bounds.
+  doc.getUsedRange("Sheet1", { includeFormat: true });
+  assert.equal(sheet.__rowStyleBoundsRecomputeCount, 1);
+});
+
 test("setFrozen is undoable", () => {
   const doc = new DocumentController();
 
