@@ -23,6 +23,9 @@ Related in-repo references:
   * `fixtures/xlsx/basic/image-in-cell.md`
 * Preservation/regression test that generates a “Place in Cell” workbook via `rust_xlsxwriter`:
   * `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
+* Relevant Formula parsing/extraction helpers:
+  * `crates/formula-xlsx/src/rich_data/mod.rs` (`extract_rich_cell_images`)
+  * `crates/formula-xlsx/src/rich_data/metadata.rs` (parsing `vm` → rich value index)
 
 ## High-level mapping chain (cell → image bytes)
 
