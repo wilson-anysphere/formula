@@ -1106,14 +1106,21 @@ test.describe("split view", () => {
     await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
+    const before = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+
     await page.keyboard.press("F2");
     const editor = secondary.locator("textarea.cell-editor");
     await expect(editor).toBeVisible();
+    // F2 enters "edit existing value" mode (Excel semantics) rather than clearing the cell.
+    // Ensure typing appends at the cursor position rather than replacing via a new edit session.
+    await expect(editor).toHaveValue(before);
     await page.keyboard.type("F2");
     await page.keyboard.press("Enter");
     await waitForIdle(page);
 
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("F2");
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1")))
+      .toBe(`${before}F2`);
   });
 
   test("clicking inside the secondary cell editor does not commit the edit", async ({ page }) => {
@@ -1406,6 +1413,11 @@ test.describe("split view / shared grid zoom", () => {
     });
     await waitForIdle(page);
 
+    const [a3Before, a4Before] = await Promise.all([
+      page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A3")),
+      page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A4")),
+    ]);
+
     const secondaryBox = await page.locator("#grid-secondary").boundingBox();
     expect(secondaryBox).not.toBeNull();
 
@@ -1435,8 +1447,8 @@ test.describe("split view / shared grid zoom", () => {
       page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A3")),
       page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A4")),
     ]);
-    expect(a3).toBe("");
-    expect(a4).toBe("");
+    expect(a3).toBe(a3Before);
+    expect(a4).toBe(a4Before);
   });
 
   test("secondary pane opens the custom grid context menu on right click", async ({ page }) => {
