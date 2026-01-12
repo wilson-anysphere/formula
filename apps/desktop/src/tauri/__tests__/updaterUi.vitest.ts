@@ -104,6 +104,35 @@ describe("updater restart", () => {
     expect(quitApp).not.toHaveBeenCalled();
   });
 
+  it("falls back to quitApp when the restart handler is missing", async () => {
+    document.body.innerHTML = `<div id="toast-root"></div>`;
+
+    const calls: string[] = [];
+    const drainBackendSync = vi.fn(async () => {
+      calls.push("drain");
+    });
+    const quitApp = vi.fn(async () => {
+      calls.push("quit");
+    });
+
+    registerAppQuitHandlers({
+      isDirty: () => true,
+      drainBackendSync,
+      quitApp,
+    });
+
+    mocks.installUpdateAndRestart.mockImplementation(async () => {
+      calls.push("install");
+    });
+
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const { restartToInstallUpdate } = await import("../updaterUi");
+    await restartToInstallUpdate();
+
+    expect(calls).toEqual(["drain", "install", "quit"]);
+  });
+
   it("aborts restart and shows an error toast if install fails", async () => {
     document.body.innerHTML = `<div id="toast-root"></div>`;
 

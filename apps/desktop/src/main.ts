@@ -6042,7 +6042,9 @@ try {
         return;
       }
       // Restart/exit using Tauri-managed shutdown semantics so updater installs can complete
-      // without relying on capability-gated process relaunch APIs.
+      // without relying on capability-gated process relaunch APIs. Like `quit_app`, this promise
+      // is expected to never resolve on success because the process terminates shortly after the
+      // command is invoked.
       await invoke("restart_app");
     },
   });

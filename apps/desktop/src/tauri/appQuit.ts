@@ -121,7 +121,17 @@ export async function requestAppRestart(options: {
   dirtyConfirmMessage?: string;
 }): Promise<boolean> {
   return requestAppExit(
-    (handlers) => (handlers.restartApp ?? handlers.quitApp)(),
+    async (handlers) => {
+      if (handlers.restartApp) {
+        try {
+          await handlers.restartApp();
+          return;
+        } catch (err) {
+          console.warn("restartApp handler failed; falling back to quitApp:", err);
+        }
+      }
+      await handlers.quitApp();
+    },
     {
       beforeQuit: options.beforeQuit,
       beforeQuitErrorToast: options.beforeQuitErrorToast ?? t("updater.restartFailed"),
