@@ -1,7 +1,7 @@
+use std::io::Write as _;
 use std::path::PathBuf;
 
 use formula_model::{CellRef, CellValue};
-use std::io::Write as _;
 
 fn fixture_path(rel: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures").join(rel)
@@ -222,4 +222,36 @@ fn open_workbook_model_csv() {
         sheet.value_a1("B2").unwrap(),
         CellValue::String("world".to_string())
     );
+}
+
+#[test]
+fn open_workbook_model_csv_decodes_windows1252() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let path = tmp.path().join("data.csv");
+
+    // "café" with Windows-1252 byte 0xE9 for "é" (invalid UTF-8).
+    std::fs::write(&path, b"id,text\n1,caf\xe9\n").expect("write csv");
+
+    let workbook = formula_io::open_workbook_model(&path).expect("open csv workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "data");
+
+    let sheet = workbook.sheet_by_name("data").expect("sheet missing");
+    assert_eq!(
+        sheet.value(CellRef::from_a1("B1").unwrap()),
+        CellValue::String("café".to_string())
+    );
+}
+
+#[test]
+fn open_workbook_model_csv_strips_utf8_bom() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let path = tmp.path().join("bom.csv");
+
+    std::fs::write(&path, b"\xEF\xBB\xBFid,text\n1,hello\n").expect("write csv");
+
+    let workbook = formula_io::open_workbook_model(&path).expect("open csv workbook model");
+    let sheet = workbook.sheet_by_name("bom").expect("sheet missing");
+    let table = sheet.columnar_table().expect("expected columnar table");
+    assert_eq!(table.schema()[0].name, "id");
 }
