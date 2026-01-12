@@ -42,6 +42,7 @@ export function ApprovalModal(props: ApprovalModalProps): React.ReactElement {
     <div
       role="dialog"
       aria-modal="true"
+      data-keybinding-barrier="true"
       tabIndex={-1}
       ref={dialogRef}
       className="ai-chat-approval-modal"

@@ -7055,6 +7055,7 @@ function pageSetupToTauri(raw: PageSetup): TauriPageSetup {
 function showPageSetupDialogModal(args: { initialValue: PageSetup; onChange: (next: PageSetup) => void }): void {
   const dialog = document.createElement("dialog");
   dialog.className = "page-setup-dialog";
+  dialog.dataset.keybindingBarrier = "true";
 
   const container = document.createElement("div");
   dialog.appendChild(container);

@@ -32,6 +32,7 @@ export class InlineEditOverlay {
     root.className = "ai-inline-edit-overlay dialog";
     root.hidden = true;
     root.dataset.testid = "inline-edit-overlay";
+    root.dataset.keybindingBarrier = "true";
     root.setAttribute("role", "dialog");
     root.setAttribute("aria-label", "AI inline edit");
 
