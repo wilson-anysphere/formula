@@ -11,7 +11,7 @@ import { createMetrics } from "../observability/metrics";
 import type { EnabledSiemOrg, SiemConfigProvider } from "../siem/configProvider";
 import type { SiemEndpointConfig } from "../siem/types";
 import { SiemExportWorker } from "../siem/worker";
-import { sha256FingerprintHexFromCertRaw } from "../http/tls";
+import { closeCachedOrgTlsAgentsForTests, sha256FingerprintHexFromCertRaw } from "../http/tls";
 
 const TEST_CERT_PEM = `-----BEGIN CERTIFICATE-----
 MIIDJTCCAg2gAwIBAgIUehlPQe+ayYtcheci4TTfm9Ds1RQwDQYJKoZIhvcNAQEL
@@ -159,6 +159,7 @@ describe("SIEM outbound TLS policy (certificate pinning)", () => {
 
   afterAll(async () => {
     await db.end();
+    await closeCachedOrgTlsAgentsForTests();
   });
 
   it("succeeds when certificate pinning is enabled and the pin matches", async () => {
