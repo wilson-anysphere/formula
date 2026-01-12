@@ -743,25 +743,25 @@ impl AppState {
             workbook
                 .print_settings
                 .sheets
-                .retain(|s| !s.sheet_name.eq_ignore_ascii_case(&deleted_name));
+                .retain(|s| !sheet_name_eq_case_insensitive(&s.sheet_name, &deleted_name));
             workbook
                 .original_print_settings
                 .sheets
-                .retain(|s| !s.sheet_name.eq_ignore_ascii_case(&deleted_name));
+                .retain(|s| !sheet_name_eq_case_insensitive(&s.sheet_name, &deleted_name));
 
             // Drop any names scoped to the deleted worksheet.
             workbook.defined_names.retain(|name| match name.sheet_id.as_deref() {
                 None => true,
                 Some(scope) => {
                     !scope.eq_ignore_ascii_case(&deleted_id)
-                        && !scope.eq_ignore_ascii_case(&deleted_name)
+                        && !sheet_name_eq_case_insensitive(scope, &deleted_name)
                 }
             });
 
             // Drop sheet-scoped tables that no longer have a home.
             workbook.tables.retain(|table| {
                 !table.sheet_id.eq_ignore_ascii_case(&deleted_id)
-                    && !table.sheet_id.eq_ignore_ascii_case(&deleted_name)
+                    && !sheet_name_eq_case_insensitive(&table.sheet_id, &deleted_name)
             });
 
             // Rewrite formulas that referenced the deleted sheet.

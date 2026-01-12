@@ -434,16 +434,16 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
     gtk_backend::read()
 }
 
-#[cfg(feature = "desktop")]
-pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
-    gtk_backend::write(payload)
-}
-
 #[cfg(not(feature = "desktop"))]
 pub fn read() -> Result<ClipboardContent, ClipboardError> {
     Err(ClipboardError::Unavailable(
         "GTK clipboard backend requires the `desktop` feature".to_string(),
     ))
+}
+
+#[cfg(feature = "desktop")]
+pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
+    gtk_backend::write(payload)
 }
 
 #[cfg(not(feature = "desktop"))]
