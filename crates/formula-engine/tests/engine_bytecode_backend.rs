@@ -2709,6 +2709,54 @@ fn bytecode_backend_propagates_error_literals_through_ops_and_functions() {
 }
 
 #[test]
+fn bytecode_backend_compiles_criteria_functions_with_error_literal_criteria_args() {
+    let mut engine = Engine::new();
+
+    // Criteria range.
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "A3", 3.0).unwrap();
+
+    // Aggregate range.
+    engine.set_cell_value("Sheet1", "B1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "B3", 30.0).unwrap();
+
+    let cases = [
+        // Criteria errors should propagate (even when written as error literals).
+        ("C1", "=SUMIF(A1:A3,#DIV/0!,B1:B3)", Value::Error(ErrorKind::Div0)),
+        ("C2", "=SUMIFS(B1:B3,A1:A3,#DIV/0!)", Value::Error(ErrorKind::Div0)),
+        ("C3", "=COUNTIFS(A1:A3,#DIV/0!)", Value::Error(ErrorKind::Div0)),
+        ("C4", "=AVERAGEIF(A1:A3,#DIV/0!,B1:B3)", Value::Error(ErrorKind::Div0)),
+    ];
+
+    for (cell, formula, _) in &cases {
+        engine.set_cell_formula("Sheet1", cell, formula).unwrap();
+    }
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(
+        stats.fallback,
+        0,
+        "expected all criteria formulas to compile to bytecode (report={:?})",
+        engine.bytecode_compile_report(100)
+    );
+    assert_eq!(stats.total_formula_cells, cases.len());
+    assert_eq!(stats.compiled, cases.len());
+
+    engine.recalculate_single_threaded();
+
+    for (cell, formula, expected) in &cases {
+        assert_eq!(
+            engine.get_cell_value("Sheet1", cell),
+            expected.clone(),
+            "mismatched value for {cell}: {formula}"
+        );
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_conditional_aggregates_numeric_criteria() {
     let mut engine = Engine::new();
 
