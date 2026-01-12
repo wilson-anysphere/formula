@@ -790,8 +790,9 @@ export class SpreadsheetApp {
 
               const prevX = this.scrollX;
               const prevY = this.scrollY;
-              this.scrollX = scroll.x;
-              this.scrollY = scroll.y;
+              const nextScroll = zoomChanged ? (this.sharedGrid?.renderer.scroll.getScroll() ?? scroll) : scroll;
+              this.scrollX = nextScroll.x;
+              this.scrollY = nextScroll.y;
               this.syncSharedChartPanes(effectiveViewport);
               this.hideCommentTooltip();
               this.renderCharts(zoomChanged);

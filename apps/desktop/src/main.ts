@@ -551,7 +551,11 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     setRibbonUiState({
       pressedById,
       labelById: { "home.number.numberFormat": numberFormatLabel },
-      disabledById: Object.create(null),
+      disabledById: {
+        "view.zoom.zoom": !app.supportsZoom(),
+        "view.zoom.zoom100": !app.supportsZoom(),
+        "view.zoom.zoomToSelection": !app.supportsZoom(),
+      },
     });
   });
 }
