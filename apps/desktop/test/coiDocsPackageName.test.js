@@ -12,21 +12,21 @@ test("desktop docs use the correct Cargo package name for desktop shell builds",
   const desktopShellDoc = fs.readFileSync(path.join(repoRoot, "docs", "11-desktop-shell.md"), "utf8");
   assert.match(
     desktopShellDoc,
-    /\bcargo_agent\.sh\s+test\s+-p\s+formula-desktop-tauri\b/,
-    "expected docs/11-desktop-shell.md to use -p formula-desktop-tauri in cargo_agent test example",
+    /\bcargo_agent\.sh\s+test\s+-p\s+desktop\b/,
+    "expected docs/11-desktop-shell.md to use -p desktop in cargo_agent test example",
   );
   assert.match(
     desktopShellDoc,
-    /\bcargo_agent\.sh\s+check\s+-p\s+formula-desktop-tauri\b[^\\n]*--features\s+desktop\b/,
-    "expected docs/11-desktop-shell.md to use -p formula-desktop-tauri in cargo_agent check example",
+    /\bcargo_agent\.sh\s+check\s+-p\s+desktop\b[^\\n]*--features\s+desktop\b/,
+    "expected docs/11-desktop-shell.md to use -p desktop in cargo_agent check example",
   );
   assert.ok(
-    !/\bcargo_agent\.sh\s+test\s+-p\s+desktop\b/.test(desktopShellDoc),
-    "docs/11-desktop-shell.md should not suggest `-p desktop` (workspace package is formula-desktop-tauri)",
+    !/\bcargo_agent\.sh\s+test\s+-p\s+formula-desktop-tauri\b/.test(desktopShellDoc),
+    "docs/11-desktop-shell.md should not suggest `-p formula-desktop-tauri` (use -p desktop via cargo_agent.sh remapping)",
   );
   assert.ok(
-    !/\bcargo_agent\.sh\s+check\s+-p\s+desktop\b/.test(desktopShellDoc),
-    "docs/11-desktop-shell.md should not suggest `-p desktop` (workspace package is formula-desktop-tauri)",
+    !/\bcargo_agent\.sh\s+check\s+-p\s+formula-desktop-tauri\b/.test(desktopShellDoc),
+    "docs/11-desktop-shell.md should not suggest `-p formula-desktop-tauri` (use -p desktop via cargo_agent.sh remapping)",
   );
 
   const desktopReadme = fs.readFileSync(path.join(repoRoot, "apps", "desktop", "README.md"), "utf8");
