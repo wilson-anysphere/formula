@@ -48,3 +48,10 @@ it still round-trips cleanly in tests.
 unzip -Z1 fixtures/xlsx/richdata/linked-data-types.xlsx | rg '^xl/(metadata\\.xml|_rels/metadata\\.xml\\.rels|richData/)'
 unzip -p fixtures/xlsx/richdata/linked-data-types.xlsx xl/worksheets/sheet1.xml | rg ' vm=| cm='
 ```
+
+For additional sanity checking (content types + relationship type URIs):
+
+```bash
+unzip -p fixtures/xlsx/richdata/linked-data-types.xlsx \\[Content_Types\\].xml | rg 'richvalue'
+unzip -p fixtures/xlsx/richdata/linked-data-types.xlsx xl/_rels/metadata.xml.rels | rg 'schemas\\.microsoft\\.com/office/2017/relationships/richValue'
+```
