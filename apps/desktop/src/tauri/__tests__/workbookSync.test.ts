@@ -137,6 +137,36 @@ describe("workbookSync", () => {
     sync.stop();
   });
 
+  it("applies backend updates returned from set_range (e.g. pivot output auto-refresh)", async () => {
+    const invoke = vi.fn(async (cmd: string) => {
+      if (cmd === "set_range") {
+        return [
+          {
+            sheet_id: "Pivot",
+            row: 0,
+            col: 0,
+            value: 42,
+            formula: null,
+            display_value: "42",
+          },
+        ];
+      }
+      return null;
+    });
+    (globalThis as any).__TAURI__ = { core: { invoke } };
+
+    const document = new DocumentController();
+    const sync = startWorkbookSync({ document: document as any });
+
+    document.setCellValue("Sheet1", { row: 0, col: 0 }, 1);
+    await flushMicrotasks();
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(document.getCell("Pivot", { row: 0, col: 0 }).value).toBe(42);
+
+    sync.stop();
+  });
+
   it("ignores document changes tagged as pivot updates (already applied in the backend)", async () => {
     const document = new DocumentController();
     const sync = startWorkbookSync({ document: document as any });

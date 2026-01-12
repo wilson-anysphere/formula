@@ -22,6 +22,10 @@ type DocumentControllerLike = {
   on(event: "change", listener: (payload: { deltas: CellDelta[]; source?: string; recalc?: boolean }) => void): () => void;
   markSaved(): void;
   readonly isDirty: boolean;
+  // Optional APIs on the real DocumentController used to apply authoritative backend updates
+  // (e.g. pivot auto-refresh output).
+  getCell?(sheetId: string, coord: { row: number; col: number }): any;
+  applyExternalDeltas?(deltas: any[], options?: { source?: string }): void;
 };
 
 type RangeCellEdit = { value: unknown | null; formula: string | null };
@@ -52,7 +56,7 @@ function valuesEqual(a: unknown, b: unknown): boolean {
   }
 }
 
-function inputEquals(before: CellState, after: CellState): boolean {
+function inputEquals(before: { value: unknown; formula: string | null }, after: { value: unknown; formula: string | null }): boolean {
   return valuesEqual(before.value ?? null, after.value ?? null) && (before.formula ?? null) === (after.formula ?? null);
 }
 
@@ -66,6 +70,11 @@ function toRangeCellEdit(state: CellState): RangeCellEdit {
     }
   }
   return { value: (state.value ?? null) as unknown | null, formula: null };
+}
+
+function normalizeFormulaText(formula: unknown): string | null {
+  if (typeof formula !== "string") return null;
+  return normalizeFormulaTextOpt(formula);
 }
 
 function cellKey(sheetId: string, row: number, col: number): string {
@@ -104,8 +113,41 @@ function isFullRectangle(edits: PendingEdit[]): { startRow: number; startCol: nu
   return { startRow, startCol, endRow, endCol };
 }
 
-async function sendEditsViaTauri(invoke: TauriInvoke, edits: PendingEdit[]): Promise<void> {
-  if (edits.length === 0) return;
+function applyBackendUpdates(document: DocumentControllerLike, raw: unknown): void {
+  if (typeof document.getCell !== "function" || typeof document.applyExternalDeltas !== "function") return;
+  if (!Array.isArray(raw) || raw.length === 0) return;
+
+  const deltas: any[] = [];
+  for (const u of raw as any[]) {
+    if (!u || typeof u !== "object") continue;
+    const sheetId = String((u as any).sheet_id ?? "").trim();
+    const row = Number((u as any).row);
+    const col = Number((u as any).col);
+    if (!sheetId) continue;
+    if (!Number.isInteger(row) || row < 0) continue;
+    if (!Number.isInteger(col) || col < 0) continue;
+
+    // Backend returns computed value updates for formula cells; the frontend has its own calc engine.
+    // We only apply input changes for non-formula cells (e.g. pivot output values).
+    if (normalizeFormulaText((u as any).formula) != null) continue;
+
+    const before = document.getCell(sheetId, { row, col });
+    const after = { value: (u as any).value ?? null, formula: null, styleId: before?.styleId ?? 0 };
+    if (inputEquals(before, after)) continue;
+    deltas.push({ sheetId, row, col, before, after });
+  }
+
+  if (deltas.length === 0) return;
+  // These updates already happened in the backend. Apply them without creating a new undo step,
+  // and tag them so the workbook sync bridge doesn't echo them back.
+  document.applyExternalDeltas(deltas, { source: "backend" });
+}
+
+async function sendEditsViaTauri(invoke: TauriInvoke, edits: PendingEdit[]): Promise<any[]> {
+  if (edits.length === 0) return [];
+
+  /** @type {any[]} */
+  const collected = [];
 
   const bySheet = new Map<string, PendingEdit[]>();
   for (const edit of edits) {
@@ -137,7 +179,7 @@ async function sendEditsViaTauri(invoke: TauriInvoke, edits: PendingEdit[]): Pro
         values.push(row);
       }
 
-      await invoke("set_range", {
+      const updates = await invoke("set_range", {
         sheet_id: sheetId,
         start_row: rect.startRow,
         start_col: rect.startCol,
@@ -145,11 +187,14 @@ async function sendEditsViaTauri(invoke: TauriInvoke, edits: PendingEdit[]): Pro
         end_col: rect.endCol,
         values
       });
+      if (Array.isArray(updates) && updates.length > 0) {
+        collected.push(...updates);
+      }
       continue;
     }
 
     // Non-rectangular: fall back to per-cell updates.
-    await Promise.all(
+    const results = await Promise.all(
       sheetEdits.map((edit) =>
         invoke("set_cell", {
           sheet_id: sheetId,
@@ -157,10 +202,17 @@ async function sendEditsViaTauri(invoke: TauriInvoke, edits: PendingEdit[]): Pro
           col: edit.col,
           value: edit.edit.value,
           formula: edit.edit.formula
-        }),
+        }).catch(() => null),
       ),
     );
+    for (const result of results) {
+      if (Array.isArray(result) && result.length > 0) {
+        collected.push(...result);
+      }
+    }
   }
+
+  return collected;
 }
 
 export function startWorkbookSync(args: {
@@ -191,7 +243,7 @@ export function startWorkbookSync(args: {
     // Some subsystems (VBA runtime, native Python) execute in the backend and then return
     // cell updates to apply to the frontend DocumentController. Those should not be echoed
     // back to the backend via set_cell/set_range.
-    if (source === "macro" || source === "python" || source === "pivot") return;
+    if (source === "macro" || source === "python" || source === "pivot" || source === "backend") return;
     if (!Array.isArray(deltas) || deltas.length === 0) return;
     for (const delta of deltas) {
       // Ignore format-only deltas (we can't mirror those over set_cell/set_range yet).
@@ -235,7 +287,8 @@ export function startWorkbookSync(args: {
       while (pending.size > 0) {
         const batch = Array.from(pending.values());
         pending.clear();
-        await sendEditsViaTauri(invokeFn, batch);
+        const updates = await sendEditsViaTauri(invokeFn, batch);
+        applyBackendUpdates(args.document, updates);
       }
 
       // If the user undoes back to the last-saved state, the DocumentController becomes clean
