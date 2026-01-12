@@ -4,7 +4,13 @@ import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
 import { AIAuditRecorder } from "../../../../packages/ai-audit/src/recorder.js";
 
 import { DLP_ACTION } from "../../../../packages/security/dlp/src/actions.js";
-import { CLASSIFICATION_LEVEL, DEFAULT_CLASSIFICATION, maxClassification, normalizeClassification } from "../../../../packages/security/dlp/src/classification.js";
+import {
+  CLASSIFICATION_LEVEL,
+  DEFAULT_CLASSIFICATION,
+  classificationRank,
+  maxClassification,
+  normalizeClassification,
+} from "../../../../packages/security/dlp/src/classification.js";
 import { DLP_DECISION, evaluatePolicy } from "../../../../packages/security/dlp/src/policyEngine.js";
 import { effectiveCellClassification, effectiveRangeClassification, normalizeRange } from "../../../../packages/security/dlp/src/selectors.js";
 
@@ -222,6 +228,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       policy: dlp.policy,
       options: { includeRestrictedContent: false },
     });
+    const maxAllowedRank = decision.maxAllowed === null ? null : classificationRank(decision.maxAllowed);
 
     if (!classificationIndex && decision.decision !== DLP_DECISION.ALLOW && hasAnyRefs && dlp.classificationRecords.length > 0) {
       classificationIndex = buildDlpCellIndex({
@@ -236,6 +243,7 @@ export class AiCellFunctionEngine implements AiFunctionEvaluator {
       args: params.args,
       provenance: alignedProvenance,
       decision,
+      maxAllowedRank,
       documentId: this.workbookId,
       defaultSheetId,
       policy: dlp.policy,
@@ -787,6 +795,7 @@ function preparePromptAndInputs(params: {
   args: CellValue[];
   provenance: AiFunctionArgumentProvenance[];
   decision: any;
+  maxAllowedRank: number | null;
   documentId: string;
   defaultSheetId: string;
   policy: any;
@@ -812,6 +821,7 @@ function preparePromptAndInputs(params: {
     value: params.args[0] ?? null,
     provenance: params.provenance[0] ?? { cells: [], ranges: [] },
     shouldRedact,
+    maxAllowedRank: params.maxAllowedRank,
     documentId: params.documentId,
     defaultSheetId: params.defaultSheetId,
     policy: params.policy,
@@ -833,6 +843,7 @@ function preparePromptAndInputs(params: {
       value: arg,
       provenance: params.provenance[idx + 1] ?? { cells: [], ranges: [] },
       shouldRedact,
+      maxAllowedRank: params.maxAllowedRank,
       documentId: params.documentId,
       defaultSheetId: params.defaultSheetId,
       policy: params.policy,
@@ -866,6 +877,7 @@ function compactArgForPrompt(params: {
   value: CellValue;
   provenance: AiFunctionArgumentProvenance;
   shouldRedact: boolean;
+  maxAllowedRank: number | null;
   documentId: string;
   defaultSheetId: string;
   policy: any;
@@ -883,6 +895,7 @@ function compactArgForPrompt(params: {
       rangeRef: rangeRefFromArray(params.value),
       provenance: params.provenance,
       shouldRedact: params.shouldRedact,
+      maxAllowedRank: params.maxAllowedRank,
       documentId: params.documentId,
       defaultSheetId: params.defaultSheetId,
       policy: params.policy,
@@ -898,6 +911,7 @@ function compactArgForPrompt(params: {
     value: scalarValue,
     provenance: params.provenance,
     shouldRedact: params.shouldRedact,
+    maxAllowedRank: params.maxAllowedRank,
     documentId: params.documentId,
     defaultSheetId: params.defaultSheetId,
     policy: params.policy,
@@ -956,6 +970,7 @@ function compactScalarForPrompt(params: {
   value: SpreadsheetValue;
   provenance: AiFunctionArgumentProvenance;
   shouldRedact: boolean;
+  maxAllowedRank: number | null;
   documentId: string;
   defaultSheetId: string;
   policy: any;
@@ -992,14 +1007,8 @@ function compactScalarForPrompt(params: {
     classification = heuristicClassifyValue(params.value as any, params.maxLiteralChars);
   }
 
-  const decision = evaluatePolicy({
-    action: DLP_ACTION.AI_CLOUD_PROCESSING,
-    classification,
-    policy: params.policy,
-    options: { includeRestrictedContent: false },
-  });
-
-  if (params.shouldRedact && decision.decision !== DLP_DECISION.ALLOW) {
+  const allowed = params.maxAllowedRank !== null && classificationRank(classification.level) <= params.maxAllowedRank;
+  if (params.shouldRedact && !allowed) {
     return { value: DLP_REDACTION_PLACEHOLDER, compaction: { kind: "scalar", redacted: true }, redactedCount: 1 };
   }
 
@@ -1017,6 +1026,7 @@ function compactArrayForPrompt(params: {
   rangeRef: string | null;
   provenance: AiFunctionArgumentProvenance;
   shouldRedact: boolean;
+  maxAllowedRank: number | null;
   documentId: string;
   defaultSheetId: string;
   policy: any;
@@ -1147,13 +1157,7 @@ function compactArrayForPrompt(params: {
         classificationIndex: params.classificationIndex,
         sheetNameResolver: params.sheetNameResolver,
       });
-      const decision = evaluatePolicy({
-        action: DLP_ACTION.AI_CLOUD_PROCESSING,
-        classification,
-        policy: params.policy,
-        options: { includeRestrictedContent: false },
-      });
-      return decision.decision !== DLP_DECISION.ALLOW;
+      return params.maxAllowedRank === null || classificationRank(classification.level) > params.maxAllowedRank;
     })();
 
   const recordNumeric = (n: number): void => {
@@ -1186,14 +1190,8 @@ function compactArrayForPrompt(params: {
 
       if (cellRef) {
         const classification = classificationForCellRef(cellRef);
-        const cellDecision = evaluatePolicy({
-          action: DLP_ACTION.AI_CLOUD_PROCESSING,
-          classification,
-          policy: params.policy,
-          options: { includeRestrictedContent: false },
-        });
-
-        if (cellDecision.decision !== DLP_DECISION.ALLOW) {
+        const allowed = params.maxAllowedRank !== null && classificationRank(classification.level) <= params.maxAllowedRank;
+        if (!allowed) {
           if (!redactedSeen.has(index)) {
             redactedSeen.add(index);
             redactedCount += 1;
@@ -1214,13 +1212,8 @@ function compactArrayForPrompt(params: {
               { documentId: params.documentId, sheetId: rangeSheetId, row, col } as any,
               params.classificationRecords,
             );
-        const cellDecision = evaluatePolicy({
-          action: DLP_ACTION.AI_CLOUD_PROCESSING,
-          classification,
-          policy: params.policy,
-          options: { includeRestrictedContent: false },
-        });
-        if (cellDecision.decision !== DLP_DECISION.ALLOW) {
+        const allowed = params.maxAllowedRank !== null && classificationRank(classification.level) <= params.maxAllowedRank;
+        if (!allowed) {
           if (!redactedSeen.has(index)) {
             redactedSeen.add(index);
             redactedCount += 1;
@@ -1357,14 +1350,6 @@ function buildDlpCellIndex(params: {
     return init;
   }
 
-  function ensureFallbackList(sheetId: string): Array<{ selector: any; classification: any }> {
-    const existing = fallbackRecordsBySheetId.get(sheetId);
-    if (existing) return existing;
-    const init: Array<{ selector: any; classification: any }> = [];
-    fallbackRecordsBySheetId.set(sheetId, init);
-    return init;
-  }
-
   for (const record of params.records || []) {
     if (!record || !record.selector || typeof record.selector !== "object") continue;
     const selector = record.selector;
@@ -1388,7 +1373,9 @@ function buildDlpCellIndex(params: {
           const existing = colMap.get(selector.columnIndex);
           colMap.set(selector.columnIndex, existing ? maxClassification(existing, record.classification) : record.classification);
         } else {
-          ensureFallbackList(selector.sheetId).push(record);
+          // Table/columnId selectors require table metadata to evaluate; AiCellFunctionEngine
+          // currently only operates on sheet coordinates (row/col) and has no table context,
+          // so these selectors cannot apply and are ignored.
         }
         break;
       }
@@ -1413,9 +1400,7 @@ function buildDlpCellIndex(params: {
         break;
       }
       default: {
-        if (typeof selector.sheetId === "string" && params.sheetIds.has(selector.sheetId)) {
-          ensureFallbackList(selector.sheetId).push(record);
-        }
+        // Unknown selector scope: ignore.
         break;
       }
     }
