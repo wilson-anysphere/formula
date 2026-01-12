@@ -58,6 +58,8 @@ export interface AppConfig {
    *
    * - `SECRET_STORE_KEYS_JSON`: JSON object containing `{ currentKeyId, keys }`,
    *   where `keys` is a map of keyId -> base64-encoded 32-byte AES key.
+   *   (Also accepts `{ current, keys }`, a direct mapping `{ v1: "<base64>", v2: "<base64>" }`
+   *   where the last entry is treated as current, or an array of `{ id, key }` entries.)
    * - `SECRET_STORE_KEYS`: comma-separated list of `<keyId>:<base64>` entries.
    *   The **last** key id is treated as current for encryption; all keys are
    *   valid for decryption.
@@ -220,42 +222,113 @@ function loadSecretStoreKeys(env: NodeJS.ProcessEnv, legacySecret: string): Secr
       );
     }
 
-    if (!parsed || typeof parsed !== "object") {
-      throw new Error("SECRET_STORE_KEYS_JSON must be a JSON object");
-    }
-
-    const record = parsed as Record<string, unknown>;
-    const currentKeyId = record.currentKeyId;
-    const keysValue = record.keys;
-
-    if (typeof currentKeyId !== "string" || currentKeyId.trim().length === 0) {
-      throw new Error("SECRET_STORE_KEYS_JSON.currentKeyId must be a non-empty string");
-    }
-    if (currentKeyId.includes(":")) {
-      throw new Error("SECRET_STORE_KEYS_JSON.currentKeyId must not contain ':'");
-    }
-    if (!keysValue || typeof keysValue !== "object" || Array.isArray(keysValue)) {
-      throw new Error("SECRET_STORE_KEYS_JSON.keys must be an object mapping keyId -> base64 key");
-    }
-
-    const keys: Record<string, Buffer> = {};
-    for (const [keyId, value] of Object.entries(keysValue as Record<string, unknown>)) {
-      if (keyId.length === 0) {
-        throw new Error("SECRET_STORE_KEYS_JSON.keys must not contain empty key ids");
+    const decodeKey = (keyId: string, value: unknown, path: string): Buffer => {
+      if (keyId.trim().length === 0) {
+        throw new Error(`${path} must not contain empty key ids`);
       }
       if (keyId.includes(":")) {
-        throw new Error(`SECRET_STORE_KEYS_JSON.keys.${keyId} must not contain ':'`);
+        throw new Error(`${path}.${keyId} must not contain ':'`);
       }
       if (typeof value !== "string" || value.trim().length === 0) {
-        throw new Error(`SECRET_STORE_KEYS_JSON.keys.${keyId} must be a base64 string`);
+        throw new Error(`${path}.${keyId} must be a base64 string`);
       }
       const raw = Buffer.from(value, "base64");
       if (raw.byteLength !== 32) {
-        throw new Error(`SECRET_STORE_KEYS_JSON.keys.${keyId} must decode to 32 bytes (got ${raw.byteLength})`);
+        throw new Error(`${path}.${keyId} must decode to 32 bytes (got ${raw.byteLength})`);
       }
-      keys[keyId] = raw;
+      return raw;
+    };
+
+    // Supported formats:
+    // - { currentKeyId: "v2", keys: { v1: "<base64>", v2: "<base64>" } } (recommended)
+    // - { current: "v2", keys: { ... } }
+    // - { v1: "<base64>", v2: "<base64>" } (current defaults to last JSON entry)
+    // - [{ id: "v1", key: "<base64>" }, { id: "v2", key: "<base64>" }] (current defaults to last entry)
+    if (Array.isArray(parsed)) {
+      if (parsed.length === 0) {
+        throw new Error("SECRET_STORE_KEYS_JSON must contain at least one key");
+      }
+
+      const keys: Record<string, Buffer> = {};
+      let currentKeyId: string | null = null;
+
+      for (const entry of parsed) {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          throw new Error("SECRET_STORE_KEYS_JSON array entries must be objects with { id, key }");
+        }
+        const record = entry as Record<string, unknown>;
+        const rawKeyId = record.id ?? record.keyId;
+        const rawKey = record.key;
+        if (typeof rawKeyId !== "string" || rawKeyId.trim().length === 0) {
+          throw new Error("SECRET_STORE_KEYS_JSON array entries must include a non-empty string 'id'");
+        }
+
+        const keyId = rawKeyId.trim();
+        if (keys[keyId]) {
+          throw new Error(`SECRET_STORE_KEYS_JSON contains duplicate keyId=${keyId}`);
+        }
+
+        keys[keyId] = decodeKey(keyId, rawKey, "SECRET_STORE_KEYS_JSON");
+        currentKeyId = keyId; // last entry is current
+      }
+
+      if (!currentKeyId) {
+        throw new Error("SECRET_STORE_KEYS_JSON must contain at least one key");
+      }
+
+      return { currentKeyId, keys };
     }
 
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("SECRET_STORE_KEYS_JSON must be a JSON object or array");
+    }
+
+    const record = parsed as Record<string, unknown>;
+    const rawCurrentKeyId = record.currentKeyId ?? record.current;
+    const keysContainer = record.keys ?? record;
+
+    if (!keysContainer || typeof keysContainer !== "object" || Array.isArray(keysContainer)) {
+      throw new Error("SECRET_STORE_KEYS_JSON.keys must be an object mapping keyId -> base64 key");
+    }
+
+    const keysObject = keysContainer as Record<string, unknown>;
+    const reserved =
+      keysContainer === record ? new Set(["currentKeyId", "current", "keys"]) : new Set<string>();
+    const entries = Object.entries(keysObject).filter(([keyId]) => !reserved.has(keyId));
+    if (entries.length === 0) {
+      // Preserve a helpful error message when operators specify a current key id
+      // but forget to populate the key map.
+      if (rawCurrentKeyId !== undefined && rawCurrentKeyId !== null && String(rawCurrentKeyId).trim().length > 0) {
+        if (typeof rawCurrentKeyId !== "string") {
+          throw new Error("SECRET_STORE_KEYS_JSON.currentKeyId must be a non-empty string when provided");
+        }
+        const currentKeyId = rawCurrentKeyId.trim();
+        if (currentKeyId.includes(":")) {
+          throw new Error("SECRET_STORE_KEYS_JSON.currentKeyId must not contain ':'");
+        }
+        throw new Error(`SECRET_STORE_KEYS_JSON currentKeyId=${currentKeyId} missing from keys`);
+      }
+
+      throw new Error("SECRET_STORE_KEYS_JSON must contain at least one key");
+    }
+
+    const keys: Record<string, Buffer> = {};
+    for (const [keyId, value] of entries) {
+      keys[keyId] = decodeKey(keyId, value, "SECRET_STORE_KEYS_JSON.keys");
+    }
+
+    let currentKeyId: string;
+    if (rawCurrentKeyId === undefined || rawCurrentKeyId === null || String(rawCurrentKeyId).trim().length === 0) {
+      currentKeyId = entries[entries.length - 1]![0];
+    } else if (typeof rawCurrentKeyId !== "string") {
+      throw new Error("SECRET_STORE_KEYS_JSON.currentKeyId must be a non-empty string when provided");
+    } else {
+      currentKeyId = rawCurrentKeyId.trim();
+    }
+
+    if (currentKeyId.includes(":")) {
+      throw new Error("SECRET_STORE_KEYS_JSON.currentKeyId must not contain ':'");
+    }
     if (!keys[currentKeyId]) {
       throw new Error(`SECRET_STORE_KEYS_JSON currentKeyId=${currentKeyId} missing from keys`);
     }

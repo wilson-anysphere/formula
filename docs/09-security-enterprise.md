@@ -677,7 +677,13 @@ For rotation, configure multiple keys and choose the "current" key for new write
     SECRET_STORE_KEYS="v1:BASE64_32_BYTES,v2:BASE64_32_BYTES"
     ```
 
-- `SECRET_STORE_KEYS_JSON`: JSON object containing `{ currentKeyId, keys }` (where `keys` maps keyId -> base64 key).
+- `SECRET_STORE_KEYS_JSON`: JSON encoded keyring.
+  - Recommended:
+    - `{ "currentKeyId": "v2", "keys": { "v1": "<base64>", "v2": "<base64>" } }`
+  - Also accepted:
+    - `{ "current": "v2", "keys": { ... } }`
+    - `{ "v1": "<base64>", "v2": "<base64>" }` (current defaults to the last entry)
+    - `[ { "id": "v1", "key": "<base64>" }, { "id": "v2", "key": "<base64>" } ]` (current defaults to the last entry)
 
 The legacy `SECRET_STORE_KEY` is still supported for smooth upgrades; it is hashed with SHA-256 to
 derive a 32-byte AES-256 key.
