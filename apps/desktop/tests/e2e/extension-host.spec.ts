@@ -553,6 +553,7 @@ test.describe("BrowserExtensionHost", () => {
         publisher: "e2e",
         version: "1.0.0",
         engines: { formula: "^1.0.0" },
+        main: "./dist/extension.mjs",
         activationEvents: [`onCommand:${commandId}`],
         contributes: { commands: [{ command: commandId, title: "Write clipboard constant", category: "DLP Test" }] },
         permissions: ["clipboard", "ui.commands"],
