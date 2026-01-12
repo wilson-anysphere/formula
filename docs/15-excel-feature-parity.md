@@ -1,612 +1,115 @@
-# Excel Feature Parity Checklist
+# Excel Feature Parity (code-driven)
 
-## Overview
+This document replaces the old hand-maintained “✅/⬜ per function” checklists, which quickly drift
+and become misleading.
 
-This document tracks every Excel feature and our implementation status. Features are categorized by priority:
+Instead, **function parity is reported from authoritative, versioned data sources in the repo** and
+validated by tests.
 
-- **P0**: Required for launch (breaks compatibility if missing)
-- **P1**: Required for power users (significant gap if missing)
-- **P2**: Nice to have (can add post-launch)
-- **P3**: Rare/legacy (low priority)
+## Sources of truth
 
----
+### Implemented function catalog (authoritative)
 
-## Formula Functions
+The source of truth for “what the engine currently implements” is:
 
-### Math & Trigonometry (P0)
+- **[`shared/functionCatalog.json`](../shared/functionCatalog.json)** (and
+  [`shared/functionCatalog.mjs`](../shared/functionCatalog.mjs))
+  - Kept in sync with the Rust registry by
+    **[`crates/formula-engine/tests/function_catalog_sync.rs`](../crates/formula-engine/tests/function_catalog_sync.rs)**.
+  - Used by downstream tooling (JS/TS, docs, scripts) without having to compile Rust.
 
-| Function | Status | Notes |
-|----------|--------|-------|
-| ABS | ⬜ | |
-| ACOS | ⬜ | |
-| ACOSH | ⬜ | |
-| ACOT | ⬜ | |
-| ACOTH | ⬜ | |
-| AGGREGATE | ⬜ | Complex, 19 subtypes |
-| ARABIC | ⬜ | |
-| ASIN | ⬜ | |
-| ASINH | ⬜ | |
-| ATAN | ⬜ | |
-| ATAN2 | ⬜ | |
-| ATANH | ⬜ | |
-| BASE | ⬜ | |
-| CEILING | ⬜ | Multiple modes |
-| CEILING.MATH | ⬜ | |
-| CEILING.PRECISE | ⬜ | |
-| COMBIN | ⬜ | |
-| COMBINA | ⬜ | |
-| COS | ⬜ | |
-| COSH | ⬜ | |
-| COT | ⬜ | |
-| COTH | ⬜ | |
-| CSC | ⬜ | |
-| CSCH | ⬜ | |
-| DECIMAL | ⬜ | |
-| DEGREES | ⬜ | |
-| EVEN | ⬜ | |
-| EXP | ⬜ | |
-| FACT | ⬜ | |
-| FACTDOUBLE | ⬜ | |
-| FLOOR | ⬜ | Multiple modes |
-| FLOOR.MATH | ⬜ | |
-| FLOOR.PRECISE | ⬜ | |
-| GCD | ⬜ | |
-| INT | ⬜ | |
-| ISO.CEILING | ⬜ | |
-| LCM | ⬜ | |
-| LET | ✅ | Important for readability |
-| LN | ⬜ | |
-| LOG | ⬜ | |
-| LOG10 | ⬜ | |
-| MDETERM | ⬜ | |
-| MINVERSE | ⬜ | |
-| MMULT | ⬜ | |
-| MOD | ⬜ | |
-| MROUND | ⬜ | |
-| MULTINOMIAL | ⬜ | |
-| MUNIT | ⬜ | |
-| ODD | ⬜ | |
-| PI | ⬜ | |
-| POWER | ⬜ | |
-| PRODUCT | ⬜ | |
-| QUOTIENT | ⬜ | |
-| RADIANS | ⬜ | |
-| RAND | ⬜ | Volatile |
-| RANDBETWEEN | ⬜ | Volatile |
-| RANDARRAY | ✅ | Dynamic array |
-| ROMAN | ⬜ | |
-| ROUND | ⬜ | |
-| ROUNDDOWN | ⬜ | |
-| ROUNDUP | ⬜ | |
-| SEC | ⬜ | |
-| SECH | ⬜ | |
-| SEQUENCE | ✅ | Dynamic array |
-| SERIESSUM | ⬜ | |
-| SIGN | ⬜ | |
-| SIN | ⬜ | |
-| SINH | ⬜ | |
-| SQRT | ⬜ | |
-| SQRTPI | ⬜ | |
-| SUBTOTAL | ⬜ | 11 function types |
-| SUM | ✅ | Core function |
-| SUMIF | ⬜ | |
-| SUMIFS | ⬜ | |
-| SUMPRODUCT | ⬜ | |
-| SUMSQ | ✅ | |
-| SUMX2MY2 | ⬜ | |
-| SUMX2PY2 | ⬜ | |
-| SUMXMY2 | ⬜ | |
-| TAN | ⬜ | |
-| TANH | ⬜ | |
-| TRUNC | ⬜ | |
+Current implemented function count (from `shared/functionCatalog.json`): **295**
 
-### Lookup & Reference (P0)
+> This number will change over time. Run the parity report script below to get the current values
+> in your checkout.
 
-| Function | Status | Notes |
-|----------|--------|-------|
-| ADDRESS | ⬜ | |
-| AREAS | ⬜ | |
-| CHOOSE | ✅ | Supports arrays and range unions |
-| CHOOSECOLS | ✅ | Dynamic array |
-| CHOOSEROWS | ✅ | Dynamic array |
-| COLUMN | ⬜ | |
-| COLUMNS | ⬜ | |
-| DROP | ✅ | Dynamic array |
-| EXPAND | ✅ | Dynamic array |
-| FILTER | ✅ | Dynamic array, critical |
-| FORMULATEXT | ⬜ | |
-| GETPIVOTDATA | ✅ | MVP: supports tabular pivot outputs (limited layouts) |
-| HLOOKUP | ✅ | Includes wildcard exact match + approximate modes |
-| HSTACK | ✅ | Dynamic array |
-| HYPERLINK | ⬜ | |
-| INDEX | ✅ | |
-| INDIRECT | ⬜ | Volatile, complex |
-| LOOKUP | ⬜ | Legacy |
-| MATCH | ✅ | Includes wildcard exact match + approximate modes |
-| OFFSET | ⬜ | Volatile |
-| ROW | ⬜ | |
-| ROWS | ⬜ | |
-| RTD | ⬜ | Real-time data |
-| SORT | ✅ | Dynamic array |
-| SORTBY | ✅ | Dynamic array |
-| TAKE | ✅ | Dynamic array |
-| TOCOL | ✅ | Dynamic array |
-| TOROW | ✅ | Dynamic array |
-| TRANSPOSE | ✅ | Dynamic array |
-| UNIQUE | ✅ | Dynamic array, critical |
-| VLOOKUP | ✅ | Includes wildcard exact match + approximate modes |
-| VSTACK | ✅ | Dynamic array |
-| WRAPCOLS | ✅ | Dynamic array |
-| WRAPROWS | ✅ | Dynamic array |
-| XLOOKUP | ✅ | Supports match_mode/search_mode + 2D return_array spilling |
-| XMATCH | ✅ | Supports match_mode/search_mode + binary search modes |
+### Excel “function universe” references (informational)
 
-### Text Functions (P0)
+Excel has multiple naming/encoding systems and many “functions” that aren’t worksheet functions
+(legacy XLM macro functions, reserved slots, etc). The following sources are useful for context and
+coverage tracking:
 
-| Function | Status | Notes |
-|----------|--------|-------|
-| ASC | ⬜ | |
-| BAHTTEXT | ⬜ | |
-| CHAR | ⬜ | |
-| CLEAN | ⬜ | |
-| CODE | ⬜ | |
-| CONCAT | ⬜ | |
-| CONCATENATE | ⬜ | Legacy, still used |
-| DBCS | ⬜ | |
-| DOLLAR | ⬜ | |
-| EXACT | ⬜ | |
-| FIND | ⬜ | Case-sensitive |
-| FINDB | ⬜ | Byte-based |
-| FIXED | ⬜ | |
-| LEFT | ⬜ | |
-| LEFTB | ⬜ | Byte-based |
-| LEN | ⬜ | |
-| LENB | ⬜ | Byte-based |
-| LOWER | ⬜ | |
-| MID | ⬜ | |
-| MIDB | ⬜ | Byte-based |
-| NUMBERVALUE | ⬜ | |
-| PHONETIC | ⬜ | |
-| PROPER | ⬜ | |
-| REPLACE | ⬜ | |
-| REPLACEB | ⬜ | Byte-based |
-| REPT | ⬜ | |
-| RIGHT | ⬜ | |
-| RIGHTB | ⬜ | Byte-based |
-| SEARCH | ⬜ | Case-insensitive |
-| SEARCHB | ⬜ | Byte-based |
-| SUBSTITUTE | ⬜ | |
-| T | ⬜ | |
-| TEXT | ⬜ | Complex formatting |
-| TEXTAFTER | ⬜ | |
-| TEXTBEFORE | ⬜ | |
-| TEXTJOIN | ⬜ | |
-| TEXTSPLIT | ✅ | Dynamic array |
-| TRIM | ⬜ | |
-| UNICHAR | ⬜ | |
-| UNICODE | ⬜ | |
-| UPPER | ⬜ | |
-| VALUE | ⬜ | |
-| VALUETOTEXT | ⬜ | |
+- **BIFF/XLSB built-in function table (FTAB)**:
+  [`crates/formula-biff/src/ftab.rs`](../crates/formula-biff/src/ftab.rs)
+  - Lists BIFF `iftab` ids `0..=484` and their canonical names.
+  - **Does not** include many modern `_xlfn.` functions (which are commonly encoded as “user-defined”
+    calls in BIFF).
+- **Excel oracle corpus**:
+  [`tests/compatibility/excel-oracle/cases.json`](../tests/compatibility/excel-oracle/cases.json)
+  - A curated set of formulas + expected outputs, used to validate behavior against Excel.
+  - Good for measuring “real-world” coverage, but not a comprehensive universe of all functions.
 
-### Logical Functions (P0)
+## Parity summary report (script)
 
-| Function | Status | Notes |
-|----------|--------|-------|
-| AND | ✅ | |
-| BYCOL | ✅ | Lambda helper |
-| BYROW | ✅ | Lambda helper |
-| FALSE | ✅ | |
-| IF | ✅ | Most used function |
-| IFERROR | ✅ | |
-| IFNA | ✅ | |
-| IFS | ✅ | Multiple conditions |
-| LAMBDA | ✅ | User-defined functions |
-| LET | ✅ | Variable binding |
-| MAKEARRAY | ✅ | Lambda helper |
-| MAP | ✅ | Lambda helper |
-| NOT | ✅ | |
-| OR | ✅ | |
-| REDUCE | ✅ | Lambda helper |
-| SCAN | ✅ | Lambda helper |
-| SWITCH | ✅ | |
-| TRUE | ✅ | |
-| XOR | ✅ | |
+To avoid baking volatile numbers into docs, use the repo script:
 
-### Date & Time (P0)
+```bash
+node tools/parity/report_functions.mjs
+```
 
-| Function | Status | Notes |
-|----------|--------|-------|
-| DATE | ⬜ | |
-| DATEDIF | ⬜ | Undocumented but used |
-| DATEVALUE | ⬜ | |
-| DAY | ⬜ | |
-| DAYS | ⬜ | |
-| DAYS360 | ⬜ | |
-| EDATE | ⬜ | |
-| EOMONTH | ⬜ | |
-| HOUR | ⬜ | |
-| ISOWEEKNUM | ⬜ | |
-| MINUTE | ⬜ | |
-| MONTH | ⬜ | |
-| NETWORKDAYS | ⬜ | |
-| NETWORKDAYS.INTL | ⬜ | |
-| NOW | ⬜ | Volatile |
-| SECOND | ⬜ | |
-| TIME | ⬜ | |
-| TIMEVALUE | ⬜ | |
-| TODAY | ⬜ | Volatile |
-| WEEKDAY | ⬜ | |
-| WEEKNUM | ⬜ | |
-| WORKDAY | ⬜ | |
-| WORKDAY.INTL | ⬜ | |
-| YEAR | ⬜ | |
-| YEARFRAC | ⬜ | |
+(Source: [`tools/parity/report_functions.mjs`](../tools/parity/report_functions.mjs))
 
-### Statistical Functions (P1)
+The report prints:
 
-| Function | Status | Notes |
-|----------|--------|-------|
-| AVEDEV | ✅ | |
-| AVERAGE | ✅ | P0 |
-| AVERAGEA | ✅ | |
-| AVERAGEIF | ✅ | P0 |
-| AVERAGEIFS | ✅ | P0 |
-| BETA.DIST | ⬜ | |
-| BETA.INV | ⬜ | |
-| BINOM.DIST | ⬜ | |
-| BINOM.DIST.RANGE | ⬜ | |
-| BINOM.INV | ⬜ | |
-| CHISQ.DIST | ⬜ | |
-| CHISQ.DIST.RT | ⬜ | |
-| CHISQ.INV | ⬜ | |
-| CHISQ.INV.RT | ⬜ | |
-| CHISQ.TEST | ⬜ | |
-| CONFIDENCE.NORM | ⬜ | |
-| CONFIDENCE.T | ⬜ | |
-| CORREL | ✅ | |
-| COUNT | ✅ | P0 |
-| COUNTA | ✅ | P0 |
-| COUNTBLANK | ✅ | P0 |
-| COUNTIF | ✅ | P0 |
-| COUNTIFS | ✅ | P0 |
-| COVARIANCE.P | ✅ | |
-| COVARIANCE.S | ✅ | |
-| DEVSQ | ✅ | |
-| EXPON.DIST | ⬜ | |
-| F.DIST | ⬜ | |
-| F.DIST.RT | ⬜ | |
-| F.INV | ⬜ | |
-| F.INV.RT | ⬜ | |
-| F.TEST | ⬜ | |
-| FISHER | ⬜ | |
-| FISHERINV | ⬜ | |
-| FORECAST | ✅ | |
-| FORECAST.ETS | ⬜ | |
-| FORECAST.ETS.CONFINT | ⬜ | |
-| FORECAST.ETS.SEASONALITY | ⬜ | |
-| FORECAST.ETS.STAT | ⬜ | |
-| FORECAST.LINEAR | ✅ | |
-| FREQUENCY | ⬜ | Array function |
-| GAMMA | ⬜ | |
-| GAMMA.DIST | ⬜ | |
-| GAMMA.INV | ⬜ | |
-| GAMMALN | ⬜ | |
-| GAMMALN.PRECISE | ⬜ | |
-| GAUSS | ⬜ | |
-| GEOMEAN | ✅ | |
-| GROWTH | ⬜ | Array function |
-| HARMEAN | ✅ | |
-| HYPGEOM.DIST | ⬜ | |
-| INTERCEPT | ✅ | |
-| KURT | ⬜ | |
-| LARGE | ✅ | P0 |
-| LINEST | ⬜ | Array function |
-| LOGEST | ⬜ | Array function |
-| LOGNORM.DIST | ⬜ | |
-| LOGNORM.INV | ⬜ | |
-| MAX | ✅ | P0 |
-| MAXA | ✅ | |
-| MAXIFS | ✅ | P0 |
-| MEDIAN | ✅ | P0 |
-| MIN | ✅ | P0 |
-| MINA | ✅ | |
-| MINIFS | ✅ | P0 |
-| MODE.MULT | ✅ | Array function |
-| MODE.SNGL | ✅ | |
-| NEGBINOM.DIST | ⬜ | |
-| NORM.DIST | ⬜ | |
-| NORM.INV | ⬜ | |
-| NORM.S.DIST | ⬜ | |
-| NORM.S.INV | ⬜ | |
-| PEARSON | ✅ | |
-| PERCENTILE.EXC | ✅ | |
-| PERCENTILE.INC | ✅ | |
-| PERCENTRANK.EXC | ✅ | |
-| PERCENTRANK.INC | ✅ | |
-| PERMUT | ⬜ | |
-| PERMUTATIONA | ⬜ | |
-| PHI | ⬜ | |
-| POISSON.DIST | ⬜ | |
-| PROB | ⬜ | |
-| QUARTILE.EXC | ✅ | |
-| QUARTILE.INC | ✅ | |
-| RANK.AVG | ✅ | |
-| RANK.EQ | ✅ | |
-| RSQ | ✅ | |
-| SKEW | ⬜ | |
-| SKEW.P | ⬜ | |
-| SLOPE | ✅ | |
-| SMALL | ✅ | P0 |
-| STANDARDIZE | ✅ | |
-| STDEV.P | ✅ | |
-| STDEV.S | ✅ | |
-| STDEVA | ✅ | |
-| STDEVPA | ✅ | |
-| STEYX | ✅ | |
-| T.DIST | ⬜ | |
-| T.DIST.2T | ⬜ | |
-| T.DIST.RT | ⬜ | |
-| T.INV | ⬜ | |
-| T.INV.2T | ⬜ | |
-| T.TEST | ⬜ | |
-| TREND | ⬜ | Array function |
-| TRIMMEAN | ✅ | |
-| VAR.P | ✅ | |
-| VAR.S | ✅ | |
-| VARA | ✅ | |
-| VARPA | ✅ | |
-| WEIBULL.DIST | ⬜ | |
-| Z.TEST | ⬜ | |
+- Implemented function count (from `shared/functionCatalog.json`)
+- FTAB non-empty name count (from `crates/formula-biff/src/ftab.rs`)
+- Approximate count of FTAB names missing from the catalog
 
-### Financial Functions (P1)
+### Example output
 
-| Function | Status | Notes |
-|----------|--------|-------|
-| ACCRINT | ✅ | freq: 1/2/4; basis: 0..4 |
-| ACCRINTM | ✅ | basis: 0..4 |
-| AMORDEGRC | ⬜ | |
-| AMORLINC | ⬜ | |
-| COUPDAYBS | ✅ | freq: 1/2/4; basis: 0..4 |
-| COUPDAYS | ✅ | freq: 1/2/4; basis: 0..4 |
-| COUPDAYSNC | ✅ | freq: 1/2/4; basis: 0..4 |
-| COUPNCD | ✅ | freq: 1/2/4; basis: 0..4 |
-| COUPNUM | ✅ | freq: 1/2/4; basis: 0..4 |
-| COUPPCD | ✅ | freq: 1/2/4; basis: 0..4 |
-| CUMIPMT | ⬜ | |
-| CUMPRINC | ⬜ | |
-| DB | ⬜ | |
-| DDB | ✅ | |
-| DISC | ✅ | |
-| DOLLARDE | ⬜ | |
-| DOLLARFR | ⬜ | |
-| DURATION | ✅ | freq: 1/2/4; basis: 0..4 |
-| EFFECT | ⬜ | |
-| FV | ✅ | P0 |
-| FVSCHEDULE | ⬜ | |
-| INTRATE | ✅ | |
-| IPMT | ✅ | |
-| IRR | ✅ | P0 |
-| ISPMT | ⬜ | |
-| MDURATION | ✅ | freq: 1/2/4; basis: 0..4 |
-| MIRR | ✅ | |
-| NOMINAL | ⬜ | |
-| NPER | ✅ | |
-| NPV | ✅ | P0 |
-| ODDFPRICE | ⬜ | |
-| ODDFYIELD | ⬜ | |
-| ODDLPRICE | ⬜ | |
-| ODDLYIELD | ⬜ | |
-| PDURATION | ⬜ | |
-| PMT | ✅ | P0 |
-| PPMT | ✅ | |
-| PRICE | ✅ | freq: 1/2/4; basis: 0..4 |
-| PRICEDISC | ✅ | |
-| PRICEMAT | ✅ | |
-| PV | ✅ | P0 |
-| RATE | ✅ | |
-| RECEIVED | ✅ | |
-| RRI | ⬜ | |
-| SLN | ✅ | |
-| SYD | ✅ | |
-| TBILLEQ | ✅ | |
-| TBILLPRICE | ✅ | |
-| TBILLYIELD | ✅ | |
-| VDB | ⬜ | |
-| XIRR | ✅ | P0 |
-| XNPV | ✅ | P0 |
-| YIELD | ✅ | freq: 1/2/4; basis: 0..4 |
-| YIELDDISC | ✅ | |
-| YIELDMAT | ✅ | |
+```text
+Excel function parity (code-driven)
+Implemented functions (shared/functionCatalog.json): 295
+BIFF FTAB function names (non-empty): 478
+FTAB names missing from engine catalog (approx): 261
+```
 
-#### Odd-coupon bond functions (ODDF\*/ODDL\*)
+## Notes on tricky function families
 
-Odd-coupon bond functions have many Excel-specific conventions (basis day-count, end-of-month
-coupon schedules, accrued interest, yield solver behavior). When implementing or modifying:
+Some function families have especially subtle Excel behavior and deserve dedicated documentation.
+For example, odd-coupon bond functions (ODDF\*/ODDL\*) involve Excel-specific conventions around
+day-count bases, coupon schedules, accrued interest, and yield solver behavior. See:
+[`docs/financial-odd-coupon-bonds.md`](financial-odd-coupon-bonds.md).
 
-- `ODDFPRICE` / `ODDFYIELD`
-- `ODDLPRICE` / `ODDLYIELD`
+## Updating / regenerating the function catalog
 
-See: [`docs/financial-odd-coupon-bonds.md`](financial-odd-coupon-bonds.md).
+When adding or changing built-in functions in Rust, regenerate the catalog with:
 
----
+```bash
+node scripts/generate-function-catalog.js
+```
 
-## File Format Features
+(Source: [`scripts/generate-function-catalog.js`](../scripts/generate-function-catalog.js))
 
-### Worksheets (P0)
+This writes:
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Multiple sheets | ⬜ | |
-| Sheet naming | ⬜ | |
-| Sheet ordering | ⬜ | |
-| Sheet color tabs | ⬜ | |
-| Hidden sheets | ⬜ | |
-| Very hidden sheets | ⬜ | |
-| Sheet protection | ⬜ | |
+- `shared/functionCatalog.json`
+- `shared/functionCatalog.mjs`
 
-### Cell Content (P0)
+Why it’s committed:
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Numbers | ⬜ | |
-| Text | ⬜ | |
-| Formulas | ⬜ | |
-| Dates | ⬜ | |
-| Times | ⬜ | |
-| Booleans | ⬜ | |
-| Errors | ⬜ | |
-| Rich text | ⬜ | |
-| Hyperlinks | ⬜ | |
-| Comments | ⬜ | |
-| Notes | ⬜ | |
-| Images in cells | ⬜ | |
+- It’s a **stable interface** for non-Rust tooling (autocomplete, docs, parity scripts, etc).
+- It makes diffs reviewable (catalog is sorted and normalized).
+- CI enforces correctness via `crates/formula-engine/tests/function_catalog_sync.rs`.
 
-### Formatting (P0)
+## Dependency threshold: 65,536 → “full recalc mode”
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Font family | ⬜ | |
-| Font size | ⬜ | |
-| Font color | ⬜ | |
-| Bold | ⬜ | |
-| Italic | ⬜ | |
-| Underline | ⬜ | |
-| Strikethrough | ⬜ | |
-| Background color | ⬜ | |
-| Number formats | ⬜ | Complex |
-| Date formats | ⬜ | |
-| Custom formats | ⬜ | |
-| Borders | ⬜ | |
-| Alignment | ⬜ | |
-| Text wrap | ⬜ | |
-| Merge cells | ⬜ | |
-| Cell rotation | ⬜ | |
+Excel has a behavior/implementation detail where, beyond a **65,536 dependency threshold**, it may
+switch away from incremental dependency-driven recalculation into a “full recalc” strategy.
 
-### Conditional Formatting (P0)
+In this repo the requirement is tracked here:
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Cell value rules | ⬜ | |
-| Formula rules | ⬜ | |
-| Data bars | ⬜ | |
-| Color scales | ⬜ | |
-| Icon sets | ⬜ | |
-| Top/bottom rules | ⬜ | |
-| Unique/duplicate | ⬜ | |
+- [`instructions/core-engine.md`](../instructions/core-engine.md) (see “Dependency threshold: 65,536
+  before full recalc mode”)
 
-### Data Features (P0)
+Relevant implementation areas (where this is/will be enforced):
 
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Tables | ⬜ | |
-| Structured references | ⬜ | |
-| Data validation | ⬜ | |
-| Dropdown lists | ⬜ | |
-| Named ranges | ⬜ | |
-| AutoFilter | ⬜ | |
-| Sort | ⬜ | |
-| Group/outline | ⬜ | |
+- Dependency graph implementation:
+  [`crates/formula-engine/src/graph/dependency_graph.rs`](../crates/formula-engine/src/graph/dependency_graph.rs)
+- Engine recalculation loop:
+  [`crates/formula-engine/src/engine.rs`](../crates/formula-engine/src/engine.rs)
+- Scaling/regression coverage:
+  [`crates/formula-engine/tests/graph_stress.rs`](../crates/formula-engine/tests/graph_stress.rs)
 
-### Charts (P1)
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Column charts (clustered/stacked/100% stacked) | ⬜ | DrawingML `c:barChart` + `c:grouping` |
-| Bar charts (clustered/stacked/100% stacked) | ⬜ | DrawingML `c:barChart` + `c:barDir="bar"` |
-| Line charts | ⬜ | |
-| Pie charts | ⬜ | |
-| Area charts (stacked/100% stacked) | ⬜ | |
-| Scatter plots | ⬜ | |
-| Bubble charts | ⬜ | |
-| Radar charts | ⬜ | |
-| Waterfall charts | ⬜ | Often ChartEx (Excel 2016+) |
-| Histogram charts | ⬜ | Often ChartEx (Excel 2016+) |
-| Pareto charts | ⬜ | Often ChartEx (Excel 2016+) |
-| Box & whisker charts | ⬜ | Often ChartEx (Excel 2016+) |
-| Treemap charts | ⬜ | Often ChartEx (Excel 2016+) |
-| Sunburst charts | ⬜ | Often ChartEx (Excel 2016+) |
-| Funnel charts | ⬜ | Often ChartEx (Excel 2016+) |
-| Stock charts (OHLC) | ⬜ | DrawingML `c:stockChart` |
-| Combo charts | ⬜ | |
-| Map charts (preserve/placeholder) | ⬜ | Preserve XML and show placeholder if unsupported |
-| Sparklines | ⬜ | |
-| Axis formatting fidelity | ⬜ | Ticks, gridlines, number formats, scaling |
-| Titles, legends, and data labels | ⬜ | Rich text + layout |
-| Theme-based colors | ⬜ | Depends on theme fidelity (Task 109) |
-| Series formatting + markers | ⬜ | Line/fill/marker, per-point overrides |
-| Layout anchored to sheet (EMUs) | ⬜ | Drawing anchors must match Excel |
-| Lossless round-trip (unknown chart types/parts) | ⬜ | Preserve chart-related parts byte-for-byte when unedited |
-
-### Pivot Tables (P1)
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Basic pivot | ⬜ | |
-| Multiple value fields | ⬜ | |
-| Calculated fields | ⬜ | |
-| Pivot charts | ⬜ | |
-| Slicers | ⬜ | |
-| Timelines | ⬜ | |
-
-### Advanced (P2)
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Power Query | ⬜ | |
-| Data Model | ⬜ | |
-| Power Pivot | ⬜ | |
-| Cube functions | ⬜ | |
-| Solver | ⬜ | |
-| Goal Seek | ⬜ | |
-| Scenarios | ⬜ | |
-
-### VBA (P2)
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Preserve vbaProject.bin | ⬜ | P0 actually |
-| Parse VBA code | ⬜ | |
-| Display VBA | ⬜ | |
-| Execute VBA | ⬜ | |
-
----
-
-## Progress Summary
-
-| Category | Total | Done | % |
-|----------|-------|------|---|
-| Math Functions | 65 | 0 | 0% |
-| Lookup Functions | 35 | 0 | 0% |
-| Text Functions | 50 | 0 | 0% |
-| Logical Functions | 20 | 0 | 0% |
-| Date Functions | 25 | 0 | 0% |
-| Statistical Functions | 100 | 0 | 0% |
-| Financial Functions | 55 | 0 | 0% |
-| File Features | 100+ | 0 | 0% |
-| **Total** | **~500** | **0** | **0%** |
-
----
-
-## Implementation Order
-
-### Phase 1: Core Functions (Months 1-3)
-1. Basic math: SUM, AVERAGE, MIN, MAX, COUNT
-2. Lookup: VLOOKUP, INDEX, MATCH, XLOOKUP
-3. Logical: IF, AND, OR, IFERROR
-4. Text: LEFT, RIGHT, MID, CONCATENATE, TRIM
-5. Date: DATE, TODAY, NOW, YEAR, MONTH, DAY
-
-### Phase 2: Extended Functions (Months 3-6)
-1. All remaining P0 functions
-2. Dynamic array functions (FILTER, SORT, UNIQUE)
-3. LAMBDA and helper functions
-4. Statistical functions
-5. Financial functions
-
-### Phase 3: Full Parity (Months 6-12)
-1. P1 functions
-2. P2 functions
-3. Edge cases and compatibility fixes
-4. Engineering functions
-5. Cube functions
+Note: The parity report script above focuses on **function coverage**. The dependency threshold is a
+separate (performance/behavior) parity requirement.
