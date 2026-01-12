@@ -55,6 +55,44 @@ function normalizeCellScalar(value: CellScalar): CellScalar {
   return normalizeFormulaText(value);
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+const FORMULA_PARSE_OPTIONS_ERROR =
+  'options must be { localeId?: string, referenceStyle?: "A1" | "R1C1" }';
+
+function normalizeFormulaParseOptions(options: unknown): FormulaParseOptions | undefined {
+  if (options == null) return undefined;
+  if (!isPlainObject(options)) {
+    throw new Error(FORMULA_PARSE_OPTIONS_ERROR);
+  }
+
+  const allowed = new Set(["localeId", "referenceStyle"]);
+  for (const key of Object.keys(options)) {
+    if (!allowed.has(key)) {
+      throw new Error(FORMULA_PARSE_OPTIONS_ERROR);
+    }
+  }
+
+  const out: FormulaParseOptions = {};
+  const localeId = (options as any).localeId;
+  if (localeId !== undefined) {
+    if (typeof localeId !== "string") throw new Error(FORMULA_PARSE_OPTIONS_ERROR);
+    out.localeId = localeId;
+  }
+
+  const referenceStyle = (options as any).referenceStyle;
+  if (referenceStyle !== undefined) {
+    if (referenceStyle !== "A1" && referenceStyle !== "R1C1") {
+      throw new Error(FORMULA_PARSE_OPTIONS_ERROR);
+    }
+    out.referenceStyle = referenceStyle;
+  }
+
+  return out;
+}
+
 /**
  * Worker-backed Engine client using a MessagePort RPC transport.
  *
@@ -257,7 +295,8 @@ export class EngineWorker {
    * flush pending `setCell` batches.
    */
   async lexFormula(formula: string, options?: FormulaParseOptions, rpcOptions?: RpcOptions): Promise<FormulaToken[]> {
-    return (await this.invoke("lexFormula", { formula, options }, rpcOptions)) as FormulaToken[];
+    const normalizedOptions = normalizeFormulaParseOptions(options);
+    return (await this.invoke("lexFormula", { formula, options: normalizedOptions }, rpcOptions)) as FormulaToken[];
   }
 
   /**
@@ -271,7 +310,8 @@ export class EngineWorker {
     options?: FormulaParseOptions,
     rpcOptions?: RpcOptions
   ): Promise<FormulaPartialLexResult> {
-    return (await this.invoke("lexFormulaPartial", { formula, options }, rpcOptions)) as FormulaPartialLexResult;
+    const normalizedOptions = normalizeFormulaParseOptions(options);
+    return (await this.invoke("lexFormulaPartial", { formula, options: normalizedOptions }, rpcOptions)) as FormulaPartialLexResult;
   }
 
   /**
@@ -298,7 +338,7 @@ export class EngineWorker {
     rpcOptions?: RpcOptions
   ): Promise<FormulaPartialParseResult> {
     const isFormulaParseOptions = (value: unknown): value is FormulaParseOptions =>
-      Boolean(value && typeof value === "object" && ("localeId" in value || "referenceStyle" in value));
+      isPlainObject(value) && !("signal" in value) && !("timeoutMs" in value);
     const isRpcOptions = (value: unknown): value is RpcOptions =>
       Boolean(value && typeof value === "object" && ("signal" in value || "timeoutMs" in value));
 
@@ -351,7 +391,12 @@ export class EngineWorker {
       }
     }
 
-    return (await this.invoke("parseFormulaPartial", { formula, cursor, options }, finalRpcOptions)) as FormulaPartialParseResult;
+    const normalizedOptions = normalizeFormulaParseOptions(options);
+    return (await this.invoke(
+      "parseFormulaPartial",
+      { formula, cursor, options: normalizedOptions },
+      finalRpcOptions
+    )) as FormulaPartialParseResult;
   }
 
   async setSheetDimensions(sheet: string, rows: number, cols: number, options?: RpcOptions): Promise<void> {
