@@ -111,6 +111,42 @@ fn tab_color_replacement_preserves_worksheet_prefix() -> Result<(), Box<dyn std:
 }
 
 #[test]
+fn tab_color_replacement_preserves_prefix_when_original_tab_color_is_expanded(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <x:sheetPr>
+    <x:tabColor rgb="FFFF0000"></x:tabColor>
+  </x:sheetPr>
+  <x:sheetData/>
+</x:worksheet>"#;
+
+    let bytes = build_minimal_xlsx(sheet_xml);
+    let mut pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    let color = TabColor::rgb("FF00FF00");
+    pkg.set_worksheet_tab_color("xl/worksheets/sheet1.xml", Some(&color))?;
+
+    let updated = std::str::from_utf8(
+        pkg.part("xl/worksheets/sheet1.xml")
+            .expect("worksheet part exists"),
+    )?;
+
+    roxmltree::Document::parse(updated)?;
+    assert!(
+        updated.contains("<x:tabColor rgb=\"FF00FF00\""),
+        "expected prefixed tabColor to update, got:\n{updated}"
+    );
+    assert!(
+        !updated.contains("</x:tabColor></x:tabColor>"),
+        "should not leave a duplicated </x:tabColor> end tag, got:\n{updated}"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn hyperlinks_insertion_preserves_worksheet_prefix() -> Result<(), Box<dyn std::error::Error>> {
     let sheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
@@ -151,4 +187,3 @@ fn hyperlinks_insertion_preserves_worksheet_prefix() -> Result<(), Box<dyn std::
 
     Ok(())
 }
-

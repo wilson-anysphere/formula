@@ -209,9 +209,21 @@ pub fn write_sheet_tab_color(
     let mut tab_color_written = false;
     let mut inserted_sheet_pr = false;
     let mut sheet_pr_prefix: Option<String> = None;
+    let mut skip_tab_color_depth: usize = 0;
 
     loop {
         let event = reader.read_event_into(&mut buf)?;
+        if skip_tab_color_depth > 0 {
+            match event {
+                Event::Start(_) => skip_tab_color_depth += 1,
+                Event::End(_) => skip_tab_color_depth = skip_tab_color_depth.saturating_sub(1),
+                Event::Empty(_) => {}
+                _ => {}
+            }
+            buf.clear();
+            continue;
+        }
+
         match event {
             Event::Eof => break,
             Event::Empty(ref e) if e.local_name().as_ref() == b"worksheet" => {
@@ -297,14 +309,22 @@ pub fn write_sheet_tab_color(
                 sheet_pr_prefix = None;
                 writer.write_event(Event::End(e.to_owned()))?;
             }
-            Event::Empty(ref e) | Event::Start(ref e)
-                if in_sheet_pr && e.local_name().as_ref() == b"tabColor" =>
-            {
+            Event::Empty(ref e) if in_sheet_pr && e.local_name().as_ref() == b"tabColor" => {
                 if let Some(color) = tab_color {
                     let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                     writer.write_event(Event::Empty(build_tab_color_element(tag.as_str(), color)))?;
                     tab_color_written = true;
                 }
+            }
+            Event::Start(ref e) if in_sheet_pr && e.local_name().as_ref() == b"tabColor" => {
+                if let Some(color) = tab_color {
+                    let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    writer.write_event(Event::Empty(build_tab_color_element(tag.as_str(), color)))?;
+                    tab_color_written = true;
+                }
+                // Swallow the original <tabColor> subtree (including its </tabColor> end tag)
+                // because we either replaced it with an empty element or removed it.
+                skip_tab_color_depth = 1;
             }
             _ => {
                 writer.write_event(event.to_owned())?;
