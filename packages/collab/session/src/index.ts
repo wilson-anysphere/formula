@@ -1369,6 +1369,22 @@ export class CollabSession {
     this.formulaConflictMonitor?.dispose();
     this.cellConflictMonitor?.dispose();
     this.cellValueConflictMonitor?.dispose();
+
+    // Collaborative undo uses Yjs' UndoManager which registers `afterTransaction`
+    // handlers on the Y.Doc. CollabSession does not own the doc instance (callers
+    // can pass their own), so we must explicitly destroy the UndoManager on
+    // teardown to avoid leaking doc observers and retaining deleted structs via
+    // `keepItem`.
+    //
+    // Note: the UndoManager instance is stored inside `localOrigins` (see
+    // @formula/collab-undo).
+    try {
+      const undoManager = Array.from(this.localOrigins).find((origin) => origin instanceof Y.UndoManager);
+      if (undoManager) undoManager.destroy();
+    } catch {
+      // ignore
+    }
+
     this.presence?.destroy();
     this.offline?.destroy();
     this.provider?.destroy?.();

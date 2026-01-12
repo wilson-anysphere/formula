@@ -219,3 +219,19 @@ test("CollabSession undo scopeNames works when an additional root was created by
   session.destroy();
   doc.destroy();
 });
+
+test("CollabSession destroy cleans up UndoManager afterTransaction hooks", () => {
+  const doc = new Y.Doc();
+  const session = createCollabSession({ doc, undo: {} });
+
+  // Sanity check: UndoManager is installed and registers doc afterTransaction observers.
+  const observers = /** @type {any} */ (doc)._observers?.get?.("afterTransaction");
+  assert.ok(observers && observers.size > 0);
+
+  session.destroy();
+
+  const after = /** @type {any} */ (doc)._observers?.get?.("afterTransaction");
+  assert.equal(after, undefined);
+
+  doc.destroy();
+});
