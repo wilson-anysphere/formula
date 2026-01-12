@@ -104,26 +104,28 @@ export function detectDataRegions(values) {
   const rowCount = values.length;
   const colCount = values.reduce((max, row) => Math.max(max, row?.length ?? 0), 0);
 
-  /** @type {boolean[][]} */
-  const visited = Array.from({ length: rowCount }, () => Array.from({ length: colCount }, () => false));
+  if (rowCount === 0 || colCount === 0) return [];
+
+  /**
+   * `Array.shift()` is O(n) due to element re-indexing.
+   * Dense regions (large contiguous blocks) would therefore take ~O(n^2) time to flood-fill.
+   *
+   * Use an index-based queue + typed visited grid to keep flood-fill linear in the number of
+   * visited cells.
+   *
+   * @type {Uint8Array[]}
+   */
+  const visited = Array.from({ length: rowCount }, () => new Uint8Array(colCount));
 
   /** @type {{ startRow: number, startCol: number, endRow: number, endCol: number }[]} */
   const regions = [];
 
-  /**
-   * @param {number} r
-   * @param {number} c
-   */
-  function getValue(r, c) {
-    return values[r]?.[c];
-  }
-
   for (let r = 0; r < rowCount; r++) {
     for (let c = 0; c < colCount; c++) {
       if (visited[r][c]) continue;
-      visited[r][c] = true;
+      visited[r][c] = 1;
 
-      if (isCellEmpty(getValue(r, c))) continue;
+      if (isCellEmpty(values[r]?.[c])) continue;
 
       let minRow = r;
       let maxRow = r;
@@ -132,27 +134,35 @@ export function detectDataRegions(values) {
 
       /** @type {[number, number][]} */
       const queue = [[r, c]];
+      let head = 0;
 
-      while (queue.length) {
-        const [qr, qc] = queue.shift();
+      while (head < queue.length) {
+        const [qr, qc] = queue[head++];
         if (qr < minRow) minRow = qr;
         if (qr > maxRow) maxRow = qr;
         if (qc < minCol) minCol = qc;
         if (qc > maxCol) maxCol = qc;
 
-        const neighbors = [
-          [qr - 1, qc],
-          [qr + 1, qc],
-          [qr, qc - 1],
-          [qr, qc + 1],
-        ];
-
-        for (const [nr, nc] of neighbors) {
-          if (nr < 0 || nr >= rowCount || nc < 0 || nc >= colCount) continue;
-          if (visited[nr][nc]) continue;
-          visited[nr][nc] = true;
-          if (isCellEmpty(getValue(nr, nc))) continue;
-          queue.push([nr, nc]);
+        // Inline neighbor exploration to avoid per-cell allocations.
+        // Up
+        if (qr > 0 && !visited[qr - 1][qc]) {
+          visited[qr - 1][qc] = 1;
+          if (!isCellEmpty(values[qr - 1]?.[qc])) queue.push([qr - 1, qc]);
+        }
+        // Down
+        if (qr + 1 < rowCount && !visited[qr + 1][qc]) {
+          visited[qr + 1][qc] = 1;
+          if (!isCellEmpty(values[qr + 1]?.[qc])) queue.push([qr + 1, qc]);
+        }
+        // Left
+        if (qc > 0 && !visited[qr][qc - 1]) {
+          visited[qr][qc - 1] = 1;
+          if (!isCellEmpty(values[qr]?.[qc - 1])) queue.push([qr, qc - 1]);
+        }
+        // Right
+        if (qc + 1 < colCount && !visited[qr][qc + 1]) {
+          visited[qr][qc + 1] = 1;
+          if (!isCellEmpty(values[qr]?.[qc + 1])) queue.push([qr, qc + 1]);
         }
       }
 

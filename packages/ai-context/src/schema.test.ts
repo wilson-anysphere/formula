@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { extractSheetSchema } from "./schema.js";
+import { detectDataRegions, extractSheetSchema } from "./schema.js";
 
 describe("extractSheetSchema", () => {
   it("detects a headered table region and infers column types", () => {
@@ -109,5 +109,14 @@ describe("extractSheetSchema", () => {
     const schema = extractSheetSchema(sheet);
     expect(schema.dataRegions[0].range).toBe("Sheet1!D11:E12");
     expect(schema.tables[0].range).toBe("Sheet1!D11:E12");
+  });
+
+  it("detectDataRegions handles a large contiguous block as a single region", () => {
+    const size = 50;
+    const values = Array.from({ length: size }, () => Array.from({ length: size }, () => 1));
+
+    const regions = detectDataRegions(values);
+    expect(regions).toHaveLength(1);
+    expect(regions[0]).toEqual({ startRow: 0, startCol: 0, endRow: size - 1, endCol: size - 1 });
   });
 });
