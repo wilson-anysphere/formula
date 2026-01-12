@@ -274,17 +274,9 @@ export class SecondaryGridView {
       }
     });
 
-    // Match SpreadsheetApp semantics: while the in-cell editor is open, ignore pointer interactions
-    // on the grid surface (don't change selection / start drags / steal focus from the editor).
-    const onSelectionCanvasPointerDownCapture = (event: PointerEvent) => {
-      if (!this.editor.isOpen()) return;
-      event.preventDefault();
-      // Block DesktopSharedGrid's pointer handler on the same canvas.
-      event.stopImmediatePropagation();
-      focusWithoutScroll(this.editor.element);
-    };
-    selectionCanvas.addEventListener("pointerdown", onSelectionCanvasPointerDownCapture, { capture: true });
-    this.disposeFns.push(() => selectionCanvas.removeEventListener("pointerdown", onSelectionCanvasPointerDownCapture, { capture: true }));
+    // Excel behavior: clicking another cell while editing should commit the edit and move selection.
+    // We rely on the editor's blur-to-commit handler above (which fires when DesktopSharedGrid
+    // focuses the container during pointer interactions).
 
     // Match SpreadsheetApp header sizing so cell hit targets line up.
     this.grid.renderer.setColWidth(0, 48);

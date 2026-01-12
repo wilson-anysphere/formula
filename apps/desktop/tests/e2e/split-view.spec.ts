@@ -368,6 +368,38 @@ test.describe("split view", () => {
     await expect(editor).toBeHidden();
   });
 
+  test("secondary in-cell edits commit when clicking another cell in the secondary pane", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    // Begin editing A1 in the secondary pane, but do not press Enter.
+    await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+    await page.keyboard.press("h");
+    const editor = secondary.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("ello");
+    await expect(editor).toHaveValue("hello");
+
+    // Clicking another cell within the secondary pane should commit and move selection.
+    await secondary.click({ position: { x: 48 + 100 + 12, y: 24 + 12 } }); // B1
+    await waitForIdle(page);
+
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+    await expect(page.getByTestId("formula-address")).toHaveValue("B1");
+    expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("hello");
+    await expect(editor).toBeHidden();
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe("grid-secondary");
+  });
+
   test("selection is global across panes without cross-pane scrolling", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
 
