@@ -795,6 +795,25 @@ pub fn build_sanitized_sheet_name_internal_hyperlink_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture containing a merged region (`A1:B1`) and a hyperlink anchored to
+/// a single cell within the merged region.
+///
+/// Excel treats merged cells as a single clickable area, so the importer should expand the
+/// hyperlink anchor to cover the full merged region.
+pub fn build_merged_hyperlink_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_merged_hyperlink_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture where the HLINK payload is split across a `CONTINUE` record.
 pub fn build_continued_hyperlink_fixture_xls() -> Vec<u8> {
     let url = format!("https://example.com/{}", "a".repeat(200));
@@ -869,6 +888,81 @@ pub fn build_continued_hyperlink_fixture_xls() -> Vec<u8> {
             .expect("write Workbook stream");
     }
     ole.into_inner().into_inner()
+}
+
+fn build_merged_hyperlink_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // XF table: 16 style XFs + one cell XF for the A1 cell value.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+    let xf_cell = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "MergedLink");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    let sheet_offset = globals.len();
+    let sheet = build_merged_hyperlink_sheet_stream(xf_cell);
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_merged_hyperlink_sheet_stream(xf_cell: u16) -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 2) (A..B)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&2u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // MERGEDCELLS: 1 range, A1:B1.
+    let mut merged = Vec::<u8>::new();
+    merged.extend_from_slice(&1u16.to_le_bytes()); // cAreas
+    merged.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+    merged.extend_from_slice(&0u16.to_le_bytes()); // rwLast
+    merged.extend_from_slice(&0u16.to_le_bytes()); // colFirst (A)
+    merged.extend_from_slice(&1u16.to_le_bytes()); // colLast (B)
+    push_record(&mut sheet, RECORD_MERGEDCELLS, &merged);
+
+    // A1: NUMBER record so calamine reports at least one used cell.
+    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, 1.0));
+
+    // A1: HLINK record pointing to https://example.com. The anchor is a single cell even though
+    // A1:B1 is merged.
+    push_record(
+        &mut sheet,
+        RECORD_HLINK,
+        &hlink_external_url(0, 0, 0, 0, "https://example.com", "Example", "Example tooltip"),
+    );
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
 }
 
 fn hlink_internal_location(

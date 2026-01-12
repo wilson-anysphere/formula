@@ -547,7 +547,21 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
                         codepage,
                     ) {
                         Ok(parsed) => {
+                            let hyperlink_start = sheet.hyperlinks.len();
                             sheet.hyperlinks.extend(parsed.hyperlinks);
+                            // Excel treats hyperlinks applied to a merged cell as applying to the
+                            // entire merged region. When BIFF stores the hyperlink as a single-cell
+                            // anchor inside a merge, expand it so `Worksheet::hyperlink_at` works
+                            // for any cell inside the merged region.
+                            if !sheet.merged_regions.is_empty() && hyperlink_start < sheet.hyperlinks.len() {
+                                for link in sheet.hyperlinks[hyperlink_start..].iter_mut() {
+                                    if link.range.is_single_cell() {
+                                        if let Some(merged) = sheet.merged_regions.containing_range(link.range.start) {
+                                            link.range = merged;
+                                        }
+                                    }
+                                }
+                            }
                             warnings.extend(parsed.warnings.into_iter().map(|w| {
                                 ImportWarning::new(format!(
                                     "failed to import `.xls` hyperlink in sheet `{sheet_name}`: {w}"

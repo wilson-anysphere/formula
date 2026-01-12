@@ -137,3 +137,22 @@ fn rewrites_internal_hyperlinks_to_sanitized_sheet_names() {
         }
     );
 }
+
+#[test]
+fn expands_hyperlink_anchor_to_merged_region() {
+    let bytes = xls_fixture_builder::build_merged_hyperlink_fixture_xls();
+    let result = import_fixture(&bytes);
+
+    let sheet = result
+        .workbook
+        .sheet_by_name("MergedLink")
+        .expect("MergedLink missing");
+
+    assert_eq!(sheet.hyperlinks.len(), 1);
+    let link = &sheet.hyperlinks[0];
+    assert_eq!(link.range, Range::from_a1("A1:B1").unwrap());
+
+    // Ensure the hyperlink is discoverable when addressing a non-anchor merged cell.
+    let b1 = CellRef::from_a1("B1").unwrap();
+    assert!(sheet.hyperlink_at(b1).is_some());
+}
