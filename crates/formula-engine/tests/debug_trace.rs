@@ -280,7 +280,10 @@ fn debug_trace_supports_array_arithmetic_broadcasting() {
     );
 
     let Value::Array(arr) = dbg.value else {
-        panic!("expected Value::Array from debug evaluation, got {:?}", dbg.value);
+        panic!(
+            "expected Value::Array from debug evaluation, got {:?}",
+            dbg.value
+        );
     };
     assert_eq!(arr.rows, 2);
     assert_eq!(arr.cols, 3);
@@ -437,11 +440,7 @@ fn debug_trace_supports_reversed_3d_sheet_range_refs() {
 #[test]
 fn debug_trace_supports_external_workbook_cell_refs() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        41.0,
-    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 41.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -469,11 +468,7 @@ fn debug_trace_supports_external_workbook_cell_refs() {
 #[test]
 fn debug_trace_supports_unquoted_external_refs_with_non_ident_workbook_names() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Work Book-1.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        9.0,
-    );
+    provider.set("[Work Book-1.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 9.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -498,11 +493,7 @@ fn debug_trace_supports_unquoted_external_refs_with_non_ident_workbook_names() {
 #[test]
 fn debug_trace_supports_external_refs_with_quoted_sheet_name_after_workbook_prefix() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]My Sheet",
-        CellAddr { row: 0, col: 0 },
-        5.0,
-    );
+    provider.set("[Book.xlsx]My Sheet", CellAddr { row: 0, col: 0 }, 5.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -530,7 +521,7 @@ fn debug_trace_supports_external_refs_with_quoted_sheet_name_after_workbook_pref
 }
 
 #[test]
-fn debug_trace_rejects_structured_references() {
+fn debug_trace_supports_structured_references() {
     let mut engine = Engine::new();
     engine.set_sheet_tables("Sheet1", vec![table_fixture_multi_col()]);
     engine.set_cell_value("Sheet1", "A1", "Col1").unwrap();
@@ -538,33 +529,30 @@ fn debug_trace_rejects_structured_references() {
     engine.set_cell_value("Sheet1", "C1", "Col3").unwrap();
     engine.set_cell_value("Sheet1", "D1", "Col4").unwrap();
     engine.set_cell_value("Sheet1", "B2", 10.0).unwrap();
-    engine
-        .set_cell_formula("Sheet1", "D2", "=[@Col2]")
-        .unwrap();
+    engine.set_cell_formula("Sheet1", "D2", "=[@Col2]").unwrap();
     engine.recalculate_single_threaded();
-    assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(10.0));
 
-    let err = engine.debug_evaluate("Sheet1", "D2").unwrap_err();
-    let formula_engine::EngineError::Parse(formula_engine::eval::FormulaParseError::UnexpectedToken(_)) =
-        err
-    else {
-        panic!("expected structured ref parse error, got: {err:?}");
-    };
+    let computed = engine.get_cell_value("Sheet1", "D2");
+    assert_eq!(computed, Value::Number(10.0));
+
+    let dbg = engine.debug_evaluate("Sheet1", "D2").unwrap();
+    assert_eq!(dbg.value, computed);
+    assert_eq!(slice(&dbg.formula, dbg.trace.span), "[@Col2]");
+    assert!(matches!(dbg.trace.kind, TraceKind::StructuredRef));
+    assert_eq!(
+        dbg.trace.reference,
+        Some(TraceRef::Cell {
+            sheet: formula_engine::functions::SheetId::Local(0),
+            addr: CellAddr { row: 1, col: 1 }
+        })
+    );
 }
 
 #[test]
 fn trace_preserves_reference_context_for_sum_over_external_ranges() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        1.0,
-    );
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 1, col: 0 },
-        2.0,
-    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 1, col: 0 }, 2.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -577,7 +565,10 @@ fn trace_preserves_reference_context_for_sum_over_external_ranges() {
     assert_eq!(dbg.value, Value::Number(3.0));
 
     let range_node = &dbg.trace.children[0];
-    assert_eq!(slice(&dbg.formula, range_node.span), "[Book.xlsx]Sheet1!A1:A2");
+    assert_eq!(
+        slice(&dbg.formula, range_node.span),
+        "[Book.xlsx]Sheet1!A1:A2"
+    );
     assert!(matches!(range_node.kind, TraceKind::RangeRef));
     assert_eq!(range_node.value, Value::Blank);
     assert_eq!(
@@ -593,11 +584,7 @@ fn trace_preserves_reference_context_for_sum_over_external_ranges() {
 #[test]
 fn debug_trace_collapses_degenerate_external_3d_sheet_spans() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        7.0,
-    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 7.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));
@@ -627,16 +614,8 @@ fn debug_trace_collapses_degenerate_external_3d_sheet_spans() {
 #[test]
 fn debug_trace_rejects_external_3d_sheet_spans() {
     let provider = Arc::new(TestExternalProvider::default());
-    provider.set(
-        "[Book.xlsx]Sheet1",
-        CellAddr { row: 0, col: 0 },
-        1.0,
-    );
-    provider.set(
-        "[Book.xlsx]Sheet3",
-        CellAddr { row: 0, col: 0 },
-        3.0,
-    );
+    provider.set("[Book.xlsx]Sheet1", CellAddr { row: 0, col: 0 }, 1.0);
+    provider.set("[Book.xlsx]Sheet3", CellAddr { row: 0, col: 0 }, 3.0);
 
     let mut engine = Engine::new();
     engine.set_external_value_provider(Some(provider));

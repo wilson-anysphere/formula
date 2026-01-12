@@ -21,7 +21,10 @@ impl Span {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TraceRef {
-    Cell { sheet: FnSheetId, addr: CellAddr },
+    Cell {
+        sheet: FnSheetId,
+        addr: CellAddr,
+    },
     Range {
         sheet: FnSheetId,
         start: CellAddr,
@@ -39,6 +42,7 @@ pub enum TraceKind {
     ArrayLiteral { rows: usize, cols: usize },
     CellRef,
     RangeRef,
+    StructuredRef,
     NameRef { name: String },
     Group,
     Unary { op: UnaryOp },
@@ -84,6 +88,7 @@ pub enum SpannedExprKind<S> {
     },
     CellRef(crate::eval::CellRef<S>),
     RangeRef(crate::eval::RangeRef<S>),
+    StructuredRef(crate::structured_refs::StructuredRef),
     NameRef(crate::eval::NameRef<S>),
     Group(Box<SpannedExpr<S>>),
     Unary {
@@ -135,6 +140,7 @@ impl<S: Clone> SpannedExpr<S> {
                 start: r.start,
                 end: r.end,
             }),
+            SpannedExprKind::StructuredRef(r) => SpannedExprKind::StructuredRef(r.clone()),
             SpannedExprKind::NameRef(n) => SpannedExprKind::NameRef(crate::eval::NameRef {
                 sheet: f(&n.sheet),
                 name: n.name.clone(),
@@ -207,6 +213,7 @@ enum TokenKind {
     String(String),
     Ident(String),
     SheetName(String),
+    StructuredRef(crate::structured_refs::StructuredRef),
     Error(ErrorKind),
     LBrace,
     RBrace,
@@ -358,7 +365,9 @@ impl<'a> Lexer<'a> {
                 '\'' => self.lex_sheet_name()?,
                 '#' => self.lex_hash_or_error()?,
                 '.' | '0'..='9' => self.lex_number()?,
-                _ if is_ident_start(ch) => self.lex_ident(),
+                _ if is_ident_start(ch) => self
+                    .try_lex_structured_ref()
+                    .unwrap_or_else(|| self.lex_ident()),
                 _ => {
                     return Err(FormulaParseError::UnexpectedToken(format!(
                         "unexpected character '{ch}'"
@@ -366,7 +375,10 @@ impl<'a> Lexer<'a> {
                 }
             };
             let span = Span::new(start, self.pos);
-            let can_spill = matches!(&kind, TokenKind::Ident(_) | TokenKind::RParen);
+            let can_spill = matches!(
+                &kind,
+                TokenKind::Ident(_) | TokenKind::StructuredRef(_) | TokenKind::RParen
+            );
             tokens.push(Token { kind, span });
             self.prev_can_spill = can_spill;
         }
@@ -383,6 +395,130 @@ impl<'a> Lexer<'a> {
 
     fn peek_str(&self, s: &str) -> bool {
         self.input[self.pos..].starts_with(s)
+    }
+
+    fn try_lex_structured_ref(&mut self) -> Option<TokenKind> {
+        let start = self.pos;
+        let ch = self.peek_char()?;
+
+        // Don't interpret external workbook prefixes (`[Book.xlsx]Sheet1!A1`) as structured refs.
+        if ch == '[' && self.looks_like_external_workbook_ref(start) {
+            return None;
+        }
+
+        // Structured refs can be `[... ]` or `TableName[...]`. We only attempt parsing when the
+        // current character could start such a reference to avoid needless work.
+        if ch != '[' && !(ch.is_ascii_alphabetic() || ch == '_') {
+            return None;
+        }
+
+        let (sref, end_pos) = crate::structured_refs::parse_structured_ref(self.input, start)?;
+        if end_pos <= start {
+            return None;
+        }
+        self.pos = end_pos;
+        Some(TokenKind::StructuredRef(sref))
+    }
+
+    fn looks_like_external_workbook_ref(&self, bracket_start: usize) -> bool {
+        let bytes = self.input.as_bytes();
+        if bytes.get(bracket_start) != Some(&b'[') {
+            return false;
+        }
+
+        // Find the workbook closing bracket.
+        let mut close = bracket_start + 1;
+        while close < bytes.len() && bytes[close] != b']' {
+            close += 1;
+        }
+        if close >= bytes.len() {
+            return false;
+        }
+
+        // Parse sheet name + optional sheet span + '!' after the workbook prefix.
+        let mut pos = close + 1;
+        while let Some(ch) = self.input[pos..].chars().next() {
+            if ch.is_whitespace() {
+                pos += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        pos = match self.scan_sheet_name(pos) {
+            Some(end) => end,
+            None => return false,
+        };
+        while let Some(ch) = self.input[pos..].chars().next() {
+            if ch.is_whitespace() {
+                pos += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+
+        if self.input[pos..].starts_with(':') {
+            pos += 1;
+            while let Some(ch) = self.input[pos..].chars().next() {
+                if ch.is_whitespace() {
+                    pos += ch.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            pos = match self.scan_sheet_name(pos) {
+                Some(end) => end,
+                None => return false,
+            };
+            while let Some(ch) = self.input[pos..].chars().next() {
+                if ch.is_whitespace() {
+                    pos += ch.len_utf8();
+                } else {
+                    break;
+                }
+            }
+        }
+
+        self.input[pos..].starts_with('!')
+    }
+
+    fn scan_sheet_name(&self, start: usize) -> Option<usize> {
+        if start >= self.input.len() {
+            return None;
+        }
+
+        // Quoted sheet name: `'My Sheet'`
+        if self.input[start..].starts_with('\'') {
+            let mut pos = start + 1;
+            loop {
+                match self.input[pos..].chars().next() {
+                    Some('\'') => {
+                        if self.input[pos..].starts_with("''") {
+                            pos += 2;
+                            continue;
+                        }
+                        return Some(pos + 1);
+                    }
+                    Some(ch) => pos += ch.len_utf8(),
+                    None => return None,
+                }
+            }
+        }
+
+        // Unquoted sheet name (identifier-like).
+        let mut pos = start;
+        let first = self.input[pos..].chars().next()?;
+        if !is_ident_start(first) || first == '[' {
+            return None;
+        }
+        pos += first.len_utf8();
+        while let Some(ch) = self.input[pos..].chars().next() {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '$') {
+                pos += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        Some(pos)
     }
 
     fn lex_ident(&mut self) -> TokenKind {
@@ -727,6 +863,13 @@ impl ParserImpl {
                     kind: SpannedExprKind::Error(*e),
                 })
             }
+            TokenKind::StructuredRef(r) => {
+                self.next();
+                Ok(SpannedExpr {
+                    span: tok.span,
+                    kind: SpannedExprKind::StructuredRef(r.clone()),
+                })
+            }
             TokenKind::Ident(id) => {
                 if matches!(self.peek_n(1).kind, TokenKind::LParen) {
                     self.parse_function_call()
@@ -745,15 +888,6 @@ impl ParserImpl {
                 {
                     self.parse_sheet_ref()
                 } else {
-                    // The canonical formula language supports structured references like `[@Col]`
-                    // and `Table1[[#Headers],[Col]]`. The debug trace parser does not implement
-                    // structured refs yet; fail fast instead of silently mis-parsing bracketed
-                    // identifiers as names (which would produce incorrect debug values).
-                    if id.starts_with('[') {
-                        return Err(FormulaParseError::UnexpectedToken(
-                            "structured references are not supported".to_string(),
-                        ));
-                    }
                     self.next();
                     match id.to_ascii_uppercase().as_str() {
                         "TRUE" => Ok(SpannedExpr {
@@ -947,7 +1081,10 @@ impl ParserImpl {
         // the parser can operate on a single sheet name string.
         if start_name.starts_with('[')
             && start_name.ends_with(']')
-            && matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::SheetName(_))
+            && matches!(
+                self.peek().kind,
+                TokenKind::Ident(_) | TokenKind::SheetName(_)
+            )
         {
             let sheet_name_tok = self.next();
             let sheet_name = match sheet_name_tok.kind {
@@ -1459,6 +1596,62 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
                     )
                 }
             },
+            SpannedExprKind::StructuredRef(sref) => {
+                match self.resolver.resolve_structured_ref(self.ctx, sref) {
+                    Some(ranges)
+                        if !ranges.is_empty()
+                            && ranges
+                                .iter()
+                                .all(|(sheet_id, _, _)| self.resolver.sheet_exists(*sheet_id)) =>
+                    {
+                        let resolved: Vec<ResolvedRange> = ranges
+                            .into_iter()
+                            .map(|(sheet_id, start, end)| ResolvedRange {
+                                sheet_id: FnSheetId::Local(sheet_id),
+                                start,
+                                end,
+                            })
+                            .collect();
+
+                        let reference = match resolved.as_slice() {
+                            [only] if only.is_single_cell() => Some(TraceRef::Cell {
+                                sheet: only.sheet_id.clone(),
+                                addr: only.start,
+                            }),
+                            [only] => Some(TraceRef::Range {
+                                sheet: only.sheet_id.clone(),
+                                start: only.start,
+                                end: only.end,
+                            }),
+                            _ => None,
+                        };
+
+                        (
+                            EvalValue::Reference(resolved),
+                            TraceNode {
+                                kind: TraceKind::StructuredRef,
+                                span: expr.span,
+                                value: Value::Blank,
+                                reference,
+                                children: Vec::new(),
+                            },
+                        )
+                    }
+                    _ => {
+                        let value = Value::Error(ErrorKind::Name);
+                        (
+                            EvalValue::Scalar(value.clone()),
+                            TraceNode {
+                                kind: TraceKind::StructuredRef,
+                                span: expr.span,
+                                value,
+                                reference: None,
+                                children: Vec::new(),
+                            },
+                        )
+                    }
+                }
+            }
             SpannedExprKind::NameRef(nref) => match self.resolve_sheet_id(&nref.sheet) {
                 Some(FnSheetId::Local(sheet_id)) if self.resolver.sheet_exists(sheet_id) => {
                     let resolved = self.resolver.resolve_name(sheet_id, &nref.name);
@@ -1799,7 +1992,9 @@ impl<'a, R: crate::eval::ValueResolver> TracedEvaluator<'a, R> {
 
     fn deref_reference_scalar(&self, ranges: &[ResolvedRange]) -> Value {
         match ranges {
-            [only] if only.is_single_cell() => self.get_sheet_cell_value(&only.sheet_id, only.start),
+            [only] if only.is_single_cell() => {
+                self.get_sheet_cell_value(&only.sheet_id, only.start)
+            }
             [_only] => Value::Error(ErrorKind::Spill),
             _ => Value::Error(ErrorKind::Value),
         }
@@ -2154,7 +2349,12 @@ fn concat_binary(left: &Value, right: &Value) -> Value {
     Value::Text(format!("{ls}{rs}"))
 }
 
-fn numeric_binary(op: crate::eval::BinaryOp, left: &Value, right: &Value, locale: NumberLocale) -> Value {
+fn numeric_binary(
+    op: crate::eval::BinaryOp,
+    left: &Value,
+    right: &Value,
+    locale: NumberLocale,
+) -> Value {
     if let Value::Error(e) = left {
         return Value::Error(*e);
     }
@@ -2196,7 +2396,9 @@ fn numeric_binary(op: crate::eval::BinaryOp, left: &Value, right: &Value, locale
 
 fn elementwise_unary(value: &Value, f: impl Fn(&Value) -> Value) -> Value {
     match value {
-        Value::Array(arr) => Value::Array(Array::new(arr.rows, arr.cols, arr.iter().map(f).collect())),
+        Value::Array(arr) => {
+            Value::Array(Array::new(arr.rows, arr.cols, arr.iter().map(f).collect()))
+        }
         other => f(other),
     }
 }
