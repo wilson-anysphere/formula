@@ -42,12 +42,39 @@ export function parseKeybinding(command: string, binding: string, when: string |
   const raw = String(binding ?? "").trim();
   if (!raw) return null;
 
-  const parts = raw
+  const rawParts = raw
     .split("+")
-    .map((p) => normalizeKeyToken(p))
+    .map((p) => p.trim())
     .filter((p) => p.length > 0);
 
-  if (parts.length === 0) return null;
+  if (rawParts.length === 0) return null;
+
+  // Defensive: reject "chord" keybindings like `ctrl+k ctrl+c` which we do not
+  // support (and which would otherwise be mis-parsed into something unsafe, like
+  // `ctrl+c`).
+  //
+  // We also treat any token with internal whitespace as invalid.
+  for (const part of rawParts) {
+    if (/\s/.test(part)) return null;
+  }
+
+  const parts = rawParts.map((p) => normalizeKeyToken(p));
+
+  const key = parts[parts.length - 1]!;
+  const isModifierToken = (token: string): boolean =>
+    token === "ctrl" ||
+    token === "control" ||
+    token === "shift" ||
+    token === "alt" ||
+    token === "option" ||
+    token === "cmd" ||
+    token === "command" ||
+    token === "meta" ||
+    token === "win" ||
+    token === "super";
+
+  // A keybinding must specify a non-modifier key.
+  if (isModifierToken(key)) return null;
 
   const out: ParsedKeybinding = {
     command,
@@ -56,7 +83,7 @@ export function parseKeybinding(command: string, binding: string, when: string |
     alt: false,
     shift: false,
     meta: false,
-    key: parts[parts.length - 1]!,
+    key,
   };
 
   for (const part of parts.slice(0, -1)) {
@@ -64,6 +91,7 @@ export function parseKeybinding(command: string, binding: string, when: string |
     else if (part === "shift") out.shift = true;
     else if (part === "alt" || part === "option") out.alt = true;
     else if (part === "cmd" || part === "command" || part === "meta" || part === "win" || part === "super") out.meta = true;
+    else return null;
   }
 
   return out;

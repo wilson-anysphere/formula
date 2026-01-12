@@ -66,6 +66,10 @@ describe("keybindings", () => {
     });
   });
 
+  it("parseKeybinding rejects unsupported chord syntax", () => {
+    expect(parseKeybinding("cmd", "ctrl+k ctrl+c")).toBeNull();
+  });
+
   it("matchesKeybinding handles special keys (space/escape)", () => {
     const spaceBinding = parseKeybinding("cmd.space", "space");
     expect(spaceBinding).not.toBeNull();
