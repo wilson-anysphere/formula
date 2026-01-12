@@ -3511,8 +3511,6 @@ export class CanvasGridRenderer {
         lineWidth: number;
         dash: number[];
         segments: number[];
-        doubleOffset?: number;
-        doubleOrientation?: "vertical" | "horizontal";
       };
 
       const borderBuckets: BorderBucket[] = [];
@@ -3535,7 +3533,7 @@ export class CanvasGridRenderer {
         return [];
       };
 
-      const getBucket = (styleKey: string, color: string, lineWidth: number): BorderBucket => {
+      const getBucket = (styleKey: CellBorderSpec["style"], color: string, lineWidth: number): BorderBucket => {
         let byColor = bucketsByStyle.get(styleKey);
         if (!byColor) {
           byColor = new Map();
@@ -3549,19 +3547,14 @@ export class CanvasGridRenderer {
         let bucket = byWidth.get(lineWidth);
         if (bucket) return bucket;
 
-        const isDouble = styleKey.startsWith("double");
-        const orientation = styleKey === "double-v" ? "vertical" : styleKey === "double-h" ? "horizontal" : undefined;
-        const style: BorderBucket["style"] = isDouble ? "double" : (styleKey as BorderBucket["style"]);
-        const dash = isDouble ? [] : dashForStyle(style, lineWidth);
+        const dash = styleKey === "double" ? [] : dashForStyle(styleKey, lineWidth);
 
         bucket = {
-          style,
+          style: styleKey,
           color,
           lineWidth,
           dash,
-          segments: [],
-          doubleOffset: isDouble ? lineWidth : undefined,
-          doubleOrientation: orientation
+          segments: []
         };
         byWidth.set(lineWidth, bucket);
         borderBuckets.push(bucket);
@@ -3625,11 +3618,15 @@ export class CanvasGridRenderer {
                 const isDouble = chosen.style === "double";
                 const strokeWidth = isDouble ? chosenEff / 3 : chosenEff;
                 if (strokeWidth > 0) {
-                  const styleKey = isDouble ? "double-v" : chosen.style;
-                  const bucket = getBucket(styleKey, chosen.color, strokeWidth);
+                  const bucket = getBucket(isDouble ? "double" : chosen.style, chosen.color, strokeWidth);
                   const x = xSheet - quadrant.scrollBaseX + quadrant.originX;
                   const cx = crispStrokePosition(x, strokeWidth);
-                  bucket.segments.push(cx, y, cx, yNext);
+                  if (isDouble) {
+                    const offset = strokeWidth;
+                    bucket.segments.push(cx - offset, y, cx - offset, yNext, cx + offset, y, cx + offset, yNext);
+                  } else {
+                    bucket.segments.push(cx, y, cx, yNext);
+                  }
                 }
               }
             }
@@ -3681,10 +3678,14 @@ export class CanvasGridRenderer {
                 const isDouble = chosen.style === "double";
                 const strokeWidth = isDouble ? chosenEff / 3 : chosenEff;
                 if (strokeWidth > 0) {
-                  const styleKey = isDouble ? "double-h" : chosen.style;
-                  const bucket = getBucket(styleKey, chosen.color, strokeWidth);
+                  const bucket = getBucket(isDouble ? "double" : chosen.style, chosen.color, strokeWidth);
                   const cy = crispStrokePosition(y, strokeWidth);
-                  bucket.segments.push(x, cy, xNext, cy);
+                  if (isDouble) {
+                    const offset = strokeWidth;
+                    bucket.segments.push(x, cy - offset, xNext, cy - offset, x, cy + offset, xNext, cy + offset);
+                  } else {
+                    bucket.segments.push(x, cy, xNext, cy);
+                  }
                 }
               }
             }
@@ -3706,36 +3707,10 @@ export class CanvasGridRenderer {
         setLineDashSafe(bucket.dash);
         gridCtx.beginPath();
 
-        if (bucket.style === "double" && bucket.doubleOffset && bucket.doubleOrientation) {
-          const offset = bucket.doubleOffset;
-          const segments = bucket.segments;
-          if (bucket.doubleOrientation === "vertical") {
-            for (let i = 0; i < segments.length; i += 4) {
-              const x = segments[i]!;
-              const y1 = segments[i + 1]!;
-              const y2 = segments[i + 3]!;
-              gridCtx.moveTo(x - offset, y1);
-              gridCtx.lineTo(x - offset, y2);
-              gridCtx.moveTo(x + offset, y1);
-              gridCtx.lineTo(x + offset, y2);
-            }
-          } else {
-            for (let i = 0; i < segments.length; i += 4) {
-              const x1 = segments[i]!;
-              const y1 = segments[i + 1]!;
-              const x2 = segments[i + 2]!;
-              gridCtx.moveTo(x1, y1 - offset);
-              gridCtx.lineTo(x2, y1 - offset);
-              gridCtx.moveTo(x1, y1 + offset);
-              gridCtx.lineTo(x2, y1 + offset);
-            }
-          }
-        } else {
-          const segments = bucket.segments;
-          for (let i = 0; i < segments.length; i += 4) {
-            gridCtx.moveTo(segments[i]!, segments[i + 1]!);
-            gridCtx.lineTo(segments[i + 2]!, segments[i + 3]!);
-          }
+        const segments = bucket.segments;
+        for (let i = 0; i < segments.length; i += 4) {
+          gridCtx.moveTo(segments[i]!, segments[i + 1]!);
+          gridCtx.lineTo(segments[i + 2]!, segments[i + 3]!);
         }
 
         gridCtx.stroke();

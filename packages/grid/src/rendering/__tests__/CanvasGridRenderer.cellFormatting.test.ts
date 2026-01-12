@@ -564,4 +564,59 @@ describe("CanvasGridRenderer cell formatting primitives", () => {
     );
     expect(borderStrokes).toHaveLength(1);
   });
+
+  it("batches double borders across orientations into a single stroke call", () => {
+    const border = { width: 3, style: "double" as const, color: "rgb(0,0,255)" };
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row === 0 && col === 0) {
+          return {
+            row,
+            col,
+            value: null,
+            style: {
+              borders: { top: border, right: border, bottom: border, left: border }
+            }
+          };
+        }
+        return null;
+      }
+    };
+
+    const gridCalls: Array<[string, ...any[]]> = [];
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+
+    const contexts = new Map<HTMLCanvasElement, CanvasRenderingContext2D>();
+    contexts.set(gridCanvas, createRecording2dContext({ canvas: gridCanvas, calls: gridCalls }));
+    contexts.set(contentCanvas, createRecording2dContext({ canvas: contentCanvas, calls: [] }));
+    contexts.set(selectionCanvas, createRecording2dContext({ canvas: selectionCanvas, calls: [] }));
+
+    HTMLCanvasElement.prototype.getContext = vi.fn(function (this: HTMLCanvasElement) {
+      const existing = contexts.get(this);
+      if (existing) return existing;
+      const fallback = createRecording2dContext({ canvas: this, calls: [] });
+      contexts.set(this, fallback);
+      return fallback;
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const renderer = new CanvasGridRenderer({ provider, rowCount: 2, colCount: 2 });
+    renderer.attach({ grid: gridCanvas, content: contentCanvas, selection: selectionCanvas });
+    renderer.resize(400, 160, 1);
+    renderer.renderImmediately();
+
+    // width=3 double => effective width 3, rendered as 2 strokes at width=1 each (3/3).
+    const borderStrokes = gridCalls.filter(
+      (call) => call[0] === "stroke" && call[1]?.strokeStyle === "rgb(0,0,255)" && Math.abs(call[1]?.lineWidth - 1) < 1e-6
+    );
+    expect(borderStrokes).toHaveLength(1);
+
+    const segments = segmentsForStroke(
+      gridCalls,
+      (state) => state.strokeStyle === "rgb(0,0,255)" && Math.abs(state.lineWidth - 1) < 1e-6
+    );
+    // 4 edges × 2 parallel lines per edge.
+    expect(segments).toHaveLength(8);
+  });
 });
