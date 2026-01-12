@@ -90,6 +90,13 @@ test("sync-server rejects connections when introspection marks token inactive", 
     role: "editor",
     sessionId: "s-invalid"
   });
+  const apiKeyRevokedToken = signJwt({
+    sub: "u-api-key-revoked",
+    docId: docName,
+    orgId: "o1",
+    role: "editor",
+    apiKeyId: "00000000-0000-0000-0000-000000000001"
+  });
   const notMemberToken = signJwt({
     sub: "u-removed",
     docId: docName,
@@ -143,6 +150,8 @@ test("sync-server rejects connections when introspection marks token inactive", 
       } else if (parsed.token === invalidClaimsToken) {
         statusCode = 403;
         body = { reason: "invalid_claims", error: "forbidden" };
+      } else if (parsed.token === apiKeyRevokedToken) {
+        body = { active: false, reason: "api_key_revoked" };
       } else if (parsed.token === notMemberToken) {
         body = { active: false, reason: "not_member", userId: "u-removed", orgId: "o1", role: "editor" };
       } else {
@@ -203,6 +212,11 @@ test("sync-server rejects connections when introspection marks token inactive", 
   );
 
   await expectWebSocketUpgradeStatus(
+    `${syncServer.wsUrl}/${docName}?token=${encodeURIComponent(apiKeyRevokedToken)}`,
+    401
+  );
+
+  await expectWebSocketUpgradeStatus(
     `${syncServer.wsUrl}/${docName}?token=${encodeURIComponent(notMemberToken)}`,
     403
   );
@@ -210,6 +224,7 @@ test("sync-server rejects connections when introspection marks token inactive", 
   assert.ok(calls.length >= 3);
   assert.ok(calls.some((c) => c.token === revokedToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === invalidClaimsToken && c.docId === docName));
+  assert.ok(calls.some((c) => c.token === apiKeyRevokedToken && c.docId === docName));
   assert.ok(calls.some((c) => c.token === notMemberToken && c.docId === docName));
 
   for (const call of calls) {
