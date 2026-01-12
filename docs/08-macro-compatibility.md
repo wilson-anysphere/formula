@@ -1114,7 +1114,7 @@ For more detail, see [`vba-digital-signatures.md`](./vba-digital-signatures.md).
 Relevant specs:
 
 - MS-OVBA (VBA project storage + Contents Hash / Agile Content Hash): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-ovba/
-- MS-OSHARED (VBA digital signature storage / DigSigInfoSerialized + MD5 VBA project hash rule): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
+- MS-OSHARED (VBA digital signature storage / DigSigBlob + DigSigInfoSerialized + MD5 VBA project hash rule): https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-oshared/
 
 ### Script Sandboxing
 
