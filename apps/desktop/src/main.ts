@@ -2728,6 +2728,27 @@ function installSheetStoreSubscription(): void {
         const added = nextOrder.filter((id) => !prevById.has(id));
         const removed = prevOrder.filter((id) => !nextById.has(id));
 
+        // If the active sheet was removed (e.g. deleting the current tab), switch the app to a
+        // remaining sheet *before* we apply DocumentController sheet deletion deltas.
+        //
+        // DocumentController emits synchronous `change` events during `deleteSheet(...)`. Several
+        // SpreadsheetApp listeners read sheet view / cell state for the *current* sheet id, and
+        // DocumentController lazily materializes sheets on read. If the app is still pointing at
+        // the sheet being deleted, those listeners can unintentionally re-create the sheet in the
+        // document model, causing the delete to appear to "not stick" (and later doc->store sync
+        // can re-add the tab metadata).
+        //
+        // By moving to a valid sheet first, we ensure any change listeners observe a stable
+        // active sheet id and do not resurrect the deleted sheet.
+        const activeSheetId = app.getCurrentSheetId();
+        if (removed.includes(activeSheetId)) {
+          const fallback =
+            workbookSheetStore.listVisible().at(0)?.id ?? workbookSheetStore.listAll().at(0)?.id ?? null;
+          if (fallback && fallback !== activeSheetId) {
+            app.activateSheet(fallback);
+          }
+        }
+
         // Renames/deletes can be paired with formula rewrites (sheet-qualified refs).
         // Keep the doc batch open through the end of the current task so any synchronous
         // follow-up edits (e.g. `rewriteDocumentFormulasForSheetRename`) become a single undo step.
@@ -3768,6 +3789,26 @@ if (
     const query = String(name ?? "").trim();
     if (!query) return null;
 
+    // In collab mode, the authoritative sheet metadata lives in the CollabSession Yjs schema.
+    // The UI sheet store may lag behind (e.g. when tests stub out `observeDeep`), so resolve
+    // by scanning the session sheet list before we fall back to local stores.
+    const collabSession = app.getCollabSession?.() ?? null;
+    if (collabSession) {
+      // Match backend uniqueness semantics (best-effort): NFKC normalize + uppercase.
+      const normalize = (value: string): string => {
+        try {
+          return value.normalize("NFKC").toUpperCase();
+        } catch {
+          return value.toUpperCase();
+        }
+      };
+      const queryCi = normalize(query);
+      for (const sheet of listSheetsFromCollabSession(collabSession)) {
+        if (sheet.id === query) return sheet.id;
+        if (normalize(sheet.name) === queryCi) return sheet.id;
+      }
+    }
+
     // Prefer matching against display names from the sheet metadata store.
     const resolved = workbookSheetStore.resolveIdByName(query);
     if (resolved) return resolved;
@@ -4210,6 +4251,12 @@ if (
         doc.getCell(id, { row: 0, col: 0 });
         app.activateSheet(id);
         restoreFocusAfterSheetNavigation();
+        // In collab mode the authoritative sheet list lives in the Yjs session (`session.sheets`).
+        // `createSheet` mutates that list directly; ensure the desktop sheet store/UI are refreshed
+        // immediately so follow-up extension calls (e.g. deleteSheet, getSheet) can resolve the new
+        // sheet by name even when collab observers are stubbed in tests.
+        syncSheetUi();
+        updateContextKeys();
         return { id, name: normalizedName };
       }
 
