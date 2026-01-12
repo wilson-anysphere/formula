@@ -54,11 +54,11 @@ futures-util = "0.3"
 formula-columnar = { path = "../../../crates/formula-columnar" }
 formula-engine = { path = "../../../crates/formula-engine" }
 formula-format = { path = "../../../crates/formula-format" }
+formula-xls = { path = "../../../crates/formula-xls" }
 formula-model = { path = "../../../crates/formula-model" }
 formula-storage = { path = "../../../crates/formula-storage" }
 formula-vba = { path = "../../../crates/formula-vba" }
 formula-vba-runtime = { path = "../../../crates/formula-vba-runtime" }
-formula-xls = { path = "../../../crates/formula-xls" }
 formula-xlsb = { path = "../../../crates/formula-xlsb", features = ["write"] }
 formula-xlsx = { path = "../../../crates/formula-xlsx" }
 serde = { version = "1.0", features = ["derive"] }
@@ -80,6 +80,7 @@ tauri-plugin-updater = { version = "2.9", optional = true }
 thiserror = "1.0"
 http-range = { version = "0.1", optional = true }
 percent-encoding = { version = "2", optional = true }
+zip = { version = "2.1", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # GTK-based clipboard backend (Wayland + X11).

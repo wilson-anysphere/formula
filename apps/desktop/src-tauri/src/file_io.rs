@@ -429,6 +429,265 @@ fn is_encrypted_ooxml_workbook(path: &Path) -> std::io::Result<bool> {
         && cfb_stream_exists(&mut ole, "EncryptedPackage"))
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum SniffedWorkbookFormat {
+    Xls,
+    Xlsx,
+    Xlsb,
+}
+
+fn sniff_workbook_format(path: &Path) -> Option<SniffedWorkbookFormat> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    const ZIP_LOCAL_FILE_HEADER: [u8; 4] = [0x50, 0x4B, 0x03, 0x04];
+    const ZIP_CENTRAL_DIRECTORY: [u8; 4] = [0x50, 0x4B, 0x05, 0x06];
+    const ZIP_SPANNING_SIGNATURE: [u8; 4] = [0x50, 0x4B, 0x07, 0x08];
+
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut header = [0u8; 8];
+    let read = file.read(&mut header).ok()?;
+
+    if read >= OLE_MAGIC.len() && header == OLE_MAGIC {
+        return Some(SniffedWorkbookFormat::Xls);
+    }
+
+    let is_zip = read >= 4
+        && (header[..4] == ZIP_LOCAL_FILE_HEADER
+            || header[..4] == ZIP_CENTRAL_DIRECTORY
+            || header[..4] == ZIP_SPANNING_SIGNATURE);
+    if !is_zip {
+        return None;
+    }
+
+    let _ = file.seek(SeekFrom::Start(0));
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+    if archive.by_name("xl/workbook.bin").is_ok() {
+        return Some(SniffedWorkbookFormat::Xlsb);
+    }
+    if archive.by_name("xl/workbook.xml").is_ok() {
+        return Some(SniffedWorkbookFormat::Xlsx);
+    }
+
+    None
+}
+
+fn read_xlsx_or_xlsm_blocking(path: &Path) -> anyhow::Result<Workbook> {
+    let origin_xlsx_bytes = Arc::<[u8]>::from(
+        std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?,
+    );
+    let workbook_model =
+        formula_xlsx::read_workbook_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
+            .with_context(|| format!("parse xlsx {:?}", path))?;
+    let print_settings = read_workbook_print_settings(origin_xlsx_bytes.as_ref())
+        .ok()
+        .unwrap_or_default();
+
+    let mut out = Workbook {
+        path: Some(path.to_string_lossy().to_string()),
+        origin_path: Some(path.to_string_lossy().to_string()),
+        origin_xlsx_bytes: Some(origin_xlsx_bytes.clone()),
+        power_query_xml: None,
+        origin_xlsb_path: None,
+        vba_project_bin: None,
+        macro_fingerprint: None,
+        preserved_drawing_parts: None,
+        preserved_pivot_parts: None,
+        theme_palette: None,
+        date_system: workbook_model.date_system,
+        defined_names: Vec::new(),
+        tables: Vec::new(),
+        sheets: Vec::new(),
+        print_settings: print_settings.clone(),
+        original_print_settings: print_settings,
+        original_power_query_xml: None,
+        cell_input_baseline: HashMap::new(),
+    };
+    // Preserve macros: if the source file contains `xl/vbaProject.bin`, stash it so that
+    // `write_xlsx_blocking` can re-inject it when saving as `.xlsm`.
+    //
+    // Note: formula-xlsx only understands XLSX/XLSM ZIP containers (not legacy XLS).
+    let mut worksheet_parts_by_name: HashMap<String, String> = HashMap::new();
+    out.vba_project_bin = formula_xlsx::read_part_from_reader(
+        Cursor::new(origin_xlsx_bytes.as_ref()),
+        "xl/vbaProject.bin",
+    )
+    .ok()
+    .flatten();
+    if let Ok(Some(power_query_xml)) = formula_xlsx::read_part_from_reader(
+        Cursor::new(origin_xlsx_bytes.as_ref()),
+        FORMULA_POWER_QUERY_PART,
+    ) {
+        out.power_query_xml = Some(power_query_xml.clone());
+        out.original_power_query_xml = Some(power_query_xml);
+    }
+    if let (Some(origin), Some(vba)) = (out.origin_path.as_deref(), out.vba_project_bin.as_deref()) {
+        out.macro_fingerprint = Some(compute_macro_fingerprint(origin, vba));
+    }
+    if let Ok(parts) = formula_xlsx::worksheet_parts_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
+    {
+        for part in parts {
+            worksheet_parts_by_name.insert(part.name, part.worksheet_part);
+        }
+    }
+    if let Ok(preserved) = formula_xlsx::drawingml::preserve_drawing_parts_from_reader(Cursor::new(
+        origin_xlsx_bytes.as_ref(),
+    )) {
+        if !preserved.is_empty() {
+            out.preserved_drawing_parts = Some(preserved);
+        }
+    }
+    if let Ok(preserved) =
+        formula_xlsx::pivots::preserve_pivot_parts_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
+    {
+        if !preserved.is_empty() {
+            out.preserved_pivot_parts = Some(preserved);
+        }
+    }
+    if let Ok(palette) = formula_xlsx::theme_palette_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
+    {
+        out.theme_palette = palette;
+    }
+
+    out.sheets = workbook_model
+        .sheets
+        .iter()
+        .map(|sheet| formula_model_sheet_to_app_sheet(sheet, &workbook_model.styles))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    for sheet in &mut out.sheets {
+        sheet.xlsx_worksheet_part = worksheet_parts_by_name.get(&sheet.name).cloned();
+    }
+
+    let sheet_names_by_id: HashMap<WorksheetId, String> = workbook_model
+        .sheets
+        .iter()
+        .map(|sheet| (sheet.id, sheet.name.clone()))
+        .collect();
+
+    out.defined_names = workbook_model
+        .defined_names
+        .iter()
+        .map(|dn| {
+            let sheet_id = match dn.scope {
+                formula_model::DefinedNameScope::Workbook => None,
+                formula_model::DefinedNameScope::Sheet(id) => sheet_names_by_id.get(&id).cloned(),
+            };
+
+            DefinedName {
+                name: dn.name.clone(),
+                refers_to: dn.refers_to.clone(),
+                sheet_id,
+                hidden: dn.hidden,
+            }
+        })
+        .collect();
+
+    out.tables = workbook_model
+        .sheets
+        .iter()
+        .flat_map(|sheet| {
+            let sheet_id = sheet.name.clone();
+            sheet.tables.iter().map(move |table| Table {
+                name: table.display_name.clone(),
+                sheet_id: sheet_id.clone(),
+                start_row: table.range.start.row as usize,
+                start_col: table.range.start.col as usize,
+                end_row: table.range.end.row as usize,
+                end_col: table.range.end.col as usize,
+                columns: table.columns.iter().map(|c| c.name.clone()).collect(),
+            })
+        })
+        .collect();
+
+    out.ensure_sheet_ids();
+    for sheet in &mut out.sheets {
+        sheet.clear_dirty_cells();
+    }
+
+    Ok(out)
+}
+
+fn read_xls_blocking(path: &Path) -> anyhow::Result<Workbook> {
+    let imported = formula_xls::import_xls_path(path)
+        .map_err(|e| anyhow::anyhow!(e))
+        .with_context(|| format!("import xls {:?}", path))?;
+    let workbook_model = imported.workbook;
+
+    let mut out = Workbook {
+        path: Some(path.to_string_lossy().to_string()),
+        origin_path: Some(path.to_string_lossy().to_string()),
+        origin_xlsx_bytes: None,
+        power_query_xml: None,
+        origin_xlsb_path: None,
+        vba_project_bin: None,
+        macro_fingerprint: None,
+        preserved_drawing_parts: None,
+        preserved_pivot_parts: None,
+        theme_palette: None,
+        date_system: workbook_model.date_system,
+        defined_names: Vec::new(),
+        tables: Vec::new(),
+        sheets: Vec::new(),
+        print_settings: WorkbookPrintSettings::default(),
+        original_print_settings: WorkbookPrintSettings::default(),
+        original_power_query_xml: None,
+        cell_input_baseline: HashMap::new(),
+    };
+
+    out.sheets = workbook_model
+        .sheets
+        .iter()
+        .map(|sheet| formula_model_sheet_to_app_sheet(sheet, &workbook_model.styles))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
+    let sheet_names_by_id: HashMap<WorksheetId, String> = workbook_model
+        .sheets
+        .iter()
+        .map(|sheet| (sheet.id, sheet.name.clone()))
+        .collect();
+
+    out.defined_names = workbook_model
+        .defined_names
+        .iter()
+        .map(|dn| {
+            let sheet_id = match dn.scope {
+                formula_model::DefinedNameScope::Workbook => None,
+                formula_model::DefinedNameScope::Sheet(id) => sheet_names_by_id.get(&id).cloned(),
+            };
+
+            DefinedName {
+                name: dn.name.clone(),
+                refers_to: dn.refers_to.clone(),
+                sheet_id,
+                hidden: dn.hidden,
+            }
+        })
+        .collect();
+
+    out.tables = workbook_model
+        .sheets
+        .iter()
+        .flat_map(|sheet| {
+            let sheet_id = sheet.name.clone();
+            sheet.tables.iter().map(move |table| Table {
+                name: table.display_name.clone(),
+                sheet_id: sheet_id.clone(),
+                start_row: table.range.start.row as usize,
+                start_col: table.range.start.col as usize,
+                end_row: table.range.end.row as usize,
+                end_col: table.range.end.col as usize,
+                columns: table.columns.iter().map(|c| c.name.clone()).collect(),
+            })
+        })
+        .collect();
+
+    out.ensure_sheet_ids();
+    for sheet in &mut out.sheets {
+        sheet.clear_dirty_cells();
+    }
+
+    Ok(out)
+}
+
 pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
     if let Ok(true) = is_encrypted_ooxml_workbook(path) {
         anyhow::bail!(
@@ -447,223 +706,23 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
     }
 
     if matches!(extension.as_deref(), Some("xlsx") | Some("xlsm")) {
-        let origin_xlsx_bytes = Arc::<[u8]>::from(
-            std::fs::read(path).with_context(|| format!("read workbook bytes {:?}", path))?,
-        );
-        let workbook_model =
-            formula_xlsx::read_workbook_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
-                .with_context(|| format!("parse xlsx {:?}", path))?;
-        let print_settings = read_workbook_print_settings(origin_xlsx_bytes.as_ref())
-            .ok()
-            .unwrap_or_default();
-
-        let mut out = Workbook {
-            path: Some(path.to_string_lossy().to_string()),
-            origin_path: Some(path.to_string_lossy().to_string()),
-            origin_xlsx_bytes: Some(origin_xlsx_bytes.clone()),
-            power_query_xml: None,
-            origin_xlsb_path: None,
-            vba_project_bin: None,
-            macro_fingerprint: None,
-            preserved_drawing_parts: None,
-            preserved_pivot_parts: None,
-            theme_palette: None,
-            date_system: workbook_model.date_system,
-            defined_names: Vec::new(),
-            tables: Vec::new(),
-            sheets: Vec::new(),
-            print_settings: print_settings.clone(),
-            original_print_settings: print_settings,
-            original_power_query_xml: None,
-            cell_input_baseline: HashMap::new(),
-        };
-        // Preserve macros: if the source file contains `xl/vbaProject.bin`, stash it so that
-        // `write_xlsx_blocking` can re-inject it when saving as `.xlsm`.
-        //
-        // Note: formula-xlsx only understands XLSX/XLSM ZIP containers (not legacy XLS).
-        let mut worksheet_parts_by_name: HashMap<String, String> = HashMap::new();
-        out.vba_project_bin =
-            formula_xlsx::read_part_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()), "xl/vbaProject.bin")
-                .ok()
-                .flatten();
-        if let Ok(Some(power_query_xml)) = formula_xlsx::read_part_from_reader(
-            Cursor::new(origin_xlsx_bytes.as_ref()),
-            FORMULA_POWER_QUERY_PART,
-        ) {
-            out.power_query_xml = Some(power_query_xml.clone());
-            out.original_power_query_xml = Some(power_query_xml);
-        }
-        if let (Some(origin), Some(vba)) = (out.origin_path.as_deref(), out.vba_project_bin.as_deref())
-        {
-            out.macro_fingerprint = Some(compute_macro_fingerprint(origin, vba));
-        }
-        if let Ok(parts) =
-            formula_xlsx::worksheet_parts_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
-        {
-            for part in parts {
-                worksheet_parts_by_name.insert(part.name, part.worksheet_part);
-            }
-        }
-        if let Ok(preserved) = formula_xlsx::drawingml::preserve_drawing_parts_from_reader(
-            Cursor::new(origin_xlsx_bytes.as_ref()),
-        ) {
-            if !preserved.is_empty() {
-                out.preserved_drawing_parts = Some(preserved);
-            }
-        }
-        if let Ok(preserved) =
-            formula_xlsx::pivots::preserve_pivot_parts_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
-        {
-            if !preserved.is_empty() {
-                out.preserved_pivot_parts = Some(preserved);
-            }
-        }
-        if let Ok(palette) =
-            formula_xlsx::theme_palette_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
-        {
-            out.theme_palette = palette;
-        }
-
-        out.sheets = workbook_model
-            .sheets
-            .iter()
-            .map(|sheet| formula_model_sheet_to_app_sheet(sheet, &workbook_model.styles))
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        for sheet in &mut out.sheets {
-            sheet.xlsx_worksheet_part = worksheet_parts_by_name.get(&sheet.name).cloned();
-        }
-
-        let sheet_names_by_id: HashMap<WorksheetId, String> = workbook_model
-            .sheets
-            .iter()
-            .map(|sheet| (sheet.id, sheet.name.clone()))
-            .collect();
-
-        out.defined_names = workbook_model
-            .defined_names
-            .iter()
-            .map(|dn| {
-                let sheet_id = match dn.scope {
-                    formula_model::DefinedNameScope::Workbook => None,
-                    formula_model::DefinedNameScope::Sheet(id) => {
-                        sheet_names_by_id.get(&id).cloned()
-                    }
-                };
-
-                DefinedName {
-                    name: dn.name.clone(),
-                    refers_to: dn.refers_to.clone(),
-                    sheet_id,
-                    hidden: dn.hidden,
-                }
-            })
-            .collect();
-
-        out.tables = workbook_model
-            .sheets
-            .iter()
-            .flat_map(|sheet| {
-                let sheet_id = sheet.name.clone();
-                sheet.tables.iter().map(move |table| Table {
-                    name: table.display_name.clone(),
-                    sheet_id: sheet_id.clone(),
-                    start_row: table.range.start.row as usize,
-                    start_col: table.range.start.col as usize,
-                    end_row: table.range.end.row as usize,
-                    end_col: table.range.end.col as usize,
-                    columns: table.columns.iter().map(|c| c.name.clone()).collect(),
-                })
-            })
-            .collect();
-
-        out.ensure_sheet_ids();
-        for sheet in &mut out.sheets {
-            sheet.clear_dirty_cells();
-        }
-        return Ok(out);
+        return read_xlsx_or_xlsm_blocking(path);
     }
 
     if matches!(extension.as_deref(), Some("xls")) {
-        let imported = formula_xls::import_xls_path(path)
-            .map_err(|e| anyhow::anyhow!(e))
-            .with_context(|| format!("import xls {:?}", path))?;
-        let workbook_model = imported.workbook;
+        return read_xls_blocking(path);
+    }
 
-        let mut out = Workbook {
-            path: Some(path.to_string_lossy().to_string()),
-            origin_path: Some(path.to_string_lossy().to_string()),
-            origin_xlsx_bytes: None,
-            power_query_xml: None,
-            origin_xlsb_path: None,
-            vba_project_bin: None,
-            macro_fingerprint: None,
-            preserved_drawing_parts: None,
-            preserved_pivot_parts: None,
-            theme_palette: None,
-            date_system: workbook_model.date_system,
-            defined_names: Vec::new(),
-            tables: Vec::new(),
-            sheets: Vec::new(),
-            print_settings: WorkbookPrintSettings::default(),
-            original_print_settings: WorkbookPrintSettings::default(),
-            original_power_query_xml: None,
-            cell_input_baseline: HashMap::new(),
-        };
-
-        out.sheets = workbook_model
-            .sheets
-            .iter()
-            .map(|sheet| formula_model_sheet_to_app_sheet(sheet, &workbook_model.styles))
-            .collect::<anyhow::Result<Vec<_>>>()?;
-
-        let sheet_names_by_id: HashMap<WorksheetId, String> = workbook_model
-            .sheets
-            .iter()
-            .map(|sheet| (sheet.id, sheet.name.clone()))
-            .collect();
-
-        out.defined_names = workbook_model
-            .defined_names
-            .iter()
-            .map(|dn| {
-                let sheet_id = match dn.scope {
-                    formula_model::DefinedNameScope::Workbook => None,
-                    formula_model::DefinedNameScope::Sheet(id) => {
-                        sheet_names_by_id.get(&id).cloned()
-                    }
-                };
-
-                DefinedName {
-                    name: dn.name.clone(),
-                    refers_to: dn.refers_to.clone(),
-                    sheet_id,
-                    hidden: dn.hidden,
-                }
-            })
-            .collect();
-
-        out.tables = workbook_model
-            .sheets
-            .iter()
-            .flat_map(|sheet| {
-                let sheet_id = sheet.name.clone();
-                sheet.tables.iter().map(move |table| Table {
-                    name: table.display_name.clone(),
-                    sheet_id: sheet_id.clone(),
-                    start_row: table.range.start.row as usize,
-                    start_col: table.range.start.col as usize,
-                    end_row: table.range.end.row as usize,
-                    end_col: table.range.end.col as usize,
-                    columns: table.columns.iter().map(|c| c.name.clone()).collect(),
-                })
-            })
-            .collect();
-
-        out.ensure_sheet_ids();
-        for sheet in &mut out.sheets {
-            sheet.clear_dirty_cells();
+    // For unknown extensions (or missing extensions), sniff the file signature/ZIP contents
+    // to route to the appropriate reader.
+    if !matches!(extension.as_deref(), Some("csv")) {
+        if let Some(format) = sniff_workbook_format(path) {
+            match format {
+                SniffedWorkbookFormat::Xls => return read_xls_blocking(path),
+                SniffedWorkbookFormat::Xlsx => return read_xlsx_or_xlsm_blocking(path),
+                SniffedWorkbookFormat::Xlsb => return read_xlsb_blocking(path),
+            }
         }
-        return Ok(out);
     }
 
     let mut workbook =
@@ -2101,6 +2160,102 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
             CellScalar::Number(85.0)
         );
         assert_eq!(sheet.get_cell(0, 2).formula.as_deref(), Some("=B1*2"));
+    }
+
+    #[test]
+    fn reads_xlsx_fixture_with_unknown_extension() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../fixtures/xlsx/basic/basic.xlsx"
+        ));
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let renamed_path = tmp.path().join("basic.bin");
+        std::fs::copy(fixture_path, &renamed_path).expect("copy fixture");
+
+        let workbook =
+            read_xlsx_blocking(&renamed_path).expect("read xlsx workbook with unknown extension");
+        assert!(
+            workbook.origin_xlsx_bytes.is_some(),
+            "expected XLSX/XLSM reader path"
+        );
+
+        assert!(!workbook.sheets.is_empty(), "expected at least one sheet");
+        let sheet = &workbook.sheets[0];
+        assert_eq!(sheet.name, "Sheet1");
+        assert_eq!(sheet.get_cell(0, 0).computed_value, CellScalar::Number(1.0));
+        assert_eq!(
+            sheet.get_cell(0, 1).computed_value,
+            CellScalar::Text("Hello".to_string())
+        );
+    }
+
+    #[test]
+    fn reads_xlsb_fixture_with_unknown_extension() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xlsb/tests/fixtures/simple.xlsb"
+        ));
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let renamed_path = tmp.path().join("simple.data");
+        std::fs::copy(fixture_path, &renamed_path).expect("copy fixture");
+
+        let workbook =
+            read_xlsx_blocking(&renamed_path).expect("read xlsb workbook with unknown extension");
+        let renamed_str = renamed_path.to_string_lossy().to_string();
+        assert_eq!(workbook.origin_xlsb_path.as_deref(), Some(renamed_str.as_str()));
+
+        assert_eq!(workbook.sheets.len(), 1);
+        let sheet = &workbook.sheets[0];
+        assert_eq!(sheet.name, "Sheet1");
+        assert_eq!(
+            sheet.get_cell(0, 0).computed_value,
+            CellScalar::Text("Hello".to_string())
+        );
+        assert_eq!(sheet.get_cell(0, 1).computed_value, CellScalar::Number(42.5));
+        assert_eq!(sheet.get_cell(0, 2).computed_value, CellScalar::Number(85.0));
+        assert_eq!(sheet.get_cell(0, 2).formula.as_deref(), Some("=B1*2"));
+    }
+
+    #[test]
+    fn reads_xls_fixture_with_unknown_extension() {
+        let fixture_path = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../crates/formula-xls/tests/fixtures/basic.xls"
+        ));
+        let expected_date_system = formula_xls::import_xls_path(fixture_path)
+            .expect("import xls")
+            .workbook
+            .date_system;
+
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let renamed_path = tmp.path().join("basic.data");
+        std::fs::copy(fixture_path, &renamed_path).expect("copy fixture");
+
+        let workbook =
+            read_xlsx_blocking(&renamed_path).expect("read xls workbook with unknown extension");
+        assert_eq!(workbook.date_system, expected_date_system);
+
+        let sheet1 = workbook
+            .sheets
+            .iter()
+            .find(|s| s.name == "Sheet1")
+            .expect("Sheet1 exists");
+        assert_eq!(
+            sheet1.get_cell(0, 0).computed_value,
+            CellScalar::Text("Hello".to_string())
+        );
+        assert_eq!(sheet1.get_cell(1, 1).computed_value, CellScalar::Number(123.0));
+        assert_eq!(sheet1.get_cell(2, 2).formula.as_deref(), Some("=B2*2"));
+
+        let second = workbook
+            .sheets
+            .iter()
+            .find(|s| s.name == "Second")
+            .expect("Second exists");
+        assert_eq!(
+            second.get_cell(0, 0).computed_value,
+            CellScalar::Text("Second sheet".to_string())
+        );
     }
 
     #[test]
