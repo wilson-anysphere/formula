@@ -243,11 +243,18 @@ fn verify_vba_digital_signature_from_parts(
         }
     }
 
-    if signature_part_result
-        .as_ref()
-        .is_some_and(|sig| sig.verification == VbaSignatureVerification::SignedVerified)
-    {
-        return Ok(signature_part_result);
+    if let Some(sig) = signature_part_result.as_mut() {
+        if sig.verification == VbaSignatureVerification::SignedVerified {
+            // For raw signature blobs (`vbaProjectSignature.bin` is not an OLE container), attempt
+            // to verify MS-OVBA project digest binding against the actual `vbaProject.bin`.
+            if sig.binding == formula_vba::VbaSignatureBinding::Unknown {
+                if let Some(vba_project_bin) = vba_project_bin {
+                    sig.binding =
+                        formula_vba::verify_vba_signature_binding(vba_project_bin, &sig.signature);
+                }
+            }
+            return Ok(signature_part_result);
+        }
     }
 
     // Fall back to inspecting `xl/vbaProject.bin` for embedded signature streams.

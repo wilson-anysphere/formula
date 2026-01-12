@@ -222,7 +222,6 @@ fn parse_cell_images_part(
                 "cellimages.xml references missing image relationship {embed_rel_id}"
             ))
         })?;
-
         if rel
             .target_mode
             .as_deref()
@@ -341,6 +340,7 @@ fn get_cell_image_rel_id(cell_image_node: &roxmltree::Node<'_, '_>) -> Option<St
         .attribute((REL_NS, "id"))
         .or_else(|| cell_image_node.attribute("r:id"))
         .or_else(|| {
+            // Clark notation: `{namespace}localname`.
             let clark = format!("{{{REL_NS}}}id");
             cell_image_node.attribute(clark.as_str())
         })

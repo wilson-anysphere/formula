@@ -623,7 +623,10 @@ pub fn verify_vba_digital_signature_with_trust(
 /// This is a best-effort helper: it returns [`VbaSignatureBinding::Unknown`] when the signature
 /// does not contain a supported digest structure, uses an unsupported hash algorithm, or the VBA
 /// project digest cannot be computed.
-pub fn verify_vba_signature_binding(vba_project_bin: &[u8], signature: &[u8]) -> VbaSignatureBinding {
+pub fn verify_vba_signature_binding(
+    vba_project_bin: &[u8],
+    signature: &[u8],
+) -> VbaSignatureBinding {
     #[cfg(target_arch = "wasm32")]
     {
         let _ = (vba_project_bin, signature);
@@ -1188,6 +1191,7 @@ pub fn verify_vba_project_signature_binding(
     let mut first_comparison = None::<VbaProjectDigestDebugInfo>;
     // Lazily computed MS-OVBA Content/Agile hashes for the project bytes.
     let mut content_hash_md5: Option<[u8; 16]> = None;
+    // Outer Option = attempted; inner Option = computed successfully.
     let mut agile_hash_md5: Option<Option<[u8; 16]>> = None;
     for payload in payloads {
         let signed = match extract_vba_signature_signed_digest(&payload) {
