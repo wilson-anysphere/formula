@@ -4,9 +4,35 @@
  * These types are intentionally dependency-free so both environments can import
  * them without pulling in Tauri/DOM/React specifics.
  */
+export type SheetVisibility = "visible" | "hidden" | "veryHidden";
+
+// Keep in sync with:
+// - `apps/desktop/src/sheets/workbookSheetStore.ts`
+// - `apps/desktop/src/document/documentController.js`
+// - `apps/desktop/src/workbook/workbook.ts`
+export type TabColor = {
+  rgb?: string;
+  theme?: number;
+  indexed?: number;
+  tint?: number;
+  auto?: boolean;
+};
+
 export type SheetInfo = {
   id: string;
   name: string;
+  /**
+   * Optional sheet visibility metadata.
+   *
+   * Desktop backends may omit this (default to "visible").
+   */
+  visibility?: SheetVisibility;
+  /**
+   * Optional sheet tab color metadata.
+   *
+   * Desktop backends may omit this (default to none).
+   */
+  tabColor?: TabColor;
 };
 
 export type WorkbookInfo = {
