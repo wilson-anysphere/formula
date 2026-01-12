@@ -14,7 +14,7 @@ use md5::{Digest as _, Md5};
 /// Excel stores VBA project signatures in one of three known variants:
 /// - `\x05DigitalSignature` (legacy)
 /// - `\x05DigitalSignatureEx` (extended, SHA-2-era)
-/// - `\x05DigitalSignatureExt` (extension; newest / used for V3 contents-hash signatures)
+/// - `\x05DigitalSignatureExt` (extension; newest / used for `ContentsHashV3` binding)
 ///
 /// Some producers store the signature stream inside a storage (e.g. `\x05DigitalSignatureEx/sig`);
 /// detection therefore inspects all OLE path components.
