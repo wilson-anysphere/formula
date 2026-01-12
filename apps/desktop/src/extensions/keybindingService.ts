@@ -134,16 +134,28 @@ export const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   // KeybindingService, extensions should never be able to claim them.
   "ctrl+n",
   "cmd+n",
+  // Some keyboards emit both ctrl+meta on the same chord.
+  "ctrl+cmd+n",
   "ctrl+o",
   "cmd+o",
+  // Some keyboards emit both ctrl+meta on the same chord.
+  "ctrl+cmd+o",
   "ctrl+s",
   "cmd+s",
+  // Some keyboards emit both ctrl+meta on the same chord.
+  "ctrl+cmd+s",
   "ctrl+shift+s",
   "cmd+shift+s",
+  // Some keyboards emit both ctrl+meta on the same chord.
+  "ctrl+cmd+shift+s",
   "ctrl+w",
   "cmd+w",
+  // Some keyboards emit both ctrl+meta on the same chord.
+  "ctrl+cmd+w",
   "ctrl+q",
   "cmd+q",
+  // Some keyboards emit both ctrl+meta on the same chord.
+  "ctrl+cmd+q",
 ];
 
 export class KeybindingService {

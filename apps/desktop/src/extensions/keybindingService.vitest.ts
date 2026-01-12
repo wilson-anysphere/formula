@@ -122,16 +122,22 @@ describe("KeybindingService", () => {
       // File shortcuts (core UX): Ctrl/Cmd + N/O/S/W/Q.
       { extensionId: "ext", command: "ext.stealNew", key: "ctrl+n", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealNew", key: "cmd+n", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealNew", key: "ctrl+cmd+n", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealOpen", key: "ctrl+o", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealOpen", key: "cmd+o", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealOpen", key: "ctrl+cmd+o", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealSave", key: "ctrl+s", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealSave", key: "cmd+s", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealSave", key: "ctrl+cmd+s", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealSaveAs", key: "ctrl+shift+s", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealSaveAs", key: "cmd+shift+s", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealSaveAs", key: "ctrl+cmd+shift+s", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealClose", key: "ctrl+w", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealClose", key: "cmd+w", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealClose", key: "ctrl+cmd+w", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealQuit", key: "ctrl+q", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealQuit", key: "cmd+q", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealQuit", key: "ctrl+cmd+q", mac: null, when: null },
     ]);
 
     // Safety net: even if an extension keybinding for a reserved shortcut slips through filtering,
@@ -332,6 +338,37 @@ describe("KeybindingService", () => {
     expect(fileHandled12).toBe(false);
     expect(fileEvent12.defaultPrevented).toBe(false);
 
+    // Some environments emit both Ctrl+Meta for a single chord.
+    const fileEvent13 = makeKeydownEvent({ key: "n", ctrlKey: true, metaKey: true });
+    const fileHandled13 = await service.dispatchKeydown(fileEvent13);
+    expect(fileHandled13).toBe(false);
+    expect(fileEvent13.defaultPrevented).toBe(false);
+
+    const fileEvent14 = makeKeydownEvent({ key: "o", ctrlKey: true, metaKey: true });
+    const fileHandled14 = await service.dispatchKeydown(fileEvent14);
+    expect(fileHandled14).toBe(false);
+    expect(fileEvent14.defaultPrevented).toBe(false);
+
+    const fileEvent15 = makeKeydownEvent({ key: "s", ctrlKey: true, metaKey: true });
+    const fileHandled15 = await service.dispatchKeydown(fileEvent15);
+    expect(fileHandled15).toBe(false);
+    expect(fileEvent15.defaultPrevented).toBe(false);
+
+    const fileEvent16 = makeKeydownEvent({ key: "S", ctrlKey: true, metaKey: true, shiftKey: true });
+    const fileHandled16 = await service.dispatchKeydown(fileEvent16);
+    expect(fileHandled16).toBe(false);
+    expect(fileEvent16.defaultPrevented).toBe(false);
+
+    const fileEvent17 = makeKeydownEvent({ key: "w", ctrlKey: true, metaKey: true });
+    const fileHandled17 = await service.dispatchKeydown(fileEvent17);
+    expect(fileHandled17).toBe(false);
+    expect(fileEvent17.defaultPrevented).toBe(false);
+
+    const fileEvent18 = makeKeydownEvent({ key: "q", ctrlKey: true, metaKey: true });
+    const fileHandled18 = await service.dispatchKeydown(fileEvent18);
+    expect(fileHandled18).toBe(false);
+    expect(fileEvent18.defaultPrevented).toBe(false);
+
     expect(extRun).not.toHaveBeenCalled();
   });
 
@@ -356,16 +393,22 @@ describe("KeybindingService", () => {
       { extensionId: "ext", command: "ext.stealCommentsPanel", key: "ctrl+cmd+shift+m", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealNew", key: "ctrl+n", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealNew", key: "cmd+n", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealNew", key: "ctrl+cmd+n", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealOpen", key: "ctrl+o", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealOpen", key: "cmd+o", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealOpen", key: "ctrl+cmd+o", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealSave", key: "ctrl+s", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealSave", key: "cmd+s", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealSave", key: "ctrl+cmd+s", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealSaveAs", key: "ctrl+shift+s", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealSaveAs", key: "cmd+shift+s", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealSaveAs", key: "ctrl+cmd+shift+s", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealClose", key: "ctrl+w", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealClose", key: "cmd+w", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealClose", key: "ctrl+cmd+w", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealQuit", key: "ctrl+q", mac: null, when: null },
       { extensionId: "ext", command: "ext.stealQuit", key: "cmd+q", mac: null, when: null },
+      { extensionId: "ext", command: "ext.stealQuit", key: "ctrl+cmd+q", mac: null, when: null },
       { extensionId: "ext", command: "ext.allowed", key: "ctrl+j", mac: null, when: null },
     ]);
 
