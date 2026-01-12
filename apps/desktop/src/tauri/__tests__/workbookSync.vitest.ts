@@ -262,19 +262,16 @@ describe("workbookSync", () => {
 
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith("apply_sheet_formatting_deltas", {
-      sheet_id: "Sheet1",
-      cell_deltas: [
-        {
-          row: 0,
-          col: 0,
-          beforeFormat: null,
-          afterFormat: { font: { bold: true } },
-        },
-      ],
-      row_style_deltas: [],
-      col_style_deltas: [],
-      sheet_style_deltas: [],
-      range_run_deltas: [],
+      payload: {
+        sheetId: "Sheet1",
+        cellFormats: [
+          {
+            row: 0,
+            col: 0,
+            format: { font: { bold: true } },
+          },
+        ],
+      },
     });
 
     const cmds = invoke.mock.calls.map((c) => c[0]);
@@ -307,19 +304,16 @@ describe("workbookSync", () => {
     });
 
     expect(invoke).toHaveBeenCalledWith("apply_sheet_formatting_deltas", {
-      sheet_id: "Sheet1",
-      cell_deltas: [
-        {
-          row: 0,
-          col: 0,
-          beforeFormat: null,
-          afterFormat: { fill: { color: "#ff0000" } },
-        },
-      ],
-      row_style_deltas: [],
-      col_style_deltas: [],
-      sheet_style_deltas: [],
-      range_run_deltas: [],
+      payload: {
+        sheetId: "Sheet1",
+        cellFormats: [
+          {
+            row: 0,
+            col: 0,
+            format: { fill: { color: "#ff0000" } },
+          },
+        ],
+      },
     });
 
     sync.stop();
@@ -349,40 +343,31 @@ describe("workbookSync", () => {
     expect(invoke).toHaveBeenCalledWith(
       "apply_sheet_formatting_deltas",
       expect.objectContaining({
-        sheet_id: "Sheet1",
-        cell_deltas: [],
-        row_style_deltas: [
-          {
-            row: 1,
-            beforeFormat: null,
-            afterFormat: { font: { bold: true } },
-          },
-        ],
-        col_style_deltas: [
-          {
-            col: 2,
-            beforeFormat: null,
-            afterFormat: { font: { underline: true } },
-          },
-        ],
-        sheet_style_deltas: [
-          {
-            beforeFormat: null,
-            afterFormat: { font: { italic: true } },
-          },
-        ],
+        payload: expect.objectContaining({
+          sheetId: "Sheet1",
+          defaultFormat: { font: { italic: true } },
+          rowFormats: [
+            {
+              row: 1,
+              format: { font: { bold: true } },
+            },
+          ],
+          colFormats: [
+            {
+              col: 2,
+              format: { font: { underline: true } },
+            },
+          ],
+        }),
       }),
     );
 
-    const payload = invoke.mock.calls[0]?.[1];
-    expect(payload.range_run_deltas.length).toBeGreaterThan(0);
-    expect(payload.range_run_deltas[0]).toEqual(
+    const payload = invoke.mock.calls[0]?.[1]?.payload as any;
+    expect(payload.formatRunsByCol.length).toBeGreaterThan(0);
+    expect(payload.formatRunsByCol[0]).toEqual(
       expect.objectContaining({
         col: 0,
-        startRow: 0,
-        endRowExclusive: 10_001,
-        beforeRuns: [],
-        afterRuns: [
+        runs: [
           {
             startRow: 0,
             endRowExclusive: 10_001,

@@ -506,24 +506,19 @@ async function sendFormattingViaTauri(
   if (!hasAny) return;
 
   type SheetPayload = {
-    cell_deltas: Array<{ row: number; col: number; beforeFormat: any | null; afterFormat: any | null }>;
-    row_style_deltas: Array<{ row: number; beforeFormat: any | null; afterFormat: any | null }>;
-    col_style_deltas: Array<{ col: number; beforeFormat: any | null; afterFormat: any | null }>;
-    sheet_style_deltas: Array<{ beforeFormat: any | null; afterFormat: any | null }>;
-    range_run_deltas: Array<{
-      col: number;
-      startRow: number;
-      endRowExclusive: number;
-      beforeRuns: Array<{ startRow: number; endRowExclusive: number; format: any | null }>;
-      afterRuns: Array<{ startRow: number; endRowExclusive: number; format: any | null }>;
-    }>;
+    sheetId: string;
+    defaultFormat?: any | null;
+    rowFormats?: Array<{ row: number; format: any | null }>;
+    colFormats?: Array<{ col: number; format: any | null }>;
+    formatRunsByCol?: Array<{ col: number; runs: Array<{ startRow: number; endRowExclusive: number; format: any | null }> }>;
+    cellFormats?: Array<{ row: number; col: number; format: any | null }>;
   };
 
   const bySheet = new Map<string, SheetPayload>();
   const ensure = (sheetId: string): SheetPayload => {
     let payload = bySheet.get(sheetId);
     if (!payload) {
-      payload = { cell_deltas: [], row_style_deltas: [], col_style_deltas: [], sheet_style_deltas: [], range_run_deltas: [] };
+      payload = { sheetId };
       bySheet.set(sheetId, payload);
     }
     return payload;
@@ -531,28 +526,29 @@ async function sendFormattingViaTauri(
 
   for (const d of deltas.cellDeltas) {
     const p = ensure(d.sheetId);
-    p.cell_deltas.push({ row: d.row, col: d.col, beforeFormat: d.beforeFormat, afterFormat: d.afterFormat });
+    if (!p.cellFormats) p.cellFormats = [];
+    p.cellFormats.push({ row: d.row, col: d.col, format: d.afterFormat });
   }
   for (const d of deltas.rowStyleDeltas) {
     const p = ensure(d.sheetId);
-    p.row_style_deltas.push({ row: d.row, beforeFormat: d.beforeFormat, afterFormat: d.afterFormat });
+    if (!p.rowFormats) p.rowFormats = [];
+    p.rowFormats.push({ row: d.row, format: d.afterFormat });
   }
   for (const d of deltas.colStyleDeltas) {
     const p = ensure(d.sheetId);
-    p.col_style_deltas.push({ col: d.col, beforeFormat: d.beforeFormat, afterFormat: d.afterFormat });
+    if (!p.colFormats) p.colFormats = [];
+    p.colFormats.push({ col: d.col, format: d.afterFormat });
   }
   for (const d of deltas.sheetStyleDeltas) {
     const p = ensure(d.sheetId);
-    p.sheet_style_deltas.push({ beforeFormat: d.beforeFormat, afterFormat: d.afterFormat });
+    p.defaultFormat = d.afterFormat;
   }
   for (const d of deltas.rangeRunDeltas) {
     const p = ensure(d.sheetId);
-    p.range_run_deltas.push({
+    if (!p.formatRunsByCol) p.formatRunsByCol = [];
+    p.formatRunsByCol.push({
       col: d.col,
-      startRow: d.startRow,
-      endRowExclusive: d.endRowExclusive,
-      beforeRuns: d.beforeRuns.map((r) => ({ startRow: r.startRow, endRowExclusive: r.endRowExclusive, format: r.format })),
-      afterRuns: d.afterRuns.map((r) => ({ startRow: r.startRow, endRowExclusive: r.endRowExclusive, format: r.format })),
+      runs: d.afterRuns.map((r) => ({ startRow: r.startRow, endRowExclusive: r.endRowExclusive, format: r.format })),
     });
   }
 
@@ -560,18 +556,16 @@ async function sendFormattingViaTauri(
   for (const sheetId of sheetIds) {
     const payload = bySheet.get(sheetId);
     if (!payload) continue;
-    payload.cell_deltas.sort((a, b) => (a.row - b.row === 0 ? a.col - b.col : a.row - b.row));
-    payload.row_style_deltas.sort((a, b) => a.row - b.row);
-    payload.col_style_deltas.sort((a, b) => a.col - b.col);
-    payload.range_run_deltas.sort((a, b) => (a.col - b.col === 0 ? a.startRow - b.startRow : a.col - b.col));
-    await invoke("apply_sheet_formatting_deltas", {
-      sheet_id: sheetId,
-      cell_deltas: payload.cell_deltas,
-      row_style_deltas: payload.row_style_deltas,
-      col_style_deltas: payload.col_style_deltas,
-      sheet_style_deltas: payload.sheet_style_deltas,
-      range_run_deltas: payload.range_run_deltas,
-    });
+    payload.cellFormats?.sort((a, b) => (a.row - b.row === 0 ? a.col - b.col : a.row - b.row));
+    payload.rowFormats?.sort((a, b) => a.row - b.row);
+    payload.colFormats?.sort((a, b) => a.col - b.col);
+    payload.formatRunsByCol?.sort((a, b) => a.col - b.col);
+    for (const entry of payload.formatRunsByCol ?? []) {
+      entry.runs.sort((a, b) => (a.startRow - b.startRow === 0 ? a.endRowExclusive - b.endRowExclusive : a.startRow - b.startRow));
+    }
+
+    // Backend expects a single `payload` argument with camelCase keys.
+    await invoke("apply_sheet_formatting_deltas", { payload });
   }
 }
 
