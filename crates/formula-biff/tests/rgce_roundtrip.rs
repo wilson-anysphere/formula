@@ -57,18 +57,18 @@ fn rgce_roundtrip_spill_range() {
 
 #[test]
 fn rgce_encode_structured_ref_is_unsupported() {
-    assert!(matches!(
-        encode_rgce("Table1[Col]"),
-        Err(EncodeRgceError::Unsupported(
-            "structured references require workbook table-id context"
-        ))
-    ));
-    assert!(matches!(
-        encode_rgce("[@Col]"),
-        Err(EncodeRgceError::Unsupported(
-            "structured references require workbook table-id context"
-        ))
-    ));
+    match encode_rgce("Table1[Col]") {
+        Err(EncodeRgceError::Unsupported(msg)) => {
+            assert!(msg.contains("table-id"), "unexpected message: {msg}");
+        }
+        other => panic!("expected Unsupported error, got: {other:?}"),
+    }
+    match encode_rgce("[@Col]") {
+        Err(EncodeRgceError::Unsupported(msg)) => {
+            assert!(msg.contains("table-id"), "unexpected message: {msg}");
+        }
+        other => panic!("expected Unsupported error, got: {other:?}"),
+    }
 }
 
 #[test]

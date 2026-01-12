@@ -1,6 +1,16 @@
 use formula_biff::{decode_rgce, DecodeRgceError};
 use pretty_assertions::assert_eq;
 
+fn normalize(formula: &str) -> String {
+    let ast = formula_engine::parse_formula(formula, formula_engine::ParseOptions::default())
+        .expect("parse formula");
+    ast.to_string(formula_engine::SerializeOptions {
+        omit_equals: true,
+        ..Default::default()
+    })
+    .expect("serialize formula")
+}
+
 /// Build a BIFF12 structured reference token (`PtgList`) encoded as `PtgExtend` + `etpg=0x19`.
 ///
 /// Payload layout (MS-XLSB 2.5.198.51):
@@ -22,6 +32,7 @@ fn decodes_structured_ref_table_column() {
     let rgce = ptg_list(1, 0x0000, 2, 2, 0x18);
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "Table1[Column2]");
+    assert_eq!(normalize(&text), normalize("Table1[Column2]"));
 }
 
 #[test]
@@ -30,6 +41,7 @@ fn decodes_structured_ref_this_row() {
     let rgce = ptg_list(1, 0x0010, 2, 2, 0x18);
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "[@Column2]");
+    assert_eq!(normalize(&text), normalize("[@Column2]"));
 }
 
 #[test]
@@ -37,6 +49,7 @@ fn decodes_structured_ref_this_row_all_columns() {
     let rgce = ptg_list(1, 0x0010, 0, 0, 0x18);
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "[@]");
+    assert_eq!(normalize(&text), normalize("[@]"));
 }
 
 #[test]
@@ -44,6 +57,10 @@ fn decodes_structured_ref_headers_column() {
     let rgce = ptg_list(1, 0x0002, 2, 2, 0x18);
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "Table1[[#Headers],[Column2]]");
+    assert_eq!(
+        normalize(&text),
+        normalize("Table1[[#Headers],[Column2]]")
+    );
 }
 
 #[test]
@@ -51,6 +68,7 @@ fn decodes_structured_ref_item_only_all() {
     let rgce = ptg_list(1, 0x0001, 0, 0, 0x18);
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "Table1[#All]");
+    assert_eq!(normalize(&text), normalize("Table1[#All]"));
 }
 
 #[test]
@@ -58,6 +76,10 @@ fn decodes_structured_ref_column_range() {
     let rgce = ptg_list(1, 0x0000, 2, 4, 0x18);
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "Table1[[Column2]:[Column4]]");
+    assert_eq!(
+        normalize(&text),
+        normalize("Table1[[Column2]:[Column4]]")
+    );
 }
 
 #[test]
@@ -65,6 +87,7 @@ fn decodes_structured_ref_value_class_emits_explicit_implicit_intersection() {
     let rgce = ptg_list(1, 0x0000, 2, 2, 0x38);
     let text = decode_rgce(&rgce).expect("decode");
     assert_eq!(text, "@Table1[Column2]");
+    assert_eq!(normalize(&text), normalize("@Table1[Column2]"));
 }
 
 #[test]
