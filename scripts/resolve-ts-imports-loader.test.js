@@ -15,11 +15,13 @@ const require = createRequire(import.meta.url);
 import { valueFromBar } from "./__fixtures__/resolve-ts-imports/foo.ts";
 import { valueFromBarExtensionless } from "./__fixtures__/resolve-ts-imports/foo-extensionless.ts";
 import { valueFromDirImport } from "./__fixtures__/resolve-ts-imports/foo-dir-import.ts";
+import { valueFromBarJsx } from "./__fixtures__/resolve-ts-imports/foo-jsx.ts";
 
 test("node:test runner resolves bundler-style + extensionless + directory TS specifiers", () => {
   assert.equal(valueFromBar(), 42);
   assert.equal(valueFromBarExtensionless(), 42);
   assert.equal(valueFromDirImport(), 42);
+  assert.equal(valueFromBarJsx(), 42);
 });
 
 function getBuiltInTypeScriptSupport() {
@@ -106,9 +108,11 @@ test(
           'import { valueFromBar } from "./scripts/__fixtures__/resolve-ts-imports/foo.ts";',
           'import { valueFromBarExtensionless } from "./scripts/__fixtures__/resolve-ts-imports/foo-extensionless.ts";',
           'import { valueFromDirImport } from "./scripts/__fixtures__/resolve-ts-imports/foo-dir-import.ts";',
+          'import { valueFromBarJsx } from "./scripts/__fixtures__/resolve-ts-imports/foo-jsx.ts";',
           "if (valueFromBar() !== 42) process.exit(1);",
           "if (valueFromBarExtensionless() !== 42) process.exit(1);",
           "if (valueFromDirImport() !== 42) process.exit(1);",
+          "if (valueFromBarJsx() !== 42) process.exit(1);",
         ].join("\n"),
       ],
       { cwd: repoRoot, encoding: "utf8" },

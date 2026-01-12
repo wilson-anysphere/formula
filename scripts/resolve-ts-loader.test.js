@@ -23,5 +23,8 @@ test(
 
     const dirMod = await import("./__fixtures__/resolve-ts-loader/dir-import.ts");
     assert.equal(dirMod.getDirValue(), 99);
+
+    const jsxMod = await import("./__fixtures__/resolve-ts-loader/jsx-import.ts");
+    assert.equal(jsxMod.getJsxImportValue(), 42);
   },
 );

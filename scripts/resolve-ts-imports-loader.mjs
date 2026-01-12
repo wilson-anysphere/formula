@@ -83,8 +83,9 @@ export async function resolve(specifier, context, defaultResolve) {
   }
 
   const isJs = base.endsWith(".js");
+  const isJsx = base.endsWith(".jsx");
   const isExtensionless = !hasExtension(base);
-  if (!isJs && !isExtensionless) {
+  if (!isJs && !isJsx && !isExtensionless) {
     return defaultResolve(specifier, context, defaultResolve);
   }
 
@@ -93,8 +94,8 @@ export async function resolve(specifier, context, defaultResolve) {
   } catch (err) {
     if (!isResolutionMiss(err)) throw err;
 
-    if (isJs) {
-      const baseNoExt = base.slice(0, -3);
+    if (isJs || isJsx) {
+      const baseNoExt = isJs ? base.slice(0, -3) : base.slice(0, -4);
       try {
         return await defaultResolve(`${baseNoExt}.ts${suffix}`, context, defaultResolve);
       } catch (candidateErr) {
