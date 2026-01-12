@@ -1025,8 +1025,45 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
         worksheet_metadata_by_part.insert(part.clone(), scan_worksheet_xml_metadata(&mut file)?);
     }
 
-    let mut missing_parts: BTreeMap<String, ()> =
-        patches_by_part.keys().map(|k| (k.clone(), ())).collect();
+    // Drop patches that are guaranteed to be a no-op:
+    // a non-material patch targeting a cell outside the sheet's existing used-range cannot
+    // reference an existing `<c>` element, so it should not force us to rewrite the worksheet part.
+    let mut effective_patches_by_part: HashMap<String, Vec<WorksheetCellPatch>> = HashMap::new();
+    for (part, patches) in patches_by_part {
+        let used_range = worksheet_metadata_by_part
+            .get(part)
+            .copied()
+            .unwrap_or_default()
+            .existing_used_range;
+        let mut filtered = Vec::new();
+        for patch in patches {
+            if patch_is_material_for_insertion(patch) {
+                filtered.push(patch.clone());
+                continue;
+            }
+
+            let in_used_range = match used_range {
+                Some(bounds) => {
+                    patch.cell.row >= bounds.min_row_0
+                        && patch.cell.row <= bounds.max_row_0
+                        && patch.cell.col >= bounds.min_col_0
+                        && patch.cell.col <= bounds.max_col_0
+                }
+                None => false,
+            };
+            if in_used_range {
+                filtered.push(patch.clone());
+            }
+        }
+        if !filtered.is_empty() {
+            effective_patches_by_part.insert(part.clone(), filtered);
+        }
+    }
+
+    let mut missing_parts: BTreeMap<String, ()> = effective_patches_by_part
+        .keys()
+        .map(|k| (k.clone(), ()))
+        .collect();
 
     let mut zip = ZipWriter::new(output);
     let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
@@ -1044,7 +1081,7 @@ fn patch_xlsx_streaming_with_archive<R: Read + Seek, W: Write + Seek>(
             continue;
         }
 
-        if let Some(patches) = patches_by_part.get(&name) {
+        if let Some(patches) = effective_patches_by_part.get(&name) {
             zip.start_file(name.clone(), options)?;
             missing_parts.remove(&name);
             let indices = shared_string_indices.get(&name);

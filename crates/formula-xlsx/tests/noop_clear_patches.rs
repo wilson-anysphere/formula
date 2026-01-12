@@ -134,12 +134,17 @@ fn streaming_noop_clear_does_not_insert_cell_or_expand_dimension(
     patches.set_cell("Sheet1", CellRef::from_a1("Z100")?, CellPatch::clear());
 
     let mut out = Cursor::new(Vec::new());
-    patch_xlsx_streaming_workbook_cell_patches(Cursor::new(bytes), &mut out, &patches)?;
+    patch_xlsx_streaming_workbook_cell_patches(Cursor::new(bytes.clone()), &mut out, &patches)?;
 
     let sheet_xml = read_sheet1_xml_from_xlsx(out.get_ref());
     assert!(!has_cell(&sheet_xml, "Z100"));
     assert!(!has_row(&sheet_xml, "100"));
     assert_eq!(dimension_ref(&sheet_xml), "A1");
+    assert_eq!(
+        out.get_ref().as_slice(),
+        bytes.as_slice(),
+        "expected streaming patcher to leave the zip unchanged for a no-op clear patch"
+    );
 
     Ok(())
 }
@@ -218,7 +223,7 @@ fn streaming_noop_clear_does_not_expand_empty_sheetdata() -> Result<(), Box<dyn 
     patches.set_cell("Sheet1", CellRef::from_a1("Z100")?, CellPatch::clear());
 
     let mut out = Cursor::new(Vec::new());
-    patch_xlsx_streaming_workbook_cell_patches(Cursor::new(bytes), &mut out, &patches)?;
+    patch_xlsx_streaming_workbook_cell_patches(Cursor::new(bytes.clone()), &mut out, &patches)?;
 
     let sheet_xml = read_sheet1_xml_from_xlsx(out.get_ref());
     assert!(
@@ -228,6 +233,11 @@ fn streaming_noop_clear_does_not_expand_empty_sheetdata() -> Result<(), Box<dyn 
     assert!(!has_cell(&sheet_xml, "Z100"));
     assert!(!has_row(&sheet_xml, "100"));
     assert_eq!(dimension_ref(&sheet_xml), "A1");
+    assert_eq!(
+        out.get_ref().as_slice(),
+        bytes.as_slice(),
+        "expected streaming patcher to leave the zip unchanged for a no-op clear patch"
+    );
 
     Ok(())
 }
