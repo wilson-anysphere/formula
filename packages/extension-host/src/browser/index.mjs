@@ -942,28 +942,32 @@ class BrowserExtensionHost {
       }
     }
 
-    // `viewActivated` is exposed as `formula.events.onViewActivated`. Like the other workbook/grid
-    // events, it should be delivered to any active extensions immediately (even if the view's
-    // owning extension later needs to request permissions during activation).
+    // Activation events are used to decide which extensions should be activated when a view is
+    // shown (similar to `onCommand:*`). The `viewActivated` event itself is broadcast to all
+    // active extensions so any running extension can subscribe via `formula.events.onViewActivated`.
+    //
+    // Broadcast before activating `onView:*` targets so an unrelated activation failure cannot
+    // prevent already-running extensions from receiving the view activation notification.
     this._broadcastEvent("viewActivated", { viewId: id });
 
-    // Activate any extensions that depend on this view, but always emit the view activation
-    // event to the broader runtime so already-running extensions can observe it.
-    //
-    // This mirrors other workbook/sheet/selection events which are broadcast to active
-    // extensions, and avoids a single failing extension activation preventing other
-    // extensions from receiving the `viewActivated` signal.
     for (const extension of targets) {
-      // Extensions that were already active received the broadcast above. Extensions that are
-      // activated as a result of this view activation need to be notified after activation.
       if (extension.active) continue;
       try {
         // eslint-disable-next-line no-await-in-loop
         await this._activateExtension(extension, activationEvent);
+
+        // Extensions activated as a result of this view activation need to receive the event
+        // after they finish starting up.
         this._sendEventToExtension(extension, "viewActivated", { viewId: id });
-      } catch {
-        // Ignore activation failures so the view event can still be delivered to other
-        // running extensions.
+      } catch (error) {
+        // Best-effort: one broken extension should not prevent view activation notifications
+        // from reaching other extensions.
+        // eslint-disable-next-line no-console
+        console.error(
+          `[formula][extensions] Failed to activate extension ${extension.id} for ${activationEvent}: ${String(
+            error?.message ?? error
+          )}`
+        );
       }
     }
   }

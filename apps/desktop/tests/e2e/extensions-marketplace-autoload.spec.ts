@@ -29,7 +29,18 @@ function viteFsUrl(absPath: string) {
 }
 
 test.describe("Marketplace-installed extensions auto-load (desktop)", () => {
+  // This suite installs a signed extension package, reloads the desktop shell, and waits for the
+  // extension host + UI to rehydrate. It can be slow on CI and low-spec runners.
+  test.describe.configure({ timeout: 120_000 });
+
   test("loads IndexedDB-installed extensions when the extension host is initialized after reload", async ({ page }) => {
+    // Avoid permission modal flakiness in this suite; other e2e tests cover the explicit
+    // permission prompt UI.
+    await page.addInitScript(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).__formulaPermissionPrompt = async () => true;
+    });
+
     const extensionId = "e2e.marketplace-autoload";
     const extensionVersion = "1.0.0";
     const commandId = "marketplaceTest.sayHello";
@@ -189,7 +200,7 @@ export async function activate(context) {
     await expect(page.getByTestId(`extension-card-${extensionId}`)).toBeVisible({ timeout: 30_000 });
 
     const runBtn = page.getByTestId(`run-command-${commandId}`);
-    await expect(runBtn).toBeVisible();
+    await expect(runBtn).toBeVisible({ timeout: 30_000 });
     await runBtn.click();
 
     await expect(page.getByTestId("toast-root")).toContainText("Hello from marketplace!");
