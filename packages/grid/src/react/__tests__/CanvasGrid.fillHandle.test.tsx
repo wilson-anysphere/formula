@@ -48,8 +48,19 @@ function createMock2dContext(canvas: HTMLCanvasElement): CanvasRenderingContext2
   } as unknown as CanvasRenderingContext2D;
 }
 
-function createPointerEvent(type: string, options: { clientX: number; clientY: number; pointerId: number }): Event {
-  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: options.clientX, clientY: options.clientY });
+function createPointerEvent(
+  type: string,
+  options: { clientX: number; clientY: number; pointerId: number; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean }
+): Event {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: options.clientX,
+    clientY: options.clientY,
+    ctrlKey: options.ctrlKey,
+    metaKey: options.metaKey,
+    altKey: options.altKey
+  });
   Object.defineProperty(event, "pointerId", { value: options.pointerId });
   return event;
 }
@@ -150,6 +161,255 @@ describe("CanvasGrid fill handle", () => {
     expect(onFillHandleCommit).toHaveBeenCalledWith({ source: sourceRange, target: expectedTarget });
     expect(apiRef.current?.getSelectionRange()).toEqual(expectedTarget);
     expect(onSelectionRangeChange).toHaveBeenCalledWith(expectedTarget);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
+  it("calls onFillCommit with the target-only range and inferred mode", async () => {
+    const apiRef = React.createRef<GridApi>();
+    const onFillCommit = vi.fn();
+    const onFillHandleCommit = vi.fn();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: (row, col) => ({ row, col, value: `${row},${col}` }) }}
+          rowCount={20}
+          colCount={10}
+          apiRef={apiRef}
+          onFillCommit={onFillCommit}
+          onFillHandleCommit={onFillHandleCommit}
+        />
+      );
+    });
+
+    const sourceRange = { startRow: 0, endRow: 2, startCol: 0, endCol: 1 };
+    await act(async () => {
+      apiRef.current?.setSelectionRange(sourceRange);
+    });
+
+    onFillCommit.mockClear();
+    onFillHandleCommit.mockClear();
+
+    const handle = apiRef.current?.getFillHandleRect();
+    expect(handle).not.toBeNull();
+
+    const targetCell = apiRef.current?.getCellRect(3, 0);
+    expect(targetCell).not.toBeNull();
+
+    const selectionCanvas = host.querySelectorAll("canvas")[2] as HTMLCanvasElement;
+    expect(selectionCanvas).toBeTruthy();
+
+    const start = { clientX: handle!.x + handle!.width / 2, clientY: handle!.y + handle!.height / 2 };
+    const end = { clientX: start.clientX, clientY: targetCell!.y + targetCell!.height / 2 };
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { ...start, pointerId: 1, ctrlKey: true }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointermove", { ...end, pointerId: 1 }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerup", { ...end, pointerId: 1 }));
+    });
+
+    expect(onFillHandleCommit).not.toHaveBeenCalled();
+    expect(onFillCommit).toHaveBeenCalledTimes(1);
+    expect(onFillCommit).toHaveBeenCalledWith({
+      sourceRange,
+      targetRange: { startRow: 2, endRow: 4, startCol: 0, endCol: 1 },
+      mode: "copy"
+    });
+
+    expect(apiRef.current?.getSelectionRange()).toEqual({ startRow: 0, endRow: 4, startCol: 0, endCol: 1 });
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
+  it("emits onFillPreviewChange with the target-only range and clears it", async () => {
+    const apiRef = React.createRef<GridApi>();
+    const onFillPreviewChange = vi.fn();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: (row, col) => ({ row, col, value: `${row},${col}` }) }}
+          rowCount={20}
+          colCount={10}
+          apiRef={apiRef}
+          onFillPreviewChange={onFillPreviewChange}
+          onFillHandleCommit={vi.fn()}
+        />
+      );
+    });
+
+    const sourceRange = { startRow: 0, endRow: 2, startCol: 0, endCol: 1 };
+    await act(async () => {
+      apiRef.current?.setSelectionRange(sourceRange);
+    });
+
+    onFillPreviewChange.mockClear();
+
+    const handle = apiRef.current?.getFillHandleRect();
+    expect(handle).not.toBeNull();
+
+    const targetCell = apiRef.current?.getCellRect(3, 0);
+    expect(targetCell).not.toBeNull();
+
+    const selectionCanvas = host.querySelectorAll("canvas")[2] as HTMLCanvasElement;
+    expect(selectionCanvas).toBeTruthy();
+
+    const start = { clientX: handle!.x + handle!.width / 2, clientY: handle!.y + handle!.height / 2 };
+    const end = { clientX: start.clientX, clientY: targetCell!.y + targetCell!.height / 2 };
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { ...start, pointerId: 1 }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointermove", { ...end, pointerId: 1 }));
+    });
+
+    expect(onFillPreviewChange).toHaveBeenCalled();
+    expect(onFillPreviewChange).toHaveBeenLastCalledWith({ startRow: 2, endRow: 4, startCol: 0, endCol: 1 });
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerup", { ...end, pointerId: 1 }));
+    });
+
+    expect(onFillPreviewChange).toHaveBeenLastCalledWith(null);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
+  it("does not commit a fill operation on pointercancel", async () => {
+    const apiRef = React.createRef<GridApi>();
+    const onFillCommit = vi.fn();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: (row, col) => ({ row, col, value: `${row},${col}` }) }}
+          rowCount={20}
+          colCount={10}
+          apiRef={apiRef}
+          onFillCommit={onFillCommit}
+        />
+      );
+    });
+
+    const sourceRange = { startRow: 0, endRow: 2, startCol: 0, endCol: 1 };
+    await act(async () => {
+      apiRef.current?.setSelectionRange(sourceRange);
+    });
+
+    onFillCommit.mockClear();
+
+    const handle = apiRef.current?.getFillHandleRect();
+    expect(handle).not.toBeNull();
+
+    const targetCell = apiRef.current?.getCellRect(3, 0);
+    expect(targetCell).not.toBeNull();
+
+    const selectionCanvas = host.querySelectorAll("canvas")[2] as HTMLCanvasElement;
+    expect(selectionCanvas).toBeTruthy();
+
+    const start = { clientX: handle!.x + handle!.width / 2, clientY: handle!.y + handle!.height / 2 };
+    const end = { clientX: start.clientX, clientY: targetCell!.y + targetCell!.height / 2 };
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { ...start, pointerId: 1 }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointermove", { ...end, pointerId: 1 }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointercancel", { ...end, pointerId: 1 }));
+    });
+
+    expect(onFillCommit).not.toHaveBeenCalled();
+    expect(apiRef.current?.getSelectionRange()).toEqual(sourceRange);
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
+  it("cancels fill handle drag on Escape without committing", async () => {
+    const apiRef = React.createRef<GridApi>();
+    const onFillCommit = vi.fn();
+    const onFillPreviewChange = vi.fn();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={{ getCell: (row, col) => ({ row, col, value: `${row},${col}` }) }}
+          rowCount={20}
+          colCount={10}
+          apiRef={apiRef}
+          onFillCommit={onFillCommit}
+          onFillPreviewChange={onFillPreviewChange}
+        />
+      );
+    });
+
+    const sourceRange = { startRow: 0, endRow: 2, startCol: 0, endCol: 1 };
+    await act(async () => {
+      apiRef.current?.setSelectionRange(sourceRange);
+    });
+
+    onFillCommit.mockClear();
+    onFillPreviewChange.mockClear();
+
+    const handle = apiRef.current?.getFillHandleRect();
+    expect(handle).not.toBeNull();
+
+    const targetCell = apiRef.current?.getCellRect(3, 0);
+    expect(targetCell).not.toBeNull();
+
+    const selectionCanvas = host.querySelectorAll("canvas")[2] as HTMLCanvasElement;
+    expect(selectionCanvas).toBeTruthy();
+
+    const container = host.querySelector('[data-testid="canvas-grid"]') as HTMLDivElement;
+    expect(container).toBeTruthy();
+
+    const start = { clientX: handle!.x + handle!.width / 2, clientY: handle!.y + handle!.height / 2 };
+    const end = { clientX: start.clientX, clientY: targetCell!.y + targetCell!.height / 2 };
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerdown", { ...start, pointerId: 1 }));
+      selectionCanvas.dispatchEvent(createPointerEvent("pointermove", { ...end, pointerId: 1 }));
+    });
+
+    await act(async () => {
+      container.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }));
+    });
+
+    expect(onFillCommit).not.toHaveBeenCalled();
+    expect(onFillPreviewChange).toHaveBeenLastCalledWith(null);
+    expect(apiRef.current?.getSelectionRange()).toEqual(sourceRange);
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(createPointerEvent("pointerup", { ...end, pointerId: 1 }));
+    });
+
+    expect(onFillCommit).not.toHaveBeenCalled();
+    expect(apiRef.current?.getSelectionRange()).toEqual(sourceRange);
 
     await act(async () => {
       root.unmount();

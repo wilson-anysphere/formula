@@ -151,7 +151,7 @@ export interface CanvasGridProps {
    */
   onFillHandleCommit?: (args: { source: CellRange; target: CellRange }) => void | Promise<void>;
   onFillPreviewChange?: (previewRange: CellRange | null) => void;
-  onFillCommit?: (event: FillCommitEvent) => void;
+  onFillCommit?: (event: FillCommitEvent) => void | Promise<void>;
   onRequestCellEdit?: (request: { row: number; col: number; initialKey?: string }) => void;
   style?: React.CSSProperties;
   ariaLabel?: string;
