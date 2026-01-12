@@ -7716,6 +7716,13 @@ export class SpreadsheetApp {
   private applyComputedChanges(changes: unknown): void {
     if (!Array.isArray(changes)) return;
     let updated = false;
+    const shouldInvalidate = this.document.getSheetIds().length <= 1;
+
+    let minRow = Infinity;
+    let maxRow = -Infinity;
+    let minCol = Infinity;
+    let maxCol = -Infinity;
+    let sawActiveSheet = false;
 
     for (const change of changes) {
       const ref = change as EngineCellRef;
@@ -7771,11 +7778,34 @@ export class SpreadsheetApp {
 
       this.computedValues.set(this.computedKey(sheetId, address), value);
       updated = true;
+
+      if (shouldInvalidate && sheetId === this.sheetId) {
+        const coord = parseA1(address.replaceAll("$", ""));
+        sawActiveSheet = true;
+        minRow = Math.min(minRow, coord.row);
+        maxRow = Math.max(maxRow, coord.row);
+        minCol = Math.min(minCol, coord.col);
+        maxCol = Math.max(maxCol, coord.col);
+      }
     }
 
     if (updated) {
       // Keep the status/formula bar in sync once computed values arrive.
       if (this.uiReady) this.updateStatus();
+      if (shouldInvalidate && sawActiveSheet) {
+        if (this.sharedGrid && this.sharedProvider) {
+          this.sharedProvider.invalidateDocCells({
+            startRow: minRow,
+            endRow: maxRow + 1,
+            startCol: minCol,
+            endCol: maxCol + 1,
+          });
+        } else if (!this.sharedGrid) {
+          // Ensure the legacy renderer repaints once computed values are available (engines may
+          // produce them asynchronously relative to the DocumentController change event).
+          this.refresh("scroll");
+        }
+      }
     }
   }
 
