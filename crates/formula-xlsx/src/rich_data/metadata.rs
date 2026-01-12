@@ -3,16 +3,18 @@
 //! Excel's rich data types (including images-in-cell) store cell values indirectly:
 //!
 //! 1. Worksheet cells (`xl/worksheets/sheet*.xml`) reference a *value-metadata* record with
-//!    `c/@vm` (1-based).
-//! 2. `xl/metadata.xml` contains `<valueMetadata>` with a list of `<bk>` records. The `vm` value is
-//!    a 1-based index into this list.
+//!    `c/@vm` (**0-based or 1-based**; both have been observed).
+//! 2. `xl/metadata.xml` contains `<valueMetadata>` with a list of `<bk>` records. The `vm` value
+//!    selects a `<bk>` record, but the base varies by producer/version (treat it as opaque and
+//!    resolve best-effort; many callers try both `vm` and `vm-1`).
 //! 3. Each `<valueMetadata><bk>` contains `<rc t="T" v="V"/>` where:
-//!    - `t` indexes `XLRICHVALUE` in `<metadataTypes>` (Excel has been observed to emit both 0-based
-//!      and 1-based indices here), and
-//!    - `v` indexes `<futureMetadata name="XLRICHVALUE">`'s `<bk>` list (usually 0-based, but some
-//!      producers appear to use 1-based indexing).
+//!    - `t` selects the `XLRICHVALUE` entry in `<metadataTypes>` (**0-based or 1-based** are both
+//!      observed in the wild/tests; treat as ambiguous),
+//!    - `v` selects an entry in `<futureMetadata name="XLRICHVALUE">`'s `<bk>` list (usually 0-based,
+//!      but some producers appear to use 1-based indexing).
 //! 4. Each `<futureMetadata><bk>` contains an extension element (commonly `xlrd:rvb`) with an
-//!    `i="N"` attribute. This is the 0-based index into `xl/richData/richValue.xml`.
+//!    `i="N"` attribute. This is the **0-based rich value index** into the rich value store
+//!    (`xl/richData/richValue*.xml` or `xl/richData/rdrichvalue.xml`, depending on file/Excel build).
 //!
 //! This module resolves that chain and returns a `HashMap<vm, rich_value_index>`.
 
@@ -32,8 +34,9 @@ struct BkRun<T> {
 /// indices (`xl/richData/richValue.xml` records).
 ///
 /// The returned map uses:
-/// - key: `vm` (1-based index into `<valueMetadata>` `<bk>` records)
-/// - value: rich value index (`rvb/@i`, 0-based index into `xl/richData/richValue.xml`)
+/// - key: `vm` (the **1-based** `<valueMetadata>` `<bk>` record index; callers should consider
+///   `vm-1` for files that use 0-based worksheet `c/@vm` values)
+/// - value: rich value index (`rvb/@i`, 0-based index into the rich value store part)
 ///
 /// This function is intentionally best-effort: if any intermediate linkage is missing for a given
 /// `vm` entry (unknown metadata type index, out-of-bounds `v`, missing `rvb/@i`, etc.), that entry
@@ -63,8 +66,9 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
     //   last resort, allow a mixed interpretation if it strictly increases how many entries we can
     //   resolve)
     //
-    // Note: Some producers also omit the `<futureMetadata name="XLRICHVALUE">` indirection and store
-    // the rich value index directly in `rc/@v`; this helper supports both layouts.
+    // Note: Some producers can omit the `<futureMetadata name="XLRICHVALUE">` indirection and store
+    // the rich value index directly in `rc/@v`. This direct layout is supported best-effort, but is
+    // not currently observed in the images-in-cell fixtures checked into this repo.
     let Ok(xlrichvalue_t_zero_based) = u32::try_from(xlrichvalue_type_idx) else {
         return Ok(HashMap::new());
     };
@@ -74,7 +78,7 @@ pub fn parse_value_metadata_vm_to_rich_value_index_map(
     let rc_t_indexing = infer_value_metadata_rc_t_indexing(&doc, metadata_types_count);
     let future_bk_indices = parse_future_rich_value_indices(&doc, "XLRICHVALUE");
     if future_bk_indices.is_empty() {
-        // Variant B (observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`):
+        // Direct mapping schema (not yet observed in this repo's images-in-cell fixtures):
         //
         // Some producers omit `<futureMetadata name="XLRICHVALUE">` entirely and instead store the
         // rich value index directly in `<valueMetadata><bk><rc ... v="..."/>`.
