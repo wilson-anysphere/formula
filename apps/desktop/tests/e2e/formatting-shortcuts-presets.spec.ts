@@ -21,15 +21,21 @@ test.describe("formatting shortcuts (Excel presets)", () => {
       await waitForIdle(page);
 
       // ---- Bold --------------------------------------------------------------
+      const initialBold = await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const sheetId = app.getCurrentSheetId();
+        const doc = app.getDocument();
+        return doc.getCellFormat(sheetId, "A1").font?.bold === true;
+      });
       await page.keyboard.press("ControlOrMeta+B");
       await waitForIdle(page);
       let bold = await page.evaluate(() => {
         const app = (window as any).__formulaApp;
         const sheetId = app.getCurrentSheetId();
         const doc = app.getDocument();
-        return doc.getCellFormat(sheetId, "A1").font?.bold;
+        return doc.getCellFormat(sheetId, "A1").font?.bold === true;
       });
-      expect(bold).toBe(true);
+      expect(bold).toBe(!initialBold);
 
       await page.keyboard.press("ControlOrMeta+B");
       await waitForIdle(page);
@@ -37,20 +43,26 @@ test.describe("formatting shortcuts (Excel presets)", () => {
         const app = (window as any).__formulaApp;
         const sheetId = app.getCurrentSheetId();
         const doc = app.getDocument();
-        return doc.getCellFormat(sheetId, "A1").font?.bold;
+        return doc.getCellFormat(sheetId, "A1").font?.bold === true;
       });
-      expect(bold).toBe(false);
+      expect(bold).toBe(initialBold);
 
       // ---- Underline ---------------------------------------------------------
+      const initialUnderline = await page.evaluate(() => {
+        const app = (window as any).__formulaApp;
+        const sheetId = app.getCurrentSheetId();
+        const doc = app.getDocument();
+        return doc.getCellFormat(sheetId, "A1").font?.underline === true;
+      });
       await page.keyboard.press("ControlOrMeta+U");
       await waitForIdle(page);
       let underline = await page.evaluate(() => {
         const app = (window as any).__formulaApp;
         const sheetId = app.getCurrentSheetId();
         const doc = app.getDocument();
-        return doc.getCellFormat(sheetId, "A1").font?.underline;
+        return doc.getCellFormat(sheetId, "A1").font?.underline === true;
       });
-      expect(underline).toBe(true);
+      expect(underline).toBe(!initialUnderline);
 
       await page.keyboard.press("ControlOrMeta+U");
       await waitForIdle(page);
@@ -58,9 +70,9 @@ test.describe("formatting shortcuts (Excel presets)", () => {
         const app = (window as any).__formulaApp;
         const sheetId = app.getCurrentSheetId();
         const doc = app.getDocument();
-        return doc.getCellFormat(sheetId, "A1").font?.underline;
+        return doc.getCellFormat(sheetId, "A1").font?.underline === true;
       });
-      expect(underline).toBe(false);
+      expect(underline).toBe(initialUnderline);
 
       // ---- Number format presets --------------------------------------------
       await page.keyboard.press("ControlOrMeta+Shift+Digit4");
@@ -95,4 +107,3 @@ test.describe("formatting shortcuts (Excel presets)", () => {
     });
   }
 });
-

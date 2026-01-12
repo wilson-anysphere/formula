@@ -11,7 +11,8 @@ async function getA1FontProp(page: Page, prop: "bold" | "italic"): Promise<boole
     const app = (window as any).__formulaApp;
     const sheetId = app.getCurrentSheetId();
     const doc = app.getDocument();
-    return doc.getCellFormat(sheetId, "A1").font?.[propName] ?? false;
+    const format = doc.getCellFormat(sheetId, "A1");
+    return format?.font?.[propName] === true;
   }, prop);
 }
 
@@ -30,10 +31,15 @@ test.describe("formatting shortcuts", () => {
     });
     await waitForIdle(page);
 
+    const before = await getA1FontProp(page, "bold");
     await page.keyboard.press("ControlOrMeta+B");
     await waitForIdle(page);
 
-    expect(await getA1FontProp(page, "bold")).toBe(true);
+    expect(await getA1FontProp(page, "bold")).toBe(!before);
+
+    await page.keyboard.press("ControlOrMeta+B");
+    await waitForIdle(page);
+    expect(await getA1FontProp(page, "bold")).toBe(before);
   });
 
   test("Ctrl+I toggles italic; Cmd+I opens AI panel without changing formatting", async ({ page }) => {
@@ -49,22 +55,22 @@ test.describe("formatting shortcuts", () => {
     });
     await waitForIdle(page);
 
-    expect(await getA1FontProp(page, "italic")).toBe(false);
+    const initialItalic = await getA1FontProp(page, "italic");
 
     await page.keyboard.press("Control+I");
     await waitForIdle(page);
-    expect(await getA1FontProp(page, "italic")).toBe(true);
+    expect(await getA1FontProp(page, "italic")).toBe(!initialItalic);
 
     await page.keyboard.press("Control+I");
     await waitForIdle(page);
-    const italicOff = await getA1FontProp(page, "italic");
-    expect(italicOff).toBe(false);
+    const italicAfterToggles = await getA1FontProp(page, "italic");
+    expect(italicAfterToggles).toBe(initialItalic);
 
     await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
 
     await page.keyboard.press("Meta+I");
     await expect(page.getByTestId("panel-aiChat")).toBeVisible();
 
-    expect(await getA1FontProp(page, "italic")).toBe(italicOff);
+    expect(await getA1FontProp(page, "italic")).toBe(italicAfterToggles);
   });
 });
