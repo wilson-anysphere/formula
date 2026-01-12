@@ -3339,7 +3339,11 @@ if (
           });
         } catch (err) {
           const message = String((err as any)?.message ?? err ?? "Clipboard write blocked by policy.");
-          showToast(message, "error");
+          try {
+            showToast(message, "error");
+          } catch {
+            // ignore - toast root may be missing in some test harnesses
+          }
           throw err;
         }
       }
