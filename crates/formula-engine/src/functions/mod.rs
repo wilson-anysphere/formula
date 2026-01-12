@@ -9,6 +9,7 @@ use crate::LocaleConfig;
 
 pub mod date_time;
 pub mod database;
+pub mod engineering;
 pub mod financial;
 pub mod information;
 pub mod lookup;
@@ -49,6 +50,8 @@ mod builtins_lookup;
 mod builtins_math;
 mod builtins_math_extended;
 mod builtins_math_more;
+mod builtins_engineering_complex;
+mod builtins_engineering_special;
 mod builtins_select;
 mod builtins_reference;
 mod builtins_statistical;

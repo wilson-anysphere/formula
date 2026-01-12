@@ -1,0 +1,181 @@
+use num_complex::Complex64;
+
+use crate::value::{parse_number, ErrorKind, NumberLocale, Value};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ParsedComplex {
+    pub value: Complex64,
+    pub suffix: char,
+}
+
+fn parse_component(text: &str, locale: NumberLocale) -> Result<f64, ErrorKind> {
+    // Excel's complex-number functions surface invalid parsing as #NUM!,
+    // even when the underlying numeric coercion would normally yield #VALUE!.
+    parse_number(text, locale).map_err(|_| ErrorKind::Num)
+}
+
+/// Parse an Excel-style complex number string (engineering functions).
+///
+/// Supported forms:
+/// - `3+4i`, `3-4i`
+/// - `4i`, `-4j`
+/// - `i`, `-i`, `+i`
+/// - `3` (pure real)
+///
+/// Whitespace is ignored.
+pub(crate) fn parse_complex(text: &str, locale: NumberLocale) -> Result<ParsedComplex, ErrorKind> {
+    let mut normalized: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    if normalized.is_empty() {
+        return Ok(ParsedComplex {
+            value: Complex64::new(0.0, 0.0),
+            suffix: 'i',
+        });
+    }
+
+    let suffix = match normalized.chars().last() {
+        Some('i') | Some('I') => Some('i'),
+        Some('j') | Some('J') => Some('j'),
+        _ => None,
+    };
+
+    if let Some(suffix) = suffix {
+        normalized.pop();
+
+        // Excel only allows the imaginary unit suffix in the final position.
+        if normalized
+            .chars()
+            .any(|c| matches!(c, 'i' | 'I' | 'j' | 'J'))
+        {
+            return Err(ErrorKind::Num);
+        }
+
+        let core = normalized.as_str();
+        if core.is_empty() || core == "+" {
+            return Ok(ParsedComplex {
+                value: Complex64::new(0.0, 1.0),
+                suffix,
+            });
+        }
+        if core == "-" {
+            return Ok(ParsedComplex {
+                value: Complex64::new(0.0, -1.0),
+                suffix,
+            });
+        }
+
+        // "a+i"/"a-i" (implicit coefficient of 1).
+        if let Some(last) = core.chars().last() {
+            if last == '+' || last == '-' {
+                let re_str = &core[..core.len() - last.len_utf8()];
+                let re = parse_component(re_str, locale)?;
+                let im = if last == '+' { 1.0 } else { -1.0 };
+                return Ok(ParsedComplex {
+                    value: Complex64::new(re, im),
+                    suffix,
+                });
+            }
+        }
+
+        // Pure imaginary coefficient ("4i", "-1.5i").
+        if let Ok(im) = parse_component(core, locale) {
+            return Ok(ParsedComplex {
+                value: Complex64::new(0.0, im),
+                suffix,
+            });
+        }
+
+        // Split into `real` and `imag` parts using the final '+'/'-' that is not part of an exponent.
+        let mut split_idx: Option<usize> = None;
+        for (idx, ch) in core.char_indices().rev() {
+            if idx == 0 {
+                continue;
+            }
+            if ch != '+' && ch != '-' {
+                continue;
+            }
+            let prev = core[..idx].chars().last().unwrap_or('\0');
+            if prev == 'e' || prev == 'E' {
+                continue;
+            }
+            split_idx = Some(idx);
+            break;
+        }
+
+        let split_idx = split_idx.ok_or(ErrorKind::Num)?;
+        let (re_str, im_str) = core.split_at(split_idx);
+        let re = parse_component(re_str, locale)?;
+        let im = parse_component(im_str, locale)?;
+        Ok(ParsedComplex {
+            value: Complex64::new(re, im),
+            suffix,
+        })
+    } else {
+        // Reject stray i/j characters elsewhere.
+        if normalized
+            .chars()
+            .any(|c| matches!(c, 'i' | 'I' | 'j' | 'J'))
+        {
+            return Err(ErrorKind::Num);
+        }
+
+        let re = parse_component(&normalized, locale)?;
+        Ok(ParsedComplex {
+            value: Complex64::new(re, 0.0),
+            suffix: 'i',
+        })
+    }
+}
+
+pub(crate) fn format_complex(mut z: Complex64, suffix: char) -> Result<String, ErrorKind> {
+    if !z.re.is_finite() || !z.im.is_finite() {
+        return Err(ErrorKind::Num);
+    }
+
+    // Normalize -0 to 0 for Excel parity.
+    if z.re == 0.0 {
+        z.re = 0.0;
+    }
+    if z.im == 0.0 {
+        z.im = 0.0;
+    }
+
+    if z.im == 0.0 {
+        return Value::Number(z.re).coerce_to_string();
+    }
+
+    let suffix = match suffix {
+        'j' | 'J' => 'j',
+        _ => 'i',
+    };
+
+    if z.re == 0.0 {
+        return Ok(format_imag_only(z.im, suffix)?);
+    }
+
+    let re_str = Value::Number(z.re).coerce_to_string()?;
+    let (sign, abs_im) = if z.im.is_sign_negative() {
+        ('-', -z.im)
+    } else {
+        ('+', z.im)
+    };
+
+    let im_coeff = if abs_im == 1.0 {
+        String::new()
+    } else {
+        Value::Number(abs_im).coerce_to_string()?
+    };
+
+    Ok(format!("{re_str}{sign}{im_coeff}{suffix}"))
+}
+
+fn format_imag_only(im: f64, suffix: char) -> Result<String, ErrorKind> {
+    if im == 1.0 {
+        return Ok(suffix.to_string());
+    }
+    if im == -1.0 {
+        return Ok(format!("-{suffix}"));
+    }
+    let coeff = Value::Number(im).coerce_to_string()?;
+    Ok(format!("{coeff}{suffix}"))
+}
+

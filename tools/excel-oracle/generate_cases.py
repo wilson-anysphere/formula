@@ -332,6 +332,55 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="sumx2py2", tags=["math", "SUMX2PY2"], formula="=SUMX2PY2({1,2},{3,4})")
 
     # ------------------------------------------------------------------
+    # Engineering functions (complex + special math)
+    # ------------------------------------------------------------------
+    _add_case(cases, prefix="complex", tags=["engineering", "COMPLEX"], formula="=COMPLEX(3,4)")
+    _add_case(cases, prefix="imabs", tags=["engineering", "IMABS"], formula='=IMABS("3+4i")')
+    _add_case(
+        cases,
+        prefix="imaginary",
+        tags=["engineering", "IMAGINARY"],
+        formula='=IMAGINARY("3+4i")',
+    )
+    _add_case(cases, prefix="imreal", tags=["engineering", "IMREAL"], formula='=IMREAL("3+4i")')
+    _add_case(
+        cases,
+        prefix="imargument",
+        tags=["engineering", "IMARGUMENT"],
+        formula='=IMARGUMENT("1+i")',
+    )
+    _add_case(
+        cases,
+        prefix="imconjugate",
+        tags=["engineering", "IMCONJUGATE"],
+        formula='=IMCONJUGATE("3+4i")',
+    )
+    _add_case(cases, prefix="imsum", tags=["engineering", "IMSUM"], formula='=IMSUM("1+i","1-i")')
+    _add_case(
+        cases,
+        prefix="improduct",
+        tags=["engineering", "IMPRODUCT"],
+        formula='=IMPRODUCT("1+i","1-i")',
+    )
+    _add_case(cases, prefix="imsub", tags=["engineering", "IMSUB"], formula='=IMSUB("3+4i","1+2i")')
+    _add_case(cases, prefix="imdiv", tags=["engineering", "IMDIV"], formula='=IMDIV("1+i","1-i")')
+    _add_case(cases, prefix="impower", tags=["engineering", "IMPOWER"], formula='=IMPOWER("i",2)')
+    _add_case(cases, prefix="imsqrt", tags=["engineering", "IMSQRT"], formula='=IMSQRT("-1")')
+    _add_case(cases, prefix="imln", tags=["engineering", "IMLN"], formula='=IMLN("1")')
+    _add_case(cases, prefix="imlog2", tags=["engineering", "IMLOG2"], formula='=IMLOG2("2")')
+    _add_case(cases, prefix="imlog10", tags=["engineering", "IMLOG10"], formula='=IMLOG10("100")')
+    _add_case(cases, prefix="imsin", tags=["engineering", "IMSIN"], formula='=IMSIN("0")')
+    _add_case(cases, prefix="imcos", tags=["engineering", "IMCOS"], formula='=IMCOS("0")')
+    _add_case(cases, prefix="imexp", tags=["engineering", "IMEXP"], formula='=IMEXP("0")')
+
+    _add_case(cases, prefix="erf", tags=["engineering", "ERF"], formula="=ERF(1)")
+    _add_case(cases, prefix="erfc", tags=["engineering", "ERFC"], formula="=ERFC(1)")
+    _add_case(cases, prefix="besselj", tags=["engineering", "BESSELJ"], formula="=BESSELJ(1,0)")
+    _add_case(cases, prefix="bessely", tags=["engineering", "BESSELY"], formula="=BESSELY(1,0)")
+    _add_case(cases, prefix="besseli", tags=["engineering", "BESSELI"], formula="=BESSELI(1,0)")
+    _add_case(cases, prefix="besselk", tags=["engineering", "BESSELK"], formula="=BESSELK(1,0)")
+
+    # ------------------------------------------------------------------
     # Aggregates over ranges
     # ------------------------------------------------------------------
     agg_vals = [0, 1, -1, 2, -2, 0.5]
@@ -1736,6 +1785,44 @@ def generate_cases() -> dict[str, Any]:
     _add_case(cases, prefix="vdb", tags=["financial", "VDB"], formula="=VDB(2400, 300, 10, 0, 0.5)")
     _add_case(cases, prefix="vdb", tags=["financial", "VDB"], formula="=VDB(2400, 0, 10, 6, 10, 2, FALSE)")
     _add_case(cases, prefix="vdb", tags=["financial", "VDB"], formula="=VDB(2400, 0, 10, 6, 10, 2, TRUE)")
+
+    # Coupon date helper functions (COUP*).
+    _add_case(
+        cases,
+        prefix="coupdaybs",
+        tags=["financial", "COUPDAYBS"],
+        formula="=COUPDAYBS(DATE(2020,3,1),DATE(2025,1,15),2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="coupdays",
+        tags=["financial", "COUPDAYS"],
+        formula="=COUPDAYS(DATE(2020,3,1),DATE(2025,1,15),2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="coupdaysnc",
+        tags=["financial", "COUPDAYSNC"],
+        formula="=COUPDAYSNC(DATE(2020,3,1),DATE(2025,1,15),2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="coupncd",
+        tags=["financial", "COUPNCD"],
+        formula="=COUPNCD(DATE(2020,3,1),DATE(2025,1,15),2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="coupnum",
+        tags=["financial", "COUPNUM"],
+        formula="=COUPNUM(DATE(2020,3,1),DATE(2025,1,15),2,0)",
+    )
+    _add_case(
+        cases,
+        prefix="couppcd",
+        tags=["financial", "COUPPCD"],
+        formula="=COUPPCD(DATE(2020,3,1),DATE(2025,1,15),2,0)",
+    )
 
     # Discount securities / T-bills.
     _add_case(

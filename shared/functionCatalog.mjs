@@ -274,6 +274,50 @@ export default {
       ]
     },
     {
+      "name": "BESSELI",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "BESSELJ",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "BESSELK",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "BESSELY",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
       "name": "BYCOL",
       "min_args": 2,
       "max_args": 2,
@@ -423,6 +467,18 @@ export default {
       "arg_types": [
         "number",
         "number"
+      ]
+    },
+    {
+      "name": "COMPLEX",
+      "min_args": 2,
+      "max_args": 3,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "number",
+        "number",
+        "text"
       ]
     },
     {
@@ -1160,6 +1216,27 @@ export default {
       ]
     },
     {
+      "name": "ERF",
+      "min_args": 1,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number",
+        "number"
+      ]
+    },
+    {
+      "name": "ERFC",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "number"
+      ]
+    },
+    {
       "name": "ERROR.TYPE",
       "min_args": 1,
       "max_args": 1,
@@ -1551,6 +1628,179 @@ export default {
       "return_type": "any",
       "arg_types": [
         "any"
+      ]
+    },
+    {
+      "name": "IMABS",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "IMAGINARY",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "IMARGUMENT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "IMCONJUGATE",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "IMCOS",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "IMDIV",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "text"
+      ]
+    },
+    {
+      "name": "IMEXP",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "IMLN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "IMLOG10",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "IMLOG2",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "IMPOWER",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "number"
+      ]
+    },
+    {
+      "name": "IMPRODUCT",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "IMREAL",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "number",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "IMSIN",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "IMSQRT",
+      "min_args": 1,
+      "max_args": 1,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
+      ]
+    },
+    {
+      "name": "IMSUB",
+      "min_args": 2,
+      "max_args": 2,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text",
+        "text"
+      ]
+    },
+    {
+      "name": "IMSUM",
+      "min_args": 1,
+      "max_args": 255,
+      "volatility": "non_volatile",
+      "return_type": "text",
+      "arg_types": [
+        "text"
       ]
     },
     {

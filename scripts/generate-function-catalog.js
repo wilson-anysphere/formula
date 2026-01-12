@@ -152,7 +152,6 @@ declare const catalog: {
 export default catalog;
 `;
 await writeFile(outputTypesPath, dtsContents, "utf8");
-
 console.log(
   `Wrote ${path.relative(repoRoot, outputJsonPath)} + ${path.relative(repoRoot, outputModulePath)} + ${path.relative(repoRoot, outputTypesPath)} (${parsed.functions.length} functions)`
 );

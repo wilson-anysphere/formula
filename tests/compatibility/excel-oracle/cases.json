@@ -12981,6 +12981,246 @@
       "id": "sumx2py2_9f5fcf5d6049"
     },
     {
+      "formula": "=COMPLEX(3,4)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "COMPLEX"
+      ],
+      "id": "complex_7540745fd43e"
+    },
+    {
+      "formula": "=IMABS(\"3+4i\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMABS"
+      ],
+      "id": "imabs_df91598bdd8e"
+    },
+    {
+      "formula": "=IMAGINARY(\"3+4i\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMAGINARY"
+      ],
+      "id": "imaginary_e8b5e3af23ae"
+    },
+    {
+      "formula": "=IMREAL(\"3+4i\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMREAL"
+      ],
+      "id": "imreal_99aff8e4e158"
+    },
+    {
+      "formula": "=IMARGUMENT(\"1+i\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMARGUMENT"
+      ],
+      "id": "imargument_d231097b175d"
+    },
+    {
+      "formula": "=IMCONJUGATE(\"3+4i\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMCONJUGATE"
+      ],
+      "id": "imconjugate_4dc46f6e7502"
+    },
+    {
+      "formula": "=IMSUM(\"1+i\",\"1-i\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMSUM"
+      ],
+      "id": "imsum_0fffbfbd7a4e"
+    },
+    {
+      "formula": "=IMPRODUCT(\"1+i\",\"1-i\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMPRODUCT"
+      ],
+      "id": "improduct_c94e1c873816"
+    },
+    {
+      "formula": "=IMSUB(\"3+4i\",\"1+2i\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMSUB"
+      ],
+      "id": "imsub_050e3615955c"
+    },
+    {
+      "formula": "=IMDIV(\"1+i\",\"1-i\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMDIV"
+      ],
+      "id": "imdiv_7326aae3ea82"
+    },
+    {
+      "formula": "=IMPOWER(\"i\",2)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMPOWER"
+      ],
+      "id": "impower_2b43b9da23ad"
+    },
+    {
+      "formula": "=IMSQRT(\"-1\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMSQRT"
+      ],
+      "id": "imsqrt_72644f60714a"
+    },
+    {
+      "formula": "=IMLN(\"1\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMLN"
+      ],
+      "id": "imln_6c4a188a1954"
+    },
+    {
+      "formula": "=IMLOG2(\"2\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMLOG2"
+      ],
+      "id": "imlog2_924f8ab34443"
+    },
+    {
+      "formula": "=IMLOG10(\"100\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMLOG10"
+      ],
+      "id": "imlog10_cbffe6ed13ef"
+    },
+    {
+      "formula": "=IMSIN(\"0\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMSIN"
+      ],
+      "id": "imsin_c4ce6c89642f"
+    },
+    {
+      "formula": "=IMCOS(\"0\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMCOS"
+      ],
+      "id": "imcos_932511c22fe0"
+    },
+    {
+      "formula": "=IMEXP(\"0\")",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "IMEXP"
+      ],
+      "id": "imexp_000ff1499830"
+    },
+    {
+      "formula": "=ERF(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "ERF"
+      ],
+      "id": "erf_e84ad071245b"
+    },
+    {
+      "formula": "=ERFC(1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "ERFC"
+      ],
+      "id": "erfc_01465cf1f7dd"
+    },
+    {
+      "formula": "=BESSELJ(1,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "BESSELJ"
+      ],
+      "id": "besselj_d9fcd99bfce1"
+    },
+    {
+      "formula": "=BESSELY(1,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "BESSELY"
+      ],
+      "id": "bessely_dadfb1350db6"
+    },
+    {
+      "formula": "=BESSELI(1,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "BESSELI"
+      ],
+      "id": "besseli_172038e6f04d"
+    },
+    {
+      "formula": "=BESSELK(1,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "engineering",
+        "BESSELK"
+      ],
+      "id": "besselk_6c4f0aad0bbc"
+    },
+    {
       "formula": "=SUM(A1:A3)",
       "outputCell": "C1",
       "inputs": [
@@ -30780,6 +31020,66 @@
       "id": "vdb_4d50a1c722d7"
     },
     {
+      "formula": "=COUPDAYBS(DATE(2020,3,1),DATE(2025,1,15),2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYBS"
+      ],
+      "id": "coupdaybs_356108ffeda6"
+    },
+    {
+      "formula": "=COUPDAYS(DATE(2020,3,1),DATE(2025,1,15),2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYS"
+      ],
+      "id": "coupdays_63e61fbf258e"
+    },
+    {
+      "formula": "=COUPDAYSNC(DATE(2020,3,1),DATE(2025,1,15),2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPDAYSNC"
+      ],
+      "id": "coupdaysnc_50f7a2dcc333"
+    },
+    {
+      "formula": "=COUPNCD(DATE(2020,3,1),DATE(2025,1,15),2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPNCD"
+      ],
+      "id": "coupncd_d00d9ef42465"
+    },
+    {
+      "formula": "=COUPNUM(DATE(2020,3,1),DATE(2025,1,15),2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPNUM"
+      ],
+      "id": "coupnum_2ec038a6e0a7"
+    },
+    {
+      "formula": "=COUPPCD(DATE(2020,3,1),DATE(2025,1,15),2,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "COUPPCD"
+      ],
+      "id": "couppcd_63f54b5a7c8c"
+    },
+    {
       "formula": "=DISC(DATE(2020,1,1),DATE(2021,1,1),97,100)",
       "outputCell": "C1",
       "inputs": [],
@@ -32420,126 +32720,6 @@
       ],
       "description": "MAKEARRAY with index-based values",
       "id": "lambda_makearray_ce970103b29c"
-    },
-    {
-      "formula": "=COUPPCD(DATE(2024,6,15),DATE(2025,1,1),2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "COUPPCD"
-      ],
-      "id": "financial_couppcd_1d7d1928e88d"
-    },
-    {
-      "formula": "=COUPNCD(DATE(2024,6,15),DATE(2025,1,1),2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "COUPNCD"
-      ],
-      "id": "financial_coupncd_c3fa6b0644d0"
-    },
-    {
-      "formula": "=COUPNUM(DATE(2024,6,15),DATE(2025,1,1),2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "COUPNUM"
-      ],
-      "id": "financial_coupnum_8a01fdf65f23"
-    },
-    {
-      "formula": "=COUPDAYBS(DATE(2024,6,15),DATE(2025,1,1),2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "COUPDAYBS"
-      ],
-      "id": "financial_coupdaybs_37f37f71ec33"
-    },
-    {
-      "formula": "=COUPDAYSNC(DATE(2024,6,15),DATE(2025,1,1),2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "COUPDAYSNC"
-      ],
-      "id": "financial_coupdaysnc_6dce3e39d0af"
-    },
-    {
-      "formula": "=COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "COUPDAYS"
-      ],
-      "id": "financial_coupdays_534468f0bddc"
-    },
-    {
-      "formula": "=ACCRINTM(DATE(2024,1,1),DATE(2024,7,1),0.12,1000,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ACCRINTM"
-      ],
-      "id": "financial_accrintm_42c4d720daaa"
-    },
-    {
-      "formula": "=ACCRINT(DATE(2024,1,1),DATE(2024,7,1),DATE(2024,4,1),0.12,1000,2,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "ACCRINT"
-      ],
-      "id": "financial_accrint_3d4de92e6b9a"
-    },
-    {
-      "formula": "=PRICE(DATE(2024,1,1),DATE(2026,1,1),0.1,0.05,100,1,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "PRICE"
-      ],
-      "id": "financial_price_2ae45f962b1a"
-    },
-    {
-      "formula": "=YIELD(DATE(2025,1,1),DATE(2026,1,1),0.1,110/1.05,100,1,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "YIELD"
-      ],
-      "id": "financial_yield_3341b0c2250d"
-    },
-    {
-      "formula": "=DURATION(DATE(2025,1,1),DATE(2026,1,1),0.1,0.05,1,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "DURATION"
-      ],
-      "id": "financial_duration_3e550034de3f"
-    },
-    {
-      "formula": "=MDURATION(DATE(2025,1,1),DATE(2026,1,1),0.1,0.05,1,0)",
-      "outputCell": "A1",
-      "inputs": [],
-      "tags": [
-        "financial",
-        "MDURATION"
-      ],
-      "id": "financial_mduration_505f19cc9d47"
     },
     {
       "formula": "=1/0",
