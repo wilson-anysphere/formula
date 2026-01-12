@@ -291,9 +291,10 @@ test("DesktopPowerQueryService persists queries to the workbook part via Tauri",
       },
     });
 
+    const doc = new DocumentController({ engine: new MockEngine() });
     const service = new DesktopPowerQueryService({
       workbookId: "wb_persist_workbook_part",
-      document: new DocumentController({ engine: new MockEngine() }),
+      document: doc,
       engine: { async executeQueryWithMeta() { return { table: DataTable.fromGrid([["A"], [1]], { hasHeaders: true, inferTypes: true }), meta: {} }; } },
       getContext: () => ({}),
     });
@@ -314,6 +315,7 @@ test("DesktopPowerQueryService persists queries to the workbook part via Tauri",
     const last = setCalls[setCalls.length - 1];
     assert.ok(typeof last.args?.xml === "string" && last.args.xml.includes("<FormulaPowerQuery"), "expected XML payload");
     assert.ok(!last.args.xml.includes("should-not-be-persisted"), "expected credentials to be redacted");
+    assert.equal(doc.isDirty, true, "expected persisting queries to mark the document dirty under Tauri");
 
     service.dispose();
   } finally {

@@ -442,6 +442,21 @@ export class DocumentController {
   }
 
   /**
+   * Mark the current document state as dirty (without creating an undo step).
+   *
+   * This is useful for metadata changes that are persisted outside the cell grid
+   * (e.g. workbook-embedded Power Query definitions).
+   */
+  markDirty() {
+    // Mark dirty even though we didn't advance the undo cursor.
+    this.savedCursor = null;
+    // Avoid merging future edits into what is now considered an unsaved state.
+    this.lastMergeKey = null;
+    this.lastMergeTime = 0;
+    this.#emitDirty();
+  }
+
+  /**
    * Mark the current state as saved (not dirty).
    */
   markSaved() {

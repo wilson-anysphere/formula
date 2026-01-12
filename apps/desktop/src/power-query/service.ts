@@ -490,6 +490,14 @@ export class DesktopPowerQueryService {
     this.invoke("power_query_state_set", { xml }).catch(() => {
       // ignore
     });
+
+    // Query definitions are persisted inside the workbook file on desktop. Ensure the host
+    // considers the workbook dirty so close prompts and save flows reflect these changes.
+    try {
+      (this.document as any).markDirty?.();
+    } catch {
+      // ignore
+    }
   }
 }
 

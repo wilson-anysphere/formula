@@ -8,6 +8,7 @@ export class DocumentController {
   on(event: string, listener: (payload: any) => void): () => void;
 
   markSaved(): void;
+  markDirty(): void;
   readonly isDirty: boolean;
 
   getSheetIds(): string[];
