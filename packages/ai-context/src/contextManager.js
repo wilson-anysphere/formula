@@ -211,6 +211,10 @@ export class ContextManager {
    * Callers are expected to provide `workbookRag` (vectorStore + embedder). The
    * embeddings are cached incrementally via content hashes.
    *
+   * Note: In Formula's desktop app, the embedder is the deterministic, offline
+   * `HashEmbedder` by default (not user-configurable). A future Cursor-managed
+   * embedding service can replace it to improve retrieval quality.
+   *
    * @param {{
    *   workbook: any,
    *   query: string,

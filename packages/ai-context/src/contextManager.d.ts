@@ -2,6 +2,13 @@ export type Attachment = { type: "range" | "formula" | "table" | "chart"; refere
 
 export type WorkbookRagOptions = {
   vectorStore: any;
+  /**
+   * Workbook RAG embedder.
+   *
+   * Note: In Formula, embeddings are not user-configurable; the desktop app uses
+   * deterministic hash embeddings by default. A future Cursor-managed embedding
+   * service can replace this.
+   */
   embedder: { embedTexts(texts: string[]): Promise<ArrayLike<number>[]> };
   topK?: number;
   sampleRows?: number;
@@ -44,4 +51,3 @@ export class ContextManager {
     dlp?: any;
   }): Promise<{ indexStats: any; retrieved: any[]; promptContext: string }>;
 }
-

@@ -40,6 +40,13 @@ export class HashEmbedder {
   }
 
   /**
+   * Deterministic, offline hash-based embeddings.
+   *
+   * This is a lightweight baseline used for RAG-style similarity search without
+   * requiring API keys or local model configuration. Retrieval quality is lower
+   * than modern ML embeddings, but it's fast and "semantic-ish" enough for basic
+   * token-overlap similarity.
+   *
    * @param {string} text
    * @returns {Promise<number[]>}
    */

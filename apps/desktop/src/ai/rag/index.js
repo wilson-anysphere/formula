@@ -27,6 +27,8 @@ export async function createDesktopRagSqlite(opts) {
     autoSave: true,
     locateFile: opts.locateFile,
   });
+  // Desktop workbook RAG uses deterministic, offline hash embeddings by default.
+  // This avoids user API keys, local model configuration, and third-party embedding providers.
   const embedder = opts.embedder ?? new HashEmbedder({ dimension });
 
   const contextManager = new ContextManager({
