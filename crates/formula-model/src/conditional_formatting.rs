@@ -1420,7 +1420,6 @@ impl ValueKey {
         }
     }
 }
-}
 
 pub fn format_render_plan(visible: Range, eval: &CfEvaluationResult) -> String {
     let mut lines = Vec::new();
