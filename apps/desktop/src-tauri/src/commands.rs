@@ -4136,6 +4136,11 @@ pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(),
     use tauri::Manager as _;
     ipc_origin::ensure_main_window(window.label(), "external URL opening", ipc_origin::Verb::Is)?;
     {
+        // Prevent arbitrary remote web content from using IPC to open external URLs. This is a
+        // defense-in-depth check: even though Tauri's security model should prevent remote origins
+        // from accessing the invoke API by default, keep the command itself resilient.
+        //
+        // Mirrors the trusted-origin checks used by other privileged commands in `main.rs`.
         let Some(webview) = window.app_handle().get_webview_window(window.label()) else {
             return Err("main webview window not available".to_string());
         };

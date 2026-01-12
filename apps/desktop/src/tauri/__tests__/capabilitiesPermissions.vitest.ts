@@ -21,35 +21,17 @@ describe("Tauri capabilities", () => {
     expect(permissions).toContain("allow-invoke");
   });
 
-  it("scopes custom Rust command invocation via core:allow-invoke (explicit allowlist)", () => {
+  it("does not grant unsupported core:allow-invoke permissions (command allowlist lives in allow-invoke.json)", () => {
     const permissions = readPermissions();
 
-    // Use the object form so we can keep the command allowlist explicit (no allow-all).
+    // `core:allow-invoke` is not present in the permission schema used by this repo's Tauri toolchain.
+    // If it is ever introduced in a future toolchain, we should only add it in a scoped/object form
+    // (explicit allowlist), and update this test accordingly.
     expect(permissions).not.toContain("core:allow-invoke");
-
-    const allowInvoke = permissions.find(
+    const coreAllowInvoke = permissions.find(
       (permission) => Boolean(permission) && typeof permission === "object" && (permission as any).identifier === "core:allow-invoke",
     );
-    expect(allowInvoke).toBeTruthy();
-
-    const allow = (allowInvoke as any).allow;
-    expect(Array.isArray(allow)).toBe(true);
-    expect(allow.length).toBeGreaterThan(0);
-
-    const commands = allow
-      .map((entry: any) => entry?.command)
-      .filter((cmd: any): cmd is string => typeof cmd === "string");
-    expect(commands.length).toBe(allow.length);
-
-    // No duplicates.
-    expect(new Set(commands).size).toBe(commands.length);
-
-    for (const cmd of commands) {
-      expect(cmd.trim()).not.toBe("");
-      // Disallow wildcard/pattern scopes; keep commands explicit.
-      expect(cmd).not.toContain("*");
- 
-    }
+    expect(coreAllowInvoke).toBeFalsy();
   });
 
   it("defines an explicit invoke command allowlist (no wildcards)", () => {
@@ -93,25 +75,6 @@ describe("Tauri capabilities", () => {
     const allowlistedCommands = new Set<string>(allow);
     // No duplicates.
     expect(allowlistedCommands.size).toBe(allow.length);
-
-    // `core:allow-invoke` is the *scoped* per-command allowlist used by the webview.
-    const capabilityPath = path.join(root, "apps/desktop/src-tauri/capabilities/main.json");
-    const capability = JSON.parse(readFileSync(capabilityPath, "utf8")) as any;
-    expect(Array.isArray(capability?.permissions)).toBe(true);
-
-    const permissions = capability.permissions as any[];
-    // The string form would grant the default/unscoped allowlist, which is not acceptable for hardened desktop builds.
-    expect(permissions).not.toContain("core:allow-invoke");
-
-    const coreAllowInvoke = permissions.find(
-      (permission) => Boolean(permission) && typeof permission === "object" && permission.identifier === "core:allow-invoke",
-    ) as any;
-    expect(coreAllowInvoke).toBeTruthy();
-
-    const coreAllow = Array.isArray(coreAllowInvoke?.allow) ? coreAllowInvoke.allow : [];
-    const coreAllowlistedCommands = new Set(
-      coreAllow.map((entry: any) => entry?.command).filter((cmd: any): cmd is string => typeof cmd === "string"),
-    );
 
     for (const cmd of allowlistedCommands) {
       expect(cmd.trim()).not.toBe("");
@@ -194,23 +157,6 @@ describe("Tauri capabilities", () => {
       missingInAllowInvoke,
       `allow-invoke.json is missing commands used by the frontend: ${missingInAllowInvoke.join(", ")}`,
     ).toEqual([]);
-
-    // Keep the `core:allow-invoke` allowlist as small as possible: it should match actual invoke() usage.
-    const missingInCore = Array.from(invokedCommands)
-      .filter((cmd) => !coreAllowlistedCommands.has(cmd))
-      .sort();
-    expect(
-      missingInCore,
-      `capabilities/main.json core:allow-invoke is missing commands used by the frontend: ${missingInCore.join(", ")}`,
-    ).toEqual([]);
-
-    const extraInCore = Array.from(coreAllowlistedCommands)
-      .filter((cmd) => !invokedCommands.has(cmd))
-      .sort();
-    expect(
-      extraInCore,
-      `capabilities/main.json core:allow-invoke should match actual invoke() usage; remove unused commands: ${extraInCore.join(", ")}`,
-    ).toEqual([]);
   });
 
   it("grants the dialog + clipboard permissions required by the frontend", () => {
@@ -284,4 +230,3 @@ describe("Tauri capabilities", () => {
     expect(identifiers.some((permission) => permission.startsWith("core:notification:"))).toBe(false);
   });
 });
-
