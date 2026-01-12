@@ -1040,4 +1040,83 @@ mod write_xlsx_from_storage_tests {
 
         Ok(())
     }
+
+    #[test]
+    fn write_xlsx_from_storage_strips_activex_parts_for_macro_free_exports() -> anyhow::Result<()> {
+        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../fixtures/xlsx/basic/activex-control.xlsx");
+        let mut workbook_meta =
+            crate::file_io::read_xlsx_blocking(&fixture_path).context("read activeX fixture")?;
+
+        let preserved = workbook_meta
+            .preserved_drawing_parts
+            .as_ref()
+            .context("expected activeX fixture to have preserved drawing parts")?;
+        assert!(
+            preserved.parts.contains_key("xl/activeX/activeX1.bin"),
+            "expected preserved parts to include activeX binary"
+        );
+        assert!(
+            preserved.parts.contains_key("xl/ctrlProps/ctrlProp1.xml"),
+            "expected preserved parts to include control properties"
+        );
+
+        // Force the macro strip path (`WorkbookKind::Workbook` is macro-free) by indicating this
+        // workbook contains VBA, even though the fixture itself is an `.xlsx`.
+        workbook_meta.vba_project_bin = Some(b"dummy-vba".to_vec());
+
+        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+        let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
+
+        let tmp = tempfile::tempdir().context("temp dir")?;
+        let out_path = tmp.path().join("activex-stripped.xlsx");
+        let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
+            .context("export activeX workbook as macro-free xlsx")?;
+
+        let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref()).context("parse export")?;
+        formula_xlsx::validate_opc_relationships(pkg.parts_map())
+            .context("validate OPC relationships for exported workbook")?;
+
+        // Macro strip should remove ActiveX/controls parts so macro-free exports don't preserve
+        // macro-capable artifacts like ActiveX binaries.
+        assert!(
+            pkg.part("xl/activeX/activeX1.bin").is_none(),
+            "expected activeX binary to be stripped"
+        );
+        assert!(
+            pkg.part("xl/activeX/activeX1.xml").is_none(),
+            "expected activeX xml to be stripped"
+        );
+        assert!(
+            pkg.part("xl/ctrlProps/ctrlProp1.xml").is_none(),
+            "expected ctrlProps xml to be stripped"
+        );
+
+        let sheet_xml = pkg
+            .part("xl/worksheets/sheet1.xml")
+            .context("missing worksheet xml")?;
+        let sheet_xml = std::str::from_utf8(sheet_xml).context("worksheet xml is not valid utf8")?;
+        assert!(
+            !sheet_xml.contains("<control ")
+                && !sheet_xml.contains("<control>")
+                && !sheet_xml.contains("<control/>")
+                && !sheet_xml.contains("</control>"),
+            "expected worksheet to have no <control> elements after macro strip, got:\n{sheet_xml}"
+        );
+
+        if let Some(sheet_rels) = pkg.part("xl/worksheets/_rels/sheet1.xml.rels") {
+            let sheet_rels =
+                std::str::from_utf8(sheet_rels).context("sheet rels is not valid utf8")?;
+            assert!(
+                !sheet_rels.contains("ctrlProps/"),
+                "expected sheet relationships to stop referencing ctrlProps after macro strip, got:\n{sheet_rels}"
+            );
+            assert!(
+                !sheet_rels.contains("activeX/"),
+                "expected sheet relationships to stop referencing activeX after macro strip, got:\n{sheet_rels}"
+            );
+        }
+
+        Ok(())
+    }
 }
