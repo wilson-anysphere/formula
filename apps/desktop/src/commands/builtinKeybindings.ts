@@ -5,11 +5,12 @@ export type BuiltinKeybinding = {
   when?: string | null;
 };
 
-const WHEN_NOT_IN_TEXT_INPUT = "!focus.inTextInput";
-const WHEN_NOT_EDITING_OR_TEXT_INPUT = "!spreadsheet.isEditing && !focus.inTextInput";
+// Spreadsheet-affecting shortcuts should fail closed when the focus/edit context keys
+// are missing during startup. Prefer explicit `== true/false` checks over `!foo`.
+const WHEN_SPREADSHEET_READY = "spreadsheet.isEditing == false && focus.inTextInput == false";
 const WHEN_SHEET_NAVIGATION =
-  "!focus.inSheetTabRename && (!focus.inTextInput || spreadsheet.formulaBarFormulaEditing)";
-const WHEN_COMMAND_PALETTE = "!workbench.commandPaletteOpen";
+  "focus.inSheetTabRename == false && (focus.inTextInput == false || spreadsheet.formulaBarFormulaEditing == true)";
+const WHEN_COMMAND_PALETTE_CLOSED = "workbench.commandPaletteOpen == false";
 
 /**
  * Built-in keybindings that power UI affordances (Command Palette + context menus)
@@ -23,202 +24,203 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "edit.undo",
     key: "ctrl+z",
     mac: "cmd+z",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "edit.redo",
     key: "ctrl+y",
     mac: "cmd+shift+z",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "edit.redo",
     key: "ctrl+shift+z",
     mac: "cmd+shift+z",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "view.toggleShowFormulas",
     key: "ctrl+`",
     mac: "cmd+`",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "audit.togglePrecedents",
     key: "ctrl+[",
     mac: "cmd+[",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "audit.toggleDependents",
     key: "ctrl+]",
     mac: "cmd+]",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "workbench.showCommandPalette",
     key: "ctrl+shift+p",
     mac: "cmd+shift+p",
-    when: WHEN_COMMAND_PALETTE,
+    when: WHEN_COMMAND_PALETTE_CLOSED,
   },
   {
     // Some keyboards (and remote desktop setups) can emit both ctrlKey+metaKey for the
     // command palette chord. Add an explicit binding so the palette remains reachable.
     command: "workbench.showCommandPalette",
     key: "ctrl+cmd+shift+p",
-    when: WHEN_COMMAND_PALETTE,
+    when: WHEN_COMMAND_PALETTE_CLOSED,
   },
   {
     command: "edit.editCell",
     key: "f2",
     mac: "f2",
-    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "view.togglePanel.aiChat",
     key: "ctrl+shift+a",
+    // IMPORTANT: Cmd+I is reserved for toggling the AI sidebar (see instructions/ui.md).
     mac: "cmd+i",
-    when: null,
+    when: WHEN_COMMAND_PALETTE_CLOSED,
   },
   {
     // Some keyboards (and remote desktop setups) can emit both ctrlKey+metaKey for
     // Cmd-based shortcuts. Add an explicit binding so the AI chat toggle remains reachable.
     command: "view.togglePanel.aiChat",
     key: "ctrl+cmd+i",
-    when: null,
+    when: WHEN_COMMAND_PALETTE_CLOSED,
   },
   {
     command: "ai.inlineEdit",
     key: "ctrl+k",
     mac: "cmd+k",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "clipboard.pasteSpecial",
     key: "ctrl+shift+v",
     mac: "cmd+shift+v",
-    when: WHEN_NOT_IN_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "clipboard.pasteSpecial",
     key: "ctrl+cmd+shift+v",
-    when: WHEN_NOT_IN_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "clipboard.copy",
     key: "ctrl+c",
     mac: "cmd+c",
-    when: WHEN_NOT_IN_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     // Some keyboards (and remote desktop setups) can emit both ctrlKey+metaKey for
     // common clipboard chords. Add explicit bindings so copy remains reliable.
     command: "clipboard.copy",
     key: "ctrl+cmd+c",
-    when: WHEN_NOT_IN_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "clipboard.cut",
     key: "ctrl+x",
     mac: "cmd+x",
-    when: WHEN_NOT_IN_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "clipboard.cut",
     key: "ctrl+cmd+x",
-    when: WHEN_NOT_IN_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "clipboard.paste",
     key: "ctrl+v",
     mac: "cmd+v",
-    when: WHEN_NOT_IN_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "clipboard.paste",
     key: "ctrl+cmd+v",
-    when: WHEN_NOT_IN_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "edit.find",
     key: "ctrl+f",
     mac: "cmd+f",
-    when: null,
+    when: WHEN_COMMAND_PALETTE_CLOSED,
   },
   {
     command: "edit.replace",
     key: "ctrl+h",
     // Cmd+H is reserved by macOS for "Hide". Use Cmd+Option+F like many native apps.
     mac: "cmd+option+f",
-    when: null,
+    when: WHEN_COMMAND_PALETTE_CLOSED,
   },
   {
     command: "navigation.goTo",
     key: "ctrl+g",
     mac: "cmd+g",
-    when: null,
+    when: WHEN_COMMAND_PALETTE_CLOSED,
   },
   {
     command: "edit.clearContents",
     key: "delete",
     // macOS keyboards use Backspace for the "delete backwards" key.
     mac: "backspace",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "edit.fillDown",
     key: "ctrl+d",
     mac: "cmd+d",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "edit.fillRight",
     key: "ctrl+r",
     mac: "cmd+r",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "edit.selectCurrentRegion",
     key: "ctrl+shift+*",
     mac: "cmd+shift+*",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "edit.selectCurrentRegion",
     key: "ctrl+shift+8",
     mac: "cmd+shift+8",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     // Dedicated numpad multiply key. Excel accepts Ctrl/Cmd+* there without Shift.
     command: "edit.selectCurrentRegion",
     key: "ctrl+*",
     mac: "cmd+*",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "edit.insertDate",
     key: "ctrl+;",
     mac: "cmd+;",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "edit.insertTime",
     key: "ctrl+shift+;",
     mac: "cmd+shift+;",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "edit.autoSum",
     key: "alt+=",
     mac: "option+=",
-    when: null,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "format.toggleBold",
     key: "ctrl+b",
     mac: "cmd+b",
-    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "format.toggleItalic",
@@ -226,37 +228,37 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     // IMPORTANT: Cmd+I is reserved for toggling the AI sidebar (see instructions/ui.md).
     // Italic formatting remains Ctrl+I to preserve the AI toggle on macOS.
     mac: "ctrl+i",
-    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "format.toggleUnderline",
     key: "ctrl+u",
     mac: "cmd+u",
-    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "format.numberFormat.currency",
     key: "ctrl+shift+$",
     mac: "cmd+shift+$",
-    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "format.numberFormat.percent",
     key: "ctrl+shift+%",
     mac: "cmd+shift+%",
-    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "format.numberFormat.date",
     key: "ctrl+shift+#",
     mac: "cmd+shift+#",
-    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "format.openFormatCells",
     key: "ctrl+1",
     mac: "cmd+1",
-    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "workbook.previousSheet",
@@ -274,18 +276,19 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "comments.addComment",
     key: "shift+f2",
     mac: "shift+f2",
-    when: WHEN_NOT_EDITING_OR_TEXT_INPUT,
+    when: WHEN_SPREADSHEET_READY,
   },
   {
     command: "comments.togglePanel",
     key: "ctrl+shift+m",
     mac: "cmd+shift+m",
-    when: null,
+    when: WHEN_COMMAND_PALETTE_CLOSED,
   },
   // Some environments emit both Ctrl+Meta for a single chord (remote desktop / VM keyboard setups).
   {
     command: "comments.togglePanel",
     key: "ctrl+cmd+shift+m",
-    when: null,
+    when: WHEN_COMMAND_PALETTE_CLOSED,
   },
 ];
+

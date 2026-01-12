@@ -30,34 +30,40 @@ describe("builtin keybinding catalog", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("evaluates key when-clauses against context keys", () => {
-    const contextKeys = new ContextKeyService();
-    const lookup = contextKeys.asLookup();
+  it("gates representative keybindings via focus/edit context keys (capture-phase safe)", () => {
+    // Fail-closed behavior is important while migrating to capture-phase routing: if context
+    // keys haven't been initialized yet, spreadsheet-affecting shortcuts should not fire.
+    const emptyKeys = new ContextKeyService();
+    const emptyLookup = emptyKeys.asLookup();
 
     const copyWhen = builtinKeybindings.find((kb) => kb.command === "clipboard.copy" && kb.key === "ctrl+c")?.when;
     expect(typeof copyWhen).toBe("string");
+    expect(evaluateWhenClause(copyWhen, emptyLookup)).toBe(false);
+
+    const paletteWhen = builtinKeybindings.find((kb) => kb.command === "workbench.showCommandPalette" && kb.key === "ctrl+shift+p")
+      ?.when;
+    expect(typeof paletteWhen).toBe("string");
+    expect(evaluateWhenClause(paletteWhen, emptyLookup)).toBe(false);
+
+    const sheetPrevWhen = builtinKeybindings.find((kb) => kb.command === "workbook.previousSheet" && kb.key === "ctrl+pageup")?.when;
+    expect(typeof sheetPrevWhen).toBe("string");
+    expect(evaluateWhenClause(sheetPrevWhen, emptyLookup)).toBe(false);
+
+    const contextKeys = new ContextKeyService();
+    const lookup = contextKeys.asLookup();
+
+    // Clipboard operations should be disabled while editing or inside text inputs.
+    contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": false });
+    expect(evaluateWhenClause(copyWhen, lookup)).toBe(true);
 
     contextKeys.set("focus.inTextInput", true);
     expect(evaluateWhenClause(copyWhen, lookup)).toBe(false);
 
-    contextKeys.set("focus.inTextInput", false);
-    expect(evaluateWhenClause(copyWhen, lookup)).toBe(true);
-
-    const formatWhen = builtinKeybindings.find((kb) => kb.command === "format.toggleBold" && kb.key === "ctrl+b")?.when;
-    expect(typeof formatWhen).toBe("string");
-
-    contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": false });
-    expect(evaluateWhenClause(formatWhen, lookup)).toBe(true);
-
     contextKeys.batch({ "spreadsheet.isEditing": true, "focus.inTextInput": false });
-    expect(evaluateWhenClause(formatWhen, lookup)).toBe(false);
+    expect(evaluateWhenClause(copyWhen, lookup)).toBe(false);
 
-    contextKeys.batch({ "spreadsheet.isEditing": false, "focus.inTextInput": true });
-    expect(evaluateWhenClause(formatWhen, lookup)).toBe(false);
-
-    const sheetPrevWhen = builtinKeybindings.find((kb) => kb.command === "workbook.previousSheet" && kb.key === "ctrl+pageup")?.when;
-    expect(typeof sheetPrevWhen).toBe("string");
-
+    // Sheet navigation should allow the formula bar "formula editing" exception, but
+    // remain blocked while renaming a sheet tab.
     contextKeys.batch({
       "focus.inSheetTabRename": true,
       "focus.inTextInput": false,
@@ -89,9 +95,7 @@ describe("builtin keybinding catalog", () => {
     });
     expect(evaluateWhenClause(sheetPrevWhen, lookup)).toBe(false);
 
-    const paletteWhen = builtinKeybindings.find((kb) => kb.command === "workbench.showCommandPalette" && kb.key === "ctrl+shift+p")?.when;
-    expect(typeof paletteWhen).toBe("string");
-
+    // Command palette should be available even in inputs, but blocked when already open.
     contextKeys.set("workbench.commandPaletteOpen", true);
     expect(evaluateWhenClause(paletteWhen, lookup)).toBe(false);
     contextKeys.set("workbench.commandPaletteOpen", false);
@@ -159,3 +163,4 @@ describe("builtin keybinding catalog", () => {
     expect(getPrimaryCommandKeybindingDisplay("edit.autoSum", macIndex)).toBe("⌥=");
   });
 });
+

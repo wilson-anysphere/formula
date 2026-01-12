@@ -70,6 +70,7 @@ describe("find/replace shortcuts", () => {
 
     const commandRegistry = new CommandRegistry();
     const contextKeys = new ContextKeyService();
+    contextKeys.set("workbench.commandPaletteOpen", false);
     const keybindingService = new KeybindingService({ commandRegistry, contextKeys, platform: "mac" });
     keybindingService.setBuiltinKeybindings(builtinKeybindings);
     const disposeKeybindings = keybindingService.installWindowListener(window);
