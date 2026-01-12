@@ -4019,6 +4019,60 @@ fn bytecode_backend_applies_implicit_intersection_for_xlookup_xmatch_lookup_valu
 }
 
 #[test]
+fn bytecode_backend_vlookup_hlookup_match_reject_3d_sheet_span_table_ranges() {
+    let mut engine = Engine::new();
+
+    // Ensure the sheet span exists so the bytecode lowerer can resolve the sheet names.
+    for sheet in ["Sheet1", "Sheet2", "Sheet3"] {
+        engine.ensure_sheet(sheet);
+    }
+
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "B1",
+            "=VLOOKUP(1, Sheet1:Sheet3!A1:B1, 2, FALSE)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula(
+            "Sheet1",
+            "B2",
+            "=HLOOKUP(1, Sheet1:Sheet3!A1:B1, 2, FALSE)",
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B3", "=MATCH(1, Sheet1:Sheet3!A1, 0)")
+        .unwrap();
+
+    // These formulas should still compile to bytecode even though 3D table ranges are not valid
+    // lookup tables for VLOOKUP/HLOOKUP/MATCH.
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 3);
+    assert_eq!(
+        stats.compiled, 3,
+        "expected VLOOKUP/HLOOKUP/MATCH to compile for 3D table ranges"
+    );
+    assert_eq!(stats.fallback, 0);
+
+    engine.recalculate_single_threaded();
+
+    let bc_values = [
+        ("B1", engine.get_cell_value("Sheet1", "B1")),
+        ("B2", engine.get_cell_value("Sheet1", "B2")),
+        ("B3", engine.get_cell_value("Sheet1", "B3")),
+    ];
+
+    // Compare against the AST backend by disabling bytecode and re-evaluating.
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+
+    for (cell, expected) in bc_values {
+        assert_eq!(engine.get_cell_value("Sheet1", cell), expected);
+    }
+}
+
+#[test]
 fn bytecode_backend_xlookup_xmatch_accept_spill_ranges_and_let_range_locals() {
     let mut engine = Engine::new();
 

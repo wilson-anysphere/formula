@@ -8161,6 +8161,7 @@ fn bytecode_expr_is_eligible_inner(
 
                 let table_ok = match &args[1] {
                     bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_) => true,
+                    bytecode::Expr::MultiRangeRef(_) => true,
                     bytecode::Expr::SpillRange(inner) => {
                         bytecode_expr_is_eligible_inner(inner, true, false, lexical_scopes)
                     }
