@@ -1348,14 +1348,14 @@ fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let mut best: Option<f64> = None;
+    let mut earliest_error: Option<(usize, usize, ErrorKind)> = None;
     match &max_range {
         Range2D::Reference(max_ref) => {
-            // `iter_reference_cells` may return cells in arbitrary order for sparse backends, but
-            // MAXIFS error propagation is order-dependent. Sort to preserve row-major semantics.
-            let mut addrs: Vec<CellAddr> = ctx.iter_reference_cells(max_ref).collect();
-            addrs.sort_by_key(|addr| (addr.row, addr.col));
-
-            'cell: for addr in addrs {
+            // `iter_reference_cells` is sparse when the backend supports it. It is not
+            // guaranteed to yield cells in row-major order, so we track the earliest included
+            // error explicitly (row-major within the range) to match Excel semantics without
+            // allocating/sorting the entire range.
+            'cell: for addr in ctx.iter_reference_cells(max_ref) {
                 let value = ctx.get_cell_value(&max_ref.sheet_id, addr);
                 let (row, col) = match value {
                     // Only numeric values contribute; errors propagate only when the row is included.
@@ -1375,7 +1375,19 @@ fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
                 match value {
                     Value::Number(n) => best = Some(best.map_or(n, |b| b.max(n))),
-                    Value::Error(e) => return Value::Error(e),
+                    Value::Error(e) => {
+                        if row == 0 && col == 0 {
+                            return Value::Error(e);
+                        }
+                        match earliest_error {
+                            None => earliest_error = Some((row, col, e)),
+                            Some((best_row, best_col, _)) => {
+                                if (row, col) < (best_row, best_col) {
+                                    earliest_error = Some((row, col, e));
+                                }
+                            }
+                        }
+                    }
                     _ => unreachable!("filtered above"),
                 }
             }
@@ -1398,7 +1410,19 @@ fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
                     match value {
                         Value::Number(n) => best = Some(best.map_or(n, |b| b.max(n))),
-                        Value::Error(e) => return Value::Error(e),
+                        Value::Error(e) => {
+                            if row == 0 && col == 0 {
+                                return Value::Error(e);
+                            }
+                            match earliest_error {
+                                None => earliest_error = Some((row, col, e)),
+                                Some((best_row, best_col, _)) => {
+                                    if (row, col) < (best_row, best_col) {
+                                        earliest_error = Some((row, col, e));
+                                    }
+                                }
+                            }
+                        }
                         _ => unreachable!("filtered above"),
                     }
                 }
@@ -1406,6 +1430,9 @@ fn maxifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
     }
 
+    if let Some((_, _, err)) = earliest_error {
+        return Value::Error(err);
+    }
     Value::Number(best.unwrap_or(0.0))
 }
 
@@ -1471,13 +1498,12 @@ fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     }
 
     let mut best: Option<f64> = None;
+    let mut earliest_error: Option<(usize, usize, ErrorKind)> = None;
     match &min_range {
         Range2D::Reference(min_ref) => {
-            // See MAXIFS for why we sort here (stable row-major error propagation).
-            let mut addrs: Vec<CellAddr> = ctx.iter_reference_cells(min_ref).collect();
-            addrs.sort_by_key(|addr| (addr.row, addr.col));
-
-            'cell: for addr in addrs {
+            // See MAXIFS for why we track errors explicitly (stable row-major propagation without
+            // needing to allocate/sort dense address lists).
+            'cell: for addr in ctx.iter_reference_cells(min_ref) {
                 let value = ctx.get_cell_value(&min_ref.sheet_id, addr);
                 let (row, col) = match value {
                     Value::Number(_) | Value::Error(_) => (
@@ -1496,7 +1522,19 @@ fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
                 match value {
                     Value::Number(n) => best = Some(best.map_or(n, |b| b.min(n))),
-                    Value::Error(e) => return Value::Error(e),
+                    Value::Error(e) => {
+                        if row == 0 && col == 0 {
+                            return Value::Error(e);
+                        }
+                        match earliest_error {
+                            None => earliest_error = Some((row, col, e)),
+                            Some((best_row, best_col, _)) => {
+                                if (row, col) < (best_row, best_col) {
+                                    earliest_error = Some((row, col, e));
+                                }
+                            }
+                        }
+                    }
                     _ => unreachable!("filtered above"),
                 }
             }
@@ -1519,7 +1557,19 @@ fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
                     match value {
                         Value::Number(n) => best = Some(best.map_or(n, |b| b.min(n))),
-                        Value::Error(e) => return Value::Error(e),
+                        Value::Error(e) => {
+                            if row == 0 && col == 0 {
+                                return Value::Error(e);
+                            }
+                            match earliest_error {
+                                None => earliest_error = Some((row, col, e)),
+                                Some((best_row, best_col, _)) => {
+                                    if (row, col) < (best_row, best_col) {
+                                        earliest_error = Some((row, col, e));
+                                    }
+                                }
+                            }
+                        }
                         _ => unreachable!("filtered above"),
                     }
                 }
@@ -1527,6 +1577,9 @@ fn minifs_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         }
     }
 
+    if let Some((_, _, err)) = earliest_error {
+        return Value::Error(err);
+    }
     Value::Number(best.unwrap_or(0.0))
 }
 
