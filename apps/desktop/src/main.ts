@@ -937,15 +937,17 @@ function openColorPicker(
   label: string,
   apply: (sheetId: string, ranges: CellRange[], argb: string) => void,
 ): void {
-  input.addEventListener(
-    "change",
-    () => {
-      const argb = rgbHexToArgb(input.value);
-      if (!argb) return;
-      applyFormattingToSelection(label, (_doc, sheetId, ranges) => apply(sheetId, ranges, argb));
-    },
-    { once: true },
-  );
+  // Avoid `addEventListener({ once: true })` here.
+  //
+  // `<input type="color">` does *not* emit a `change` event when the user cancels the native
+  // picker. If we used `addEventListener`, we'd accumulate listeners across cancels and the next
+  // successful pick would apply formatting multiple times (multiple history entries).
+  input.onchange = () => {
+    input.onchange = null;
+    const argb = rgbHexToArgb(input.value);
+    if (!argb) return;
+    applyFormattingToSelection(label, (_doc, sheetId, ranges) => apply(sheetId, ranges, argb));
+  };
   input.click();
 }
 
