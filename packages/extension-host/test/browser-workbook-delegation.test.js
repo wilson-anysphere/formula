@@ -604,3 +604,89 @@ test("BrowserExtensionHost: workbook.save does not emit beforeSave when workbook
   assert.equal(saveCalls, 1);
   assert.equal(beforeSave, undefined);
 });
+
+test("BrowserExtensionHost: workbook.getActiveWorkbook overwrites stored path when spreadsheetApi returns path=null", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  let active = { name: "Initial", path: "/tmp/initial.xlsx" };
+  const sheets = [{ id: "sheet1", name: "Sheet1" }];
+  const activeSheet = sheets[0];
+
+  /** @type {any} */
+  let apiResult;
+
+  /** @type {(value?: unknown) => void} */
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const scenarios = [
+    {
+      onPostMessage(msg) {
+        if (msg?.type === "api_result" && msg.id === "req1") {
+          apiResult = msg.result;
+          resolveDone();
+        }
+      },
+    },
+  ];
+
+  installFakeWorker(t, scenarios);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      async getActiveWorkbook() {
+        return active;
+      },
+      listSheets() {
+        return sheets;
+      },
+      getActiveSheet() {
+        return activeSheet;
+      },
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.workbook-clear-path";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "memory://workbook-clear-path/",
+    mainUrl: "memory://workbook-clear-path/main.mjs",
+    manifest: {
+      name: "workbook-clear-path",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["workbook.manage"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension?.worker);
+
+  // Prime internal workbook metadata with a path, then simulate the host returning a
+  // pathless workbook snapshot.
+  host.openWorkbook("/tmp/primed.xlsx");
+  active = { name: "Untitled", path: null };
+
+  extension.worker.emitMessage({
+    type: "api_call",
+    id: "req1",
+    namespace: "workbook",
+    method: "getActiveWorkbook",
+    args: [],
+  });
+
+  await done;
+
+  assert.equal(apiResult?.path ?? null, null);
+});

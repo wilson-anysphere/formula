@@ -489,10 +489,43 @@ class BrowserExtensionHost {
       try {
         const workbook = await this._spreadsheet.getActiveWorkbook();
         if (workbook && typeof workbook === "object") {
-          this._workbook = {
-            name: String(workbook.name ?? this._workbook.name),
-            path: workbook.path ?? this._workbook.path ?? null
-          };
+          const next = { ...this._workbook };
+          // `Workbook.name` is required by the API contract, but treat empty/missing values
+          // as "no update" to preserve a stable snapshot in partially-implemented hosts.
+          try {
+            if (Object.prototype.hasOwnProperty.call(workbook, "name")) {
+              const rawName = workbook.name;
+              const trimmed = typeof rawName === "string" ? rawName.trim() : null;
+              if (trimmed) {
+                next.name = trimmed;
+              } else if (rawName !== undefined && rawName !== null) {
+                next.name = String(rawName);
+              }
+            }
+          } catch {
+            // ignore
+          }
+
+          // `path` is optional; importantly, `null` means "unsaved workbook". Preserve the
+          // existing path only when the host omits `path` (undefined), so transitions from
+          // saved -> unsaved are reflected in extension snapshots/events.
+          try {
+            if (Object.prototype.hasOwnProperty.call(workbook, "path")) {
+              const rawPath = workbook.path;
+              if (rawPath === undefined) {
+                // keep previous
+              } else if (rawPath == null) {
+                next.path = null;
+              } else {
+                const str = String(rawPath);
+                next.path = str.trim().length > 0 ? str : null;
+              }
+            }
+          } catch {
+            // ignore
+          }
+
+          this._workbook = { name: next.name, path: next.path ?? null };
         }
       } catch {
         // ignore
