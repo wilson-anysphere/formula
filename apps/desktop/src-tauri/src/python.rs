@@ -570,6 +570,7 @@ pub fn run_python_script(
     max_memory_bytes: Option<u64>,
     context: Option<PythonRunContext>,
 ) -> Result<PythonRunResult, String> {
+    crate::ipc_limits::enforce_script_code_size(code)?;
     let permissions = permissions.unwrap_or_default();
     if !unsafe_python_permissions_enabled()
         && (permissions.filesystem != PythonFilesystemPermission::None
@@ -767,4 +768,30 @@ pub fn run_python_script(
             stack: traceback,
         }),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ipc_limits::MAX_SCRIPT_CODE_BYTES;
+
+    #[test]
+    fn run_python_script_rejects_oversized_code_without_spawning_python() {
+        let mut workbook = crate::file_io::Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let oversized = "x".repeat(MAX_SCRIPT_CODE_BYTES + 1);
+        let err = run_python_script(&mut state, &oversized, None, None, None, None)
+            .expect_err("expected oversized code to be rejected");
+        assert!(
+            err.contains("Script is too large"),
+            "unexpected error: {err}"
+        );
+        assert!(
+            err.contains(&MAX_SCRIPT_CODE_BYTES.to_string()),
+            "expected error to mention limit: {err}"
+        );
+    }
 }

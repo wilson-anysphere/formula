@@ -2002,6 +2002,7 @@ pub async fn run_python_script(
     state: State<'_, SharedAppState>,
 ) -> Result<PythonRunResult, String> {
     let _ = workbook_id;
+    crate::ipc_limits::enforce_script_code_size(&code)?;
     let shared = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let mut state = shared.lock().unwrap();
@@ -3006,6 +3007,7 @@ pub async fn validate_vba_migration(
     state: State<'_, SharedAppState>,
     trust: State<'_, SharedMacroTrustStore>,
 ) -> Result<MigrationValidationReport, String> {
+    crate::ipc_limits::enforce_script_code_size(&code)?;
     let workbook_id_str = workbook_id.clone();
     let shared = state.inner().clone();
     let trust_shared = trust.inner().clone();
