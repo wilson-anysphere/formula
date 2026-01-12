@@ -13,6 +13,7 @@ use formula_engine::bytecode::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 use formula_engine::LocaleConfig;
+#[cfg(not(target_arch = "wasm32"))]
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
 #[cfg(not(target_arch = "wasm32"))]

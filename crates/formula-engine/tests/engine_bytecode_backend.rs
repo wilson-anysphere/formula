@@ -1,3 +1,5 @@
+#![cfg(not(target_arch = "wasm32"))]
+
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::eval::{
     parse_a1, EvalContext, Evaluator, RecalcContext, SheetReference, ValueResolver,
