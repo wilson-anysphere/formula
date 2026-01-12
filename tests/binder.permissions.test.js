@@ -156,6 +156,78 @@ test("binder: encrypted Yjs cells are masked and refuse plaintext writes", async
     ydoc.destroy();
   }
 });
+
+test("binder: rejects disallowed range-run formatting edits and does not write formatRunsByCol into Yjs", async () => {
+  const ydoc = new Y.Doc();
+  const sheets = ydoc.getArray("sheets");
+
+  // Seed a default Sheet1 entry so sheet-level formatting metadata has a place to live.
+  ydoc.transact(() => {
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheets.push([sheet]);
+  });
+
+  const documentController = new DocumentController();
+
+  /** @type {any[] | null} */
+  let rejected = null;
+
+  const binder = bindYjsToDocumentController({
+    ydoc,
+    documentController,
+    defaultSheetId: "Sheet1",
+    userId: "me",
+    permissions: {
+      role: "editor",
+      restrictions: [
+        // Disallow editing A1:A11 for this user.
+        { sheetId: "Sheet1", startRow: 0, endRow: 10, startCol: 0, endCol: 0, editAllowlist: ["other-user"] },
+      ],
+    },
+    onEditRejected: (deltas) => {
+      rejected = deltas;
+    },
+  });
+
+  try {
+    const italicStyleId = documentController.styleTable.intern({ font: { italic: true } });
+
+    // Simulate a buggy caller that bypasses DocumentController.canEditCell by using
+    // applyExternalRangeRunDeltas. The binder must still reject + revert (and refuse
+    // to write into Yjs).
+    documentController.applyExternalRangeRunDeltas([
+      {
+        sheetId: "Sheet1",
+        col: 0,
+        startRow: 0,
+        endRowExclusive: 20,
+        beforeRuns: [],
+        afterRuns: [{ startRow: 0, endRowExclusive: 20, styleId: italicStyleId }],
+      },
+    ]);
+
+    assert.ok(Array.isArray(rejected), "expected onEditRejected to be called");
+    assert.equal(rejected?.length, 1);
+    assert.equal(rejected?.[0]?.sheetId, "Sheet1");
+    assert.equal(rejected?.[0]?.col, 0);
+
+    // Binder should revert the local DocumentController state.
+    assert.equal(documentController.getCellFormat("Sheet1", "A1")?.font?.italic, undefined);
+    assert.equal(documentController.model.sheets.get("Sheet1")?.formatRunsByCol?.get?.(0), undefined);
+
+    // Allow any microtask-scheduled Yjs writes to run (should be none).
+    await Promise.resolve();
+
+    const ySheet = sheets.get(0);
+    assert.ok(ySheet instanceof Y.Map);
+    assert.equal(ySheet.get("formatRunsByCol"), undefined);
+  } finally {
+    binder.destroy();
+    ydoc.destroy();
+  }
+});
  
 test("binder: initializes when cells root was created by a different Yjs instance (CJS Doc.getMap)", async () => {
   const Ycjs = requireYjsCjs();
