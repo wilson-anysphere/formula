@@ -654,7 +654,7 @@ pub fn verify_vba_signature_binding(
                 // to our deterministic "project digest" over OLE streams. This keeps binding checks
                 // useful for synthetically-constructed fixtures while preserving the spec-ish path
                 // for real-world projects.
-                let digest = match compute_vba_project_digest(vba_project_bin, DigestAlg::Md5) {
+                let digest = match crate::compute_vba_project_digest(vba_project_bin, DigestAlg::Md5) {
                     Ok(v) => v,
                     Err(_) => return VbaSignatureBinding::Unknown,
                 };
@@ -737,6 +737,7 @@ fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
         DigestAlg::Sha256 => "SHA-256",
     })
 }
+
 fn is_signature_component(component: &str) -> bool {
     let trimmed = component.trim_start_matches(|c: char| c <= '\u{001F}');
     matches!(
@@ -1214,18 +1215,41 @@ pub fn verify_vba_project_signature_binding(
         // MS-OSHARED §4.3: for VBA signatures, Office stores an MD5 digest in `DigestInfo.digest`
         // even when `DigestInfo.algorithm` indicates SHA-256.
         if content_hash_md5.is_none() {
-            let Ok(content_normalized) = content_normalized_data(project_ole) else {
-                continue;
-            };
-            content_hash_md5 = Some(Md5::digest(&content_normalized).into());
-            // Agile Content Hash (MS-OVBA §2.4.2.4) incorporates designer storages. Only compute it
-            // when `FormsNormalizedData` is available.
-            agile_hash_md5 = Some(forms_normalized_data(project_ole).ok().map(|forms| {
-                let mut h = Md5::new();
-                h.update(&content_normalized);
-                h.update(&forms);
-                h.finalize().into()
-            }));
+            match content_normalized_data(project_ole) {
+                Ok(content_normalized) => {
+                    content_hash_md5 = Some(Md5::digest(&content_normalized).into());
+
+                    // Agile Content Hash (MS-OVBA §2.4.2.4) incorporates designer storages. Only
+                    // compute it when `FormsNormalizedData` is available.
+                    agile_hash_md5 = Some(forms_normalized_data(project_ole).ok().map(|forms| {
+                        let mut h = Md5::new();
+                        h.update(&content_normalized);
+                        h.update(&forms);
+                        h.finalize().into()
+                    }));
+                }
+                Err(_) => {
+                    // Best-effort fallback: if we can't compute the MS-OVBA ContentNormalizedData
+                    // transcript (e.g. minimal/incomplete VBA projects, unknown compression), fall
+                    // back to our deterministic "project digest" over OLE streams. This keeps
+                    // binding checks useful for synthetically-constructed fixtures while preserving
+                    // the spec-ish path for real-world projects.
+                    let digest = match crate::compute_vba_project_digest(project_ole, DigestAlg::Md5) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+                    let digest_md5: [u8; 16] = match digest.as_slice().try_into() {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+
+                    content_hash_md5 = Some(digest_md5);
+                    // There is no distinct "agile" digest in this fallback mode; treat it as
+                    // equivalent so mismatches are surfaced as `BoundMismatch` rather than
+                    // `BoundUnknown`.
+                    agile_hash_md5 = Some(Some(digest_md5));
+                }
+            }
         }
 
         let Some(content_hash_md5) = content_hash_md5 else {
