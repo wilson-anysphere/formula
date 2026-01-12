@@ -1,5 +1,12 @@
 import { formatA1Address } from "../../../../../packages/search/index.js";
 
+function formatSheetNameForA1(sheetName) {
+  const name = String(sheetName ?? "").trim();
+  if (!name) return "";
+  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
+  return `'${name.replace(/'/g, "''")}'`;
+}
+
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -59,13 +66,15 @@ export function createFindReplaceDialog(controller, { mode = "find" } = {}) {
     const results = await controller.findAll();
     resultsList.replaceChildren();
     for (const r of results) {
+      const sheetToken = formatSheetNameForA1(r.sheetName);
+      const sheetPrefix = sheetToken ? `${sheetToken}!` : "";
       const item = el(
         "li",
         {
           onClick: () =>
             controller.setActiveCell?.({ sheetName: r.sheetName, row: r.row, col: r.col }),
         },
-        [`${r.sheetName}!${formatA1Address({ row: r.row, col: r.col })} — ${r.text}`],
+        [`${sheetPrefix}${formatA1Address({ row: r.row, col: r.col })} — ${r.text}`],
       );
       resultsList.append(item);
     }

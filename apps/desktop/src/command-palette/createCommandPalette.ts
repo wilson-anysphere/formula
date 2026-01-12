@@ -103,6 +103,13 @@ function sortCommandsAlpha(a: CommandContribution, b: CommandContribution): numb
   return a.title.localeCompare(b.title);
 }
 
+function formatSheetNameForA1(sheetName: string): string {
+  const name = String(sheetName ?? "").trim();
+  if (!name) return "";
+  if (/^[A-Za-z0-9_]+$/.test(name)) return name;
+  return `'${name.replace(/'/g, "''")}'`;
+}
+
 function buildGroupsForEmptyQuery(
   allCommands: PreparedCommandForFuzzy<CommandContribution>[],
   recentIds: string[],
@@ -537,15 +544,15 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
                 workbook: goTo.workbook,
                 currentSheetName: goTo.getCurrentSheetName(),
               });
-              return {
-                kind: "goTo" as const,
-                label: tWithVars("commandPalette.goToSuggestion", { query: trimmed }),
-                resolved: `${parsed.sheetName}!${formatA1Range(parsed.range)}`,
-                parsed,
-              };
-            } catch {
-              return null;
-            }
+               return {
+                 kind: "goTo" as const,
+                 label: tWithVars("commandPalette.goToSuggestion", { query: trimmed }),
+                 resolved: `${formatSheetNameForA1(parsed.sheetName)}!${formatA1Range(parsed.range)}`,
+                 parsed,
+               };
+             } catch {
+               return null;
+             }
           })()
         : null;
 

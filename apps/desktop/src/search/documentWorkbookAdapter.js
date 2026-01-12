@@ -116,9 +116,24 @@ export class DocumentWorkbookAdapter {
     const display = this.sheetNameResolver?.getSheetNameById?.(trimmed);
     if (typeof display === "string" && display.trim()) return trimmed;
 
-    // Fallback: allow referring to sheets by id (legacy behavior).
+    // Fallback: allow referring to sheets by id (legacy behavior) and, when possible, by the
+    // DocumentController's metadata name (useful when callers haven't provided a separate
+    // sheetNameResolver but the document still has user-facing names stored in sheet meta).
     const ids = typeof this.document.getSheetIds === "function" ? this.document.getSheetIds() : [];
-    return ids.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
+    const needle = trimmed.toLowerCase();
+
+    const byId = ids.find((id) => id.toLowerCase() === needle) ?? null;
+    if (byId) return byId;
+
+    if (typeof this.document.getSheetMeta === "function") {
+      for (const id of ids) {
+        const meta = this.document.getSheetMeta(id);
+        const name = meta?.name;
+        if (typeof name === "string" && name.trim().toLowerCase() === needle) return id;
+      }
+    }
+
+    return null;
   }
 
   #getSheetById(sheetId) {
@@ -145,7 +160,11 @@ class DocumentSheetAdapter {
   }
 
   get name() {
-    return this.sheetNameResolver?.getSheetNameById?.(this.sheetId) ?? this.sheetId;
+    const resolved = this.sheetNameResolver?.getSheetNameById?.(this.sheetId);
+    if (resolved) return resolved;
+    const metaName = this.document.getSheetMeta?.(this.sheetId)?.name;
+    if (typeof metaName === "string" && metaName.trim() !== "") return metaName;
+    return this.sheetId;
   }
 
   getUsedRange() {
