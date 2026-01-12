@@ -12,6 +12,12 @@ const {
 } = v2Core;
 
 const SIGNATURE_ALGORITHM = "ed25519";
+// NOTE: Keep these limits in sync with:
+// - `shared/extension-package/v2-browser.mjs`
+// - `apps/desktop/src-tauri/src/ed25519_verifier.rs`
+const MAX_SIGNATURE_PAYLOAD_BYTES = 5 * 1024 * 1024; // 5MB
+const MAX_PUBLIC_KEY_PEM_BYTES = 64 * 1024; // 64KB
+const MAX_SIGNATURE_BASE64_BYTES = 1024;
 
 function bytesToHex(bytes: Uint8Array): string {
   let out = "";
@@ -100,12 +106,17 @@ async function verifyEd25519SignatureViaTauri(
     );
   }
 
-  const ok = await invoke("verify_ed25519_signature", {
-    payload: Array.from(payloadBytes),
-    signature_base64: signatureBase64,
-    public_key_pem: publicKeyPem
-  });
-  return Boolean(ok);
+  try {
+    const ok = await invoke("verify_ed25519_signature", {
+      payload: Array.from(payloadBytes),
+      signature_base64: signatureBase64,
+      public_key_pem: publicKeyPem
+    });
+    return Boolean(ok);
+  } catch (error) {
+    const message = String((error as any)?.message ?? error);
+    throw new Error(`Failed to verify extension signature via Tauri IPC: ${message}`);
+  }
 }
 
 async function verifyEd25519SignatureDesktop(
@@ -113,11 +124,31 @@ async function verifyEd25519SignatureDesktop(
   signatureBase64: string,
   publicKeyPem: string
 ): Promise<boolean> {
+  if (payloadBytes.length > MAX_SIGNATURE_PAYLOAD_BYTES) {
+    throw new Error(`Signature payload is too large (max ${MAX_SIGNATURE_PAYLOAD_BYTES} bytes)`);
+  }
+  if (String(publicKeyPem).length > MAX_PUBLIC_KEY_PEM_BYTES) {
+    throw new Error(`Public key PEM is too large (max ${MAX_PUBLIC_KEY_PEM_BYTES} bytes)`);
+  }
+  if (String(signatureBase64).length > MAX_SIGNATURE_BASE64_BYTES) {
+    throw new Error(`Signature base64 is too large (max ${MAX_SIGNATURE_BASE64_BYTES} bytes)`);
+  }
+
   try {
     return await verifyEd25519SignatureViaWebCrypto(payloadBytes, signatureBase64, publicKeyPem);
   } catch (error) {
     if (isEd25519NotSupportedError(error)) {
-      return await verifyEd25519SignatureViaTauri(payloadBytes, signatureBase64, publicKeyPem);
+      const message = String((error as any)?.message ?? error);
+      try {
+        return await verifyEd25519SignatureViaTauri(payloadBytes, signatureBase64, publicKeyPem);
+      } catch (invokeError) {
+        const invokeMsg = String((invokeError as any)?.message ?? invokeError);
+        throw new Error(
+          "This environment's WebCrypto implementation does not support Ed25519, so extension packages cannot be verified. " +
+            "If you are running Formula Desktop, ensure the native verifier is available. " +
+            `Original error: ${message}. Tauri error: ${invokeMsg}`
+        );
+      }
     }
 
     const message = String((error as any)?.message ?? error);
