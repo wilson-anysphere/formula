@@ -56,12 +56,11 @@ function toHexByte(value: number): string {
   return clamped.toString(16).padStart(2, "0");
 }
 
-function fallbackColorFromId(id: string): string {
+function fallbackColorFromHash(hash: number): string {
   // When CSS tokens are unavailable (e.g. node-only unit tests), produce a stable
   // 6-digit hex color without embedding literal hex values in the source.
-  const hash = hashStringToUInt32(id);
   // Keep colors away from pure black/white so they remain visible on common backgrounds.
-  const channel = (offset: number) => 64 + ((hash >> offset) & 0x7f);
+  const channel = (offset: number) => 64 + ((hash >>> offset) & 0x7f);
   const r = channel(0);
   const g = channel(7);
   const b = channel(14);
@@ -69,9 +68,10 @@ function fallbackColorFromId(id: string): string {
 }
 
 function colorFromId(id: string): string {
-  const fallback = resolveCssVar("--formula-grid-remote-presence-default", { fallback: fallbackColorFromId(id) });
+  const hash = hashStringToUInt32(id);
+  const fallback = resolveCssVar("--formula-grid-remote-presence-default", { fallback: fallbackColorFromHash(hash) });
   if (COLOR_TOKEN_PALETTE.length === 0) return fallback;
-  const idx = hashStringToUInt32(id) % COLOR_TOKEN_PALETTE.length;
+  const idx = hash % COLOR_TOKEN_PALETTE.length;
   const token = COLOR_TOKEN_PALETTE[idx]!;
   return resolveCssVar(token, { fallback });
 }
