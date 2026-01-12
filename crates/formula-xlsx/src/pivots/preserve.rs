@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom};
 
@@ -334,14 +335,15 @@ impl XlsxPackage {
         }
 
         let workbook_rels_part = "xl/_rels/workbook.xml.rels";
-        let rel_map: HashMap<String, crate::relationships::Relationship> =
-            match self.part(workbook_rels_part) {
-                Some(workbook_rels_xml) => parse_relationships(workbook_rels_xml, workbook_rels_part)?
-                    .into_iter()
-                    .map(|r| (r.id.clone(), r))
-                    .collect(),
-                None => HashMap::new(),
-            };
+        let rel_map: HashMap<String, crate::relationships::Relationship> = match self
+            .part(workbook_rels_part)
+        {
+            Some(workbook_rels_xml) => parse_relationships(workbook_rels_xml, workbook_rels_part)?
+                .into_iter()
+                .map(|r| (r.id.clone(), r))
+                .collect(),
+            None => HashMap::new(),
+        };
 
         // Only preserve the <pivotCaches> subtree when we can also preserve every referenced
         // pivotCacheDefinition relationship. Otherwise re-applying would introduce broken r:id
@@ -495,25 +497,20 @@ impl XlsxPackage {
             if !preserved.workbook_pivot_cache_rels.is_empty() {
                 let rewritten =
                     rewrite_relationship_ids(pivot_caches, "pivotCaches", &workbook_rid_map)?;
-                let workbook_xml = self.part(workbook_part).ok_or_else(|| {
-                    ChartExtractionError::MissingPart(workbook_part.to_string())
-                })?;
-                let updated = ensure_workbook_xml_has_pivot_caches(
-                    workbook_xml,
-                    workbook_part,
-                    &rewritten,
-                )?;
+                let workbook_xml = self
+                    .part(workbook_part)
+                    .ok_or_else(|| ChartExtractionError::MissingPart(workbook_part.to_string()))?;
+                let updated =
+                    ensure_workbook_xml_has_pivot_caches(workbook_xml, workbook_part, &rewritten)?;
                 self.set_part(workbook_part, updated);
             }
         }
 
         let sheets = workbook_sheet_parts(self)?;
         for (sheet_name, preserved_sheet) in &preserved.sheet_pivot_tables {
-            let Some(sheet) = match_sheet_by_name_or_index(
-                &sheets,
-                sheet_name,
-                preserved_sheet.sheet_index,
-            ) else {
+            let Some(sheet) =
+                match_sheet_by_name_or_index(&sheets, sheet_name, preserved_sheet.sheet_index)
+            else {
                 continue;
             };
 
@@ -540,11 +537,8 @@ impl XlsxPackage {
             let Some(sheet_xml) = self.part(&sheet.part_name) else {
                 continue;
             };
-            let updated_sheet_xml = ensure_sheet_xml_has_pivot_tables(
-                sheet_xml,
-                &sheet.part_name,
-                &rewritten,
-            )?;
+            let updated_sheet_xml =
+                ensure_sheet_xml_has_pivot_tables(sheet_xml, &sheet.part_name, &rewritten)?;
             self.set_part(sheet.part_name.clone(), updated_sheet_xml);
         }
 
@@ -620,8 +614,11 @@ fn apply_preserved_pivot_caches_to_workbook_xml_with_part(
         return Ok(workbook_xml.to_string());
     }
 
-    let doc =
-        Document::parse(workbook_xml).map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let workbook_xml = expand_self_closing_workbook_root_if_needed(workbook_xml, part_name)?;
+    let workbook_xml = workbook_xml.as_ref();
+
+    let doc = Document::parse(workbook_xml)
+        .map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
     let workbook = doc.root_element();
 
     let mut updated = if let Some(pivot_caches) = workbook
@@ -831,18 +828,21 @@ fn parse_pivot_cache_entries(xml: &str) -> Result<Vec<PivotCacheEntry>, ChartExt
     let doc = Document::parse(&wrapped)
         .map_err(|e| ChartExtractionError::XmlParse("pivotCaches".to_string(), e))?;
 
-    let pivot_caches = doc.descendants().find(|n| {
-        n.is_element() && n.tag_name().name() == "pivotCaches"
-    }).ok_or_else(|| {
-        ChartExtractionError::XmlStructure("pivotCaches: missing <pivotCaches>".to_string())
-    })?;
+    let pivot_caches = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "pivotCaches")
+        .ok_or_else(|| {
+            ChartExtractionError::XmlStructure("pivotCaches: missing <pivotCaches>".to_string())
+        })?;
 
     let mut entries = Vec::new();
     for node in pivot_caches
         .children()
         .filter(|n| n.is_element() && n.tag_name().name() == "pivotCache")
     {
-        let cache_id = node.attribute("cacheId").and_then(|v| v.parse::<u32>().ok());
+        let cache_id = node
+            .attribute("cacheId")
+            .and_then(|v| v.parse::<u32>().ok());
         let raw_xml = wrapped[node.range()].to_string();
         entries.push(PivotCacheEntry { cache_id, raw_xml });
     }
@@ -879,16 +879,12 @@ fn ensure_workbook_has_namespace_prefix(
         let pos_after = reader.buffer_position() as usize;
 
         match event {
-            Event::Start(ref e) | Event::Empty(ref e)
-                if e.local_name().as_ref() == b"workbook" =>
-            {
-                let tag = workbook_xml
-                    .get(pos_before..pos_after)
-                    .ok_or_else(|| {
-                        ChartExtractionError::XmlStructure(format!(
-                            "{part_name}: invalid <workbook> start tag offsets"
-                        ))
-                    })?;
+            Event::Start(ref e) | Event::Empty(ref e) if e.local_name().as_ref() == b"workbook" => {
+                let tag = workbook_xml.get(pos_before..pos_after).ok_or_else(|| {
+                    ChartExtractionError::XmlStructure(format!(
+                        "{part_name}: invalid <workbook> start tag offsets"
+                    ))
+                })?;
                 if tag.contains(&needle) {
                     return Ok(workbook_xml.to_string());
                 }
@@ -923,6 +919,87 @@ fn ensure_workbook_has_namespace_prefix(
 fn is_self_closing_element(xml: &str) -> bool {
     let trimmed = xml.trim_end();
     trimmed.ends_with("/>") && !trimmed.contains("</")
+}
+
+fn expand_self_closing_workbook_root_if_needed<'a>(
+    workbook_xml: &'a str,
+    part_name: &str,
+) -> Result<Cow<'a, str>, ChartExtractionError> {
+    let mut reader = Reader::from_str(workbook_xml);
+    reader.config_mut().trim_text(false);
+    let mut buf = Vec::new();
+
+    loop {
+        let pos_before = reader.buffer_position() as usize;
+        let event = reader.read_event_into(&mut buf).map_err(|e| {
+            ChartExtractionError::XmlStructure(format!("{part_name}: xml parse error: {e}"))
+        })?;
+        let pos_after = reader.buffer_position() as usize;
+
+        match event {
+            Event::Start(ref e) if e.local_name().as_ref() == b"workbook" => {
+                return Ok(Cow::Borrowed(workbook_xml));
+            }
+            Event::Empty(ref e) if e.local_name().as_ref() == b"workbook" => {
+                let tag = workbook_xml.get(pos_before..pos_after).ok_or_else(|| {
+                    ChartExtractionError::XmlStructure(format!(
+                        "{part_name}: invalid <workbook/> tag offsets"
+                    ))
+                })?;
+                let qname = extract_qname_from_start_tag(tag, part_name)?;
+                let close_tag = format!("</{qname}>");
+
+                let (tag_start, trailing_ws) = split_trailing_whitespace(tag);
+                let tag_start = tag_start.trim_end();
+                let tag_start = tag_start.strip_suffix("/>").ok_or_else(|| {
+                    ChartExtractionError::XmlStructure(format!(
+                        "{part_name}: invalid self-closing <workbook/> start tag"
+                    ))
+                })?;
+                let tag_start = tag_start.trim_end();
+
+                let mut out = String::with_capacity(workbook_xml.len() + close_tag.len() + 1);
+                out.push_str(&workbook_xml[..pos_before]);
+                out.push_str(tag_start);
+                out.push('>');
+                out.push_str(&close_tag);
+                out.push_str(trailing_ws);
+                out.push_str(&workbook_xml[pos_after..]);
+                return Ok(Cow::Owned(out));
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+
+        buf.clear();
+    }
+
+    Err(ChartExtractionError::XmlStructure(format!(
+        "{part_name}: missing <workbook>"
+    )))
+}
+
+fn extract_qname_from_start_tag<'a>(
+    tag: &'a str,
+    part_name: &str,
+) -> Result<&'a str, ChartExtractionError> {
+    let Some(rest) = tag.strip_prefix('<') else {
+        return Err(ChartExtractionError::XmlStructure(format!(
+            "{part_name}: invalid <workbook> start tag"
+        )));
+    };
+    let end_rel = rest
+        .char_indices()
+        .find(|(_, c)| c.is_whitespace() || *c == '>' || *c == '/')
+        .map(|(idx, _)| idx)
+        .unwrap_or(rest.len());
+    let qname = &rest[..end_rel];
+    if qname.is_empty() {
+        return Err(ChartExtractionError::XmlStructure(format!(
+            "{part_name}: invalid <workbook> qualified name"
+        )));
+    }
+    Ok(qname)
 }
 
 fn split_trailing_whitespace(s: &str) -> (&str, &str) {
@@ -997,7 +1074,8 @@ pub fn ensure_sheet_xml_has_pivot_tables(
     let pivot_tables_str = std::str::from_utf8(pivot_tables_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8("pivotTables".to_string(), e))?;
 
-    let doc = Document::parse(xml_str).map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
+    let doc = Document::parse(xml_str)
+        .map_err(|e| ChartExtractionError::XmlParse(part_name.to_string(), e))?;
     let root = doc.root_element();
     if root.tag_name().name() != "worksheet" {
         return Err(ChartExtractionError::XmlStructure(format!(
@@ -1062,13 +1140,9 @@ pub fn ensure_sheet_xml_has_pivot_tables(
             .unwrap_or(0);
 
         let close_tag_len = crate::xml::prefixed_tag(worksheet_prefix, "worksheet").len() + 3;
-        let close_idx = root
-            .range()
-            .end
-            .checked_sub(close_tag_len)
-            .ok_or_else(|| {
-                ChartExtractionError::XmlStructure(format!("{part_name}: invalid </worksheet> tag"))
-            })?;
+        let close_idx = root.range().end.checked_sub(close_tag_len).ok_or_else(|| {
+            ChartExtractionError::XmlStructure(format!("{part_name}: invalid </worksheet> tag"))
+        })?;
 
         let ext_idx = root
             .children()
@@ -1171,7 +1245,9 @@ fn rewrite_relationship_ids(
 
                 let qname = e.name();
                 let name = std::str::from_utf8(qname.as_ref()).map_err(|_| {
-                    ChartExtractionError::XmlStructure(format!("{part_name}: non-utf8 element name"))
+                    ChartExtractionError::XmlStructure(format!(
+                        "{part_name}: non-utf8 element name"
+                    ))
                 })?;
                 let mut out = BytesStart::new(name);
                 for attr in e.attributes().with_checks(false) {
@@ -1266,7 +1342,9 @@ fn rewrite_relationship_ids(
 
                 let qname = e.name();
                 let name = std::str::from_utf8(qname.as_ref()).map_err(|_| {
-                    ChartExtractionError::XmlStructure(format!("{part_name}: non-utf8 element name"))
+                    ChartExtractionError::XmlStructure(format!(
+                        "{part_name}: non-utf8 element name"
+                    ))
                 })?;
                 let mut out = BytesStart::new(name);
                 for attr in e.attributes().with_checks(false) {
@@ -1337,9 +1415,9 @@ fn rewrite_relationship_ids(
                 ns_stack.pop();
             }
             _ => {
-                writer.write_event(event.to_owned()).map_err(|e| {
-                    ChartExtractionError::XmlStructure(format!("{part_name}: {e}"))
-                })?;
+                writer
+                    .write_event(event.to_owned())
+                    .map_err(|e| ChartExtractionError::XmlStructure(format!("{part_name}: {e}")))?;
             }
         }
 
@@ -1349,7 +1427,10 @@ fn rewrite_relationship_ids(
     Ok(writer.into_inner())
 }
 
-fn extract_pivot_table_rids(fragment: &str, context: &str) -> Result<Vec<String>, ChartExtractionError> {
+fn extract_pivot_table_rids(
+    fragment: &str,
+    context: &str,
+) -> Result<Vec<String>, ChartExtractionError> {
     let maybe_prefix = detect_prefix_in_fragment(fragment, "pivotTables")
         .or_else(|| detect_prefix_in_fragment(fragment, "pivotTable"));
     let prefix_decl = maybe_prefix
@@ -1428,8 +1509,7 @@ fn detect_attr_prefixes(fragment: &str, local: &str) -> HashSet<String> {
         let mut start = idx;
         while start > 0 {
             let c = bytes[start - 1];
-            let is_name_char =
-                c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c == b'.';
+            let is_name_char = c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c == b'.';
             if !is_name_char {
                 break;
             }
@@ -1488,11 +1568,13 @@ fn rewrite_spreadsheetml_prefix_in_fragment(
                         ))
                     })?;
                 } else {
-                    writer.write_event(Event::Start(e.to_owned())).map_err(|e| {
-                        ChartExtractionError::XmlStructure(format!(
-                            "{part_name}: xml write error: {e}"
-                        ))
-                    })?;
+                    writer
+                        .write_event(Event::Start(e.to_owned()))
+                        .map_err(|e| {
+                            ChartExtractionError::XmlStructure(format!(
+                                "{part_name}: xml write error: {e}"
+                            ))
+                        })?;
                 }
             }
             Event::Empty(ref e) => {
@@ -1521,11 +1603,13 @@ fn rewrite_spreadsheetml_prefix_in_fragment(
                         ))
                     })?;
                 } else {
-                    writer.write_event(Event::Empty(e.to_owned())).map_err(|e| {
-                        ChartExtractionError::XmlStructure(format!(
-                            "{part_name}: xml write error: {e}"
-                        ))
-                    })?;
+                    writer
+                        .write_event(Event::Empty(e.to_owned()))
+                        .map_err(|e| {
+                            ChartExtractionError::XmlStructure(format!(
+                                "{part_name}: xml write error: {e}"
+                            ))
+                        })?;
                 }
             }
             Event::End(ref e) => {
@@ -1629,7 +1713,10 @@ mod tests {
 
         let pivot_pos = updated_str.find("<pivotTables").unwrap();
         let ext_pos = updated_str.find("<extLst").unwrap();
-        assert!(pivot_pos < ext_pos, "pivotTables should be inserted before extLst");
+        assert!(
+            pivot_pos < ext_pos,
+            "pivotTables should be inserted before extLst"
+        );
     }
 
     #[test]
@@ -1641,8 +1728,14 @@ mod tests {
             apply_preserved_pivot_caches_to_workbook_xml(workbook, fragment).expect("patch");
 
         Document::parse(&updated).expect("output should be parseable XML");
-        assert!(updated.contains("<x:pivotCaches"), "missing inserted block: {updated}");
-        assert!(!updated.contains("</workbook>"), "introduced unprefixed close tag: {updated}");
+        assert!(
+            updated.contains("<x:pivotCaches"),
+            "missing inserted block: {updated}"
+        );
+        assert!(
+            !updated.contains("</workbook>"),
+            "introduced unprefixed close tag: {updated}"
+        );
         assert!(
             !updated.contains("</pivotCaches>"),
             "introduced unprefixed pivotCaches close tag: {updated}"
@@ -1663,12 +1756,63 @@ mod tests {
 
         Document::parse(&updated).expect("output should be parseable XML");
         assert!(
-            updated.contains(r#"xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#),
+            updated.contains(
+                r#"xmlns:rel="http://schemas.openxmlformats.org/officeDocument/2006/relationships""#
+            ),
             "missing xmlns:rel declaration: {updated}"
         );
         assert!(
             updated.contains(r#"rel:id="rId2""#),
             "missing rel:id attribute: {updated}"
+        );
+    }
+
+    #[test]
+    fn inserts_pivot_caches_into_self_closing_prefixed_workbook_root() {
+        let workbook = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><x:workbook xmlns:x="{SPREADSHEETML_NS}"/>"#
+        );
+        let fragment = r#"<x:pivotCaches><x:pivotCache cacheId="1" r:id="rId1"/></x:pivotCaches>"#;
+
+        let updated =
+            apply_preserved_pivot_caches_to_workbook_xml(&workbook, fragment).expect("patch");
+
+        Document::parse(&updated).expect("output should be parseable XML");
+        assert!(
+            updated.contains("<x:pivotCaches"),
+            "missing inserted block: {updated}"
+        );
+        assert!(
+            updated.contains("</x:workbook>"),
+            "missing prefixed close tag: {updated}"
+        );
+        assert!(
+            !updated.contains("</workbook>"),
+            "introduced unprefixed close tag: {updated}"
+        );
+    }
+
+    #[test]
+    fn inserts_pivot_caches_into_self_closing_default_ns_workbook_root_adds_relationship_namespace()
+    {
+        let workbook = format!(
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="{SPREADSHEETML_NS}"/>"#
+        );
+        let fragment = r#"<pivotCaches><pivotCache cacheId="1" r:id="rId1"/></pivotCaches>"#;
+
+        let updated =
+            apply_preserved_pivot_caches_to_workbook_xml(&workbook, fragment).expect("patch");
+
+        Document::parse(&updated).expect("output should be parseable XML");
+        assert!(
+            updated.contains(&format!(
+                r#"<workbook xmlns="{SPREADSHEETML_NS}" xmlns:r="{REL_NS}""#
+            )),
+            "missing xmlns:r declaration on <workbook>: {updated}"
+        );
+        assert!(
+            updated.contains("<pivotCaches"),
+            "missing inserted block: {updated}"
         );
     }
 
@@ -1681,7 +1825,10 @@ mod tests {
             apply_preserved_pivot_caches_to_workbook_xml(workbook, fragment).expect("patch");
 
         Document::parse(&updated).expect("output should be parseable XML");
-        assert!(updated.contains("</x:pivotCaches>"), "missing prefixed close tag: {updated}");
+        assert!(
+            updated.contains("</x:pivotCaches>"),
+            "missing prefixed close tag: {updated}"
+        );
         assert!(
             !updated.contains("</pivotCaches>"),
             "introduced unprefixed pivotCaches close tag: {updated}"
@@ -1716,7 +1863,10 @@ mod tests {
         let rewritten = rewrite_relationship_ids(fragment.as_bytes(), "test", &id_map)
             .expect("rewrite relationship ids");
         let rewritten = std::str::from_utf8(&rewritten).unwrap();
-        assert!(rewritten.contains(r#"id="rId9""#), "unexpected output: {rewritten}");
+        assert!(
+            rewritten.contains(r#"id="rId9""#),
+            "unexpected output: {rewritten}"
+        );
         assert!(
             !rewritten.contains(r#"id="rId1""#),
             "unexpected output: {rewritten}"

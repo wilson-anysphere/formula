@@ -27,7 +27,9 @@ fn sheet_part_for_name(saved: &[u8], name: &str) -> String {
 
     let sheet = parsed
         .descendants()
-        .find(|n| n.is_element() && n.tag_name().name() == "sheet" && n.attribute("name") == Some(name))
+        .find(|n| {
+            n.is_element() && n.tag_name().name() == "sheet" && n.attribute("name") == Some(name)
+        })
         .expect("expected sheet in workbook.xml");
 
     // `r:id` is a namespaced attribute, so roxmltree exposes it as `(namespace-uri, local-name)`.
@@ -61,7 +63,6 @@ fn writer_emits_vm_cm_on_added_sheet() {
         cell,
         CellValue::String("MSFT".to_string()),
     );
- 
     // Inject value/cell metadata that should be serialized onto the `<c>` element.
     let meta = doc
         .xlsx_meta_mut()
