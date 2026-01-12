@@ -389,10 +389,12 @@ function createDefaultFileAdapter(): FileAdapter {
               };
             }
           : undefined,
-       listDir: async (path, options = {}) => {
-         const recursive = options.recursive ?? false;
-         if (typeof readDir !== "function") {
-           const invoke = getTauriInvoke();
+      listDir: async (path, options = {}) => {
+        const recursive = options.recursive ?? false;
+        // Prefer the backend `list_dir` command when available. It returns mtime/size and enforces
+        // backend-side resource limits to prevent excessive memory/CPU usage.
+        if (hasTauriInvoke()) {
+          const invoke = getTauriInvoke();
            let payload: unknown;
            try {
              payload = await invoke("list_dir", { path, recursive });
@@ -403,13 +405,13 @@ function createDefaultFileAdapter(): FileAdapter {
                  `This folder contains too many files (or is too deeply nested) to list safely.\n\n${message}\n\nTry selecting a smaller folder or disabling recursive listing.`,
                );
              }
-             throw err instanceof Error ? err : new Error(message);
-           }
-           if (!Array.isArray(payload)) throw new Error("Unexpected list_dir payload returned from filesystem API");
-           return payload.map((entry) => ({
-             path: String((entry as any)?.path ?? ""),
-             name: typeof (entry as any)?.name === "string" ? (entry as any).name : undefined,
-             size: (() => {
+            throw err instanceof Error ? err : new Error(message);
+          }
+          if (!Array.isArray(payload)) throw new Error("Unexpected list_dir payload returned from filesystem API");
+          return payload.map((entry) => ({
+            path: String((entry as any)?.path ?? ""),
+            name: typeof (entry as any)?.name === "string" ? (entry as any).name : undefined,
+            size: (() => {
               try {
                 return normalizeFileSize((entry as any)?.size);
               } catch {
@@ -419,6 +421,10 @@ function createDefaultFileAdapter(): FileAdapter {
             mtimeMs: (entry as any)?.mtimeMs != null ? normalizeMtimeMs((entry as any).mtimeMs) : undefined,
             isDir: Boolean((entry as any)?.isDir),
           }));
+        }
+
+        if (typeof readDir !== "function") {
+          throw new Error("Filesystem directory listing API not available");
         }
 
         // The FS plugin does not include mtime/size, so gather metadata for each entry.
