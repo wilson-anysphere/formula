@@ -54,16 +54,28 @@ fn coupon_pcd_ncd_num(
     system: ExcelDateSystem,
 ) -> ExcelResult<(i32, i32, i32)> {
     let months = coupon_period_months(frequency).ok_or(ExcelError::Num)?;
-
-    let mut ncd = maturity;
     let mut n = 1i32;
 
+    // Important: Excel's coupon schedule is anchored on maturity and steps in whole coupon periods.
+    // Using iterative EDATE stepping (EDATE(prev_coupon, -months)) can "drift" the day-of-month
+    // after clamping (e.g. 31st -> 28th -> 28th), producing incorrect earlier coupon dates for
+    // end-of-month schedules. To avoid this, always step relative to maturity.
     for _ in 0..MAX_COUPON_STEPS {
-        let pcd = date_time::edate(ncd, -months, system)?;
+        let months_back = months.checked_mul(n).ok_or(ExcelError::Num)?;
+        let pcd = date_time::edate(maturity, -months_back, system)?;
+        let ncd = if n == 1 {
+            maturity
+        } else {
+            let prev_months_back = months
+                .checked_mul(n.checked_sub(1).ok_or(ExcelError::Num)?)
+                .ok_or(ExcelError::Num)?;
+            date_time::edate(maturity, -prev_months_back, system)?
+        };
+
         if pcd <= settlement {
             return Ok((pcd, ncd, n));
         }
-        ncd = pcd;
+
         n = n.checked_add(1).ok_or(ExcelError::Num)?;
     }
 
@@ -79,6 +91,23 @@ fn days_between(start_date: i32, end_date: i32, basis: i32, system: ExcelDateSys
     }
 }
 
+fn coupon_period_e(pcd: i32, ncd: i32, basis: i32, freq: f64) -> ExcelResult<f64> {
+    let e = match basis {
+        // For these bases, Excel treats the regular coupon period as a fixed fraction of a
+        // 360-day or 365-day year (depending on basis).
+        0 | 2 | 4 => 360.0 / freq,
+        3 => 365.0 / freq,
+        // Actual/Actual uses the actual number of days between coupon dates.
+        1 => (ncd - pcd) as f64,
+        _ => return Err(ExcelError::Num),
+    };
+    if e.is_finite() && e > 0.0 {
+        Ok(e)
+    } else {
+        Err(if e == 0.0 { ExcelError::Div0 } else { ExcelError::Num })
+    }
+}
+
 fn coupon_schedule(
     settlement: i32,
     maturity: i32,
@@ -89,7 +118,8 @@ fn coupon_schedule(
     let (pcd, ncd, n) = coupon_pcd_ncd_num(settlement, maturity, frequency, system)?;
 
     let a = days_between(pcd, settlement, basis, system)? as f64;
-    let e = days_between(pcd, ncd, basis, system)? as f64;
+    let freq = frequency as f64;
+    let e = coupon_period_e(pcd, ncd, basis, freq)?;
     let dsc = days_between(settlement, ncd, basis, system)? as f64;
 
     if !a.is_finite() || !e.is_finite() || !dsc.is_finite() {
@@ -349,4 +379,3 @@ pub fn mduration(
         Err(ExcelError::Num)
     }
 }
-

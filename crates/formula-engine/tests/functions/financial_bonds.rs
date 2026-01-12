@@ -1,5 +1,6 @@
 use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::functions::financial::{duration, mduration, price, yield_rate};
+use formula_engine::functions::date_time;
 use formula_engine::{ErrorKind, Value};
 
 use super::harness::TestSheet;
@@ -124,6 +125,70 @@ fn price_supports_zero_yield() {
 }
 
 #[test]
+fn price_basis_2_and_3_use_fixed_coupon_period_length() {
+    // Construct a zero-coupon bond so the price depends only on the time-to-maturity exponent.
+    // For basis 2/3 Excel uses a fixed coupon-period length E (360/freq or 365/freq), while DSC
+    // remains an actual day count. That means DSC/E is not necessarily 1 even when settlement is a
+    // coupon date.
+    let system = ExcelDateSystem::EXCEL_1900;
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 7, 1), system).unwrap();
+    let ncd = ymd_to_serial(ExcelDate::new(2021, 1, 1), system).unwrap();
+
+    let yld = 0.1;
+    let redemption = 100.0;
+    let frequency = 2;
+    let freq = frequency as f64;
+    let g = 1.0 + yld / freq;
+
+    // basis 2: E = 360/freq
+    let dsc = (ncd - settlement) as f64;
+    let e2 = 360.0 / freq;
+    let t2 = dsc / e2 + 1.0; // maturity is one full period after NCD
+    let expected2 = redemption * g.powf(-t2);
+    let actual2 = price(settlement, maturity, 0.0, yld, redemption, frequency, 2, system).unwrap();
+    assert_close(actual2, expected2, 1e-10);
+
+    // basis 3: E = 365/freq
+    let e3 = 365.0 / freq;
+    let t3 = dsc / e3 + 1.0;
+    let expected3 = redemption * g.powf(-t3);
+    let actual3 = price(settlement, maturity, 0.0, yld, redemption, frequency, 3, system).unwrap();
+    assert_close(actual3, expected3, 1e-10);
+}
+
+#[test]
+fn coupon_schedule_is_anchored_on_maturity_for_eom_dates() {
+    // Regression test for EOM schedules: naive iterative EDATE stepping can drift after month-end
+    // clamping (e.g. 31st -> 28th -> 28th). Excel's coupon schedule is anchored on maturity, so
+    // stepping back in whole periods should recover the prior year/month-end date.
+    let system = ExcelDateSystem::EXCEL_1900;
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 8, 31), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 11, 1), system).unwrap();
+
+    let rate = 0.10;
+    let yld = 0.0;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 0;
+
+    // With yld=0, dirty price is simply redemption + N*coupon_payment (no discounting). For this
+    // schedule, the previous coupon date should be 2020-08-31 (not 2020-08-28), yielding A=61
+    // under the US 30/360 convention.
+    let coupon_payment = 100.0 * rate / (frequency as f64);
+    let n = 2.0;
+    let dirty = redemption + coupon_payment * n;
+
+    let pcd = ymd_to_serial(ExcelDate::new(2020, 8, 31), system).unwrap();
+    let a = date_time::days360(pcd, settlement, false, system).unwrap() as f64;
+    let e = 360.0 / (frequency as f64);
+    let expected = dirty - coupon_payment * (a / e);
+
+    let actual = price(settlement, maturity, rate, yld, redemption, frequency, basis, system).unwrap();
+    assert_close(actual, expected, 1e-10);
+}
+
+#[test]
 fn rejects_invalid_frequency_and_basis() {
     let system = ExcelDateSystem::EXCEL_1900;
     let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
@@ -164,4 +229,3 @@ fn builtins_accept_date_strings_via_datevalue() {
         Value::Error(ErrorKind::Num)
     );
 }
-
