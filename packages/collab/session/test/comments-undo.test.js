@@ -572,3 +572,53 @@ test("Binder-origin undo captures comment edits when legacy Array-backed comment
 
   doc.destroy();
 });
+
+test("Binder-origin undo captures comment edits when nested comment maps were created by a different Yjs instance (CJS applyUpdate)", () => {
+  const Ycjs = requireYjsCjs();
+
+  const remote = new Ycjs.Doc();
+  const comments = remote.getMap("comments");
+  remote.transact(() => {
+    const comment = new Ycjs.Map();
+    comment.set("id", "c1");
+    comment.set("cellRef", "Sheet1:0:0");
+    comment.set("kind", "threaded");
+    comment.set("authorId", "u1");
+    comment.set("authorName", "Alice");
+    comment.set("createdAt", 1);
+    comment.set("updatedAt", 1);
+    comment.set("resolved", false);
+    comment.set("content", "from-cjs");
+    comment.set("mentions", []);
+    comment.set("replies", new Ycjs.Array());
+    comments.set("c1", comment);
+  });
+
+  const update = Ycjs.encodeStateAsUpdate(remote);
+
+  const doc = new Y.Doc();
+  // Ensure the root exists in the ESM build so the update only introduces foreign
+  // nested comment maps (not a foreign `comments` root).
+  const commentsRoot = doc.getMap("comments");
+  Ycjs.applyUpdate(doc, update, REMOTE_ORIGIN);
+
+  // Verify the nested comment map is foreign.
+  const nested = commentsRoot.get("c1");
+  assert.ok(nested);
+  assert.equal(nested instanceof Y.Map, false);
+
+  const binderOrigin = { type: "document-controller:binder" };
+  const undoService = createUndoService({ mode: "collab", doc, scope: [commentsRoot], origin: binderOrigin });
+  const mgr = createCommentManagerForDoc({ doc, transact: undoService.transact });
+
+  assert.equal(mgr.listAll()[0]?.content, "from-cjs");
+
+  mgr.setCommentContent({ commentId: "c1", content: "edited", now: 2 });
+  assert.equal(mgr.listAll()[0]?.content, "edited");
+  assert.equal(undoService.canUndo(), true);
+
+  undoService.undo();
+  assert.equal(mgr.listAll()[0]?.content, "from-cjs");
+
+  doc.destroy();
+});
