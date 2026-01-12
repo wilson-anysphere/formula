@@ -243,7 +243,10 @@ function CollabBranchManagerPanel({ session }: { session: CollabSession }) {
       checkoutBranch: async (a: BranchActor, input: { name: string }) => {
         await commitCurrentState("auto: checkout");
         const state = await branchService.checkoutBranch(a as any, input as any);
-        applyDocumentStateToYjsDoc(session.doc, state as any, { origin: session.origin });
+        // Branch checkout is a bulk "time travel" operation and must not be captured by
+        // collaborative undo tracking. CollabSession also treats this origin as ignored
+        // for conflict monitors so it doesn't surface spurious conflicts.
+        applyDocumentStateToYjsDoc(session.doc, state as any, { origin: "branching-apply" });
         return state;
       },
       previewMerge: async (a: BranchActor, input: { sourceBranch: string }) => {
@@ -253,7 +256,8 @@ function CollabBranchManagerPanel({ session }: { session: CollabSession }) {
       merge: async (a: BranchActor, input: { sourceBranch: string; resolutions: any[]; message?: string }) => {
         await commitCurrentState("auto: merge");
         const result = await branchService.merge(a as any, input as any);
-        applyDocumentStateToYjsDoc(session.doc, (result as any).state, { origin: session.origin });
+        // See checkoutBranch origin note above.
+        applyDocumentStateToYjsDoc(session.doc, (result as any).state, { origin: "branching-apply" });
         return result;
       },
     } as any;
