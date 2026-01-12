@@ -2365,9 +2365,11 @@ fn patch_workbook_xml(
                 let mut saw_window_width = false;
                 let mut saw_window_height = false;
                 let mut saw_window_state = false;
+                let mut saw_active_tab = false;
                 for attr in e.attributes() {
                     let attr = attr?;
                     match attr.key.as_ref() {
+                        b"activeTab" => saw_active_tab = true,
                         b"xWindow" => saw_x_window = true,
                         b"yWindow" => saw_y_window = true,
                         b"windowWidth" => saw_window_width = true,
@@ -2379,7 +2381,8 @@ fn patch_workbook_xml(
                     writer.get_mut().extend_from_slice(attr.key.as_ref());
                     writer.get_mut().extend_from_slice(b"=\"");
                     let value = match attr.key.as_ref() {
-                        b"activeTab" | b"firstSheet" => {
+                        b"activeTab" => active_tab_idx.to_string(),
+                        b"firstSheet" => {
                             let old = attr.unescape_value()?.into_owned().parse::<usize>().ok();
                             old.and_then(|idx| {
                                 old_sheet_index_to_new_index
@@ -2393,7 +2396,7 @@ fn patch_workbook_xml(
                                 attr.unescape_value()
                                     .map(|v| v.into_owned())
                                     .unwrap_or_default()
-                            })
+                                })
                         }
                         b"xWindow" => view_window
                             .and_then(|window| window.x)
@@ -2498,6 +2501,13 @@ fn patch_workbook_xml(
                             }
                         }
                     }
+                }
+                if !saw_active_tab && active_tab_idx != 0 {
+                    writer.get_mut().extend_from_slice(b" activeTab=\"");
+                    writer
+                        .get_mut()
+                        .extend_from_slice(active_tab_idx.to_string().as_bytes());
+                    writer.get_mut().push(b'"');
                 }
                 writer.get_mut().push(b'>');
             }
@@ -2510,9 +2520,11 @@ fn patch_workbook_xml(
                 let mut saw_window_width = false;
                 let mut saw_window_height = false;
                 let mut saw_window_state = false;
+                let mut saw_active_tab = false;
                 for attr in e.attributes() {
                     let attr = attr?;
                     match attr.key.as_ref() {
+                        b"activeTab" => saw_active_tab = true,
                         b"xWindow" => saw_x_window = true,
                         b"yWindow" => saw_y_window = true,
                         b"windowWidth" => saw_window_width = true,
@@ -2524,7 +2536,8 @@ fn patch_workbook_xml(
                     writer.get_mut().extend_from_slice(attr.key.as_ref());
                     writer.get_mut().extend_from_slice(b"=\"");
                     let value = match attr.key.as_ref() {
-                        b"activeTab" | b"firstSheet" => {
+                        b"activeTab" => active_tab_idx.to_string(),
+                        b"firstSheet" => {
                             let old = attr.unescape_value()?.into_owned().parse::<usize>().ok();
                             old.and_then(|idx| {
                                 old_sheet_index_to_new_index
@@ -2538,7 +2551,7 @@ fn patch_workbook_xml(
                                 attr.unescape_value()
                                     .map(|v| v.into_owned())
                                     .unwrap_or_default()
-                            })
+                                })
                         }
                         b"xWindow" => view_window
                             .and_then(|window| window.x)
@@ -2643,6 +2656,13 @@ fn patch_workbook_xml(
                             }
                         }
                     }
+                }
+                if !saw_active_tab && active_tab_idx != 0 {
+                    writer.get_mut().extend_from_slice(b" activeTab=\"");
+                    writer
+                        .get_mut()
+                        .extend_from_slice(active_tab_idx.to_string().as_bytes());
+                    writer.get_mut().push(b'"');
                 }
                 writer.get_mut().extend_from_slice(b"/>");
             }
