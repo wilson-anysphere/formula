@@ -13,7 +13,10 @@ const MAX_RICH_TEXT_BYTES: usize = 2 * 1024 * 1024; // 2 MiB (HTML / RTF)
 
 fn normalize_base64_str(mut base64: &str) -> &str {
     base64 = base64.trim();
-    if base64.starts_with("data:") {
+    if base64
+        .get(0..5)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("data:"))
+    {
         if let Some(comma) = base64.find(',') {
             base64 = &base64[comma + 1..];
         }
@@ -259,6 +262,10 @@ mod tests {
         assert_eq!(estimate_base64_decoded_len("AAAA"), Some(3));
         assert_eq!(
             estimate_base64_decoded_len("data:image/png;base64,Zm9v"),
+            Some(3)
+        );
+        assert_eq!(
+            estimate_base64_decoded_len("DATA:image/png;base64,Zm9v"),
             Some(3)
         );
     }
