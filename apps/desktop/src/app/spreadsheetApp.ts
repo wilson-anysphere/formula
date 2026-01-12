@@ -682,6 +682,10 @@ export class SpreadsheetApp {
         connection: { wsUrl: collab.wsUrl, docId: collab.docId, token: collab.token },
         presence: { user: collab.user, activeSheet: this.sheetId },
       });
+      // Populate `modifiedBy` metadata for any direct `CollabSession.setCell*` writes
+      // (used by some conflict resolution + versioning flows) and ensure downstream
+      // conflict UX can attribute local edits correctly.
+      this.collabSession.setPermissions({ role: "editor", rangeRestrictions: [], userId: collab.user.id });
 
       this.sheetViewBinder = bindSheetViewToCollabSession({
         session: this.collabSession,
