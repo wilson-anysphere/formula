@@ -176,6 +176,61 @@ test(
   },
 );
 
+test(
+  "cursor AI policy guard ignores forbidden strings in excluded docs/ paths (git-tracked mode)",
+  { skip: !HAS_GIT },
+  async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-git-docs-excluded-pass-"));
+    try {
+      await writeFixtureFile(tmpRoot, "docs/notes.md", "OpenAI\n");
+
+      const init = spawnSync("git", ["init"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(init.status, 0, init.stderr);
+      const add = spawnSync("git", ["add", "docs/notes.md"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(add.status, 0, add.stderr);
+
+      const result = await runPolicyApi(tmpRoot);
+      assert.equal(result.ok, true, formatViolations(result.violations));
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test("cursor AI policy guard ignores forbidden strings in allowlisted AGENTS.md", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-agents-allowlist-pass-"));
+  try {
+    await writeFixtureFile(tmpRoot, "AGENTS.md", "OpenAI\n");
+
+    const result = await runPolicyApi(tmpRoot);
+    assert.equal(result.ok, true, formatViolations(result.violations));
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test(
+  "cursor AI policy guard does not allowlist AGENTS.md by basename (only exact root path)",
+  { skip: !HAS_GIT },
+  async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-git-agents-basename-fail-"));
+    try {
+      await writeFixtureFile(tmpRoot, "notes/AGENTS.md", "OpenAI\n");
+
+      const init = spawnSync("git", ["init"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(init.status, 0, init.stderr);
+      const add = spawnSync("git", ["add", "notes/AGENTS.md"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(add.status, 0, add.stderr);
+
+      const result = await runPolicyApi(tmpRoot, { maxViolations: 1 });
+      assert.equal(result.ok, false);
+      assert.match(formatViolations(result.violations), /openai/i);
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
+  },
+);
+
 test("cursor AI policy guard scans Dockerfiles for provider strings", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-dockerfile-fail-"));
   try {
