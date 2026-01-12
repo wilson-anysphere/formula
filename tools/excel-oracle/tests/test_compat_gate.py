@@ -178,6 +178,12 @@ class CompatGateTierPresetTests(unittest.TestCase):
         self.assertIn("thai", smoke_tags)
         self.assertIn("thai", p0_tags)
 
+    def test_smoke_tier_includes_coupon_schedule_tag(self) -> None:
+        compat_gate = self._load_compat_gate()
+
+        smoke_tags = compat_gate._effective_include_tags(tier="smoke", user_include_tags=[])
+        self.assertIn("coupon_schedule", smoke_tags)
+
     def test_user_include_tag_overrides_tier_presets(self) -> None:
         compat_gate = self._load_compat_gate()
 
