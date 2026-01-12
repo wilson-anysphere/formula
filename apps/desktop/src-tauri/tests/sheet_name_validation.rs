@@ -440,6 +440,34 @@ fn rename_sheet_rejects_duplicate_name_case_insensitive() {
 }
 
 #[test]
+fn rename_sheet_allows_case_only_change_on_same_sheet() {
+    let (mut state, sheet1_id, _sheet2_id) = loaded_state_with_two_sheets();
+    state
+        .rename_sheet(&sheet1_id, "sheet1".to_string())
+        .expect("expected rename to different case to succeed");
+    let workbook = state.get_workbook().expect("workbook loaded");
+    let sheet1 = workbook.sheet(&sheet1_id).expect("sheet exists");
+    assert_eq!(sheet1.name, "sheet1");
+}
+
+#[test]
+fn rename_sheet_allows_unicode_case_only_change_on_same_sheet() {
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("é".to_string());
+    workbook.add_sheet("Sheet2".to_string());
+    let sheet1_id = workbook.sheets[0].id.clone();
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    state
+        .rename_sheet(&sheet1_id, "É".to_string())
+        .expect("expected rename to different unicode case to succeed");
+    let workbook = state.get_workbook().expect("workbook loaded");
+    let sheet1 = workbook.sheet(&sheet1_id).expect("sheet exists");
+    assert_eq!(sheet1.name, "É");
+}
+
+#[test]
 fn rename_sheet_rejects_duplicate_name_with_unicode_case_folding() {
     let mut workbook = Workbook::new_empty(None);
     workbook.add_sheet("é".to_string());
