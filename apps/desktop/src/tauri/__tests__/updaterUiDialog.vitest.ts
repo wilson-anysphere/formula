@@ -46,17 +46,19 @@ const originalGlobalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "
 const originalWindowLocalStorage = Object.getOwnPropertyDescriptor(window, "localStorage");
 
 describe("updaterUi (dialog + download)", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useRealTimers();
     document.body.innerHTML = '<div id="toast-root"></div>';
-
-    // Node 25 ships an experimental `globalThis.localStorage` accessor that throws unless
-    // started with `--localstorage-file`. Provide a stable in-memory implementation for tests.
     const storage = createInMemoryLocalStorage();
+    // Node 25 ships an experimental `globalThis.localStorage` accessor that throws unless started
+    // with `--localstorage-file`. Ensure tests always have a stable in-memory implementation.
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
     Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
 
-    vi.resetModules();
+    // `updaterUi` holds state in module-level singletons. Tests in other suites may have
+    // imported it already; ensure we always start clean.
+    const { __resetUpdaterUiStateForTests } = await import("../updaterUi");
+    __resetUpdaterUiStateForTests();
   });
 
   afterEach(() => {

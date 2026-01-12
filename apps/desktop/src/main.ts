@@ -106,7 +106,7 @@ import { getPrimaryCommandKeybindingDisplay, type ContributedKeybinding } from "
 import { KeybindingService } from "./extensions/keybindingService.js";
 import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
-import { createCommandPalette } from "./command-palette/index.js";
+import { createCommandPalette, installCommandPaletteRecentsTracking } from "./command-palette/index.js";
 import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
 import { DEFAULT_GRID_LIMITS } from "./selection/selection.js";
 import type { GridLimits, Range, SelectionState } from "./selection/types";
@@ -1785,6 +1785,18 @@ function currentSelectionRect(): SelectionRect {
 
 let openCommandPalette: (() => void) | null = null;
 const commandRegistry = new CommandRegistry();
+const disposeCommandPaletteRecentsTracking = (() => {
+  try {
+    return installCommandPaletteRecentsTracking(commandRegistry, localStorage);
+  } catch {
+    // In extremely restricted environments (or future Node runtimes with throwing `localStorage` accessors),
+    // fall back to no-op tracking.
+    return () => {};
+  }
+})();
+window.addEventListener("unload", () => {
+  disposeCommandPaletteRecentsTracking();
+});
 
 // Expose for Playwright e2e so tests can execute commands by id without going
 // through UI affordances.

@@ -2,6 +2,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as notifications from "./notifications";
+
 const DISMISSED_VERSION_KEY = "formula.updater.dismissedVersion";
 const DISMISSED_AT_KEY = "formula.updater.dismissedAt";
 const TEST_TIMEOUT_MS = 30_000;
@@ -34,8 +36,7 @@ const originalGlobalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "
 const originalWindowLocalStorage = Object.getOwnPropertyDescriptor(window, "localStorage");
 const originalTauri = Object.getOwnPropertyDescriptor(globalThis, "__TAURI__");
 
-beforeEach(() => {
-  vi.resetModules();
+beforeEach(async () => {
   document.body.innerHTML = `<div id="toast-root"></div>`;
 
   // Ensure any stale test stubs from other suites don't leak into these tests.
@@ -48,6 +49,9 @@ beforeEach(() => {
   const storage = createInMemoryLocalStorage();
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
   Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
+
+  const { __resetUpdaterUiStateForTests } = await loadUpdaterUi();
+  __resetUpdaterUiStateForTests();
 });
 
 afterEach(() => {
@@ -127,7 +131,6 @@ describe("tauri/updaterUi dismissal persistence", () => {
 
   it("suppresses startup prompts for a recently-dismissed version, but manual checks still show", async () => {
     const { handleUpdaterEvent } = await loadUpdaterUi();
-    const notifications = await import("./notifications");
     const notifySpy = vi.spyOn(notifications, "notify").mockResolvedValue(undefined);
 
     localStorage.setItem(DISMISSED_VERSION_KEY, "1.2.3");
@@ -156,7 +159,6 @@ describe("tauri/updaterUi dismissal persistence", () => {
 
   it("sends a startup notification again once the dismissal TTL expires", async () => {
     const { handleUpdaterEvent } = await loadUpdaterUi();
-    const notifications = await import("./notifications");
     const notifySpy = vi.spyOn(notifications, "notify").mockResolvedValue(undefined);
 
     const eightDaysAgoMs = Date.now() - 8 * 24 * 60 * 60 * 1000;
@@ -172,7 +174,6 @@ describe("tauri/updaterUi dismissal persistence", () => {
 
   it("clears stored dismissal when a different version becomes available at startup", async () => {
     const { handleUpdaterEvent } = await loadUpdaterUi();
-    const notifications = await import("./notifications");
     const notifySpy = vi.spyOn(notifications, "notify").mockResolvedValue(undefined);
 
     localStorage.setItem(DISMISSED_VERSION_KEY, "1.2.3");

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { mountTitlebar } from "./mountTitlebar.js";
 
@@ -10,6 +10,12 @@ import { mountTitlebar } from "./mountTitlebar.js";
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 const TEST_TIMEOUT_MS = 30_000;
+
+afterEach(() => {
+  document.body.replaceChildren();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("mountTitlebar", () => {
   it("mounts a Titlebar into a container and unmounts cleanly", async () => {

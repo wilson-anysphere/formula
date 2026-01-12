@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as ui from "../../extensions/ui";
 import { setLocale, t, tWithVars } from "../../i18n/index.js";
 import * as notifications from "../notifications";
-import { handleUpdaterEvent, installUpdaterUi } from "../updaterUi";
+import { __resetUpdaterUiStateForTests, handleUpdaterEvent, installUpdaterUi } from "../updaterUi";
 
 async function flushMicrotasks(times = 4): Promise<void> {
   for (let idx = 0; idx < times; idx++) {
@@ -18,6 +18,7 @@ async function flushMicrotasks(times = 4): Promise<void> {
 describe("updaterUi (events)", () => {
   beforeEach(() => {
     setLocale("en-US");
+    __resetUpdaterUiStateForTests();
   });
 
   afterEach(() => {

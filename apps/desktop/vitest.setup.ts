@@ -27,14 +27,12 @@ class MemoryLocalStorage implements Storage {
   }
 }
 
-function localStorageUsable(): boolean {
+function storageUsable(storage: Storage | null | undefined): boolean {
   try {
-    // Node ships an experimental `globalThis.localStorage` that can be present but unusable
-    // unless the process is started with `--localstorage-file`. Some methods may throw even if
-    // simple reads appear to work, so probe the full API surface we rely on in tests.
-    const storage = globalThis.localStorage;
     if (!storage) return false;
-
+    // Node ships an experimental `globalThis.localStorage` that can be present but unusable unless the
+    // process is started with `--localstorage-file`. Some methods may throw even if reads appear to work,
+    // so probe the API surface our tests rely on.
     const probeKey = "vitest-probe";
     storage.setItem(probeKey, "1");
     storage.getItem(probeKey);
@@ -46,12 +44,43 @@ function localStorageUsable(): boolean {
   }
 }
 
-if (!localStorageUsable()) {
-  const storage = new MemoryLocalStorage();
+function installLocalStorage(storage: Storage): void {
   try {
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
   } catch {
-    // eslint-disable-next-line no-global-assign
-    globalThis.localStorage = storage;
+    try {
+      // eslint-disable-next-line no-global-assign
+      (globalThis as any).localStorage = storage;
+    } catch {
+      // ignore
+    }
   }
+
+  if (typeof window !== "undefined") {
+    try {
+      Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
+    } catch {
+      try {
+        // eslint-disable-next-line no-global-assign
+        (window as any).localStorage = storage;
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+// Node 25+ ships an experimental `globalThis.localStorage` accessor that throws unless Node is started
+// with `--localstorage-file`. Desktop tests rely on localStorage; provide a stable in-memory shim when
+// the built-in accessor is unusable.
+const existing = (() => {
+  try {
+    return (globalThis as any).localStorage as Storage | undefined;
+  } catch {
+    return undefined;
+  }
+})();
+
+if (!storageUsable(existing)) {
+  installLocalStorage(new MemoryLocalStorage());
 }

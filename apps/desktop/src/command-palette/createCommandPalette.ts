@@ -12,7 +12,8 @@ import {
   type PreparedCommandForFuzzy,
 } from "./fuzzy.js";
 import { searchFunctionResults, type CommandPaletteFunctionResult } from "./commandPaletteSearch.js";
-import { getRecentCommandIdsForDisplay, installCommandRecentsTracker, type StorageLike } from "./recents.js";
+import { getRecentCommandIdsForDisplay, type StorageLike } from "./recents.js";
+import { installCommandPaletteRecentsTracking } from "./installCommandPaletteRecentsTracking.js";
 import { searchShortcutCommands } from "./shortcutSearch.js";
 import { formatA1Range, parseGoTo, type GoToParseResult, type GoToWorkbookLookup } from "../../../../packages/search/index.js";
 
@@ -1121,25 +1122,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     renderResults("async");
   });
 
-  const disposeRecentsTracker = installCommandRecentsTracker(commandRegistry, storage, {
-    ignoreCommandIds: [
-      "workbench.showCommandPalette",
-      // Undo/redo is also extremely high frequency during normal editing and not
-      // very useful as a "recent command palette command".
-      "edit.undo",
-      "edit.redo",
-      // Clipboard commands are extremely high frequency (via keybindings/menus) and would
-      // otherwise dominate the "RECENT" group.
-      "clipboard.copy",
-      "clipboard.cut",
-      "clipboard.paste",
-      "clipboard.pasteSpecial",
-      "clipboard.pasteSpecial.all",
-      "clipboard.pasteSpecial.values",
-      "clipboard.pasteSpecial.formulas",
-      "clipboard.pasteSpecial.formats",
-    ],
-  });
+  const disposeRecentsTracker = installCommandPaletteRecentsTracking(commandRegistry, storage);
 
   const onOverlayClick = (e: MouseEvent) => {
     if (e.target === overlay) close();

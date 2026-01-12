@@ -761,11 +761,11 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
 
   // Tray-triggered manual checks can happen while the app is hidden to tray. Ensure the
   // window is visible before rendering any toast/dialog feedback.
-  // Note: `source` may be rewritten from "startup" -> "manual" when the user clicks
-  // "Check for Updates" while a startup check is in-flight. In that follow-up case, we
-  // still want manual-style toasts/dialogs, but we should not spam `show()`/`setFocus()`
-  // twice; the initial manual event already raised the window.
-  if (rawSource === "manual") {
+  //
+  // If we're treating a startup-sourced completion event as a manual follow-up (because the user
+  // clicked "Check for Updates" while a startup check was already running), avoid re-showing /
+  // refocusing the window: it was already surfaced for the initial manual request.
+  if (source === "manual" && !followUpManual) {
     await showMainWindowBestEffort();
   }
 
@@ -894,4 +894,40 @@ export async function restartToInstallUpdate(): Promise<boolean> {
     },
     beforeQuitErrorToast: t("updater.restartFailed"),
   });
+}
+
+/**
+ * Internal: reset module-scoped state for unit tests.
+ *
+ * The updater UI module maintains dialog + in-flight state in module-level variables so the
+ * desktop shell can treat it as a singleton. Vitest runs multiple suites in the same worker,
+ * so tests must be able to start from a clean state.
+ */
+export function __resetUpdaterUiStateForTests(): void {
+  try {
+    updateDialog?.dialog.close();
+  } catch {
+    // ignore
+  }
+  try {
+    updateDialog?.dialog.remove();
+  } catch {
+    // ignore
+  }
+
+  updateDialog = null;
+  updateInfo = null;
+  downloadedUpdate = null;
+  downloadInFlight = false;
+  lastUpdateError = null;
+
+  progressDownloaded = 0;
+  progressTotal = null;
+  progressPercent = null;
+
+  manualUpdateCheckFollowUp = false;
+  if (manualUpdateCheckFollowUpTimeout) {
+    clearTimeout(manualUpdateCheckFollowUpTimeout);
+    manualUpdateCheckFollowUpTimeout = null;
+  }
 }
