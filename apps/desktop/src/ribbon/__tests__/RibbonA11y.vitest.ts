@@ -91,7 +91,7 @@ describe("Ribbon a11y + keyboard navigation", () => {
     act(() => root.unmount());
   });
 
-  it("supports Left/Right/Home/End keyboard navigation (wraps around)", () => {
+  it("supports Left/Right/Home/End keyboard navigation (wraps around)", async () => {
     const { container, root } = renderRibbon();
 
     // Start on "Home".
@@ -100,39 +100,44 @@ describe("Ribbon a11y + keyboard navigation", () => {
     expect(document.activeElement).toBe(home);
 
     // Right -> Insert
-    act(() => {
+    await act(async () => {
       home.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     });
     const insert = getSelectedTab(container);
     expect(insert.textContent?.trim()).toBe("Insert");
     expect(document.activeElement).toBe(insert);
 
     // End -> Help
-    act(() => {
+    await act(async () => {
       insert.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     });
     const help = getSelectedTab(container);
     expect(help.textContent?.trim()).toBe("Help");
     expect(document.activeElement).toBe(help);
 
     // Right on last tab wraps -> File (index 0 in schema)
-    act(() => {
+    await act(async () => {
       help.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     });
     const file = getSelectedTab(container);
     expect(file.textContent?.trim()).toBe("File");
     expect(document.activeElement).toBe(file);
 
     // Home -> File (stays)
-    act(() => {
+    await act(async () => {
       file.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     });
     expect(getSelectedTab(container).textContent?.trim()).toBe("File");
 
     // Left on first tab wraps -> Help
     const fileTab = getSelectedTab(container);
-    act(() => {
+    await act(async () => {
       fileTab.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
     });
     expect(getSelectedTab(container).textContent?.trim()).toBe("Help");
 

@@ -217,11 +217,15 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
         setFlyoutOpen(false);
       }
       actions.onTabChange?.(tab.id);
-      const button = tabButtonRefs.current[tab.id];
-      // Prefer keeping the viewport stable while still ensuring the newly-focused
-      // tab is visible within the horizontally-scrollable tab strip.
-      button?.focus({ preventScroll: true });
-      button?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      // Focus needs to occur after React has committed updates so that the newly
+      // selected tab isn't still hidden by responsive styles (e.g. narrow tab strip).
+      requestAnimationFrame(() => {
+        const button = tabButtonRefs.current[tab.id];
+        // Prefer keeping the viewport stable while still ensuring the newly-focused
+        // tab is visible within the horizontally-scrollable tab strip.
+        button?.focus({ preventScroll: true });
+        button?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+      });
     },
     [actions, tabs],
   );
