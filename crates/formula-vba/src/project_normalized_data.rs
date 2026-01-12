@@ -57,9 +57,18 @@ pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
     // some TLV-ish dir streams).
     let mut in_module = false;
     let mut module_seen_non_name_record = false;
+    // Some producers appear to use 0x0049 as the Unicode marker/record for MODULEDOCSTRING rather
+    // than the canonical 0x0048. Track whether we've just seen MODULEDOCSTRING so we can
+    // distinguish that from MODULEHELPFILEPATHUNICODE (0x0049), which this helper intentionally
+    // excludes.
+    let mut expect_module_docstring_unicode = false;
     while offset < dir_decompressed.len() {
         let (id, data, next_offset) = read_dir_record(&dir_decompressed, offset)?;
         offset = next_offset;
+
+        if expect_module_docstring_unicode && !matches!(id, 0x0048 | 0x0049) {
+            expect_module_docstring_unicode = false;
+        }
 
         match id {
             // ---------------------------------------------------------------------
@@ -163,6 +172,7 @@ pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 if in_module {
                     module_seen_non_name_record = true;
                 }
+                expect_module_docstring_unicode = true;
             }
 
             // Non-string module metadata records included in V3.
@@ -183,6 +193,17 @@ pub fn project_normalized_data_v3(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                 if in_module {
                     module_seen_non_name_record = true;
                 }
+                expect_module_docstring_unicode = false;
+            }
+            // Some producers use 0x0049 as the MODULEDOCSTRING Unicode marker/record. Only treat it
+            // as a docstring variant when it follows MODULEDOCSTRING; otherwise it is more likely
+            // MODULEHELPFILEPATHUNICODE (which this helper intentionally excludes).
+            0x0049 if expect_module_docstring_unicode => {
+                out.extend_from_slice(unicode_record_payload(data)?);
+                if in_module {
+                    module_seen_non_name_record = true;
+                }
+                expect_module_docstring_unicode = false;
             }
 
             // All other records (references, module offsets, etc.) are excluded from this helper's
@@ -213,6 +234,10 @@ fn scan_unicode_presence(
     // some real-world projects reuse 0x0048. Track this expectation so we can disambiguate 0x0048
     // as either MODULESTREAMNAMEUNICODE or MODULEDOCSTRINGUNICODE depending on context.
     let mut expect_module_stream_name_unicode = false;
+    // Some producers appear to use 0x0049 as the Unicode marker/record for MODULEDOCSTRING rather
+    // than the canonical 0x0048. Track whether we've just seen MODULEDOCSTRING so we can
+    // distinguish that from MODULEHELPFILEPATHUNICODE (0x0049).
+    let mut expect_module_docstring_unicode = false;
 
     let mut offset = 0usize;
     while offset < dir_decompressed.len() {
@@ -222,6 +247,9 @@ fn scan_unicode_presence(
         if expect_module_stream_name_unicode && !matches!(id, 0x0032 | 0x0048) {
             expect_module_stream_name_unicode = false;
         }
+        if expect_module_docstring_unicode && !matches!(id, 0x0048 | 0x0049) {
+            expect_module_docstring_unicode = false;
+        }
 
         match id {
             // New module record group starts at MODULENAME.
@@ -230,6 +258,7 @@ fn scan_unicode_presence(
                 modules_unicode.push(ModuleUnicodePresence::default());
                 current_module_seen_non_name_record = false;
                 expect_module_stream_name_unicode = false;
+                expect_module_docstring_unicode = false;
             }
 
             // Project-level Unicode/alternate string variants.
@@ -248,6 +277,7 @@ fn scan_unicode_presence(
                     });
                     current_module_seen_non_name_record = false;
                     expect_module_stream_name_unicode = false;
+                    expect_module_docstring_unicode = false;
                 } else if let Some(idx) = current_module {
                     modules_unicode[idx].module_name = true;
                 }
@@ -261,6 +291,13 @@ fn scan_unicode_presence(
                 } else {
                     expect_module_stream_name_unicode = false;
                 }
+                expect_module_docstring_unicode = false;
+            }
+            0x001B | 0x001C => {
+                if current_module.is_some() {
+                    current_module_seen_non_name_record = true;
+                }
+                expect_module_docstring_unicode = true;
             }
             0x0032 => {
                 if let Some(idx) = current_module {
@@ -268,6 +305,7 @@ fn scan_unicode_presence(
                     current_module_seen_non_name_record = true;
                 }
                 expect_module_stream_name_unicode = false;
+                expect_module_docstring_unicode = false;
             }
             0x0048 => {
                 if let Some(idx) = current_module {
@@ -280,14 +318,26 @@ fn scan_unicode_presence(
                     }
                 }
                 expect_module_stream_name_unicode = false;
+                expect_module_docstring_unicode = false;
+            }
+            0x0049 => {
+                if let Some(idx) = current_module {
+                    current_module_seen_non_name_record = true;
+                    if expect_module_docstring_unicode {
+                        modules_unicode[idx].module_docstring = true;
+                    }
+                }
+                expect_module_stream_name_unicode = false;
+                expect_module_docstring_unicode = false;
             }
             // Any non-name module record helps disambiguate MODULENAMEUNICODE as either an alternate
             // representation (immediately after MODULENAME) or the start of a new module group.
-            0x001B | 0x001C | 0x001E | 0x0021 | 0x0025 | 0x0028 | 0x002B | 0x002C | 0x0031 => {
+            0x001E | 0x0021 | 0x0025 | 0x0028 | 0x002B | 0x002C | 0x0031 => {
                 if current_module.is_some() {
                     current_module_seen_non_name_record = true;
                 }
                 expect_module_stream_name_unicode = false;
+                expect_module_docstring_unicode = false;
             }
 
             _ => {}

@@ -1136,6 +1136,58 @@ fn project_normalized_data_v3_omits_moduledocstring_001b_when_unicode_record_pre
 }
 
 #[test]
+fn project_normalized_data_v3_treats_0049_as_moduledocstringunicode_when_following_moduledocstring() {
+    // Some producers appear to use 0x0049 as the Unicode marker/record for MODULEDOCSTRING rather
+    // than the canonical 0x0048. Ensure we only treat it as a docstring Unicode variant when it
+    // follows MODULEDOCSTRING, and that it causes the ANSI docstring bytes to be omitted.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        push_record(&mut out, 0x0019, b"Module1");
+        push_record(&mut out, 0x001C, b"AnsiDoc");
+        push_record(&mut out, 0x0049, &unicode_record_data("UniDoc"));
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized =
+        project_normalized_data_v3_dir_records(&vba_bin).expect("ProjectNormalizedDataV3");
+
+    let expected = [b"Module1".to_vec(), utf16le_bytes("UniDoc"), 0u16.to_le_bytes().to_vec()].concat();
+
+    assert_eq!(normalized, expected);
+    assert!(
+        !normalized.windows(b"AnsiDoc".len()).any(|w| w == b"AnsiDoc"),
+        "expected ANSI MODULEDOCSTRING bytes to be omitted when 0x0049 Unicode variant is present"
+    );
+}
+
+#[test]
+fn project_normalized_data_v3_ignores_modulehelpfilepathunicode_0049() {
+    // Ensure we do not accidentally treat MODULEHELPFILEPATHUNICODE (0x0049) as a docstring record.
+    // `project_normalized_data_v3_dir_records` intentionally excludes helpfile path records.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        push_record(&mut out, 0x0019, b"Module1");
+        push_record(&mut out, 0x001D, b"HelpPath"); // MODULEHELPFILEPATH
+        push_record(&mut out, 0x0049, &unicode_record_data("HelpPathUni"));
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized =
+        project_normalized_data_v3_dir_records(&vba_bin).expect("ProjectNormalizedDataV3");
+
+    let expected = [b"Module1".to_vec(), 0u16.to_le_bytes().to_vec()].concat();
+    assert_eq!(normalized, expected);
+}
+
+#[test]
 fn project_normalized_data_v3_strips_unicode_length_prefix_when_prefix_is_byte_count() {
     // Some producers embed an internal u32 length prefix in Unicode dir record payloads where the
     // length is the UTF-16LE byte count (not code units). Ensure we strip the prefix in this case.
