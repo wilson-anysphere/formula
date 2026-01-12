@@ -444,6 +444,9 @@ export function CellFormattingDemo(): React.ReactElement {
         <div style={{ marginTop: 6, color: "var(--formula-grid-cell-text, #4b5563)", opacity: 0.8 }}>
           Use this view to manually verify cell formatting changes in <code>@formula/grid</code>.
         </div>
+        <div style={{ marginTop: 6, color: "var(--formula-grid-cell-text, #4b5563)", opacity: 0.7, fontSize: 12 }}>
+          Tip: drag row/column header boundaries to resize; double-click to auto-fit.
+        </div>
 
         <div style={{ marginTop: 10, display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div>
@@ -577,6 +580,7 @@ export function CellFormattingDemo(): React.ReactElement {
           onZoomChange={setZoom}
           onSelectionChange={setSelection}
           onSelectionRangeChange={setSelectionRange}
+          enableResize
           apiRef={apiRef}
         />
       </div>
