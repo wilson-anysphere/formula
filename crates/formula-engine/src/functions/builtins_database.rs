@@ -174,7 +174,10 @@ inventory::submit! {
     }
 }
 
-fn parse_query(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Result<DatabaseQuery, ErrorKind> {
+fn parse_query(
+    ctx: &dyn FunctionContext,
+    args: &[CompiledExpr],
+) -> Result<DatabaseQuery, ErrorKind> {
     let database = ctx.eval_arg(&args[0]);
     let field = eval_scalar_arg(ctx, &args[1]);
     let criteria = ctx.eval_arg(&args[2]);
@@ -188,7 +191,11 @@ fn dsum_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let mut sum = 0.0;
-    for row in query.iter_matching_rows() {
+    for row in query.iter_matching_rows(ctx) {
+        let row = match row {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
         match query.field_value(row) {
             Value::Number(n) => sum += *n,
             Value::Error(e) => return Value::Error(*e),
@@ -211,7 +218,11 @@ fn daverage_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let mut sum = 0.0;
     let mut count: u64 = 0;
-    for row in query.iter_matching_rows() {
+    for row in query.iter_matching_rows(ctx) {
+        let row = match row {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
         match query.field_value(row) {
             Value::Number(n) => {
                 sum += *n;
@@ -240,7 +251,11 @@ fn dmin_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let mut best: Option<f64> = None;
-    for row in query.iter_matching_rows() {
+    for row in query.iter_matching_rows(ctx) {
+        let row = match row {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
         match query.field_value(row) {
             Value::Number(n) => best = Some(best.map_or(*n, |b| b.min(*n))),
             Value::Error(e) => return Value::Error(*e),
@@ -262,7 +277,11 @@ fn dmax_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let mut best: Option<f64> = None;
-    for row in query.iter_matching_rows() {
+    for row in query.iter_matching_rows(ctx) {
+        let row = match row {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
         match query.field_value(row) {
             Value::Number(n) => best = Some(best.map_or(*n, |b| b.max(*n))),
             Value::Error(e) => return Value::Error(*e),
@@ -285,7 +304,11 @@ fn dproduct_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
 
     let mut out = 1.0;
     let mut saw_number = false;
-    for row in query.iter_matching_rows() {
+    for row in query.iter_matching_rows(ctx) {
+        let row = match row {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
         match query.field_value(row) {
             Value::Number(n) => {
                 saw_number = true;
@@ -318,7 +341,11 @@ fn dcount_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let mut count: u64 = 0;
-    for row in query.iter_matching_rows() {
+    for row in query.iter_matching_rows(ctx) {
+        let row = match row {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
         if matches!(query.field_value(row), Value::Number(_)) {
             count += 1;
         }
@@ -333,7 +360,11 @@ fn dcounta_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let mut count: u64 = 0;
-    for row in query.iter_matching_rows() {
+    for row in query.iter_matching_rows(ctx) {
+        let row = match row {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
         if !matches!(query.field_value(row), Value::Blank) {
             count += 1;
         }
@@ -348,7 +379,11 @@ fn dget_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
     };
 
     let mut match_row: Option<usize> = None;
-    for row in query.iter_matching_rows() {
+    for row in query.iter_matching_rows(ctx) {
+        let row = match row {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
         if match_row.is_some() {
             return Value::Error(ErrorKind::Num);
         }
@@ -390,7 +425,11 @@ fn dstdev_impl(ctx: &dyn FunctionContext, args: &[CompiledExpr], variant: StdevV
     };
 
     let mut values = Vec::new();
-    for row in query.iter_matching_rows() {
+    for row in query.iter_matching_rows(ctx) {
+        let row = match row {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
         match query.field_value(row) {
             Value::Number(n) => values.push(*n),
             Value::Error(e) => return Value::Error(*e),
@@ -434,7 +473,11 @@ fn dvar_impl(ctx: &dyn FunctionContext, args: &[CompiledExpr], variant: VarVaria
     };
 
     let mut values = Vec::new();
-    for row in query.iter_matching_rows() {
+    for row in query.iter_matching_rows(ctx) {
+        let row = match row {
+            Ok(r) => r,
+            Err(e) => return Value::Error(e),
+        };
         match query.field_value(row) {
             Value::Number(n) => values.push(*n),
             Value::Error(e) => return Value::Error(*e),

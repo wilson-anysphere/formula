@@ -12,7 +12,7 @@ def generate(
     # ------------------------------------------------------------------
     # Database functions (legacy list/database)
     # ------------------------------------------------------------------
-    db_inputs = [
+    db_table_inputs = [
         # Database: A1:D4 (header row + 3 records)
         CellInput("A1", "Name"),
         CellInput("B1", "Dept"),
@@ -30,6 +30,8 @@ def generate(
         CellInput("B4", "HR"),
         CellInput("C4", 28),
         CellInput("D4", 1200),
+    ]
+    db_standard_criteria_inputs = [
         # Criteria: F1:G3
         # (Dept="Sales" AND Age>30) OR (Dept="HR" AND Age<30)
         CellInput("F1", "Dept"),
@@ -39,6 +41,7 @@ def generate(
         CellInput("F3", "HR"),
         CellInput("G3", "<30"),
     ]
+    db_inputs = [*db_table_inputs, *db_standard_criteria_inputs]
 
     for func in [
         "DAVERAGE",
@@ -72,3 +75,51 @@ def generate(
         output_cell="J1",
     )
 
+    # ------------------------------------------------------------------
+    # Database "computed criteria" (blank criteria header + formula criteria)
+    # ------------------------------------------------------------------
+    # Basic computed criteria: header is blank, criteria cell contains a formula referencing the
+    # first record row of the database (row 2), and it is evaluated as-if filled down.
+    add_case(
+        cases,
+        prefix="database_dsum_computed",
+        tags=["database", "DSUM", "computed-criteria"],
+        formula='=DSUM(A1:D4,"Salary",F1:F2)',
+        inputs=[
+            *db_table_inputs,
+            CellInput("F2", formula="=C2>30"),
+        ],
+        output_cell="J1",
+    )
+
+    # Error propagation: a formula error for any record row should propagate out of DSUM.
+    add_case(
+        cases,
+        prefix="database_dsum_computed",
+        tags=["database", "DSUM", "computed-criteria", "errors"],
+        formula='=DSUM(A1:D4,"Salary",F1:F2)',
+        inputs=[
+            *db_table_inputs,
+            CellInput("F2", formula="=1/(C2-35)>0"),
+        ],
+        output_cell="J1",
+    )
+
+    # OR across clauses mixing computed + standard criteria:
+    # (Dept="Sales" AND computed Age>32) OR (Dept="HR" AND Age<30)
+    add_case(
+        cases,
+        prefix="database_dsum_computed",
+        tags=["database", "DSUM", "computed-criteria", "or"],
+        formula='=DSUM(A1:D4,"Salary",F1:H3)',
+        inputs=[
+            *db_table_inputs,
+            CellInput("F1", "Dept"),
+            CellInput("H1", "Age"),
+            CellInput("F2", "Sales"),
+            CellInput("G2", formula="=C2>32"),
+            CellInput("F3", "HR"),
+            CellInput("H3", "<30"),
+        ],
+        output_cell="J1",
+    )

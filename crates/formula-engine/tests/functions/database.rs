@@ -53,8 +53,14 @@ fn database_functions_or_of_and_criteria() {
     assert_number(&sheet.eval("=DCOUNTA(A1:D5,\"Salary\",F1:G3)"), 2.0);
 
     // Sample variance/stdev should error for a single numeric value.
-    assert_eq!(sheet.eval("=DVAR(A1:D5,\"Salary\",F1:G3)"), Value::Error(ErrorKind::Div0));
-    assert_eq!(sheet.eval("=DSTDEV(A1:D5,\"Salary\",F1:G3)"), Value::Error(ErrorKind::Div0));
+    assert_eq!(
+        sheet.eval("=DVAR(A1:D5,\"Salary\",F1:G3)"),
+        Value::Error(ErrorKind::Div0)
+    );
+    assert_eq!(
+        sheet.eval("=DSTDEV(A1:D5,\"Salary\",F1:G3)"),
+        Value::Error(ErrorKind::Div0)
+    );
 
     // Population variance/stdev for a single numeric value is 0.
     assert_number(&sheet.eval("=DVARP(A1:D5,\"Salary\",F1:G3)"), 0.0);
@@ -87,3 +93,75 @@ fn dget_errors_and_success() {
     );
 }
 
+#[test]
+fn database_functions_computed_criteria_basic() {
+    let mut sheet = TestSheet::new();
+    seed_database(&mut sheet);
+
+    // Criteria (F1:F2):
+    // Blank header + a formula means "computed criteria".
+    //
+    // The formula is written against the first database record row (row 2) and evaluated as if it
+    // were filled down over the database.
+    sheet.set_formula("F2", "=C2>30");
+
+    // Matches Bob (35) and Dan (40) => Salary sum = 1500 + 2000.
+    assert_number(&sheet.eval("=DSUM(A1:D5,\"Salary\",F1:F2)"), 3500.0);
+    assert_number(&sheet.eval("=DAVERAGE(A1:D5,\"Salary\",F1:F2)"), 1750.0);
+    assert_number(&sheet.eval("=DCOUNT(A1:D5,\"Salary\",F1:F2)"), 2.0);
+    assert_number(&sheet.eval("=DCOUNTA(A1:D5,\"Salary\",F1:F2)"), 2.0);
+
+    // Single-match computed criteria.
+    sheet.set_formula("F2", "=C2>35");
+    assert_number(&sheet.eval("=DGET(A1:D5,\"Salary\",F1:F2)"), 2000.0);
+}
+
+#[test]
+fn database_functions_computed_criteria_or_with_standard_criteria() {
+    let mut sheet = TestSheet::new();
+    seed_database(&mut sheet);
+
+    // Criteria (F1:H3):
+    // (Dept="Sales" AND computed Age>32) OR (Dept="HR" AND Age<30)
+    sheet.set("F1", "Dept");
+    // G1 is intentionally blank to enable computed criteria.
+    sheet.set("H1", "Age");
+
+    sheet.set("F2", "Sales");
+    sheet.set_formula("G2", "=C2>32");
+
+    sheet.set("F3", "HR");
+    sheet.set("H3", "<30");
+
+    // Matches Bob (1500) and Carol ("n/a")
+    assert_number(&sheet.eval("=DSUM(A1:D5,\"Salary\",F1:H3)"), 1500.0);
+    assert_number(&sheet.eval("=DCOUNT(A1:D5,\"Salary\",F1:H3)"), 1.0);
+    assert_number(&sheet.eval("=DCOUNTA(A1:D5,\"Salary\",F1:H3)"), 2.0);
+}
+
+#[test]
+fn database_functions_computed_criteria_error_propagation() {
+    let mut sheet = TestSheet::new();
+    seed_database(&mut sheet);
+
+    // Criteria (F1:F2): formula errors on the "Bob" record (Age==35).
+    sheet.set_formula("F2", "=1/(C2-35)>0");
+
+    assert_eq!(
+        sheet.eval("=DSUM(A1:D5,\"Salary\",F1:F2)"),
+        Value::Error(ErrorKind::Div0)
+    );
+}
+
+#[test]
+fn database_functions_computed_criteria_requires_formula() {
+    let mut sheet = TestSheet::new();
+    seed_database(&mut sheet);
+
+    // Criteria header blank + non-blank cell that is not a formula => #VALUE!
+    sheet.set("F2", ">30");
+    assert_eq!(
+        sheet.eval("=DSUM(A1:D5,\"Salary\",F1:F2)"),
+        Value::Error(ErrorKind::Value)
+    );
+}

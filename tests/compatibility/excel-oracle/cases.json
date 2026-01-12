@@ -31216,6 +31216,268 @@
       "id": "database_dget_d74e5349d03c"
     },
     {
+      "formula": "=DSUM(A1:D4,\"Salary\",F1:F2)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
+          "cell": "F2",
+          "formula": "=C2>30"
+        }
+      ],
+      "tags": [
+        "database",
+        "DSUM",
+        "computed-criteria"
+      ],
+      "id": "database_dsum_computed_e8e084f867f0"
+    },
+    {
+      "formula": "=DSUM(A1:D4,\"Salary\",F1:F2)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
+          "cell": "F2",
+          "formula": "=1/(C2-35)>0"
+        }
+      ],
+      "tags": [
+        "database",
+        "DSUM",
+        "computed-criteria",
+        "errors"
+      ],
+      "id": "database_dsum_computed_c22da892333a"
+    },
+    {
+      "formula": "=DSUM(A1:D4,\"Salary\",F1:H3)",
+      "outputCell": "J1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": "Name"
+        },
+        {
+          "cell": "B1",
+          "value": "Dept"
+        },
+        {
+          "cell": "C1",
+          "value": "Age"
+        },
+        {
+          "cell": "D1",
+          "value": "Salary"
+        },
+        {
+          "cell": "A2",
+          "value": "Alice"
+        },
+        {
+          "cell": "B2",
+          "value": "Sales"
+        },
+        {
+          "cell": "C2",
+          "value": 30
+        },
+        {
+          "cell": "D2",
+          "value": 1000
+        },
+        {
+          "cell": "A3",
+          "value": "Bob"
+        },
+        {
+          "cell": "B3",
+          "value": "Sales"
+        },
+        {
+          "cell": "C3",
+          "value": 35
+        },
+        {
+          "cell": "D3",
+          "value": 1500
+        },
+        {
+          "cell": "A4",
+          "value": "Carol"
+        },
+        {
+          "cell": "B4",
+          "value": "HR"
+        },
+        {
+          "cell": "C4",
+          "value": 28
+        },
+        {
+          "cell": "D4",
+          "value": 1200
+        },
+        {
+          "cell": "F1",
+          "value": "Dept"
+        },
+        {
+          "cell": "H1",
+          "value": "Age"
+        },
+        {
+          "cell": "F2",
+          "value": "Sales"
+        },
+        {
+          "cell": "G2",
+          "formula": "=C2>32"
+        },
+        {
+          "cell": "F3",
+          "value": "HR"
+        },
+        {
+          "cell": "H3",
+          "value": "<30"
+        }
+      ],
+      "tags": [
+        "database",
+        "DSUM",
+        "computed-criteria",
+        "or"
+      ],
+      "id": "database_dsum_computed_2634fc65a606"
+    },
+    {
       "formula": "=PV(0, 3, -10)",
       "outputCell": "C1",
       "inputs": [],
