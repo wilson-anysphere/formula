@@ -656,6 +656,45 @@ fn verifies_raw_signature_part_binding_when_wordsig_blob_wrapped() {
         matches!(binding, VbaProjectBindingVerification::BoundVerified(_)),
         "expected BoundVerified, got {binding:?}"
     );
+
+    // Tamper with a covered project stream but keep the signature bytes the same.
+    let mut tampered_module = module1.to_vec();
+    tampered_module[0] ^= 0xFF;
+    let tampered_project = build_minimal_vba_project_bin(&tampered_module);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/vbaProject.bin", options).unwrap();
+    zip.write_all(&tampered_project).unwrap();
+
+    zip.start_file("xl/_rels/vbaProject.bin.rels", options).unwrap();
+    zip.write_all(vba_rels).unwrap();
+
+    zip.start_file("xl/vbaProjectSignature.bin", options).unwrap();
+    zip.write_all(&wrapped).unwrap();
+
+    let bytes = zip.finish().unwrap().into_inner();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read tampered package");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
+    assert_eq!(sig.stream_path, "xl/vbaProjectSignature.bin");
+
+    let binding = pkg
+        .vba_project_signature_binding()
+        .expect("binding verification")
+        .expect("project should be present");
+    assert!(
+        matches!(binding, VbaProjectBindingVerification::BoundMismatch(_)),
+        "expected BoundMismatch, got {binding:?}"
+    );
 }
 
 #[test]
@@ -838,6 +877,55 @@ fn verifies_raw_signature_part_binding_when_digsig_info_serialized_wrapped() {
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+
+    let binding = pkg
+        .vba_project_signature_binding()
+        .expect("binding verification")
+        .expect("project should be present");
+    assert!(
+        matches!(binding, VbaProjectBindingVerification::BoundVerified(_)),
+        "expected BoundVerified, got {binding:?}"
+    );
+
+    // Tamper with a covered project stream but keep the signature bytes the same.
+    let mut tampered_module = module1.to_vec();
+    tampered_module[0] ^= 0xFF;
+    let tampered_project = build_minimal_vba_project_bin(&tampered_module);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(zip::CompressionMethod::Deflated);
+
+    zip.start_file("xl/vbaProject.bin", options).unwrap();
+    zip.write_all(&tampered_project).unwrap();
+
+    zip.start_file("xl/_rels/vbaProject.bin.rels", options)
+        .unwrap();
+    zip.write_all(vba_rels).unwrap();
+
+    zip.start_file("xl/vbaProjectSignature.bin", options)
+        .unwrap();
+    zip.write_all(&wrapped).unwrap();
+
+    let bytes = zip.finish().unwrap().into_inner();
+    let pkg = XlsxPackage::from_bytes(&bytes).expect("read tampered package");
+
+    let sig = pkg
+        .verify_vba_digital_signature()
+        .expect("signature verification should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
+    assert_eq!(sig.binding, VbaSignatureBinding::NotBound);
+
+    let binding = pkg
+        .vba_project_signature_binding()
+        .expect("binding verification")
+        .expect("project should be present");
+    assert!(
+        matches!(binding, VbaProjectBindingVerification::BoundMismatch(_)),
+        "expected BoundMismatch, got {binding:?}"
+    );
 }
 
 #[test]
@@ -881,4 +969,13 @@ fn verifies_raw_vba_project_signature_part_binding_for_v3_digest_when_digsig_blo
 
     assert_eq!(sig.verification, VbaSignatureVerification::SignedVerified);
     assert_eq!(sig.binding, VbaSignatureBinding::Bound);
+
+    let binding = pkg
+        .vba_project_signature_binding()
+        .expect("binding verification")
+        .expect("project should be present");
+    assert!(
+        matches!(binding, VbaProjectBindingVerification::BoundVerified(_)),
+        "expected BoundVerified, got {binding:?}"
+    );
 }
