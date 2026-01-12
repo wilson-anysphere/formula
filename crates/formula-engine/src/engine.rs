@@ -4855,7 +4855,15 @@ fn analyze_external_precedents(
 ) -> Vec<PrecedentNode> {
     let mut out: HashSet<PrecedentNode> = HashSet::new();
     let mut visiting_names = HashSet::new();
-    walk_external_expr(expr, current_cell, workbook, &mut out, &mut visiting_names);
+    let mut lexical_scopes: Vec<HashSet<String>> = Vec::new();
+    walk_external_expr(
+        expr,
+        current_cell,
+        workbook,
+        &mut out,
+        &mut visiting_names,
+        &mut lexical_scopes,
+    );
     out.into_iter().collect()
 }
 
@@ -4865,7 +4873,21 @@ fn walk_external_expr(
     workbook: &Workbook,
     precedents: &mut HashSet<PrecedentNode>,
     visiting_names: &mut HashSet<(SheetId, String)>,
+    lexical_scopes: &mut Vec<HashSet<String>>,
 ) {
+    fn name_is_local(scopes: &[HashSet<String>], name_key: &str) -> bool {
+        scopes.iter().rev().any(|scope| scope.contains(name_key))
+    }
+
+    fn bare_identifier(expr: &CompiledExpr) -> Option<String> {
+        match expr {
+            Expr::NameRef(nref) if matches!(nref.sheet, SheetReference::Current) => {
+                Some(normalize_defined_name(&nref.name))
+            }
+            _ => None,
+        }
+    }
+
     match expr {
         Expr::CellRef(r) => {
             if let SheetReference::External(key) = &r.sheet {
@@ -4897,6 +4919,10 @@ fn walk_external_expr(
                 return;
             }
 
+            if name_is_local(lexical_scopes, &name_key) {
+                return;
+            }
+
             let visit_key = (sheet, name_key.clone());
             if !visiting_names.insert(visit_key.clone()) {
                 return;
@@ -4912,6 +4938,7 @@ fn walk_external_expr(
                         workbook,
                         precedents,
                         visiting_names,
+                        lexical_scopes,
                     );
                 }
             }
@@ -4921,26 +4948,169 @@ fn walk_external_expr(
         | Expr::Postfix { expr, .. }
         | Expr::ImplicitIntersection(expr)
         | Expr::SpillRange(expr) => {
-            walk_external_expr(expr, current_cell, workbook, precedents, visiting_names)
+            walk_external_expr(
+                expr,
+                current_cell,
+                workbook,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            )
         }
         Expr::Binary { left, right, .. } | Expr::Compare { left, right, .. } => {
-            walk_external_expr(left, current_cell, workbook, precedents, visiting_names);
-            walk_external_expr(right, current_cell, workbook, precedents, visiting_names);
+            walk_external_expr(
+                left,
+                current_cell,
+                workbook,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            );
+            walk_external_expr(
+                right,
+                current_cell,
+                workbook,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            );
         }
-        Expr::FunctionCall { args, .. } => {
+        Expr::FunctionCall { name, args, .. } => {
+            if let Some(spec) = crate::functions::lookup_function(name) {
+                match spec.name {
+                    "LET" => {
+                        if args.len() < 3 || args.len() % 2 == 0 {
+                            return;
+                        }
+
+                        lexical_scopes.push(HashSet::new());
+                        for pair in args[..args.len() - 1].chunks_exact(2) {
+                            let Some(name_key) = bare_identifier(&pair[0]) else {
+                                lexical_scopes.pop();
+                                return;
+                            };
+                            walk_external_expr(
+                                &pair[1],
+                                current_cell,
+                                workbook,
+                                precedents,
+                                visiting_names,
+                                lexical_scopes,
+                            );
+                            lexical_scopes
+                                .last_mut()
+                                .expect("pushed scope")
+                                .insert(name_key);
+                        }
+
+                        walk_external_expr(
+                            &args[args.len() - 1],
+                            current_cell,
+                            workbook,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                        lexical_scopes.pop();
+                        return;
+                    }
+                    "LAMBDA" => {
+                        if args.is_empty() {
+                            return;
+                        }
+
+                        let mut scope = HashSet::new();
+                        for param in &args[..args.len() - 1] {
+                            let Some(name_key) = bare_identifier(param) else {
+                                return;
+                            };
+                            if !scope.insert(name_key) {
+                                return;
+                            }
+                        }
+
+                        lexical_scopes.push(scope);
+                        walk_external_expr(
+                            &args[args.len() - 1],
+                            current_cell,
+                            workbook,
+                            precedents,
+                            visiting_names,
+                            lexical_scopes,
+                        );
+                        lexical_scopes.pop();
+                        return;
+                    }
+                    _ => {}
+                }
+            } else {
+                let name_key = normalize_defined_name(name);
+                let is_local = !name_key.is_empty() && name_is_local(lexical_scopes, &name_key);
+                if !name_key.is_empty() && !is_local {
+                    let sheet = current_cell.sheet;
+                    let visit_key = (sheet, name_key.clone());
+                    if visiting_names.insert(visit_key.clone()) {
+                        if let Some(def) = resolve_defined_name(workbook, sheet, &name_key) {
+                            if let Some(expr) = def.compiled.as_ref() {
+                                walk_external_expr(
+                                    expr,
+                                    CellKey {
+                                        sheet,
+                                        addr: current_cell.addr,
+                                    },
+                                    workbook,
+                                    precedents,
+                                    visiting_names,
+                                    lexical_scopes,
+                                );
+                            }
+                        }
+                        visiting_names.remove(&visit_key);
+                    }
+                }
+            }
+
             for a in args {
-                walk_external_expr(a, current_cell, workbook, precedents, visiting_names);
+                walk_external_expr(
+                    a,
+                    current_cell,
+                    workbook,
+                    precedents,
+                    visiting_names,
+                    lexical_scopes,
+                );
             }
         }
         Expr::Call { callee, args } => {
-            walk_external_expr(callee, current_cell, workbook, precedents, visiting_names);
+            walk_external_expr(
+                callee,
+                current_cell,
+                workbook,
+                precedents,
+                visiting_names,
+                lexical_scopes,
+            );
             for a in args {
-                walk_external_expr(a, current_cell, workbook, precedents, visiting_names);
+                walk_external_expr(
+                    a,
+                    current_cell,
+                    workbook,
+                    precedents,
+                    visiting_names,
+                    lexical_scopes,
+                );
             }
         }
         Expr::ArrayLiteral { values, .. } => {
             for el in values.iter() {
-                walk_external_expr(el, current_cell, workbook, precedents, visiting_names);
+                walk_external_expr(
+                    el,
+                    current_cell,
+                    workbook,
+                    precedents,
+                    visiting_names,
+                    lexical_scopes,
+                );
             }
         }
         Expr::StructuredRef(_)

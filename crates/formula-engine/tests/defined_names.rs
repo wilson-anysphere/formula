@@ -1,4 +1,6 @@
-use formula_engine::{EditError, EditOp, Engine, ErrorKind, NameDefinition, NameScope, Value};
+use formula_engine::{
+    EditError, EditOp, Engine, ErrorKind, NameDefinition, NameScope, PrecedentNode, Value,
+};
 
 #[test]
 fn workbook_scoped_name_can_be_used_in_other_cells() {
@@ -294,5 +296,65 @@ fn lambda_parameter_names_do_not_register_defined_name_dependencies() {
     assert!(
         !engine.is_dirty("Sheet1", "A1"),
         "LAMBDA parameters should not create a defined-name dependency"
+    );
+}
+
+#[test]
+fn let_and_lambda_locals_do_not_surface_external_precedents() {
+    let mut engine = Engine::new();
+
+    // Define a workbook-scoped name `X` that points at an external workbook cell.
+    // LET/LAMBDA locals named `X` should *not* treat that as a defined-name reference.
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Reference("[Book.xlsx]Sheet1!A1".to_string()),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(X,1,X+1)")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=LAMBDA(X,X+1)(1)")
+        .unwrap();
+
+    for addr in ["A1", "A2"] {
+        let precedents = engine.precedents("Sheet1", addr).unwrap();
+        assert!(
+            precedents.iter().all(|p| {
+                !matches!(
+                    p,
+                    PrecedentNode::ExternalCell { .. } | PrecedentNode::ExternalRange { .. }
+                )
+            }),
+            "expected no external precedents for {addr}, got {precedents:?}"
+        );
+    }
+}
+
+#[test]
+fn named_lambda_calls_surface_external_precedents() {
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "ADD_EXT",
+            NameScope::Workbook,
+            NameDefinition::Formula("=LAMBDA(n,[Book.xlsx]Sheet1!A1+n)".to_string()),
+        )
+        .unwrap();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=ADD_EXT(1)")
+        .unwrap();
+
+    let precedents = engine.precedents("Sheet1", "A1").unwrap();
+    assert!(
+        precedents.iter().any(|p| matches!(
+            p,
+            PrecedentNode::ExternalCell { sheet, addr } if sheet == "[Book.xlsx]Sheet1" && addr.row == 0 && addr.col == 0
+        )),
+        "expected external precedent for [Book.xlsx]Sheet1!A1, got {precedents:?}"
     );
 }
