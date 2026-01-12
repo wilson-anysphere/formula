@@ -1,4 +1,5 @@
 use formula_engine::date::ExcelDateSystem;
+use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::{ErrorKind, Value};
 
 use super::harness::{assert_number, TestSheet};
@@ -271,6 +272,21 @@ fn bond_date_text_coercion_respects_workbook_date_system() {
     let Some(v) = eval_or_skip(
         &mut sheet,
         r#"=YIELD("2008-02-15","2017-11-15",0.0575,95.04287,100,2,0)-YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2,0)"#,
+    ) else {
+        return;
+    };
+    assert_number(&v, 0.0);
+}
+
+#[test]
+fn bond_date_text_coercion_is_locale_stable_for_iso_strings() {
+    let mut sheet = TestSheet::new();
+    sheet.set_value_locale(ValueLocaleConfig::de_de());
+
+    // ISO-like date strings should remain parseable regardless of the value locale.
+    let Some(v) = eval_or_skip(
+        &mut sheet,
+        r#"=COUPDAYS("2024-06-15","2025-01-01",2,0)-COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,0)"#,
     ) else {
         return;
     };
