@@ -5,6 +5,16 @@ use formula_xlsx::{patch_xlsx_streaming, WorksheetCellPatch};
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 fn build_minimal_xlsx() -> Vec<u8> {
+    // The low-level streaming patcher preserves `vm` when patching "partial" ZIPs that only
+    // contain worksheet XML. Include a minimal `[Content_Types].xml` so this fixture exercises
+    // the full workbook behavior where patched cells drop `vm`.
+    let content_types_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>"#;
+
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -30,6 +40,9 @@ fn build_minimal_xlsx() -> Vec<u8> {
     let cursor = Cursor::new(Vec::new());
     let mut zip = ZipWriter::new(cursor);
     let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+
+    zip.start_file("[Content_Types].xml", options).unwrap();
+    zip.write_all(content_types_xml.as_bytes()).unwrap();
 
     zip.start_file("xl/workbook.xml", options).unwrap();
     zip.write_all(workbook_xml.as_bytes()).unwrap();
