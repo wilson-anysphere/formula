@@ -345,6 +345,17 @@ fn ignore_rules_normalize_leading_slashes_and_backslashes() {
 }
 
 #[test]
+fn zip_entry_names_are_normalized_for_diffing() {
+    let expected_zip = zip_bytes(&[(r"xl\\calcChain.xml", br#"<calcChain/>"#)]);
+    let actual_zip = zip_bytes(&[("xl/calcChain.xml", br#"<calcChain/>"#)]);
+    let expected = WorkbookArchive::from_bytes(&expected_zip).unwrap();
+    let actual = WorkbookArchive::from_bytes(&actual_zip).unwrap();
+
+    let report = xlsx_diff::diff_archives(&expected, &actual);
+    assert!(report.is_empty(), "expected no diffs, got {:#?}", report.differences);
+}
+
+#[test]
 fn ignore_glob_suppresses_calcchain_related_plumbing_diffs() {
     let expected_zip = zip_bytes(&[
         (

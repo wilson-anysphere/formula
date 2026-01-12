@@ -143,11 +143,15 @@ impl WorkbookArchive {
             if file.is_dir() {
                 continue;
             }
-            let name = file.name().to_string();
+            let name = normalize_opc_part_name(file.name());
             let mut buf = Vec::with_capacity(file.size() as usize);
             file.read_to_end(&mut buf)
                 .with_context(|| format!("read part {name}"))?;
-            parts.insert(name, buf);
+            if parts.insert(name.clone(), buf).is_some() {
+                return Err(anyhow!(
+                    "duplicate part name after normalization (possible invalid zip): {name}"
+                ));
+            }
         }
 
         Ok(Self { parts })
