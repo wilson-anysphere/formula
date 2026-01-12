@@ -20,11 +20,13 @@ use crate::locale::{
 use crate::value::{Array, ErrorKind, Value};
 use formula_model::{CellId, CellRef, Range, Table, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
-use rayon::prelude::*;
+use rayon::{prelude::*, ThreadPool, ThreadPoolBuilder};
 use std::cell::RefCell;
 use std::cmp::{max, Ordering};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+use std::sync::OnceLock;
 use thiserror::Error;
 
 mod bytecode_diagnostics;
@@ -50,6 +52,40 @@ pub enum EngineError {
 pub enum RecalcMode {
     SingleThreaded,
     MultiThreaded,
+}
+
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+static RECALC_THREAD_POOL: OnceLock<Option<ThreadPool>> = OnceLock::new();
+
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+fn recalc_thread_pool() -> Option<&'static ThreadPool> {
+    RECALC_THREAD_POOL
+        .get_or_init(build_recalc_thread_pool)
+        .as_ref()
+}
+
+#[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+fn build_recalc_thread_pool() -> Option<ThreadPool> {
+    // Rayon defaults to using `available_parallelism` threads for its global pool, which can be
+    // excessive in test environments where the Rust test harness already spawns many threads
+    // (`--test-threads`) and OS thread creation can fail with `EAGAIN`.
+    //
+    // Prefer a modest default and fall back to fewer threads if the pool cannot be created.
+    let available = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    let mut threads = available.min(8).max(1);
+
+    loop {
+        match ThreadPoolBuilder::new().num_threads(threads).build() {
+            Ok(pool) => return Some(pool),
+            Err(_) if threads > 1 => {
+                threads = threads / 2;
+                continue;
+            }
+            Err(_) => return None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1866,6 +1902,34 @@ impl Engine {
     }
 
     fn recalculate_with_mode_and_value_changes(
+        &mut self,
+        mode: RecalcMode,
+        value_changes: Option<&mut RecalcValueChangeCollector>,
+    ) {
+        #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
+        {
+            if mode == RecalcMode::MultiThreaded {
+                if let Some(pool) = recalc_thread_pool() {
+                    pool.install(|| {
+                        self.recalculate_with_mode_and_value_changes_inner(mode, value_changes)
+                    });
+                    return;
+                }
+
+                // If we can't create a Rayon thread pool (e.g. due to OS resource limits), fall
+                // back to single-threaded recalc instead of panicking.
+                self.recalculate_with_mode_and_value_changes_inner(
+                    RecalcMode::SingleThreaded,
+                    value_changes,
+                );
+                return;
+            }
+        }
+
+        self.recalculate_with_mode_and_value_changes_inner(mode, value_changes);
+    }
+
+    fn recalculate_with_mode_and_value_changes_inner(
         &mut self,
         mode: RecalcMode,
         mut value_changes: Option<&mut RecalcValueChangeCollector>,
@@ -9614,6 +9678,8 @@ mod tests {
 
         let report = engine.bytecode_compile_report(10);
         assert_eq!(report.len(), 1);
+        // `LowerError::Unsupported` is mapped to `IneligibleExpr` so compile reports can distinguish
+        // "missing bytecode implementation" from structural lowering errors (e.g. cross-sheet refs).
         assert_eq!(report[0].reason, BytecodeCompileReason::IneligibleExpr);
     }
 

@@ -112,17 +112,15 @@ fn oddfprice_basis1_uses_prev_coupon_period_for_e() {
 fn odd_coupon_settlement_equal_coupon_dates_are_rejected() {
     let system = ExcelDateSystem::EXCEL_1900;
 
-    // Pinned by current engine behavior; verify against real Excel via
-    // tools/excel-oracle/run-excel-oracle.ps1 (Task 393).
+    // Settlement must fall strictly inside the odd coupon period.
     //
-    // Settlement must fall strictly inside the odd coupon period:
     // - ODDL*: last_interest < settlement < maturity
     // - ODDF*: issue < settlement < first_coupon <= maturity
     //
-    // Boundary equalities (e.g. settlement == last_interest, settlement == first_coupon) currently
-    // return `#NUM!`.
+    // In Excel, boundary equalities (e.g. `settlement == last_interest`) evaluate to `#NUM!` and
+    // are locked via `crates/formula-engine/tests/odd_coupon_date_boundaries.rs`.
 
-    // ODDL*: settlement == last_interest returns #NUM! (A == 0 boundary is rejected).
+    // ODDL*: settlement == last_interest => #NUM!
     let maturity = ymd_to_serial(ExcelDate::new(2023, 5, 15), system).unwrap();
     let last_interest = ymd_to_serial(ExcelDate::new(2023, 1, 31), system).unwrap();
     let settlement_eq_last = last_interest;
@@ -178,7 +176,7 @@ fn odd_coupon_settlement_equal_coupon_dates_are_rejected() {
     );
     assert_eq!(result, Err(ExcelError::Num));
 
-    // ODDF*: settlement == first_coupon returns #NUM! (DSC == 0 boundary is rejected).
+    // ODDF*: settlement == first_coupon => #NUM!
     let issue = ymd_to_serial(ExcelDate::new(2022, 12, 15), system).unwrap();
     let first_coupon = ymd_to_serial(ExcelDate::new(2023, 1, 31), system).unwrap();
     let maturity2 = ymd_to_serial(ExcelDate::new(2024, 7, 31), system).unwrap();

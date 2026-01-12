@@ -297,6 +297,9 @@ fn oddf_equation(
     }
 
     // Excel-style chronology: issue < settlement < first_coupon <= maturity.
+    //
+    // In Excel, boundary equalities such as `issue == settlement` or `settlement == first_coupon`
+    // evaluate to `#NUM!` and are covered by parity tests.
     if !(issue < settlement && settlement < first_coupon && first_coupon <= maturity) {
         return Err(ExcelError::Num);
     }

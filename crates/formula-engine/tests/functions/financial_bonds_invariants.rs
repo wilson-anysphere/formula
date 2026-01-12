@@ -26,13 +26,12 @@ pub(super) fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Optio
 }
 
 fn coupon_date_from_maturity(maturity: &str, months_per_period: i32, periods_back: i32) -> String {
-    // Coupon schedules are maturity-anchored: each coupon date is computed as an offset from
-    // `maturity` in whole coupon periods (12/frequency), using `EDATE`.
+    // Coupon schedules are maturity-anchored.
     //
-    // Important: repeated iterative stepping (e.g. `EDATE(EDATE(maturity,-m),-m)`) can drift for
-    // month-end dates due to end-of-month clamping (e.g. Dec 31 -> Jun 30 -> Dec 30). The COUP*
-    // functions (and bond schedule math) compute coupon dates as `EDATE(maturity, -k*m)`, so tests
-    // should too.
+    // IMPORTANT: Coupon schedules are derived as `EDATE(maturity, -k*m)` rather than by stepping
+    // backwards one period at a time. `EDATE` month-stepping is not invertible due to end-of-month
+    // clamping, and iteratively stepping can cause the day-of-month to drift (e.g. 31st -> 30th),
+    // producing dates that Excel's COUP* helpers do not treat as coupon boundaries.
     //
     // Excel also has an end-of-month (EOM) rule: if `maturity` is the last day of its month,
     // the coupon schedule is pinned to month-end (including leap-year February).
