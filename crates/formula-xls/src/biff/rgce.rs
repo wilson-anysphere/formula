@@ -1753,6 +1753,24 @@ mod tests {
     }
 
     #[test]
+    fn decodes_unknown_ptg_to_parseable_error_literal() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetRef> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        let rgce = [0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#UNSUPPORTED_PTG_0x00!");
+        assert!(
+            !decoded.warnings.is_empty(),
+            "expected warning for unsupported ptg, warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn decodes_ptg_namex_to_ref_placeholder() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetRef> = Vec::new();
