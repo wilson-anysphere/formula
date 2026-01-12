@@ -402,7 +402,7 @@ function createDefaultFileAdapter(): FileAdapter {
              const message = normalizeInvokeErrorMessage(err);
              if (isListDirLimitError(message)) {
                throw new Error(
-                 `This folder contains too many files (or is too deeply nested) to list safely.\n\n${message}\n\nTry selecting a smaller folder or disabling recursive listing.`,
+                 `This folder contains too many items (files/folders), or is too deeply nested, to list safely.\n\n${message}\n\nTry selecting a smaller folder or disabling recursive listing.`,
                );
              }
             throw err instanceof Error ? err : new Error(message);
@@ -640,7 +640,7 @@ function createDefaultFileAdapter(): FileAdapter {
         const message = normalizeInvokeErrorMessage(err);
         if (isListDirLimitError(message)) {
           throw new Error(
-            `This folder contains too many files (or is too deeply nested) to list safely.\n\n${message}\n\nTry selecting a smaller folder or disabling recursive listing.`,
+            `This folder contains too many items (files/folders), or is too deeply nested, to list safely.\n\n${message}\n\nTry selecting a smaller folder or disabling recursive listing.`,
           );
         }
         throw err instanceof Error ? err : new Error(message);
