@@ -362,6 +362,20 @@ export class SpreadsheetApp {
       }
     | null = null;
   private sharedChartPaneLayout: { frozenContentWidth: number; frozenContentHeight: number } | null = null;
+  private sharedChartPaneLayoutMemo:
+    | {
+        viewportWidth: number;
+        viewportHeight: number;
+        frozenWidth: number;
+        frozenHeight: number;
+        headerWidth: number;
+        headerHeight: number;
+        frozenContentWidth: number;
+        frozenContentHeight: number;
+      }
+    | null = null;
+  // Test/debug counter: increments when `syncSharedChartPanes` applies new DOM styles (i.e. when layout inputs change).
+  private sharedChartPaneLayoutSyncCount = 0;
   private referenceCanvas: HTMLCanvasElement;
   private auditingCanvas: HTMLCanvasElement;
   private selectionCanvas: HTMLCanvasElement;
@@ -382,6 +396,8 @@ export class SpreadsheetApp {
   private auditingRequestId = 0;
   private auditingIdlePromise: Promise<void> = Promise.resolve();
   private auditingLastCellKey: string | null = null;
+  private auditingWasRendered = false;
+  private auditingNeedsClear = false;
 
   private outline = new Outline();
   private outlineLayer: HTMLDivElement;
@@ -2734,8 +2750,12 @@ export class SpreadsheetApp {
       this.auditingCtx.setTransform(1, 0, 0, 1, 0, 0);
       this.auditingCtx.scale(this.dpr, this.dpr);
 
-       this.sharedGrid.resize(this.width, this.height, this.dpr);
-       const viewport = this.sharedGrid.renderer.scroll.getViewportState();
+      // If auditing is currently off, avoid repeatedly clearing this canvas on scroll.
+      // Track that it was resized so `renderAuditing()` can do a one-time clear if needed.
+      this.auditingNeedsClear = true;
+
+      this.sharedGrid.resize(this.width, this.height, this.dpr);
+      const viewport = this.sharedGrid.renderer.scroll.getViewportState();
       this.syncSharedChartPanes(viewport);
 
       // Keep our legacy scroll coordinates in sync for chart positioning helpers.
@@ -2762,6 +2782,7 @@ export class SpreadsheetApp {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(this.dpr, this.dpr);
     }
+    this.auditingNeedsClear = true;
 
     // Charts should scroll with the grid but stay clipped under headers.
     this.chartLayer.style.left = `${this.rowHeaderWidth}px`;
@@ -3154,11 +3175,49 @@ export class SpreadsheetApp {
     const frozenContentWidth = Math.max(0, frozenWidthClamped - headerWidthClamped);
     const frozenContentHeight = Math.max(0, frozenHeightClamped - headerHeightClamped);
 
+    const memo = this.sharedChartPaneLayoutMemo;
+    if (
+      memo &&
+      memo.viewportWidth === viewport.width &&
+      memo.viewportHeight === viewport.height &&
+      memo.frozenWidth === viewport.frozenWidth &&
+      memo.frozenHeight === viewport.frozenHeight &&
+      memo.headerWidth === headerWidth &&
+      memo.headerHeight === headerHeight &&
+      memo.frozenContentWidth === frozenContentWidth &&
+      memo.frozenContentHeight === frozenContentHeight
+    ) {
+      return;
+    }
+
     const cellAreaWidth = Math.max(0, viewport.width - headerWidthClamped);
     const cellAreaHeight = Math.max(0, viewport.height - headerHeightClamped);
 
     const scrollableWidth = Math.max(0, cellAreaWidth - frozenContentWidth);
     const scrollableHeight = Math.max(0, cellAreaHeight - frozenContentHeight);
+
+    if (memo) {
+      memo.viewportWidth = viewport.width;
+      memo.viewportHeight = viewport.height;
+      memo.frozenWidth = viewport.frozenWidth;
+      memo.frozenHeight = viewport.frozenHeight;
+      memo.headerWidth = headerWidth;
+      memo.headerHeight = headerHeight;
+      memo.frozenContentWidth = frozenContentWidth;
+      memo.frozenContentHeight = frozenContentHeight;
+    } else {
+      this.sharedChartPaneLayoutMemo = {
+        viewportWidth: viewport.width,
+        viewportHeight: viewport.height,
+        frozenWidth: viewport.frozenWidth,
+        frozenHeight: viewport.frozenHeight,
+        headerWidth,
+        headerHeight,
+        frozenContentWidth,
+        frozenContentHeight,
+      };
+    }
+    this.sharedChartPaneLayoutSyncCount += 1;
 
     // Charts are rendered as DOM overlays. In shared-grid mode, the column/row
     // headers are implemented as frozen panes, so we position the outer chart
@@ -3383,9 +3442,19 @@ export class SpreadsheetApp {
   }
 
   private renderAuditing(): void {
-    this.auditingRenderer.clear(this.auditingCtx);
+    if (this.auditingMode === "off") {
+      // Avoid clearing the full auditing canvas on every scroll when auditing overlays are disabled.
+      // We only need to clear when (1) overlays were previously rendered or (2) the canvas was resized/reinitialized.
+      if (this.auditingWasRendered || this.auditingNeedsClear) {
+        this.auditingRenderer.clear(this.auditingCtx);
+        this.auditingWasRendered = false;
+        this.auditingNeedsClear = false;
+      }
+      return;
+    }
 
-    if (this.auditingMode === "off") return;
+    this.auditingNeedsClear = false;
+    this.auditingRenderer.clear(this.auditingCtx);
 
     const clipRect = this.sharedGrid
       ? (() => {
@@ -3416,6 +3485,7 @@ export class SpreadsheetApp {
     });
 
     this.auditingCtx.restore();
+    this.auditingWasRendered = true;
   }
 
   private renderSelection(): void {
