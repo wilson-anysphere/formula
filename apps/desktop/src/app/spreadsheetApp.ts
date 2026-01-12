@@ -968,6 +968,7 @@ export class SpreadsheetApp {
         onReferenceHighlights: (highlights) => {
           this.referenceHighlightsSource = highlights;
           this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
+          if (this.sharedGrid) this.syncSharedGridReferenceHighlights();
           this.renderReferencePreview();
         }
       });
@@ -1576,6 +1577,7 @@ export class SpreadsheetApp {
       }
       this.referencePreview = null;
       this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
+      if (this.sharedGrid) this.syncSharedGridReferenceHighlights();
       this.syncFrozenPanes();
       if (this.wasmEngine) {
         await this.enqueueWasmSync(async (engine) => {
@@ -1717,6 +1719,7 @@ export class SpreadsheetApp {
     this.chartStore.setDefaultSheet(sheetId);
     this.referencePreview = null;
     this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
+    if (this.sharedGrid) this.syncSharedGridReferenceHighlights();
     if (this.sharedGrid) {
       const { frozenRows, frozenCols } = this.getFrozen();
       const headerRows = 1;
@@ -1755,6 +1758,7 @@ export class SpreadsheetApp {
       this.chartStore.setDefaultSheet(target.sheetId);
       this.referencePreview = null;
       this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
+      if (this.sharedGrid) this.syncSharedGridReferenceHighlights();
       if (this.sharedGrid) {
         const { frozenRows, frozenCols } = this.getFrozen();
         const headerRows = 1;
@@ -1802,6 +1806,7 @@ export class SpreadsheetApp {
       this.chartStore.setDefaultSheet(target.sheetId);
       this.referencePreview = null;
       this.referenceHighlights = this.computeReferenceHighlightsForSheet(this.sheetId, this.referenceHighlightsSource);
+      if (this.sharedGrid) this.syncSharedGridReferenceHighlights();
       if (this.sharedGrid) {
         const { frozenRows, frozenCols } = this.getFrozen();
         const headerRows = 1;
@@ -2114,6 +2119,36 @@ export class SpreadsheetApp {
     if (!this.sharedGrid) return;
     const mode = this.formulaBar?.isFormulaEditing() ? "rangeSelection" : "default";
     this.sharedGrid.setInteractionMode(mode);
+  }
+
+  private syncSharedGridReferenceHighlights(): void {
+    if (!this.sharedGrid) return;
+
+    if (this.referenceHighlights.length === 0) {
+      this.sharedGrid.renderer.setReferenceHighlights(null);
+      return;
+    }
+
+    const headerRows = this.sharedHeaderRows();
+    const headerCols = this.sharedHeaderCols();
+
+    const gridHighlights = this.referenceHighlights.map((highlight) => {
+      const startRow = Math.min(highlight.start.row, highlight.end.row);
+      const endRow = Math.max(highlight.start.row, highlight.end.row);
+      const startCol = Math.min(highlight.start.col, highlight.end.col);
+      const endCol = Math.max(highlight.start.col, highlight.end.col);
+
+      const range: GridCellRange = {
+        startRow: startRow + headerRows,
+        endRow: endRow + headerRows + 1,
+        startCol: startCol + headerCols,
+        endCol: endCol + headerCols + 1
+      };
+
+      return { range, color: highlight.color, active: highlight.active };
+    });
+
+    this.sharedGrid.renderer.setReferenceHighlights(gridHighlights);
   }
 
   private onSharedRangeSelectionStart(range: GridCellRange): void {
@@ -6100,6 +6135,7 @@ export class SpreadsheetApp {
     if (this.sharedGrid) {
       this.syncSharedGridInteractionMode();
       this.sharedGrid.clearRangeSelection();
+      this.sharedGrid.renderer.setReferenceHighlights(null);
     }
 
     // Restore focus + selection to the original edit cell, even if the user
@@ -6120,6 +6156,7 @@ export class SpreadsheetApp {
     if (this.sharedGrid) {
       this.syncSharedGridInteractionMode();
       this.sharedGrid.clearRangeSelection();
+      this.sharedGrid.renderer.setReferenceHighlights(null);
     }
 
     if (target) {
