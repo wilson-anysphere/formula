@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcRoot = path.join(desktopRoot, "src");
 
-const SOURCE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx"]);
+const SOURCE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"]);
 
 // The WebView bundle must remain Node-free, but the repo intentionally contains some
 // Node-only modules used by Node integration tests (and later bridged via IPC/Tauri).
@@ -74,7 +74,14 @@ function isTestFile(relPosix) {
   if (relPosix.startsWith("tests/")) return true;
   if (relPosix.includes("/__tests__/")) return true;
   const base = path.posix.basename(relPosix);
-  if (base.endsWith(".d.ts") || base.endsWith(".d.tsx")) return true;
+  if (
+    base.endsWith(".d.ts") ||
+    base.endsWith(".d.tsx") ||
+    base.endsWith(".d.mts") ||
+    base.endsWith(".d.cts")
+  ) {
+    return true;
+  }
   return TEST_FILE_RE.test(base);
 }
 
