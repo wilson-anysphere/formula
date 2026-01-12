@@ -483,9 +483,11 @@ impl<'a> CompileCtx<'a> {
                 .push(Instruction::new(OpCode::PushConst, idx, 0));
         }
         let func_idx = intern_func(self.program, Function::Choose);
-        self.program
-            .instrs
-            .push(Instruction::new(OpCode::CallFunc, func_idx, args.len() as u32));
+        self.program.instrs.push(Instruction::new(
+            OpCode::CallFunc,
+            func_idx,
+            args.len() as u32,
+        ));
 
         // Store the selection result so we can branch on it multiple times without re-evaluating
         // the index expression.
