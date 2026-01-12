@@ -38,12 +38,17 @@ test("desktop index.html exposes required shell containers and testids", () => {
     "toast-root",
 
     // Status bar (e2e relies on these)
+    "status-mode",
     "active-cell",
     "selection-range",
     "active-value",
     "collab-status",
+    "selection-sum",
+    "selection-avg",
+    "selection-count",
     "sheet-switcher",
     "zoom-control",
+    "status-zoom",
     "sheet-position",
 
     // Debug/test controls (kept in static HTML for Playwright)
