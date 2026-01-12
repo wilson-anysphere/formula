@@ -1,11 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRequire } from "node:module";
 
 import * as Y from "yjs";
 
 import { diffDocumentStates } from "../patch.js";
 import { emptyDocumentState, normalizeDocumentState } from "../state.js";
 import { YjsBranchStore } from "./YjsBranchStore.js";
+
+function requireYjsCjs() {
+  const require = createRequire(import.meta.url);
+  const prevError = console.error;
+  console.error = (...args) => {
+    if (typeof args[0] === "string" && args[0].startsWith("Yjs was already imported.")) return;
+    prevError(...args);
+  };
+  try {
+    // eslint-disable-next-line import/no-named-as-default-member
+    return require("yjs");
+  } finally {
+    console.error = prevError;
+  }
+}
 
 /**
  * Deterministic pseudo-random bytes for tests (avoid crypto + avoid large runs of
@@ -145,3 +161,70 @@ test("YjsBranchStore: can read legacy json commits when configured for gzip-chun
   assert.deepEqual(loadedState, normalizeDocumentState(next));
 });
 
+test("YjsBranchStore initializes when roots were created by a different Yjs instance (CJS getMap)", async () => {
+  const Ycjs = requireYjsCjs();
+
+  const doc = new Y.Doc();
+
+  // Simulate a mixed module loader environment where another Yjs instance eagerly
+  // instantiates the BranchStore roots before YjsBranchStore is constructed.
+  Ycjs.Doc.prototype.getMap.call(doc, "branching:branches");
+  Ycjs.Doc.prototype.getMap.call(doc, "branching:commits");
+  Ycjs.Doc.prototype.getMap.call(doc, "branching:meta");
+
+  assert.throws(() => doc.getMap("branching:branches"), /different constructor/);
+  assert.throws(() => doc.getMap("branching:commits"), /different constructor/);
+  assert.throws(() => doc.getMap("branching:meta"), /different constructor/);
+
+  const store = new YjsBranchStore({
+    ydoc: doc,
+    payloadEncoding: "gzip-chunks",
+    chunkSize: 1024,
+    maxChunksPerTransaction: 2,
+    snapshotEveryNCommits: 1,
+  });
+
+  // Root normalization should re-wrap foreign roots into the local Yjs instance.
+  assert.ok(doc.share.get("branching:branches") instanceof Y.Map);
+  assert.ok(doc.share.get("branching:commits") instanceof Y.Map);
+  assert.ok(doc.share.get("branching:meta") instanceof Y.Map);
+
+  assert.ok(doc.getMap("branching:branches") instanceof Y.Map);
+  assert.ok(doc.getMap("branching:commits") instanceof Y.Map);
+  assert.ok(doc.getMap("branching:meta") instanceof Y.Map);
+
+  const actor = { userId: "u1", role: "owner" };
+  const docId = "doc-foreign-branching";
+
+  await store.ensureDocument(docId, actor, makeInitialState());
+  const main = await store.getBranch(docId, "main");
+  assert.ok(main);
+
+  const current = await store.getDocumentStateAtCommit(main.headCommitId);
+  const next = structuredClone(current);
+  next.metadata.foo = "bar";
+
+  const patch = diffDocumentStates(current, next);
+  const commit = await store.createCommit({
+    docId,
+    parentCommitId: main.headCommitId,
+    mergeParentCommitId: null,
+    createdBy: actor.userId,
+    createdAt: 123,
+    message: "test",
+    patch,
+    nextState: next,
+  });
+
+  const loaded = await store.getCommit(commit.id);
+  assert.ok(loaded);
+  assert.deepEqual(loaded.patch, patch);
+
+  const rawCommit = doc.getMap("branching:commits").get(commit.id);
+  assert.ok(rawCommit instanceof Y.Map);
+  assert.equal(rawCommit.get("patch"), undefined);
+  assert.equal(rawCommit.get("patchEncoding"), "gzip-chunks");
+
+  const patchChunks = rawCommit.get("patchChunks");
+  assert.ok(patchChunks instanceof Y.Array);
+});

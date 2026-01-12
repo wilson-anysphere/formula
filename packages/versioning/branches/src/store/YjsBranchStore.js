@@ -144,6 +144,74 @@ function getYArray(value) {
   return /** @type {Y.Array<any>} */ (maybe);
 }
 
+function isYAbstractType(value) {
+  if (value instanceof Y.AbstractType) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = /** @type {any} */ (value);
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
+  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
+}
+
+function replaceForeignRootType({ doc, name, existing, create }) {
+  const t = create();
+
+  // Mirror Yjs' own Doc.get conversion logic for AbstractType placeholders, but
+  // also support roots instantiated by a different Yjs module instance (e.g.
+  // CJS `require("yjs")`).
+  t._map = existing?._map;
+  t._start = existing?._start;
+  t._length = existing?._length;
+
+  const map = existing?._map;
+  if (map instanceof Map) {
+    map.forEach((item) => {
+      for (let n = item; n !== null; n = n.left) {
+        n.parent = t;
+      }
+    });
+  }
+
+  for (let n = existing?._start ?? null; n !== null; n = n.right) {
+    n.parent = t;
+  }
+
+  doc.share.set(name, t);
+  t._integrate(doc, null);
+  return t;
+}
+
+/**
+ * Safely access a Map root without relying on `doc.getMap`, which can throw when
+ * the root was instantiated by a different Yjs module instance (ESM vs CJS).
+ *
+ * @param {any} doc
+ * @param {string} name
+ * @returns {Y.Map<any>}
+ */
+function getMapRoot(doc, name) {
+  const existing = doc?.share?.get?.(name);
+  if (!existing) return doc.getMap(name);
+
+  const map = getYMap(existing);
+  if (map) {
+    if (map instanceof Y.Map) return map;
+    if (doc instanceof Y.Doc) {
+      return replaceForeignRootType({ doc, name, existing: map, create: () => new Y.Map() });
+    }
+    return map;
+  }
+
+  if (isYAbstractType(existing)) {
+    if (doc instanceof Y.Doc) {
+      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
+    }
+    return doc.getMap(name);
+  }
+
+  throw new Error(`Unsupported Yjs root type for "${name}"`);
+}
+
 /**
  * @param {any} map
  * @returns {any}
@@ -223,9 +291,9 @@ export class YjsBranchStore {
     if (!ydoc) throw new Error("YjsBranchStore requires { ydoc }");
     this.#ydoc = ydoc;
     this.#rootName = rootName ?? "branching";
-    this.#branches = ydoc.getMap(`${this.#rootName}:branches`);
-    this.#commits = ydoc.getMap(`${this.#rootName}:commits`);
-    this.#meta = ydoc.getMap(`${this.#rootName}:meta`);
+    this.#branches = getMapRoot(ydoc, `${this.#rootName}:branches`);
+    this.#commits = getMapRoot(ydoc, `${this.#rootName}:commits`);
+    this.#meta = getMapRoot(ydoc, `${this.#rootName}:meta`);
     this.#snapshotEveryNCommits =
       snapshotEveryNCommits == null ? 50 : snapshotEveryNCommits;
     this.#snapshotWhenPatchExceedsBytes =
