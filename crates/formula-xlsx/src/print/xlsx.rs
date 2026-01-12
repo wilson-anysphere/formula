@@ -538,6 +538,7 @@ fn update_workbook_xml(
     let mut skipping_defined_name = false;
     let mut current_defined_key: Option<(String, usize)> = None;
     let mut applied: HashSet<(String, usize)> = HashSet::new();
+    let needs_defined_names = edits.values().any(|e| matches!(e, DefinedNameEdit::Set(_)));
 
     loop {
         let event = reader.read_event_into(&mut buf)?;
@@ -550,7 +551,40 @@ fn update_workbook_xml(
             Event::Empty(ref e) if e.local_name().as_ref() == b"workbook" => {
                 let ns = crate::xml::workbook_xml_namespaces_from_workbook_start(e)?;
                 workbook_prefix = ns.spreadsheetml_prefix;
-                writer.write_event(event)?;
+
+                // Some workbooks are degenerate/self-closing (e.g. `<workbook .../>`). When we need
+                // to insert defined names, expand the root to a proper start/end pair so we can
+                // emit children.
+                if needs_defined_names {
+                    let workbook_tag =
+                        String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    writer.write_event(Event::Start(e.to_owned()))?;
+
+                    let defined_names_tag =
+                        crate::xml::prefixed_tag(workbook_prefix.as_deref(), "definedNames");
+                    let defined_name_tag =
+                        crate::xml::prefixed_tag(workbook_prefix.as_deref(), "definedName");
+
+                    writer.write_event(Event::Start(BytesStart::new(defined_names_tag.as_str())))?;
+                    for ((name, local_sheet_id), edit) in edits {
+                        if let DefinedNameEdit::Set(value) = edit {
+                            write_defined_name(
+                                &mut writer,
+                                defined_name_tag.as_str(),
+                                name,
+                                *local_sheet_id,
+                                value,
+                            )?;
+                        }
+                    }
+                    writer.write_event(Event::End(BytesEnd::new(defined_names_tag.as_str())))?;
+
+                    writer.write_event(Event::End(BytesEnd::new(workbook_tag.as_str())))?;
+                    // The workbook was self-closing, so nothing else can appear inside it.
+                    seen_defined_names = true;
+                } else {
+                    writer.write_event(event)?;
+                }
             }
 
             Event::Empty(ref e) if e.local_name().as_ref() == b"definedNames" => {
@@ -673,7 +707,7 @@ fn update_workbook_xml(
             Event::End(ref e)
                 if e.local_name().as_ref() == b"workbook"
                     && !seen_defined_names
-                    && edits.values().any(|e| matches!(e, DefinedNameEdit::Set(_))) =>
+                    && needs_defined_names =>
             {
                 let defined_names_tag =
                     crate::xml::prefixed_tag(workbook_prefix.as_deref(), "definedNames");
@@ -1104,4 +1138,91 @@ fn write_col_breaks(
     }
     writer.write_event(Event::End(BytesEnd::new(col_breaks_tag.as_str())))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SPREADSHEETML_NS: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+    #[test]
+    fn update_workbook_xml_expands_self_closing_prefixed_root_and_inserts_defined_names() {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>"#;
+
+        let edits: HashMap<(String, usize), DefinedNameEdit> = HashMap::from([(
+            ("_xlnm.Print_Area".to_string(), 0),
+            DefinedNameEdit::Set("Sheet1!$A$1:$B$2".to_string()),
+        )]);
+
+        let updated = update_workbook_xml(workbook_xml, &edits).unwrap();
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        // Root should be expanded and remain prefixed.
+        assert!(updated_str.contains("<x:workbook"));
+        assert!(updated_str.contains("</x:workbook>"));
+
+        // Inserted tags must use the SpreadsheetML prefix (`x:` here).
+        assert!(updated_str.contains("<x:definedNames"));
+        assert!(updated_str.contains("<x:definedName"));
+
+        // Ensure output is well-formed and namespace-correct.
+        let doc = roxmltree::Document::parse(updated_str).unwrap();
+        let root = doc.root_element();
+        assert_eq!(root.tag_name().name(), "workbook");
+        assert_eq!(root.tag_name().namespace(), Some(SPREADSHEETML_NS));
+
+        let defined_names = root
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "definedNames")
+            .expect("missing definedNames");
+        assert_eq!(defined_names.tag_name().namespace(), Some(SPREADSHEETML_NS));
+
+        let defined_name = root
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "definedName")
+            .expect("missing definedName");
+        assert_eq!(defined_name.tag_name().namespace(), Some(SPREADSHEETML_NS));
+    }
+
+    #[test]
+    fn update_workbook_xml_expands_self_closing_default_ns_root_and_inserts_unprefixed_defined_names()
+    {
+        let workbook_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#;
+
+        let edits: HashMap<(String, usize), DefinedNameEdit> = HashMap::from([(
+            ("_xlnm.Print_Titles".to_string(), 0),
+            DefinedNameEdit::Set("Sheet1!$1:$1".to_string()),
+        )]);
+
+        let updated = update_workbook_xml(workbook_xml, &edits).unwrap();
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
+        assert!(updated_str.contains("<workbook"));
+        assert!(updated_str.contains("</workbook>"));
+
+        // With SpreadsheetML as the default namespace, inserted tags should be unprefixed.
+        assert!(updated_str.contains("<definedNames>"));
+        assert!(updated_str.contains("<definedName"));
+
+        let doc = roxmltree::Document::parse(updated_str).unwrap();
+        let root = doc.root_element();
+        assert_eq!(root.tag_name().name(), "workbook");
+        assert_eq!(root.tag_name().namespace(), Some(SPREADSHEETML_NS));
+
+        let defined_names = root
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "definedNames")
+            .expect("missing definedNames");
+        assert_eq!(defined_names.tag_name().namespace(), Some(SPREADSHEETML_NS));
+
+        let defined_name = root
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "definedName")
+            .expect("missing definedName");
+        assert_eq!(defined_name.tag_name().namespace(), Some(SPREADSHEETML_NS));
+    }
 }
