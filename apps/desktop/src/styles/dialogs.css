@@ -13,6 +13,13 @@
   background: var(--dialog-backdrop);
 }
 
+.dialog__controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .dialog__controls button {
   border: 1px solid var(--border);
   border-radius: 8px;

@@ -42,6 +42,11 @@ test("extension UI dialogs avoid inline style assignments", () => {
     /controls\.className\s*=\s*"dialog__controls"/,
     "showInputBox should apply the dialog__controls CSS class",
   );
+  assert.match(
+    inputBoxSection,
+    /dialog\.className\s*=\s*"dialog extensions-ui"/,
+    "showInputBox should add an extensions-ui class to scope dialog-specific styling",
+  );
 
   const quickPickSection = extractSection(uiSource, "export async function showQuickPick");
   assert.equal(
@@ -68,6 +73,11 @@ test("extension UI dialogs avoid inline style assignments", () => {
     quickPickSection,
     /sub\.className\s*=\s*"quick-pick__subtext"/,
     "showQuickPick should apply the quick-pick__subtext CSS class",
+  );
+  assert.match(
+    quickPickSection,
+    /dialog\.className\s*=\s*"dialog extensions-ui"/,
+    "showQuickPick should add an extensions-ui class to scope dialog-specific styling",
   );
 
   const mainPath = path.join(__dirname, "..", "src", "main.ts");

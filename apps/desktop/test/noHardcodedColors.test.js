@@ -26,6 +26,11 @@ test("core UI does not hardcode colors outside tokens.css", () => {
     const rel = path.relative(srcRoot, file).replace(/\\\\/g, "/");
     if (rel === "styles/tokens.css") return false;
     if (rel.startsWith("grid/presence-renderer/")) return false;
+    // Collaboration user identities intentionally use a fixed palette of hex colors
+    // (data-driven presence cursor/selection rendering). Treat these like other
+    // data-driven formatting paths (rich text, conditional formatting) and allow
+    // hardcoded colors.
+    if (rel === "collab/userIdentity.ts") return false;
     // Rich text styles include data-driven colors (cell formatting).
     if (rel.startsWith("grid/text/rich-text/")) return false;
     // Conditional formatting colors are data-driven (cell formatting).

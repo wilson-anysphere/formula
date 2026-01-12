@@ -33,7 +33,7 @@ type InputBoxOptions = { prompt?: string; value?: string; placeHolder?: string }
 
 export async function showInputBox(options: InputBoxOptions = {}): Promise<string | null> {
   const dialog = document.createElement("dialog");
-  dialog.className = "dialog";
+  dialog.className = "dialog extensions-ui";
   dialog.dataset.testid = "input-box";
 
   const title = document.createElement("div");
@@ -111,7 +111,7 @@ export async function showQuickPick<T>(
   options: { placeHolder?: string } = {},
 ): Promise<T | null> {
   const dialog = document.createElement("dialog");
-  dialog.className = "dialog";
+  dialog.className = "dialog extensions-ui";
   dialog.dataset.testid = "quick-pick";
 
   const title = document.createElement("div");
