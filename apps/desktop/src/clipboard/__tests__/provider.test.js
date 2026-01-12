@@ -1151,6 +1151,45 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("tauri: read drops oversized tauri clipboard.readText payloads", async () => {
+    const largeText = "x".repeat(3 * 1024 * 1024);
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd) {
+              if (cmd === "clipboard_read" || cmd === "read_clipboard") {
+                throw new Error("command not found");
+              }
+              throw new Error(`Unexpected command: ${cmd}`);
+            },
+          },
+          clipboard: {
+            async readText() {
+              return largeText;
+            },
+          },
+        },
+        navigator: {
+          clipboard: {
+            async read() {
+              throw new Error("permission denied");
+            },
+            async readText() {
+              throw new Error("permission denied");
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.deepEqual(content, { text: undefined });
+      }
+    );
+  });
+
   await t.test("tauri: read falls back to core.invoke('read_clipboard') when clipboard_read is unavailable", async () => {
     await withGlobals(
       {
@@ -1189,6 +1228,51 @@ test("clipboard provider", async (t) => {
         assert.ok(content.imagePng instanceof Uint8Array);
         assert.deepEqual(content, {
           text: "legacy text",
+          html: "legacy html",
+          rtf: "legacy rtf",
+          imagePng: new Uint8Array([0x09, 0x08, 0x07]),
+        });
+      }
+    );
+  });
+
+  await t.test("tauri: read ignores oversized legacy text payloads", async () => {
+    const largeText = "x".repeat(3 * 1024 * 1024);
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd) {
+              if (cmd === "clipboard_read") {
+                throw new Error("command not found");
+              }
+              if (cmd === "read_clipboard") {
+                return { text: largeText, html: "legacy html", rtf: "legacy rtf", image_png_base64: "CQgH" };
+              }
+              throw new Error(`Unexpected command: ${cmd}`);
+            },
+          },
+          clipboard: {},
+        },
+        navigator: {
+          clipboard: {
+            async read() {
+              throw new Error("permission denied");
+            },
+            async readText() {
+              throw new Error("permission denied");
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.ok(content.imagePng instanceof Uint8Array);
+        assert.equal(content.text, undefined);
+        assert.deepEqual(content, {
+          text: undefined,
           html: "legacy html",
           rtf: "legacy rtf",
           imagePng: new Uint8Array([0x09, 0x08, 0x07]),

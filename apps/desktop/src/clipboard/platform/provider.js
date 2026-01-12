@@ -275,7 +275,13 @@ function encodeBase64(bytes) {
 function mergeClipboardContent(target, source) {
   if (!source || typeof source !== "object") return;
 
-  if (typeof target.text !== "string" && typeof source.text === "string") target.text = source.text;
+  if (
+    typeof target.text !== "string" &&
+    typeof source.text === "string" &&
+    source.text.length <= MAX_RICH_TEXT_CHARS
+  ) {
+    target.text = source.text;
+  }
 
   if (typeof target.html !== "string" && typeof source.html === "string" && source.html.length <= MAX_RICH_TEXT_CHARS) {
     target.html = source.html;
@@ -369,16 +375,16 @@ function createTauriClipboardProvider() {
       // 1) Prefer rich reads via the native clipboard command when available (Tauri IPC).
       if (typeof tauriInvoke === "function") {
         try {
-          const result = await tauriInvoke("clipboard_read");
-          if (result && typeof result === "object") {
-            /** @type {any} */
-            const r = result;
-            native = {};
-            if (typeof r.text === "string") native.text = r.text;
-            if (typeof r.html === "string" && r.html.length <= MAX_RICH_TEXT_CHARS) native.html = r.html;
-            if (typeof r.rtf === "string" && r.rtf.length <= MAX_RICH_TEXT_CHARS) native.rtf = r.rtf;
+            const result = await tauriInvoke("clipboard_read");
+            if (result && typeof result === "object") {
+              /** @type {any} */
+              const r = result;
+              native = {};
+              if (typeof r.text === "string" && r.text.length <= MAX_RICH_TEXT_CHARS) native.text = r.text;
+              if (typeof r.html === "string" && r.html.length <= MAX_RICH_TEXT_CHARS) native.html = r.html;
+              if (typeof r.rtf === "string" && r.rtf.length <= MAX_RICH_TEXT_CHARS) native.rtf = r.rtf;
 
-            const pngBase64 = readPngBase64(r);
+              const pngBase64 = readPngBase64(r);
             if (pngBase64) {
               const imagePng = coerceUint8Array(pngBase64);
               if (imagePng) {
@@ -443,7 +449,7 @@ function createTauriClipboardProvider() {
       if (!skippedOversizedPlainText && typeof merged.text !== "string" && tauriClipboard?.readText) {
         try {
           const text = await tauriClipboard.readText();
-          if (typeof text === "string") merged.text = text;
+          if (typeof text === "string" && text.length <= MAX_RICH_TEXT_CHARS) merged.text = text;
         } catch {
           // Ignore.
         }
