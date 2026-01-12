@@ -1,8 +1,8 @@
-use crate::error::ExcelError;
+use super::builtins_helpers::excel_result_number;
 use crate::eval::CompiledExpr;
 use crate::functions::{eval_scalar_arg, ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{ErrorKind, Value};
+use crate::value::Value;
 
 inventory::submit! {
     FunctionSpec {
@@ -32,13 +32,5 @@ fn pduration_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
         Err(e) => return Value::Error(e),
     };
 
-    match super::pduration(rate, pv, fv) {
-        Ok(n) => Value::Number(n),
-        Err(e) => Value::Error(match e {
-            ExcelError::Div0 => ErrorKind::Div0,
-            ExcelError::Value => ErrorKind::Value,
-            ExcelError::Num => ErrorKind::Num,
-        }),
-    }
+    excel_result_number(super::pduration(rate, pv, fv))
 }
-
