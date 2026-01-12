@@ -584,7 +584,14 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
       .toBe(sentinel);
 
     // Select A1 and attempt copy (should be blocked).
-    await page.click("#grid", { position: { x: 53, y: 29 } });
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      app.selectRange({
+        sheetId,
+        range: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
+      });
+    });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
     await expect(page.getByTestId("selection-range")).toHaveText("A1");
 
@@ -609,7 +616,14 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     });
 
     // Attempt cut (should be blocked: clipboard unchanged and cell not cleared).
-    await page.click("#grid", { position: { x: 53, y: 29 } });
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      app.selectRange({
+        sheetId,
+        range: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
+      });
+    });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
     await page.keyboard.press(`${modifier}+X`);
