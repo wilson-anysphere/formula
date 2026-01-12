@@ -143,7 +143,8 @@ export class DocumentBranchingWorkflow {
           sheetMeta.visibility = nextMeta.visibility;
         }
         if (supportsSheetMetadata && nextMeta && "tabColor" in nextMeta) {
-          sheetMeta.tabColor = nextMeta.tabColor ?? null;
+          if (nextMeta.tabColor === null) sheetMeta.tabColor = null;
+          else if (typeof nextMeta.tabColor === "string") sheetMeta.tabColor = nextMeta.tabColor;
         }
         merged.sheets.metaById[sheetId] = sheetMeta;
       } else {
@@ -164,7 +165,11 @@ export class DocumentBranchingWorkflow {
           merged.sheets.metaById[sheetId] = { ...merged.sheets.metaById[sheetId], visibility: nextMeta.visibility };
         }
         if (supportsSheetMetadata && nextMeta && "tabColor" in nextMeta) {
-          merged.sheets.metaById[sheetId] = { ...merged.sheets.metaById[sheetId], tabColor: nextMeta.tabColor ?? null };
+          if (nextMeta.tabColor === null) {
+            merged.sheets.metaById[sheetId] = { ...merged.sheets.metaById[sheetId], tabColor: null };
+          } else if (typeof nextMeta.tabColor === "string") {
+            merged.sheets.metaById[sheetId] = { ...merged.sheets.metaById[sheetId], tabColor: nextMeta.tabColor };
+          }
         }
         if (nextMeta?.view) {
           merged.sheets.metaById[sheetId] = { ...merged.sheets.metaById[sheetId], view: structuredClone(nextMeta.view) };

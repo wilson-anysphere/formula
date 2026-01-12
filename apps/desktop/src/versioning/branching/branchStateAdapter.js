@@ -290,7 +290,7 @@ export function documentControllerToBranchState(doc) {
       if (tabColor && typeof tabColor === "object" && typeof tabColor.rgb === "string") {
         tabColor = tabColor.rgb;
       }
-      if (tabColor == null) {
+      if (tabColor === null) {
         metaOut.tabColor = null;
       } else if (typeof tabColor === "string") {
         metaOut.tabColor = tabColor;
@@ -378,8 +378,10 @@ export function applyBranchStateToDocumentController(doc, state) {
     if (meta.visibility === "visible" || meta.visibility === "hidden" || meta.visibility === "veryHidden") {
       outSheet.visibility = meta.visibility;
     }
-    if ("tabColor" in meta) {
-      outSheet.tabColor = meta.tabColor ?? null;
+    if (meta.tabColor === null) {
+      outSheet.tabColor = null;
+    } else if (typeof meta.tabColor === "string") {
+      outSheet.tabColor = meta.tabColor;
     }
 
     // --- Layered formats (sheet/row/col defaults) ---

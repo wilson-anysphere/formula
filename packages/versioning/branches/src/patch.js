@@ -267,7 +267,7 @@ export function applyPatch(state, patch) {
           nextMeta.visibility = meta.visibility;
         }
         if ("tabColor" in meta) {
-          if (meta.tabColor == null) {
+          if (meta.tabColor === null) {
             nextMeta.tabColor = null;
           } else if (typeof meta.tabColor === "string") {
             nextMeta.tabColor = meta.tabColor;

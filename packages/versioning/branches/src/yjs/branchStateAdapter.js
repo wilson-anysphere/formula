@@ -690,12 +690,12 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
           if (meta && "visibility" in meta) {
             if (meta.visibility === "visible" || meta.visibility === "hidden" || meta.visibility === "veryHidden") {
               entry.set("visibility", meta.visibility);
-            } else if (meta.visibility == null) {
+            } else if (meta.visibility === null) {
               entry.delete("visibility");
             }
           }
           if (meta && "tabColor" in meta) {
-            if (meta.tabColor == null) {
+            if (meta.tabColor === null) {
               entry.delete("tabColor");
             } else if (typeof meta.tabColor === "string") {
               entry.set("tabColor", meta.tabColor);
