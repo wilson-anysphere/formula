@@ -320,6 +320,12 @@ describe("CanvasGrid scrollbars", () => {
     const viewport = apiRef.current?.getViewportState();
     expect(viewport).toBeTruthy();
 
+    thumbSpy.mockClear();
+    await act(async () => {
+      // Trigger a scrollbar sync after the initial mount effects.
+      apiRef.current?.scrollBy(0, 0);
+    });
+
     const zoom = apiRef.current?.getZoom() ?? 1;
     const inset = 2 * zoom;
     const thickness = 10 * zoom;
@@ -374,6 +380,11 @@ describe("CanvasGrid scrollbars", () => {
     expect(viewport?.maxScrollY).toBeGreaterThan(0);
     expect(viewport?.maxScrollX).toBe(0);
 
+    thumbSpy.mockClear();
+    await act(async () => {
+      apiRef.current?.scrollBy(0, 0);
+    });
+
     const zoom = apiRef.current?.getZoom() ?? 1;
     const inset = 2 * zoom;
     const thickness = 10 * zoom;
@@ -424,6 +435,11 @@ describe("CanvasGrid scrollbars", () => {
     expect(viewport).toBeTruthy();
     expect(viewport?.maxScrollY).toBeGreaterThan(0);
     expect(viewport?.maxScrollX).toBeGreaterThan(0);
+
+    thumbSpy.mockClear();
+    await act(async () => {
+      apiRef.current?.scrollBy(0, 0);
+    });
 
     const zoom = apiRef.current?.getZoom() ?? 1;
     const inset = 2 * zoom;
@@ -478,6 +494,11 @@ describe("CanvasGrid scrollbars", () => {
     expect(viewport?.frozenHeight).toBeGreaterThan(0);
     expect(viewport?.frozenWidth).toBeGreaterThan(0);
 
+    thumbSpy.mockClear();
+    await act(async () => {
+      apiRef.current?.scrollBy(0, 0);
+    });
+
     const zoom = apiRef.current?.getZoom() ?? 1;
     const inset = 2 * zoom;
     const thickness = 10 * zoom;
@@ -516,13 +537,13 @@ describe("CanvasGrid scrollbars", () => {
       );
     });
 
-    const callsAfterMount = rectSpy.mock.calls.length;
+    rectSpy.mockClear();
 
     await act(async () => {
       apiRef.current?.scrollBy(10, 10);
     });
 
-    expect(rectSpy.mock.calls.length).toBe(callsAfterMount);
+    expect(rectSpy).not.toHaveBeenCalled();
 
     await act(async () => {
       root.unmount();
