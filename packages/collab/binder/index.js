@@ -486,7 +486,7 @@ export function bindYjsToDocumentController(options) {
     applyingRemote = true;
     try {
       if (typeof documentController.applyExternalDeltas === "function") {
-        documentController.applyExternalDeltas(deltas);
+        documentController.applyExternalDeltas(deltas, { source: "collab" });
       } else {
         // Fallback for older DocumentController versions: apply via user mutations without feedback.
         const prevCanEdit = "canEditCell" in documentController ? documentController.canEditCell : undefined;
@@ -840,7 +840,7 @@ export function bindYjsToDocumentController(options) {
       applyingRemote = true;
       try {
         if (typeof documentController.applyExternalDeltas === "function") {
-          documentController.applyExternalDeltas(deniedInverse, { recalc: false });
+          documentController.applyExternalDeltas(deniedInverse, { recalc: false, source: "collab" });
         } else {
           const prevCanEdit = "canEditCell" in documentController ? documentController.canEditCell : undefined;
           if (prevCanEdit !== undefined) documentController.canEditCell = null;
