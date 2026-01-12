@@ -146,6 +146,23 @@ Note: `clipboard-manager:allow-read-text` / `clipboard-manager:allow-write-text`
 clipboard helpers (`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats (HTML/RTF/PNG)
 are handled via custom Rust commands (`__TAURI__.core.invoke(...)`) and must be kept input-validated/scoped in Rust.
 
+### Validating permission identifiers against the installed Tauri toolchain
+
+Tauri’s permission identifiers are derived from the **exact** versions of Tauri core + enabled plugins in your build
+toolchain. To validate that `src-tauri/capabilities/*.json` files only use real, supported identifiers, you can
+generate the capability JSON schema and list the available permissions:
+
+```bash
+# Generates `apps/desktop/src-tauri/gen/schemas/desktop-schema.json` (ignored by git).
+# On Linux this requires the system WebView toolchain (gtk/webkit2gtk) because it compiles the desktop feature set.
+bash scripts/cargo_agent.sh check -p formula-desktop-tauri --features desktop --lib
+
+# Lists all permission identifiers available to this app (core + enabled plugins).
+cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls
+```
+
+Note: on Tauri v2.9, core permissions use the `core:` prefix (e.g. `core:event:allow-listen`, `core:window:allow-hide`).
+
 If you add new desktop IPC surface area, you must update the capability allowlists:
 
 - new frontend↔backend events → `event:allow-listen` / `event:allow-emit` (sometimes `core:event:*`, depending on Tauri toolchain)

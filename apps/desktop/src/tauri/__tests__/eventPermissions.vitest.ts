@@ -13,8 +13,8 @@ type CapabilityPermission =
     };
 
 describe("tauri capability event permissions", () => {
-  const allowListenIdentifiers = ["event:allow-listen", "core:event:allow-listen"] as const;
-  const allowEmitIdentifiers = ["event:allow-emit", "core:event:allow-emit"] as const;
+  const allowListenIdentifiers = ["core:event:allow-listen"] as const;
+  const allowEmitIdentifiers = ["core:event:allow-emit"] as const;
 
   it("is scoped to the main window label via the capability file", () => {
     const tauriConfUrl = new URL("../../../src-tauri/tauri.conf.json", import.meta.url);
@@ -43,9 +43,8 @@ describe("tauri capability event permissions", () => {
     const permissions = Array.isArray(capability.permissions) ? capability.permissions : [];
 
     // Using the string form grants the permission with its default (unscoped) allowlist. For
-    // `event:allow-listen` / `event:allow-emit` (or the `core:`-prefixed variants in some Tauri
-    // versions) that effectively becomes "allow all events", which is not acceptable for
-    // hardened desktop builds.
+    // `core:event:allow-listen` / `core:event:allow-emit` that effectively becomes "allow all
+    // events", which is not acceptable for hardened desktop builds.
     for (const id of allowListenIdentifiers) expect(permissions).not.toContain(id);
     for (const id of allowEmitIdentifiers) expect(permissions).not.toContain(id);
 

@@ -849,6 +849,22 @@ Guardrail tests (to prevent accidental “allow everything” capability drift):
 - `apps/desktop/src/tauri/__tests__/openFileIpcWiring.vitest.ts` — asserts the open-file IPC handshake (`open-file-ready`) is still wired in `main.ts` (prevents cold-start open drops).
 - `apps/desktop/src/tauri/__tests__/updaterMainListeners.vitest.ts` — asserts updater UX listeners remain consolidated in `tauri/updaterUi.ts` and the `updater-ui-ready` handshake stays intact.
 
+### Validating permissions against the Tauri toolchain
+
+When upgrading Tauri or plugins, the set of valid permission identifiers can change. You can validate the capability
+files against the **actual** toolchain installed in your environment by regenerating the schemas and listing the
+available permissions:
+
+```bash
+# Generates `apps/desktop/src-tauri/gen/schemas/desktop-schema.json` (ignored by git).
+bash scripts/cargo_agent.sh check -p formula-desktop-tauri --features desktop --lib
+
+# Lists all available `${plugin}:${permission}` identifiers.
+cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls
+```
+
+Note: on Tauri v2.9, core permissions use the `core:` prefix (e.g. `core:event:allow-listen`).
+
 ### Practical workflow
 
 - If you add a new event name used by `listen(...)` or `emit(...)`, update the `event:allow-listen` / `event:allow-emit` allowlists (in `apps/desktop/src-tauri/capabilities/main.json`).
