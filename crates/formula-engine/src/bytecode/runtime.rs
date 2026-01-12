@@ -9684,32 +9684,12 @@ fn coord_in_range(coord: CellCoord, range: ResolvedRange) -> bool {
 }
 
 #[inline]
-fn record_error_col_major(
-    best: &mut Option<(i32, i32, ErrorKind)>,
-    coord: CellCoord,
-    err: ErrorKind,
-) {
-    // The dense fallback paths scan columns outermost and rows innermost. Preserve that precedence
-    // by selecting the error with the smallest (col, row) coordinate.
-    match best {
-        None => *best = Some((coord.col, coord.row, err)),
-        Some((best_col, best_row, _)) => {
-            if (coord.col, coord.row) < (*best_col, *best_row) {
-                *best = Some((coord.col, coord.row, err));
-            }
-        }
-    }
-}
-
-#[inline]
 fn record_error_row_major(
     best: &mut Option<(i32, i32, ErrorKind)>,
     coord: CellCoord,
     err: ErrorKind,
 ) {
-    // The dense AND/OR reference paths (and criteria-aggregate fallbacks) scan rows outermost and
-    // columns innermost. Preserve that precedence by selecting the error with the smallest
-    // (row, col) coordinate.
+    // Preserve row-major error precedence for range scans: rows outermost, columns innermost.
     match best {
         None => *best = Some((coord.row, coord.col, err)),
         Some((best_row, best_col, _)) => {
@@ -9772,7 +9752,7 @@ fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
                 }
                 match v {
                     Value::Number(n) => sum += n,
-                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    Value::Error(e) => record_error_row_major(&mut best_error, coord, e),
                     // SUM ignores text/logicals/blanks in references.
                     Value::Bool(_)
                     | Value::Text(_)
@@ -9794,26 +9774,32 @@ fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
     }
 
     let mut sum = 0.0;
+    let mut scan_cols: Vec<i32> = Vec::new();
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
             sum += simd::sum_ignore_nan_f64(slice);
         } else {
-            for row in range.row_start..=range.row_end {
-                match grid.get_value(CellCoord { row, col }) {
-                    Value::Number(v) => sum += v,
-                    Value::Error(e) => return Err(e),
-                    // SUM ignores text/logicals/blanks in references.
-                    Value::Bool(_)
-                    | Value::Text(_)
-                    | Value::Entity(_)
-                    | Value::Record(_)
-                    | Value::Empty
-                    | Value::Missing
-                    | Value::Array(_)
-                    | Value::Range(_)
-                    | Value::MultiRange(_)
-                    | Value::Lambda(_) => {}
-                }
+            scan_cols.push(col);
+        }
+    }
+
+    // Dense fallback: scan in row-major order so error precedence matches the AST evaluator.
+    for row in range.row_start..=range.row_end {
+        for &col in &scan_cols {
+            match grid.get_value(CellCoord { row, col }) {
+                Value::Number(v) => sum += v,
+                Value::Error(e) => return Err(e),
+                // SUM ignores text/logicals/blanks in references.
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
+                | Value::Empty
+                | Value::Missing
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -9839,7 +9825,7 @@ fn sum_range_on_sheet(
                 }
                 match v {
                     Value::Number(n) => sum += n,
-                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    Value::Error(e) => record_error_row_major(&mut best_error, coord, e),
                     // SUM ignores text/logicals/blanks in references.
                     Value::Bool(_)
                     | Value::Text(_)
@@ -9861,27 +9847,33 @@ fn sum_range_on_sheet(
     }
 
     let mut sum = 0.0;
+    let mut scan_cols: Vec<i32> = Vec::new();
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
         {
             sum += simd::sum_ignore_nan_f64(slice);
         } else {
-            for row in range.row_start..=range.row_end {
-                match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
-                    Value::Number(v) => sum += v,
-                    Value::Error(e) => return Err(e),
-                    // SUM ignores text/logicals/blanks in references.
-                    Value::Bool(_)
-                    | Value::Text(_)
-                    | Value::Entity(_)
-                    | Value::Record(_)
-                    | Value::Empty
-                    | Value::Missing
-                    | Value::Array(_)
-                    | Value::Range(_)
-                    | Value::MultiRange(_)
-                    | Value::Lambda(_) => {}
-                }
+            scan_cols.push(col);
+        }
+    }
+
+    // Dense fallback: scan in row-major order so error precedence matches the AST evaluator.
+    for row in range.row_start..=range.row_end {
+        for &col in &scan_cols {
+            match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
+                Value::Number(v) => sum += v,
+                Value::Error(e) => return Err(e),
+                // SUM ignores text/logicals/blanks in references.
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
+                | Value::Empty
+                | Value::Missing
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -9907,7 +9899,7 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize)
                         sum += n;
                         count += 1;
                     }
-                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    Value::Error(e) => record_error_row_major(&mut best_error, coord, e),
                     // Ignore non-numeric values in references.
                     Value::Bool(_)
                     | Value::Text(_)
@@ -9930,31 +9922,37 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize)
 
     let mut sum = 0.0;
     let mut count = 0usize;
+    let mut scan_cols: Vec<i32> = Vec::new();
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
             let (s, c) = simd::sum_count_ignore_nan_f64(slice);
             sum += s;
             count += c;
         } else {
-            for row in range.row_start..=range.row_end {
-                match grid.get_value(CellCoord { row, col }) {
-                    Value::Number(v) => {
-                        sum += v;
-                        count += 1;
-                    }
-                    Value::Error(e) => return Err(e),
-                    // Ignore non-numeric values in references.
-                    Value::Bool(_)
-                    | Value::Text(_)
-                    | Value::Entity(_)
-                    | Value::Record(_)
-                    | Value::Empty
-                    | Value::Missing
-                    | Value::Array(_)
-                    | Value::Range(_)
-                    | Value::MultiRange(_)
-                    | Value::Lambda(_) => {}
+            scan_cols.push(col);
+        }
+    }
+
+    // Dense fallback: scan in row-major order so error precedence matches the AST evaluator.
+    for row in range.row_start..=range.row_end {
+        for &col in &scan_cols {
+            match grid.get_value(CellCoord { row, col }) {
+                Value::Number(v) => {
+                    sum += v;
+                    count += 1;
                 }
+                Value::Error(e) => return Err(e),
+                // Ignore non-numeric values in references.
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
+                | Value::Empty
+                | Value::Missing
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -9984,7 +9982,7 @@ fn sum_count_range_on_sheet(
                         sum += n;
                         count += 1;
                     }
-                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    Value::Error(e) => record_error_row_major(&mut best_error, coord, e),
                     // Ignore non-numeric values in references.
                     Value::Bool(_)
                     | Value::Text(_)
@@ -10007,6 +10005,7 @@ fn sum_count_range_on_sheet(
 
     let mut sum = 0.0;
     let mut count = 0usize;
+    let mut scan_cols: Vec<i32> = Vec::new();
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
         {
@@ -10014,25 +10013,30 @@ fn sum_count_range_on_sheet(
             sum += s;
             count += c;
         } else {
-            for row in range.row_start..=range.row_end {
-                match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
-                    Value::Number(v) => {
-                        sum += v;
-                        count += 1;
-                    }
-                    Value::Error(e) => return Err(e),
-                    // Ignore non-numeric values in references.
-                    Value::Bool(_)
-                    | Value::Text(_)
-                    | Value::Entity(_)
-                    | Value::Record(_)
-                    | Value::Empty
-                    | Value::Missing
-                    | Value::Array(_)
-                    | Value::Range(_)
-                    | Value::MultiRange(_)
-                    | Value::Lambda(_) => {}
+            scan_cols.push(col);
+        }
+    }
+
+    // Dense fallback: scan in row-major order so error precedence matches the AST evaluator.
+    for row in range.row_start..=range.row_end {
+        for &col in &scan_cols {
+            match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
+                Value::Number(v) => {
+                    sum += v;
+                    count += 1;
                 }
+                Value::Error(e) => return Err(e),
+                // Ignore non-numeric values in references.
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
+                | Value::Empty
+                | Value::Missing
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
             }
         }
     }
@@ -10318,7 +10322,7 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
                 }
                 match v {
                     Value::Number(n) => out = Some(out.map_or(n, |prev| prev.min(n))),
-                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    Value::Error(e) => record_error_row_major(&mut best_error, coord, e),
                     Value::Bool(_)
                     | Value::Text(_)
                     | Value::Entity(_)
@@ -10339,31 +10343,34 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
     }
 
     let mut out: Option<f64> = None;
+    let mut scan_cols: Vec<i32> = Vec::new();
     for col in range.col_start..=range.col_end {
-        let col_min = if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
-            simd::min_ignore_nan_f64(slice)
-        } else {
-            let mut m: Option<f64> = None;
-            for row in range.row_start..=range.row_end {
-                match grid.get_value(CellCoord { row, col }) {
-                    Value::Number(v) => m = Some(m.map_or(v, |prev| prev.min(v))),
-                    Value::Error(e) => return Err(e),
-                    Value::Bool(_)
-                    | Value::Text(_)
-                    | Value::Entity(_)
-                    | Value::Record(_)
-                    | Value::Empty
-                    | Value::Missing
-                    | Value::Array(_)
-                    | Value::Range(_)
-                    | Value::MultiRange(_)
-                    | Value::Lambda(_) => {}
-                }
+        if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
+            if let Some(m) = simd::min_ignore_nan_f64(slice) {
+                out = Some(out.map_or(m, |prev| prev.min(m)));
             }
-            m
-        };
-        if let Some(m) = col_min {
-            out = Some(out.map_or(m, |prev| prev.min(m)));
+        } else {
+            scan_cols.push(col);
+        }
+    }
+
+    // Dense fallback: scan in row-major order so error precedence matches the AST evaluator.
+    for row in range.row_start..=range.row_end {
+        for &col in &scan_cols {
+            match grid.get_value(CellCoord { row, col }) {
+                Value::Number(v) => out = Some(out.map_or(v, |prev| prev.min(v))),
+                Value::Error(e) => return Err(e),
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
+                | Value::Empty
+                | Value::Missing
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
+            }
         }
     }
     Ok(out)
@@ -10388,7 +10395,7 @@ fn min_range_on_sheet(
                 }
                 match v {
                     Value::Number(n) => out = Some(out.map_or(n, |prev| prev.min(n))),
-                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    Value::Error(e) => record_error_row_major(&mut best_error, coord, e),
                     Value::Bool(_)
                     | Value::Text(_)
                     | Value::Entity(_)
@@ -10409,33 +10416,35 @@ fn min_range_on_sheet(
     }
 
     let mut out: Option<f64> = None;
+    let mut scan_cols: Vec<i32> = Vec::new();
     for col in range.col_start..=range.col_end {
-        let col_min = if let Some(slice) =
-            grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
+        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
         {
-            simd::min_ignore_nan_f64(slice)
-        } else {
-            let mut m: Option<f64> = None;
-            for row in range.row_start..=range.row_end {
-                match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
-                    Value::Number(v) => m = Some(m.map_or(v, |prev| prev.min(v))),
-                    Value::Error(e) => return Err(e),
-                    Value::Bool(_)
-                    | Value::Text(_)
-                    | Value::Entity(_)
-                    | Value::Record(_)
-                    | Value::Empty
-                    | Value::Missing
-                    | Value::Array(_)
-                    | Value::Range(_)
-                    | Value::MultiRange(_)
-                    | Value::Lambda(_) => {}
-                }
+            if let Some(m) = simd::min_ignore_nan_f64(slice) {
+                out = Some(out.map_or(m, |prev| prev.min(m)));
             }
-            m
-        };
-        if let Some(m) = col_min {
-            out = Some(out.map_or(m, |prev| prev.min(m)));
+        } else {
+            scan_cols.push(col);
+        }
+    }
+
+    // Dense fallback: scan in row-major order so error precedence matches the AST evaluator.
+    for row in range.row_start..=range.row_end {
+        for &col in &scan_cols {
+            match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
+                Value::Number(v) => out = Some(out.map_or(v, |prev| prev.min(v))),
+                Value::Error(e) => return Err(e),
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
+                | Value::Empty
+                | Value::Missing
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
+            }
         }
     }
     Ok(out)
@@ -10456,7 +10465,7 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
                 }
                 match v {
                     Value::Number(n) => out = Some(out.map_or(n, |prev| prev.max(n))),
-                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    Value::Error(e) => record_error_row_major(&mut best_error, coord, e),
                     Value::Bool(_)
                     | Value::Text(_)
                     | Value::Entity(_)
@@ -10477,31 +10486,34 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
     }
 
     let mut out: Option<f64> = None;
+    let mut scan_cols: Vec<i32> = Vec::new();
     for col in range.col_start..=range.col_end {
-        let col_max = if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
-            simd::max_ignore_nan_f64(slice)
-        } else {
-            let mut m: Option<f64> = None;
-            for row in range.row_start..=range.row_end {
-                match grid.get_value(CellCoord { row, col }) {
-                    Value::Number(v) => m = Some(m.map_or(v, |prev| prev.max(v))),
-                    Value::Error(e) => return Err(e),
-                    Value::Bool(_)
-                    | Value::Text(_)
-                    | Value::Entity(_)
-                    | Value::Record(_)
-                    | Value::Empty
-                    | Value::Missing
-                    | Value::Array(_)
-                    | Value::Range(_)
-                    | Value::MultiRange(_)
-                    | Value::Lambda(_) => {}
-                }
+        if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
+            if let Some(m) = simd::max_ignore_nan_f64(slice) {
+                out = Some(out.map_or(m, |prev| prev.max(m)));
             }
-            m
-        };
-        if let Some(m) = col_max {
-            out = Some(out.map_or(m, |prev| prev.max(m)));
+        } else {
+            scan_cols.push(col);
+        }
+    }
+
+    // Dense fallback: scan in row-major order so error precedence matches the AST evaluator.
+    for row in range.row_start..=range.row_end {
+        for &col in &scan_cols {
+            match grid.get_value(CellCoord { row, col }) {
+                Value::Number(v) => out = Some(out.map_or(v, |prev| prev.max(v))),
+                Value::Error(e) => return Err(e),
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
+                | Value::Empty
+                | Value::Missing
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
+            }
         }
     }
     Ok(out)
@@ -10526,7 +10538,7 @@ fn max_range_on_sheet(
                 }
                 match v {
                     Value::Number(n) => out = Some(out.map_or(n, |prev| prev.max(n))),
-                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    Value::Error(e) => record_error_row_major(&mut best_error, coord, e),
                     Value::Bool(_)
                     | Value::Text(_)
                     | Value::Entity(_)
@@ -10547,33 +10559,35 @@ fn max_range_on_sheet(
     }
 
     let mut out: Option<f64> = None;
+    let mut scan_cols: Vec<i32> = Vec::new();
     for col in range.col_start..=range.col_end {
-        let col_max = if let Some(slice) =
-            grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
+        if let Some(slice) = grid.column_slice_on_sheet(sheet, col, range.row_start, range.row_end)
         {
-            simd::max_ignore_nan_f64(slice)
-        } else {
-            let mut m: Option<f64> = None;
-            for row in range.row_start..=range.row_end {
-                match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
-                    Value::Number(v) => m = Some(m.map_or(v, |prev| prev.max(v))),
-                    Value::Error(e) => return Err(e),
-                    Value::Bool(_)
-                    | Value::Text(_)
-                    | Value::Entity(_)
-                    | Value::Record(_)
-                    | Value::Empty
-                    | Value::Missing
-                    | Value::Array(_)
-                    | Value::Range(_)
-                    | Value::MultiRange(_)
-                    | Value::Lambda(_) => {}
-                }
+            if let Some(m) = simd::max_ignore_nan_f64(slice) {
+                out = Some(out.map_or(m, |prev| prev.max(m)));
             }
-            m
-        };
-        if let Some(m) = col_max {
-            out = Some(out.map_or(m, |prev| prev.max(m)));
+        } else {
+            scan_cols.push(col);
+        }
+    }
+
+    // Dense fallback: scan in row-major order so error precedence matches the AST evaluator.
+    for row in range.row_start..=range.row_end {
+        for &col in &scan_cols {
+            match grid.get_value_on_sheet(sheet, CellCoord { row, col }) {
+                Value::Number(v) => out = Some(out.map_or(v, |prev| prev.max(v))),
+                Value::Error(e) => return Err(e),
+                Value::Bool(_)
+                | Value::Text(_)
+                | Value::Entity(_)
+                | Value::Record(_)
+                | Value::Empty
+                | Value::Missing
+                | Value::Array(_)
+                | Value::Range(_)
+                | Value::MultiRange(_)
+                | Value::Lambda(_) => {}
+            }
         }
     }
     Ok(out)

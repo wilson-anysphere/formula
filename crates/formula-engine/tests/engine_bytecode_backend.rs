@@ -8720,6 +8720,44 @@ fn bytecode_backend_conditional_aggregates_error_precedence_is_row_major_for_2d_
 }
 
 #[test]
+fn bytecode_backend_basic_aggregates_error_precedence_is_row_major_for_2d_ranges() {
+    let mut engine = Engine::new();
+
+    // 2x2 range with two different errors. Excel (and the AST evaluator) return the first error in
+    // row-major range order: A1, B1, A2, B2.
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine
+        .set_cell_value("Sheet1", "B1", Value::Error(ErrorKind::Div0))
+        .unwrap();
+    engine
+        .set_cell_value("Sheet1", "A2", Value::Error(ErrorKind::Ref))
+        .unwrap();
+    engine.set_cell_value("Sheet1", "B2", 2.0).unwrap();
+
+    let cases = [
+        ("C1", "=SUM(A1:B2)"),
+        ("C2", "=AVERAGE(A1:B2)"),
+        ("C3", "=MIN(A1:B2)"),
+        ("C4", "=MAX(A1:B2)"),
+    ];
+    for (cell, formula) in cases {
+        engine.set_cell_formula("Sheet1", cell, formula).unwrap();
+    }
+
+    assert_eq!(engine.bytecode_program_count(), 4);
+    engine.recalculate_single_threaded();
+
+    for (cell, formula) in cases {
+        assert_eq!(
+            engine.get_cell_value("Sheet1", cell),
+            Value::Error(ErrorKind::Div0),
+            "mismatched value for {cell}: {formula}",
+        );
+        assert_engine_matches_ast(&engine, formula, cell);
+    }
+}
+
+#[test]
 fn bytecode_backend_compiles_xlfn_prefixed_minmaxifs() {
     let mut engine = Engine::new();
 
