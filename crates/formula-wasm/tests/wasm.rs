@@ -429,6 +429,10 @@ fn lex_formula_partial_returns_tokens_and_error_for_unterminated_string() {
         .expect("expected string token");
     assert_eq!(string_token.span.start, 1);
     assert_eq!(string_token.span.end, 7);
+
+    // The error span should also cover the unterminated string literal.
+    assert_eq!(err.span.start, string_token.span.start);
+    assert_eq!(err.span.end, string_token.span.end);
 }
 
 #[wasm_bindgen_test]
