@@ -347,7 +347,7 @@ fn verify_vba_digital_signature_with_trust_from_parts(
                     signature_part_result = Some(formula_vba::VbaDigitalSignatureTrusted {
                         signature: VbaDigitalSignature {
                             stream_path: signature_part_name,
-                            stream_kind: VbaSignatureStreamKind::Unknown,
+                            stream_kind: formula_vba::VbaSignatureStreamKind::Unknown,
                             signer_subject,
                             signature: bytes.to_vec(),
                             verification,

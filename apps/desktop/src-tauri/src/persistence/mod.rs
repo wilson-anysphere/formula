@@ -292,7 +292,7 @@ fn rich_model_cell_value_to_scalar(value: &ModelCellValue) -> Option<CellScalar>
 }
 
 #[cfg(test)]
-mod tests {
+mod storage_export_tests {
     use super::*;
 
     #[test]
@@ -474,5 +474,209 @@ fn apply_cached_formula_values(model: &mut ModelWorkbook, workbook: &AppWorkbook
                 model_sheet.set_value(cell_ref, scalar_to_model_value(&computed));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::Context;
+    use formula_storage::ImportModelWorkbookOptions;
+    use formula_xlsx::print::{CellRange, ColRange, Orientation, PrintTitles, RowRange, Scaling};
+    use std::path::Path;
+
+    fn import_app_workbook(storage: &formula_storage::Storage, workbook: &AppWorkbook) -> anyhow::Result<Uuid> {
+        let model = workbook_to_model(workbook).context("convert workbook to model")?;
+        let meta = storage
+            .import_model_workbook(&model, ImportModelWorkbookOptions::new("test"))
+            .context("import workbook into storage")?;
+        Ok(meta.id)
+    }
+
+    #[test]
+    fn write_xlsx_from_storage_creates_parent_dirs_and_overwrites_existing_file() -> anyhow::Result<()> {
+        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+
+        let mut workbook_meta = AppWorkbook::new_empty(None);
+        workbook_meta.add_sheet("Sheet1".to_string());
+        workbook_meta.ensure_sheet_ids();
+        workbook_meta.sheets[0].set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(123.0))),
+        );
+
+        let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
+
+        let tmp = tempfile::tempdir().context("temp dir")?;
+        let out_path = tmp.path().join("nested/dir/export.xlsx");
+
+        // Parent directories should be created automatically.
+        let first_bytes =
+            write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
+                .context("first export")?;
+        assert!(out_path.exists(), "expected output file to exist");
+        assert!(
+            out_path
+                .parent()
+                .expect("path should have parent")
+                .is_dir(),
+            "expected parent directories to be created"
+        );
+        assert_eq!(
+            std::fs::read(&out_path).context("read first output")?.as_slice(),
+            first_bytes.as_ref(),
+            "expected file bytes to match returned bytes"
+        );
+
+        // Pre-create the file with sentinel content to ensure overwrite/replacement semantics.
+        std::fs::write(&out_path, b"old").context("write sentinel bytes")?;
+        assert_eq!(std::fs::read(&out_path)?.as_slice(), b"old");
+
+        let second_bytes =
+            write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
+                .context("second export")?;
+        let disk_bytes = std::fs::read(&out_path).context("read overwritten output")?;
+        assert_ne!(
+            disk_bytes.as_slice(),
+            b"old",
+            "expected export to overwrite sentinel bytes"
+        );
+        assert_eq!(
+            disk_bytes.as_slice(),
+            second_bytes.as_ref(),
+            "expected on-disk bytes to match returned bytes"
+        );
+
+        Ok(())
+    }
+
+    fn assert_content_type_contains_workbook_main(bytes: &[u8], expected: &str) -> anyhow::Result<()> {
+        let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes).context("parse xlsx package")?;
+        let ct_xml = pkg
+            .part("[Content_Types].xml")
+            .context("missing [Content_Types].xml")?;
+        let ct_xml = std::str::from_utf8(ct_xml).context("content types is not valid utf8")?;
+        assert!(
+            ct_xml.contains(expected),
+            "expected [Content_Types].xml to contain workbook main content type {expected}, got:\n{ct_xml}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn write_xlsx_from_storage_enforces_workbook_kind_and_macro_behavior_for_templates_and_addins(
+    ) -> anyhow::Result<()> {
+        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../fixtures/xlsx/macros/basic.xlsm");
+        let workbook_meta =
+            crate::file_io::read_xlsx_blocking(&fixture_path).context("read macro fixture")?;
+        let expected_vba = workbook_meta
+            .vba_project_bin
+            .as_deref()
+            .context("expected macro fixture to contain xl/vbaProject.bin")?;
+
+        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+        let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
+
+        let tmp = tempfile::tempdir().context("temp dir")?;
+
+        let cases = [
+            (
+                "xltx",
+                formula_xlsx::WorkbookKind::Template,
+                None::<&[u8]>,
+            ),
+            (
+                "xltm",
+                formula_xlsx::WorkbookKind::MacroEnabledTemplate,
+                Some(expected_vba),
+            ),
+            (
+                "xlam",
+                formula_xlsx::WorkbookKind::MacroEnabledAddIn,
+                Some(expected_vba),
+            ),
+        ];
+
+        for (ext, kind, expected_vba_part) in cases {
+            let out_path = tmp.path().join(format!("export.{ext}"));
+            let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
+                .with_context(|| format!("export to .{ext}"))?;
+
+            assert_content_type_contains_workbook_main(bytes.as_ref(), kind.workbook_content_type())
+                .with_context(|| format!("check workbook main content type for .{ext}"))?;
+
+            let pkg = formula_xlsx::XlsxPackage::from_bytes(bytes.as_ref())
+                .with_context(|| format!("parse exported .{ext} package"))?;
+            assert_eq!(
+                pkg.vba_project_bin(),
+                expected_vba_part,
+                "unexpected VBA project presence for .{ext}"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn write_xlsx_from_storage_writes_print_settings_for_templates_and_addins() -> anyhow::Result<()> {
+        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../fixtures/xlsx/basic/print-settings.xlsx");
+        let workbook_meta =
+            crate::file_io::read_xlsx_blocking(&fixture_path).context("read print settings fixture")?;
+
+        assert_eq!(
+            workbook_meta.print_settings.sheets.len(),
+            1,
+            "expected fixture to contain one sheet worth of print settings"
+        );
+        let sheet = &workbook_meta.print_settings.sheets[0];
+        assert_eq!(sheet.sheet_name, "Sheet1");
+        assert_eq!(
+            sheet.print_area.as_deref(),
+            Some(
+                &[CellRange {
+                    start_row: 1,
+                    end_row: 10,
+                    start_col: 1,
+                    end_col: 4,
+                }][..]
+            )
+        );
+        assert_eq!(
+            sheet.print_titles,
+            Some(PrintTitles {
+                repeat_rows: Some(RowRange { start: 1, end: 1 }),
+                repeat_cols: Some(ColRange { start: 1, end: 2 }),
+            })
+        );
+        assert_eq!(sheet.page_setup.orientation, Orientation::Landscape);
+        assert_eq!(sheet.page_setup.paper_size.code, 9);
+        assert_eq!(
+            sheet.page_setup.scaling,
+            Scaling::FitTo { width: 1, height: 0 }
+        );
+        assert!(sheet.manual_page_breaks.row_breaks_after.contains(&5));
+        assert!(sheet.manual_page_breaks.col_breaks_after.contains(&2));
+
+        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+        let workbook_id = import_app_workbook(&storage, &workbook_meta)?;
+
+        let tmp = tempfile::tempdir().context("temp dir")?;
+        for ext in ["xltx", "xlam"] {
+            let out_path = tmp.path().join(format!("print-settings.{ext}"));
+            let bytes = write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)
+                .with_context(|| format!("export to .{ext}"))?;
+
+            let reread = formula_xlsx::print::read_workbook_print_settings(bytes.as_ref())
+                .context("read print settings from exported workbook")?;
+            assert_eq!(
+                reread, workbook_meta.print_settings,
+                "expected print settings to round-trip for .{ext}"
+            );
+        }
+
+        Ok(())
     }
 }
