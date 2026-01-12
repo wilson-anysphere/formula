@@ -141,6 +141,7 @@ export class ContextMenu {
       }
 
       if (item.type === "submenu") {
+        btn.dataset.contextMenuSubmenu = "true";
         const arrow = document.createElement("span");
         arrow.textContent = "›";
         arrow.style.color = "var(--text-secondary)";
@@ -198,9 +199,120 @@ export class ContextMenu {
     this.positionMenu(x, y);
 
     this.keydownListener = (e) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      this.close();
+      if (!this.isShown) return;
+
+      const activeEl = document.activeElement as HTMLElement | null;
+      const focusInSubmenu = Boolean(this.submenu && activeEl && this.submenu.contains(activeEl));
+      const focusContainer = focusInSubmenu ? this.submenu : this.menu;
+
+      const focusableButtons = (container: HTMLElement | null): HTMLButtonElement[] => {
+        if (!container) return [];
+        return Array.from(container.querySelectorAll<HTMLButtonElement>("button")).filter((btn) => !btn.disabled);
+      };
+
+      const focusButtonByDelta = (delta: number) => {
+        const buttons = focusableButtons(focusContainer);
+        if (buttons.length === 0) return;
+
+        // Navigating the main menu should close any open submenu.
+        if (!focusInSubmenu) this.closeSubmenu();
+
+        const active = document.activeElement as HTMLElement | null;
+        const activeBtn = active instanceof HTMLButtonElement ? active : null;
+        const idx = activeBtn ? buttons.indexOf(activeBtn) : -1;
+        const next = idx === -1 ? (delta > 0 ? 0 : buttons.length - 1) : (idx + delta + buttons.length) % buttons.length;
+        buttons[next]?.focus({ preventScroll: true });
+      };
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        this.close();
+        return;
+      }
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        e.stopPropagation();
+        focusButtonByDelta(1);
+        return;
+      }
+
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        e.stopPropagation();
+        focusButtonByDelta(-1);
+        return;
+      }
+
+      if (e.key === "Home") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!focusInSubmenu) this.closeSubmenu();
+        const buttons = focusableButtons(focusContainer);
+        buttons[0]?.focus({ preventScroll: true });
+        return;
+      }
+
+      if (e.key === "End") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!focusInSubmenu) this.closeSubmenu();
+        const buttons = focusableButtons(focusContainer);
+        buttons[buttons.length - 1]?.focus({ preventScroll: true });
+        return;
+      }
+
+      if (e.key === "Enter" || e.key === " ") {
+        const active = document.activeElement as HTMLElement | null;
+        const activeBtn = active instanceof HTMLButtonElement ? active : null;
+        if (!activeBtn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const opensSubmenu = activeBtn.dataset.contextMenuSubmenu === "true";
+        activeBtn.click();
+        if (opensSubmenu) {
+          queueMicrotask(() => {
+            if (!this.isShown || !this.submenu) return;
+            const buttons = focusableButtons(this.submenu);
+            buttons[0]?.focus({ preventScroll: true });
+          });
+        }
+        return;
+      }
+
+      if (e.key === "ArrowRight") {
+        if (focusInSubmenu) return;
+        const active = document.activeElement as HTMLElement | null;
+        const activeBtn = active instanceof HTMLButtonElement ? active : null;
+        if (!activeBtn) return;
+        if (activeBtn.dataset.contextMenuSubmenu !== "true") return;
+        e.preventDefault();
+        e.stopPropagation();
+        activeBtn.click();
+        queueMicrotask(() => {
+          if (!this.isShown || !this.submenu) return;
+          const buttons = focusableButtons(this.submenu);
+          buttons[0]?.focus({ preventScroll: true });
+        });
+        return;
+      }
+
+      if (e.key === "ArrowLeft") {
+        if (!this.submenu) return;
+        if (!focusInSubmenu) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.closeSubmenu();
+          return;
+        }
+        const parent = this.submenuParent;
+        if (!parent) return;
+        e.preventDefault();
+        e.stopPropagation();
+        this.closeSubmenu({ keepParent: true });
+        parent.focus({ preventScroll: true });
+      }
     };
     window.addEventListener("keydown", this.keydownListener, true);
   }
@@ -266,6 +378,7 @@ export class ContextMenu {
       }
 
       if (item.type === "submenu") {
+        btn.dataset.contextMenuSubmenu = "true";
         const arrow = document.createElement("span");
         arrow.textContent = "›";
         arrow.style.color = "var(--text-secondary)";
