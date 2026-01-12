@@ -76,6 +76,30 @@ describe("CollabWorkbookSheetStore", () => {
     expect(keyRef.value).toBe(computeCollabSheetsKey(listSheetsFromCollabSession(session)));
   });
 
+  it("writes setVisibility() changes back to session.sheets (including veryHidden)", () => {
+    const session = makeSession([
+      { id: "s1", name: "Sheet1", visibility: "visible" },
+      { id: "s2", name: "Sheet2", visibility: "visible" },
+    ]);
+    const keyRef = { value: computeCollabSheetsKey(listSheetsFromCollabSession(session)) };
+    const store = new CollabWorkbookSheetStore(session as any, listSheetsFromCollabSession(session), keyRef);
+
+    store.setVisibility("s2", "veryHidden");
+    expect(store.getById("s2")?.visibility).toBe("veryHidden");
+    expect((session.sheets.get(1) as any).get("visibility")).toBe("veryHidden");
+    expect(keyRef.value).toBe(computeCollabSheetsKey(listSheetsFromCollabSession(session)));
+
+    store.setVisibility("s2", "hidden");
+    expect(store.getById("s2")?.visibility).toBe("hidden");
+    expect((session.sheets.get(1) as any).get("visibility")).toBe("hidden");
+    expect(keyRef.value).toBe(computeCollabSheetsKey(listSheetsFromCollabSession(session)));
+
+    store.setVisibility("s2", "visible");
+    expect(store.getById("s2")?.visibility).toBe("visible");
+    expect((session.sheets.get(1) as any).get("visibility")).toBe("visible");
+    expect(keyRef.value).toBe(computeCollabSheetsKey(listSheetsFromCollabSession(session)));
+  });
+
   it("writes tabColor changes back to session.sheets and canonicalizes to ARGB", () => {
     const session = makeSession([{ id: "s1", name: "Sheet1", visibility: "visible" }]);
     const keyRef = { value: computeCollabSheetsKey(listSheetsFromCollabSession(session)) };

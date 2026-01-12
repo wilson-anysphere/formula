@@ -281,6 +281,22 @@ export class CollabWorkbookSheetStore extends WorkbookSheetStore {
     });
   }
 
+  override setVisibility(id: string, visibility: SheetVisibility): void {
+    const before = this.getById(id)?.visibility;
+    super.setVisibility(id, visibility);
+    const after = this.getById(id)?.visibility;
+    if (!after || after === before) return;
+
+    this.session.transactLocal(() => {
+      const idx = findCollabSheetIndexById(this.session, id);
+      if (idx < 0) return;
+      const entry: any = this.session.sheets.get(idx);
+      if (!entry || typeof entry.set !== "function") return;
+      entry.set("visibility", after);
+      this.refreshKeyFromSession();
+    });
+  }
+
   override setTabColor(id: string, color: TabColor | undefined): void {
     // Collab sheet metadata stores tab colors as 8-digit ARGB hex strings (e.g. "FFFF0000").
     // Normalize UI-provided `TabColor.rgb` values into that representation before writing.
