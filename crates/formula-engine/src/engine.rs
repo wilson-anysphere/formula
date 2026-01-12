@@ -3589,6 +3589,16 @@ impl Engine {
                             lexical_scopes,
                         )
                     }
+                    crate::Expr::Binary(b) if b.op == crate::BinaryOp::Intersect => {
+                        // Reference intersection definitions (e.g. `A1:C3 B2:D4`) can be lowered
+                        // to bytecode using reference algebra operators.
+                        self.extract_static_ref_expr_for_bytecode(
+                            &ast.expr,
+                            sheet_id,
+                            visiting,
+                            lexical_scopes,
+                        )
+                    }
                     crate::Expr::Binary(b) if b.op == crate::BinaryOp::Range => {
                         // Reference definitions must be a direct cell/range reference.
                         if !matches!(
@@ -3826,6 +3836,25 @@ impl Engine {
                 )?;
                 Some(crate::Expr::Binary(crate::BinaryExpr {
                     op: crate::BinaryOp::Union,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }))
+            }
+            crate::Expr::Binary(b) if b.op == crate::BinaryOp::Intersect => {
+                let left = self.extract_static_ref_expr_for_bytecode(
+                    &b.left,
+                    current_sheet,
+                    visiting,
+                    lexical_scopes,
+                )?;
+                let right = self.extract_static_ref_expr_for_bytecode(
+                    &b.right,
+                    current_sheet,
+                    visiting,
+                    lexical_scopes,
+                )?;
+                Some(crate::Expr::Binary(crate::BinaryExpr {
+                    op: crate::BinaryOp::Intersect,
                     left: Box::new(left),
                     right: Box::new(right),
                 }))

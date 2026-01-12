@@ -1268,6 +1268,49 @@ fn bytecode_backend_inlines_defined_name_union_static_refs() {
 }
 
 #[test]
+fn bytecode_backend_inlines_defined_name_intersection_static_refs() {
+    let mut engine = Engine::new();
+
+    // Populate a small grid of numbers:
+    // A1:C3 = 1..=9 (row-major).
+    let mut n = 1.0;
+    for row in 1..=3 {
+        for col in ["A", "B", "C"] {
+            engine
+                .set_cell_value("Sheet1", &format!("{col}{row}"), n)
+                .unwrap();
+            n += 1.0;
+        }
+    }
+
+    engine
+        .define_name(
+            "MyIntersect",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!$A$1:$C$3 Sheet1!$B$2:$D$4".to_string()),
+        )
+        .unwrap();
+    engine
+        // Keep the formula outside the operand ranges to avoid spurious circular references in the
+        // engine's conservative dependency analysis.
+        .set_cell_formula("Sheet1", "E1", "=SUM(MyIntersect)")
+        .unwrap();
+
+    // Ensure the intersection name was inlined and compiled to bytecode.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "E1");
+    assert_eq!(via_bytecode, Value::Number(28.0));
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "E1");
+
+    assert_eq!(via_bytecode, via_ast);
+}
+
+#[test]
 fn bytecode_backend_inlines_defined_name_spill_range_refs() {
     let mut engine = Engine::new();
 
