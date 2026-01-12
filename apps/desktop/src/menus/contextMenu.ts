@@ -27,6 +27,13 @@ export type ContextMenuOpenOptions = {
   x: number;
   y: number;
   items: ContextMenuItem[];
+  /**
+   * When true, move focus to the first enabled menu item after opening.
+   *
+   * This is intended for keyboard-initiated opens (e.g. Shift+F10). Pointer
+   * opens should generally leave focus on the underlying surface.
+   */
+  focusFirst?: boolean;
 };
 
 export class ContextMenu {
@@ -83,7 +90,7 @@ export class ContextMenu {
     this.menu = menu;
   }
 
-  open({ x, y, items }: ContextMenuOpenOptions): void {
+  open({ x, y, items, focusFirst }: ContextMenuOpenOptions): void {
     this.close();
     this.isShown = true;
     this.lastAnchor = { x, y };
@@ -315,10 +322,20 @@ export class ContextMenu {
       }
     };
     window.addEventListener("keydown", this.keydownListener, true);
+
+    if (items.length > 0 && focusFirst) {
+      this.focusFirst();
+    }
   }
 
   isOpen(): boolean {
     return this.isShown;
+  }
+
+  focusFirst(): void {
+    if (!this.isShown) return;
+    const first = this.menu.querySelector<HTMLButtonElement>("button:not(:disabled)");
+    first?.focus({ preventScroll: true });
   }
 
   update(items: ContextMenuItem[]): void {
