@@ -1190,80 +1190,96 @@ if (
 
   let extensionPanelBridge: ExtensionPanelBridge | null = null;
 
-  const extensionHostManager = new DesktopExtensionHostManager({
-    engineVersion: "1.0.0",
-    spreadsheetApi: {
-      getActiveSheet() {
-        const sheetId = app.getCurrentSheetId();
-        return { id: sheetId, name: workbookSheetNames.get(sheetId) ?? sheetId };
-      },
-      listSheets() {
+  // The desktop UI is used both inside the Tauri shell and as a pure-web fallback (e2e, local dev).
+  // Only expose real workbook lifecycle operations to extensions when the Tauri bridge is present;
+  // otherwise let BrowserExtensionHost fall back to its in-memory stub workbook implementation.
+  const hasTauriWorkbookBridge = typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const extensionSpreadsheetApi: any = {
+    getActiveSheet() {
+      const sheetId = app.getCurrentSheetId();
+      return { id: sheetId, name: workbookSheetNames.get(sheetId) ?? sheetId };
+    },
+    listSheets() {
+      const ids = app.getDocument().getSheetIds();
+      const list = ids.length > 0 ? ids : ["Sheet1"];
+      return list.map((id) => ({ id, name: workbookSheetNames.get(id) ?? id }));
+    },
+    async getSelection() {
+      const sheetId = app.getCurrentSheetId();
+      const range = app.getSelectionRanges()[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
+      const values: Array<Array<string | number | boolean | null>> = [];
+      for (let r = range.startRow; r <= range.endRow; r++) {
+        const row: Array<string | number | boolean | null> = [];
+        for (let c = range.startCol; c <= range.endCol; c++) {
+          const cell = app.getDocument().getCell(sheetId, { row: r, col: c }) as any;
+          row.push(normalizeExtensionCellValue(cell?.value ?? null));
+        }
+        values.push(row);
+      }
+      return { ...range, values };
+    },
+    async getCell(row: number, col: number) {
+      const sheetId = app.getCurrentSheetId();
+      const cell = app.getDocument().getCell(sheetId, { row, col }) as any;
+      return normalizeExtensionCellValue(cell?.value ?? null);
+    },
+    async setCell(row: number, col: number, value: unknown) {
+      const sheetId = app.getCurrentSheetId();
+      app.getDocument().setCellValue(sheetId, { row, col }, value);
+    },
+  };
+
+  if (hasTauriWorkbookBridge) {
+    extensionSpreadsheetApi.getActiveWorkbook = async () => {
+      const sheetId = app.getCurrentSheetId();
+      const activeSheet = { id: sheetId, name: workbookSheetNames.get(sheetId) ?? sheetId };
+      const sheets = (() => {
         const ids = app.getDocument().getSheetIds();
         const list = ids.length > 0 ? ids : ["Sheet1"];
         return list.map((id) => ({ id, name: workbookSheetNames.get(id) ?? id }));
-      },
-      async getSelection() {
-        const sheetId = app.getCurrentSheetId();
-        const range = app.getSelectionRanges()[0] ?? { startRow: 0, startCol: 0, endRow: 0, endCol: 0 };
-        const values: Array<Array<string | number | boolean | null>> = [];
-        for (let r = range.startRow; r <= range.endRow; r++) {
-          const row: Array<string | number | boolean | null> = [];
-          for (let c = range.startCol; c <= range.endCol; c++) {
-            const cell = app.getDocument().getCell(sheetId, { row: r, col: c }) as any;
-            row.push(normalizeExtensionCellValue(cell?.value ?? null));
-          }
-          values.push(row);
-        }
-        return { ...range, values };
-      },
-      async getCell(row: number, col: number) {
-        const sheetId = app.getCurrentSheetId();
-        const cell = app.getDocument().getCell(sheetId, { row, col }) as any;
-        return normalizeExtensionCellValue(cell?.value ?? null);
-      },
-      async setCell(row: number, col: number, value: unknown) {
-        const sheetId = app.getCurrentSheetId();
-        app.getDocument().setCellValue(sheetId, { row, col }, value);
-      },
-      async getActiveWorkbook() {
-        const sheetId = app.getCurrentSheetId();
-        const activeSheet = { id: sheetId, name: workbookSheetNames.get(sheetId) ?? sheetId };
-        const sheets = (() => {
-          const ids = app.getDocument().getSheetIds();
-          const list = ids.length > 0 ? ids : ["Sheet1"];
-          return list.map((id) => ({ id, name: workbookSheetNames.get(id) ?? id }));
-        })();
+      })();
 
-        const path =
-          activeWorkbook?.path ??
-          activeWorkbook?.origin_path ??
-          // If no backend workbook is active, treat this as an unsaved session.
-          null;
+      const path =
+        activeWorkbook?.path ??
+        activeWorkbook?.origin_path ??
+        // If no backend workbook is active, treat this as an unsaved session.
+        null;
 
-        const name = (() => {
-          const pick = typeof path === "string" && path.trim() !== "" ? path : null;
-          if (!pick) return "Workbook";
-          return pick.split(/[/\\]/).pop() ?? "Workbook";
-        })();
+      const name = (() => {
+        const pick = typeof path === "string" && path.trim() !== "" ? path : null;
+        if (!pick) return "Workbook";
+        return pick.split(/[/\\]/).pop() ?? "Workbook";
+      })();
 
-        return { name, path, sheets, activeSheet };
-      },
-      async openWorkbook(path: string) {
-        await openWorkbookFromPath(String(path));
-      },
-      async createWorkbook() {
-        await handleNewWorkbook();
-      },
-      async saveWorkbook() {
-        await handleSave();
-      },
-      async saveWorkbookAs(path: string) {
-        await handleSaveAsPath(String(path));
-      },
-      async closeWorkbook() {
-        await handleNewWorkbook();
-      },
-    },
+      return { name, path, sheets, activeSheet };
+    };
+
+    extensionSpreadsheetApi.openWorkbook = async (path: string) => {
+      await openWorkbookFromPath(String(path));
+    };
+
+    extensionSpreadsheetApi.createWorkbook = async () => {
+      await handleNewWorkbook();
+    };
+
+    extensionSpreadsheetApi.saveWorkbook = async () => {
+      await handleSave();
+    };
+
+    extensionSpreadsheetApi.saveWorkbookAs = async (path: string) => {
+      await handleSaveAsPath(String(path));
+    };
+
+    extensionSpreadsheetApi.closeWorkbook = async () => {
+      await handleNewWorkbook();
+    };
+  }
+
+  const extensionHostManager = new DesktopExtensionHostManager({
+    engineVersion: "1.0.0",
+    spreadsheetApi: extensionSpreadsheetApi,
     uiApi: {
       showMessage: async (message: string, type?: string) => {
         showToast(String(message ?? ""), (type as any) ?? "info");
