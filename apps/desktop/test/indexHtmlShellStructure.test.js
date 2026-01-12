@@ -91,6 +91,24 @@ test("desktop index.html exposes required shell containers and testids", () => {
       .join("\\n")}`,
   );
 
+  // Also enforce uniqueness across *all* static test ids, not just the required shell ones.
+  // This keeps `page.getByTestId(...)` deterministic even as new shell markup gets added.
+  const htmlWithoutScripts = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+  const allTestIdMatches = [...htmlWithoutScripts.matchAll(/data-testid=["']([^"']+)["']/g)].map((m) => m[1]);
+  const allTestIdCounts = new Map();
+  for (const testId of allTestIdMatches) {
+    allTestIdCounts.set(testId, (allTestIdCounts.get(testId) ?? 0) + 1);
+  }
+  const allDuplicateTestIds = [...allTestIdCounts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([testId, count]) => `${testId} (${count}x)`)
+    .sort();
+  assert.deepEqual(
+    allDuplicateTestIds,
+    [],
+    `apps/desktop/index.html contains duplicate data-testid values:\\n${allDuplicateTestIds.map((m) => `- ${m}`).join("\\n")}`,
+  );
+
   // The collaboration indicator is part of the visible status bar (it should not be
   // hidden inside `.statusbar__debug`, which is display:none in production styles).
   const collabStatusIndex = html.indexOf('data-testid="collab-status"');
