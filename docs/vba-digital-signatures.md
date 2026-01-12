@@ -85,8 +85,8 @@ In the wild, the signature stream bytes are not always “just a PKCS#7 blob”.
    - The stream is a DER-encoded CMS `ContentInfo` (ASN.1 `SEQUENCE`, often starting with `0x30`).
    - `ContentInfo.contentType` is typically `signedData` (`1.2.840.113549.1.7.2`).
 2. **MS-OSHARED `DigSigInfoSerialized` wrapper/prefix**
-    - Some Office producers wrap or prefix the CMS bytes with a `DigSigInfoSerialized` structure
-      (see MS-OSHARED).
+   - Some Office producers wrap or prefix the CMS bytes with a `DigSigInfoSerialized` structure
+     (see MS-OSHARED).
    - `DigSigInfoSerialized` is a little-endian length-prefixed structure; parsing it lets us locate
      the embedded CMS payload deterministically instead of scanning for a DER `SEQUENCE`.
    - Common (but not universal) layout:
@@ -94,18 +94,19 @@ In the wild, the signature stream bytes are not always “just a PKCS#7 blob”.
      - `u32le cbSigningCertStore`
      - `u32le cchProjectName` (often a UTF-16 code unit count, but some producers treat this as a
        byte length)
-     - followed by variable-size blobs (often: `projectNameUtf16le`, `certStoreBytes`, `signatureBytes`)
+     - followed by variable-size blobs (often: `projectNameUtf16le`, `certStoreBytes`,
+       `signatureBytes`)
      - some producers include a `version` and/or `reserved` DWORD before the length fields.
-    - The ordering of the variable blobs can vary across producers/versions. A robust parser should
-      compute candidate offsets and **validate** by checking that the bytes at the computed offset
-      parse as a CMS `signedData` `ContentInfo`.
-    - The wrapper's `cbSignature` region can include padding; prefer using the DER length inside the
-      region to find the actual CMS payload size.
-    - ⚠️ The `cbSigningCertStore` blob may itself contain a PKCS#7/CMS structure (often beginning
-      with `0x30`). This means naive “scan for the first PKCS#7 SignedData” logic can pick the
-      **certificate store** rather than the actual signature. Prefer the `DigSigInfoSerialized`-derived
-      `(offset, len)` when available, and when falling back to scanning heuristics, prefer the **last**
-      plausible `SignedData` candidate in the stream.
+   - The ordering of the variable blobs can vary across producers/versions. A robust parser should
+     compute candidate offsets and **validate** by checking that the bytes at the computed offset
+     parse as a CMS `signedData` `ContentInfo`.
+   - The wrapper's `cbSignature` region can include padding; prefer using the DER length inside the
+     region to find the actual CMS payload size.
+   - ⚠️ The `cbSigningCertStore` blob may itself contain a PKCS#7/CMS structure (often beginning
+     with `0x30`). This means naive “scan for the first PKCS#7 SignedData” logic can pick the
+     **certificate store** rather than the actual signature. Prefer the `DigSigInfoSerialized`-derived
+     `(offset, len)` when available, and when falling back to scanning heuristics, prefer the **last**
+     plausible `SignedData` candidate in the stream.
 3. **Detached `content || pkcs7`**
    - The stream contains `signed_content_bytes` followed by a detached CMS signature (`pkcs7_der`).
    - Verification must pass the prefix bytes as the detached content when verifying the CMS blob.
@@ -119,7 +120,7 @@ High-level extraction steps:
 
 1. **Obtain the CMS `ContentInfo` bytes**
    - If the stream is raw CMS DER, use it directly.
-  - If the stream is a `DigSigInfoSerialized` wrapper, unwrap it (per MS-OSHARED).
+   - If the stream is a `DigSigInfoSerialized` wrapper, unwrap it (per MS-OSHARED).
    - If the stream is `content || pkcs7`, split it (find the CMS DER start); the `content` prefix is
      the detached signed content.
 2. **Parse CMS and locate `SignedData.encapContentInfo`**
