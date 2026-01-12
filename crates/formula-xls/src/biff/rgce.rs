@@ -2100,6 +2100,49 @@ mod tests {
     }
 
     #[test]
+    fn decodes_ptgexp_and_ptgtbl_as_unknown_error_literals() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // PtgExp is a shared-formula token that we cannot resolve in NAME decoding.
+        // Ensure we consume its 4-byte payload and keep decoding the remaining tokens.
+        //
+        // rgce: PtgExp(payload=0) ; PtgInt 1 ; PtgAdd
+        let rgce = [
+            0x01, // PtgExp
+            0x00, 0x00, 0x00, 0x00, // payload
+            0x1E, 0x01, 0x00, // 1
+            0x03, // +
+        ];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#UNKNOWN!+1");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("0x01")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+
+        // PtgTbl is another token used by shared formulas; treat it similarly.
+        let rgce = [
+            0x02, // PtgTbl
+            0x00, 0x00, 0x00, 0x00, // payload
+            0x1E, 0x01, 0x00, // 1
+            0x03, // +
+        ];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#UNKNOWN!+1");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("0x02")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
     fn decodes_ptg_array_as_unknown_error_literal_and_continues() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetEntry> = Vec::new();
