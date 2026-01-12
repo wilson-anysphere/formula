@@ -103,8 +103,10 @@ See `docs/11-desktop-shell.md` for details.
 Tauri v2 permissions are granted via **capabilities**:
 
 - `apps/desktop/src-tauri/capabilities/*.json`
-- the main window is labeled `main` and opts into the `main` capability via `app.windows[].capabilities: ["main"]` in `apps/desktop/src-tauri/tauri.conf.json`
-  - `apps/desktop/src-tauri/capabilities/main.json` is also scoped to `windows: ["main"]`
+- capability files scope themselves to window labels via the capability file’s `"windows": [...]` list (matching `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`)
+
+Note: our current `tauri-build` toolchain does **not** support window-level opt-in via `app.windows[].capabilities` (it causes
+a build error). Keep window scoping in the capability file.
 
 Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the full allowlists):
 
@@ -116,7 +118,6 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
   "local": true,
   "windows": ["main"],
   "permissions": [
-    { "identifier": "core:allow-invoke", "allow": [{ "command": "open_external_url" }] },
     { "identifier": "core:event:allow-listen", "allow": [{ "event": "open-file" }] },
     { "identifier": "core:event:allow-emit", "allow": [{ "event": "open-file-ready" }] },
     "core:event:allow-unlisten",
@@ -124,12 +125,12 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
     "dialog:allow-save",
     "dialog:allow-confirm",
     "dialog:allow-message",
-    "window:allow-hide",
-    "window:allow-show",
-    "window:allow-set-focus",
-    "window:allow-close",
-    "clipboard:allow-read-text",
-    "clipboard:allow-write-text",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:window:allow-close",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
     "updater:allow-check",
     "updater:allow-download",
     "updater:allow-install"
@@ -145,7 +146,7 @@ Note: external URL opening should go through the `open_external_url` Rust comman
 and restricted to the main window + trusted app-local origins) rather than granting the webview direct access to the
 shell plugin (`shell:allow-open`).
 
-Note: `clipboard:allow-read-text` / `clipboard:allow-write-text` grant access to the plain-text
+Note: `clipboard-manager:allow-read-text` / `clipboard-manager:allow-write-text` grant access to the plain-text
 clipboard helpers (`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats (HTML/RTF/PNG)
 are handled via custom Rust commands (`__TAURI__.core.invoke(...)`) and must be kept input-validated/scoped in Rust.
 
@@ -167,14 +168,13 @@ cd apps/desktop && bash ../../scripts/cargo_agent.sh tauri permission ls
 If you add new desktop IPC surface area, you must update the capability allowlists:
 
 - new frontend↔backend events → `core:event:allow-listen` / `core:event:allow-emit`
-- new invoked command → add it to the `core:allow-invoke` allowlist
 - new plugin API usage → add the corresponding `*:allow-*` permission string(s)
 
 We keep guardrail tests to ensure we don't accidentally broaden the desktop IPC surface:
 
 - **Event allowlists**: enforce the **exact** `core:event:allow-listen` / `core:event:allow-emit` sets (no wildcard / allow-all):
   - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`
-- **Invoke/core/plugin permissions**: ensure the `core:allow-invoke` allowlist + required plugin permissions are explicitly granted (dialogs, window ops, clipboard plain text, updater, etc):
+- **Core/plugin permissions**: ensure required plugin permissions are explicitly granted (dialogs, window ops, clipboard plain text, updater, etc) and we don't accidentally grant dangerous extras:
   - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`
 
 Filesystem access for Power Query is handled via **custom Rust commands** (e.g. `read_text_file`, `list_dir`)
@@ -291,10 +291,9 @@ TypeScript ↔ Rust communication:
 // In this repo, commands must also be:
 //  1) registered in `apps/desktop/src-tauri/src/main.rs` (`generate_handler![...]`)
 //
-// Commands are also explicitly allowlisted in the Tauri capability file via
-// `core:allow-invoke` (see `apps/desktop/src-tauri/capabilities/main.json`).
-//
-// Even with `core:allow-invoke`, you must keep commands input-validated/scoped in Rust.
+// Note: this repo does **not** rely on a Tauri capability allowlist for custom command invocation
+// (no `core:allow-invoke`). Commands must be hardened in Rust (trusted-origin + window-label
+// checks, argument validation, filesystem/network scope checks, etc).
 //
 #[tauri::command]
 fn check_for_updates(app: tauri::AppHandle, source: crate::updater::UpdateCheckSource) -> Result<(), String> {
