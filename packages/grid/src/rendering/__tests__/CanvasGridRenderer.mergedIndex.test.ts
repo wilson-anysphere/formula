@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CellProvider, CellRange } from "../../model/CellProvider";
 import { CanvasGridRenderer } from "../CanvasGridRenderer";
+import { isInteriorHorizontalGridline } from "../mergedCells";
 
 describe("CanvasGridRenderer merged index", () => {
   it("indexes only visible rows for extremely tall merged ranges", () => {
@@ -44,5 +45,11 @@ describe("CanvasGridRenderer merged index", () => {
     // Interior cells that are visible must still be treated as merged.
     const sampleRow = viewport.main.rows.start;
     expect(mergedIndex.rangeAt({ row: sampleRow, col: 1 })).toEqual(tallMerge);
+
+    // The row immediately above the visible viewport is indexed so top-edge gridlines/borders can
+    // be suppressed when a merge spans across the viewport boundary.
+    const boundaryRow = sampleRow - 1;
+    expect(mergedIndex.rangeAt({ row: boundaryRow, col: 1 })).toEqual(tallMerge);
+    expect(isInteriorHorizontalGridline(mergedIndex, boundaryRow, 1)).toBe(true);
   });
 });
