@@ -420,7 +420,15 @@ pub fn extract_embedded_images(pkg: &XlsxPackage) -> Result<Vec<EmbeddedImageCel
                                 .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
                     })
                     .map(|rel| {
-                        let target = path::resolve_target(rich_value_rel_part, &rel.target);
+                        let target = rel.target.split('#').next().unwrap_or(&rel.target);
+                        let target = target.strip_prefix("./").unwrap_or(target);
+                        // Some producers emit `Target="media/image1.png"` (relative to `xl/`)
+                        // rather than `Target="../media/image1.png"` (relative to `xl/richData/`).
+                        let target = if target.starts_with("media/") {
+                            format!("xl/{target}")
+                        } else {
+                            path::resolve_target(rich_value_rel_part, target)
+                        };
                         (rel.id, target)
                     })
                     .collect()

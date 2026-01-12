@@ -173,6 +173,15 @@ const RICH_VALUE_REL_RELS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8" st
 </Relationships>
 "#;
 
+const RICH_VALUE_REL_RELS_XML_MEDIA_RELATIVE_TO_XL: &str =
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+                 Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+                 Target="media/image1.png"/>
+</Relationships>
+"#;
+
 const RICH_VALUE_REL_RELS_XML_NON_IMAGE: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1"
@@ -181,7 +190,11 @@ const RICH_VALUE_REL_RELS_XML_NON_IMAGE: &str = r#"<?xml version="1.0" encoding=
 </Relationships>
 "#;
 
-fn assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(metadata_xml: &str, vm: u32) {
+fn assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema_with_rels(
+    metadata_xml: &str,
+    vm: u32,
+    rich_value_rel_rels_xml: &str,
+) {
     let png_bytes = STANDARD
         .decode(PNG_1X1_TRANSPARENT_B64)
         .expect("decode png base64");
@@ -214,7 +227,7 @@ fn assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(metadata
     );
     pkg.set_part(
         "xl/richData/_rels/richValueRel.xml.rels",
-        RICH_VALUE_REL_RELS_XML.as_bytes().to_vec(),
+        rich_value_rel_rels_xml.as_bytes().to_vec(),
     );
     pkg.set_part("xl/media/image1.png", png_bytes.clone());
 
@@ -250,6 +263,14 @@ fn assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(metadata
     assert!(!image.decorative);
 }
 
+fn assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(metadata_xml: &str, vm: u32) {
+    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema_with_rels(
+        metadata_xml,
+        vm,
+        RICH_VALUE_REL_RELS_XML,
+    );
+}
+
 #[test]
 fn extracts_embedded_image_from_cell_vm_metadata_richdata_schema() {
     assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(METADATA_XML, 1);
@@ -276,6 +297,17 @@ fn extracts_embedded_image_when_metadata_uses_direct_rich_value_index() {
 fn extracts_embedded_image_when_cell_vm_is_zero() {
     // Some workbooks have been observed to use 0-based `vm` indices.
     assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema(METADATA_XML, 0);
+}
+
+#[test]
+fn extracts_when_rich_value_rel_rels_target_is_relative_to_xl() {
+    // Some producers emit `Target="media/image1.png"` (relative to `xl/`) instead of
+    // `Target="../media/image1.png"` (relative to `xl/richData/`).
+    assert_extracts_embedded_image_from_cell_vm_metadata_richdata_schema_with_rels(
+        METADATA_XML,
+        1,
+        RICH_VALUE_REL_RELS_XML_MEDIA_RELATIVE_TO_XL,
+    );
 }
 
 #[test]
