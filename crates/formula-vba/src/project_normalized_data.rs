@@ -206,11 +206,20 @@ fn scan_unicode_presence(
     let mut modules_unicode: Vec<ModuleUnicodePresence> = Vec::new();
     let mut current_module: Option<usize> = None;
     let mut current_module_seen_non_name_record = false;
+    // Some TLV-ish `VBA/dir` layouts store a Unicode module stream name as a separate record
+    // immediately following MODULESTREAMNAME (0x001A). In most files this record id is 0x0032, but
+    // some real-world projects reuse 0x0048. Track this expectation so we can disambiguate 0x0048
+    // as either MODULESTREAMNAMEUNICODE or MODULEDOCSTRINGUNICODE depending on context.
+    let mut expect_module_stream_name_unicode = false;
 
     let mut offset = 0usize;
     while offset < dir_decompressed.len() {
         let (id, _data, next_offset) = read_dir_record(dir_decompressed, offset)?;
         offset = next_offset;
+
+        if expect_module_stream_name_unicode && !matches!(id, 0x0032 | 0x0048) {
+            expect_module_stream_name_unicode = false;
+        }
 
         match id {
             // New module record group starts at MODULENAME.
@@ -218,6 +227,7 @@ fn scan_unicode_presence(
                 current_module = Some(modules_unicode.len());
                 modules_unicode.push(ModuleUnicodePresence::default());
                 current_module_seen_non_name_record = false;
+                expect_module_stream_name_unicode = false;
             }
 
             // Project-level Unicode/alternate string variants.
@@ -235,8 +245,19 @@ fn scan_unicode_presence(
                         ..Default::default()
                     });
                     current_module_seen_non_name_record = false;
+                    expect_module_stream_name_unicode = false;
                 } else if let Some(idx) = current_module {
                     modules_unicode[idx].module_name = true;
+                }
+            }
+            0x001A => {
+                if current_module.is_some() {
+                    current_module_seen_non_name_record = true;
+                    // Expect a Unicode stream name record to follow (0x0032 in many encodings, but
+                    // some files reuse 0x0048).
+                    expect_module_stream_name_unicode = true;
+                } else {
+                    expect_module_stream_name_unicode = false;
                 }
             }
             0x0032 => {
@@ -244,19 +265,27 @@ fn scan_unicode_presence(
                     modules_unicode[idx].module_stream_name = true;
                     current_module_seen_non_name_record = true;
                 }
+                expect_module_stream_name_unicode = false;
             }
             0x0048 => {
                 if let Some(idx) = current_module {
-                    modules_unicode[idx].module_docstring = true;
                     current_module_seen_non_name_record = true;
+                    if expect_module_stream_name_unicode {
+                        // Some producers use 0x0048 as the module stream-name Unicode record id.
+                        modules_unicode[idx].module_stream_name = true;
+                    } else {
+                        modules_unicode[idx].module_docstring = true;
+                    }
                 }
+                expect_module_stream_name_unicode = false;
             }
             // Any non-name module record helps disambiguate MODULENAMEUNICODE as either an alternate
             // representation (immediately after MODULENAME) or the start of a new module group.
-            0x001A | 0x001C | 0x001E | 0x0021 | 0x0025 | 0x0028 | 0x002B | 0x002C | 0x0031 => {
+            0x001C | 0x001E | 0x0021 | 0x0025 | 0x0028 | 0x002B | 0x002C | 0x0031 => {
                 if current_module.is_some() {
                     current_module_seen_non_name_record = true;
                 }
+                expect_module_stream_name_unicode = false;
             }
 
             _ => {}

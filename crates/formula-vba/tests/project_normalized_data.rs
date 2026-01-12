@@ -874,6 +874,53 @@ fn project_normalized_data_v3_prefers_unicode_over_ansi_for_strings() {
 }
 
 #[test]
+fn project_normalized_data_v3_treats_0048_as_modulestreamnameunicode_when_following_modulestreamname() {
+    // Some real-world `VBA/dir` encodings store MODULESTREAMNAMEUNICODE as a separate record with id
+    // 0x0048 immediately following MODULESTREAMNAME (0x001A). (0x0048 is normally used for
+    // MODULEDOCSTRINGUNICODE in TLV-ish layouts.)
+    //
+    // Ensure `project_normalized_data_v3_dir_records` treats it as a Unicode stream-name variant so
+    // the ANSI MODULESTREAMNAME bytes are omitted.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        push_record(&mut out, 0x0019, b"Module1");
+
+        // ANSI MODULESTREAMNAME should be omitted when the Unicode variant is present.
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"AnsiStream");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+
+        // Unicode stream-name bytes stored in a separate record id (0x0048).
+        push_record(&mut out, 0x0048, &unicode_record_data("UniStream"));
+
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes()); // MODULETYPE
+
+        out
+    };
+
+    let vba_bin = build_vba_bin_with_dir_decompressed(&dir_decompressed);
+    let normalized =
+        project_normalized_data_v3_dir_records(&vba_bin).expect("ProjectNormalizedDataV3");
+
+    let expected = [
+        b"Module1".as_slice(),
+        utf16le_bytes("UniStream").as_slice(),
+        0u16.to_le_bytes().as_slice(),
+    ]
+    .concat();
+
+    assert_eq!(normalized, expected);
+    assert!(
+        !normalized
+            .windows(b"AnsiStream".len())
+            .any(|w| w == b"AnsiStream"),
+        "expected ANSI MODULESTREAMNAME bytes to be omitted when Unicode (0x0048) variant is present"
+    );
+}
+
+#[test]
 fn project_normalized_data_v3_strips_unicode_length_prefix_when_prefix_is_byte_count() {
     // Some producers embed an internal u32 length prefix in Unicode dir record payloads where the
     // length is the UTF-16LE byte count (not code units). Ensure we strip the prefix in this case.
