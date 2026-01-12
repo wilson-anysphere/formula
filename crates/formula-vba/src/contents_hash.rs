@@ -1491,14 +1491,17 @@ pub fn v3_content_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, Par
                         stream_name: decode_dir_unicode_string(data),
                         text_offset: None,
                         name_bytes: Vec::new(),
-                        name_unicode_bytes: Some(data.to_vec()),
+                        // Some producers embed an internal u32 length prefix before the UTF-16LE
+                        // bytes. Strip it when it is consistent with the remaining payload.
+                        name_unicode_bytes: Some(trim_u32_len_prefix_unicode_string(data).to_vec()),
                         type_record_reserved: None,
                         seen_non_name_record: false,
                         read_only_record_reserved: None,
                         private_record_reserved: None,
                     });
                 } else if let Some(m) = current_module.as_mut() {
-                    m.name_unicode_bytes = Some(data.to_vec());
+                    m.name_unicode_bytes =
+                        Some(trim_u32_len_prefix_unicode_string(data).to_vec());
                     // If we haven't yet seen an explicit stream name, update the default stream
                     // name derived from MODULENAME.
                     if !m.seen_non_name_record {
