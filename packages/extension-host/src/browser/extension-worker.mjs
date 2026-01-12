@@ -2,6 +2,7 @@
 // environments where workspace package links are incomplete (e.g. minimal agent
 // sandboxes).
 import * as formulaApi from "../../../extension-api/index.mjs";
+import { lockDownTauriGlobals } from "./tauri-globals.mjs";
 
 formulaApi.__setTransport({
   postMessage: (message) => postMessage(message)
@@ -141,6 +142,12 @@ function lockDownProperty(target, prop, value) {
 function applySandboxGuardrails(sandbox) {
   if (sandboxGuardrailsApplied) return;
   sandboxGuardrailsApplied = true;
+
+  // Tauri injects `__TAURI__` / `__TAURI_IPC__` globals in some contexts. If those are exposed
+  // inside the extension worker, untrusted extension code could call native commands directly
+  // and bypass Formula's permission model (clipboard, filesystem, etc). Best-effort lock them
+  // down to `undefined` before loading any extension modules.
+  lockDownTauriGlobals(lockDownGlobal);
 
   if (sandbox?.disableEval) {
     const blocked = (name) => {
