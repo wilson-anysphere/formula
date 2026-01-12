@@ -21,6 +21,8 @@ whose names begin with the control character `0x05` (U+0005):
 
 Notes:
 
+- This is **not** the same as an OPC/package-level Digital Signature (XML-DSig) stored in
+  `_xmlsignatures/*` parts. The VBA signature lives inside the embedded OLE `vbaProject.bin`.
 - These can appear at the root, e.g. `\x05DigitalSignature`.
 - Some producers store the signature as a **storage** named `\x05DigitalSignature*` containing one
   or more streams, e.g. `\x05DigitalSignature/sig`. Signature discovery should therefore match on
@@ -43,7 +45,8 @@ In the wild, the signature stream bytes are not always “just a PKCS#7 blob”.
    - Common (but not universal) layout:
      - `u32le cbSignature`
      - `u32le cbSigningCertStore`
-     - `u32le cchProjectName` (UTF-16 code units)
+     - `u32le cchProjectName` (often a UTF-16 code unit count, but some producers treat this as a
+       byte length)
      - followed by variable-size blobs (often: `projectNameUtf16le`, `certStoreBytes`, `signatureBytes`)
      - some producers include a `version` and/or `reserved` DWORD before the length fields.
    - The ordering of the variable blobs can vary across producers/versions. A robust parser should
