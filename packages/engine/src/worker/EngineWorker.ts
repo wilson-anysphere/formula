@@ -100,6 +100,19 @@ function normalizeFormulaParseOptions(options: unknown): unknown | undefined {
   return out;
 }
 
+function pruneNullsDeep(value: unknown): unknown {
+  if (value == null) return value;
+  if (Array.isArray(value)) return value.map((item) => pruneNullsDeep(item));
+  if (typeof value !== "object") return value;
+
+  const out: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (raw === null || raw === undefined) continue;
+    out[key] = pruneNullsDeep(raw);
+  }
+  return out;
+}
+
 /**
  * Worker-backed Engine client using a MessagePort RPC transport.
  *
@@ -222,7 +235,11 @@ export class EngineWorker {
     options?: RpcOptions
   ): Promise<CellDataRich> {
     await this.flush();
-    return (await this.invoke("getCellRich", { address, sheet }, options)) as CellDataRich;
+    const raw = (await this.invoke("getCellRich", { address, sheet }, options)) as CellDataRich;
+    // WASM-bindgen DTOs sometimes include `null` for missing optional fields (instead of omitting
+    // them). Normalize these to better match the Engine TS API (which uses `undefined`/omitted
+    // keys for optional fields) and to keep rich values stable across roundtrips.
+    return pruneNullsDeep(raw) as CellDataRich;
   }
 
   async getRange(
