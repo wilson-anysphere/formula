@@ -110,8 +110,9 @@ export function ExtensionsPanel({
         if (raw == null) return;
 
         let parsed: unknown;
+        const trimmed = raw.trim();
         try {
-          parsed = JSON.parse(raw);
+          parsed = trimmed.length === 0 ? [] : JSON.parse(trimmed);
         } catch (err) {
           showToast(`Invalid JSON: ${String((err as any)?.message ?? err)}`, "error");
           return;
