@@ -15,7 +15,7 @@ export NODE_OPTIONS="--max-old-space-size=3072"
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 
 # Make: Limit parallel jobs
-export MAKEFLAGS="${MAKEFLAGS:--j4}"
+export MAKEFLAGS="${MAKEFLAGS:--j${CARGO_BUILD_JOBS}}"
 
 # Rust codegen units:
 #

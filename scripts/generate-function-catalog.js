@@ -68,6 +68,8 @@ function isCatalogVolatility(value) {
   return value === "non_volatile" || value === "volatile";
 }
 
+const jobs = process.env.CARGO_BUILD_JOBS ?? "4";
+
 const raw = await run("cargo", [
   "run",
   "--quiet",
@@ -82,13 +84,12 @@ const raw = await run("cargo", [
     CARGO_HOME: cargoHome,
     // Keep builds safe in high-core-count environments (e.g. agent sandboxes) even
     // if the caller didn't source `scripts/agent-init.sh`.
-    CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS ?? "4",
-    MAKEFLAGS: process.env.MAKEFLAGS ?? "-j4",
-    CARGO_PROFILE_DEV_CODEGEN_UNITS:
-      process.env.CARGO_PROFILE_DEV_CODEGEN_UNITS ?? (process.env.CARGO_BUILD_JOBS ?? "4"),
+    CARGO_BUILD_JOBS: jobs,
+    MAKEFLAGS: process.env.MAKEFLAGS ?? `-j${jobs}`,
+    CARGO_PROFILE_DEV_CODEGEN_UNITS: process.env.CARGO_PROFILE_DEV_CODEGEN_UNITS ?? jobs,
     // Rayon defaults to spawning one worker per core; cap it for multi-agent hosts unless
     // callers explicitly override it.
-    RAYON_NUM_THREADS: process.env.RAYON_NUM_THREADS ?? (process.env.CARGO_BUILD_JOBS ?? "4"),
+    RAYON_NUM_THREADS: process.env.RAYON_NUM_THREADS ?? jobs,
     // Some environments configure Cargo to use `sccache` via `build.rustc-wrapper`.
     // Default to disabling any configured wrapper unless the user explicitly sets one.
     RUSTC_WRAPPER: process.env.RUSTC_WRAPPER ?? "",
