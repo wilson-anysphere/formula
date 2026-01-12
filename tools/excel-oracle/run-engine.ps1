@@ -110,8 +110,22 @@ if (-not $env:RAYON_NUM_THREADS) {
 # Some environments configure Cargo globally with `build.rustc-wrapper`. When the wrapper is
 # unavailable/misconfigured, builds can fail even for `cargo metadata`. Default to disabling any
 # configured wrapper unless the user explicitly overrides it.
-if (-not $env:RUSTC_WRAPPER) { $env:RUSTC_WRAPPER = "" }
-if (-not $env:RUSTC_WORKSPACE_WRAPPER) { $env:RUSTC_WORKSPACE_WRAPPER = "" }
+$rustcWrapper = [Environment]::GetEnvironmentVariable("RUSTC_WRAPPER")
+if ($null -eq $rustcWrapper) { $rustcWrapper = [Environment]::GetEnvironmentVariable("CARGO_BUILD_RUSTC_WRAPPER") }
+if ($null -eq $rustcWrapper) { $rustcWrapper = "" }
+
+$rustcWorkspaceWrapper = [Environment]::GetEnvironmentVariable("RUSTC_WORKSPACE_WRAPPER")
+if ($null -eq $rustcWorkspaceWrapper) {
+  $rustcWorkspaceWrapper = [Environment]::GetEnvironmentVariable("CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER")
+}
+if ($null -eq $rustcWorkspaceWrapper) { $rustcWorkspaceWrapper = "" }
+
+$env:RUSTC_WRAPPER = $rustcWrapper
+$env:RUSTC_WORKSPACE_WRAPPER = $rustcWorkspaceWrapper
+# Cargo can also read wrapper config via `CARGO_BUILD_RUSTC_WRAPPER`. Set it explicitly so a global
+# Cargo config cannot unexpectedly re-enable a flaky wrapper when the user didn't opt in.
+$env:CARGO_BUILD_RUSTC_WRAPPER = $rustcWrapper
+$env:CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER = $rustcWorkspaceWrapper
 
 if (-not $EngineCommand) {
   $EngineCommand = $env:FORMULA_ENGINE_CMD
