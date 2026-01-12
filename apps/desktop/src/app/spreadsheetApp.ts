@@ -1515,6 +1515,38 @@ export class SpreadsheetApp {
     }
   }
 
+  /**
+   * Public clipboard commands (used by split view + other non-primary grid surfaces).
+   *
+   * These intentionally mirror the keyboard shortcut behavior in `onKeyDown`:
+   * - no-ops while editing (cell editor, formula bar, inline edit)
+   * - uses the async clipboard helpers tracked by `IdleTracker` so tests can await `whenIdle()`
+   */
+  copy(): void {
+    if (this.inlineEditController.isOpen()) return;
+    if (this.isEditing()) return;
+    this.idle.track(this.copySelectionToClipboard());
+  }
+
+  cut(): void {
+    if (this.inlineEditController.isOpen()) return;
+    if (this.isEditing()) return;
+    this.idle.track(this.cutSelectionToClipboard());
+  }
+
+  paste(): void {
+    if (this.inlineEditController.isOpen()) return;
+    if (this.isEditing()) return;
+    this.idle.track(this.pasteClipboardToSelection());
+  }
+
+  clearSelection(): void {
+    if (this.inlineEditController.isOpen()) return;
+    if (this.isEditing()) return;
+    this.clearSelectionContents();
+    this.refresh();
+  }
+
   async clipboardCopy(): Promise<void> {
     await this.copySelectionToClipboard();
   }

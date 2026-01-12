@@ -31,7 +31,9 @@ test.describe("split view", () => {
     await secondary.hover({ position: { x: 60, y: 40 } });
     await page.mouse.wheel(0, 600);
 
-    await expect.poll(async () => Number((await secondary.getAttribute("data-scroll-y")) ?? 0)).toBeGreaterThan(secondaryScrollBefore);
+    await expect
+      .poll(async () => Number((await secondary.getAttribute("data-scroll-y")) ?? 0))
+      .toBeGreaterThan(secondaryScrollBefore);
 
     const primaryScrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll().y);
     expect(primaryScrollAfter).toBe(primaryScrollBefore);
@@ -126,7 +128,7 @@ test.describe("split view", () => {
 
 test.describe("split view / shared grid zoom", () => {
   test("Ctrl/Cmd+wheel zoom changes grid geometry", async ({ page }) => {
-    await page.goto("/?grid=shared");
+    await gotoDesktop(page, "/?grid=shared");
 
     await page.waitForFunction(() => {
       const app = (window as any).__formulaApp;
@@ -145,7 +147,6 @@ test.describe("split view / shared grid zoom", () => {
     expect(rectsBefore.a1).toBeTruthy();
     expect(rectsBefore.b1).toBeTruthy();
 
-    const a1Before = rectsBefore.a1 as { x: number; y: number; width: number; height: number };
     const b1Before = rectsBefore.b1 as { x: number; y: number; width: number; height: number };
 
     // Dispatch a ctrl+wheel event directly (avoid Playwright actionability checks around
@@ -163,7 +164,7 @@ test.describe("split view / shared grid zoom", () => {
           // Note: client coords don't matter for this assertion (we only assert geometry changes).
           clientX: 0,
           clientY: 0,
-        })
+        }),
       );
     });
 
@@ -223,4 +224,47 @@ test.describe("split view / shared grid zoom", () => {
     if (!after) throw new Error("Missing B1 rect after resize");
     expect(after.x).toBeGreaterThan(before.x + 30);
   });
+
+  test("clipboard + delete shortcuts work while focus is in the secondary pane", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoDesktop(page, "/?grid=shared");
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+
+    // Enable split view.
+    await page.getByTestId("split-vertical").click();
+    const secondary = page.getByTestId("grid-secondary");
+    await expect(secondary).toBeVisible();
+
+    // Select A1 in the secondary pane and enter a value.
+    await secondary.click({ position: { x: 60, y: 40 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await page.keyboard.press("F2");
+    const editor = page.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await editor.fill("Secondary");
+    await page.keyboard.press("Enter");
+    await waitForIdle(page);
+
+    // Re-focus the secondary grid and copy the cell value.
+    await secondary.click({ position: { x: 60, y: 40 } });
+    await page.keyboard.press(`${modifier}+C`);
+    await waitForIdle(page);
+
+    // Paste into B1 using the secondary pane focus.
+    await secondary.click({ position: { x: 160, y: 40 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("B1");
+    await page.keyboard.press(`${modifier}+V`);
+    await waitForIdle(page);
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"))).toBe("Secondary");
+
+    // Delete clears the selection.
+    await secondary.click({ position: { x: 160, y: 40 } });
+    await page.keyboard.press("Delete");
+    await waitForIdle(page);
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("B1"))).toBe("");
+  });
 });
+
