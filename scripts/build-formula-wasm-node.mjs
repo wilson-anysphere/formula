@@ -158,7 +158,8 @@ function buildWithWasmPack() {
   // environments where stdout isn't a TTY this can create enormous logs and even hit output capture
   // limits. Pass `--quiet` through to cargo in those cases unless callers explicitly opt into
   // verbose output.
-  const cargoExtraArgs = !verbose && !process.stdout.isTTY ? ["--quiet"] : [];
+  const cargoExtraArgs = ["--locked"];
+  if (!verbose && !process.stdout.isTTY) cargoExtraArgs.push("--quiet");
   const rustcWrapper = process.env.RUSTC_WRAPPER ?? process.env.CARGO_BUILD_RUSTC_WRAPPER ?? "";
   const rustcWorkspaceWrapper =
     process.env.RUSTC_WORKSPACE_WRAPPER ??

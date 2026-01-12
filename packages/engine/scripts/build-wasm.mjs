@@ -367,7 +367,8 @@ function runWasmPack({ jobs, makeflags, releaseCodegenUnits, rayonThreads, binar
   // In CI/agent environments where stdout isn't a TTY this can create enormous logs and even hit
   // output capture limits. Pass `--quiet` through to cargo in those cases unless callers
   // explicitly opt into verbose output.
-  const cargoExtraArgs = !verbose && !process.stdout.isTTY ? ["--quiet"] : [];
+  const cargoExtraArgs = ["--locked"];
+  if (!verbose && !process.stdout.isTTY) cargoExtraArgs.push("--quiet");
 
   const wasmPackArgs = [
     "build",
