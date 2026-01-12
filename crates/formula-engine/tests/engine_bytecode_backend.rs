@@ -7557,6 +7557,83 @@ fn bytecode_backend_inlines_sheet_scoped_constant_defined_names() {
 }
 
 #[test]
+fn bytecode_backend_inlines_constant_defined_names_under_percent_postfix() {
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(2.0)),
+        )
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=X%").unwrap();
+
+    // Ensure the constant is inlined so the bytecode backend can compile the percent postfix.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(via_bytecode, Value::Number(0.02));
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(via_ast, via_bytecode);
+}
+
+#[test]
+fn bytecode_backend_inlines_constant_defined_names_inside_let_bindings() {
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(2.0)),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(y, X, y+1)")
+        .unwrap();
+
+    // The defined name should be inlined so the LET formula can compile to bytecode.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(via_bytecode, Value::Number(3.0));
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(via_ast, via_bytecode);
+}
+
+#[test]
+fn bytecode_backend_inlines_constant_defined_names_inside_array_literals() {
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(2.0)),
+        )
+        .unwrap();
+    engine.set_cell_formula("Sheet1", "A1", "=SUM({1,X})").unwrap();
+
+    // Ensure the constant is inlined so numeric-only array-literal lowering can proceed.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(via_bytecode, Value::Number(3.0));
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(via_ast, via_bytecode);
+}
+
+#[test]
 fn bytecode_backend_inlines_constant_defined_name_error_values() {
     let mut engine = Engine::new();
     engine
