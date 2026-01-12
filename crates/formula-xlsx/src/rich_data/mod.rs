@@ -44,11 +44,11 @@ pub const REL_TYPE_RD_RICH_VALUE: &str =
 /// Workbook relationship type for `xl/richData/rdrichvaluestructure.xml`.
 pub const REL_TYPE_RD_RICH_VALUE_STRUCTURE: &str =
     "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueStructure";
-/// Workbook relationship type for `xl/richData/rdrichvaluetypes.xml`.
+/// Workbook relationship type for `xl/richData/rdRichValueTypes.xml`.
 pub const REL_TYPE_RD_RICH_VALUE_TYPES: &str =
     "http://schemas.microsoft.com/office/2017/06/relationships/rdRichValueTypes";
 
-/// `[Content_Types].xml` override content type for `xl/richData/rdrichvaluetypes.xml`.
+/// `[Content_Types].xml` override content type for `xl/richData/rdRichValueTypes.xml`.
 pub const CONTENT_TYPE_RDRICHVALUETYPES: &str = "application/vnd.ms-excel.rdrichvaluetypes+xml";
 /// `[Content_Types].xml` override content type for `xl/richData/rdrichvalue.xml`.
 pub const CONTENT_TYPE_RDRICHVALUE: &str = "application/vnd.ms-excel.rdrichvalue+xml";
