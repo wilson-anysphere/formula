@@ -120,7 +120,7 @@ import {
   seedPanelRegistryFromContributedPanelsSeedStore,
   setSeedPanelsForExtension,
 } from "./extensions/contributedPanelsSeedStore.js";
-import { builtinKeybindings } from "./commands/builtinKeybindings.js";
+import { builtinKeybindings as builtinKeybindingsCatalog } from "./commands/builtinKeybindings.js";
 
 import sampleHelloManifest from "../../../extensions/sample-hello/package.json";
 import { purgeLegacyDesktopLLMSettings } from "./ai/llm/desktopLLMClient.js";
@@ -2238,12 +2238,38 @@ if (
   const parsedKeybindings: Array<ReturnType<typeof parseKeybinding>> = [];
   const commandKeybindingDisplayIndex = new Map<string, string[]>();
   let lastLoadedExtensionIds = new Set<string>();
+
+  // Keybindings used for UI surfaces (command palette, context menu shortcut hints).
+  // Prefer using `./commands/builtinKeybindings.ts` for new bindings.
+  const extraBuiltinKeybindings = [
+    { command: "clipboard.pasteSpecial", key: "ctrl+alt+v", mac: "cmd+option+v" },
+    { command: "edit.find", key: "ctrl+f", mac: "cmd+f" },
+    { command: "edit.replace", key: "ctrl+h", mac: "cmd+h" },
+    { command: "navigation.goTo", key: "ctrl+g", mac: "cmd+g" },
+    { command: "edit.clearContents", key: "delete", mac: "backspace" },
+    { command: "edit.fillDown", key: "ctrl+d", mac: "cmd+d" },
+    { command: "edit.fillRight", key: "ctrl+r", mac: "cmd+r" },
+    { command: "edit.insertDate", key: "ctrl+;", mac: "cmd+;" },
+    { command: "edit.insertTime", key: "ctrl+shift+;", mac: "cmd+shift+;" },
+    { command: "edit.autoSum", key: "alt+=", mac: "option+=" },
+    { command: "workbook.previousSheet", key: "ctrl+pageup", mac: "cmd+pageup" },
+    { command: "workbook.nextSheet", key: "ctrl+pagedown", mac: "cmd+pagedown" },
+  ];
+
+  const builtinKeybindingHints = [...builtinKeybindingsCatalog, ...extraBuiltinKeybindings];
+
   const sheetNavigationKeybindings: Array<NonNullable<ReturnType<typeof parseKeybinding>>> = [
     parseKeybinding("workbook.previousSheet", "ctrl+pageup"),
     parseKeybinding("workbook.nextSheet", "ctrl+pagedown"),
     parseKeybinding("workbook.previousSheet", "cmd+pageup"),
     parseKeybinding("workbook.nextSheet", "cmd+pagedown"),
   ].filter((binding): binding is NonNullable<ReturnType<typeof parseKeybinding>> => binding != null);
+
+  const aiChatToggleKeybindings: Array<NonNullable<ReturnType<typeof parseKeybinding>>> = [
+    parseKeybinding("view.togglePanel.aiChat", "ctrl+shift+a"),
+    parseKeybinding("view.togglePanel.aiChat", "cmd+shift+a"),
+  ].filter((binding): binding is NonNullable<ReturnType<typeof parseKeybinding>> => binding != null);
+
   const syncContributedCommands = () => {
     if (!extensionHostManager.ready || extensionHostManager.error) return;
     try {
@@ -2334,7 +2360,7 @@ if (
         : [];
     const nextKeybindingsIndex = buildCommandKeybindingDisplayIndex({
       platform,
-      builtin: builtinKeybindings,
+      builtin: builtinKeybindingHints,
       contributed,
     });
     for (const [commandId, bindings] of nextKeybindingsIndex.entries()) {
@@ -2394,6 +2420,17 @@ if (
       // Reserve Ctrl/Cmd+Shift+P for the command palette.
       const primary = e.ctrlKey || e.metaKey;
       if (primary && e.shiftKey && (e.key === "P" || e.key === "p")) return;
+
+      for (const binding of aiChatToggleKeybindings) {
+        if (!matchesKeybinding(binding, e)) continue;
+        e.preventDefault();
+        // Stop propagation so the grid doesn't interpret Ctrl/Cmd+Shift+A as "select all" (Ctrl/Cmd+A).
+        e.stopPropagation();
+        void commandRegistry.executeCommand(binding.command).catch((err) => {
+          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+        });
+        return;
+      }
 
       for (const binding of sheetNavigationKeybindings) {
         if (!matchesKeybinding(binding, e)) continue;
