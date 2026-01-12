@@ -43,6 +43,17 @@ function hasThousandsSeparators(format: string): boolean {
   return integerSection.includes(",");
 }
 
+function gcd(a: number, b: number): number {
+  let x = Math.abs(Math.trunc(a));
+  let y = Math.abs(Math.trunc(b));
+  while (y !== 0) {
+    const t = x % y;
+    x = y;
+    y = t;
+  }
+  return x === 0 ? 1 : x;
+}
+
 function isSupportedDateFormat(format: string): boolean {
   // v1 only supports a couple of known presets. Avoid treating arbitrary numeric
   // formats containing letters (e.g. `0.0,"M"`) as dates.
@@ -53,6 +64,98 @@ function isSupportedDateFormat(format: string): boolean {
   // Keep the detection intentionally narrow to avoid mis-classifying arbitrary formats.
   const compact = lower.replace(/\s+/g, "");
   return /^h{1,2}:m{1,2}(:s{1,2})?$/.test(compact);
+}
+
+function parseScientificFormat(format: string): { decimals: number; expDigits: number } | null {
+  const upper = format.toUpperCase();
+  const match = /E([+-])([0]+)/.exec(upper);
+  if (!match) return null;
+  const expDigits = match[2]?.length ?? 0;
+  if (expDigits <= 0) return null;
+  const base = upper.slice(0, match.index);
+  const decimals = parseDecimalPlaces(base);
+  return { decimals, expDigits };
+}
+
+function formatScientific(value: number, { decimals, expDigits }: { decimals: number; expDigits: number }): string {
+  if (!Number.isFinite(value)) return "0";
+  const sign = value < 0 && !Object.is(value, -0) ? "-" : "";
+  const abs = Math.abs(value);
+  if (abs === 0) {
+    const mantissa = (0).toFixed(decimals);
+    return `${sign}${mantissa}E+${"0".padStart(expDigits, "0")}`;
+  }
+
+  // Compute exponent in base 10.
+  let exponent = Math.floor(Math.log10(abs));
+  let mantissa = abs / Math.pow(10, exponent);
+
+  // Round mantissa to the required decimals.
+  const rounded = Number(mantissa.toFixed(decimals));
+  mantissa = rounded;
+  if (mantissa >= 10) {
+    mantissa /= 10;
+    exponent += 1;
+  }
+
+  const mantissaText = mantissa.toFixed(decimals);
+  const expSign = exponent >= 0 ? "+" : "-";
+  const expText = Math.abs(exponent).toString().padStart(expDigits, "0");
+  return `${sign}${mantissaText}E${expSign}${expText}`;
+}
+
+function parseFractionFormat(format: string): { maxDenominator: number } | null {
+  // Restrict to classic "?" placeholder-based fraction formats (e.g. "# ?/?", "# ??/??").
+  if (!format.includes("?")) return null;
+  const match = /\/\?+/.exec(format);
+  if (!match) return null;
+  const digits = match[0].length - 1; // exclude the "/"
+  if (digits <= 0) return null;
+  const maxDenominator = Math.pow(10, digits) - 1;
+  return { maxDenominator };
+}
+
+function formatFraction(value: number, { maxDenominator }: { maxDenominator: number }): string {
+  if (!Number.isFinite(value)) return "";
+
+  const isNegative = value < 0 && !Object.is(value, -0);
+  const abs = Math.abs(value);
+  const whole = Math.floor(abs);
+  const frac = abs - whole;
+
+  if (frac < 1e-12) return `${isNegative ? "-" : ""}${whole}`;
+
+  let bestNumerator = 0;
+  let bestDenominator = 1;
+  let bestError = Infinity;
+
+  for (let d = 1; d <= maxDenominator; d += 1) {
+    const n = Math.round(frac * d);
+    const approx = n / d;
+    const error = Math.abs(frac - approx);
+    if (error < bestError) {
+      bestError = error;
+      bestNumerator = n;
+      bestDenominator = d;
+      if (error < 1e-12) break;
+    }
+  }
+
+  if (bestNumerator === 0) return `${isNegative ? "-" : ""}${whole}`;
+
+  if (bestNumerator >= bestDenominator) {
+    // Rounding pushed us up to 1.
+    const nextWhole = whole + 1;
+    return `${isNegative ? "-" : ""}${nextWhole}`;
+  }
+
+  const divisor = gcd(bestNumerator, bestDenominator);
+  const numerator = bestNumerator / divisor;
+  const denominator = bestDenominator / divisor;
+
+  const sign = isNegative ? "-" : "";
+  if (whole === 0) return `${sign}${numerator}/${denominator}`;
+  return `${sign}${whole} ${numerator}/${denominator}`;
 }
 
 function formatExcelDate(serial: number, format: string): string {
@@ -137,6 +240,16 @@ export function formatValueWithNumberFormat(value: number, numberFormat: string)
 
   if (isSupportedDateFormat(section)) {
     return formatExcelDate(value, section);
+  }
+
+  const scientific = parseScientificFormat(section);
+  if (scientific) {
+    return formatScientific(value, scientific);
+  }
+
+  const fraction = parseFractionFormat(section);
+  if (fraction) {
+    return formatFraction(value, fraction);
   }
 
   return formatNumeric(value, section);
