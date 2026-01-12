@@ -80,6 +80,15 @@ test.describe("Extension clipboard DLP (taint tracking)", () => {
     await gotoDesktop(page);
     await assertClipboardSupportedOrSkip(page);
 
+    // Move off the Restricted cell so selection-based DLP enforcement doesn't block this test.
+    // This ensures the block is coming from the extension host's taint tracking + clipboardWriteGuard.
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const app: any = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+      app.activateCell({ sheetId, row: 0, col: 1 }); // B1
+    });
+
     const marker = `__formula_clipboard_marker__${Math.random().toString(16).slice(2)}`;
     await page.evaluate(async (marker) => {
       await navigator.clipboard.writeText(marker);
