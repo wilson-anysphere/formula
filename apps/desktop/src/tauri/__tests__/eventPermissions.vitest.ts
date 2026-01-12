@@ -288,6 +288,21 @@ describe("tauri capability event permissions", () => {
       Array.isArray(allowEmit?.allow) ? allowEmit.allow.map((entry: any) => entry?.event).filter(Boolean) : [],
     );
 
+    // Some subsystems (e.g. the updater UI) `listen(...)` via an indirection (iterating over a typed
+    // list of event names) instead of calling `listen("...")` directly. Keep those allowlisted too.
+    {
+      const updaterUiPath = path.join(root, "apps/desktop/src/tauri/updaterUi.ts");
+      const updaterUiText = readFileSync(updaterUiPath, "utf8");
+      const updaterEventType = updaterUiText.match(/type\s+UpdaterEventName\s*=\s*([\s\S]*?);/);
+      expect(updaterEventType).toBeTruthy();
+
+      const updaterEvents = Array.from(updaterEventType![1].matchAll(/["']([^"']+)["']/g)).map((m) => m[1]);
+      expect(updaterEvents.length).toBeGreaterThan(0);
+      for (const event of updaterEvents) {
+        expect(allowListenEvents.has(event)).toBe(true);
+      }
+    }
+
     for (const event of listenedByFrontend) {
       expect(allowListenEvents.has(event)).toBe(true);
     }
