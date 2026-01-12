@@ -44,7 +44,7 @@ fn open_clipboard_with_retry() -> Result<ClipboardGuard, ClipboardError> {
     for attempt in 0..ATTEMPTS {
         match unsafe { OpenClipboard(None) } {
             Ok(()) => return Ok(ClipboardGuard),
-            Err(err) if attempt + 1 < ATTEMPTS => {
+            Err(_) if attempt + 1 < ATTEMPTS => {
                 // Small backoff.
                 std::thread::sleep(Duration::from_millis(10));
                 continue;
@@ -94,7 +94,7 @@ fn try_get_clipboard_bytes(
     }
 
     let slice = unsafe { std::slice::from_raw_parts(ptr as *const u8, size) };
-    let mut out = slice.to_vec();
+    let out = slice.to_vec();
 
     // `GlobalUnlock` returns FALSE both when the lock count reaches zero and when it fails.
     // The Windows crate maps FALSE to an error, so ignore the return value and rely on OS
