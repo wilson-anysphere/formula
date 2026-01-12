@@ -16,7 +16,12 @@ function showModal(dialog: HTMLDialogElement): void {
   dialog.setAttribute("open", "true");
 }
 
+function isDialogOpen(dialog: HTMLDialogElement): boolean {
+  return (dialog as any).open === true || dialog.hasAttribute("open");
+}
+
 function closeDialog(dialog: HTMLDialogElement, returnValue: string): void {
+  if (!isDialogOpen(dialog)) return;
   if (typeof (dialog as any).close === "function") {
     (dialog as any).close(returnValue);
     return;
@@ -131,6 +136,9 @@ export async function showInputBox(options: InputBoxOptions = {}): Promise<strin
       if (e.key === "Enter") {
         e.preventDefault();
         closeDialog(dialog, "ok");
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closeDialog(dialog, "cancel");
       }
     });
   });
@@ -217,6 +225,12 @@ export async function showQuickPick<T>(
 
       // Arrow-key navigation between list items (VS Code-like quick pick behavior).
       if (buttons.length === 0) return;
+
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeDialog(dialog, "");
+        return;
+      }
       const active = document.activeElement;
       const currentIndex = active ? buttons.indexOf(active as HTMLButtonElement) : -1;
 
