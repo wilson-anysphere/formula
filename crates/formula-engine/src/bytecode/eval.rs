@@ -2,7 +2,9 @@ use super::ast::{BinaryOp, UnaryOp};
 use super::grid::Grid;
 use super::runtime::{apply_binary, apply_unary, call_function};
 use super::value::{CellCoord, Value};
+use crate::date::ExcelDateSystem;
 use crate::locale::ValueLocaleConfig;
+use chrono::Utc;
 
 use super::program::{OpCode, Program};
 
@@ -99,8 +101,43 @@ impl Vm {
         program: &Program,
         grid: &dyn Grid,
         base: CellCoord,
-        _value_locale: ValueLocaleConfig,
+        value_locale: ValueLocaleConfig,
     ) -> Value {
+        // Preserve the existing public API while ensuring locale-aware coercion for text values
+        // matches the main evaluator. This uses Excel's default 1900 date system and the current
+        // wall-clock time for any date strings that omit a year.
+        let _guard = super::runtime::set_thread_eval_context(
+            ExcelDateSystem::EXCEL_1900,
+            value_locale,
+            Utc::now(),
+        );
         self.eval(program, grid, base)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eval_with_value_locale_parses_numeric_text_using_locale() {
+        let origin = CellCoord::new(0, 0);
+        let expr = super::super::parse_formula("=\"1.234,56\"+1", origin).expect("parse");
+        let cache = super::super::BytecodeCache::new();
+        let program = cache.get_or_compile(&expr);
+        let grid = super::super::grid::ColumnarGrid::new(1, 1);
+
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval_with_value_locale(
+            &program,
+            &grid,
+            origin,
+            ValueLocaleConfig::de_de(),
+        );
+
+        match value {
+            Value::Number(n) => assert!((n - 1235.56).abs() < 1e-9, "got {n}"),
+            other => panic!("expected Value::Number, got {other:?}"),
+        }
     }
 }
