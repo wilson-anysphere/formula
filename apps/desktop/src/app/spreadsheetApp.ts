@@ -677,12 +677,14 @@ export class SpreadsheetApp {
     // outside the grid viewport while we virtualize with negative coordinates.
     this.root.style.overflow = "hidden";
 
-    // Seed a simple outline group: rows 2-4 with a summary row at 5 (Excel 1-based indices).
-    this.outline.groupRows(2, 4);
-    this.outline.recomputeOutlineHiddenRows();
-    // And columns 2-4 with a summary column at 5.
-    this.outline.groupCols(2, 4);
-    this.outline.recomputeOutlineHiddenCols();
+    if (this.gridMode === "legacy") {
+      // Seed a simple outline group: rows 2-4 with a summary row at 5 (Excel 1-based indices).
+      this.outline.groupRows(2, 4);
+      this.outline.recomputeOutlineHiddenRows();
+      // And columns 2-4 with a summary column at 5.
+      this.outline.groupCols(2, 4);
+      this.outline.recomputeOutlineHiddenCols();
+    }
 
     if (!collabEnabled) {
       // Seed data for navigation tests (used range ends at D5).
@@ -4740,7 +4742,7 @@ export class SpreadsheetApp {
   }
 
   private renderOutlineControls(): void {
-    if (!this.outline.pr.showOutlineSymbols) {
+    if (this.sharedGrid || !this.outline.pr.showOutlineSymbols) {
       for (const button of this.outlineButtons.values()) button.remove();
       this.outlineButtons.clear();
       return;
@@ -4836,12 +4838,14 @@ export class SpreadsheetApp {
   }
 
   private onOutlineUpdated(): void {
-    if (this.gridMode === "legacy") {
-      this.rebuildAxisVisibilityCache();
+    if (this.gridMode !== "legacy") {
+      // Outline groups (and hidden rows/cols) aren't implemented in the shared grid renderer yet.
+      return;
     }
+
+    this.rebuildAxisVisibilityCache();
     this.ensureActiveCellVisible();
     this.scrollCellIntoView(this.selection.active);
-    if (this.sharedGrid) this.syncSharedGridSelectionFromState();
     this.refresh();
     this.focus();
   }
@@ -5835,6 +5839,12 @@ export class SpreadsheetApp {
 
     // Outline grouping shortcuts (Excel-style): Alt+Shift+Right/Left.
     if (e.altKey && e.shiftKey && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+      if (this.sharedGrid) {
+        // Shared-grid mode doesn't currently implement outline groups or hidden rows/cols.
+        // Treat the shortcut as a no-op so it doesn't affect legacy visibility caches or navigation.
+        e.preventDefault();
+        return;
+      }
       e.preventDefault();
       const range = this.selection.ranges[this.selection.activeRangeIndex] ?? this.selection.ranges[0];
       if (!range) return;
@@ -6856,14 +6866,17 @@ export class SpreadsheetApp {
   }
 
   private usedRangeProvider() {
+    const shared = Boolean(this.sharedGrid);
     return {
       getUsedRange: () => this.computeUsedRange(),
       isCellEmpty: (cell: CellCoord) => {
         const state = this.document.getCell(this.sheetId, cell) as { value: unknown; formula: string | null };
         return state?.value == null && state?.formula == null;
       },
-      isRowHidden: (row: number) => this.isRowHidden(row),
-      isColHidden: (col: number) => this.isColHidden(col),
+      // Shared-grid mode doesn't render outline-hidden rows/cols (yet). Ensure navigation
+      // logic doesn't treat outline-hidden indices as hidden unless the renderer actually hides them.
+      isRowHidden: (row: number) => (shared ? false : this.isRowHidden(row)),
+      isColHidden: (col: number) => (shared ? false : this.isColHidden(col)),
     };
   }
 
