@@ -175,8 +175,12 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   let selectedIndex = 0;
   let visibleCommands: RenderableCommand[] = [];
   let extensionLoadTimer: number | null = null;
+  // Track which commands were launched from the palette so we only record those in
+  // palette recents (and only after they successfully execute).
+  const pendingPaletteRecentCounts = new Map<string, number>();
 
   const executeCommand = (commandId: string): void => {
+    pendingPaletteRecentCounts.set(commandId, (pendingPaletteRecentCounts.get(commandId) ?? 0) + 1);
     void commandRegistry.executeCommand(commandId).catch((err) => {
       console.error(`Command failed (${commandId}):`, err);
     });
@@ -289,7 +293,6 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
         });
         li.addEventListener("click", () => {
           close();
-          recordCommandPaletteRecent(localStorage, cmd.commandId);
           executeCommand(cmd.commandId);
         });
 
@@ -309,13 +312,21 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     const cmd = visibleCommands[selectedIndex];
     if (!cmd) return;
     close();
-    recordCommandPaletteRecent(localStorage, cmd.commandId);
     executeCommand(cmd.commandId);
   }
 
   const disposeRegistrySub = commandRegistry.subscribe(() => {
     if (!isOpen) return;
     render();
+  });
+
+  const disposeExecuteSub = commandRegistry.onDidExecuteCommand((evt) => {
+    const count = pendingPaletteRecentCounts.get(evt.commandId);
+    if (!count) return;
+    if (count <= 1) pendingPaletteRecentCounts.delete(evt.commandId);
+    else pendingPaletteRecentCounts.set(evt.commandId, count - 1);
+    if (evt.error) return;
+    recordCommandPaletteRecent(localStorage, evt.commandId);
   });
 
   const onOverlayClick = (e: MouseEvent) => {
@@ -377,6 +388,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
   function dispose(): void {
     disposeRegistrySub();
+    disposeExecuteSub();
     overlay.removeEventListener("click", onOverlayClick);
     input.removeEventListener("input", onInput);
     input.removeEventListener("keydown", onInputKeyDown);
