@@ -945,6 +945,64 @@ test("api errors: activation errors preserve extension error name/code", async (
   });
 });
 
+test("api errors: non-Error host throws preserve name/code for extensions", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-host-non-error-throws-"));
+  const extDir = path.join(dir, "ext");
+  await fs.mkdir(extDir);
+
+  const commandId = "errorExt.hostNonErrorThrow";
+  await writeExtensionFixture(
+    extDir,
+    {
+      name: "host-non-error-throws-ext",
+      version: "1.0.0",
+      publisher: "formula-test",
+      main: "./dist/extension.js",
+      engines: { formula: "^1.0.0" },
+      activationEvents: [`onCommand:${commandId}`],
+      contributes: { commands: [{ command: commandId, title: "Host non-error throw" }] },
+      permissions: ["ui.commands", "cells.read"]
+    },
+    `
+      const formula = require("@formula/extension-api");
+      exports.activate = async (context) => {
+        context.subscriptions.push(await formula.commands.registerCommand(${JSON.stringify(
+          commandId
+        )}, async () => {
+          try {
+            await formula.cells.getRange("A1:A1");
+            return { ok: true };
+          } catch (err) {
+            return { ok: false, name: err?.name ?? null, message: err?.message ?? String(err), code: err?.code ?? null };
+          }
+        }));
+      };
+    `
+  );
+
+  const host = new ExtensionHost({
+    engineVersion: "1.0.0",
+    activationTimeoutMs: ACTIVATION_TIMEOUT_MS,
+    permissionsStoragePath: path.join(dir, "permissions.json"),
+    extensionStoragePath: path.join(dir, "storage.json"),
+    permissionPrompt: async () => true,
+    spreadsheet: {
+      getRange() {
+        throw { name: "AbortError", message: "Range cancelled", code: "BOOM" };
+      }
+    }
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  await host.loadExtension(extDir);
+
+  const result = await host.executeCommand(commandId);
+  assert.deepEqual(result, { ok: false, name: "AbortError", message: "Range cancelled", code: "BOOM" });
+});
+
 test("permissions: workbook.saveAs requires workbook.manage and denial prevents updating workbook path", async (t) => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-ext-workbook-saveas-deny-"));
   const extDir = path.join(dir, "ext");
