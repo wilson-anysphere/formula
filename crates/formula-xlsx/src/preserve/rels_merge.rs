@@ -277,14 +277,24 @@ mod tests {
         )
         .expect("repair rels");
 
+        let updated_str = std::str::from_utf8(&updated).unwrap();
+
         // Ensure the newly inserted element is still in the relationships namespace
         // (i.e. it used the same `pr:` prefix, not an unprefixed tag with no namespace).
-        let doc = roxmltree::Document::parse(std::str::from_utf8(&updated).unwrap()).unwrap();
+        let doc = roxmltree::Document::parse(updated_str).unwrap();
         let inserted = doc
             .descendants()
             .find(|n| n.is_element() && n.tag_name().name() == "Relationship" && n.attribute("Id") == Some("rId2"))
             .expect("inserted relationship");
         assert_eq!(inserted.tag_name().namespace(), Some(PACKAGE_REL_NS));
+        assert!(
+            updated_str.contains(r#"<pr:Relationship Id="rId2""#),
+            "expected inserted <pr:Relationship>, got:\n{updated_str}"
+        );
+        assert!(
+            !updated_str.contains("<Relationship "),
+            "should not introduce unprefixed <Relationship> tags in prefix-only .rels, got:\n{updated_str}"
+        );
     }
 
     #[test]
