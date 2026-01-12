@@ -7,6 +7,8 @@
 .ribbon {
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 0;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
   user-select: none;
@@ -410,4 +412,19 @@
 
 .ribbon[data-density="hidden"] .ribbon__content {
   display: none;
+}
+
+.ribbon[data-density="hidden"][data-flyout-open="true"] {
+  z-index: 50;
+}
+
+.ribbon[data-density="hidden"][data-flyout-open="true"] .ribbon__content {
+  display: block;
+  position: absolute;
+  top: 26px;
+  left: 0;
+  right: 0;
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--dialog-shadow);
+  z-index: 1;
 }

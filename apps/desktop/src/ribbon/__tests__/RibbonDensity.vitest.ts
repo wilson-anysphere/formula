@@ -115,6 +115,42 @@ describe("Ribbon density + collapse toggle", () => {
     act(() => root.unmount());
   });
 
+  it("shows ribbon content as a flyout when density is hidden", async () => {
+    vi.stubGlobal("localStorage", createStorageMock());
+    const { root, ribbonRoot, container } = renderRibbon();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      setRibbonWidth(ribbonRoot, 700);
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(ribbonRoot.dataset.density).toBe("hidden");
+
+    const content = container.querySelector<HTMLElement>(".ribbon__content");
+    if (!content) throw new Error("Missing ribbon content");
+    expect(content.hidden).toBe(true);
+
+    const activeTab = container.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]');
+    if (!activeTab) throw new Error("Missing active tab");
+
+    await act(async () => {
+      activeTab.click();
+      await Promise.resolve();
+    });
+    expect(content.hidden).toBe(false);
+    expect(ribbonRoot.dataset.flyoutOpen).toBe("true");
+
+    act(() => {
+      document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+    });
+    expect(content.hidden).toBe(true);
+
+    act(() => root.unmount());
+  });
+
   it("supports double-clicking the active tab to toggle collapse", async () => {
     vi.stubGlobal("localStorage", createStorageMock());
     const { root, ribbonRoot, container } = renderRibbon();

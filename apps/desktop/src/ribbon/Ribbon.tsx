@@ -92,6 +92,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
   );
   const [ribbonWidth, setRibbonWidth] = React.useState<number>(0);
   const [userCollapsed, setUserCollapsed] = React.useState<boolean>(() => readRibbonCollapsedFromStorage());
+  const [flyoutOpen, setFlyoutOpen] = React.useState(false);
 
   const toggleUserCollapsed = React.useCallback(() => {
     setUserCollapsed((prev) => !prev);
@@ -170,10 +171,12 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
         setPressedById((prev) => ({ ...prev, [button.id]: nextPressed }));
         actions.onToggle?.(button.id, nextPressed);
         actions.onCommand?.(button.id);
+        setFlyoutOpen(false);
         return;
       }
 
       actions.onCommand?.(button.id);
+      setFlyoutOpen(false);
     },
     [actions, uiState.pressedById],
   );
@@ -212,12 +215,56 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
   const density: RibbonDensity = responsiveDensity === "hidden" ? "hidden" : userCollapsed ? "hidden" : responsiveDensity;
   const contentVisible = density !== "hidden";
   const collapseLabel = userCollapsed ? "Expand ribbon" : "Collapse ribbon";
+  const showContent = contentVisible || flyoutOpen;
+
+  React.useEffect(() => {
+    if (contentVisible) setFlyoutOpen(false);
+  }, [contentVisible]);
+
+  React.useEffect(() => {
+    if (!flyoutOpen) return;
+    if (contentVisible) return;
+    const root = rootRef.current;
+    if (!root) return;
+
+    const close = () => setFlyoutOpen(false);
+
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (root.contains(target)) return;
+      close();
+    };
+
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (root.contains(target)) return;
+      close();
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      close();
+      tabButtonRefs.current[activeTabId]?.focus();
+    };
+
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [activeTabId, contentVisible, flyoutOpen]);
 
   return (
     <div
       className="ribbon"
       data-testid="ribbon-root"
       data-density={density}
+      data-flyout-open={flyoutOpen && !contentVisible ? "true" : undefined}
       ref={rootRef}
       onKeyDownCapture={(event) => {
         if (event.key !== "Escape" && event.key !== "ArrowUp") return;
@@ -235,6 +282,9 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
           if (event.key === "ArrowUp") return;
         }
         event.preventDefault();
+        if (event.key === "Escape" && flyoutOpen && !contentVisible) {
+          setFlyoutOpen(false);
+        }
         tabButtonRefs.current[activeTabId]?.focus();
       }}
     >
@@ -265,6 +315,9 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                 onClick={() => {
                   setActiveTabId(tab.id);
                   actions.onTabChange?.(tab.id);
+                  if (!contentVisible) {
+                    setFlyoutOpen((prev) => (isActive ? !prev : true));
+                  }
                 }}
                 onKeyDown={(event) => {
                   if (event.key === "ArrowRight") {
@@ -288,8 +341,16 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
                     return;
                   }
                   if (event.key === "ArrowDown") {
-                    if (!contentVisible) return;
                     event.preventDefault();
+                    if (!contentVisible) {
+                      if (!isActive) {
+                        setActiveTabId(tab.id);
+                        actions.onTabChange?.(tab.id);
+                      }
+                      setFlyoutOpen(true);
+                      requestAnimationFrame(() => focusFirstControl(tab.id));
+                      return;
+                    }
                     if (!isActive) {
                       setActiveTabId(tab.id);
                       actions.onTabChange?.(tab.id);
@@ -337,7 +398,7 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
         </div>
       </div>
 
-      <div className="ribbon__content" hidden={!contentVisible}>
+      <div className="ribbon__content" hidden={!showContent}>
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           return (
