@@ -175,7 +175,15 @@ export async function activate(context) {
           malicious: false,
           downloadCount: 0,
           latestVersion: extensionVersion,
-          versions: [],
+          versions: [
+            {
+              version: extensionVersion,
+              sha256: pkgSha256,
+              uploadedAt: new Date().toISOString(),
+              yanked: false,
+              scanStatus: "passed",
+            },
+          ],
           readme: "",
           publisherPublicKeyPem: keys.publicKeyPem,
           createdAt: new Date().toISOString(),
