@@ -41,6 +41,7 @@ SMOKE_INCLUDE_TAGS = [
     "COUNT",
     "COUNTIF",
     "TEXT",
+    "TEXTSPLIT",
     "VALUE",
     "DATEVALUE",
     "WORKDAY",
