@@ -208,8 +208,39 @@ describe("SpreadsheetApp shared-grid keyboard navigation", () => {
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", altKey: true, bubbles: true, cancelable: true }));
       expect(app.getActiveCell()).toEqual({ row: 0, col: pageCols });
 
+      // Shift+End should extend to the last column from the current anchor.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "End", shiftKey: true, bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: 0, col: limits.maxCols - 1 });
+      expect((app as any).selection.anchor).toEqual({ row: 0, col: pageCols });
+      expect((app as any).selection.ranges).toEqual([
+        { startRow: 0, endRow: 0, startCol: pageCols, endCol: limits.maxCols - 1 },
+      ]);
+
+      // Reset back to a single cell at column A so subsequent paging assertions are stable.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+
+      // Return to the original horizontal PageDown target.
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", altKey: true, bubbles: true, cancelable: true }));
-      expect(app.getActiveCell()).toEqual({ row: 0, col: Math.min(limits.maxCols - 1, pageCols * 2) });
+      expect(app.getActiveCell()).toEqual({ row: 0, col: pageCols });
+
+      // Shift+Home should extend selection back to the first column (keeping the anchor fixed).
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", shiftKey: true, bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+      expect((app as any).selection.anchor).toEqual({ row: 0, col: pageCols });
+      expect((app as any).selection.ranges).toEqual([{ startRow: 0, endRow: 0, startCol: 0, endCol: pageCols }]);
+
+      // Collapse back to a single cell before paging further.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", altKey: true, bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: 0, col: pageCols });
+
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", altKey: true, bubbles: true, cancelable: true }));
+      const col2 = Math.min(limits.maxCols - 1, pageCols * 2);
+      expect(app.getActiveCell()).toEqual({ row: 0, col: col2 });
+
+      // Alt+PageUp should page back left by the same amount.
+      root.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", altKey: true, bubbles: true, cancelable: true }));
+      expect(app.getActiveCell()).toEqual({ row: 0, col: Math.max(0, col2 - pageCols) });
 
       // Home should return to the first column (row unchanged).
       root.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true, cancelable: true }));
