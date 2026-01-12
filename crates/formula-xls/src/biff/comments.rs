@@ -288,8 +288,13 @@ fn parse_txo_text_biff5(
     codepage: u16,
     warnings: &mut Vec<String>,
 ) -> Option<String> {
-    // BIFF5 stores the TXO text bytes directly in subsequent CONTINUE records (no per-fragment
-    // option flags byte). Treat the continued bytes as ANSI encoded using the workbook codepage.
+    // BIFF5 typically stores the TXO text bytes directly in subsequent CONTINUE records (no
+    // per-fragment option flags byte). Treat the continued bytes as ANSI encoded using the
+    // workbook codepage.
+    //
+    // Some producers appear to mimic BIFF8's continued-string layout and prefix each CONTINUE
+    // fragment with a one-byte "high-byte" flag (0/1). In that case, the TXO `cchText` count does
+    // *not* include those flag bytes, so treat them as optional and skip them best-effort.
     let first = record.first_fragment();
     if first.len() < TXO_TEXT_LEN_OFFSET + 2 {
         // Best-effort: if the TXO header is malformed, decode the first continuation as text.
@@ -304,6 +309,30 @@ fn parse_txo_text_biff5(
     }
 
     let fragments: Vec<&[u8]> = record.fragments().collect();
+    let continues = fragments.get(1..).unwrap_or_default();
+
+    let mut skip_leading_flag_bytes = false;
+    if let Some(first_continue) = continues.first().copied() {
+        if matches!(first_continue.first().copied(), Some(0) | Some(1)) {
+            let max_chars_if_flags_present: usize = continues
+                .iter()
+                .map(|frag| {
+                    if frag.is_empty() {
+                        0
+                    } else if matches!(frag.first().copied(), Some(0) | Some(1)) {
+                        frag.len().saturating_sub(1)
+                    } else {
+                        frag.len()
+                    }
+                })
+                .sum();
+
+            if cch_text <= max_chars_if_flags_present {
+                skip_leading_flag_bytes = true;
+            }
+        }
+    }
+
     let mut frag_idx = 1usize;
     let mut offset = 0usize;
     let mut remaining = cch_text;
@@ -318,6 +347,11 @@ fn parse_txo_text_biff5(
                 break;
             }
             continue;
+        }
+
+        if offset == 0 && skip_leading_flag_bytes && matches!(frag.first().copied(), Some(0) | Some(1))
+        {
+            offset = 1;
         }
 
         if offset >= frag.len() {
@@ -1004,6 +1038,40 @@ mod tests {
             txo_with_cch_text(cch_text),
             continue_text_biff5(&part1),
             continue_text_biff5(&part2),
+            // Formatting CONTINUE payload (dummy bytes).
+            continue_text_biff5(&[0u8; 4]),
+            eof(),
+        ]
+        .concat();
+
+        let (notes, warnings) =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1251).expect("parse");
+        assert!(
+            warnings.is_empty(),
+            "unexpected warnings: {warnings:?}"
+        );
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].author, "Alice");
+        assert_eq!(notes[0].text, "Hi А");
+    }
+
+    #[test]
+    fn parses_biff5_txo_text_split_across_multiple_continue_records_with_flags_using_codepage() {
+        // Some BIFF5 writers appear to prefix each CONTINUE fragment with a BIFF8-style
+        // "high-byte" flag (0/1). Ensure we treat that as an optional flag byte rather than part of
+        // the text payload.
+        let part1 = [b'H', b'i', b' '];
+        let part2 = [0xC0];
+        let cch_text = (part1.len() + part2.len()) as u16;
+
+        let stream = [
+            bof_biff5(),
+            note_biff5(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text(cch_text),
+            // Use the BIFF8-style helper so each fragment begins with a flag byte.
+            continue_text_compressed_bytes(&part1),
+            continue_text_compressed_bytes(&part2),
             // Formatting CONTINUE payload (dummy bytes).
             continue_text_biff5(&[0u8; 4]),
             eof(),

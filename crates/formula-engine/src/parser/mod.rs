@@ -3349,12 +3349,13 @@ fn estimate_tokenized_bytes(expr: &Expr) -> usize {
                 // Field access isn't representable in Excel's legacy BIFF token stream, but we still
                 // need a stable, conservative estimate to enforce the 16,384 byte limit.
                 //
-                // Approximate as a small operator overhead plus a string-like payload for the field
-                // name, and include the base expression size.
-                total = total.saturating_add(1);
+                // Approximate it like a small function call taking the base expression plus a
+                // string-like payload for the field name (mirroring how `FieldAccess` is compiled to
+                // `_FIELDACCESS(base, field)` during evaluation).
+                total = total.saturating_add(4); // ptgFuncVar-like
                 total = total.saturating_add(
                     3usize.saturating_add(access.field.chars().count().saturating_mul(2)),
-                );
+                ); // ptgStr-like
                 stack.push(access.base.as_ref());
             }
             Expr::Array(arr) => {
