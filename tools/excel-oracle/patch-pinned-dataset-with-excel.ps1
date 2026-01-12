@@ -43,6 +43,11 @@
   Optional tags to include (passed through to run-excel-oracle.ps1). This can be used instead of
   a subset corpus by pointing SubsetCasesPath at the canonical cases.json and filtering by tag.
 
+.PARAMETER RequireTags
+  Optional tags that must all be present (AND semantics; passed through to run-excel-oracle.ps1).
+  This can be used instead of a subset corpus by pointing SubsetCasesPath at the canonical cases.json
+  and filtering by required tags.
+
 .PARAMETER ExcludeTags
   Optional tags to exclude (passed through to run-excel-oracle.ps1).
 
@@ -61,6 +66,7 @@ param(
   [string]$ExcelOutPath = "",
   [int]$MaxCases = 0,
   [string[]]$IncludeTags = @(),
+  [string[]]$RequireTags = @(),
   [string[]]$ExcludeTags = @(),
   [switch]$Visible,
   [switch]$DryRun
@@ -102,7 +108,7 @@ if ($DryRun) {
   Write-Host "Dry run: patch-pinned-dataset-with-excel.ps1"
   Write-Host ""
   Write-Host "Would run Excel oracle:"
-  Write-Host "  $excelScript -CasesPath $subsetCasesFull -OutPath $excelResultsFull -Visible:$Visible -MaxCases $MaxCases -IncludeTags <...> -ExcludeTags <...>"
+  Write-Host "  $excelScript -CasesPath $subsetCasesFull -OutPath $excelResultsFull -Visible:$Visible -MaxCases $MaxCases -IncludeTags <...> -RequireTags <...> -ExcludeTags <...>"
   Write-Host ""
   Write-Host "Would patch pinned dataset:"
   Write-Host "  python $updateScript --cases $casesFull --pinned $pinnedFull --merge-results $excelResultsFull --overwrite-existing --no-engine"
@@ -114,7 +120,7 @@ if ($DryRun) {
 Push-Location $repoRoot
 try {
   Write-Host "Generating Excel results from subset corpus: $subsetCasesFull"
-  & $excelScript -CasesPath $subsetCasesFull -OutPath $excelResultsFull -Visible:$Visible -MaxCases $MaxCases -IncludeTags $IncludeTags -ExcludeTags $ExcludeTags
+  & $excelScript -CasesPath $subsetCasesFull -OutPath $excelResultsFull -Visible:$Visible -MaxCases $MaxCases -IncludeTags $IncludeTags -RequireTags $RequireTags -ExcludeTags $ExcludeTags
 
   Write-Host ""
   Write-Host "Patching pinned dataset (overwrite existing case IDs) -> $pinnedFull"

@@ -22,6 +22,10 @@
   Optional list of case tags to include. If provided, only cases that contain
   at least one of these tags are evaluated.
 
+.PARAMETER RequireTags
+  Optional list of case tags that must all be present on a case for it to be
+  evaluated (AND semantics). This can be combined with IncludeTags/ExcludeTags.
+
 .PARAMETER ExcludeTags
   Optional list of case tags to exclude. Any case containing one of these tags
   is skipped.
@@ -44,6 +48,8 @@ param(
   [int]$MaxCases = 0,
 
   [string[]]$IncludeTags = @(),
+
+  [string[]]$RequireTags = @(),
 
   [string[]]$ExcludeTags = @(),
 
@@ -166,12 +172,19 @@ if ($casesJson.schemaVersion -ne 1) {
 $caseList = @($casesJson.cases)
 
 $include = @($IncludeTags | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
+$require = @($RequireTags | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
 $exclude = @($ExcludeTags | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" })
 
-if ($include.Count -gt 0 -or $exclude.Count -gt 0) {
+if ($include.Count -gt 0 -or $require.Count -gt 0 -or $exclude.Count -gt 0) {
   $caseList = $caseList | Where-Object {
     $tags = @()
     if ($null -ne $_.tags) { $tags = @($_.tags | ForEach-Object { [string]$_ }) }
+
+    if ($require.Count -gt 0) {
+      foreach ($t in $require) {
+        if (-not ($tags -contains $t)) { return $false }
+      }
+    }
 
     if ($include.Count -gt 0) {
       $matched = $false

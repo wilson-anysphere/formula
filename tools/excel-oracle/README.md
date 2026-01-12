@@ -123,6 +123,16 @@ powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1
   -ExcludeTags spill,dynarr
 ```
 
+Note: `-IncludeTags` uses **OR semantics** (a case is included if it contains *any* of the included
+tags). To require that a case contains *all* tags (AND semantics), use `-RequireTags`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/excel-oracle/run-excel-oracle.ps1 `
+  -CasesPath tests/compatibility/excel-oracle/cases.json `
+  -OutPath tests/compatibility/excel-oracle/datasets/excel-oracle.json `
+  -RequireTags odd_coupon,basis4
+```
+
 To generate only the **long odd-coupon** stub scenarios (`ODDF*` / `ODDL*`) for quick iteration / pinning,
 use the small subset corpus:
 
