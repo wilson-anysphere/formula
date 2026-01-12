@@ -150,16 +150,15 @@ Tauri v2 replaces Tauri v1’s “allowlist” with **capabilities**, defined as
 
 Capabilities are scoped per window in **two** places (defense-in-depth):
 
-- `apps/desktop/src-tauri/tauri.conf.json` opts a window into capability identifiers via `app.windows[].capabilities`.
+- `apps/desktop/src-tauri/tauri.conf.json` opts a window into capability identifiers via `app.windows[].capabilities`
+  (for example: the `main` window includes `"capabilities": ["main"]`).
 - Each capability file under `apps/desktop/src-tauri/capabilities/` further scopes itself to window labels via
-  `"windows": [...]`.
+  `"windows": [...]` (for example: the `main` capability includes `"windows": ["main"]`).
 
-In this repo the main window is labeled `main` (`app.windows[].label` in `tauri.conf.json`). It opts into the `main`
-capability via `"capabilities": ["main"]`, and `capabilities/main.json` also scopes itself to that window via
-`"windows": ["main"]`.
-
-> Keep `app.windows[].capabilities` and the capability file’s `"windows": [...]` scoping in sync so adding a new window never
-> implicitly grants it the main capability (guardrailed by `apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`).
+Keep these two layers in sync so adding a new window never implicitly grants it the main capability (guardrailed by
+`apps/desktop/src/tauri/__tests__/tauriSecurityConfig.vitest.ts`). New windows should be unprivileged by default: opt them
+in explicitly via `app.windows[].capabilities`, and keep each capability file’s `"windows"` list intentional (or define a
+separate capability for that window).
 
 Example excerpt:
 
