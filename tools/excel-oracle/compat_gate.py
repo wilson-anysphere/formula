@@ -408,19 +408,27 @@ def main() -> int:
     # compiling locally for determinism/reliability unless the user explicitly opted in.
     #
     # Cargo respects both `RUSTC_WRAPPER` and the config/env-var equivalent
-    # `CARGO_BUILD_RUSTC_WRAPPER`. Unify them with nullish precedence (treating empty strings as
-    # an explicit override) so wrapper config cannot leak in unexpectedly.
+    # `CARGO_BUILD_RUSTC_WRAPPER`. When these are unset (or explicitly set to the empty string),
+    # override any global config by forcing a benign wrapper (`env`) that simply executes rustc.
     rustc_wrapper = env.get("RUSTC_WRAPPER")
     if rustc_wrapper is None:
         rustc_wrapper = env.get("CARGO_BUILD_RUSTC_WRAPPER")
-    if rustc_wrapper is None:
-        rustc_wrapper = ""
+    if not rustc_wrapper:
+        rustc_wrapper = (
+            (shutil.which("env") or "env")
+            if os.name != "nt"
+            else ""
+        )
 
     rustc_workspace_wrapper = env.get("RUSTC_WORKSPACE_WRAPPER")
     if rustc_workspace_wrapper is None:
         rustc_workspace_wrapper = env.get("CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER")
-    if rustc_workspace_wrapper is None:
-        rustc_workspace_wrapper = ""
+    if not rustc_workspace_wrapper:
+        rustc_workspace_wrapper = (
+            (shutil.which("env") or "env")
+            if os.name != "nt"
+            else ""
+        )
 
     env["RUSTC_WRAPPER"] = rustc_wrapper
     env["RUSTC_WORKSPACE_WRAPPER"] = rustc_workspace_wrapper

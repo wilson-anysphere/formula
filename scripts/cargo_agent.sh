@@ -636,12 +636,20 @@ while true; do
     fi
 
     if [[ "${sccache_failed}" == "true" && "${disabled_rustc_wrapper_for_retry}" == "false" ]]; then
-      echo "cargo_agent: sccache failure; retrying with rustc wrappers disabled" >&2
-      # Disable wrappers via env vars so we override any global Cargo config (`build.rustc-wrapper`).
-      export RUSTC_WRAPPER=""
-      export RUSTC_WORKSPACE_WRAPPER=""
-      export CARGO_BUILD_RUSTC_WRAPPER=""
-      export CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER=""
+      echo "cargo_agent: sccache failure; retrying with sccache disabled" >&2
+      # Override any global Cargo config (`build.rustc-wrapper = "sccache"`) by forcing a benign
+      # wrapper (`env`) that simply executes the underlying rustc.
+      #
+      # Note: Setting these vars to the empty string does *not* reliably override a configured
+      # rustc wrapper; Cargo treats empty values as "unset" and can fall back to the global config.
+      env_wrapper="$(command -v env 2>/dev/null || true)"
+      if [[ -z "${env_wrapper}" ]]; then
+        env_wrapper="env"
+      fi
+      export RUSTC_WRAPPER="${env_wrapper}"
+      export RUSTC_WORKSPACE_WRAPPER="${env_wrapper}"
+      export CARGO_BUILD_RUSTC_WRAPPER="${env_wrapper}"
+      export CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER="${env_wrapper}"
       disabled_rustc_wrapper_for_retry=true
     fi
 
