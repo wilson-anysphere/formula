@@ -214,3 +214,59 @@ test("BrowserExtensionHost: clipboard.writeText blocks when guard throws", async
   assert.deepEqual(writes, []);
 });
 
+test("BrowserExtensionHost: taint list is capped to the most recent ranges", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      getActiveSheet() {
+        return { id: "sheet1", name: "Sheet1" };
+      },
+      async getSelection() {
+        return { startRow: 0, startCol: 0, endRow: 0, endCol: 0, values: [[null]] };
+      },
+      async getCell() {
+        return null;
+      },
+      async setCell() {},
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.taint-cap";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "taint-cap",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["cells.read"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+
+  // Add more than the cap (50) unique single-cell ranges. Use distinct rows/cols so
+  // no merging occurs.
+  for (let i = 0; i < 60; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await host._executeApi("cells", "getCell", [i, i], extension);
+  }
+
+  assert.equal(extension.taintedRanges.length, 50);
+  assert.deepEqual(extension.taintedRanges[0], { sheetId: "sheet1", startRow: 10, startCol: 10, endRow: 10, endCol: 10 });
+  assert.deepEqual(extension.taintedRanges[49], { sheetId: "sheet1", startRow: 59, startCol: 59, endRow: 59, endCol: 59 });
+});

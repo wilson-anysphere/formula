@@ -126,36 +126,10 @@ function unionTaintedRanges(a, b) {
 function compressTaintedRangesToLimit(ranges, limit) {
   const max = Number.isFinite(limit) ? Math.max(0, limit) : MAX_TAINTED_RANGES_PER_EXTENSION;
   if (ranges.length <= max) return ranges;
-
-  /** @type {Array<any>} */
-  const out = [...ranges];
-  while (out.length > max) {
-    const counts = new Map();
-    for (const range of out) {
-      counts.set(range.sheetId, (counts.get(range.sheetId) ?? 0) + 1);
-    }
-
-    const sheetToMerge = [...counts.entries()].find(([, count]) => count > 1)?.[0] ?? null;
-    if (!sheetToMerge) {
-      // Degenerate case: lots of single ranges across sheets. Prefer dropping oldest
-      // entries over unbounded growth.
-      out.shift();
-      continue;
-    }
-
-    const firstIdx = out.findIndex((r) => r.sheetId === sheetToMerge);
-    const secondIdx = out.findIndex((r, idx) => idx > firstIdx && r.sheetId === sheetToMerge);
-    if (firstIdx === -1 || secondIdx === -1) {
-      out.shift();
-      continue;
-    }
-
-    const merged = unionTaintedRanges(out[firstIdx], out[secondIdx]);
-    out[firstIdx] = merged;
-    out.splice(secondIdx, 1);
-  }
-
-  return out;
+  // Keep a bounded number of ranges to avoid unbounded memory usage. Prefer keeping
+  // the most recently accessed ranges rather than merging into coarse bounding boxes
+  // (which can over-taint cells that were never read and introduce false positives).
+  return ranges.slice(-max);
 }
 
 function addTaintedRangeToList(ranges, nextRange) {
