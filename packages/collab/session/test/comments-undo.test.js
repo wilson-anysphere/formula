@@ -622,3 +622,53 @@ test("Binder-origin undo captures comment edits when nested comment maps were cr
 
   doc.destroy();
 });
+
+test("Binder-origin undo captures comment edits when comments root itself was created by a different Yjs instance (CJS applyUpdate)", () => {
+  const Ycjs = requireYjsCjs();
+
+  const remote = new Ycjs.Doc();
+  const comments = remote.getMap("comments");
+  remote.transact(() => {
+    const comment = new Ycjs.Map();
+    comment.set("id", "c1");
+    comment.set("cellRef", "Sheet1:0:0");
+    comment.set("kind", "threaded");
+    comment.set("authorId", "u1");
+    comment.set("authorName", "Alice");
+    comment.set("createdAt", 1);
+    comment.set("updatedAt", 1);
+    comment.set("resolved", false);
+    comment.set("content", "from-cjs");
+    comment.set("mentions", []);
+    comment.set("replies", new Ycjs.Array());
+    comments.set("c1", comment);
+  });
+  const update = Ycjs.encodeStateAsUpdate(remote);
+
+  const doc = new Y.Doc();
+  // Apply update via the CJS build to simulate y-websocket applying updates.
+  Ycjs.applyUpdate(doc, update, REMOTE_ORIGIN);
+
+  // Root exists but is not necessarily `instanceof Y.Map` in this module.
+  assert.ok(doc.share.get("comments"));
+
+  const root = getCommentsRoot(doc);
+  if (root.kind !== "map") {
+    throw new Error("Expected canonical comments root schema in this test");
+  }
+  assert.equal(root.map instanceof Y.Map, false);
+
+  const binderOrigin = { type: "document-controller:binder" };
+  const undoService = createUndoService({ mode: "collab", doc, scope: [root.map], origin: binderOrigin });
+  const mgr = createCommentManagerForDoc({ doc, transact: undoService.transact });
+
+  assert.equal(mgr.listAll()[0]?.content ?? null, "from-cjs");
+  mgr.setCommentContent({ commentId: "c1", content: "edited", now: 2 });
+  assert.equal(mgr.listAll()[0]?.content ?? null, "edited");
+  assert.equal(undoService.canUndo(), true);
+
+  undoService.undo();
+  assert.equal(mgr.listAll()[0]?.content ?? null, "from-cjs");
+
+  doc.destroy();
+});
