@@ -35,7 +35,17 @@ function createMockCanvasContext(): CanvasRenderingContext2D {
 
 function createPointerLikeMouseEvent(
   type: string,
-  options: { clientX: number; clientY: number; button: number; pointerId?: number; pointerType?: string },
+  options: {
+    clientX: number;
+    clientY: number;
+    button: number;
+    ctrlKey?: boolean;
+    metaKey?: boolean;
+    shiftKey?: boolean;
+    altKey?: boolean;
+    pointerId?: number;
+    pointerType?: string;
+  },
 ): MouseEvent {
   const event = new MouseEvent(type, {
     bubbles: true,
@@ -43,6 +53,10 @@ function createPointerLikeMouseEvent(
     clientX: options.clientX,
     clientY: options.clientY,
     button: options.button,
+    ctrlKey: options.ctrlKey,
+    metaKey: options.metaKey,
+    shiftKey: options.shiftKey,
+    altKey: options.altKey,
   });
   Object.defineProperty(event, "pointerId", { configurable: true, value: options.pointerId ?? 1 });
   Object.defineProperty(event, "pointerType", { configurable: true, value: options.pointerType ?? "mouse" });
@@ -158,5 +172,108 @@ describe("DesktopSharedGrid right-click selection semantics", () => {
     container.remove();
     outsideFocusTarget.remove();
   });
-});
 
+  it("treats Ctrl+click as a context-click on macOS (does not add to the selection)", () => {
+    const originalPlatform = navigator.platform;
+    const restorePlatform = () => {
+      try {
+        Object.defineProperty(navigator, "platform", { configurable: true, value: originalPlatform });
+      } catch {
+        // ignore
+      }
+    };
+    try {
+      Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
+    } catch {
+      // If the runtime doesn't allow stubbing `navigator.platform`, skip the test.
+      // (Vitest/jsdom generally allows this, but some environments can lock it down.)
+      restorePlatform();
+      return;
+    }
+
+    const container = document.createElement("div");
+    container.tabIndex = 0;
+    document.body.appendChild(container);
+
+    const gridCanvas = document.createElement("canvas");
+    const contentCanvas = document.createElement("canvas");
+    const selectionCanvas = document.createElement("canvas");
+    container.appendChild(gridCanvas);
+    container.appendChild(contentCanvas);
+    container.appendChild(selectionCanvas);
+
+    const vTrack = document.createElement("div");
+    const vThumb = document.createElement("div");
+    const hTrack = document.createElement("div");
+    const hThumb = document.createElement("div");
+    container.appendChild(vTrack);
+    container.appendChild(vThumb);
+    container.appendChild(hTrack);
+    container.appendChild(hThumb);
+
+    vi.spyOn(selectionCanvas, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 400,
+      bottom: 200,
+      width: 400,
+      height: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    } as DOMRect);
+
+    const grid = new DesktopSharedGrid({
+      container,
+      provider: new MockCellProvider({ rowCount: 100, colCount: 100 }),
+      rowCount: 100,
+      colCount: 100,
+      frozenRows: 1,
+      frozenCols: 1,
+      defaultRowHeight: 24,
+      defaultColWidth: 100,
+      canvases: { grid: gridCanvas, content: contentCanvas, selection: selectionCanvas },
+      scrollbars: { vTrack, vThumb, hTrack, hThumb },
+      enableResize: false,
+      enableKeyboard: false,
+      enableWheel: false,
+    });
+    grid.renderer.setColWidth(0, 48);
+    grid.renderer.setRowHeight(0, 24);
+    grid.resize(400, 200, 1);
+
+    // Select A1:B2 with active cell at A1.
+    grid.setSelectionRanges(
+      [{ startRow: 1, endRow: 3, startCol: 1, endCol: 3 }],
+      { activeIndex: 0, activeCell: { row: 1, col: 1 }, scrollIntoView: false },
+    );
+
+    // Ctrl+click B2 (within selection) should keep the selection as-is.
+    selectionCanvas.dispatchEvent(
+      createPointerLikeMouseEvent("pointerdown", {
+        clientX: 48 + 100 + 10,
+        clientY: 24 + 24 + 10,
+        button: 0,
+        ctrlKey: true,
+      }),
+    );
+    expect(grid.renderer.getSelection()).toEqual({ row: 1, col: 1 });
+    expect(grid.renderer.getSelectionRanges()).toEqual([{ startRow: 1, endRow: 3, startCol: 1, endCol: 3 }]);
+
+    // Ctrl+click D4 (outside) should collapse selection to D4 (not additive).
+    selectionCanvas.dispatchEvent(
+      createPointerLikeMouseEvent("pointerdown", {
+        clientX: 48 + 3 * 100 + 10,
+        clientY: 24 + 3 * 24 + 10,
+        button: 0,
+        ctrlKey: true,
+      }),
+    );
+    expect(grid.renderer.getSelection()).toEqual({ row: 4, col: 4 });
+    expect(grid.renderer.getSelectionRanges()).toEqual([{ startRow: 4, endRow: 5, startCol: 4, endCol: 5 }]);
+
+    grid.destroy();
+    container.remove();
+    restorePlatform();
+  });
+});

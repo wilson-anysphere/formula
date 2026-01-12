@@ -1254,6 +1254,14 @@ export class DesktopSharedGrid {
 
   private installPointerHandlers(options: { enableResize: boolean }): void {
     const selectionCanvas = this.selectionCanvas;
+    const isMacPlatform = (() => {
+      try {
+        const platform = typeof navigator !== "undefined" ? navigator.platform : "";
+        return /Mac|iPhone|iPad|iPod/.test(platform);
+      } catch {
+        return false;
+      }
+    })();
 
     const MIN_COL_WIDTH = 24;
     const MIN_ROW_HEIGHT = 16;
@@ -1265,7 +1273,13 @@ export class DesktopSharedGrid {
       // selection intact; right-clicking outside moves the active cell to the clicked
       // cell. We intentionally only support sheet cells for now (not row/col header
       // context menus).
-      if (event.pointerType === "mouse" && event.button !== 0) {
+      //
+      // Note: On macOS, Ctrl+click is commonly treated as a right click and fires the
+      // `contextmenu` event. Ensure we treat it as a context-click (not additive selection).
+      const isContextClick =
+        event.pointerType === "mouse" &&
+        (event.button === 2 || (isMacPlatform && event.button === 0 && event.ctrlKey && !event.metaKey));
+      if (isContextClick) {
         const point = this.getViewportPoint(event);
         const picked = renderer.pickCellAt(point.x, point.y);
         if (!picked) return;
