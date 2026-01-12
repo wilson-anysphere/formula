@@ -268,3 +268,45 @@ test("browser PermissionManager: accepts object-form declared permissions", asyn
     clipboard: true,
   });
 });
+
+test("browser PermissionManager: does not rewrite v2 permission records when no migration is needed", async () => {
+  const { PermissionManager } = await importBrowserPermissionManager();
+
+  const map = new Map();
+  let setCalls = 0;
+  const storage = {
+    getItem(key) {
+      const k = String(key);
+      return map.has(k) ? map.get(k) : null;
+    },
+    setItem(key, value) {
+      setCalls += 1;
+      map.set(String(key), String(value));
+    },
+    removeItem(key) {
+      map.delete(String(key));
+    }
+  };
+
+  const storageKey = "formula.test.permissions.noMigrate";
+  const initial = JSON.stringify({
+    "pub.ext": {
+      clipboard: true,
+      network: { mode: "allowlist", hosts: ["api.example.com"] }
+    }
+  });
+  map.set(storageKey, initial);
+
+  const pm = new PermissionManager({
+    storage,
+    storageKey,
+    prompt: async () => true
+  });
+
+  assert.deepEqual(await pm.getGrantedPermissions("pub.ext"), {
+    clipboard: true,
+    network: { mode: "allowlist", hosts: ["api.example.com"] }
+  });
+  assert.equal(setCalls, 0);
+  assert.equal(storage.getItem(storageKey), initial);
+});

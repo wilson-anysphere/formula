@@ -8,6 +8,38 @@ class PermissionError extends Error {
   }
 }
 
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (typeof a !== typeof b) return false;
+
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (!deepEqual(a[i], b[i])) return false;
+    }
+    return true;
+  }
+
+  if (typeof a === "object") {
+    const aKeys = Object.keys(a);
+    const bKeys = Object.keys(b);
+    if (aKeys.length !== bKeys.length) return false;
+    aKeys.sort();
+    bKeys.sort();
+    for (let i = 0; i < aKeys.length; i += 1) {
+      if (aKeys[i] !== bKeys[i]) return false;
+    }
+    for (const key of aKeys) {
+      if (!deepEqual(a[key], b[key])) return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
 function normalizeStringArray(value) {
   if (!Array.isArray(value)) return [];
   return value
@@ -76,7 +108,10 @@ function normalizePermissionsStore(data) {
   for (const [extensionId, record] of Object.entries(data)) {
     const normalized = normalizePermissionRecord(record);
     out[extensionId] = normalized;
-    if (record !== normalized) migrated = true;
+    // We migrate whenever the in-memory normalized representation differs from persisted data.
+    // A reference inequality check would always flag objects as migrated since we construct a
+    // fresh record during normalization.
+    if (!deepEqual(record, normalized)) migrated = true;
   }
 
   return { store: out, migrated };

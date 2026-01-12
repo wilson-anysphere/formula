@@ -245,3 +245,37 @@ test("permission storage: resetAllPermissions clears all extensions and forces r
     { extensionId: "pub.two", permissions: ["clipboard"] }
   ]);
 });
+
+test("permission storage: does not rewrite v2 permission records when no migration is needed", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "formula-perms-no-migrate-"));
+  const storePath = path.join(dir, "permissions.json");
+
+  // Use non-standard formatting so we can detect unexpected migration writes.
+  const initial = JSON.stringify(
+    {
+      "pub.ext": {
+        "cells.write": true,
+        network: { mode: "allowlist", hosts: ["api.example.com"] }
+      }
+    },
+    null,
+    4
+  );
+
+  await fs.writeFile(storePath, initial, "utf8");
+
+  const pm = new PermissionManager({
+    storagePath: storePath,
+    prompt: async () => {
+      throw new Error("prompt should not be called");
+    }
+  });
+
+  assert.deepEqual(await pm.getGrantedPermissions("pub.ext"), {
+    "cells.write": true,
+    network: { mode: "allowlist", hosts: ["api.example.com"] }
+  });
+
+  const after = await fs.readFile(storePath, "utf8");
+  assert.equal(after, initial);
+});
