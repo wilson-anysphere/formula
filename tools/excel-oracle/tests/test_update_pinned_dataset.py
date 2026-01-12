@@ -106,7 +106,46 @@ class UpdatePinnedDatasetTests(unittest.TestCase):
                     run_engine_for_missing=False,
                 )
 
+    def test_refuses_to_fill_real_excel_dataset_with_engine(self) -> None:
+        update = self._load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+
+            cases_path = tmp / "cases.json"
+            cases_payload = {
+                "schemaVersion": 1,
+                "caseSet": "test",
+                "defaultSheet": "Sheet1",
+                "cases": [
+                    {"id": "case1", "formula": "=1+1", "outputCell": "C1", "inputs": [], "tags": []},
+                    {"id": "case2", "formula": "=2+2", "outputCell": "C1", "inputs": [], "tags": []},
+                ],
+            }
+            cases_path.write_text(json.dumps(cases_payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+            pinned_path = tmp / "pinned.json"
+            # Simulate a dataset pinned from real Excel: source.kind=excel and no syntheticSource metadata.
+            pinned_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "2026-01-01T00:00:00Z",
+                "source": {"kind": "excel", "version": "16.0", "build": "12345", "operatingSystem": "Windows"},
+                "caseSet": {"path": "cases.json", "sha256": "old", "count": 1},
+                "results": [{"caseId": "case1"}],
+            }
+            pinned_path.write_text(json.dumps(pinned_payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+            # By default the updater should refuse to fill missing cases by running the engine when the
+            # dataset looks like real Excel.
+            with self.assertRaises(SystemExit):
+                update.update_pinned_dataset(
+                    cases_path=cases_path,
+                    pinned_path=pinned_path,
+                    merge_results_paths=[],
+                    engine_bin=None,
+                    run_engine_for_missing=True,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
-

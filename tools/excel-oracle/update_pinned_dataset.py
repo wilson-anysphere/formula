@@ -121,6 +121,7 @@ def update_pinned_dataset(
     merge_results_paths: list[Path],
     engine_bin: Path | None,
     run_engine_for_missing: bool,
+    force_engine: bool = False,
 ) -> tuple[int, int]:
     """
     Update `pinned_path` in-place.
@@ -131,6 +132,13 @@ def update_pinned_dataset(
     repo_root = Path(__file__).resolve().parents[2]
     cases_payload = _load_json(cases_path)
     pinned_payload = _load_json(pinned_path)
+    source = pinned_payload.get("source", {})
+    # Pinned datasets are typically either:
+    # - Real Excel results (source.kind == "excel", no syntheticSource)
+    # - Synthetic baseline re-tagged as Excel (source.kind == "excel", syntheticSource present)
+    #
+    # Filling missing results by running the engine is only safe for the synthetic baseline.
+    is_synthetic_baseline = isinstance(source, dict) and isinstance(source.get("syntheticSource"), dict)
 
     cases_sha = _sha256_file(cases_path)
     cases_list = cases_payload.get("cases", [])
@@ -193,6 +201,14 @@ def update_pinned_dataset(
 
     # If still missing, optionally run the engine on a temp corpus containing only missing cases.
     if missing and run_engine_for_missing:
+        if not is_synthetic_baseline and not force_engine:
+            raise SystemExit(
+                "Refusing to fill missing oracle results by running formula-engine because the pinned dataset "
+                "appears to be produced by real Excel (source.syntheticSource is missing). "
+                "Generate additional Excel results and pass them via --merge-results, or re-run with "
+                "--no-engine to require merge-only updates. If you intentionally want to produce a synthetic "
+                "baseline dataset, pass --force-engine."
+            )
         missing_cases = [c for c in cases_list if isinstance(c, dict) and c.get("id") in missing]
         temp_corpus = {
             "schemaVersion": cases_payload.get("schemaVersion"),
@@ -266,6 +282,14 @@ def main() -> int:
         help="Do not run formula-excel-oracle. Require --merge-results to cover all missing cases.",
     )
     p.add_argument(
+        "--force-engine",
+        action="store_true",
+        help=(
+            "Allow filling missing case results by running formula-engine even if the pinned dataset appears "
+            "to be produced by real Excel. This will produce a mixed dataset and is not recommended."
+        ),
+    )
+    p.add_argument(
         "--engine-bin",
         default="",
         help=(
@@ -295,6 +319,7 @@ def main() -> int:
         merge_results_paths=merge_results_paths,
         engine_bin=engine_bin,
         run_engine_for_missing=not args.no_engine,
+        force_engine=args.force_engine,
     )
 
     if missing_before == 0:
@@ -307,4 +332,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
