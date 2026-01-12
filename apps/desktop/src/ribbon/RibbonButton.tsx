@@ -91,6 +91,7 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
       aria-expanded={hasMenu ? menuOpen : undefined}
       disabled={button.disabled}
       data-testid={button.testId}
+      data-command-id={button.id}
       ref={buttonRef}
       onClick={() => {
         if (hasMenu) {
@@ -132,6 +133,7 @@ export const RibbonButton = React.memo(function RibbonButton({ button, pressed, 
               className="ribbon-dropdown__menuitem"
               disabled={item.disabled}
               data-testid={item.testId}
+              data-command-id={item.id}
               onClick={() => {
                 closeMenu();
                 onActivate?.({
