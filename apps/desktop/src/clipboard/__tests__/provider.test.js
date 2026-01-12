@@ -503,6 +503,59 @@ test("clipboard provider", async (t) => {
     );
   });
 
+  await t.test("web: write includes small image/png when provided via legacy pngBase64", async () => {
+    /** @type {any[]} */
+    const writes = [];
+    /** @type {string[]} */
+    const writeTextCalls = [];
+
+    class MockClipboardItem {
+      /**
+       * @param {Record<string, Blob>} data
+       */
+      constructor(data) {
+        this.data = data;
+      }
+    }
+
+    // Minimal PNG signature bytes.
+    const pngBase64 = "iVBORw==";
+
+    await withGlobals(
+      {
+        __TAURI__: undefined,
+        ClipboardItem: MockClipboardItem,
+        navigator: {
+          clipboard: {
+            async write(items) {
+              writes.push(items);
+            },
+            async writeText(text) {
+              writeTextCalls.push(text);
+            },
+          },
+        },
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: "plain", html: "<p>hello</p>", pngBase64 });
+
+        assert.equal(writes.length, 1);
+        assert.equal(writeTextCalls.length, 0);
+
+        assert.equal(writes[0].length, 1);
+        const item = writes[0][0];
+        assert.ok(item instanceof MockClipboardItem);
+
+        const keys = Object.keys(item.data).sort();
+        assert.deepEqual(keys, ["image/png", "text/html", "text/plain"].sort());
+
+        assert.equal(item.data["image/png"].type, "image/png");
+        assert.equal(item.data["image/png"].size, 4);
+      }
+    );
+  });
+
   await t.test("web: write omits oversized image/png blobs but still writes html/text", async () => {
     /** @type {any[]} */
     const writes = [];
@@ -655,6 +708,28 @@ test("clipboard provider", async (t) => {
             async invoke(cmd) {
               assert.equal(cmd, "clipboard_read");
               return { image_png_base64: "CQgH" };
+            },
+          },
+        },
+        navigator: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        const content = await provider.read();
+        assert.ok(content.imagePng instanceof Uint8Array);
+        assert.deepEqual(content, { text: undefined, imagePng: new Uint8Array([0x09, 0x08, 0x07]) });
+      }
+    );
+  });
+
+  await t.test("tauri: read decodes png_base64 into imagePng bytes", async () => {
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd) {
+              assert.equal(cmd, "clipboard_read");
+              return { png_base64: "CQgH" };
             },
           },
         },
@@ -892,6 +967,43 @@ test("clipboard provider", async (t) => {
         // If the native `clipboard_write` command succeeds, avoid the Web Clipboard API
         // write, since it can clobber other rich formats (RTF/image) that were written natively.
         assert.equal(writes.length, 0);
+      }
+    );
+  });
+
+  await t.test("tauri: write accepts legacy pngBase64 when imagePng is omitted", async () => {
+    /** @type {any[]} */
+    const invokeCalls = [];
+
+    await withGlobals(
+      {
+        __TAURI__: {
+          core: {
+            async invoke(cmd, args) {
+              invokeCalls.push([cmd, args]);
+            },
+          },
+          clipboard: {
+            async writeText() {
+              throw new Error("should not call legacy writeText when clipboard_write succeeds");
+            },
+          },
+        },
+        navigator: undefined,
+      },
+      async () => {
+        const provider = await createClipboardProvider();
+        await provider.write({ text: "plain", html: "<p>hello</p>", pngBase64: "CQgH" });
+
+        assert.equal(invokeCalls.length, 1);
+        assert.equal(invokeCalls[0][0], "clipboard_write");
+        assert.deepEqual(invokeCalls[0][1], {
+          payload: {
+            text: "plain",
+            html: "<p>hello</p>",
+            pngBase64: "CQgH",
+          },
+        });
       }
     );
   });
