@@ -120,6 +120,16 @@ describe("keybindings", () => {
     expect(formatKeybindingForDisplay(escape, "other")).toMatchInlineSnapshot('"Meta+Esc"');
   });
 
+  it("formatKeybindingForDisplay preserves punctuation tokens", () => {
+    const semicolon = parseKeybinding("cmd.test", "ctrl+shift+;")!;
+    expect(formatKeybindingForDisplay(semicolon, "other")).toBe("Ctrl+Shift+;");
+    expect(formatKeybindingForDisplay(semicolon, "mac")).toBe("⌃⇧;");
+
+    const equal = parseKeybinding("cmd.test", "ctrl+shift+=")!;
+    expect(formatKeybindingForDisplay(equal, "other")).toBe("Ctrl+Shift+=");
+    expect(formatKeybindingForDisplay(equal, "mac")).toBe("⌃⇧=");
+  });
+
   it("buildCommandKeybindingDisplayIndex returns primary binding for a command", () => {
     const index = buildCommandKeybindingDisplayIndex({
       platform: "other",
