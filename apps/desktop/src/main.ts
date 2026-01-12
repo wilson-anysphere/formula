@@ -644,6 +644,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const sheetId = app.getCurrentSheetId();
     const ranges = app.getSelectionRanges();
     const formatState = computeSelectionFormatState(app.getDocument(), sheetId, ranges);
+    const isEditing = app.isEditing();
 
     const pressedById = {
       "home.font.bold": formatState.bold,
@@ -667,20 +668,48 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       return "Custom";
     })();
 
+    const zoomDisabled = !app.supportsZoom();
+    const disabledById = {
+      ...(isEditing
+        ? {
+            // Formatting commands are disabled while editing (Excel-style behavior).
+            "home.font.bold": true,
+            "home.font.italic": true,
+            "home.font.underline": true,
+            "home.font.fontSize": true,
+            "home.font.fontColor": true,
+            "home.font.fillColor": true,
+            "home.font.borders": true,
+            "home.alignment.wrapText": true,
+            "home.alignment.alignLeft": true,
+            "home.alignment.center": true,
+            "home.alignment.alignRight": true,
+            "home.number.numberFormat": true,
+            "home.number.percent": true,
+            "home.number.accounting": true,
+            "home.number.date": true,
+            "home.number.comma": true,
+            "home.number.increaseDecimal": true,
+            "home.number.decreaseDecimal": true,
+          }
+        : null),
+      // View/zoom controls depend on the current runtime (e.g. shared-grid mode).
+      "view.zoom.zoom": zoomDisabled,
+      "view.zoom.zoom100": zoomDisabled,
+      "view.zoom.zoomToSelection": zoomDisabled,
+    };
+
     setRibbonUiState({
       pressedById,
       labelById: { "home.number.numberFormat": numberFormatLabel },
-      disabledById: {
-        "view.zoom.zoom": !app.supportsZoom(),
-        "view.zoom.zoom100": !app.supportsZoom(),
-        "view.zoom.zoomToSelection": !app.supportsZoom(),
-      },
+      disabledById,
     });
   });
 }
 
 app.subscribeSelection(() => scheduleRibbonSelectionFormatStateUpdate());
 app.getDocument().on("change", () => scheduleRibbonSelectionFormatStateUpdate());
+app.onEditStateChange(() => scheduleRibbonSelectionFormatStateUpdate());
 window.addEventListener("formula:view-changed", () => scheduleRibbonSelectionFormatStateUpdate());
 window.addEventListener("formula:zoom-changed", () => syncZoomControl());
 scheduleRibbonSelectionFormatStateUpdate();

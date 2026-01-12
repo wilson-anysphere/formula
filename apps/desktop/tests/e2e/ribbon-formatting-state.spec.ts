@@ -33,7 +33,14 @@ test.describe("ribbon formatting state", () => {
     const ribbon = page.getByTestId("ribbon-root");
     await expect(ribbon).toBeVisible();
 
+    // The desktop shell currently opens on the View tab; switch to Home so
+    // formatting controls are visible.
+    const homeTab = ribbon.getByRole("tab", { name: "Home" });
+    await homeTab.click();
+    await expect(homeTab).toHaveAttribute("aria-selected", "true");
+
     const bold = ribbon.locator('button[data-command-id="home.font.bold"]');
+    await expect(bold).toBeVisible();
     await expect(bold).toHaveAttribute("aria-pressed", "false");
 
     // Toggle Bold on for A1.
