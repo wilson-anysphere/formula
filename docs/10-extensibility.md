@@ -246,7 +246,7 @@ Key components:
      - refuses installs when the publisher is revoked (or when all publisher signing keys are revoked)
      - warns on `deprecated` extensions (optional confirmation callback)
    - Package scan status (`download.scanStatus` / `X-Package-Scan-Status`) is subject to a client policy:
-     - default: **enforce** (refuse) in production builds, **allow** (warn-only) in dev/test builds
+     - default: **enforce** (refuse) in production builds, **allow** (warn-only) in development builds
      - configurable via install options / env overrides
    - The installer also verifies the manifest id/version match the requested `{id, version}`, and (when present)
       checks `X-Package-Files-Sha256` against the verified package file inventory.

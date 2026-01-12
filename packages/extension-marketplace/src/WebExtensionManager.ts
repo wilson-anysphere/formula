@@ -276,8 +276,13 @@ export interface WebExtensionInstallOptions {
    * - "allow": allow install but return a warning (and optionally require confirmation)
    * - "ignore": ignore scan status completely
    *
-   * Default: "enforce". Override via `FORMULA_EXTENSION_SCAN_POLICY` /
-   * `FORMULA_WEB_EXTENSION_SCAN_POLICY` (node) or `VITE_FORMULA_EXTENSION_SCAN_POLICY` (web).
+   * Default:
+   * - production builds: "enforce"
+   * - development builds: "allow"
+   * - test/unknown builds: "enforce" (safe default)
+   *
+   * Override via `FORMULA_EXTENSION_SCAN_POLICY` / `FORMULA_WEB_EXTENSION_SCAN_POLICY` (node)
+   * or `VITE_FORMULA_EXTENSION_SCAN_POLICY` (web).
    */
   scanPolicy?: ExtensionScanPolicy;
   /**
@@ -303,7 +308,9 @@ function defaultScanPolicyFromEnv(): ExtensionScanPolicy {
         return normalized as ExtensionScanPolicy;
       }
     }
-    return "enforce";
+    // Default to strict unless explicitly running in a development environment. Tests should be strict by default
+    // so security policies are deterministic.
+    return env?.NODE_ENV === "development" ? "allow" : "enforce";
   }
 
   const metaEnv = (import.meta as any)?.env as Record<string, unknown> | undefined;
@@ -314,6 +321,11 @@ function defaultScanPolicyFromEnv(): ExtensionScanPolicy {
       return normalized as ExtensionScanPolicy;
     }
   }
+  if (typeof metaEnv?.PROD === "boolean") {
+    return metaEnv.PROD ? "enforce" : "allow";
+  }
+
+  // Safe default when we cannot infer build mode.
   return "enforce";
 }
 
