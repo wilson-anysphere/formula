@@ -1944,6 +1944,13 @@ if (
     const active = zone.active ?? zone.panels[0];
     if (!active) return;
 
+    function dockTabSelector(panelId: string): string {
+      const testId = `dock-tab-${panelId}`;
+      const escaped =
+        typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(testId) : testId.replace(/"/g, '\\"');
+      return `[data-testid="${escaped}"]`;
+    }
+
     const panel = document.createElement("div");
     panel.className = "dock-panel";
     panel.dataset.testid = `panel-${active}`;
@@ -1980,7 +1987,7 @@ if (
           // `activateDockedPanel` triggers a synchronous re-render via the layout controller
           // change listener. Focus the newly-rendered tab so keyboard users can continue to
           // navigate the tab strip after clicking.
-          el.querySelector<HTMLButtonElement>(`[data-testid="dock-tab-${panelId}"]`)?.focus();
+          el.querySelector<HTMLButtonElement>(dockTabSelector(panelId))?.focus();
         });
         tab.addEventListener("keydown", (e) => {
           const key = e.key;
@@ -2001,7 +2008,7 @@ if (
           if (!nextId) return;
 
           layoutController.activateDockedPanel(nextId, currentSide);
-          el.querySelector<HTMLButtonElement>(`[data-testid="dock-tab-${nextId}"]`)?.focus();
+          el.querySelector<HTMLButtonElement>(dockTabSelector(nextId))?.focus();
         });
         tabs.appendChild(tab);
       }
