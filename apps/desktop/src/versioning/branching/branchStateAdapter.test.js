@@ -48,9 +48,13 @@ function attachSheetMetadataShim(doc) {
       const id = sheet?.id;
       if (typeof id !== "string" || id.length === 0) continue;
       const name = sheet?.name;
+      const visibility = sheet?.visibility;
+      const tabColor = sheet?.tabColor;
       metaById.set(id, {
         id,
         name: typeof name === "string" && name.length > 0 ? name : id,
+        ...(visibility ? { visibility } : {}),
+        ...(tabColor !== undefined ? { tabColor } : {}),
       });
     }
     originalApplyState(snapshot);
@@ -103,3 +107,25 @@ test("documentControllerToBranchState/applyBranchStateToDocumentController: roun
   assert.equal(roundTrip.sheets.metaById.Sheet2?.name, "Data");
 });
 
+test("documentControllerToBranchState/applyBranchStateToDocumentController: includes sheet visibility + tabColor when present", () => {
+  const doc = new DocumentController();
+  attachSheetMetadataShim(doc);
+
+  doc.setCellValue("Sheet1", "A1", 1);
+  doc.setSheetMeta("Sheet1", { name: "Summary", visibility: "hidden", tabColor: "FF00FF00" });
+
+  const state = documentControllerToBranchState(doc);
+  assert.equal(state.sheets.metaById.Sheet1?.visibility, "hidden");
+  assert.equal(state.sheets.metaById.Sheet1?.tabColor, "FF00FF00");
+
+  const restored = new DocumentController();
+  const { metaById } = attachSheetMetadataShim(restored);
+
+  applyBranchStateToDocumentController(restored, state);
+  assert.equal(metaById.get("Sheet1")?.visibility, "hidden");
+  assert.equal(metaById.get("Sheet1")?.tabColor, "FF00FF00");
+
+  const roundTrip = documentControllerToBranchState(restored);
+  assert.equal(roundTrip.sheets.metaById.Sheet1?.visibility, "hidden");
+  assert.equal(roundTrip.sheets.metaById.Sheet1?.tabColor, "FF00FF00");
+});
