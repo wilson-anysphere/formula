@@ -400,4 +400,84 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
     // Paste Values should not paste formats; C1 should keep the default styleId.
     expect(styleId).toBe(0);
   });
+
+  test("DLP blocks spreadsheet copy/cut for Restricted ranges (toast shown, clipboard unchanged)", async ({ page }) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await gotoDesktop(page);
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    const sentinel = "SENTINEL";
+
+    // Seed A1 = Secret.
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const doc = app.getDocument();
+      const sheetId = app.getCurrentSheetId();
+      doc.beginBatch({ label: "Seed DLP clipboard cells" });
+      doc.setCellValue(sheetId, "A1", "Secret");
+      doc.endBatch();
+      app.refresh();
+    });
+    await waitForIdle(page);
+
+    // Mark A1:A1 as Restricted in the local classification store (keyed by workbook id).
+    await page.evaluate(() => {
+      const workbookId = "local-workbook";
+      const app = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
+
+      const record = {
+        selector: {
+          scope: "range",
+          documentId: workbookId,
+          sheetId,
+          range: { start: { row: 0, col: 0 }, end: { row: 0, col: 0 } }, // A1
+        },
+        classification: { level: "Restricted", labels: [] },
+        updatedAt: new Date().toISOString(),
+      };
+
+      localStorage.setItem(`dlp:classifications:${workbookId}`, JSON.stringify([record]));
+    });
+
+    // Seed clipboard with sentinel value so we can verify copy/cut do not overwrite it.
+    await page.evaluate((text) => navigator.clipboard.writeText(text), sentinel);
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(sentinel);
+
+    // Select A1 and attempt copy (should be blocked).
+    await page.click("#grid", { position: { x: 53, y: 29 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await expect(page.getByTestId("selection-range")).toHaveText("A1");
+
+    await page.keyboard.press(`${modifier}+C`);
+    await waitForIdle(page);
+
+    const toastRoot = page.getByTestId("toast-root");
+    const copyToast = toastRoot.getByTestId("toast").last();
+    await expect(copyToast).toBeVisible();
+    await expect(copyToast).toContainText(/clipboard copy is blocked|data loss prevention/i);
+
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(sentinel);
+
+    // Clear the existing toast so we can assert cut creates its own message.
+    await page.evaluate(() => {
+      document.getElementById("toast-root")?.replaceChildren();
+    });
+
+    // Attempt cut (should be blocked: clipboard unchanged and cell not cleared).
+    await page.click("#grid", { position: { x: 53, y: 29 } });
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await page.keyboard.press(`${modifier}+X`);
+    await waitForIdle(page);
+
+    const cutToast = toastRoot.getByTestId("toast").last();
+    await expect(cutToast).toBeVisible();
+    await expect(cutToast).toContainText(/clipboard copy is blocked|data loss prevention/i);
+
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(sentinel);
+
+    const a1ValueAfterCut = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
+    expect(a1ValueAfterCut).toBe("Secret");
+  });
 });
