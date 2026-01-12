@@ -1,5 +1,7 @@
 import { showToast } from "../extensions/ui.js";
 
+import * as nativeDialogs from "./nativeDialogs";
+
 export type BeforeQuitHook = () => Promise<void> | void;
 
 export type AppQuitHandlers = {
@@ -66,7 +68,9 @@ export async function requestAppQuit(options: RequestAppQuitOptions = {}): Promi
     }
 
     if (handlers.isDirty()) {
-      const discard = window.confirm(options.dirtyConfirmMessage ?? "You have unsaved changes. Discard them?");
+      const discard = await nativeDialogs.confirm(
+        options.dirtyConfirmMessage ?? "You have unsaved changes. Discard them?",
+      );
       if (!discard) return false;
     }
 
@@ -107,4 +111,3 @@ export async function requestAppRestart(options: {
     dirtyConfirmMessage: options.dirtyConfirmMessage,
   });
 }
-
