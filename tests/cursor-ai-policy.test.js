@@ -290,6 +290,51 @@ test(
   },
 );
 
+test(
+  "cursor AI policy guard handles ':' in filenames when using git grep output parsing",
+  { skip: !HAS_GIT || process.platform === "win32" || process.platform === "darwin" },
+  async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-git-grep-colon-fail-"));
+    try {
+      await writeFixtureFile(tmpRoot, "packages/example/src/weird:name.js", 'const provider = "OpenAI";\n');
+
+      const init = spawnSync("git", ["init"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(init.status, 0, init.stderr);
+      const add = spawnSync("git", ["add", "packages/example/src/weird:name.js"], { cwd: tmpRoot, encoding: "utf8" });
+      assert.equal(add.status, 0, add.stderr);
+
+      // Add enough extra tracked entries to cross the `GIT_GREP_MIN_FILES` threshold so the policy guard uses
+      // its git-grep fast path.
+      const extraFileCount = 199;
+      const blobProc = spawnSync("git", ["hash-object", "-w", "--stdin"], {
+        cwd: tmpRoot,
+        encoding: "utf8",
+        input: "export const x = 1;\n",
+      });
+      assert.equal(blobProc.status, 0, blobProc.stderr);
+      const blobSha = String(blobProc.stdout || "").trim();
+      assert.ok(blobSha.length > 0);
+
+      let indexInfo = "";
+      for (let i = 0; i < extraFileCount; i += 1) {
+        indexInfo += `100644 ${blobSha} 0\tpackages/example/src/many/file-${i}.js\n`;
+      }
+      const indexInfoProc = spawnSync("git", ["update-index", "--index-info"], {
+        cwd: tmpRoot,
+        encoding: "utf8",
+        input: indexInfo,
+      });
+      assert.equal(indexInfoProc.status, 0, indexInfoProc.stderr);
+
+      const result = await runPolicyApi(tmpRoot, { maxViolations: 1 });
+      assert.equal(result.ok, false);
+      assert.equal(result.violations[0]?.file, "packages/example/src/weird:name.js");
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
+  },
+);
+
 test("cursor AI policy guard scans Dockerfiles for provider strings", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-dockerfile-fail-"));
   try {

@@ -301,15 +301,27 @@ function gitGrepMatches(rootDir, needles) {
 
     /** @type {Array<{ file: string, line: number, text: string }>} */
     const matches = [];
-    const lines = out.split(/\r?\n/).filter(Boolean);
-    for (const raw of lines) {
-      // With `-z -n`, format is: `${file}\0${line}\0${text}`.
-      const parts = raw.split("\0");
-      if (parts.length < 3) continue;
-      const file = parts[0];
-      const line = Number.parseInt(parts[1] ?? "", 10);
+    // With `-z -n`, format is: `${file}\0${line}\0${text}\n` per match.
+    // Parse sequentially so filenames containing `\n` can't break record boundaries.
+    let i = 0;
+    while (i < out.length) {
+      const fileEnd = out.indexOf("\0", i);
+      if (fileEnd === -1) break;
+      const file = out.slice(i, fileEnd);
+      i = fileEnd + 1;
+
+      const lineEnd = out.indexOf("\0", i);
+      if (lineEnd === -1) break;
+      const lineStr = out.slice(i, lineEnd);
+      const line = Number.parseInt(lineStr, 10);
+      i = lineEnd + 1;
+
+      let textEnd = out.indexOf("\n", i);
+      if (textEnd === -1) textEnd = out.length;
+      const text = out.slice(i, textEnd);
+      i = textEnd < out.length ? textEnd + 1 : out.length;
+
       if (!Number.isFinite(line)) continue;
-      const text = parts.slice(2).join("\0");
       matches.push({ file, line, text });
     }
     return matches;
