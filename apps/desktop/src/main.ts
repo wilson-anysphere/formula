@@ -1261,6 +1261,66 @@ if (
     ];
   }
 
+  const SVG_NS = "http://www.w3.org/2000/svg";
+
+  function iconSvg(kind: "dock-left" | "dock-right" | "dock-bottom" | "float" | "close") {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("width", "16");
+    svg.setAttribute("height", "16");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.5");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+
+    const path = (d: string) => {
+      const el = document.createElementNS(SVG_NS, "path");
+      el.setAttribute("d", d);
+      svg.appendChild(el);
+    };
+
+    switch (kind) {
+      case "dock-left": {
+        path("M3 3v10");
+        path("M12 8H5");
+        path("M8 5L5 8l3 3");
+        break;
+      }
+      case "dock-right": {
+        path("M13 3v10");
+        path("M4 8H11");
+        path("M8 5l3 3-3 3");
+        break;
+      }
+      case "dock-bottom": {
+        path("M3 13H13");
+        path("M8 4V11");
+        path("M5 8l3 3 3-3");
+        break;
+      }
+      case "float": {
+        // Two overlapping rectangles.
+        path("M3 5h8v8H3z");
+        path("M5 3h8v8H5z");
+        break;
+      }
+      case "close": {
+        path("M4 4l8 8");
+        path("M12 4l-8 8");
+        break;
+      }
+      default: {
+        // Exhaustive guard.
+        const _exhaustive: never = kind;
+        return _exhaustive;
+      }
+    }
+
+    return svg;
+  }
+
   function renderDock(el: HTMLElement, zone: { panels: string[]; active: string | null }, currentSide: "left" | "right" | "bottom") {
     el.replaceChildren();
     if (zone.panels.length === 0) return;
@@ -1276,17 +1336,46 @@ if (
     const header = document.createElement("div");
     header.className = "dock-panel__header";
 
-    const title = document.createElement("div");
-    title.className = "dock-panel__title";
-    title.textContent = panelTitle(active);
+    const titleOrTabs = (() => {
+      if (zone.panels.length <= 1) {
+        const title = document.createElement("div");
+        title.className = "dock-panel__title";
+        title.textContent = panelTitle(active);
+        return title;
+      }
+
+      const tabs = document.createElement("div");
+      tabs.className = "dock-panel__tabs";
+      tabs.setAttribute("role", "tablist");
+
+      for (const panelId of zone.panels) {
+        const tab = document.createElement("button");
+        tab.type = "button";
+        tab.className = "dock-panel__tab";
+        tab.textContent = panelTitle(panelId);
+        tab.setAttribute("role", "tab");
+        tab.setAttribute("aria-selected", panelId === active ? "true" : "false");
+        tab.addEventListener("click", (e) => {
+          e.preventDefault();
+          if (panelId === active) return;
+          layoutController.activateDockedPanel(panelId, currentSide);
+        });
+        tabs.appendChild(tab);
+      }
+
+      return tabs;
+    })();
 
     const controls = document.createElement("div");
     controls.className = "dock-panel__controls";
 
-    function button(label: string, testId: string, onClick: () => void) {
+    function iconButton(label: string, testId: string, icon: SVGElement, onClick: () => void) {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.textContent = label;
+      btn.className = "dock-panel__control";
+      btn.title = label;
+      btn.setAttribute("aria-label", label);
+      btn.appendChild(icon);
       btn.dataset.testid = testId;
       btn.addEventListener("click", (e) => {
         e.preventDefault();
@@ -1298,7 +1387,7 @@ if (
     // Dock controls. (Only left is required for the e2e smoke test, but we wire all sides.)
     if (currentSide !== "left") {
       controls.appendChild(
-        button("Dock left", active === PanelIds.AI_CHAT ? "dock-ai-panel-left" : "dock-panel-left", () => {
+        iconButton("Dock left", active === PanelIds.AI_CHAT ? "dock-ai-panel-left" : "dock-panel-left", iconSvg("dock-left"), () => {
           layoutController.dockPanel(active, "left");
         }),
       );
@@ -1306,7 +1395,7 @@ if (
 
     if (currentSide !== "right") {
       controls.appendChild(
-        button("Dock right", "dock-panel-right", () => {
+        iconButton("Dock right", "dock-panel-right", iconSvg("dock-right"), () => {
           layoutController.dockPanel(active, "right");
         }),
       );
@@ -1314,26 +1403,26 @@ if (
 
     if (currentSide !== "bottom") {
       controls.appendChild(
-        button("Dock bottom", "dock-panel-bottom", () => {
+        iconButton("Dock bottom", "dock-panel-bottom", iconSvg("dock-bottom"), () => {
           layoutController.dockPanel(active, "bottom");
         }),
       );
     }
 
     controls.appendChild(
-      button("Float", "float-panel", () => {
+      iconButton("Float", "float-panel", iconSvg("float"), () => {
         const rect = (panelRegistry.get(active) as any)?.defaultFloatingRect ?? { x: 80, y: 80, width: 420, height: 560 };
         layoutController.floatPanel(active, rect);
       }),
     );
 
     controls.appendChild(
-      button("Close", active === PanelIds.AI_CHAT ? "close-ai-panel" : "close-panel", () => {
+      iconButton("Close", active === PanelIds.AI_CHAT ? "close-ai-panel" : "close-panel", iconSvg("close"), () => {
         layoutController.closePanel(active);
       }),
     );
 
-    header.appendChild(title);
+    header.appendChild(titleOrTabs);
     header.appendChild(controls);
 
     const body = document.createElement("div");
@@ -1374,22 +1463,34 @@ if (
 
       const dockLeftBtn = document.createElement("button");
       dockLeftBtn.type = "button";
-      dockLeftBtn.textContent = "Dock left";
+      dockLeftBtn.className = "dock-panel__control";
+      dockLeftBtn.title = "Dock left";
+      dockLeftBtn.setAttribute("aria-label", "Dock left");
+      dockLeftBtn.appendChild(iconSvg("dock-left"));
       dockLeftBtn.addEventListener("click", () => layoutController.dockPanel(panelId, "left"));
 
       const dockRightBtn = document.createElement("button");
       dockRightBtn.type = "button";
-      dockRightBtn.textContent = "Dock right";
+      dockRightBtn.className = "dock-panel__control";
+      dockRightBtn.title = "Dock right";
+      dockRightBtn.setAttribute("aria-label", "Dock right");
+      dockRightBtn.appendChild(iconSvg("dock-right"));
       dockRightBtn.addEventListener("click", () => layoutController.dockPanel(panelId, "right"));
 
       const dockBottomBtn = document.createElement("button");
       dockBottomBtn.type = "button";
-      dockBottomBtn.textContent = "Dock bottom";
+      dockBottomBtn.className = "dock-panel__control";
+      dockBottomBtn.title = "Dock bottom";
+      dockBottomBtn.setAttribute("aria-label", "Dock bottom");
+      dockBottomBtn.appendChild(iconSvg("dock-bottom"));
       dockBottomBtn.addEventListener("click", () => layoutController.dockPanel(panelId, "bottom"));
 
       const closeBtn = document.createElement("button");
       closeBtn.type = "button";
-      closeBtn.textContent = "Close";
+      closeBtn.className = "dock-panel__control";
+      closeBtn.title = "Close";
+      closeBtn.setAttribute("aria-label", "Close");
+      closeBtn.appendChild(iconSvg("close"));
       closeBtn.addEventListener("click", () => layoutController.closePanel(panelId));
 
       controls.appendChild(dockLeftBtn);

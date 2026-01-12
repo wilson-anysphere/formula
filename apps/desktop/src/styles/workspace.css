@@ -96,29 +96,105 @@
 .dock-panel__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--panel-border);
 }
 
 .dock-panel__title {
+  flex: 1;
+  min-width: 0;
   font-weight: 600;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-panel__tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.dock-panel__tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.dock-panel__tab {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 16px;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease);
+}
+
+.dock-panel__tab:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.dock-panel__tab[aria-selected="true"] {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.dock-panel__tab:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
 }
 
 .dock-panel__controls {
   display: flex;
-  gap: 6px;
+  gap: 4px;
+  margin-left: auto;
 }
 
-.dock-panel__controls button {
+.dock-panel__control {
+  width: 28px;
+  height: 28px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 4px 8px;
+  padding: 0;
   background: var(--bg-primary);
-  color: var(--text-primary);
+  color: var(--text-secondary);
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background-color var(--motion-duration-fast) var(--motion-ease),
+    border-color var(--motion-duration-fast) var(--motion-ease),
+    color var(--motion-duration-fast) var(--motion-ease);
+}
+
+.dock-panel__control:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.dock-panel__control:focus-visible {
+  outline: 2px solid var(--selection-border);
+  outline-offset: 2px;
+}
+
+.dock-panel__control svg {
+  width: 16px;
+  height: 16px;
 }
 
 .dock-panel__body {
