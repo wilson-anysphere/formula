@@ -1511,21 +1511,61 @@ mod tests {
         let expr = expr.trim();
         assert!(!expr.is_empty(), "decoded expression must be non-empty");
         let formula = format!("={expr}");
-        parse_formula(&formula, ParseOptions::default()).unwrap_or_else(|err| {
+        let ast = parse_formula(&formula, ParseOptions::default()).unwrap_or_else(|err| {
             panic!(
                 "expected decoded expression to be parseable, expr={expr:?}, err={err:?}, formula={formula:?}"
             );
         });
 
-        // BIFF decode can return a bare Excel error literal (`#REF!`, `#NAME?`, `#UNKNOWN!`, …).
-        // Validate that the token is a *known* Excel error literal so we don't regress back to
-        // emitting custom, unsupported error-like placeholders.
-        if expr.starts_with('#') {
-            assert!(
-                formula_model::ErrorValue::from_str(expr).is_ok(),
-                "unexpected Excel error literal: {expr:?}"
-            );
+        // Validate that any error literals in the parsed AST are *known* Excel errors (so we don't
+        // regress back to emitting custom, unsupported error-like placeholders such as `#SHEET`).
+        fn assert_known_errors(expr: &formula_engine::Expr) {
+            match expr {
+                formula_engine::Expr::Error(e) => {
+                    assert!(
+                        formula_model::ErrorValue::from_str(e).is_ok(),
+                        "unexpected Excel error literal: {e:?}"
+                    );
+                }
+                formula_engine::Expr::FieldAccess(fa) => assert_known_errors(&fa.base),
+                formula_engine::Expr::Array(arr) => {
+                    for row in &arr.rows {
+                        for el in row {
+                            assert_known_errors(el);
+                        }
+                    }
+                }
+                formula_engine::Expr::FunctionCall(call) => {
+                    for arg in &call.args {
+                        assert_known_errors(arg);
+                    }
+                }
+                formula_engine::Expr::Call(call) => {
+                    assert_known_errors(&call.callee);
+                    for arg in &call.args {
+                        assert_known_errors(arg);
+                    }
+                }
+                formula_engine::Expr::Unary(u) => assert_known_errors(&u.expr),
+                formula_engine::Expr::Postfix(p) => assert_known_errors(&p.expr),
+                formula_engine::Expr::Binary(b) => {
+                    assert_known_errors(&b.left);
+                    assert_known_errors(&b.right);
+                }
+                // Leaf nodes.
+                formula_engine::Expr::Number(_)
+                | formula_engine::Expr::String(_)
+                | formula_engine::Expr::Boolean(_)
+                | formula_engine::Expr::NameRef(_)
+                | formula_engine::Expr::CellRef(_)
+                | formula_engine::Expr::ColRef(_)
+                | formula_engine::Expr::RowRef(_)
+                | formula_engine::Expr::StructuredRef(_)
+                | formula_engine::Expr::Missing => {}
+            }
         }
+
+        assert_known_errors(&ast.expr);
     }
 
     /*
@@ -1726,6 +1766,63 @@ mod tests {
                 .warnings
                 .iter()
                 .any(|w| w.contains("0xFFFF")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn renders_user_defined_ptgfuncvar_calls_with_unresolved_namex_as_parseable_formulas() {
+        let sheet_names: Vec<String> = Vec::new();
+        let externsheet: Vec<ExternSheetEntry> = Vec::new();
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // Excel encodes user-defined / add-in / future functions as PtgFuncVar with iftab=255,
+        // where the function name is the top-of-stack expression.
+        //
+        // If that name expression is an unresolved PtgNameX (external name reference), we still
+        // want the printed formula text to be parseable (even though semantics are best-effort).
+        //
+        // rgce: PtgNameX(ixti=0,iname=0) ; PtgFuncVar(argc=1,iftab=255)
+        let rgce = [
+            0x39, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // PtgNameX payload
+            0x22, 0x01, 0xFF, 0x00, // PtgFuncVar (user-defined)
+        ];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#REF!()");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("PtgNameX")),
+            "warnings={:?}",
+            decoded.warnings
+        );
+        assert_parseable(&decoded.text);
+    }
+
+    #[test]
+    fn renders_3d_refs_with_missing_supbook_as_ref() {
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetEntry> = vec![ExternSheetEntry {
+            supbook: 1,
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = RgceDecodeContext {
+            codepage: 1252,
+            sheet_names: &sheet_names,
+            externsheet: &externsheet,
+            supbooks: &[],
+            defined_names: &defined_names,
+        };
+
+        // PtgRef3d ixti=0 referencing an EXTERNSHEET entry with iSupBook=1, but no SUPBOOK table.
+        let rgce = [0x3A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#REF!");
+        assert!(
+            decoded.warnings.iter().any(|w| w.contains("SUPBOOK")),
             "warnings={:?}",
             decoded.warnings
         );
