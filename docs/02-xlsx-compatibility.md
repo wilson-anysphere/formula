@@ -272,7 +272,8 @@ Example (`xl/metadata.xml`, representative):
   <!-- vm="1" selects the first <bk> (Excel often uses 1-based vm). -->
   <valueMetadata count="1">
     <bk>
-      <!-- t = (1-based) index into <metadataTypes>, v = (0-based) index into <futureMetadata> -->
+      <!-- t = index into <metadataTypes> (0-based or 1-based; 1-based is observed in the Excel fixtures in this repo),
+           v = (0-based) index into <futureMetadata> -->
       <rc t="1" v="0"/>
     </bk>
   </valueMetadata>
