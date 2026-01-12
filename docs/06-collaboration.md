@@ -95,7 +95,7 @@ Implementation detail:
   delegates to `FormulaConflictMonitor.setLocalFormula(...)`, which writes the `null` marker for clears.
 - In `mode: "formula+value"`, value writes also clear formulas via a `null` marker to support formula-vs-value conflict detection.
 
-Formula normalization is consistent across the stack: formula strings are treated as canonical when they start with `"="` and have no leading/trailing whitespace (see binder/session implementations).
+Formula normalization: most consumers normalize formula strings to a canonical **text** form (`=...` with surrounding whitespace stripped). The desktop binder normalizes formulas on read/write, and branching/versioning adapters normalize formulas when producing snapshots/diffs. Direct `session.setCellFormula(...)` writes preserve the input aside from basic trimming, so UI code should prefer writing canonical formula text.
 
 ### Cell encryption (`enc`) (protected ranges)
 
