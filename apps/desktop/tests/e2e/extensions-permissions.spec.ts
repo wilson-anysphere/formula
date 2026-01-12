@@ -434,4 +434,77 @@ test.describe("Extensions permissions UI", () => {
       await page.unroute("http://allowed.example/**").catch(() => {});
     }
   });
+
+  test("network allowlist adds a host when permission is granted", async ({ page }) => {
+    const urlA = "http://one.example/";
+    const urlB = "http://two.example/";
+    const extensionId = "formula.sample-hello";
+
+    await page.route("http://one.example/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain",
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: "one",
+      });
+    });
+    await page.route("http://two.example/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "text/plain",
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: "two",
+      });
+    });
+
+    try {
+      await page.addInitScript(() => {
+        try {
+          localStorage.removeItem("formula.extensionHost.permissions");
+        } catch {
+          // ignore
+        }
+      });
+
+      await gotoDesktop(page);
+
+      await page.getByTestId("open-extensions-panel").click();
+      await expect(page.getByTestId("panel-extensions")).toBeVisible();
+
+      // First host.
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([urlA]));
+      await page.getByTestId("input-box-ok").click();
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await page.getByTestId("extension-permission-allow").click();
+
+      await expect(page.getByTestId("toast-root")).toContainText("Fetched: one");
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("one.example");
+
+      // Second host should prompt again and, when allowed, expand the allowlist.
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([urlB]));
+      await page.getByTestId("input-box-ok").click();
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await expect(page.getByTestId("extension-permission-ui.commands")).toHaveCount(0);
+      const networkEntry = page.getByTestId("extension-permission-network");
+      await expect(networkEntry).toBeVisible();
+      await expect(networkEntry).toContainText("two.example");
+      await page.getByTestId("extension-permission-allow").click();
+      await expect(page.getByTestId("extension-permission-network")).toHaveCount(0);
+
+      await expect(page.getByTestId("toast-root")).toContainText("Fetched: two");
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("one.example");
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("two.example");
+    } finally {
+      await page.unroute("http://one.example/**").catch(() => {});
+      await page.unroute("http://two.example/**").catch(() => {});
+    }
+  });
 });
