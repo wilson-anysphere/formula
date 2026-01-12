@@ -54,4 +54,32 @@ describe("command-palette shortcut search", () => {
       "workbench.showCommandPalette",
     ]);
   });
+
+  test("when limits are provided, fills results across categories (doesn't truncate to the first category)", () => {
+    const commands = [
+      { commandId: "catA.three", title: "Three", category: "CatA", source: { kind: "builtin" as const } },
+      { commandId: "catA.one", title: "One", category: "CatA", source: { kind: "builtin" as const } },
+      { commandId: "catA.two", title: "Two", category: "CatA", source: { kind: "builtin" as const } },
+      { commandId: "catB.four", title: "Four", category: "CatB", source: { kind: "builtin" as const } },
+      { commandId: "catB.five", title: "Five", category: "CatB", source: { kind: "builtin" as const } },
+    ];
+
+    const keybindingIndex = new Map<string, readonly string[]>([
+      ["catA.three", ["ctrl+c"]],
+      ["catA.one", ["ctrl+a"]],
+      ["catA.two", ["ctrl+b"]],
+      ["catB.four", ["ctrl+d"]],
+      ["catB.five", ["ctrl+e"]],
+    ]);
+
+    const result = searchShortcutCommands({
+      commands,
+      keybindingIndex,
+      query: "ctrl",
+      limits: { maxResults: 4, maxResultsPerCategory: 2 },
+    });
+
+    // 2 from CatA (ctrl+a, ctrl+b) + 2 from CatB (ctrl+d, ctrl+e).
+    expect(result.map((c) => c.commandId)).toEqual(["catA.one", "catA.two", "catB.four", "catB.five"]);
+  });
 });

@@ -185,14 +185,20 @@ export function searchShortcutCommands<T extends ShortcutSearchCommandLike>(para
   const maxPerCategoryRaw = limits ? Math.max(1, Math.floor(limits.maxResultsPerCategory)) : null;
   const maxPerCategory = maxResults != null && maxPerCategoryRaw != null ? Math.min(maxResults, maxPerCategoryRaw) : null;
 
-  // Optimized path for listing all shortcuts (`/` with an empty query): avoid sorting huge arrays.
-  if (!q && maxResults != null && maxPerCategory != null) {
+  // When limits are provided we can avoid sorting potentially huge match arrays by
+  // keeping only the best N shortcuts per category and returning at most maxResults.
+  if (maxResults != null && maxPerCategory != null) {
     if (maxResults === 0) return [];
 
     const byCategory = new Map<string, Array<ShortcutSearchMatch<T>>>();
     for (const cmd of params.commands) {
       const shortcut = getPrimaryShortcut(params.keybindingIndex.get(cmd.commandId));
       if (!shortcut) continue;
+
+      if (q) {
+        const haystack = `${cmd.title} ${cmd.commandId} ${shortcut}`.toLowerCase();
+        if (!haystack.includes(q) && !matchesShortcutTokenQuery(shortcut, q)) continue;
+      }
 
       const category = normalizeCategory(cmd.category);
       const list = byCategory.get(category) ?? [];
@@ -251,11 +257,6 @@ export function searchShortcutCommands<T extends ShortcutSearchCommandLike>(para
     if (catCompare !== 0) return catCompare;
     return compareShortcutMatches(a, b);
   });
-
-  // Optional cap even in the sorted path (useful when query is selective).
-  if (maxResults != null && matches.length > maxResults) {
-    return matches.slice(0, maxResults);
-  }
 
   return matches;
 }
