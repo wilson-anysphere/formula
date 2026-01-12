@@ -436,47 +436,33 @@ test.describe("sheet tabs", () => {
     await expect(page.locator('[data-testid="sheet-tab-Sheet2"]')).toHaveCount(0);
 
     // Drag Sheet3 before Sheet1.
-    try {
-      await page
-        .getByTestId("sheet-tab-Sheet3")
-        .dragTo(page.getByTestId("sheet-tab-Sheet1"), { targetPosition: { x: 1, y: 1 } });
-    } catch {
-      // Ignore; we'll fall back to a synthetic drop below.
-    }
-
-    // As with other tab drag tests, use a synthetic drop if Playwright's dragTo doesn't take.
+    //
+    // Note: avoid Playwright's `dragTo` here (can hang in the desktop shell); dispatch a
+    // synthetic drop event instead.
     const desiredAll = [
       { id: "Sheet3", visibility: "visible" },
       { id: "Sheet1", visibility: "visible" },
       { id: "Sheet2", visibility: "hidden" },
     ];
+    await page.evaluate(() => {
+      const fromId = "Sheet3";
+      const target = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
+      if (!target) throw new Error("Missing Sheet1 tab");
+      const rect = target.getBoundingClientRect();
 
-    const currentAll = await page.evaluate(() => {
-      const app = (window as any).__formulaApp;
-      return app.getWorkbookSheetStore().listAll().map((s: any) => ({ id: s.id, visibility: s.visibility }));
-    });
+      const dt = new DataTransfer();
+      dt.setData("text/sheet-id", fromId);
+      dt.setData("text/plain", fromId);
 
-    if (JSON.stringify(currentAll) !== JSON.stringify(desiredAll)) {
-      await page.evaluate(() => {
-        const fromId = "Sheet3";
-        const target = document.querySelector('[data-testid="sheet-tab-Sheet1"]') as HTMLElement | null;
-        if (!target) throw new Error("Missing Sheet1 tab");
-        const rect = target.getBoundingClientRect();
-
-        const dt = new DataTransfer();
-        dt.setData("text/sheet-id", fromId);
-        dt.setData("text/plain", fromId);
-
-        const drop = new DragEvent("drop", {
-          bubbles: true,
-          cancelable: true,
-          clientX: rect.left + 1,
-          clientY: rect.top + rect.height / 2,
-        });
-        Object.defineProperty(drop, "dataTransfer", { value: dt });
-        target.dispatchEvent(drop);
+      const drop = new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        clientX: rect.left + 1,
+        clientY: rect.top + rect.height / 2,
       });
-    }
+      Object.defineProperty(drop, "dataTransfer", { value: dt });
+      target.dispatchEvent(drop);
+    });
 
     await expect
       .poll(() =>
