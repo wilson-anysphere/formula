@@ -18,7 +18,8 @@ import { enforceExport } from "../../dlp/enforceExport.js";
 
 function isLikelyDateNumberFormat(fmt) {
   if (typeof fmt !== "string") return false;
-  return fmt.toLowerCase().includes("yyyy-mm-dd");
+  const lower = fmt.toLowerCase();
+  return lower.includes("yyyy-mm-dd") || lower.includes("m/d/yyyy");
 }
 
 /**

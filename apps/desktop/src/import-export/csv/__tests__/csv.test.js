@@ -109,6 +109,17 @@ test("CSV export respects DocumentController cell numberFormat when serializing 
   assert.equal(csv, "2024-01-31");
 });
 
+test("CSV export treats m/d/yyyy numberFormat as date-like and serializes to an ISO date string", () => {
+  const doc = new DocumentController();
+  const serial = dateToExcelSerial(new Date(Date.UTC(2024, 0, 31)));
+
+  doc.setCellValue("Sheet1", "A1", serial);
+  doc.setRangeFormat("Sheet1", "A1", { numberFormat: "m/d/yyyy" });
+
+  const csv = exportDocumentRangeToCsv(doc, "Sheet1", "A1");
+  assert.equal(csv, "2024-01-31");
+});
+
 test("CSV export respects layered column formats (styleId may be 0)", () => {
   const doc = new DocumentController();
   const serial = dateToExcelSerial(new Date(Date.UTC(2024, 0, 31)));
