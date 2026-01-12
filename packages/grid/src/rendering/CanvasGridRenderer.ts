@@ -3928,17 +3928,21 @@ export class CanvasGridRenderer {
         } else {
           const lineWidth = winner.totalWidth;
           if (!Number.isFinite(lineWidth) || lineWidth <= 0) continue;
-          const lineDash = dashForStyle(winner.spec.style, lineWidth);
-          const dashKey = lineDash.length > 0 ? lineDash.join(",") : "solid";
+          const style = winner.spec.style;
+          const unit = style === "solid" ? 0 : Math.max(1, lineWidth);
+          // Include the resolved dash unit in the key so we don't need to allocate a dash array just
+          // to determine whether `setLineDash` needs to change.
+          const dashKey = style === "solid" ? "solid" : `${style}:${unit}`;
           const key = `${strokeStyle}|${lineWidth}|${dashKey}|single`;
           let group = groups.get(key);
           if (!group) {
+            const lineDash = style === "solid" ? [] : dashForStyle(style, lineWidth);
             group = {
               strokeStyle,
               lineWidth,
               lineDash,
               dashKey,
-              lineCap: winner.spec.style === "dotted" ? "round" : "butt",
+              lineCap: style === "dotted" ? "round" : "butt",
               double: false,
               segments: []
             };
