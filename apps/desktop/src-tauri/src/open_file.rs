@@ -6,6 +6,9 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
     "xlsx",
     "xls",
     "xlsm",
+    "xltx",
+    "xltm",
+    "xlam",
     "xlsb",
     "csv",
     #[cfg(feature = "parquet")]
@@ -20,7 +23,7 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
 /// - macOS open-document events (converted to `file://...` strings)
 ///
 /// Normalization rules:
-/// - accepts: `xlsx`, `xls`, `xlsm`, `xlsb`, `csv` (case-insensitive)
+/// - accepts: `xlsx`, `xls`, `xlsm`, `xltx`, `xltm`, `xlam`, `xlsb`, `csv` (case-insensitive)
 ///   - plus `parquet` when compiled with the `parquet` feature
 /// - handles `file://...` URLs (via [`Url::to_file_path`])
 /// - resolves relative paths using `cwd` when provided (falls back to `std::env::current_dir()`)
@@ -110,12 +113,22 @@ mod tests {
         let argv = vec![
             "formula-desktop".to_string(),
             "Report.XLSX".to_string(),
+            "Template.XLTX".to_string(),
+            "Addin.XLAM".to_string(),
             "data.csv".to_string(),
             "ignore.md".to_string(),
         ];
 
         let paths = extract_open_file_paths_from_argv(&argv, Some(cwd));
-        assert_eq!(paths, vec![cwd.join("Report.XLSX"), cwd.join("data.csv")]);
+        assert_eq!(
+            paths,
+            vec![
+                cwd.join("Report.XLSX"),
+                cwd.join("Template.XLTX"),
+                cwd.join("Addin.XLAM"),
+                cwd.join("data.csv")
+            ]
+        );
     }
 
     #[test]
