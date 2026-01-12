@@ -297,8 +297,16 @@ function installExternalLinkInterceptor(): void {
   const handler = (event: MouseEvent) => {
       if (event.defaultPrevented) return;
 
-      const target = event.target as Element | null;
-      if (!target || typeof target.closest !== "function") return;
+      // `event.target` can be a `Text` node (e.g. clicking the text inside an <a>).
+      // Normalize to an Element so we can use `.closest(...)`.
+      const rawTarget = event.target as unknown;
+      const target =
+        rawTarget instanceof Element
+          ? rawTarget
+          : rawTarget && typeof (rawTarget as any).parentElement === "object"
+            ? ((rawTarget as any).parentElement as Element | null)
+            : null;
+      if (!target || typeof (target as any).closest !== "function") return;
       const anchor = target.closest("a[href]") as HTMLAnchorElement | null;
       if (!anchor) return;
 
