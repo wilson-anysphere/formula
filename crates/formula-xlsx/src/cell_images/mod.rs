@@ -142,6 +142,13 @@ fn parse_cell_images_part(
 ) -> Result<CellImagesPart> {
     let rels_path = crate::openxml::rels_part_name(path);
 
+    fn strip_fragment(target: &str) -> &str {
+        target
+            .split_once('#')
+            .map(|(base, _)| base)
+            .unwrap_or(target)
+    }
+
     let rid_to_target: HashMap<String, String> = parts
         .get(&rels_path)
         .and_then(|rels_bytes| crate::openxml::parse_relationships(rels_bytes).ok())
@@ -155,19 +162,24 @@ fn parse_cell_images_part(
                         .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
                         && rel.type_uri == REL_TYPE_IMAGE
                 })
-                .map(|rel| {
-                    let target_path = resolve_target_best_effort(path, &rels_path, &rel.target, parts)
+                .filter_map(|rel| {
+                    let target = strip_fragment(&rel.target);
+                    if target.is_empty() {
+                        return None;
+                    }
+
+                    let target_path = resolve_target_best_effort(path, &rels_path, target, parts)
                         .unwrap_or_else(|_| {
                             // Fall back to strict URI resolution if the target cannot be found in
                             // `parts`. This preserves a deterministic output even for incomplete
                             // workbooks.
-                            let mut strict = resolve_target(path, &rel.target);
+                            let mut strict = resolve_target(path, target);
                             if strict.starts_with("media/") {
                                 strict = format!("xl/{strict}");
                             }
                             strict
                         });
-                    (rel.id, target_path)
+                    Some((rel.id, target_path))
                 })
                 .collect()
         })
@@ -398,8 +410,8 @@ mod tests {
 
         let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image2.png"/>
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png#frag"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image2.png#frag"/>
 </Relationships>"#;
 
         let parts: BTreeMap<String, Vec<u8>> = [
