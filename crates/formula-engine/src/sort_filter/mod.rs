@@ -1,5 +1,6 @@
 mod a1;
 mod filter;
+mod parse;
 mod sort;
 mod types;
 mod visibility;
@@ -7,11 +8,14 @@ mod worksheet;
 
 pub use a1::{parse_a1_range, to_a1_range, A1ParseError};
 pub use filter::{
-    apply_autofilter, AutoFilter, ColumnFilter, DateComparison, FilterCriterion, FilterJoin,
-    FilterResult, FilterValue, FilterViewId, FilterViews, NumberComparison, TextMatch,
-    TextMatchKind,
+    apply_autofilter, apply_autofilter_with_value_locale, AutoFilter, ColumnFilter, DateComparison,
+    FilterCriterion, FilterJoin, FilterResult, FilterValue, FilterViewId, FilterViews,
+    NumberComparison, TextMatch, TextMatchKind,
 };
-pub use sort::{sort_range, RowPermutation, SortKey, SortOrder, SortSpec, SortValueType};
+pub use sort::{
+    sort_range, sort_range_with_value_locale, RowPermutation, SortKey, SortOrder, SortSpec,
+    SortValueType,
+};
 pub use types::{CellValue, HeaderOption, RangeData, RangeDataError, RangeRef};
 pub use visibility::{HiddenRows, RowVisibility};
 pub use worksheet::apply_autofilter_to_outline;

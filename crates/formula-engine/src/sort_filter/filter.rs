@@ -1,3 +1,5 @@
+use crate::locale::ValueLocaleConfig;
+use crate::sort_filter::parse::{parse_text_datetime, parse_text_number};
 use crate::sort_filter::sort::datetime_to_excel_serial_1900;
 use crate::sort_filter::types::{CellValue, RangeData, RangeRef};
 use chrono::{Local, NaiveDate, NaiveDateTime};
@@ -257,6 +259,14 @@ impl FilterViews {
 }
 
 pub fn apply_autofilter(range: &RangeData, filter: &AutoFilter) -> FilterResult {
+    apply_autofilter_with_value_locale(range, filter, ValueLocaleConfig::en_us())
+}
+
+pub fn apply_autofilter_with_value_locale(
+    range: &RangeData,
+    filter: &AutoFilter,
+    value_locale: ValueLocaleConfig,
+) -> FilterResult {
     let row_count = range.rows.len();
     let mut visible_rows = vec![true; row_count];
 
@@ -276,7 +286,7 @@ pub fn apply_autofilter(range: &RangeData, filter: &AutoFilter) -> FilterResult 
                 .get(local_row)
                 .and_then(|r| r.get(*col_id))
                 .unwrap_or(&CellValue::Blank);
-            if !evaluate_column_filter(cell, col_filter) {
+            if !evaluate_column_filter(cell, col_filter, value_locale) {
                 row_visible = false;
                 break;
             }
@@ -302,25 +312,31 @@ pub fn apply_autofilter(range: &RangeData, filter: &AutoFilter) -> FilterResult 
     }
 }
 
-fn evaluate_column_filter(cell: &CellValue, filter: &ColumnFilter) -> bool {
+fn evaluate_column_filter(cell: &CellValue, filter: &ColumnFilter, value_locale: ValueLocaleConfig) -> bool {
     if filter.criteria.is_empty() {
         return true;
     }
 
     match filter.join {
-        FilterJoin::Any => filter.criteria.iter().any(|c| evaluate_criterion(cell, c)),
-        FilterJoin::All => filter.criteria.iter().all(|c| evaluate_criterion(cell, c)),
+        FilterJoin::Any => filter
+            .criteria
+            .iter()
+            .any(|c| evaluate_criterion(cell, c, value_locale)),
+        FilterJoin::All => filter
+            .criteria
+            .iter()
+            .all(|c| evaluate_criterion(cell, c, value_locale)),
     }
 }
 
-fn evaluate_criterion(cell: &CellValue, criterion: &FilterCriterion) -> bool {
+fn evaluate_criterion(cell: &CellValue, criterion: &FilterCriterion, value_locale: ValueLocaleConfig) -> bool {
     match criterion {
         FilterCriterion::Blanks => is_blank(cell),
         FilterCriterion::NonBlanks => !is_blank(cell),
-        FilterCriterion::Equals(value) => equals_value(cell, value),
+        FilterCriterion::Equals(value) => equals_value(cell, value, value_locale),
         FilterCriterion::TextMatch(m) => text_match(cell, m),
-        FilterCriterion::Number(cmp) => number_cmp(cell, cmp),
-        FilterCriterion::Date(cmp) => date_cmp(cell, cmp),
+        FilterCriterion::Number(cmp) => number_cmp(cell, cmp, value_locale),
+        FilterCriterion::Date(cmp) => date_cmp(cell, cmp, value_locale),
     }
 }
 
@@ -328,15 +344,15 @@ fn is_blank(cell: &CellValue) -> bool {
     matches!(cell, CellValue::Blank) || matches!(cell, CellValue::Text(s) if s.trim().is_empty())
 }
 
-fn equals_value(cell: &CellValue, value: &FilterValue) -> bool {
+fn equals_value(cell: &CellValue, value: &FilterValue, value_locale: ValueLocaleConfig) -> bool {
     match value {
         FilterValue::Text(s) => {
             let cell_s = cell_to_string(cell);
             cell_s.eq_ignore_ascii_case(s)
         }
-        FilterValue::Number(n) => coerce_number(cell).is_some_and(|v| v == *n),
+        FilterValue::Number(n) => coerce_number(cell, value_locale).is_some_and(|v| v == *n),
         FilterValue::Bool(b) => matches!(cell, CellValue::Bool(v) if v == b),
-        FilterValue::DateTime(dt) => coerce_datetime(cell).is_some_and(|v| v == *dt),
+        FilterValue::DateTime(dt) => coerce_datetime(cell, value_locale).is_some_and(|v| v == *dt),
     }
 }
 
@@ -356,8 +372,8 @@ fn text_match(cell: &CellValue, m: &TextMatch) -> bool {
     }
 }
 
-fn number_cmp(cell: &CellValue, cmp: &NumberComparison) -> bool {
-    let Some(n) = coerce_number(cell) else {
+fn number_cmp(cell: &CellValue, cmp: &NumberComparison, value_locale: ValueLocaleConfig) -> bool {
+    let Some(n) = coerce_number(cell, value_locale) else {
         return false;
     };
 
@@ -371,27 +387,27 @@ fn number_cmp(cell: &CellValue, cmp: &NumberComparison) -> bool {
     }
 }
 
-fn date_cmp(cell: &CellValue, cmp: &DateComparison) -> bool {
+fn date_cmp(cell: &CellValue, cmp: &DateComparison, value_locale: ValueLocaleConfig) -> bool {
     match cmp {
         DateComparison::Today => {
             let today = Local::now().date_naive();
-            date_cmp(cell, &DateComparison::OnDate(today))
+            date_cmp(cell, &DateComparison::OnDate(today), value_locale)
         }
         DateComparison::Yesterday => {
             let yesterday = Local::now().date_naive().pred_opt().unwrap();
-            date_cmp(cell, &DateComparison::OnDate(yesterday))
+            date_cmp(cell, &DateComparison::OnDate(yesterday), value_locale)
         }
         DateComparison::Tomorrow => {
             let tomorrow = Local::now().date_naive().succ_opt().unwrap();
-            date_cmp(cell, &DateComparison::OnDate(tomorrow))
+            date_cmp(cell, &DateComparison::OnDate(tomorrow), value_locale)
         }
-        DateComparison::OnDate(d) => coerce_datetime(cell)
+        DateComparison::OnDate(d) => coerce_datetime(cell, value_locale)
             .map(|dt| dt.date() == *d)
             .unwrap_or(false),
-        DateComparison::After(dt) => coerce_datetime(cell).is_some_and(|v| v > *dt),
-        DateComparison::Before(dt) => coerce_datetime(cell).is_some_and(|v| v < *dt),
+        DateComparison::After(dt) => coerce_datetime(cell, value_locale).is_some_and(|v| v > *dt),
+        DateComparison::Before(dt) => coerce_datetime(cell, value_locale).is_some_and(|v| v < *dt),
         DateComparison::Between { start, end } => {
-            coerce_datetime(cell).is_some_and(|v| v >= *start && v <= *end)
+            coerce_datetime(cell, value_locale).is_some_and(|v| v >= *start && v <= *end)
         }
     }
 }
@@ -407,49 +423,20 @@ fn cell_to_string(cell: &CellValue) -> String {
     }
 }
 
-fn parse_number(text: &str) -> Option<f64> {
-    let s = text.trim().replace(',', "");
-    if s.is_empty() {
-        return None;
-    }
-    s.parse().ok()
-}
-
-fn parse_datetime(text: &str) -> Option<NaiveDateTime> {
-    let s = text.trim();
-    if s.is_empty() {
-        return None;
-    }
-
-    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
-        return Some(dt);
-    }
-    if let Ok(dt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M") {
-        return Some(dt);
-    }
-    if let Ok(date) = NaiveDate::parse_from_str(s, "%Y-%m-%d") {
-        return Some(date.and_hms_opt(0, 0, 0)?);
-    }
-    if let Ok(date) = NaiveDate::parse_from_str(s, "%m/%d/%Y") {
-        return Some(date.and_hms_opt(0, 0, 0)?);
-    }
-    None
-}
-
-fn coerce_number(cell: &CellValue) -> Option<f64> {
+fn coerce_number(cell: &CellValue, value_locale: ValueLocaleConfig) -> Option<f64> {
     match cell {
         CellValue::Number(n) => Some(*n),
         CellValue::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        CellValue::Text(s) => parse_number(s),
+        CellValue::Text(s) => parse_text_number(s, value_locale),
         CellValue::DateTime(dt) => Some(datetime_to_excel_serial_1900(*dt)),
         CellValue::Error(_) | CellValue::Blank => None,
     }
 }
 
-fn coerce_datetime(cell: &CellValue) -> Option<NaiveDateTime> {
+fn coerce_datetime(cell: &CellValue, value_locale: ValueLocaleConfig) -> Option<NaiveDateTime> {
     match cell {
         CellValue::DateTime(dt) => Some(*dt),
-        CellValue::Text(s) => parse_datetime(s),
+        CellValue::Text(s) => parse_text_datetime(s, value_locale),
         _ => None,
     }
 }
@@ -525,6 +512,30 @@ mod tests {
         let result = apply_autofilter(&data, &filter);
         assert_eq!(result.visible_rows, vec![true, true, true, false]);
         assert_eq!(result.hidden_sheet_rows, vec![3]);
+    }
+
+    #[test]
+    fn locale_aware_numeric_filter_respects_decimal_separator() {
+        let data = range(vec![
+            vec![CellValue::Text("Val".into())],
+            vec![CellValue::Text("1,10".into())],
+            vec![CellValue::Text("1,2".into())],
+        ]);
+
+        let filter = AutoFilter {
+            range: data.range,
+            columns: BTreeMap::from([(
+                0,
+                ColumnFilter {
+                    join: FilterJoin::Any,
+                    criteria: vec![FilterCriterion::Number(NumberComparison::LessThan(1.15))],
+                },
+            )]),
+        };
+
+        let result = apply_autofilter_with_value_locale(&data, &filter, ValueLocaleConfig::de_de());
+        assert_eq!(result.visible_rows, vec![true, true, false]);
+        assert_eq!(result.hidden_sheet_rows, vec![2]);
     }
 
     #[test]
