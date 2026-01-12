@@ -4,6 +4,39 @@ pub mod platform;
 
 mod cf_html;
 
+// Clipboard items can contain extremely large rich payloads (especially images).
+// Guard against unbounded memory usage / IPC payload sizes by skipping oversized formats.
+//
+// These match the frontend clipboard provider limits.
+const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
+const MAX_RICH_TEXT_BYTES: usize = 2 * 1024 * 1024; // 2 MiB (HTML / RTF)
+
+fn estimate_base64_decoded_len(base64: &str) -> Option<usize> {
+    let s = base64.trim();
+    if s.is_empty() {
+        return Some(0);
+    }
+
+    let len = s.len();
+    let padding = if s.ends_with("==") {
+        2
+    } else if s.ends_with('=') {
+        1
+    } else {
+        0
+    };
+
+    // If the encoded length is well-formed, we can compute the exact decoded length. Otherwise,
+    // compute a conservative upper bound to avoid allocating huge buffers during base64 decode.
+    if len % 4 == 0 {
+        let groups = len / 4;
+        groups.checked_mul(3)?.checked_sub(padding)
+    } else {
+        let groups = (len + 3) / 4;
+        groups.checked_mul(3)
+    }
+}
+
 #[cfg(any(target_os = "windows", test))]
 mod windows_dib;
 #[cfg(target_os = "windows")]
@@ -59,6 +92,33 @@ impl ClipboardWritePayload {
                 "must include at least one of text, html, rtf, pngBase64".to_string(),
             ));
         }
+
+        if let Some(html) = self.html.as_deref() {
+            if html.as_bytes().len() > MAX_RICH_TEXT_BYTES {
+                return Err(ClipboardError::InvalidPayload(format!(
+                    "html exceeds maximum size ({MAX_RICH_TEXT_BYTES} bytes)"
+                )));
+            }
+        }
+
+        if let Some(rtf) = self.rtf.as_deref() {
+            if rtf.as_bytes().len() > MAX_RICH_TEXT_BYTES {
+                return Err(ClipboardError::InvalidPayload(format!(
+                    "rtf exceeds maximum size ({MAX_RICH_TEXT_BYTES} bytes)"
+                )));
+            }
+        }
+
+        if let Some(png_base64) = self.png_base64.as_deref() {
+            if !png_base64.trim().is_empty() {
+                let decoded_len = estimate_base64_decoded_len(png_base64).unwrap_or(usize::MAX);
+                if decoded_len > MAX_IMAGE_BYTES {
+                    return Err(ClipboardError::InvalidPayload(format!(
+                        "pngBase64 exceeds maximum size ({MAX_IMAGE_BYTES} bytes)"
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -76,7 +136,22 @@ pub enum ClipboardError {
 }
 
 pub fn read() -> Result<ClipboardContent, ClipboardError> {
-    platform::read()
+    let mut content = platform::read()?;
+
+    if matches!(content.html, Some(ref s) if s.as_bytes().len() > MAX_RICH_TEXT_BYTES) {
+        content.html = None;
+    }
+    if matches!(content.rtf, Some(ref s) if s.as_bytes().len() > MAX_RICH_TEXT_BYTES) {
+        content.rtf = None;
+    }
+    if let Some(ref s) = content.png_base64 {
+        let decoded_len = estimate_base64_decoded_len(s).unwrap_or(usize::MAX);
+        if decoded_len > MAX_IMAGE_BYTES {
+            content.png_base64 = None;
+        }
+    }
+
+    Ok(content)
 }
 
 pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
@@ -122,5 +197,42 @@ pub fn clipboard_write(app: tauri::AppHandle, payload: ClipboardWritePayload) ->
     {
         let _ = app;
         write(&payload).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ClipboardError, ClipboardWritePayload, MAX_RICH_TEXT_BYTES};
+
+    #[test]
+    fn validate_rejects_oversized_html() {
+        let payload = ClipboardWritePayload {
+            text: Some("hello".to_string()),
+            html: Some("x".repeat(MAX_RICH_TEXT_BYTES + 1)),
+            rtf: None,
+            png_base64: None,
+        };
+
+        let err = payload.validate().expect_err("expected size check to fail");
+        match err {
+            ClipboardError::InvalidPayload(msg) => assert!(msg.contains("html exceeds maximum size")),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_rejects_oversized_rtf() {
+        let payload = ClipboardWritePayload {
+            text: Some("hello".to_string()),
+            html: None,
+            rtf: Some("x".repeat(MAX_RICH_TEXT_BYTES + 1)),
+            png_base64: None,
+        };
+
+        let err = payload.validate().expect_err("expected size check to fail");
+        match err {
+            ClipboardError::InvalidPayload(msg) => assert!(msg.contains("rtf exceeds maximum size")),
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }
