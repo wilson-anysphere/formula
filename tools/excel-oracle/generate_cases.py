@@ -51,6 +51,17 @@ def _add_case(
     output_cell: str = "C1",
     description: str | None = None,
 ) -> None:
+    # Guardrail: the `output_cell` contains the formula under test. If an input also writes to
+    # that cell, we can accidentally overwrite the formula or create an unintended circular
+    # reference (e.g. output cell participates in a counted range).
+    #
+    # This has bitten us before in COUNTIF criteria cases, so keep the generator strict.
+    inputs = list(inputs)
+    if any(i.cell == output_cell for i in inputs):
+        raise ValueError(
+            f"case output_cell {output_cell!r} collides with an input cell for formula {formula!r}"
+        )
+
     payload: dict[str, Any] = {
         "formula": formula,
         "outputCell": output_cell,
@@ -436,6 +447,7 @@ def generate_cases() -> dict[str, Any]:
             tags=["agg", "criteria", "COUNTIF", "booleans"],
             formula=f"=COUNTIF(C1:C7,{crit_expr})",
             inputs=criteria_bool_inputs,
+            output_cell="D1",
         )
 
     # Date-string criteria against date serial numbers.
