@@ -84,7 +84,7 @@ export async function setupExtensionTestHarness(): Promise<void> {
   });
 
   const marketplaceClient = new MarketplaceClient({ baseUrl: "/api" });
-  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: host.engineVersion });
 
   const api = {
     async installExtension(id: string) {

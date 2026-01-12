@@ -6,7 +6,6 @@ import {
   readExtensionPackageV2,
   verifyExtensionPackageV2Browser
 } from "../../../shared/extension-package/v2-browser.mjs";
-
 import { validateExtensionManifest } from "../../../shared/extension-manifest/index.mjs";
 
 import { MarketplaceClient } from "./MarketplaceClient";
@@ -35,9 +34,22 @@ export interface InstalledExtensionRecord {
   corrupted?: boolean;
   corruptedAt?: string;
   corruptedReason?: string;
+
+  /**
+   * When set, the installed record has been quarantined because its stored
+   * manifest is invalid or incompatible with the current Formula engine version.
+   *
+   * Installing a compatible extension version (or changing engine version)
+   * should clear this flag.
+   */
+  incompatible?: boolean;
+  incompatibleAt?: string;
+  incompatibleReason?: string;
 }
 
 export interface BrowserExtensionHostLike {
+  readonly engineVersion?: string;
+  getEngineVersion?(): string;
   loadExtension(args: {
     extensionId: string;
     extensionPath: string;
@@ -507,10 +519,11 @@ export class WebExtensionManager {
   ) {
     this.marketplaceClient = options.marketplaceClient ?? new MarketplaceClient();
     this.host = options.host ?? null;
-    this.engineVersion =
-      typeof options.engineVersion === "string" && options.engineVersion.trim().length > 0
-        ? options.engineVersion.trim()
-        : "1.0.0";
+    const fromHost =
+      this.host?.engineVersion ??
+      (typeof this.host?.getEngineVersion === "function" ? this.host.getEngineVersion() : null);
+    const rawEngine = options.engineVersion ?? fromHost ?? "1.0.0";
+    this.engineVersion = typeof rawEngine === "string" && rawEngine.trim().length > 0 ? rawEngine.trim() : "1.0.0";
     this.scanPolicy = options.scanPolicy ?? defaultScanPolicyFromEnv();
   }
 
@@ -918,7 +931,19 @@ export class WebExtensionManager {
 
     await this._verifyStoredPackageIntegrity(installed, pkg);
 
-    const manifest = this._validateManifest(pkg.verified.manifest, { id: installed.id, version: installed.version });
+    let manifest: Record<string, any>;
+    try {
+      manifest = this._validateManifest(pkg.verified.manifest, { id: installed.id, version: installed.version });
+    } catch (error) {
+      const msg = String((error as Error)?.message ?? error);
+      await this._quarantineIncompatibleInstall(installed, msg).catch(() => {});
+      throw error instanceof Error ? error : new Error(msg);
+    }
+
+    if (installed.incompatible) {
+      await this._clearIncompatibleInstall(installed).catch(() => {});
+    }
+
     const bundleId = `${manifest.publisher}.${manifest.name}`;
     if (bundleId !== installed.id) {
       const reason = `package id mismatch (expected ${installed.id} but got ${bundleId})`;
@@ -1126,6 +1151,40 @@ export class WebExtensionManager {
     } catch (error) {
       const msg = String((error as Error)?.message ?? error);
       throw new Error(`Invalid extension manifest for ${context.id}@${context.version}: ${msg}`);
+    }
+  }
+
+  private async _quarantineIncompatibleInstall(installed: InstalledExtensionRecord, reason: string): Promise<void> {
+    const db = await openDb();
+    try {
+      const tx = db.transaction([STORE_INSTALLED], "readwrite");
+      const store = tx.objectStore(STORE_INSTALLED);
+      store.put({
+        ...installed,
+        incompatible: true,
+        incompatibleAt: new Date().toISOString(),
+        incompatibleReason: String(reason || "unknown error")
+      });
+      await txDone(tx);
+    } finally {
+      db.close();
+    }
+  }
+
+  private async _clearIncompatibleInstall(installed: InstalledExtensionRecord): Promise<void> {
+    if (!installed.incompatible && !installed.incompatibleAt && !installed.incompatibleReason) return;
+    const db = await openDb();
+    try {
+      const tx = db.transaction([STORE_INSTALLED], "readwrite");
+      const store = tx.objectStore(STORE_INSTALLED);
+      const next: InstalledExtensionRecord & Record<string, any> = { ...installed };
+      delete (next as any).incompatible;
+      delete (next as any).incompatibleAt;
+      delete (next as any).incompatibleReason;
+      store.put(next);
+      await txDone(tx);
+    } finally {
+      db.close();
     }
   }
 }

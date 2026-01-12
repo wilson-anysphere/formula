@@ -358,6 +358,10 @@ class BrowserExtensionHost {
     this._spreadsheet.onSheetActivated?.((e) => this._broadcastEvent("sheetActivated", e));
   }
 
+  get engineVersion() {
+    return this._engineVersion;
+  }
+
   get spreadsheet() {
     return this._spreadsheet;
   }

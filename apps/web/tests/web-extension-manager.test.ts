@@ -380,7 +380,6 @@ test("install fails when engines.formula is incompatible with engineVersion", as
   await fs.writeFile(path.join(extDir, "dist", "extension.js"), source);
 
   const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
-
   const marketplaceClient = createMockMarketplace({
     extensionId: "test.engine-mismatch-ext",
     latestVersion: "1.0.0",
@@ -393,7 +392,70 @@ test("install fails when engines.formula is incompatible with engineVersion", as
   await expect(manager.install("test.engine-mismatch-ext")).rejects.toThrow(/engine mismatch/i);
   expect(await manager.listInstalled()).toEqual([]);
 
+  // Ensure we didn't persist any package bytes.
+  const db = await requestToPromise(indexedDB.open("formula.webExtensions"));
+  try {
+    const tx = db.transaction(["packages"], "readonly");
+    const store = tx.objectStore("packages");
+    const records = (await requestToPromise(store.getAll())) as any[];
+    await txDone(tx);
+    expect(records).toEqual([]);
+  } finally {
+    db.close();
+  }
+
   await manager.dispose();
+  await fs.rm(tmpRoot, { recursive: true, force: true });
+});
+
+test("loadInstalled quarantines when a stored manifest becomes incompatible with engineVersion", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-quarantine-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "quarantine-ext",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.mjs",
+    engines: { formula: "^1.0.0" }
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  const source = `export async function activate() {}\n`;
+  await fs.writeFile(path.join(extDir, "dist", "extension.mjs"), source);
+  await fs.writeFile(path.join(extDir, "dist", "extension.js"), source);
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.quarantine-ext",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const installer = new WebExtensionManager({ marketplaceClient, engineVersion: "1.0.0" });
+  await installer.install("test.quarantine-ext");
+  await installer.dispose();
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "2.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "2.0.0" });
+
+  await expect(manager.loadInstalled("test.quarantine-ext")).rejects.toThrow(/engine mismatch/i);
+  const stored = await manager.getInstalled("test.quarantine-ext");
+  expect(stored?.incompatible).toBe(true);
+  expect(String(stored?.incompatibleReason ?? "")).toMatch(/engine mismatch/i);
+  expect(manager.isLoaded("test.quarantine-ext")).toBe(false);
+  expect(host.listExtensions().some((e: any) => e.id === "test.quarantine-ext")).toBe(false);
+
+  await manager.dispose();
+  await host.dispose();
   await fs.rm(tmpRoot, { recursive: true, force: true });
 });
 
