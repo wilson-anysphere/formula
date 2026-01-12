@@ -78,72 +78,33 @@ Key config fields you'll touch most often:
 - `build.devUrl`: URL the desktop WebView loads in dev (Vite server)
 - `build.frontendDist`: path to built frontend assets for production builds
 - `app.security.csp`: Content Security Policy for the desktop WebView
+- `app.windows[].capabilities`: which capabilities apply to each window
 - `plugins.*`: plugin configuration (e.g. updater)
 
 Tauri v2 permissions are granted via **capabilities**:
 
 - `apps/desktop/src-tauri/capabilities/*.json`
+- referenced from `apps/desktop/src-tauri/tauri.conf.json` via `app.windows[].capabilities`
 
-Example (see `apps/desktop/src-tauri/capabilities/main.json`):
+Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the full allowlists):
 
-```json
+```jsonc
 {
   "identifier": "main",
   "description": "Permissions for the main desktop window",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    {
-      "identifier": "event:allow-listen",
-      "allow": [
-        { "event": "close-prep" },
-        { "event": "close-requested" },
-        { "event": "oauth-redirect" },
-        { "event": "file-dropped" },
-        { "event": "open-file" },
-        { "event": "startup:window-visible" },
-        { "event": "startup:webview-loaded" },
-        { "event": "startup:tti" },
-        { "event": "startup:metrics" },
-        { "event": "tray-open" },
-        { "event": "tray-new" },
-        { "event": "tray-quit" },
-        { "event": "shortcut-quick-open" },
-        { "event": "shortcut-command-palette" },
-        { "event": "menu-open" },
-        { "event": "menu-new" },
-        { "event": "menu-save" },
-        { "event": "menu-save-as" },
-        { "event": "menu-close-window" },
-        { "event": "menu-quit" },
-        { "event": "menu-undo" },
-        { "event": "menu-redo" },
-        { "event": "menu-cut" },
-        { "event": "menu-copy" },
-        { "event": "menu-paste" },
-        { "event": "menu-select-all" },
-        { "event": "menu-about" },
-        { "event": "menu-check-updates" },
-        { "event": "update-check-already-running" },
-        { "event": "update-check-started" },
-        { "event": "update-not-available" },
-        { "event": "update-check-error" },
-        { "event": "update-available" }
-      ]
-    },
-    {
-      "identifier": "event:allow-emit",
-      "allow": [
-        { "event": "close-prep-done" },
-        { "event": "close-handled" },
-        { "event": "open-file-ready" },
-        { "event": "updater-ui-ready" }
-      ]
-    },
+    { "identifier": "core:allow-invoke", "allow": ["open_workbook", "save_workbook"] },
+    // ...
+    { "identifier": "event:allow-listen", "allow": [{ "event": "open-file" }] },
+    { "identifier": "event:allow-emit", "allow": [{ "event": "open-file-ready" }] },
+    // ...
     "dialog:allow-open",
     "dialog:allow-save",
     "window:allow-hide",
     "window:allow-show",
+    "window:allow-set-focus",
     "window:allow-close",
     "clipboard:allow-read-text",
     "clipboard:allow-write-text",
