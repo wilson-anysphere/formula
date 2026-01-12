@@ -70,6 +70,29 @@ media relationships.
 This section is a “what to look for” summary for the core **cell image store** parts. Details and
 variant shapes are documented further below.
 
+#### Confirmed vs unconfirmed
+
+**Confirmed (from in-repo fixtures/tests):**
+
+- A workbook can contain a dedicated `cellImages` part (seen in tests as `xl/cellimages.xml` and
+  `xl/cellImages.xml`) plus a matching relationship part at `xl/_rels/<part>.rels`.
+- The `cellImages` XML can reference binary images via DrawingML-style `r:embed="rIdX"` references.
+- `rIdX` is resolved through the `*.rels` part to an image under `xl/media/*`.
+- Image relationship type is the standard OOXML one:
+  - `http://schemas.openxmlformats.org/officeDocument/2006/relationships/image`
+
+**Unconfirmed / needs real Excel sample (Place in Cell / `IMAGE()`):**
+
+- Exact part naming + casing used by current Excel builds (and whether multiple numbered parts like
+  `cellImages1.xml` are used).
+- Exact root namespace used by Excel for `cellImages` today (we *expect* `.../2019/cellimages`, but
+  have seen other variants in synthetic fixtures).
+- Exact schema shape (e.g. whether `<cellImage>` always contains a full `<xdr:pic>` subtree or can be
+  a lightweight reference-only element).
+- The relationship `Type` URI used for “workbook/worksheet → `cellImages.xml`” discovery.
+- The exact “cell → image” mapping mechanism (likely via `vm`/`metadata.xml` + `xl/richData/*`, but
+  needs confirmation from a real Excel-generated file).
+
 #### Parts
 
 - `xl/cellImages.xml` (**preferred**, but casing can vary; see note above)
