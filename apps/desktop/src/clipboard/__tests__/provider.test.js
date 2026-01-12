@@ -735,9 +735,9 @@ test("clipboard provider", async (t) => {
         assert.ok(item instanceof MockClipboardItem);
 
         const keys = Object.keys(item.data).sort();
-        // ClipboardItem writes are best-effort: include rich formats (like RTF) when provided,
-        // but the provider may fall back to HTML/plain if the platform rejects them.
-        assert.deepEqual(keys, ["text/html", "text/plain", "text/rtf"].sort());
+        // ClipboardItem writes are best-effort and intentionally omit RTF so we don't
+        // regress HTML clipboard writes on platforms that reject unsupported types.
+        assert.deepEqual(keys, ["text/html", "text/plain"].sort());
       }
     );
   });
