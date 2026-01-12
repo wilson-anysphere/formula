@@ -1,5 +1,5 @@
 /**
- * Normalize CLI arguments forwarded from `pnpm test:vitest` to `vitest run`.
+ * Normalize CLI arguments forwarded from `pnpm test:vitest` to `vitest`.
  *
  * Why this exists:
  * - pnpm will forward a literal `--` delimiter through to scripts when callers include it
@@ -12,16 +12,16 @@
  * @returns {string[]}
  */
 export function normalizeVitestArgs(rawArgs) {
-  /** @type {string[]} */
-  const args = [];
-  for (const arg of rawArgs) {
-    if (arg === "--") continue;
-    if (arg === "--silent") {
-      args.push("--silent=true");
-      continue;
-    }
-    args.push(arg);
+  let args = rawArgs.slice();
+  // Strip only the first occurrence so callers can still pass a literal `--` later
+  // if they really need to.
+  const delimiterIdx = args.indexOf("--");
+  if (delimiterIdx >= 0) {
+    args = [...args.slice(0, delimiterIdx), ...args.slice(delimiterIdx + 1)];
   }
-  return args;
-}
 
+  return args.map((arg) => {
+    if (arg === "--silent") return "--silent=true";
+    return arg;
+  });
+}
