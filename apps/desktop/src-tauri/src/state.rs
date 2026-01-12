@@ -27,7 +27,6 @@ use formula_storage::{
     AutoSaveConfig, AutoSaveManager, CellChange, CellData as StorageCellData,
     CellRange as StorageCellRange, ImportModelWorkbookOptions,
 };
-use formula_model::validate_sheet_name;
 use formula_xlsx::print::{
     CellRange as PrintCellRange, ManualPageBreaks, PageSetup, SheetPrintSettings,
 };
@@ -342,21 +341,16 @@ impl AppState {
     pub fn create_sheet(&mut self, name: String) -> Result<String, AppStateError> {
         let workbook = self.get_workbook_mut()?;
         let trimmed = name.trim();
-        if trimmed.is_empty() {
-            return Err(AppStateError::WhatIf(
-                "sheet name cannot be empty".to_string(),
-            ));
-        }
-        validate_sheet_name(trimmed)
+        formula_model::validate_sheet_name(trimmed)
             .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
         if workbook
             .sheets
             .iter()
             .any(|sheet| sheet.name.eq_ignore_ascii_case(trimmed))
         {
-            return Err(AppStateError::WhatIf(format!(
-                "sheet name already exists: {trimmed}"
-            )));
+            return Err(AppStateError::WhatIf(
+                formula_model::SheetNameError::DuplicateName.to_string(),
+            ));
         }
 
         let base_id = trimmed.to_string();
@@ -381,7 +375,7 @@ impl AppState {
     pub fn add_sheet(&mut self, name: String) -> Result<SheetInfoData, AppStateError> {
         let workbook = self.get_workbook_mut()?;
         let base = name.trim();
-        let base = if base.is_empty() { "Sheet" } else { base };
+        formula_model::validate_sheet_name(base).map_err(|e| AppStateError::WhatIf(e.to_string()))?;
 
         let mut candidate_name = base.to_string();
         let mut counter = 1usize;
@@ -391,8 +385,24 @@ impl AppState {
             .any(|sheet| sheet.name.eq_ignore_ascii_case(&candidate_name))
         {
             counter += 1;
-            candidate_name = format!("{base} {counter}");
+            let suffix = format!(" {counter}");
+            let suffix_len = suffix.encode_utf16().count();
+            let max_base_len =
+                formula_model::EXCEL_MAX_SHEET_NAME_LEN.saturating_sub(suffix_len);
+            let mut used_len = 0usize;
+            let mut truncated = String::new();
+            for ch in base.chars() {
+                let ch_len = ch.len_utf16();
+                if used_len + ch_len > max_base_len {
+                    break;
+                }
+                used_len += ch_len;
+                truncated.push(ch);
+            }
+            candidate_name = format!("{truncated}{suffix}");
         }
+        formula_model::validate_sheet_name(&candidate_name)
+            .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
 
         let base_id = candidate_name.clone();
         let mut candidate_id = base_id.clone();
@@ -422,21 +432,16 @@ impl AppState {
 
     pub fn rename_sheet(&mut self, sheet_id: &str, name: String) -> Result<(), AppStateError> {
         let trimmed = name.trim();
-        if trimmed.is_empty() {
-            return Err(AppStateError::WhatIf(
-                "sheet name cannot be empty".to_string(),
-            ));
-        }
-        validate_sheet_name(trimmed)
+        formula_model::validate_sheet_name(trimmed)
             .map_err(|e| AppStateError::WhatIf(e.to_string()))?;
         let (old_name, new_name) = {
             let workbook = self.get_workbook()?;
             if workbook.sheets.iter().any(|sheet| {
                 sheet.id != sheet_id && sheet.name.eq_ignore_ascii_case(trimmed)
             }) {
-                return Err(AppStateError::WhatIf(format!(
-                    "sheet name already exists: {trimmed}"
-                )));
+                return Err(AppStateError::WhatIf(
+                    formula_model::SheetNameError::DuplicateName.to_string(),
+                ));
             }
             let sheet = workbook
                 .sheet(sheet_id)

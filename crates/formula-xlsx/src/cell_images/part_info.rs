@@ -15,7 +15,8 @@ const WORKBOOK_RELS_PART: &str = "xl/_rels/workbook.xml.rels";
 const FALLBACK_CELL_IMAGES_PART: &str = "xl/cellimages.xml";
 
 /// Standard OpenXML relationship type for embedded images.
-const IMAGE_REL_TYPE: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+const IMAGE_REL_TYPE: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CellImagesPartInfo {
@@ -70,7 +71,9 @@ impl XlsxPackage {
         let mut embeds = Vec::with_capacity(embed_rids.len());
         for rid in embed_rids {
             let target_part = rid_to_target.get(&rid).cloned().ok_or_else(|| {
-                XlsxError::Invalid(format!("cellimages.xml references missing image relationship {rid}"))
+                XlsxError::Invalid(format!(
+                    "cellimages.xml references missing image relationship {rid}"
+                ))
             })?;
             let target_bytes = self
                 .part(&target_part)
@@ -197,14 +200,12 @@ fn parse_cell_images_image_relationships(
         {
             continue;
         }
-        if rel.type_uri != IMAGE_REL_TYPE {
+        if !rel.type_uri.eq_ignore_ascii_case(IMAGE_REL_TYPE) {
             continue;
         }
-
-        let target = resolve_target(cell_images_part, &rel.target);
-        out.insert(rel.id, target);
+        let target_part = resolve_target(cell_images_part, &rel.target);
+        out.insert(rel.id, target_part);
     }
 
     Ok(out)
 }
-
