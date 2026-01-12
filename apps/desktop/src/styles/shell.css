@@ -184,33 +184,6 @@ dialog.page-setup-dialog::backdrop {
 
 /* --- Sheet tabs ---------------------------------------------------------- */
 
-.sheet-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 6px 8px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-secondary);
-  align-items: center;
-  overflow-x: auto;
-}
-
-.sheet-tab {
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: 12px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.sheet-tab[data-active="true"] {
-  border-color: var(--accent);
-  background: var(--accent-light);
-  font-weight: 600;
-}
-
 /* --- Status bar ---------------------------------------------------------- */
 
 .statusbar {

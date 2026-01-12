@@ -745,9 +745,8 @@ if (!sheetTabsRoot) {
   throw new Error("Missing #sheet-tabs container");
 }
 const sheetTabsRootEl = sheetTabsRoot;
-// The HTML scaffold historically used `.sheet-tabs` for the container itself. The
-// modern sheet bar uses `.sheet-bar` with an inner `.sheet-tabs` strip (matching
-// `mockups/spreadsheet-main.html`), so update the class list once on boot.
+// The shell uses `.sheet-bar` (with an inner `.sheet-tabs` strip) for styling.
+// Normalize older HTML scaffolds that used `.sheet-tabs` on the container itself.
 sheetTabsRootEl.classList.add("sheet-bar");
 sheetTabsRootEl.classList.remove("sheet-tabs");
 
