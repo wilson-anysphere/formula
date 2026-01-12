@@ -239,12 +239,36 @@ fn detect_workbook_sheet_qnames(
     let sheet_tag =
         sheet_tag.or_else(|| Some(crate::xml::prefixed_tag(sheets_prefix.as_deref(), "sheet")));
 
-    let rel_id_attr = rel_id_attr.or_else(|| {
-        Some(crate::xml::prefixed_tag(
+    // We must never emit a namespace prefix that isn't declared in the scope we preserve when
+    // rewriting `<sheets>`. Namespace declarations that only appeared on the original `<sheet>`
+    // elements will be dropped when we replace them with new elements.
+    //
+    // Therefore:
+    // - If we found an existing `*:id` attribute, only keep its prefix if that prefix is also
+    //   declared on the workbook root or `<sheets>` element.
+    // - Otherwise, use the prefix declared on the workbook root / `<sheets>`, or fall back to an
+    //   unprefixed `id` to keep the output namespace-well-formed.
+    let rel_id_attr = match rel_id_attr {
+        Some(found) => {
+            let found_prefix = found.split_once(':').map(|(p, _)| p);
+            match (found_prefix, office_relationships_prefix.as_deref()) {
+                // Existing attribute is unprefixed (`id`) => always safe to keep as-is.
+                (None, _) => Some(found),
+                // Existing attribute prefix matches the declared prefix => safe to keep.
+                (Some(p), Some(declared)) if p == declared => Some(found),
+                // Existing attribute prefix doesn't match the in-scope declared prefix; use the
+                // in-scope prefix so we don't emit an undeclared one.
+                (Some(_), Some(declared)) => Some(crate::xml::prefixed_tag(Some(declared), "id")),
+                // No in-scope declaration for the relationships namespace; avoid emitting any
+                // prefix at all.
+                (Some(_), None) => Some("id".to_string()),
+            }
+        }
+        None => Some(crate::xml::prefixed_tag(
             office_relationships_prefix.as_deref(),
             "id",
-        ))
-    });
+        )),
+    };
 
     Ok((sheet_tag, rel_id_attr))
 }
@@ -686,6 +710,37 @@ mod tests {
         assert!(rewritten.contains(r#"<x:sheet name=""#));
         assert!(!rewritten.contains(" r:id="));
         assert!(!rewritten.contains(" rel:id="));
+    }
+
+    #[test]
+    fn write_workbook_sheets_does_not_emit_sheet_scoped_relationship_prefix() {
+        // Relationships prefix is only declared on the original `<sheet>` element, not on the
+        // workbook root or `<sheets>`. Since we replace all `<sheet>` elements, we must not keep
+        // an `r:id` attribute that would become undeclared after rewriting.
+        let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<x:workbook xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:sheets>
+    <x:sheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" name="Sheet1" sheetId="1" r:id="rId1"/>
+  </x:sheets>
+</x:workbook>
+"#;
+
+        let sheets = vec![WorkbookSheetInfo {
+            name: "Sheet1".to_string(),
+            sheet_id: 1,
+            rel_id: "rId1".to_string(),
+            visibility: SheetVisibility::Visible,
+        }];
+
+        let rewritten = write_workbook_sheets(workbook_xml, &sheets).unwrap();
+
+        roxmltree::Document::parse(&rewritten).expect("rewritten workbook.xml should be valid XML");
+        assert!(rewritten.contains(r#"<x:sheet name=""#));
+        assert!(rewritten.contains(r#"id="rId1""#));
+        assert!(
+            !rewritten.contains(" r:id="),
+            "should not emit an undeclared r:id prefix, got:\n{rewritten}"
+        );
     }
 
     #[test]
