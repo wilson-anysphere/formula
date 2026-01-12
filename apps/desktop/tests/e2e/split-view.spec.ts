@@ -814,6 +814,32 @@ test.describe("split view", () => {
     expect(Math.abs(primaryScrollAfter.x - primaryScrollBefore.x)).toBeLessThan(0.1);
     expect(Math.abs(primaryScrollAfter.y - primaryScrollBefore.y)).toBeLessThan(0.1);
   });
+
+  test("disabling split view commits an in-progress secondary-pane edit", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+
+    // Start editing C2 in the secondary pane but do NOT press Enter/Tab.
+    await secondary.click({ position: { x: 48 + 2 * 100 + 12, y: 24 + 1 * 24 + 12 } });
+    await page.keyboard.press("h");
+    const editor = secondary.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("ello");
+
+    // Disable split view; the in-progress edit should be committed as a "command" commit.
+    await page.getByTestId("ribbon-root").getByTestId("split-none").click();
+    await expect(secondary).not.toBeVisible();
+    await waitForIdle(page);
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("C2"))).toBe("hello");
+  });
 });
 
 test.describe("split view / shared grid zoom", () => {
