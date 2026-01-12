@@ -36,6 +36,9 @@ export function applyFillCommitToDocumentController(options: ApplyFillCommitOpti
   const width = Math.max(0, sourceRange.endCol - sourceRange.startCol);
   if (height === 0 || width === 0) return { editsApplied: 0 };
 
+  // Avoid allocating a fresh `{row,col}` object for every cell visit during fills.
+  const coordScratch = { row: 0, col: 0 };
+
   const toScalar = (value: unknown): CellScalar => {
     if (value == null) return null;
     if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
@@ -47,8 +50,10 @@ export function applyFillCommitToDocumentController(options: ApplyFillCommitOpti
   const sourceCells: FillSourceCell[][] = [];
   for (let row = sourceRange.startRow; row < sourceRange.endRow; row++) {
     const outRow: FillSourceCell[] = [];
+    coordScratch.row = row;
     for (let col = sourceRange.startCol; col < sourceRange.endCol; col++) {
-      const cell = doc.getCell(sheetId, { row, col }) as { value: unknown; formula: string | null };
+      coordScratch.col = col;
+      const cell = doc.getCell(sheetId, coordScratch) as { value: unknown; formula: string | null };
       const formula = typeof cell?.formula === "string" && cell.formula.trim() !== "" ? cell.formula : null;
       if (formula) {
         const computed = getCellComputedValue ? getCellComputedValue(row, col) : null;
@@ -67,7 +72,9 @@ export function applyFillCommitToDocumentController(options: ApplyFillCommitOpti
   doc.beginBatch({ label: "Fill" });
   try {
     for (const edit of edits) {
-      doc.setCellInput(sheetId, { row: edit.row, col: edit.col }, edit.value);
+      coordScratch.row = edit.row;
+      coordScratch.col = edit.col;
+      doc.setCellInput(sheetId, coordScratch, edit.value);
     }
   } finally {
     doc.endBatch();

@@ -1019,11 +1019,15 @@ export class SpreadsheetApp {
     if (this.presenceCanvas) this.root.appendChild(this.presenceCanvas);
     this.root.appendChild(this.selectionCanvas);
 
+    // Avoid allocating a fresh `{row,col}` object for every chart cell lookup.
+    const chartCoordScratch = { row: 0, col: 0 };
     this.chartStore = new ChartStore({
       defaultSheet: this.sheetId,
       sheetNameResolver: this.sheetNameResolver,
       getCellValue: (sheetId, row, col) => {
-        const state = this.document.getCell(sheetId, { row, col }) as {
+        chartCoordScratch.row = row;
+        chartCoordScratch.col = col;
+        const state = this.document.getCell(sheetId, chartCoordScratch) as {
           value: unknown;
           formula: string | null;
         };
@@ -1282,13 +1286,18 @@ export class SpreadsheetApp {
               return;
             }
 
+            const fillCoordScratch = { row: 0, col: 0 };
             applyFillCommitToDocumentController({
               document: this.document,
               sheetId: this.sheetId,
               sourceRange: source,
               targetRange: target,
               mode,
-              getCellComputedValue: (row, col) => this.getCellComputedValue({ row, col }) as any
+              getCellComputedValue: (row, col) => {
+                fillCoordScratch.row = row;
+                fillCoordScratch.col = col;
+                return this.getCellComputedValue(fillCoordScratch) as any;
+              }
             });
 
             // Ensure non-grid overlays (charts, auditing) refresh after the mutation.
@@ -3073,6 +3082,10 @@ export class SpreadsheetApp {
     const inSelection = (row: number, col: number): boolean =>
       ranges.some((r) => row >= r.startRow && row <= r.endRow && col >= r.startCol && col <= r.endCol);
 
+    // Reuse a single coord object while scanning selection cells to avoid allocating
+    // `{row,col}` objects for every visited coordinate.
+    const coordScratch = { row: 0, col: 0 };
+
     let selectionArea = 0;
     const SELECTION_AREA_SCAN_THRESHOLD = 10_000;
     for (const r of ranges) {
@@ -3083,17 +3096,19 @@ export class SpreadsheetApp {
     }
 
     if (selectionArea <= SELECTION_AREA_SCAN_THRESHOLD) {
-      const visited = ranges.length > 1 ? new Set<string>() : null;
+      const visited = ranges.length > 1 ? new Set<number>() : null;
       for (const r of ranges) {
         for (let row = r.startRow; row <= r.endRow; row += 1) {
           for (let col = r.startCol; col <= r.endCol; col += 1) {
             if (visited) {
-              const key = `${row},${col}`;
+              const key = row * COMPUTED_COORD_COL_STRIDE + col;
               if (visited.has(key)) continue;
               visited.add(key);
             }
 
-            const cell = this.document.getCell(this.sheetId, { row, col });
+            coordScratch.row = row;
+            coordScratch.col = col;
+            const cell = this.document.getCell(this.sheetId, coordScratch);
             // Ignore format-only cells (styleId-only).
             const hasContent = cell.value != null || cell.formula != null;
             if (!hasContent) continue;
@@ -3102,7 +3117,7 @@ export class SpreadsheetApp {
 
             // Sum/average operate on numeric values only (computed values for formulas).
             if (cell.formula != null) {
-              const computed = this.getCellComputedValue({ row, col });
+              const computed = this.getCellComputedValue(coordScratch);
               if (typeof computed === "number" && Number.isFinite(computed)) {
                 numericCount += 1;
                 numericSum += computed;
@@ -3127,7 +3142,9 @@ export class SpreadsheetApp {
 
         // Sum/average operate on numeric values only (computed values for formulas).
         if (cell.formula != null) {
-          const computed = this.getCellComputedValue({ row, col });
+          coordScratch.row = row;
+          coordScratch.col = col;
+          const computed = this.getCellComputedValue(coordScratch);
           if (typeof computed === "number" && Number.isFinite(computed)) {
             numericCount += 1;
             numericSum += computed;
@@ -7008,13 +7025,18 @@ export class SpreadsheetApp {
       return false;
     }
 
+    const fillCoordScratch = { row: 0, col: 0 };
     applyFillCommitToDocumentController({
       document: this.document,
       sheetId: this.sheetId,
       sourceRange: source,
       targetRange: deltaRange,
       mode,
-      getCellComputedValue: (row, col) => this.getCellComputedValue({ row, col }) as any
+      getCellComputedValue: (row, col) => {
+        fillCoordScratch.row = row;
+        fillCoordScratch.col = col;
+        return this.getCellComputedValue(fillCoordScratch) as any;
+      }
     });
     return true;
   }
@@ -7105,6 +7127,12 @@ export class SpreadsheetApp {
     const label = direction === "down" ? t("command.edit.fillDown") : t("command.edit.fillRight");
 
     // Explicit batch so multi-range selections become a single undo step.
+    const fillCoordScratch = { row: 0, col: 0 };
+    const getCellComputedValue = (row: number, col: number) => {
+      fillCoordScratch.row = row;
+      fillCoordScratch.col = col;
+      return this.getCellComputedValue(fillCoordScratch) as any;
+    };
     this.document.beginBatch({ label });
     try {
       for (const op of operations) {
@@ -7114,7 +7142,7 @@ export class SpreadsheetApp {
           sourceRange: op.sourceRange,
           targetRange: op.targetRange,
           mode: "formulas",
-          getCellComputedValue: (row, col) => this.getCellComputedValue({ row, col }) as any
+          getCellComputedValue
         });
       }
     } finally {

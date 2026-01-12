@@ -571,14 +571,18 @@ export class SecondaryGridView {
       });
       return;
     }
-
+    const fillCoordScratch = { row: 0, col: 0 };
     applyFillCommitToDocumentController({
       document: this.document,
       sheetId,
       sourceRange: source,
       targetRange: target,
       mode,
-      getCellComputedValue: (row, col) => this.getComputedValue({ row, col }) as any,
+      getCellComputedValue: (row, col) => {
+        fillCoordScratch.row = row;
+        fillCoordScratch.col = col;
+        return this.getComputedValue(fillCoordScratch) as any;
+      },
     });
 
     // Ensure the secondary pane repaints immediately after the mutation. The primary
