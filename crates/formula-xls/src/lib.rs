@@ -1231,19 +1231,6 @@ fn import_xls_path_with_biff_reader(
             .strip_prefix('=')
             .unwrap_or(refers_to)
             .to_string();
-        let refers_to = if sheet_rename_pairs.is_empty() {
-            refers_to
-        } else {
-            let mut rewritten = refers_to;
-            for (old_name, new_name) in sheet_rename_pairs.iter().rev() {
-                rewritten = formula_model::rewrite_sheet_names_in_formula(
-                    &rewritten,
-                    old_name,
-                    new_name,
-                );
-            }
-            rewritten
-        };
 
         // When BIFF defined names were imported successfully, prefer them over calamine’s
         // best-effort string representation.
