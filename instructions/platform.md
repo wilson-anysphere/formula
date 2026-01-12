@@ -116,9 +116,24 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
     // ...
     {
       "identifier": "core:event:allow-listen",
-      "allow": [{ "event": "open-file" }, { "event": "oauth-redirect" }, { "event": "startup:metrics" }]
+      "allow": [
+        { "event": "open-file" },
+        { "event": "oauth-redirect" },
+        { "event": "startup:window-visible" },
+        { "event": "startup:webview-loaded" },
+        { "event": "startup:tti" },
+        { "event": "startup:metrics" }
+      ]
     },
-    { "identifier": "core:event:allow-emit", "allow": [{ "event": "open-file-ready" }, { "event": "close-prep-done" }] },
+    {
+      "identifier": "core:event:allow-emit",
+      "allow": [
+        { "event": "open-file-ready" },
+        { "event": "oauth-redirect-ready" },
+        { "event": "close-prep-done" },
+        { "event": "close-handled" }
+      ]
+    },
     // ...
     "dialog:allow-open",
     "dialog:allow-save",
