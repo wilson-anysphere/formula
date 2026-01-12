@@ -55,8 +55,8 @@ Notes:
   - writers should preserve the original casing when round-tripping an existing file.
 - **`cellImages.xml` may be absent:** Some workbooks store image-in-cell values entirely via
   `xl/metadata.xml` + `xl/richData/*` (especially `richValueRel.xml` → `.rels` → `xl/media/*`) without a
-  separate `xl/cellImages.xml` part. See `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` and
-  `crates/formula-xlsx/tests/rich_data_roundtrip.rs`.
+  separate `xl/cellImages.xml` part. See `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (notes in
+  `fixtures/xlsx/basic/image-in-cell-richdata.md`) and `crates/formula-xlsx/tests/rich_data_roundtrip.rs`.
   - If `cellImages.xml` exists, preserve it and its relationship graph.
 - `xl/media/*` contains the actual image bytes (usually `.png`, but Excel may use other formats).
 - The exact `xl/richData/*` file set can vary across Excel builds; the `richValue*` names shown above are

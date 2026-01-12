@@ -125,6 +125,8 @@ ground truth for namespaces/root element names.
 
 ### Fixture: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` (`richValue.xml` + `richValueRel.xml` 2017 variant)
 
+See also: [`fixtures/xlsx/basic/image-in-cell-richdata.md`](../fixtures/xlsx/basic/image-in-cell-richdata.md) (walkthrough of this fixture).
+
 **Parts present** (complete inventory from `unzip -l`):
 
 ```
