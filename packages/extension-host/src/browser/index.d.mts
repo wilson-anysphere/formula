@@ -39,7 +39,7 @@ export class BrowserExtensionHost {
     manifest: Record<string, any>;
     mainUrl: string;
   }): Promise<string>;
-  unloadExtension(extensionId: string): Promise<boolean>;
+  unloadExtension(extensionId: string): Promise<void | boolean>;
   updateExtension(args: {
     extensionId: string;
     extensionPath: string;

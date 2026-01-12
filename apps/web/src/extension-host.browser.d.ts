@@ -9,7 +9,7 @@ declare module "@formula/extension-host/browser" {
       mainUrl: string;
     }): Promise<string>;
 
-    unloadExtension(extensionId: string): Promise<boolean>;
+    unloadExtension(extensionId: string): Promise<void | boolean>;
 
     resetExtensionState(extensionId: string): Promise<void>;
 
