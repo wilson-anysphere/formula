@@ -119,6 +119,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Desktop open-file IPC readiness unit tests
+        # Keep this lightweight: run only the targeted unit tests that guard the
+        # `open-file` readiness handshake (no Tauri/WebView build required).
+        run: pnpm -C apps/desktop test -- src/tauri/__tests__/openFileIpc.vitest.ts src/tauri/__tests__/openFileIpcWiring.vitest.ts
+
       - name: Lint (Node-free desktop renderer guard)
         run: pnpm -w lint
 
