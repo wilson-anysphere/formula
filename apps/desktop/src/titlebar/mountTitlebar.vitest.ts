@@ -44,18 +44,18 @@ describe("mountTitlebar", () => {
     expect(dragRegion).toBeTruthy();
     expect(dragRegion?.getAttribute("data-tauri-drag-region")).not.toBeNull();
 
-    expect(container.querySelector(".formula-titlebar__app-name")?.textContent).toBe("Formula");
-    expect(container.querySelector(".formula-titlebar__document-name")?.textContent).toBe("Untitled.xlsx");
-    expect(container.querySelector(".formula-titlebar__document-name")?.getAttribute("title")).toBe("Untitled.xlsx");
+    expect(container.querySelector('[data-testid="titlebar-app-name"]')?.textContent).toBe("Formula");
+    expect(container.querySelector('[data-testid="titlebar-document-name"]')?.textContent).toBe("Untitled.xlsx");
+    expect(container.querySelector('[data-testid="titlebar-document-name"]')?.getAttribute("title")).toBe("Untitled.xlsx");
 
     // Window controls exist with accessible labels.
     const windowControls = container.querySelector<HTMLElement>('[data-testid="titlebar-window-controls"]');
     expect(windowControls?.getAttribute("role")).toBe("group");
     expect(windowControls?.getAttribute("aria-label")).toBe("Window controls");
 
-    const closeButton = container.querySelector('[aria-label="Close window"]');
-    const minimizeButton = container.querySelector('[aria-label="Minimize window"]');
-    const maximizeButton = container.querySelector('[aria-label="Maximize window"]');
+    const closeButton = container.querySelector('[data-testid="titlebar-window-close"]');
+    const minimizeButton = container.querySelector('[data-testid="titlebar-window-minimize"]');
+    const maximizeButton = container.querySelector('[data-testid="titlebar-window-maximize"]');
     expect(closeButton).toBeInstanceOf(HTMLButtonElement);
     expect(minimizeButton).toBeInstanceOf(HTMLButtonElement);
     expect(maximizeButton).toBeInstanceOf(HTMLButtonElement);
@@ -126,9 +126,9 @@ describe("mountTitlebar", () => {
     expect(container.querySelector<HTMLButtonElement>('[data-testid="undo"]')?.disabled).toBe(true);
     expect(container.querySelector<HTMLButtonElement>('[data-testid="redo"]')?.disabled).toBe(true);
 
-    const closeButton = container.querySelector<HTMLButtonElement>('[aria-label="Close window"]');
-    const minimizeButton = container.querySelector<HTMLButtonElement>('[aria-label="Minimize window"]');
-    const maximizeButton = container.querySelector<HTMLButtonElement>('[aria-label="Maximize window"]');
+    const closeButton = container.querySelector<HTMLButtonElement>('[data-testid="titlebar-window-close"]');
+    const minimizeButton = container.querySelector<HTMLButtonElement>('[data-testid="titlebar-window-minimize"]');
+    const maximizeButton = container.querySelector<HTMLButtonElement>('[data-testid="titlebar-window-maximize"]');
 
     expect(closeButton?.disabled).toBe(false);
     expect(minimizeButton?.disabled).toBe(false);

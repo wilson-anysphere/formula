@@ -127,6 +127,7 @@ export function Titlebar({
           className="formula-titlebar__window-button formula-titlebar__window-button--close"
           aria-label="Close window"
           title="Close window"
+          data-testid="titlebar-window-close"
           disabled={!windowControls?.onClose}
           onClick={windowControls?.onClose}
         />
@@ -135,6 +136,7 @@ export function Titlebar({
           className="formula-titlebar__window-button formula-titlebar__window-button--minimize"
           aria-label="Minimize window"
           title="Minimize window"
+          data-testid="titlebar-window-minimize"
           disabled={!windowControls?.onMinimize}
           onClick={windowControls?.onMinimize}
         />
@@ -143,6 +145,7 @@ export function Titlebar({
           className="formula-titlebar__window-button formula-titlebar__window-button--maximize"
           aria-label="Maximize window"
           title="Maximize window"
+          data-testid="titlebar-window-maximize"
           disabled={!windowControls?.onToggleMaximize}
           onClick={windowControls?.onToggleMaximize}
         />
@@ -188,9 +191,11 @@ export function Titlebar({
         onDoubleClick={windowControls?.onToggleMaximize}
       >
         <div className="formula-titlebar__titles" data-testid="titlebar-titles">
-          <span className="formula-titlebar__app-name">{appName}</span>
+          <span className="formula-titlebar__app-name" data-testid="titlebar-app-name">
+            {appName}
+          </span>
           {normalizedDocumentName.trim().length > 0 ? (
-            <span className="formula-titlebar__document-name" title={normalizedDocumentName}>
+            <span className="formula-titlebar__document-name" title={normalizedDocumentName} data-testid="titlebar-document-name">
               {normalizedDocumentName}
             </span>
           ) : null}
