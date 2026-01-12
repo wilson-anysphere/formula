@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandRegistry } from "../extensions/commandRegistry.js";
 import { ContextKeyService } from "../extensions/contextKeys.js";
 import { createCommandPalette } from "./createCommandPalette.js";
+import { COMMAND_RECENTS_STORAGE_KEY, LEGACY_COMMAND_RECENTS_STORAGE_KEY, readCommandRecents } from "./recents.js";
 
 function createStorageMock(): Storage {
   const map = new Map<string, string>();
@@ -103,6 +104,83 @@ describe("createCommandPalette focus management", () => {
     dispatchKey("Escape");
     expect(document.activeElement).toBe(outsideButton);
     expect(onCloseFocus).not.toHaveBeenCalled();
+
+    controller.dispose();
+  });
+});
+
+describe("createCommandPalette recents integration", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    vi.stubGlobal("localStorage", createStorageMock());
+    vi.useFakeTimers();
+    vi.setSystemTime(1234);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not record ignored clipboard commands, but does record normal commands", async () => {
+    const commandRegistry = new CommandRegistry();
+    commandRegistry.registerBuiltinCommand("clipboard.copy", "Copy", () => {});
+    commandRegistry.registerBuiltinCommand("cmd.normal", "Normal", () => {});
+
+    const controller = createCommandPalette({
+      commandRegistry,
+      contextKeys: new ContextKeyService(),
+      keybindingIndex: new Map(),
+      ensureExtensionsLoaded: async () => {},
+      onCloseFocus: () => {},
+      extensionLoadDelayMs: 60_000,
+    });
+
+    await commandRegistry.executeCommand("clipboard.copy");
+    expect(readCommandRecents(localStorage)).toEqual([]);
+
+    await commandRegistry.executeCommand("cmd.normal");
+    expect(readCommandRecents(localStorage)).toEqual([{ commandId: "cmd.normal", lastUsedMs: 1234, count: 1 }]);
+
+    controller.dispose();
+  });
+
+  it("does not record failed command executions", async () => {
+    const commandRegistry = new CommandRegistry();
+    commandRegistry.registerBuiltinCommand("cmd.fail", "Fail", () => {
+      throw new Error("boom");
+    });
+
+    const controller = createCommandPalette({
+      commandRegistry,
+      contextKeys: new ContextKeyService(),
+      keybindingIndex: new Map(),
+      ensureExtensionsLoaded: async () => {},
+      onCloseFocus: () => {},
+      extensionLoadDelayMs: 60_000,
+    });
+
+    await expect(commandRegistry.executeCommand("cmd.fail")).rejects.toThrow("boom");
+    expect(readCommandRecents(localStorage)).toEqual([]);
+
+    controller.dispose();
+  });
+
+  it("migrates legacy recents key on install (and filters ignored entries)", () => {
+    localStorage.setItem(LEGACY_COMMAND_RECENTS_STORAGE_KEY, JSON.stringify(["clipboard.copy", "cmd.normal"]));
+    expect(localStorage.getItem(COMMAND_RECENTS_STORAGE_KEY)).toBeNull();
+
+    const commandRegistry = new CommandRegistry();
+    const controller = createCommandPalette({
+      commandRegistry,
+      contextKeys: new ContextKeyService(),
+      keybindingIndex: new Map(),
+      ensureExtensionsLoaded: async () => {},
+      onCloseFocus: () => {},
+      extensionLoadDelayMs: 60_000,
+    });
+
+    expect(readCommandRecents(localStorage)).toEqual([{ commandId: "cmd.normal", lastUsedMs: 1234, count: 1 }]);
 
     controller.dispose();
   });
