@@ -356,10 +356,12 @@ export class ContextManager {
       : null;
 
     // If DLP is enabled, redact the query before sending it to the embedder when policy
-    // would not allow sending that sensitive content to a cloud provider. This avoids
-    // leaking user-provided tokens (e.g. an email/SSN pasted into the prompt) to cloud
-    // embedding services, and also improves retrieval when stored chunk text has been
-    // redacted to deterministic placeholders.
+    // would not allow that sensitive content to be processed by cloud AI.
+    //
+    // Today, Formula's workbook RAG uses deterministic hash embeddings (offline), but we
+    // still redact here so:
+    // - retrieval stays consistent when indexed chunk text has been replaced with deterministic placeholders
+    // - this remains safe if a future Cursor-managed embedding service is introduced
     const queryHeuristic = dlp ? classifyText(params.query) : null;
     const queryClassification = queryHeuristic ? heuristicToPolicyClassification(queryHeuristic) : null;
     const queryDecision =
