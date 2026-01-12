@@ -11,6 +11,7 @@ mod authenticode;
 mod compression;
 mod contents_hash;
 mod dir;
+mod normalized_data;
 mod offcrypto;
 mod ole;
 mod project_digest;
@@ -22,6 +23,7 @@ pub use authenticode::{
 pub use compression::{compress_container, decompress_container, CompressionError};
 pub use contents_hash::content_normalized_data;
 pub use dir::{DirParseError, DirStream, ModuleRecord, ModuleType};
+pub use normalized_data::forms_normalized_data;
 pub use ole::{OleError, OleFile};
 pub use project_digest::{compute_vba_project_digest, DigestAlg};
 pub use signature::{
