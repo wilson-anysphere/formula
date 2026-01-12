@@ -54,6 +54,7 @@ mod read;
 mod reader;
 mod recalc_policy;
 mod relationships;
+mod rich_data;
 mod rich_data_images;
 pub mod shared_strings;
 mod sheet_metadata;
