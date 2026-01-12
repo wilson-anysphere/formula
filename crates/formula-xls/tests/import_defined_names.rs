@@ -213,6 +213,24 @@ fn imports_defined_names_with_external_workbook_3d_refs() {
     assert_eq!(ext_span.refers_to, "'[Book1.xlsx]SheetA:SheetC'!$A$1");
     assert_parseable_refers_to(&ext_span.refers_to);
 
+    let ext_namex = result
+        .workbook
+        .defined_names
+        .iter()
+        .find(|n| n.name == "ExtNameX")
+        .expect("ExtNameX missing");
+    assert_eq!(ext_namex.refers_to, "'[Book1.xlsx]SheetA'!ExtDefined");
+    assert_parseable_refers_to(&ext_namex.refers_to);
+
+    let udf = result
+        .workbook
+        .defined_names
+        .iter()
+        .find(|n| n.name == "ExtUdfCall")
+        .expect("ExtUdfCall missing");
+    assert_eq!(udf.refers_to, "MyUdf(1)");
+    assert_parseable_refers_to(&udf.refers_to);
+
     for name in &result.workbook.defined_names {
         assert_parseable_refers_to(&name.refers_to);
     }
