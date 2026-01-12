@@ -1528,6 +1528,33 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Consume tokens until the matching closing `)` for the current parenthesized group/call.
+    ///
+    /// Assumes the opening `(` has already been consumed.
+    ///
+    /// Returns `true` if a matching `)` was found and consumed, or `false` if EOF was reached
+    /// first.
+    fn consume_until_matching_rparen(&mut self) -> bool {
+        let mut depth: usize = 1;
+        while depth > 0 {
+            match self.peek_kind() {
+                TokenKind::LParen => {
+                    depth += 1;
+                    self.next();
+                }
+                TokenKind::RParen => {
+                    depth = depth.saturating_sub(1);
+                    self.next();
+                }
+                TokenKind::Eof => return false,
+                _ => {
+                    self.next();
+                }
+            }
+        }
+        true
+    }
+
     fn parse_expression_best_effort(&mut self, min_bp: u8) -> Expr {
         self.skip_trivia();
         let mut lhs = self.parse_prefix_best_effort();
@@ -1952,6 +1979,18 @@ impl<'a> Parser<'a> {
                 _ => {}
             }
 
+            if args.len() == crate::EXCEL_MAX_ARGS {
+                self.record_error(ParseError::new(
+                    format!("Too many arguments (max {})", crate::EXCEL_MAX_ARGS),
+                    self.current_span(),
+                ));
+                let closed = self.consume_until_matching_rparen();
+                if closed {
+                    self.func_stack.pop();
+                }
+                break;
+            }
+
             // Parse an argument (or record it as missing).
             if matches!(self.peek_kind(), TokenKind::ArgSep) {
                 args.push(Expr::Missing);
@@ -2035,6 +2074,15 @@ impl<'a> Parser<'a> {
                     break;
                 }
                 _ => {}
+            }
+
+            if args.len() == crate::EXCEL_MAX_ARGS {
+                self.record_error(ParseError::new(
+                    format!("Too many arguments (max {})", crate::EXCEL_MAX_ARGS),
+                    self.current_span(),
+                ));
+                self.consume_until_matching_rparen();
+                break;
             }
 
             if matches!(self.peek_kind(), TokenKind::ArgSep) {
@@ -2547,6 +2595,12 @@ impl<'a> Parser<'a> {
             } else {
                 loop {
                     self.skip_trivia();
+                    if args.len() == crate::EXCEL_MAX_ARGS {
+                        return Err(ParseError::new(
+                            format!("Too many arguments (max {})", crate::EXCEL_MAX_ARGS),
+                            self.current_span(),
+                        ));
+                    }
                     if matches!(self.peek_kind(), TokenKind::ArgSep) {
                         // Missing argument.
                         args.push(Expr::Missing);
@@ -2605,6 +2659,12 @@ impl<'a> Parser<'a> {
             } else {
                 loop {
                     self.skip_trivia();
+                    if args.len() == crate::EXCEL_MAX_ARGS {
+                        return Err(ParseError::new(
+                            format!("Too many arguments (max {})", crate::EXCEL_MAX_ARGS),
+                            self.current_span(),
+                        ));
+                    }
                     if matches!(self.peek_kind(), TokenKind::ArgSep) {
                         // Missing argument.
                         args.push(Expr::Missing);

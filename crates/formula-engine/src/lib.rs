@@ -33,6 +33,12 @@ pub mod sort_filter;
 pub mod value;
 pub mod what_if;
 
+/// Excel's hard limit for the maximum number of arguments in a single function call.
+///
+/// This applies to both built-in function calls (e.g. `SUM(...)`) and call expressions
+/// used for LAMBDA invocation syntax (e.g. `LAMBDA(...)(...)`).
+pub const EXCEL_MAX_ARGS: usize = 255;
+
 mod engine;
 mod perf;
 pub mod structured_refs;

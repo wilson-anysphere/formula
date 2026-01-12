@@ -582,6 +582,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
     }
 
     fn eval_function_call(&self, name: &str, args: &[CompiledExpr]) -> Value {
+        if args.len() > crate::EXCEL_MAX_ARGS {
+            return Value::Error(ErrorKind::Value);
+        }
+
         if let Some(spec) = crate::functions::lookup_function(name) {
             if args.len() < spec.min_args || args.len() > spec.max_args {
                 return Value::Error(ErrorKind::Value);
@@ -622,6 +626,10 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
         lambda: crate::value::Lambda,
         args: &[CompiledExpr],
     ) -> Value {
+        if args.len() > crate::EXCEL_MAX_ARGS {
+            return Value::Error(ErrorKind::Value);
+        }
+
         let depth = self.lambda_depth.get();
         if depth >= LAMBDA_RECURSION_LIMIT {
             return Value::Error(ErrorKind::Calc);
@@ -1293,6 +1301,10 @@ impl<'a, R: ValueResolver> FunctionContext for Evaluator<'a, R> {
     }
 
     fn eval_lambda(&self, lambda: &Lambda, args: Vec<FnArgValue>) -> Value {
+        if args.len() > crate::EXCEL_MAX_ARGS {
+            return Value::Error(ErrorKind::Value);
+        }
+
         if args.len() > lambda.params.len() {
             return Value::Error(ErrorKind::Value);
         }
