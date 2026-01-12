@@ -176,7 +176,6 @@ export class DesktopPowerQueryService {
   private readonly emitter = new Emitter<DesktopPowerQueryServiceEvent>();
   private readonly refreshManager: DesktopPowerQueryRefreshManager;
   private readonly getContext: () => QueryExecutionContext;
-  private readonly invoke: TauriInvoke | null;
   private readonly queries = new Map<string, Query>();
   private readonly applyControllers = new Map<string, AbortController>();
   private readonly unsubscribeRefreshEvents: (() => void) | null;
@@ -186,7 +185,6 @@ export class DesktopPowerQueryService {
     this.workbookId = normalizeWorkbookId(options.workbookId);
     this.document = options.document;
     this.getContext = options.getContext ?? (() => getContextForDocument(this.document));
-    this.invoke = getTauriInvokeOrNull();
 
     const creds = createPowerQueryCredentialManager({ prompt: options.credentialPrompt });
     this.credentialStore = creds.store;
@@ -451,9 +449,10 @@ export class DesktopPowerQueryService {
   private async loadInitialQueries(): Promise<void> {
     // Prefer workbook-backed state (portable, file-backed) and fall back to localStorage
     // for backwards compatibility and non-Tauri contexts.
-    if (this.invoke) {
+    const invoke = getTauriInvokeOrNull();
+    if (invoke) {
       try {
-        const xml = await this.invoke("power_query_state_get");
+        const xml = await invoke("power_query_state_get");
         if (typeof xml === "string" && xml.trim()) {
           const workbookQueries = parseFormulaPowerQueryXml(xml);
           if (workbookQueries) {
@@ -482,13 +481,14 @@ export class DesktopPowerQueryService {
     const queries = this.getQueries();
     saveQueriesToStorage(this.workbookId, queries);
 
-    if (!this.invoke) return;
+    const invoke = getTauriInvokeOrNull();
+    if (!invoke) return;
     const xml = serializeFormulaPowerQueryXml(queries);
     if (xml === this.lastPersistedWorkbookXml) {
       return;
     }
     this.lastPersistedWorkbookXml = xml;
-    this.invoke("power_query_state_set", { xml }).catch(() => {
+    invoke("power_query_state_set", { xml }).catch(() => {
       // Retry on future updates if the invoke failed.
       if (this.lastPersistedWorkbookXml === xml) this.lastPersistedWorkbookXml = null;
     });
