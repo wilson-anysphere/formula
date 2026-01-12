@@ -237,6 +237,101 @@ describe("CanvasGrid resize auto-fit interactions", () => {
     host.remove();
   });
 
+  it("dragging a header resize boundary updates the column on touch and emits a single onAxisSizeChange commit event", async () => {
+    const provider: CellProvider = {
+      getCell: (row, col) => {
+        if (row === 0 && col === 1) return { row, col, value: "A" };
+        if (row === 1 && col === 0) return { row, col, value: 1 };
+        return null;
+      }
+    };
+
+    const apiRef = React.createRef<GridApi>();
+    const onAxisSizeChange = vi.fn<(change: GridAxisSizeChange) => void>();
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(
+        <CanvasGrid
+          provider={provider}
+          rowCount={20}
+          colCount={10}
+          defaultRowHeight={10}
+          defaultColWidth={50}
+          frozenRows={1}
+          frozenCols={1}
+          enableResize
+          apiRef={apiRef}
+          onAxisSizeChange={onAxisSizeChange}
+        />
+      );
+    });
+
+    const api = apiRef.current;
+    expect(api).toBeTruthy();
+
+    const beforeWidth = api!.getColWidth(1);
+    expect(beforeWidth).toBe(50);
+
+    const beforeScroll = api!.getScroll();
+    expect(api!.getSelection()).toBeNull();
+
+    const colARect = api!.getCellRect(0, 1);
+    expect(colARect).not.toBeNull();
+
+    const boundaryX = colARect!.x + colARect!.width;
+    const boundaryY = colARect!.y + colARect!.height / 2;
+
+    const selectionCanvas = host.querySelector('[data-testid="canvas-grid-selection"]') as HTMLCanvasElement;
+    expect(selectionCanvas).toBeTruthy();
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(
+        createPointerEvent("pointerdown", { clientX: boundaryX, clientY: boundaryY, pointerId: 4, pointerType: "touch" })
+      );
+      selectionCanvas.dispatchEvent(
+        createPointerEvent("pointermove", {
+          clientX: boundaryX + 40,
+          clientY: boundaryY,
+          pointerId: 4,
+          pointerType: "touch"
+        })
+      );
+    });
+
+    expect(onAxisSizeChange).toHaveBeenCalledTimes(0);
+
+    await act(async () => {
+      selectionCanvas.dispatchEvent(
+        createPointerEvent("pointerup", { clientX: boundaryX + 40, clientY: boundaryY, pointerId: 4, pointerType: "touch" })
+      );
+    });
+
+    const afterWidth = api!.getColWidth(1);
+    expect(afterWidth).toBeGreaterThan(beforeWidth);
+    expect(api!.getScroll()).toEqual(beforeScroll);
+    expect(api!.getSelection()).toBeNull();
+
+    expect(onAxisSizeChange).toHaveBeenCalledTimes(1);
+    expect(onAxisSizeChange.mock.calls[0]?.[0]).toMatchObject({
+      kind: "col",
+      index: 1,
+      previousSize: beforeWidth,
+      size: afterWidth,
+      defaultSize: 50,
+      zoom: 1,
+      source: "resize"
+    });
+
+    await act(async () => {
+      root.unmount();
+    });
+    host.remove();
+  });
+
   it("double tapping a header resize boundary auto-fits the column on touch", async () => {
     const provider: CellProvider = {
       getCell: (row, col) => {

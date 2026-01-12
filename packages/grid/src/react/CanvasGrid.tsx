@@ -1263,6 +1263,44 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
 
       const touchMode = touchModeRef.current ?? "auto";
       if (event.pointerType === "touch" && touchMode !== "select" && interactionModeRef.current !== "rangeSelection") {
+        // Allow resizing (and double-tap auto-fit) on touch devices even when touch interactions
+        // are primarily configured for pan/zoom. Treat a touch that starts on a resize handle as
+        // a resize gesture instead of a pan.
+        if (
+          enableResizeRef.current &&
+          touchPointers.size === 0 &&
+          resizePointerIdRef.current === null &&
+          selectionPointerIdRef.current === null
+        ) {
+          const point = getViewportPoint(event);
+          const hit = getResizeHit(point.x, point.y);
+          if (hit) {
+            event.preventDefault();
+            resizePointerIdRef.current = event.pointerId;
+            selectionCanvas.setPointerCapture?.(event.pointerId);
+
+            if (hit.kind === "col") {
+              resizeDragRef.current = {
+                kind: "col",
+                index: hit.index,
+                startClient: event.clientX,
+                startSize: renderer.getColWidth(hit.index)
+              };
+              selectionCanvas.style.cursor = "col-resize";
+            } else {
+              resizeDragRef.current = {
+                kind: "row",
+                index: hit.index,
+                startClient: event.clientY,
+                startSize: renderer.getRowHeight(hit.index)
+              };
+              selectionCanvas.style.cursor = "row-resize";
+            }
+
+            return;
+          }
+        }
+
         event.preventDefault();
         keyboardAnchorRef.current = null;
         stopAutoScroll();
@@ -1566,6 +1604,27 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       const renderer = rendererRef.current;
       if (!renderer) return;
 
+      if (resizePointerIdRef.current !== null) {
+        if (event.pointerId !== resizePointerIdRef.current) return;
+        const drag = resizeDragRef.current;
+        if (!drag) return;
+
+        event.preventDefault();
+
+        if (drag.kind === "col") {
+          const delta = event.clientX - drag.startClient;
+          const minWidth = MIN_COL_WIDTH * zoomRef.current;
+          renderer.setColWidth(drag.index, Math.max(minWidth, drag.startSize + delta));
+        } else {
+          const delta = event.clientY - drag.startClient;
+          const minHeight = MIN_ROW_HEIGHT * zoomRef.current;
+          renderer.setRowHeight(drag.index, Math.max(minHeight, drag.startSize + delta));
+        }
+
+        syncScrollbars();
+        return;
+      }
+
       const touchMode = touchModeRef.current ?? "auto";
       if (event.pointerType === "touch" && touchMode !== "select" && interactionModeRef.current !== "rangeSelection") {
         if (!touchPointers.has(event.pointerId)) return;
@@ -1607,27 +1666,6 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         return;
       }
 
-      if (resizePointerIdRef.current !== null) {
-        if (event.pointerId !== resizePointerIdRef.current) return;
-        const drag = resizeDragRef.current;
-        if (!drag) return;
-
-        event.preventDefault();
-
-        if (drag.kind === "col") {
-          const delta = event.clientX - drag.startClient;
-          const minWidth = MIN_COL_WIDTH * zoomRef.current;
-          renderer.setColWidth(drag.index, Math.max(minWidth, drag.startSize + delta));
-        } else {
-          const delta = event.clientY - drag.startClient;
-          const minHeight = MIN_ROW_HEIGHT * zoomRef.current;
-          renderer.setRowHeight(drag.index, Math.max(minHeight, drag.startSize + delta));
-        }
-
-        syncScrollbars();
-        return;
-      }
-
       if (selectionPointerIdRef.current === null) return;
       if (event.pointerId !== selectionPointerIdRef.current) return;
 
@@ -1648,6 +1686,84 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     };
 
     const endDrag = (event: PointerEvent) => {
+      if (resizePointerIdRef.current !== null && event.pointerId === resizePointerIdRef.current) {
+        const drag = resizeDragRef.current;
+
+        resizePointerIdRef.current = null;
+        resizeDragRef.current = null;
+        selectionCanvas.style.cursor = "default";
+        try {
+          selectionCanvas.releasePointerCapture?.(event.pointerId);
+        } catch {
+          // Some environments throw if the pointer isn't captured; ignore.
+        }
+
+        const resizeRenderer = rendererRef.current;
+        if (resizeRenderer && drag) {
+          const endSize =
+            drag.kind === "col" ? resizeRenderer.getColWidth(drag.index) : resizeRenderer.getRowHeight(drag.index);
+          const defaultSize =
+            drag.kind === "col" ? resizeRenderer.scroll.cols.defaultSize : resizeRenderer.scroll.rows.defaultSize;
+
+          const sizeChanged = endSize !== drag.startSize;
+
+          if (sizeChanged) {
+            onAxisSizeChangeRef.current?.({
+              kind: drag.kind,
+              index: drag.index,
+              size: endSize,
+              previousSize: drag.startSize,
+              defaultSize,
+              zoom: zoomRef.current,
+              source: "resize"
+            });
+            lastResizeClickRef.current = null;
+            syncScrollbars();
+            return;
+          }
+
+          // Treat a non-moving resize interaction as a "click" on the handle. If we see two clicks
+          // within the double-click threshold, auto-fit (Excel behavior).
+          if (event.type === "pointerup" && interactionModeRef.current !== "rangeSelection") {
+            const ts = nowMs();
+            const last = lastResizeClickRef.current;
+            if (last && last.hit.kind === drag.kind && last.hit.index === drag.index && ts - last.time <= DOUBLE_CLICK_MS) {
+              lastResizeClickRef.current = null;
+
+              const prevSize = endSize;
+              const nextSize =
+                drag.kind === "col"
+                  ? resizeRenderer.autoFitCol(drag.index, { maxWidth: AUTO_FIT_MAX_COL_WIDTH })
+                  : resizeRenderer.autoFitRow(drag.index, { maxHeight: AUTO_FIT_MAX_ROW_HEIGHT });
+              syncScrollbars();
+
+              if (nextSize !== prevSize) {
+                onAxisSizeChangeRef.current?.({
+                  kind: drag.kind,
+                  index: drag.index,
+                  size: nextSize,
+                  previousSize: prevSize,
+                  defaultSize,
+                  zoom: zoomRef.current,
+                  source: "autoFit"
+                });
+              }
+              return;
+            }
+
+            lastResizeClickRef.current = { time: ts, hit: { kind: drag.kind, index: drag.index } };
+          } else {
+            lastResizeClickRef.current = null;
+          }
+
+          syncScrollbars();
+          return;
+        }
+
+        syncScrollbars();
+        return;
+      }
+
       const touchMode = touchModeRef.current ?? "auto";
       if (event.pointerType === "touch" && touchMode !== "select" && interactionModeRef.current !== "rangeSelection") {
         if (!touchPointers.has(event.pointerId)) return;
@@ -1820,84 +1936,6 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
           };
         }
 
-        return;
-      }
-
-      if (resizePointerIdRef.current !== null && event.pointerId === resizePointerIdRef.current) {
-        const drag = resizeDragRef.current;
-
-        resizePointerIdRef.current = null;
-        resizeDragRef.current = null;
-        selectionCanvas.style.cursor = "default";
-        try {
-          selectionCanvas.releasePointerCapture?.(event.pointerId);
-        } catch {
-          // Some environments throw if the pointer isn't captured; ignore.
-        }
-
-        const resizeRenderer = rendererRef.current;
-        if (resizeRenderer && drag) {
-          const endSize =
-            drag.kind === "col" ? resizeRenderer.getColWidth(drag.index) : resizeRenderer.getRowHeight(drag.index);
-          const defaultSize =
-            drag.kind === "col" ? resizeRenderer.scroll.cols.defaultSize : resizeRenderer.scroll.rows.defaultSize;
-
-          const sizeChanged = endSize !== drag.startSize;
-
-          if (sizeChanged) {
-            onAxisSizeChangeRef.current?.({
-              kind: drag.kind,
-              index: drag.index,
-              size: endSize,
-              previousSize: drag.startSize,
-              defaultSize,
-              zoom: zoomRef.current,
-              source: "resize"
-            });
-            lastResizeClickRef.current = null;
-            syncScrollbars();
-            return;
-          }
-
-          // Treat a non-moving resize interaction as a "click" on the handle. If we see two clicks
-          // within the double-click threshold, auto-fit (Excel behavior).
-          if (event.type === "pointerup" && interactionModeRef.current !== "rangeSelection") {
-            const ts = nowMs();
-            const last = lastResizeClickRef.current;
-            if (last && last.hit.kind === drag.kind && last.hit.index === drag.index && ts - last.time <= DOUBLE_CLICK_MS) {
-              lastResizeClickRef.current = null;
-
-              const prevSize = endSize;
-              const nextSize =
-                drag.kind === "col"
-                  ? resizeRenderer.autoFitCol(drag.index, { maxWidth: AUTO_FIT_MAX_COL_WIDTH })
-                  : resizeRenderer.autoFitRow(drag.index, { maxHeight: AUTO_FIT_MAX_ROW_HEIGHT });
-              syncScrollbars();
-
-              if (nextSize !== prevSize) {
-                onAxisSizeChangeRef.current?.({
-                  kind: drag.kind,
-                  index: drag.index,
-                  size: nextSize,
-                  previousSize: prevSize,
-                  defaultSize,
-                  zoom: zoomRef.current,
-                  source: "autoFit"
-                });
-              }
-              return;
-            }
-
-            lastResizeClickRef.current = { time: ts, hit: { kind: drag.kind, index: drag.index } };
-          } else {
-            lastResizeClickRef.current = null;
-          }
-
-          syncScrollbars();
-          return;
-        }
-
-        syncScrollbars();
         return;
       }
 
