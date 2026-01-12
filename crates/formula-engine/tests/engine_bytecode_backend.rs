@@ -2,6 +2,9 @@ use formula_engine::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
 use formula_engine::eval::{
     parse_a1, EvalContext, Evaluator, RecalcContext, SheetReference, ValueResolver,
 };
+use formula_engine::functions::{
+    ArraySupport, FunctionContext, FunctionSpec, ThreadSafety, ValueType, Volatility,
+};
 use formula_engine::locale::ValueLocaleConfig;
 use formula_engine::value::NumberLocale;
 use formula_engine::{
@@ -12,6 +15,27 @@ use formula_model::table::TableColumn;
 use formula_model::{Range, Table};
 use proptest::prelude::*;
 use std::sync::Arc;
+
+fn not_thread_safe_test(
+    _ctx: &dyn FunctionContext,
+    _args: &[formula_engine::eval::CompiledExpr],
+) -> Value {
+    Value::Number(1.0)
+}
+
+inventory::submit! {
+    FunctionSpec {
+        name: "NOT_THREAD_SAFE_TEST",
+        min_args: 0,
+        max_args: 0,
+        volatility: Volatility::NonVolatile,
+        thread_safety: ThreadSafety::NotThreadSafe,
+        array_support: ArraySupport::ScalarOnly,
+        return_type: ValueType::Number,
+        arg_types: &[],
+        implementation: not_thread_safe_test,
+    }
+}
 
 fn cell_addr_to_a1(addr: formula_engine::eval::CellAddr) -> String {
     fn col_to_name(mut col: u32) -> String {
@@ -1203,6 +1227,80 @@ fn bytecode_compile_diagnostics_reports_grid_and_range_limits() {
         .find(|e| e.sheet == "Sheet1" && e.addr == parse_a1("B1").unwrap())
         .map(|e| e.reason.clone());
     assert_eq!(b1, Some(BytecodeCompileReason::ExceedsRangeCellLimit));
+}
+
+#[test]
+fn bytecode_compile_diagnostics_reports_unknown_sheet_reason() {
+    let mut engine = Engine::new();
+
+    // Reference to a sheet that does not exist in the workbook.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=MissingSheet!A1")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 0);
+    assert_eq!(stats.fallback, 1);
+    assert_eq!(
+        stats
+            .fallback_reasons
+            .get(&BytecodeCompileReason::LowerError(
+                bytecode::LowerError::UnknownSheet,
+            ))
+            .copied()
+            .unwrap_or(0),
+        1
+    );
+}
+
+#[test]
+fn bytecode_compile_diagnostics_reports_external_reference_reason() {
+    let mut engine = Engine::new();
+
+    // External workbook reference with a 3D sheet span. These are not valid external sheet keys in
+    // the main evaluator (they expand by workbook sheet ordering), so they are not marked volatile
+    // and reach the bytecode lowering stage.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=[Book.xlsx]Sheet1:Sheet2!A1")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 0);
+    assert_eq!(stats.fallback, 1);
+    assert_eq!(
+        stats
+            .fallback_reasons
+            .get(&BytecodeCompileReason::LowerError(
+                bytecode::LowerError::ExternalReference,
+            ))
+            .copied()
+            .unwrap_or(0),
+        1
+    );
+}
+
+#[test]
+fn bytecode_compile_diagnostics_reports_not_thread_safe_reason() {
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=NOT_THREAD_SAFE_TEST()")
+        .unwrap();
+
+    let stats = engine.bytecode_compile_stats();
+    assert_eq!(stats.total_formula_cells, 1);
+    assert_eq!(stats.compiled, 0);
+    assert_eq!(stats.fallback, 1);
+    assert_eq!(
+        stats
+            .fallback_reasons
+            .get(&BytecodeCompileReason::NotThreadSafe)
+            .copied()
+            .unwrap_or(0),
+        1
+    );
 }
 
 #[test]
