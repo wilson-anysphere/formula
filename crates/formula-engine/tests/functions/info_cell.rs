@@ -93,6 +93,17 @@ fn info_recalc_reflects_calc_settings() {
         engine.get_cell_value("Sheet1", "A1"),
         Value::Text("Automatic except for tables".to_string())
     );
+
+    let mut engine = Engine::new();
+    engine.set_calc_settings(CalcSettings {
+        calculation_mode: CalculationMode::Manual,
+        ..CalcSettings::default()
+    });
+    engine
+        .set_cell_formula("Sheet1", "A1", "=INFO(\"recalc\")")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Text("Manual".to_string()));
 }
 
 #[test]
