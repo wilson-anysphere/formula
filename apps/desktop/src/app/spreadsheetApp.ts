@@ -2956,9 +2956,13 @@ export class SpreadsheetApp {
     const did = undo ? this.document.undo() : this.document.redo();
     if (did) {
       this.syncEngineNow();
-      this.clampScroll();
-      this.syncScrollbars();
-      this.refresh();
+      // Undo/redo can affect sheet view state (e.g. frozen panes). Keep renderer + scrollbars in sync.
+      this.syncFrozenPanes();
+      if (this.sharedGrid) {
+        // Shared grid rendering is driven by CanvasGridRenderer, but we still need to refresh
+        // overlays (charts, auditing, etc) after changes.
+        this.refresh();
+      }
     }
     return true;
   }
