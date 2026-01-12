@@ -1701,6 +1701,7 @@ class CollabWorkbookSheetStore extends WorkbookSheetStore {
       // This update originated locally; update the cached key so our observer
       // doesn't unnecessarily rebuild the sheet store instance.
       lastCollabSheetsKey = collabSheetsKey(this.session);
+      lastCollabSheetsSession = this.session;
     });
   }
 
@@ -1760,6 +1761,7 @@ class CollabWorkbookSheetStore extends WorkbookSheetStore {
       // This update originated locally; update the cached key so our observer
       // doesn't unnecessarily rebuild the sheet store instance.
       lastCollabSheetsKey = collabSheetsKey(this.session);
+      lastCollabSheetsSession = this.session;
     });
   }
 
@@ -1773,6 +1775,7 @@ class CollabWorkbookSheetStore extends WorkbookSheetStore {
       // This update originated locally; update the cached key so our observer
       // doesn't unnecessarily rebuild the sheet store instance.
       lastCollabSheetsKey = collabSheetsKey(this.session);
+      lastCollabSheetsSession = this.session;
     });
   }
 
@@ -1791,6 +1794,7 @@ class CollabWorkbookSheetStore extends WorkbookSheetStore {
       // This update originated locally; update the cached key so our observer
       // doesn't unnecessarily rebuild the sheet store instance.
       lastCollabSheetsKey = collabSheetsKey(this.session);
+      lastCollabSheetsSession = this.session;
     });
   }
 
@@ -1809,6 +1813,51 @@ class CollabWorkbookSheetStore extends WorkbookSheetStore {
       // This update originated locally; update the cached key so our observer
       // doesn't unnecessarily rebuild the sheet store instance.
       lastCollabSheetsKey = collabSheetsKey(this.session);
+      lastCollabSheetsSession = this.session;
+    });
+  }
+
+  override setTabColor(id: string, color: TabColor | undefined): void {
+    // Collab sheet metadata stores tab colors as 8-digit ARGB hex strings (e.g. "FFFF0000").
+    // Normalize UI-provided `TabColor.rgb` values into that representation before writing.
+    const raw = color?.rgb;
+    let normalized: string | null = null;
+    if (raw != null) {
+      const trimmed = String(raw).trim();
+      if (trimmed) {
+        const withoutHash = trimmed.startsWith("#") ? trimmed.slice(1) : trimmed;
+        if (/^[0-9A-Fa-f]{8}$/.test(withoutHash)) {
+          normalized = withoutHash.toUpperCase();
+        } else if (/^[0-9A-Fa-f]{6}$/.test(withoutHash)) {
+          normalized = `FF${withoutHash.toUpperCase()}`;
+        } else {
+          throw new Error(`Invalid tabColor (expected 6 or 8-digit hex): ${trimmed}`);
+        }
+      }
+    }
+
+    const before = this.getById(id)?.tabColor?.rgb ?? null;
+    const normalizedColor = normalized ? ({ rgb: normalized } satisfies TabColor) : undefined;
+    super.setTabColor(id, normalizedColor);
+    const after = this.getById(id)?.tabColor?.rgb ?? null;
+    if (after === before) return;
+
+    this.session.transactLocal(() => {
+      const idx = findCollabSheetIndexById(this.session, id);
+      if (idx < 0) return;
+      const entry: any = this.session.sheets.get(idx);
+      if (!entry) return;
+
+      if (!normalized) {
+        if (typeof entry.delete === "function") entry.delete("tabColor");
+      } else if (typeof entry.set === "function") {
+        entry.set("tabColor", normalized);
+      }
+
+      // This update originated locally; update the cached key so our observer
+      // doesn't unnecessarily rebuild the sheet store instance.
+      lastCollabSheetsKey = collabSheetsKey(this.session);
+      lastCollabSheetsSession = this.session;
     });
   }
 }
@@ -1842,12 +1891,18 @@ function reconcileSheetStoreWithDocument(ids: string[]): void {
 }
 
 let lastCollabSheetsKey = "";
+let lastCollabSheetsSession: CollabSession | null = null;
 
 function syncSheetStoreFromCollabSession(session: CollabSession): void {
   const sheets = listSheetsFromCollabSession(session);
   const key = collabSheetsKeyFromList(sheets);
-  if (key === lastCollabSheetsKey) return;
+  // Avoid rebuilding the sheet store unless the Yjs sheet list actually changed, *and*
+  // the current store instance is already backed by the same CollabSession.
+  if (key === lastCollabSheetsKey && lastCollabSheetsSession === session && workbookSheetStore instanceof CollabWorkbookSheetStore) {
+    return;
+  }
   lastCollabSheetsKey = key;
+  lastCollabSheetsSession = session;
 
   try {
     workbookSheetStore = new CollabWorkbookSheetStore(
@@ -2051,6 +2106,8 @@ function ensureCollabSheetObserver(): void {
     }
     observedCollabSession = null;
     collabSheetsObserver = null;
+    lastCollabSheetsKey = "";
+    lastCollabSheetsSession = null;
     return;
   }
   if (observedCollabSession === session) return;
