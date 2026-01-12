@@ -38,6 +38,7 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
     //
     // Note: `VBA/dir` stores records as: u16 id, u32 len, `len` bytes of record data.
     const PROJECTSYSKIND: u16 = 0x0001;
+    // Present in many real-world files, but MS-OVBA `ProjectNormalizedData` does not incorporate it.
     const PROJECTCOMPATVERSION: u16 = 0x004A;
     const PROJECTLCID: u16 = 0x0002;
     const PROJECTCODEPAGE: u16 = 0x0003;
@@ -91,7 +92,6 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
 
         match id {
             PROJECTSYSKIND
-            | PROJECTCOMPATVERSION
             | PROJECTLCID
             | PROJECTLCIDINVOKE
             | PROJECTCODEPAGE
@@ -101,6 +101,11 @@ pub fn project_normalized_data(vba_project_bin: &[u8]) -> Result<Vec<u8>, ParseE
             | PROJECTLIBFLAGS
             | PROJECTVERSION => {
                 out.extend_from_slice(data);
+            }
+
+            PROJECTCOMPATVERSION => {
+                // MS-OVBA `ProjectNormalizedData` pseudocode does not include this record's data.
+                // Keep parsing resilient to its presence, but do not incorporate it into the output.
             }
 
             PROJECTDOCSTRING => {
