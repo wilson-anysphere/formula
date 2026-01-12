@@ -169,9 +169,11 @@ fn verifies_project_digest_binding_with_external_signature_part() {
     let digest = hash(MessageDigest::md5(), &normalized).expect("md5 digest");
     assert_eq!(digest.as_ref().len(), 16, "expected 16-byte MD5 digest");
 
-    // VBA signatures sign an Authenticode `SpcIndirectDataContent` whose DigestInfo digest bytes
-    // are the MS-OVBA project ContentNormalizedData hash (MD5), even when the DigestInfo algorithm
-    // OID indicates SHA-256. We store it as:
+    // VBA signatures sign an Authenticode `SpcIndirectDataContent` whose DigestInfo.digest bytes
+    // are the MS-OVBA v1 Content Hash (`MD5(ContentNormalizedData)`; MS-OVBA §2.4.2.3).
+    //
+    // Per MS-OSHARED §4.3, Office stores these MD5 digest bytes for legacy signature streams even
+    // when DigestInfo.digestAlgorithm.algorithm advertises SHA-256. We store it as:
     //   signed_content || pkcs7_detached_signature(signed_content)
     let signed_content = build_spc_indirect_data_content_sha256_oid_with_md5_digest(digest.as_ref());
     let pkcs7 = make_pkcs7_detached_signature(&signed_content);

@@ -471,14 +471,16 @@ fn verifies_raw_signature_part_binding_against_vba_project_bin() {
     let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
     let vba_project_bin = build_minimal_vba_project_bin(module1);
 
-    // Signed digest is MD5(ContentNormalizedData) per MS-OVBA.
+    // Signed digest bytes are the MS-OVBA v1 Content Hash:
+    // `ContentHash = MD5(ContentNormalizedData)` (MS-OVBA §2.4.2.3).
     let normalized = content_normalized_data(&vba_project_bin).expect("content normalized data");
     let digest = hash(MessageDigest::md5(), &normalized)
         .expect("md5 digest")
         .to_vec();
 
     // Authenticode SpcIndirectDataContent: DigestInfo.algorithm is typically SHA-256 in practice,
-    // but DigestInfo.digest bytes are still the 16-byte MD5 project digest for VBA signatures.
+    // but DigestInfo.digest bytes are still the 16-byte MD5 project digest for legacy VBA signatures
+    // (MS-OSHARED §4.3).
     let spc = make_spc_indirect_data_content_sha256(&digest);
     let pkcs7 = make_pkcs7_signed_message(&spc);
 
@@ -551,7 +553,8 @@ fn verifies_raw_signature_part_binding_when_digsig_blob_wrapped() {
     let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
     let vba_project_bin = build_minimal_vba_project_bin(module1);
 
-    // Signed digest is MD5(ContentNormalizedData) per MS-OVBA.
+    // Signed digest bytes are the MS-OVBA v1 Content Hash:
+    // `ContentHash = MD5(ContentNormalizedData)` (MS-OVBA §2.4.2.3).
     let normalized = content_normalized_data(&vba_project_bin).expect("content normalized data");
     let digest = hash(MessageDigest::md5(), &normalized)
         .expect("md5 digest")
@@ -607,7 +610,8 @@ fn verifies_raw_signature_part_binding_when_wordsig_blob_wrapped() {
     let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
     let vba_project_bin = build_minimal_vba_project_bin(module1);
 
-    // Signed digest is MD5(ContentNormalizedData) per MS-OVBA.
+    // Signed digest bytes are the MS-OVBA v1 Content Hash:
+    // `ContentHash = MD5(ContentNormalizedData)` (MS-OVBA §2.4.2.3).
     let normalized = content_normalized_data(&vba_project_bin).expect("content normalized data");
     let digest = hash(MessageDigest::md5(), &normalized)
         .expect("md5 digest")
@@ -759,7 +763,8 @@ fn verifies_raw_signature_part_binding_when_digsig_blob_wrapped_and_tampered_pro
     let module1 = b"Sub Hello()\r\nEnd Sub\r\n";
     let vba_project_bin = build_minimal_vba_project_bin(module1);
 
-    // Signed digest is MD5(ContentNormalizedData) per MS-OVBA.
+    // Signed digest bytes are the MS-OVBA v1 Content Hash:
+    // `ContentHash = MD5(ContentNormalizedData)` (MS-OVBA §2.4.2.3).
     let normalized = content_normalized_data(&vba_project_bin).expect("content normalized data");
     let digest = hash(MessageDigest::md5(), &normalized)
         .expect("md5 digest")
