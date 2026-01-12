@@ -425,6 +425,42 @@ pub fn build_print_settings_calamine_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture where the worksheet name is invalid and will be sanitized by the
+/// importer, but at least one defined name still refers to the original (invalid) sheet name.
+pub fn build_sanitized_sheet_name_defined_name_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_sanitized_sheet_name_defined_name_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture where sanitizing one invalid worksheet name causes a collision with
+/// another sheet's *original* name.
+///
+/// This is used to ensure defined-name sheet-reference rewriting does not mistakenly rewrite
+/// already-sanitized BIFF-defined-name formulas (which are resolved by sheet index) into the
+/// colliding sheet.
+pub fn build_sanitized_sheet_name_defined_name_collision_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_sanitized_sheet_name_defined_name_collision_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a minimal BIFF8 `.xls` fixture containing a single sheet named `Notes`
 /// with a NOTE/OBJ/TXO comment anchored to `A1`.
 pub fn build_note_comment_fixture_xls() -> Vec<u8> {
@@ -2242,6 +2278,130 @@ fn build_print_settings_calamine_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_sanitized_sheet_name_defined_name_collision_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Sheet 0: invalid name, will sanitize from `Bad/Name` -> `Bad_Name`.
+    let boundsheet0_start = globals.len();
+    let mut boundsheet0 = Vec::<u8>::new();
+    boundsheet0.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet0.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet0, "Bad/Name");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet0);
+    let boundsheet0_offset_pos = boundsheet0_start + 4;
+
+    // Sheet 1: already has the sanitized base name, will dedupe to `Bad_Name (2)`.
+    let boundsheet1_start = globals.len();
+    let mut boundsheet1 = Vec::<u8>::new();
+    boundsheet1.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet1.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet1, "Bad_Name");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet1);
+    let boundsheet1_offset_pos = boundsheet1_start + 4;
+
+    // Minimal EXTERNSHEET table with one internal sheet entry (sheet 0).
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
+
+    // One workbook-scoped name that refers to the invalid sheet name (sheet 0).
+    // MyRange -> 'Bad/Name'!$A$1
+    let rgce = ptg_ref3d(0, 0, 0);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("MyRange", 0, false, None, &rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet substreams ------------------------------------------------------
+    let sheet0_offset = globals.len();
+    let sheet0 = build_empty_sheet_stream(xf_general);
+    globals[boundsheet0_offset_pos..boundsheet0_offset_pos + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet0);
+
+    let sheet1_offset = globals.len();
+    let sheet1 = build_empty_sheet_stream(xf_general);
+    globals[boundsheet1_offset_pos..boundsheet1_offset_pos + 4]
+        .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet1);
+
+    globals
+}
+
+fn build_sanitized_sheet_name_defined_name_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
+    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
+    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+
+    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // One General cell XF.
+    let xf_general = 16u16;
+    push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
+
+    // Single worksheet with an invalid name (contains `/`), which the importer will sanitize.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Bad/Name");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    // Minimal EXTERNSHEET table with one internal sheet entry.
+    push_record(
+        &mut globals,
+        RECORD_EXTERNSHEET,
+        &externsheet_record(&[(0, 0)]),
+    );
+
+    // One workbook-scoped name that refers to the (invalid) sheet name.
+    // MyRange -> 'Bad/Name'!$A$1
+    let rgce = ptg_ref3d(0, 0, 0);
+    push_record(
+        &mut globals,
+        RECORD_NAME,
+        &name_record("MyRange", 0, false, None, &rgce),
+    );
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet substream --------------------------------------------------------
+    let sheet_offset = globals.len();
+    let sheet = build_empty_sheet_stream(xf_general);
+
+    // Patch BoundSheet offset.
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    globals.extend_from_slice(&sheet);
+    globals
+}
 fn build_empty_sheet_stream(xf_general: u16) -> Vec<u8> {
     let mut sheet = Vec::<u8>::new();
 

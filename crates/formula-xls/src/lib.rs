@@ -1294,6 +1294,30 @@ fn import_xls_path_with_biff_reader(
             .unwrap_or(refers_to)
             .to_string();
 
+        // Defined names can contain sheet references, and those can point at sheet names that were
+        // later sanitized during import. Rewrite any sheet-qualified references using the same
+        // sheet rename mapping we apply to cells.
+        let mut refers_to = refers_to;
+        if !sheet_rename_pairs.is_empty() {
+            let original = refers_to.clone();
+            let mut rewritten = refers_to.clone();
+            // Apply rename pairs in reverse order so we don't cascade rewrites when a sanitized
+            // name collides with another sheet's original name (see comment in the cell-formula
+            // rewrite pass above).
+            for (old_name, new_name) in sheet_rename_pairs.iter().rev() {
+                rewritten =
+                    formula_model::rewrite_sheet_names_in_formula(&rewritten, old_name, new_name);
+            }
+
+            // `refers_to` is stored without a leading `=`; normalize defensively after rewriting.
+            // If rewriting produces an empty string, keep the original.
+            if let Some(normalized) = normalize_formula_text(&rewritten) {
+                refers_to = normalized;
+            } else {
+                refers_to = original;
+            }
+        }
+
         // When BIFF defined names were imported successfully, prefer them over calamine’s
         // best-effort string representation.
         if defined_names_before_calamine != 0
@@ -1334,17 +1358,6 @@ fn import_xls_path_with_biff_reader(
             "skipped {skipped_count} `.xls` defined names from calamine fallback due to invalid/duplicate names"
         )));
     }
-
-    // Defined names can contain sheet references, and those can point at sheet names that were
-    // later sanitized during import. Rewrite defined-name formulas using the same sheet rename
-    // mapping we apply to cells.
-    if !sheet_rename_pairs.is_empty() {
-        formula_rewrite::rewrite_defined_name_formulas_for_sheet_renames(
-            &mut out,
-            &sheet_rename_pairs,
-        );
-    }
-
     populate_print_settings_from_defined_names(&mut out, &mut warnings);
 
     // Best-effort import of worksheet AutoFilter ranges (phase 1).
@@ -1553,7 +1566,6 @@ fn import_xls_path_with_biff_reader(
             raw_xml: Vec::new(),
         });
     }
-
     Ok(XlsImportResult {
         workbook: out,
         source: ImportSource {

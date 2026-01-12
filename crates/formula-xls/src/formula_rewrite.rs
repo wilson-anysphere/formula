@@ -108,6 +108,7 @@ pub(crate) fn rewrite_workbook_formulas_for_sheet_renames(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn rewrite_defined_name_formulas_for_sheet_renames(
     workbook: &mut Workbook,
     sheet_rename_pairs: &[(String, String)],
