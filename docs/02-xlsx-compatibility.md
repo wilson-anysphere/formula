@@ -573,7 +573,7 @@ round-trip, treat the **part path** (including its original casing) as authorita
 
 1. `xl/workbook.xml` (via `xl/_rels/workbook.xml.rels`) contains a relationship that targets `cellImages.xml` (or `cellimages.xml`):
    - The relationship **Type URI is a Microsoft extension** and has been observed to vary across Excel builds.
-   - **Detection strategy**: treat any relationship whose `Target` resolves (case-insensitively) to `xl/cellimages.xml` as authoritative, rather than hardcoding a single `Type` URI.
+   - **Detection strategy**: treat any relationship whose `Target` resolves to either `xl/cellImages.xml` or `xl/cellimages.xml` (preserving the original casing) as authoritative, rather than hardcoding a single `Type` URI.
 2. `xl/_rels/cellImages.xml.rels` contains relationships of type `…/relationships/image` pointing at `xl/media/*` files.
    - The relationship `Id` values (e.g. `rId1`) are referenced from within `xl/cellImages.xml` via `r:embed`, so they must be preserved (or updated consistently if rewriting).
    - Targets are typically relative paths like `media/image1.png` (resolving to `/xl/media/image1.png`), but should be preserved as-is.
@@ -592,7 +592,7 @@ Observed in this repo (see `crates/formula-xlsx/tests/cell_images.rs` and
 - `application/vnd.ms-excel.cellimages+xml`
 
 **Preservation/detection strategy:**
-- Treat any `[Content_Types].xml` `<Override>` whose `PartName` case-insensitively matches `/xl/cellimages.xml` as authoritative.
+- Treat any `[Content_Types].xml` `<Override>` whose `PartName` is `/xl/cellImages.xml` or `/xl/cellimages.xml` as authoritative.
 - Preserve the `ContentType` value byte-for-byte on round-trip; **do not** hardcode a single MIME string in the writer.
 
 #### Relationship type URIs
