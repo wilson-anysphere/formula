@@ -65,6 +65,9 @@ def _step_skipped(reason: str) -> StepResult:
 
 
 def _scan_features(zip_names: list[str]) -> dict[str, Any]:
+    zip_names_casefold = [n.casefold() for n in zip_names]
+    zip_names_casefold_set = set(zip_names_casefold)
+
     prefixes = {
         "charts": "xl/charts/",
         "drawings": "xl/drawings/",
@@ -85,6 +88,11 @@ def _scan_features(zip_names: list[str]) -> dict[str, Any]:
     features["has_vba"] = "xl/vbaProject.bin" in zip_names
     features["has_connections"] = "xl/connections.xml" in zip_names
     features["has_shared_strings"] = "xl/sharedStrings.xml" in zip_names
+    # Excel's "Images in Cell" feature (aka `cellImages`).
+    features["has_cell_images"] = (
+        "xl/cellimages.xml" in zip_names_casefold_set
+        or any(n.startswith("xl/cellimages/") for n in zip_names_casefold)
+    )
     features["sheet_xml_count"] = len([n for n in zip_names if n.startswith("xl/worksheets/sheet")])
     zip_names_lower = [n.lower() for n in zip_names]
     features["has_cell_images"] = any(n == "xl/cellimages.xml" for n in zip_names_lower) or any(
