@@ -703,6 +703,11 @@ High-level contents (see the file for the exhaustive list):
 
 We intentionally keep capabilities narrow and rely on explicit Rust commands + higher-level app permission gates (macro trust, DLP, extension permissions) for privileged operations.
 
+Guardrail tests (to prevent accidental “allow everything” capability drift):
+
+- `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts` — asserts the `event:allow-listen` / `event:allow-emit` allowlists match the desktop shell’s real event usage (and contain no wildcards).
+- `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` — asserts required command/plugin permissions for key flows (rich clipboard bridge and updater restart/install) remain explicitly allowlisted.
+
 ### Practical workflow
 
 - If you add a new `#[tauri::command]` and the frontend needs to call it, add the command name to the `core:allow-invoke` allowlist.
