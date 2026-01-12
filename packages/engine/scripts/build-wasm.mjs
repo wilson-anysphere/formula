@@ -361,6 +361,13 @@ function runWasmPack({ jobs, makeflags, releaseCodegenUnits, rayonThreads, binar
   const limitAs = process.env.FORMULA_CARGO_LIMIT_AS ?? "14G";
   const runLimited = path.join(repoRoot, "scripts", "run_limited.sh");
   const canUseRunLimited = process.platform !== "win32" && existsSync(runLimited);
+  const verbose =
+    process.env.FORMULA_WASM_PACK_VERBOSE === "1" || process.env.FORMULA_WASM_PACK_VERBOSE === "true";
+  // `wasm-pack build` inherits cargo's per-crate compile output, which can be extremely verbose.
+  // In CI/agent environments where stdout isn't a TTY this can create enormous logs and even hit
+  // output capture limits. Pass `--quiet` through to cargo in those cases unless callers
+  // explicitly opt into verbose output.
+  const cargoExtraArgs = !verbose && !process.stdout.isTTY ? ["--quiet"] : [];
 
   const wasmPackArgs = [
     "build",
@@ -375,6 +382,7 @@ function runWasmPack({ jobs, makeflags, releaseCodegenUnits, rayonThreads, binar
     // Avoid generating a nested package.json in the output directory; consumers
     // import the wrapper by URL and do not need `wasm-pack`'s npm packaging.
     "--no-pack",
+    ...cargoExtraArgs,
   ];
 
   const env = {
