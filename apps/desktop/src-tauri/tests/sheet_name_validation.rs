@@ -493,3 +493,27 @@ fn create_sheet_rejects_duplicate_name_with_unicode_nfkc_equivalence() {
         other => panic!("expected WhatIf error, got {other:?}"),
     }
 }
+
+#[test]
+fn create_sheet_rejects_duplicate_name_with_unicode_case_folding() {
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("straße".to_string());
+    workbook.add_sheet("Sheet2".to_string());
+
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    // German ß uppercases to "SS". Excel compares sheet names case-insensitively across Unicode, so
+    // this should be treated as a duplicate.
+    let err = state
+        .create_sheet("STRASSE".to_string())
+        .expect_err("expected duplicate sheet name error");
+
+    match err {
+        AppStateError::WhatIf(msg) => assert!(
+            msg.contains("already exists"),
+            "expected duplicate error, got {msg:?}"
+        ),
+        other => panic!("expected WhatIf error, got {other:?}"),
+    }
+}
