@@ -285,7 +285,8 @@ function loadSecretStoreKeys(env: NodeJS.ProcessEnv, legacySecret: string): Secr
 
     const record = parsed as Record<string, unknown>;
     const rawCurrentKeyId = record.currentKeyId ?? record.current;
-    const keysContainer = record.keys ?? record;
+    const keysContainerProvided = record.keys !== undefined;
+    const keysContainer = keysContainerProvided ? record.keys : record;
 
     if (!keysContainer || typeof keysContainer !== "object" || Array.isArray(keysContainer)) {
       throw new Error("SECRET_STORE_KEYS_JSON.keys must be an object mapping keyId -> base64 key");
@@ -312,9 +313,10 @@ function loadSecretStoreKeys(env: NodeJS.ProcessEnv, legacySecret: string): Secr
       throw new Error("SECRET_STORE_KEYS_JSON must contain at least one key");
     }
 
+    const keysPath = keysContainerProvided ? "SECRET_STORE_KEYS_JSON.keys" : "SECRET_STORE_KEYS_JSON";
     const keys: Record<string, Buffer> = {};
     for (const [keyId, value] of entries) {
-      keys[keyId] = decodeKey(keyId, value, "SECRET_STORE_KEYS_JSON.keys");
+      keys[keyId] = decodeKey(keyId, value, keysPath);
     }
 
     let currentKeyId: string;
