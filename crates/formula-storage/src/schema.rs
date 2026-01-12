@@ -562,9 +562,15 @@ fn ensure_column(
 
 fn column_exists(tx: &Transaction<'_>, table: &str, column: &str) -> rusqlite::Result<bool> {
     let mut stmt = tx.prepare(&format!("PRAGMA table_info({table})"))?;
-    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    // Best-effort: ignore malformed rows rather than failing migrations. While PRAGMA output
+    // should be well-formed for valid schemas, corrupted databases can contain unexpected
+    // values that would otherwise prevent the storage from opening.
+    let rows = stmt.query_map([], |row| Ok(row.get::<_, Option<String>>(1).ok().flatten()))?;
     for name in rows {
-        if name? == column {
+        let Ok(Some(name)) = name else {
+            continue;
+        };
+        if name == column {
             return Ok(true);
         }
     }
