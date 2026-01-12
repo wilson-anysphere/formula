@@ -1111,6 +1111,43 @@ test("install warns when installing a deprecated extension", async () => {
   await host.dispose();
 });
 
+test("install can be cancelled via confirm() when installing a deprecated extension", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+    deprecated: true,
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true,
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  let confirmCalled = false;
+  await expect(
+    manager.install("formula.sample-hello", "1.0.0", {
+      confirm: async (warning) => {
+        confirmCalled = true;
+        expect(warning.kind).toBe("deprecated");
+        return false;
+      },
+    })
+  ).rejects.toThrow(/cancel/i);
+  expect(confirmCalled).toBe(true);
+  expect(await manager.listInstalled()).toEqual([]);
+
+  await manager.dispose();
+  await host.dispose();
+});
+
 test("install enforces scanStatus when configured", async () => {
   const keys = generateEd25519KeyPair();
   const extensionDir = path.resolve("extensions/sample-hello");
@@ -1161,6 +1198,45 @@ test("install can allow non-passed scanStatus in dev mode when configured", asyn
   const result = await manager.install("formula.sample-hello", "1.0.0", { scanPolicy: "allow" });
   expect(result.warnings?.some((w) => w.kind === "scanStatus" && w.scanStatus === "pending")).toBe(true);
   expect(await manager.getInstalled("formula.sample-hello")).toMatchObject({ version: "1.0.0" });
+
+  await manager.dispose();
+  await host.dispose();
+});
+
+test("install can be cancelled via confirm() when scanStatus is non-passed and policy=allow", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+    scanStatuses: { "1.0.0": "pending" },
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true,
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  let confirmCalled = false;
+  await expect(
+    manager.install("formula.sample-hello", "1.0.0", {
+      scanPolicy: "allow",
+      confirm: async (warning) => {
+        confirmCalled = true;
+        expect(warning.kind).toBe("scanStatus");
+        expect(warning.scanStatus).toBe("pending");
+        return false;
+      },
+    })
+  ).rejects.toThrow(/cancel/i);
+  expect(confirmCalled).toBe(true);
+  expect(await manager.listInstalled()).toEqual([]);
 
   await manager.dispose();
   await host.dispose();
