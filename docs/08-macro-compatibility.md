@@ -1028,6 +1028,9 @@ Important notes:
 - Binding uses the hash algorithm indicated by the extracted `DigestInfo` (commonly SHA-1 or
   SHA-256). Unknown/unsupported digest OIDs are treated conservatively as unverified (`binding ==
   Unknown`).
+- Because binding is best-effort (and may not perfectly match Excel/MS-OVBA on all real-world files
+  yet), this policy can produce **false negatives** (a legitimately signed workbook treated as
+  untrusted). We prefer false negatives over false positives for `trusted_signed_only`.
 - Certificate chain trust ("trusted publisher") is not enforced by default (OpenSSL `NOVERIFY`), but
   can be evaluated as an **opt-in** step by calling `formula-vba`'s
   `verify_vba_digital_signature_with_trust` with an explicit root certificate set.
