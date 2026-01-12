@@ -96,7 +96,11 @@ export function Ribbon({ actions, schema = defaultRibbonSchema, initialTabId }: 
       if (!tab) return;
       setActiveTabId(tab.id);
       actions.onTabChange?.(tab.id);
-      tabButtonRefs.current[tab.id]?.focus();
+      const button = tabButtonRefs.current[tab.id];
+      // Prefer keeping the viewport stable while still ensuring the newly-focused
+      // tab is visible within the horizontally-scrollable tab strip.
+      button?.focus({ preventScroll: true });
+      button?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
     },
     [actions, tabs],
   );
