@@ -132,33 +132,59 @@ fn dump_dir_records(decompressed: &[u8]) {
         }
 
         let id = u16::from_le_bytes([decompressed[offset], decompressed[offset + 1]]);
-        let len = u32::from_le_bytes([
+        let raw_len_or_reserved = u32::from_le_bytes([
             decompressed[offset + 2],
             decompressed[offset + 3],
             decompressed[offset + 4],
             decompressed[offset + 5],
         ]) as usize;
-        offset += 6;
 
-        if offset + len > decompressed.len() {
-            println!(
-                "[{:03}] offset=0x{record_offset:08x} id={id:#06x} len={len} <bad record length: need {} bytes, have {}>",
-                idx + 1,
-                len,
-                decompressed.len().saturating_sub(offset)
-            );
-            break;
-        }
-        let data = &decompressed[offset..offset + len];
-        offset += len;
+        // Most `VBA/dir` records are encoded as `Id(u16) || Size(u32) || Data(Size)`.
+        //
+        // However, real-world projects can store PROJECTVERSION (0x0009) in the fixed-length form:
+        //   Id(u16) || Reserved(u32) || VersionMajor(u32) || VersionMinor(u16)
+        // (12 bytes total). When Reserved is 0, a naive TLV parser would interpret it as `Size=0`
+        // and mis-align parsing for all following records.
+        let (data, record_len, next_offset) = if id == 0x0009 && raw_len_or_reserved == 0 {
+            let end = record_offset + 12;
+            if end > decompressed.len() {
+                println!(
+                    "[{:03}] offset=0x{record_offset:08x} id={id:#06x} <truncated PROJECTVERSION: need 12 bytes, have {}>",
+                    idx + 1,
+                    decompressed.len() - record_offset
+                );
+                break;
+            }
+
+            (
+                &decompressed[record_offset + 2..end],
+                10usize,
+                end,
+            )
+        } else {
+            let len = raw_len_or_reserved;
+            let data_start = record_offset + 6;
+            let data_end = data_start + len;
+            if data_end > decompressed.len() {
+                println!(
+                    "[{:03}] offset=0x{record_offset:08x} id={id:#06x} len={len} <bad record length: need {} bytes, have {}>",
+                    idx + 1,
+                    len,
+                    decompressed.len().saturating_sub(data_start)
+                );
+                break;
+            }
+            (&decompressed[data_start..data_end], len, data_end)
+        };
+        offset = next_offset;
 
         idx += 1;
         let name = dir_record_names::record_name(id).unwrap_or("<unknown>");
         println!(
-            "[{idx:03}] offset=0x{record_offset:08x} id={id:#06x} len={len:>6} {name}"
+            "[{idx:03}] offset=0x{record_offset:08x} id={id:#06x} len={record_len:>6} {name}"
         );
 
-        if len <= 64 {
+        if record_len <= 64 {
             println!("      hex: {}", bytes_to_hex_spaced(data));
             if !data.is_empty() {
                 println!("      ascii: {}", bytes_to_ascii_preview(data));
