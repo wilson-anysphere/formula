@@ -1,6 +1,5 @@
 import React from "react";
 
-import { getRibbonIcon } from "../ui/icons/ribbonIconMap.js";
 import type { RibbonButtonDefinition, RibbonButtonKind, RibbonButtonSize } from "./ribbonSchema.js";
 import { RibbonIcon } from "./icons/RibbonIcon.js";
 
@@ -36,14 +35,9 @@ function classForSize(size: RibbonButtonSize): string {
   }
 }
 
-function getRibbonIconNode(
-  commandId: string,
-  iconId?: RibbonButtonDefinition["iconId"],
-): React.ReactNode {
-  if (iconId) return <RibbonIcon id={iconId} />;
-  const IconComponent = getRibbonIcon(commandId);
-  if (IconComponent) return <IconComponent width="100%" height="100%" />;
-  return null;
+function getRibbonIconNode(iconId?: RibbonButtonDefinition["iconId"]): React.ReactNode {
+  if (!iconId) return null;
+  return <RibbonIcon id={iconId} />;
 }
 
 export const RibbonButton = React.memo(function RibbonButton({
@@ -56,7 +50,7 @@ export const RibbonButton = React.memo(function RibbonButton({
   const kind = button.kind ?? "button";
   const size = button.size ?? "small";
   const isPressed = Boolean(pressed);
-  const iconNode = getRibbonIconNode(button.id, button.iconId);
+  const iconNode = getRibbonIconNode(button.iconId);
   const hasIcon = Boolean(iconNode);
   const ariaPressed = kind === "toggle" ? isPressed : undefined;
   const hasMenu = kind === "dropdown" && Boolean(button.menuItems?.length);
@@ -276,7 +270,7 @@ export const RibbonButton = React.memo(function RibbonButton({
               }}
             >
               {(() => {
-                const menuIconNode = getRibbonIconNode(item.id, item.iconId);
+                const menuIconNode = getRibbonIconNode(item.iconId);
                 return menuIconNode ? (
                   <span className="ribbon-dropdown__icon" aria-hidden="true">
                     {menuIconNode}

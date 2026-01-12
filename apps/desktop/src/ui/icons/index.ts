@@ -1,9 +1,5 @@
 export { Icon } from "./Icon";
 export type { IconProps } from "./Icon";
-export { ribbonIconMap } from "./ribbonIconMap";
-export type { RibbonIconComponent } from "./ribbonIconMap";
-export type { RibbonIconId } from "./ribbonIconMap";
-export { getRibbonIcon } from "./ribbonIconMap";
 
 export { AlignCenterIcon } from "./AlignCenterIcon";
 export { AlignBottomIcon } from "./AlignBottomIcon";

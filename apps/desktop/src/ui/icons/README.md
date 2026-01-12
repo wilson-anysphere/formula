@@ -38,8 +38,8 @@ export function MyIcon(props: Omit<IconProps, "children">) {
    - `fill="currentColor"` and optionally `stroke="none"`
 4. Export the icon from `index.ts`.
 
-### Optional: Ribbon integration helper
+## Ribbon integration
 
-`ribbonIconMap.ts` provides a command-id → icon mapping and `getRibbonIcon(commandId)` to make
-it easy for the ribbon UI to migrate away from placeholder glyph strings.
-
+The desktop ribbon renders icons exclusively via the internal ribbon icon library
+in `apps/desktop/src/ribbon/icons` using stable `iconId` values in the ribbon
+schema.
