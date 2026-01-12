@@ -658,6 +658,26 @@ pub fn build_protection_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
+/// Build a BIFF8 `.xls` fixture with workbook and worksheet protection records that include
+/// truncated payloads.
+///
+/// This exercises the importer's best-effort behaviour: truncated record payloads should surface
+/// as `ImportWarning`s, but parsing should continue and later valid records should still be
+/// imported.
+pub fn build_protection_truncated_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_protection_truncated_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
 /// Build a BIFF8 `.xls` fixture with a custom sheet tab color.
 pub fn build_tab_color_fixture_xls() -> Vec<u8> {
     let workbook_stream = build_tab_color_workbook_stream();
@@ -3049,6 +3069,50 @@ fn build_protection_workbook_stream() -> Vec<u8> {
     globals
 }
 
+fn build_protection_truncated_workbook_stream() -> Vec<u8> {
+    let mut globals = Vec::<u8>::new();
+
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+
+    // Workbook protection records with intentionally short payloads first, followed by valid
+    // records. This should yield warnings but still import the final values.
+    push_record(&mut globals, RECORD_PROTECT, &[1]); // truncated (expected u16)
+    push_record(&mut globals, RECORD_PROTECT, &1u16.to_le_bytes()); // lock structure
+    push_record(&mut globals, RECORD_WINDOWPROTECT, &[1]); // truncated (expected u16)
+    push_record(&mut globals, RECORD_WINDOWPROTECT, &1u16.to_le_bytes()); // lock windows
+    push_record(&mut globals, RECORD_PASSWORD, &[0xAF]); // truncated (expected u16)
+    push_record(&mut globals, RECORD_PASSWORD, &0x83AFu16.to_le_bytes()); // "password" hash
+
+    // Remaining required/standard globals.
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
+
+    // Minimal XF table (style XFs only).
+    for _ in 0..16 {
+        push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
+    }
+
+    // Single worksheet.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "ProtectedTruncated");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]);
+
+    let sheet_offset = globals.len();
+    let sheet = build_protection_truncated_sheet_stream();
+
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
 fn build_tab_color_workbook_stream() -> Vec<u8> {
     let mut globals = Vec::<u8>::new();
 
@@ -3258,6 +3322,37 @@ fn build_protection_sheet_stream() -> Vec<u8> {
     // booleans.
     push_record(&mut sheet, RECORD_OBJPROTECT, &0u16.to_le_bytes());
     push_record(&mut sheet, RECORD_SCENPROTECT, &0u16.to_le_bytes());
+
+    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
+    sheet
+}
+
+fn build_protection_truncated_sheet_stream() -> Vec<u8> {
+    let mut sheet = Vec::<u8>::new();
+
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
+
+    // Worksheet protection records with intentionally short payloads first, followed by valid
+    // ones. This should yield warnings but still import the final values.
+    push_record(&mut sheet, RECORD_PROTECT, &[1]); // truncated
+    push_record(&mut sheet, RECORD_PROTECT, &1u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_PASSWORD, &[0xEB]); // truncated
+    push_record(&mut sheet, RECORD_PASSWORD, &0xCBEBu16.to_le_bytes()); // "test" hash
+    push_record(&mut sheet, RECORD_OBJPROTECT, &[0]); // truncated
+    push_record(&mut sheet, RECORD_OBJPROTECT, &0u16.to_le_bytes()); // allow objects
+    push_record(&mut sheet, RECORD_SCENPROTECT, &[0]); // truncated
+    push_record(&mut sheet, RECORD_SCENPROTECT, &0u16.to_le_bytes()); // allow scenarios
 
     push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
     sheet
