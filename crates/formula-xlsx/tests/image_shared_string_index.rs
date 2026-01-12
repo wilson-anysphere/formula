@@ -1,7 +1,7 @@
 use std::io::{Cursor, Read as _, Write as _};
 
 use formula_model::drawings::ImageId;
-use formula_model::{CellRef, CellValue, ImageValue};
+use formula_model::{CellRef, CellValue, EntityValue, ImageValue, RecordValue};
 use formula_xlsx::load_from_bytes;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
@@ -124,3 +124,72 @@ fn document_writer_preserves_shared_string_index_for_image_alt_text() -> Result<
     Ok(())
 }
 
+#[test]
+fn document_writer_preserves_shared_string_index_for_entity_display_value(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_duplicate_shared_strings_xlsx();
+    let mut doc = load_from_bytes(&bytes)?;
+    let sheet_id = doc.workbook.sheets[0].id;
+
+    doc.set_cell_value(
+        sheet_id,
+        CellRef::from_a1("A2")?,
+        CellValue::Entity(EntityValue::new("Base")),
+    );
+
+    let saved = doc.save_to_vec()?;
+    let sheet_xml = zip_part(&saved, "xl/worksheets/sheet1.xml");
+    let doc_xml = roxmltree::Document::parse(&sheet_xml)?;
+    let ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    let cell = doc_xml
+        .descendants()
+        .find(|n| n.has_tag_name((ns, "c")) && n.attribute("r") == Some("A2"))
+        .expect("A2 cell should exist");
+    assert_eq!(cell.attribute("t"), Some("s"));
+    let v = cell
+        .children()
+        .find(|n| n.has_tag_name((ns, "v")))
+        .and_then(|n| n.text())
+        .unwrap_or_default();
+    assert_eq!(
+        v, "1",
+        "expected writer to preserve the original shared string index when Entity display value is unchanged"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn document_writer_preserves_shared_string_index_for_record_display_value(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_duplicate_shared_strings_xlsx();
+    let mut doc = load_from_bytes(&bytes)?;
+    let sheet_id = doc.workbook.sheets[0].id;
+
+    doc.set_cell_value(
+        sheet_id,
+        CellRef::from_a1("A2")?,
+        CellValue::Record(RecordValue::new("Base")),
+    );
+
+    let saved = doc.save_to_vec()?;
+    let sheet_xml = zip_part(&saved, "xl/worksheets/sheet1.xml");
+    let doc_xml = roxmltree::Document::parse(&sheet_xml)?;
+    let ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    let cell = doc_xml
+        .descendants()
+        .find(|n| n.has_tag_name((ns, "c")) && n.attribute("r") == Some("A2"))
+        .expect("A2 cell should exist");
+    assert_eq!(cell.attribute("t"), Some("s"));
+    let v = cell
+        .children()
+        .find(|n| n.has_tag_name((ns, "v")))
+        .and_then(|n| n.text())
+        .unwrap_or_default();
+    assert_eq!(
+        v, "1",
+        "expected writer to preserve the original shared string index when Record display value is unchanged"
+    );
+
+    Ok(())
+}

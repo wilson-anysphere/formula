@@ -434,6 +434,42 @@ impl XlsxDocument {
                     meta.raw_value = Some(idx.to_string());
                 }
             }
+            (Some(CellValueKind::SharedString { index }), CellValue::Entity(entity))
+                if self
+                    .shared_strings
+                    .get(*index as usize)
+                    .is_some_and(|rt| rt.text.as_str() == entity.display_value.as_str()) =>
+            {
+                let idx = *index;
+                let raw_matches = meta
+                    .raw_value
+                    .as_deref()
+                    .and_then(|raw| raw.trim().parse::<u32>().ok())
+                    .is_some_and(|raw| raw == idx);
+                meta.value_kind = Some(CellValueKind::SharedString { index: idx });
+                if !raw_matches {
+                    meta.raw_value = Some(idx.to_string());
+                }
+            }
+            (Some(CellValueKind::SharedString { index }), CellValue::Record(record))
+                if {
+                    let display = record.to_string();
+                    self.shared_strings
+                        .get(*index as usize)
+                        .is_some_and(|rt| rt.text.as_str() == display.as_str())
+                } =>
+            {
+                let idx = *index;
+                let raw_matches = meta
+                    .raw_value
+                    .as_deref()
+                    .and_then(|raw| raw.trim().parse::<u32>().ok())
+                    .is_some_and(|raw| raw == idx);
+                meta.value_kind = Some(CellValueKind::SharedString { index: idx });
+                if !raw_matches {
+                    meta.raw_value = Some(idx.to_string());
+                }
+            }
             (Some(CellValueKind::SharedString { index }), CellValue::Image(image))
                 if image
                     .alt_text
@@ -605,6 +641,42 @@ impl XlsxDocument {
                         .shared_strings
                         .get(*index as usize)
                         .is_some_and(|rt| rt.text.as_str() == s.as_str()) =>
+                {
+                    let idx = *index;
+                    let raw_matches = meta
+                        .raw_value
+                        .as_deref()
+                        .and_then(|raw| raw.trim().parse::<u32>().ok())
+                        .is_some_and(|raw| raw == idx);
+                    meta.value_kind = Some(CellValueKind::SharedString { index: idx });
+                    if !raw_matches {
+                        meta.raw_value = Some(idx.to_string());
+                    }
+                }
+                (Some(CellValueKind::SharedString { index }), CellValue::Entity(entity))
+                    if self
+                        .shared_strings
+                        .get(*index as usize)
+                        .is_some_and(|rt| rt.text.as_str() == entity.display_value.as_str()) =>
+                {
+                    let idx = *index;
+                    let raw_matches = meta
+                        .raw_value
+                        .as_deref()
+                        .and_then(|raw| raw.trim().parse::<u32>().ok())
+                        .is_some_and(|raw| raw == idx);
+                    meta.value_kind = Some(CellValueKind::SharedString { index: idx });
+                    if !raw_matches {
+                        meta.raw_value = Some(idx.to_string());
+                    }
+                }
+                (Some(CellValueKind::SharedString { index }), CellValue::Record(record))
+                    if {
+                        let display = record.to_string();
+                        self.shared_strings
+                            .get(*index as usize)
+                            .is_some_and(|rt| rt.text.as_str() == display.as_str())
+                    } =>
                 {
                     let idx = *index;
                     let raw_matches = meta
