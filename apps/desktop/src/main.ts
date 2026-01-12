@@ -1792,15 +1792,42 @@ function createCommandPalette(commands: readonly CommandPaletteCommand[]): { ope
 }
 
 const commandPalette = createCommandPalette([
-  { id: "view.freezePanes", title: "Freeze Panes", run: () => app.freezePanes(), keywords: ["frozen", "pane"] },
-  { id: "view.freezeTopRow", title: "Freeze Top Row", run: () => app.freezeTopRow(), keywords: ["frozen", "row"] },
+  {
+    id: "view.freezePanes",
+    title: "Freeze Panes",
+    run: () => {
+      app.freezePanes();
+      app.focus();
+    },
+    keywords: ["frozen", "pane"]
+  },
+  {
+    id: "view.freezeTopRow",
+    title: "Freeze Top Row",
+    run: () => {
+      app.freezeTopRow();
+      app.focus();
+    },
+    keywords: ["frozen", "row"]
+  },
   {
     id: "view.freezeFirstColumn",
     title: "Freeze First Column",
-    run: () => app.freezeFirstColumn(),
+    run: () => {
+      app.freezeFirstColumn();
+      app.focus();
+    },
     keywords: ["frozen", "column"]
   },
-  { id: "view.unfreezePanes", title: "Unfreeze Panes", run: () => app.unfreezePanes(), keywords: ["frozen", "pane"] }
+  {
+    id: "view.unfreezePanes",
+    title: "Unfreeze Panes",
+    run: () => {
+      app.unfreezePanes();
+      app.focus();
+    },
+    keywords: ["frozen", "pane"]
+  }
 ]);
 
 const openCommandPalette = () => commandPalette.open();
