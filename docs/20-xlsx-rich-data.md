@@ -120,7 +120,10 @@ sheetN.xml: <c vm="VM_INDEX">…</c>
     `rc/@v` indexes into the `futureMetadata` table and `xlrd:rvb/@i` is the rich value index.
   - Other schemas may exist in the wild; treat metadata as opaque and preserve unknown tables/attributes.
 - `richValue*.xml` can be **split across multiple parts** (`richValue.xml`, `richValue1.xml`, …). The `RV_INDEX` should be interpreted as a **global index across the concatenated `<rv>` streams** in part order.
-  - Open question: the exact ordering rules Excel uses when multiple parts exist (lexicographic vs numeric suffix). Use numeric suffix ordering (`richValue.xml` then `richValue1.xml`, `richValue2.xml`, …) and verify with fixtures.
+  - Formula interprets part order using **numeric-suffix ordering** (`richValue.xml` then `richValue1.xml`, `richValue2.xml`, …), which is enforced by
+    `crates/formula-xlsx/tests/rich_value_part_numeric_suffix_order.rs`.
+  - Open question (Excel): the exact ordering rules Excel uses when multiple parts exist (lexicographic vs numeric suffix). Treat the writer as
+    “preserve existing parts” and avoid renumbering unless the mapping is rebuilt holistically.
 - Image references inside `<rv>` appear to use an **integer relationship-slot index** (not an `rId` string directly). That slot index points into the ordered `<rel>` list in `richValueRel.xml`.
 
 ---

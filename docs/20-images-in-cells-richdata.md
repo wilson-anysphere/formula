@@ -906,6 +906,8 @@ Two variants are observed in-repo:
 Other builds may:
 
 * split values across `xl/richData/richValue1.xml`, `richValue2.xml`, ...
+  * Formula treats these as a single logical stream ordered by numeric suffix (see
+    `crates/formula-xlsx/tests/rich_value_part_numeric_suffix_order.rs`).
 * include an explicit global index attribute on `<rv>` (e.g. `i="…"`, `id="…"`, `idx="…"`)
 * include multiple `<v>` members, with types indicated by attributes like `kind="rel"` and/or `t="rel"` / `t="r"` / etc.
 
