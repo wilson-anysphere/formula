@@ -143,7 +143,15 @@ export function GridPerformanceHarness(props?: {
         }}
       >
         <div style={{ marginBottom: 8, opacity: 0.9 }}>
-          Demos: <code>?demo=style</code> (cell formatting) · <code>?demo=merged</code> (merged cells)
+          Demos:{" "}
+          <a href="?demo=style" style={{ color: "inherit" }}>
+            <code>?demo=style</code>
+          </a>{" "}
+          (cell formatting) ·{" "}
+          <a href="?demo=merged" style={{ color: "inherit" }}>
+            <code>?demo=merged</code>
+          </a>{" "}
+          (merged cells)
         </div>
         <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
           Zoom

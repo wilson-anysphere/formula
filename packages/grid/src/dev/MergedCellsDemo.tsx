@@ -111,7 +111,15 @@ export function MergedCellsDemo(): React.ReactElement {
         <div style={{ fontWeight: 600 }}>Merged cells + Excel-style text overflow</div>
         <div style={{ marginTop: 4, color: "var(--formula-grid-cell-text, #4b5563)", opacity: 0.75 }}>
           Try clicking inside merged regions (selection snaps to the anchor) and observe text overflowing into empty neighbors.
-          Switch demos via URL: <code>?demo=style</code> (cell formatting), <code>?demo=perf</code> (performance).
+          Switch demos:{" "}
+          <a href="?demo=style" style={{ color: "inherit" }}>
+            <code>?demo=style</code>
+          </a>{" "}
+          (cell formatting),{" "}
+          <a href="?demo=perf" style={{ color: "inherit" }}>
+            <code>?demo=perf</code>
+          </a>{" "}
+          (performance).
         </div>
         <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10 }}>
           Zoom

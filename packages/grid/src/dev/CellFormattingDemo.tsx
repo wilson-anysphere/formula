@@ -377,13 +377,22 @@ export function CellFormattingDemo(): React.ReactElement {
             <div style={{ fontWeight: 600, marginBottom: 4 }}>Switch demos</div>
             <div style={{ opacity: 0.9, lineHeight: 1.4 }}>
               <div>
-                <code>?demo=style</code> (this)
+                <a href="?demo=style" style={{ color: "inherit", textDecoration: "none" }}>
+                  <code>?demo=style</code>
+                </a>{" "}
+                (this)
               </div>
               <div>
-                <code>?demo=perf</code> (performance harness)
+                <a href="?demo=perf" style={{ color: "inherit", textDecoration: "none" }}>
+                  <code>?demo=perf</code>
+                </a>{" "}
+                (performance harness)
               </div>
               <div>
-                <code>?demo=merged</code> (merged cells demo)
+                <a href="?demo=merged" style={{ color: "inherit", textDecoration: "none" }}>
+                  <code>?demo=merged</code>
+                </a>{" "}
+                (merged cells demo)
               </div>
             </div>
           </div>
