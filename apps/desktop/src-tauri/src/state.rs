@@ -19,8 +19,8 @@ use formula_engine::what_if::{
     CellRef as WhatIfCellRef, CellValue as WhatIfCellValue, EngineWhatIfModel, WhatIfModel,
 };
 use formula_engine::{
-    Engine as FormulaEngine, ErrorKind, ExternalValueProvider, PrecedentNode, RecalcMode,
-    Value as EngineValue,
+    Engine as FormulaEngine, ErrorKind, ExternalValueProvider, NameDefinition, NameScope,
+    PrecedentNode, RecalcMode, Value as EngineValue,
 };
 use formula_format::{format_value, FormatOptions, Value as FormatValue};
 use formula_storage::{
@@ -2388,6 +2388,34 @@ impl AppState {
             self.engine.ensure_sheet(&sheet.name);
         }
 
+        // Load workbook-level defined names into the calculation engine so formulas referencing
+        // them evaluate correctly.
+        //
+        // This is best-effort: invalid/unsupported definitions are ignored rather than aborting
+        // workbook load.
+        for defined in &workbook.defined_names {
+            let name = defined.name.trim();
+            let refers_to = defined.refers_to.trim();
+            if name.is_empty() || refers_to.is_empty() {
+                continue;
+            }
+
+            let scope = match defined.sheet_id.as_deref() {
+                None => NameScope::Workbook,
+                Some(sheet_key) => resolve_sheet_case_insensitive(workbook, sheet_key)
+                    .map(|sheet| NameScope::Sheet(sheet.name.as_str()))
+                    .unwrap_or(NameScope::Workbook),
+            };
+
+            // Preserve the "refers_to" text without forcing an '=' prefix; the formula engine
+            // parser accepts either form.
+            let _ = self.engine.define_name(
+                name,
+                scope,
+                NameDefinition::Formula(refers_to.to_string()),
+            );
+        }
+
         for sheet in &workbook.sheets {
             let sheet_name = &sheet.name;
             for ((row, col), cell) in sheet.cells_iter() {
@@ -3166,6 +3194,32 @@ mod tests {
         let b1_after = state.get_cell(&sheet_id, 0, 1).unwrap();
         assert_eq!(b1_after.value, CellScalar::Number(11.0));
         assert!(state.has_unsaved_changes());
+    }
+
+    #[test]
+    fn rebuild_engine_loads_workbook_defined_names() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        let sheet_id = workbook.sheets[0].id.clone();
+
+        workbook.defined_names.push(crate::file_io::DefinedName {
+            name: "MyName".to_string(),
+            refers_to: "42".to_string(),
+            sheet_id: None,
+            hidden: false,
+        });
+
+        workbook.sheet_mut(&sheet_id).unwrap().set_cell(
+            0,
+            0,
+            Cell::from_formula("=MyName+1".to_string()),
+        );
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let a1 = state.get_cell(&sheet_id, 0, 0).unwrap();
+        assert_eq!(a1.value, CellScalar::Number(43.0));
     }
 
     #[test]
