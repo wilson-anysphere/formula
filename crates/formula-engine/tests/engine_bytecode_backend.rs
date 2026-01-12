@@ -801,6 +801,28 @@ fn bytecode_backend_matches_ast_for_counta_and_countblank() {
 }
 
 #[test]
+fn bytecode_backend_rejects_counta_and_countblank_array_literals() {
+    // Bytecode array literals are numeric-only (f64 + NaN for blanks/non-numeric). That is not
+    // sufficient to preserve COUNTA/COUNTBLANK semantics over arrays containing text/bools.
+    // Ensure these formulas fall back to the AST backend.
+    let mut engine = Engine::new();
+
+    engine
+        .set_cell_formula("Sheet1", "A1", "=COUNTA({\"a\",TRUE,\"\"})")
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A2", "=COUNTBLANK({\"a\",TRUE,\"\"})")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(3.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "A2"), Value::Number(1.0));
+}
+
+#[test]
 fn bytecode_backend_counta_and_countblank_respect_non_numeric_reference_cells() {
     // If the bytecode backend incorrectly treats non-numeric reference values as NaN via column
     // slices, COUNTA/COUNTBLANK will miscount. This test ensures we fall back to per-cell scanning

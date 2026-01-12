@@ -6566,11 +6566,15 @@ fn bytecode_expr_is_eligible_inner(
             | bytecode::ast::Function::Average
             | bytecode::ast::Function::Min
             | bytecode::ast::Function::Max
-            | bytecode::ast::Function::Count
-            | bytecode::ast::Function::CountA
-            | bytecode::ast::Function::CountBlank => args
+            | bytecode::ast::Function::Count => args
                 .iter()
                 .all(|arg| bytecode_expr_is_eligible_inner(arg, true, true, lexical_scopes)),
+            bytecode::ast::Function::CountA | bytecode::ast::Function::CountBlank => args.iter().all(|arg| {
+                // Bytecode array literals are numeric-only (`f64` with NaN for blanks/non-numeric).
+                // That's sufficient for SUM/AVERAGE/MIN/MAX/COUNT (which ignore non-numeric),
+                // but would be incorrect for COUNTA/COUNTBLANK which are sensitive to text/bools.
+                bytecode_expr_is_eligible_inner(arg, true, false, lexical_scopes)
+            }),
             bytecode::ast::Function::SumIf | bytecode::ast::Function::AverageIf => {
                 if args.len() != 2 && args.len() != 3 {
                     return false;
