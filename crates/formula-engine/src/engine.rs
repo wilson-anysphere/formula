@@ -9920,56 +9920,104 @@ mod tests {
             engine.set_cell_value("Sheet1", "A500000", 2.0).unwrap();
             engine.set_cell_value("Sheet1", "A1048576", 3.0).unwrap();
 
+            // Sum/average value range (aligned with A:A).
+            engine.set_cell_value("Sheet1", "C1", 10.0).unwrap();
+            engine.set_cell_value("Sheet1", "C500000", 20.0).unwrap();
+            engine.set_cell_value("Sheet1", "C1048576", 30.0).unwrap();
+
+            // Secondary criteria range (aligned with A:A).
+            engine.set_cell_value("Sheet1", "D1", 100.0).unwrap();
+            engine.set_cell_value("Sheet1", "D500000", 200.0).unwrap();
+            engine.set_cell_value("Sheet1", "D1048576", 100.0).unwrap();
+
             engine
                 .set_cell_formula("Sheet1", "B1", "=SUM(A:A)")
                 .unwrap();
             engine
                 .set_cell_formula("Sheet1", "B2", "=COUNTIF(A:A, 0)")
                 .unwrap();
+
+            // Criteria aggregates over full-column ranges should also take the sparse iteration path.
+            engine
+                .set_cell_formula("Sheet1", "B3", r#"=SUMIF(A:A,">1",C:C)"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B4", r#"=SUMIFS(C:C,A:A,">1",D:D,100)"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B5", r#"=COUNTIFS(A:A,">1",D:D,100)"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B6", r#"=AVERAGEIF(A:A,">1",C:C)"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B7", r#"=AVERAGEIFS(C:C,A:A,">1",D:D,200)"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B8", r#"=MINIFS(C:C,A:A,">1",D:D,200)"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B9", r#"=MAXIFS(C:C,A:A,">1",D:D,200)"#)
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B10", r#"=COUNTIFS(A:A,"",D:D,"")"#)
+                .unwrap();
         }
 
         let mut bytecode_engine = Engine::new();
         setup(&mut bytecode_engine);
 
-        // Ensure the SUM formula is actually bytecode-compiled.
+        // Ensure the full-column formulas are actually bytecode-compiled.
         let sheet_id = bytecode_engine.workbook.sheet_id("Sheet1").unwrap();
-        let b1 = parse_a1("B1").unwrap();
-        let cell_b1 = bytecode_engine.workbook.sheets[sheet_id]
-            .cells
-            .get(&b1)
-            .and_then(|c| c.compiled.as_ref())
-            .expect("compiled formula");
-        assert!(
-            matches!(cell_b1, CompiledFormula::Bytecode(_)),
-            "expected SUM(A:A) to compile to bytecode"
-        );
+        let formula_cells = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10"];
+        let mut tasks: Vec<(CellKey, CompiledFormula)> = Vec::with_capacity(formula_cells.len());
+        for cell in formula_cells {
+            let addr = parse_a1(cell).unwrap();
+            let compiled = bytecode_engine.workbook.sheets[sheet_id]
+                .cells
+                .get(&addr)
+                .and_then(|c| c.compiled.as_ref())
+                .cloned()
+                .expect("compiled formula");
+            assert!(
+                matches!(compiled, CompiledFormula::Bytecode(_)),
+                "expected {cell} to compile to bytecode"
+            );
+            tasks.push((
+                CellKey {
+                    sheet: sheet_id,
+                    addr,
+                },
+                compiled,
+            ));
+        }
 
-        // Column caches should *not* allocate a full-column buffer for `A:A`.
+        // Column caches should *not* allocate a full-column buffer for `A:A` (or any other full-column
+        // references used by the formulas above).
         let snapshot = Snapshot::from_workbook(
             &bytecode_engine.workbook,
             &bytecode_engine.spills,
             bytecode_engine.external_value_provider.clone(),
             bytecode_engine.external_data_provider.clone(),
         );
-        let key_b1 = CellKey {
-            sheet: sheet_id,
-            addr: b1,
-        };
-        let tasks = vec![(key_b1, cell_b1.clone())];
         let column_cache =
             BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
         assert!(
-            !column_cache
-                .by_sheet
-                .get(sheet_id)
-                .map(|cols| cols.contains_key(&0))
-                .unwrap_or(false),
-            "expected full-column range to skip column-slice cache allocation"
+            column_cache.by_sheet[sheet_id].is_empty(),
+            "expected full-column ranges to skip column-slice cache allocation"
         );
 
         bytecode_engine.recalculate_single_threaded();
         let bc_sum = bytecode_engine.get_cell_value("Sheet1", "B1");
         let bc_countif = bytecode_engine.get_cell_value("Sheet1", "B2");
+        let bc_sumif = bytecode_engine.get_cell_value("Sheet1", "B3");
+        let bc_sumifs = bytecode_engine.get_cell_value("Sheet1", "B4");
+        let bc_countifs = bytecode_engine.get_cell_value("Sheet1", "B5");
+        let bc_averageif = bytecode_engine.get_cell_value("Sheet1", "B6");
+        let bc_averageifs = bytecode_engine.get_cell_value("Sheet1", "B7");
+        let bc_minifs = bytecode_engine.get_cell_value("Sheet1", "B8");
+        let bc_maxifs = bytecode_engine.get_cell_value("Sheet1", "B9");
+        let bc_countifs_blank = bytecode_engine.get_cell_value("Sheet1", "B10");
 
         let mut ast_engine = Engine::new();
         ast_engine.set_bytecode_enabled(false);
@@ -9977,13 +10025,40 @@ mod tests {
         ast_engine.recalculate_single_threaded();
         let ast_sum = ast_engine.get_cell_value("Sheet1", "B1");
         let ast_countif = ast_engine.get_cell_value("Sheet1", "B2");
+        let ast_sumif = ast_engine.get_cell_value("Sheet1", "B3");
+        let ast_sumifs = ast_engine.get_cell_value("Sheet1", "B4");
+        let ast_countifs = ast_engine.get_cell_value("Sheet1", "B5");
+        let ast_averageif = ast_engine.get_cell_value("Sheet1", "B6");
+        let ast_averageifs = ast_engine.get_cell_value("Sheet1", "B7");
+        let ast_minifs = ast_engine.get_cell_value("Sheet1", "B8");
+        let ast_maxifs = ast_engine.get_cell_value("Sheet1", "B9");
+        let ast_countifs_blank = ast_engine.get_cell_value("Sheet1", "B10");
 
         assert_eq!(bc_sum, ast_sum, "SUM mismatch");
         assert_eq!(bc_countif, ast_countif, "COUNTIF mismatch");
+        assert_eq!(bc_sumif, ast_sumif, "SUMIF mismatch");
+        assert_eq!(bc_sumifs, ast_sumifs, "SUMIFS mismatch");
+        assert_eq!(bc_countifs, ast_countifs, "COUNTIFS mismatch");
+        assert_eq!(bc_averageif, ast_averageif, "AVERAGEIF mismatch");
+        assert_eq!(bc_averageifs, ast_averageifs, "AVERAGEIFS mismatch");
+        assert_eq!(bc_minifs, ast_minifs, "MINIFS mismatch");
+        assert_eq!(bc_maxifs, ast_maxifs, "MAXIFS mismatch");
+        assert_eq!(
+            bc_countifs_blank, ast_countifs_blank,
+            "COUNTIFS blank mismatch"
+        );
 
         // Sanity check expected values.
         assert_eq!(bc_sum, Value::Number(6.0));
         assert_eq!(bc_countif, Value::Number(1_048_573.0));
+        assert_eq!(bc_sumif, Value::Number(50.0));
+        assert_eq!(bc_sumifs, Value::Number(30.0));
+        assert_eq!(bc_countifs, Value::Number(1.0));
+        assert_eq!(bc_averageif, Value::Number(25.0));
+        assert_eq!(bc_averageifs, Value::Number(20.0));
+        assert_eq!(bc_minifs, Value::Number(20.0));
+        assert_eq!(bc_maxifs, Value::Number(20.0));
+        assert_eq!(bc_countifs_blank, Value::Number(1_048_573.0));
     }
 
     #[test]
