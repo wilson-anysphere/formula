@@ -954,6 +954,36 @@ fn bytecode_backend_inlines_defined_name_static_ranges() {
 }
 
 #[test]
+fn bytecode_backend_inlines_defined_name_3d_sheet_span_ranges() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+    engine.set_cell_value("Sheet2", "A1", 2.0).unwrap();
+    engine
+        .define_name(
+            "My3D",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1:Sheet2!$A$1".to_string()),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "B1", "=SUM(My3D)")
+        .unwrap();
+
+    // Ensure the named 3D reference was inlined and compiled to bytecode.
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "B1");
+    assert_eq!(via_bytecode, Value::Number(3.0));
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "B1");
+
+    assert_eq!(via_bytecode, via_ast);
+}
+
+#[test]
 fn bytecode_backend_does_not_inline_dynamic_defined_name_formulas() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();

@@ -3633,7 +3633,11 @@ impl Engine {
             None => Some(crate::SheetRef::Sheet(
                 self.workbook.sheet_names.get(current_sheet)?.clone(),
             )),
-            Some(s) => Some(crate::SheetRef::Sheet(s.as_single_sheet()?.to_string())),
+            Some(crate::SheetRef::Sheet(name)) => Some(crate::SheetRef::Sheet(name.clone())),
+            Some(crate::SheetRef::SheetRange { start, end }) => Some(crate::SheetRef::SheetRange {
+                start: start.clone(),
+                end: end.clone(),
+            }),
         };
 
         let col = match r.col {
@@ -3665,7 +3669,11 @@ impl Engine {
             None => Some(crate::SheetRef::Sheet(
                 self.workbook.sheet_names.get(current_sheet)?.clone(),
             )),
-            Some(s) => Some(crate::SheetRef::Sheet(s.as_single_sheet()?.to_string())),
+            Some(crate::SheetRef::Sheet(name)) => Some(crate::SheetRef::Sheet(name.clone())),
+            Some(crate::SheetRef::SheetRange { start, end }) => Some(crate::SheetRef::SheetRange {
+                start: start.clone(),
+                end: end.clone(),
+            }),
         };
         let col = match r.col {
             crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
@@ -3690,7 +3698,11 @@ impl Engine {
             None => Some(crate::SheetRef::Sheet(
                 self.workbook.sheet_names.get(current_sheet)?.clone(),
             )),
-            Some(s) => Some(crate::SheetRef::Sheet(s.as_single_sheet()?.to_string())),
+            Some(crate::SheetRef::Sheet(name)) => Some(crate::SheetRef::Sheet(name.clone())),
+            Some(crate::SheetRef::SheetRange { start, end }) => Some(crate::SheetRef::SheetRange {
+                start: start.clone(),
+                end: end.clone(),
+            }),
         };
         let row = match r.row {
             crate::Coord::A1 { index, .. } => crate::Coord::A1 { index, abs: true },
