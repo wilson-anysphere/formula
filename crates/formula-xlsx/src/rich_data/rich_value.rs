@@ -63,7 +63,7 @@ fn is_rel_kind(node: &roxmltree::Node<'_, '_>) -> bool {
         if matches!(
             local.to_ascii_lowercase().as_str(),
             "kind" | "k" | "t" | "type"
-        ) && attr.value().eq_ignore_ascii_case("rel")
+        ) && (attr.value().eq_ignore_ascii_case("rel") || attr.value().eq_ignore_ascii_case("r"))
         {
             return true;
         }
@@ -121,6 +121,21 @@ mod tests {
     }
 
     #[test]
+    fn parses_t_r_values() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv type="0">
+      <v t="r">12</v>
+    </rv>
+  </values>
+</rvData>"#;
+
+        let parsed = parse_rich_value_relationship_indices(xml.as_bytes()).expect("parse");
+        assert_eq!(parsed, vec![Some(12)]);
+    }
+
+    #[test]
     fn ignores_non_integer_rel_values() {
         let xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
@@ -138,4 +153,3 @@ mod tests {
         assert_eq!(parsed, vec![None, Some(12)]);
     }
 }
-

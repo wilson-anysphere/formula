@@ -75,6 +75,12 @@ pub fn resolve_rich_value_image_targets(
             continue;
         }
         let target = crate::path::resolve_target(RICH_VALUE_REL_XML, target);
+        // This helper is intended specifically for images-in-cells, which Excel stores under
+        // `xl/media/*`. Ignore other relationship targets to avoid incorrectly returning e.g.
+        // drawings/hyperlinks as "image" targets.
+        if !target.starts_with("xl/media/") {
+            continue;
+        }
         targets_by_id.insert(rel.id, target);
     }
 
@@ -301,6 +307,47 @@ mod tests {
         parts.insert(
             "xl/richData/richValue.xml".to_string(),
             rich_value_xml.to_vec(),
+        );
+
+        let resolved = resolve_rich_value_image_targets(&parts).expect("resolve");
+        assert_eq!(resolved, vec![None]);
+    }
+
+    #[test]
+    fn ignores_non_media_relationship_targets() {
+        let rich_value_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
+  <values>
+    <rv><v kind="rel">0</v></rv>
+  </values>
+</rvData>"#;
+
+        let rich_value_rel_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rvRel xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata"
+       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <rels>
+    <rel r:id="rId1"/>
+  </rels>
+</rvRel>"#;
+
+        // Target is not under `xl/media/*`, so should not be treated as an image target.
+        let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>
+</Relationships>"#;
+
+        let mut parts: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        parts.insert(
+            "xl/richData/richValue.xml".to_string(),
+            rich_value_xml.to_vec(),
+        );
+        parts.insert(
+            "xl/richData/richValueRel.xml".to_string(),
+            rich_value_rel_xml.to_vec(),
+        );
+        parts.insert(
+            "xl/richData/_rels/richValueRel.xml.rels".to_string(),
+            rels_xml.to_vec(),
         );
 
         let resolved = resolve_rich_value_image_targets(&parts).expect("resolve");
