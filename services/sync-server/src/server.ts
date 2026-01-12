@@ -270,7 +270,12 @@ export function createSyncServer(
   };
 
   const recordUpgradeRejection = (
-    reason: "rate_limit" | "auth_failure" | "tombstone" | "retention_purging"
+    reason:
+      | "rate_limit"
+      | "auth_failure"
+      | "tombstone"
+      | "retention_purging"
+      | "max_connections_per_doc"
   ) => {
     metrics.wsConnectionsRejectedTotal.inc({ reason });
   };
@@ -1451,6 +1456,7 @@ export function createSyncServer(
           sendUpgradeRejection(socket, 414, "Document id too long");
           return;
         }
+
         // Parse the query string for token extraction.
         const url = new URL(req.url, "http://localhost");
 
@@ -1528,6 +1534,17 @@ export function createSyncServer(
             recordUpgradeRejection("auth_failure");
             logger.error({ err, ip, docName }, "ws_introspection_failed");
             sendUpgradeRejection(socket, 503, "Introspection failed");
+            return;
+          }
+        }
+
+        const maxConnectionsPerDoc = config.limits.maxConnectionsPerDoc ?? 0;
+        if (maxConnectionsPerDoc > 0) {
+          const activeForDoc = activeSocketsByDoc.get(docName);
+          const activeCount = activeForDoc?.size ?? 0;
+          if (activeCount >= maxConnectionsPerDoc) {
+            recordUpgradeRejection("max_connections_per_doc");
+            sendUpgradeRejection(socket, 429, "max_connections_per_doc_exceeded");
             return;
           }
         }

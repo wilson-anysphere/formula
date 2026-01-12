@@ -138,6 +138,7 @@ describe("API e2e: auth + RBAC + sync token", () => {
         trustProxy: false,
         gc: true,
         tls: null,
+        metrics: { public: true },
         dataDir,
         disableDataDirLock: false,
         persistence: {
@@ -158,6 +159,7 @@ describe("API e2e: auth + RBAC + sync token", () => {
         limits: {
           maxConnections: 100,
           maxConnectionsPerIp: 100,
+          maxConnectionsPerDoc: 0,
           maxConnAttemptsPerWindow: 500,
           connAttemptWindowMs: 60_000,
           maxMessageBytes: 2 * 1024 * 1024,

@@ -238,6 +238,8 @@ export async function startSyncServer(opts: {
       SYNC_SERVER_TLS_KEY_PATH: "",
       // Prevent local ops hardening flags from affecting test behavior.
       SYNC_SERVER_DISABLE_PUBLIC_METRICS: "",
+      // Prevent per-document websocket connection limits from leaking into tests.
+      SYNC_SERVER_MAX_CONNECTIONS_PER_DOC: "",
       ...authEnv,
       ...(opts.env ?? {}),
     },

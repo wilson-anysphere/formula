@@ -34,6 +34,7 @@ function createConfig(dataDir: string, overrides: Partial<SyncServerConfig> = {}
     limits: {
       maxConnections: 100,
       maxConnectionsPerIp: 25,
+      maxConnectionsPerDoc: 0,
       maxConnAttemptsPerWindow: 100,
       connAttemptWindowMs: 60_000,
       maxMessageBytes: 2 * 1024 * 1024,

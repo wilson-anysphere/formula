@@ -220,6 +220,7 @@ function createFallbackMetrics(): SyncServerMetrics {
   wsConnectionsRejectedTotal.inc({ reason: "auth_failure" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "tombstone" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "retention_purging" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "max_connections_per_doc" }, 0);
 
   const wsClosesTotal = createCounter<"code">({
     name: "sync_server_ws_closes_total",
@@ -314,7 +315,8 @@ export type WsConnectionRejectionReason =
   | "rate_limit"
   | "auth_failure"
   | "tombstone"
-  | "retention_purging";
+  | "retention_purging"
+  | "max_connections_per_doc";
 
 export type RetentionSweepKind = "leveldb" | "tombstone";
 
@@ -376,6 +378,7 @@ export function createSyncServerMetrics(): SyncServerMetrics {
   wsConnectionsRejectedTotal.inc({ reason: "auth_failure" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "tombstone" }, 0);
   wsConnectionsRejectedTotal.inc({ reason: "retention_purging" }, 0);
+  wsConnectionsRejectedTotal.inc({ reason: "max_connections_per_doc" }, 0);
 
   const wsClosesTotal = new promClient.Counter({
     name: "sync_server_ws_closes_total",

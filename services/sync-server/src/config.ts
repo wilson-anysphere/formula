@@ -105,6 +105,7 @@ export type SyncServerConfig = {
   limits: {
     maxConnections: number;
     maxConnectionsPerIp: number;
+    maxConnectionsPerDoc: number;
     maxConnAttemptsPerWindow: number;
     connAttemptWindowMs: number;
     maxMessageBytes: number;
@@ -395,6 +396,7 @@ export function loadConfigFromEnv(): SyncServerConfig {
         process.env.SYNC_SERVER_MAX_CONNECTIONS_PER_IP,
         25
       ),
+      maxConnectionsPerDoc: envInt(process.env.SYNC_SERVER_MAX_CONNECTIONS_PER_DOC, 0),
       maxConnAttemptsPerWindow: envInt(
         process.env.SYNC_SERVER_MAX_CONN_ATTEMPTS_PER_WINDOW,
         60

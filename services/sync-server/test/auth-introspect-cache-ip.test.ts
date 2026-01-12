@@ -132,6 +132,7 @@ test("auth:introspect caches results per (token, docId, clientIp)", async (t) =>
     limits: {
       maxConnections: 100,
       maxConnectionsPerIp: 100,
+      maxConnectionsPerDoc: 0,
       maxConnAttemptsPerWindow: 500,
       connAttemptWindowMs: 60_000,
       maxMessageBytes: 2 * 1024 * 1024,
