@@ -5652,14 +5652,14 @@ fn fn_sumif(
     for row_off in 0..rows {
         for col_off in 0..cols {
             let crit_v = criteria_range.get_value_at(grid, row_off, col_off);
-            let engine_value = bytecode_value_to_engine_ref(&crit_v);
+            let engine_value = bytecode_value_to_engine_ref(crit_v.as_ref());
             if !criteria.matches(&engine_value) {
                 continue;
             }
 
-            match sum_range.get_value_at(grid, row_off, col_off) {
-                Value::Number(v) => sum += v,
-                Value::Error(e) => return Value::Error(e),
+            match sum_range.get_value_at(grid, row_off, col_off).as_ref() {
+                Value::Number(v) => sum += *v,
+                Value::Error(e) => return Value::Error(*e),
                 Value::Bool(_)
                 | Value::Text(_)
                 | Value::Entity(_)
@@ -5971,15 +5971,15 @@ fn sumifs_with_array_ranges(
         'cell: for col_off in 0..cols {
             for (range, crit) in crit_ranges.iter().copied().zip(crits.iter()) {
                 let crit_v = range.get_value_at(grid, row_off, col_off);
-                let engine_value = bytecode_value_to_engine_ref(&crit_v);
+                let engine_value = bytecode_value_to_engine_ref(crit_v.as_ref());
                 if !crit.matches(&engine_value) {
                     continue 'cell;
                 }
             }
 
-            match sum_range.get_value_at(grid, row_off, col_off) {
-                Value::Number(v) => sum += v,
-                Value::Error(e) => return Value::Error(e),
+            match sum_range.get_value_at(grid, row_off, col_off).as_ref() {
+                Value::Number(v) => sum += *v,
+                Value::Error(e) => return Value::Error(*e),
                 Value::Bool(_)
                 | Value::Text(_)
                 | Value::Entity(_)
@@ -6270,14 +6270,16 @@ fn countifs_with_array_ranges(
 
         let mut matches = true;
         for (range, crit) in ranges.iter().zip(criteria.iter()) {
-            let v = match range {
-                CriteriaRange::Range(r) => grid.get_value(CellCoord {
+            let engine_value = match range {
+                CriteriaRange::Range(r) => bytecode_value_to_engine(grid.get_value(CellCoord {
                     row: r.row_start + row_off as i32,
                     col: r.col_start + col_off as i32,
-                }),
-                CriteriaRange::Array(a) => a.values.get(idx).cloned().unwrap_or(Value::Empty),
+                })),
+                CriteriaRange::Array(a) => {
+                    let v = a.values.get(idx).unwrap_or(&Value::Empty);
+                    bytecode_value_to_engine_ref(v)
+                }
             };
-            let engine_value = bytecode_value_to_engine(v);
             if !crit.matches(&engine_value) {
                 matches = false;
                 break;
@@ -6514,17 +6516,17 @@ fn fn_averageif(
     for row_off in 0..rows {
         for col_off in 0..cols {
             let crit_v = criteria_range.get_value_at(grid, row_off, col_off);
-            let engine_value = bytecode_value_to_engine_ref(&crit_v);
+            let engine_value = bytecode_value_to_engine_ref(crit_v.as_ref());
             if !criteria.matches(&engine_value) {
                 continue;
             }
 
-            match avg_range.get_value_at(grid, row_off, col_off) {
+            match avg_range.get_value_at(grid, row_off, col_off).as_ref() {
                 Value::Number(v) => {
-                    sum += v;
+                    sum += *v;
                     count += 1;
                 }
-                Value::Error(e) => return Value::Error(e),
+                Value::Error(e) => return Value::Error(*e),
                 Value::Bool(_)
                 | Value::Text(_)
                 | Value::Entity(_)
@@ -6863,18 +6865,18 @@ fn averageifs_with_array_ranges(
         'cell: for col_off in 0..cols {
             for (range, crit) in crit_ranges.iter().copied().zip(crits.iter()) {
                 let crit_v = range.get_value_at(grid, row_off, col_off);
-                let engine_value = bytecode_value_to_engine_ref(&crit_v);
+                let engine_value = bytecode_value_to_engine_ref(crit_v.as_ref());
                 if !crit.matches(&engine_value) {
                     continue 'cell;
                 }
             }
 
-            match avg_range.get_value_at(grid, row_off, col_off) {
+            match avg_range.get_value_at(grid, row_off, col_off).as_ref() {
                 Value::Number(v) => {
-                    sum += v;
+                    sum += *v;
                     count += 1;
                 }
-                Value::Error(e) => return Value::Error(e),
+                Value::Error(e) => return Value::Error(*e),
                 Value::Bool(_)
                 | Value::Text(_)
                 | Value::Entity(_)
@@ -7166,15 +7168,15 @@ fn minifs_with_array_ranges(
         'cell: for col_off in 0..cols {
             for (range, crit) in crit_ranges.iter().copied().zip(crits.iter()) {
                 let crit_v = range.get_value_at(grid, row_off, col_off);
-                let engine_value = bytecode_value_to_engine_ref(&crit_v);
+                let engine_value = bytecode_value_to_engine_ref(crit_v.as_ref());
                 if !crit.matches(&engine_value) {
                     continue 'cell;
                 }
             }
 
-            match min_range.get_value_at(grid, row_off, col_off) {
-                Value::Number(v) => best = Some(best.map_or(v, |b| b.min(v))),
-                Value::Error(e) => return Value::Error(e),
+            match min_range.get_value_at(grid, row_off, col_off).as_ref() {
+                Value::Number(v) => best = Some(best.map_or(*v, |b| b.min(*v))),
+                Value::Error(e) => return Value::Error(*e),
                 Value::Bool(_)
                 | Value::Text(_)
                 | Value::Entity(_)
@@ -7463,15 +7465,15 @@ fn maxifs_with_array_ranges(
         'cell: for col_off in 0..cols {
             for (range, crit) in crit_ranges.iter().copied().zip(crits.iter()) {
                 let crit_v = range.get_value_at(grid, row_off, col_off);
-                let engine_value = bytecode_value_to_engine_ref(&crit_v);
+                let engine_value = bytecode_value_to_engine_ref(crit_v.as_ref());
                 if !crit.matches(&engine_value) {
                     continue 'cell;
                 }
             }
 
-            match max_range.get_value_at(grid, row_off, col_off) {
-                Value::Number(v) => best = Some(best.map_or(v, |b| b.max(v))),
-                Value::Error(e) => return Value::Error(e),
+            match max_range.get_value_at(grid, row_off, col_off).as_ref() {
+                Value::Number(v) => best = Some(best.map_or(*v, |b| b.max(*v))),
+                Value::Error(e) => return Value::Error(*e),
                 Value::Bool(_)
                 | Value::Text(_)
                 | Value::Entity(_)
@@ -8973,18 +8975,21 @@ impl<'a> Range2DArg<'a> {
         }
     }
 
-    fn get_value_at(self, grid: &dyn Grid, row_off: i32, col_off: i32) -> Value {
+    fn get_value_at(self, grid: &dyn Grid, row_off: i32, col_off: i32) -> Cow<'a, Value> {
         match self {
             Range2DArg::Range(r) => {
                 let row = r.row_start + row_off;
                 let col = r.col_start + col_off;
-                grid.get_value(CellCoord { row, col })
+                Cow::Owned(grid.get_value(CellCoord { row, col }))
             }
             Range2DArg::Array(a) => {
                 let row = row_off as usize;
                 let col = col_off as usize;
                 let idx = row * a.cols + col;
-                a.values.get(idx).cloned().unwrap_or(Value::Empty)
+                match a.values.get(idx) {
+                    Some(v) => Cow::Borrowed(v),
+                    None => Cow::Owned(Value::Empty),
+                }
             }
         }
     }
