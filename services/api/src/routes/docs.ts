@@ -868,12 +868,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
           })
         );
 
-        return reply.code(403).send({
-          error: "dlp_blocked",
-          reasonCode: evaluation.reasonCode,
-          classification: evaluation.classification,
-          maxAllowed: evaluation.maxAllowed,
-        });
+        return reply.code(403).send({ error: "dlp_blocked" });
       }
     }
 
@@ -1046,12 +1041,7 @@ export function registerDocRoutes(app: FastifyInstance): void {
           })
         );
 
-        return reply.code(403).send({
-          error: "dlp_blocked",
-          reasonCode: evaluation.reasonCode,
-          classification: evaluation.classification,
-          maxAllowed: evaluation.maxAllowed,
-        });
+        return reply.code(403).send({ error: "dlp_blocked" });
       }
 
       await app.db.query(
