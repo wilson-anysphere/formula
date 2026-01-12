@@ -59,8 +59,32 @@ export function injectWebviewCsp(html: string): string {
       }
 
       try {
+        // If we couldn't fully delete the global, attempt to lock it down to undefined so it can't be
+        // re-populated later in the page lifecycle.
+        Object.defineProperty(window, key, {
+          value: undefined,
+          writable: false,
+          configurable: false,
+        });
+        continue;
+      } catch {
+        // Ignore.
+      }
+
+      try {
         // If deletion fails, fall back to overwriting.
         window[key] = undefined;
+      } catch {
+        // Ignore.
+      }
+
+      try {
+        // Best-effort: after overwriting, try to lock down the property to prevent later reinjection.
+        Object.defineProperty(window, key, {
+          value: undefined,
+          writable: false,
+          configurable: false,
+        });
       } catch {
         // Ignore.
       }
