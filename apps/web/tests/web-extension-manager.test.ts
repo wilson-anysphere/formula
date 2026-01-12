@@ -695,6 +695,13 @@ test("uninstall clears persisted permission + extension storage state (localStor
     "formula.extensionHost.storage.formula.sample-hello",
     JSON.stringify({ foo: "bar" })
   );
+  globalThis.localStorage.setItem(
+    "formula.extensions.contributedPanels.v1",
+    JSON.stringify({
+      "sampleHello.panel": { extensionId: "formula.sample-hello", title: "Sample Hello Panel" },
+      "other.panel": { extensionId: "other.extension", title: "Other Panel" }
+    })
+  );
 
   // Ensure we preserve other extensions' panel seeds while removing the uninstalled extension.
   const seedKey = "formula.extensions.contributedPanels.v1";
@@ -713,6 +720,12 @@ test("uninstall clears persisted permission + extension storage state (localStor
   const storeAfter = (host as any)._storageApi.getExtensionStore("formula.sample-hello");
   expect(storeAfter).not.toBe(storeBefore);
   expect(storeAfter.foo).toBeUndefined();
+
+  const panelSeedsRaw = globalThis.localStorage.getItem("formula.extensions.contributedPanels.v1");
+  expect(panelSeedsRaw).not.toBe(null);
+  const panelSeeds = JSON.parse(String(panelSeedsRaw));
+  expect(panelSeeds["sampleHello.panel"]).toBeUndefined();
+  expect(panelSeeds["other.panel"]).toEqual({ extensionId: "other.extension", title: "Other Panel" });
 
   const permissionsRaw = globalThis.localStorage.getItem("formula.extensionHost.permissions");
   expect(permissionsRaw).not.toBe(null);
