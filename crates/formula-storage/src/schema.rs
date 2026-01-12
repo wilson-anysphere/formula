@@ -13,8 +13,21 @@ pub(crate) fn init(conn: &mut Connection) -> rusqlite::Result<()> {
     let mut version: i64 = tx.query_row(
         "SELECT version FROM schema_version WHERE id = 1",
         [],
-        |row| row.get(0),
+        |row| {
+            if let Some(version) = row.get::<_, Option<i64>>(0).ok().flatten() {
+                return Ok(version);
+            }
+            if let Some(raw) = row.get::<_, Option<String>>(0).ok().flatten() {
+                if let Ok(parsed) = raw.trim().parse::<i64>() {
+                    return Ok(parsed);
+                }
+            }
+            Ok(0)
+        },
     )?;
+    if version < 0 {
+        version = 0;
+    }
 
     // If a newer client has already migrated the database, fail fast. This
     // avoids silently corrupting state by attempting to operate on an unknown schema.
