@@ -3196,7 +3196,18 @@ fn normalize_formula(formula: Option<String>) -> Option<String> {
 }
 
 fn coord_to_a1(row: usize, col: usize) -> String {
-    format!("{}{}", col_index_to_letters(col), row + 1)
+    // Prefer the shared A1 formatter for consistency with the rest of the codebase and to avoid
+    // debug overflow panics when converting 0-based coordinates to 1-based A1 notation
+    // (e.g. `row == u32::MAX` on 32-bit targets).
+    match (u32::try_from(row), u32::try_from(col)) {
+        (Ok(row), Ok(col)) => formula_model::CellRef::new(row, col).to_a1(),
+        _ => {
+            let row_1_based = u64::try_from(row)
+                .unwrap_or(u64::MAX)
+                .saturating_add(1);
+            format!("{}{}", col_index_to_letters(col), row_1_based)
+        }
+    }
 }
 
 fn quote_sheet_name(name: &str) -> String {
@@ -3205,13 +3216,16 @@ fn quote_sheet_name(name: &str) -> String {
     format!("'{escaped}'")
 }
 
-fn col_index_to_letters(mut col: usize) -> String {
+fn col_index_to_letters(col: usize) -> String {
     // Excel columns are base-26 with A=1..Z=26.
-    col += 1;
+    //
+    // Do arithmetic in u64 so very large `usize` indices (e.g. u32::MAX on wasm32/32-bit targets)
+    // don't overflow on the 0->1 conversion.
+    let mut col = u64::try_from(col).unwrap_or(u64::MAX).saturating_add(1);
     let mut letters = Vec::new();
     while col > 0 {
-        let rem = (col - 1) % 26;
-        letters.push((b'A' + rem as u8) as char);
+        let rem = ((col - 1) % 26) as u8;
+        letters.push((b'A' + rem) as char);
         col = (col - 1) / 26;
     }
     letters.iter().rev().collect()
@@ -4526,6 +4540,11 @@ mod tests {
         assert_eq!(col_index_to_letters(27), "AB");
         assert_eq!(col_index_to_letters(701), "ZZ");
         assert_eq!(col_index_to_letters(702), "AAA");
+    }
+
+    #[test]
+    fn coord_to_a1_formats_u32_max_row_without_overflow() {
+        assert_eq!(coord_to_a1(u32::MAX as usize, 0), "A4294967296");
     }
 
     fn simple_pivot_config() -> PivotConfig {
