@@ -116,6 +116,120 @@ async fn autosave_persists_and_exports_round_trip() {
 }
 
 #[tokio::test]
+async fn autosave_persists_sheet_visibility_and_tab_color() {
+    let tmp_dir = tempfile::tempdir().expect("temp dir");
+    let db_path = tmp_dir.path().join("autosave.sqlite");
+
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("Sheet1".to_string());
+    workbook.add_sheet("Sheet2".to_string());
+    workbook.add_sheet("Sheet3".to_string());
+
+    let mut state = AppState::new();
+    state
+        .load_workbook_persistent(workbook, WorkbookPersistenceLocation::OnDisk(db_path.clone()))
+        .expect("load persistent workbook");
+
+    state
+        .set_sheet_tab_color("Sheet1", Some(formula_model::TabColor::rgb("FFFF0000")))
+        .expect("set sheet tab color");
+    state
+        .set_sheet_visibility("Sheet2", formula_model::SheetVisibility::Hidden)
+        .expect("set Sheet2 visibility");
+    state
+        .set_sheet_visibility("Sheet3", formula_model::SheetVisibility::VeryHidden)
+        .expect("set Sheet3 visibility");
+
+    state
+        .autosave_manager()
+        .expect("autosave")
+        .flush()
+        .await
+        .expect("flush autosave");
+
+    // Assert persisted sheet metadata is reflected in the SQLite `sheets` table.
+    let storage = Storage::open_path(&db_path).expect("open storage");
+    let workbooks = storage.list_workbooks().expect("list workbooks");
+    assert_eq!(workbooks.len(), 1);
+    let workbook_id = workbooks[0].id;
+    let sheets = storage.list_sheets(workbook_id).expect("list sheets");
+
+    let sheet1 = sheets.iter().find(|s| s.name == "Sheet1").expect("Sheet1 meta");
+    assert_eq!(
+        sheet1.tab_color.as_deref(),
+        Some("FFFF0000"),
+        "expected Sheet1 tab_color persisted"
+    );
+    assert_eq!(sheet1.visibility, formula_storage::SheetVisibility::Visible);
+
+    let sheet2 = sheets.iter().find(|s| s.name == "Sheet2").expect("Sheet2 meta");
+    assert_eq!(sheet2.visibility, formula_storage::SheetVisibility::Hidden);
+    assert!(sheet2.tab_color.is_none());
+
+    let sheet3 = sheets.iter().find(|s| s.name == "Sheet3").expect("Sheet3 meta");
+    assert_eq!(sheet3.visibility, formula_storage::SheetVisibility::VeryHidden);
+    assert!(sheet3.tab_color.is_none());
+
+    // Recovery: load a new AppState from the same autosave DB.
+    let mut template = Workbook::new_empty(None);
+    template.add_sheet("Sheet1".to_string());
+    template.add_sheet("Sheet2".to_string());
+    template.add_sheet("Sheet3".to_string());
+    let mut recovered = AppState::new();
+    recovered
+        .load_workbook_persistent(template, WorkbookPersistenceLocation::OnDisk(db_path.clone()))
+        .expect("load recovered workbook");
+
+    let recovered_workbook = recovered.get_workbook().expect("workbook").clone();
+    assert_eq!(
+        recovered_workbook
+            .sheet("Sheet1")
+            .and_then(|s| s.tab_color.as_ref())
+            .and_then(|c| c.rgb.as_deref()),
+        Some("FFFF0000"),
+        "expected Sheet1 tab color to survive recovery"
+    );
+    assert_eq!(
+        recovered_workbook.sheet("Sheet2").expect("Sheet2").visibility,
+        formula_model::SheetVisibility::Hidden
+    );
+    assert_eq!(
+        recovered_workbook.sheet("Sheet3").expect("Sheet3").visibility,
+        formula_model::SheetVisibility::VeryHidden
+    );
+
+    // Export through the same storage→xlsx path as the desktop `save_workbook` command.
+    let xlsx_path = tmp_dir.path().join("export.xlsx");
+    let export_storage = recovered.persistent_storage().expect("storage handle");
+    let export_id = recovered.persistent_workbook_id().expect("workbook id");
+    let export_meta = recovered.get_workbook().expect("workbook").clone();
+    recovered
+        .autosave_manager()
+        .expect("autosave")
+        .flush()
+        .await
+        .expect("flush before export");
+    let bytes = write_xlsx_from_storage(&export_storage, export_id, &export_meta, &xlsx_path)
+        .expect("export xlsx");
+
+    let model =
+        formula_xlsx::read_workbook_from_reader(Cursor::new(bytes.as_ref())).expect("read exported model");
+    let exported_sheet1 = model.sheet_by_name("Sheet1").expect("Sheet1 exists");
+    assert_eq!(
+        exported_sheet1.tab_color.as_ref().and_then(|c| c.rgb.as_deref()),
+        Some("FFFF0000"),
+        "expected Sheet1 tab color to round-trip through storage export"
+    );
+    let exported_sheet2 = model.sheet_by_name("Sheet2").expect("Sheet2 exists");
+    assert_eq!(exported_sheet2.visibility, formula_model::SheetVisibility::Hidden);
+    let exported_sheet3 = model.sheet_by_name("Sheet3").expect("Sheet3 exists");
+    assert_eq!(
+        exported_sheet3.visibility,
+        formula_model::SheetVisibility::VeryHidden
+    );
+}
+
+#[tokio::test]
 async fn export_creates_parent_dirs_for_new_workbook() {
     let tmp_dir = tempfile::tempdir().expect("temp dir");
     let db_path = tmp_dir.path().join("autosave.sqlite");
