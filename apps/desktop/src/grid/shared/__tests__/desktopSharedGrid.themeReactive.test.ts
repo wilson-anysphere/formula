@@ -188,6 +188,11 @@ describe("DesktopSharedGrid theme reactivity", () => {
       expect(matchMediaMock).toHaveBeenCalledWith("(prefers-contrast: more)");
       expect(matchMediaMock).toHaveBeenCalledWith("(forced-colors: active)");
 
+      const requiredQueries = ["(prefers-color-scheme: dark)", "(prefers-contrast: more)", "(forced-colors: active)"];
+      for (const query of requiredQueries) {
+        expect(listenersByQuery.get(query)?.size).toBeGreaterThan(0);
+      }
+
       expect(grid.renderer.getTheme().gridBg).toBe("rgb(10, 20, 30)");
 
       container.style.setProperty("--formula-grid-bg", "rgb(40, 50, 60)");
@@ -204,6 +209,8 @@ describe("DesktopSharedGrid theme reactivity", () => {
     }
 
     // Ensure listeners were detached on destroy.
-    expect(listenersByQuery.get("(prefers-color-scheme: dark)")?.size ?? 0).toBe(0);
+    for (const query of ["(prefers-color-scheme: dark)", "(prefers-contrast: more)", "(forced-colors: active)"]) {
+      expect(listenersByQuery.get(query)?.size ?? 0).toBe(0);
+    }
   });
 });
