@@ -4695,13 +4695,14 @@ mountRibbon(ribbonRoot, {
       }
 
       const percent = Number(suffix);
-      if (!Number.isFinite(percent) || percent <= 0) return;
-      if (!app.supportsZoom()) return;
+      if (Number.isFinite(percent) && Number.isInteger(percent) && percent > 0) {
+        if (!app.supportsZoom()) return;
 
-      app.setZoom(percent / 100);
-      syncZoomControl();
-      app.focus();
-      return;
+        app.setZoom(percent / 100);
+        syncZoomControl();
+        app.focus();
+        return;
+      }
     }
 
     const fontSizePrefix = "home.font.fontSize.";
