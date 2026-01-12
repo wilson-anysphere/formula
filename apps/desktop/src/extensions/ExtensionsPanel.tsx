@@ -297,7 +297,14 @@ export function ExtensionsPanel({
                             setRepairingId(item.id);
                             try {
                               if (isIncompatible) {
-                                await webExtensionManager.update(item.id);
+                                const updated = await webExtensionManager.update(item.id);
+                                // If no update is available, fall back to a repair/reinstall of the
+                                // currently-installed version. This handles cases where the
+                                // incompatible quarantine was caused by persisted manifest
+                                // corruption rather than an engine mismatch.
+                                if (String(updated?.version ?? "") === String(item.version ?? "")) {
+                                  await webExtensionManager.repair(item.id);
+                                }
                               } else {
                                 await webExtensionManager.repair(item.id);
                               }

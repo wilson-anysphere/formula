@@ -121,4 +121,100 @@ describe("ExtensionsPanel (IndexedDB installs)", () => {
       root.unmount();
     });
   });
+
+  it("falls back to repair() when update() does not change the installed version", async () => {
+    const rootEl = document.createElement("div");
+    document.body.appendChild(rootEl);
+    const root = createRoot(rootEl);
+
+    const listeners = new Set<() => void>();
+
+    const manager = {
+      ready: true,
+      error: null,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      loadBuiltInExtensions: vi.fn(async () => {}),
+      host: { listExtensions: () => [] },
+      getContributedCommands: () => [],
+      getContributedPanels: () => [],
+      getContributedKeybindings: () => [],
+      getGrantedPermissions: vi.fn(async () => ({})),
+      revokePermission: vi.fn(async () => {}),
+      resetPermissionsForExtension: vi.fn(async () => {}),
+      resetAllPermissions: vi.fn(async () => {}),
+    } as any;
+
+    let installedList: any[] = [
+      {
+        id: "test.incompatible-ext",
+        version: "1.0.0",
+        incompatible: true,
+        incompatibleReason: "invalid extension manifest (corrupted metadata)",
+      },
+    ];
+
+    const webExtensionManager = {
+      verifyAllInstalled: vi.fn(async () => ({})),
+      listInstalled: vi.fn(async () => installedList),
+      update: vi.fn(async (id: string) => {
+        // Simulate "already up to date" (no semver bump).
+        return { id, version: "1.0.0", installedAt: new Date().toISOString() };
+      }),
+      repair: vi.fn(async (id: string) => {
+        // Simulate reinstall clearing the incompatible quarantine.
+        installedList = [{ id, version: "1.0.0" }];
+        return installedList[0];
+      }),
+      loadInstalled: vi.fn(async () => {}),
+    } as any;
+
+    await act(async () => {
+      root.render(
+        React.createElement(ExtensionsPanel, {
+          manager,
+          webExtensionManager,
+          onSyncExtensions: vi.fn(),
+          onExecuteCommand: vi.fn(),
+          onOpenPanel: vi.fn(),
+        }),
+      );
+    });
+
+    // Allow effects (refreshInstalled) to run.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const actionButton = rootEl.querySelector(
+      '[data-testid="repair-extension-test.incompatible-ext"]',
+    ) as HTMLButtonElement | null;
+    expect(actionButton).toBeTruthy();
+
+    await act(async () => {
+      actionButton?.click();
+    });
+
+    await waitFor(() => webExtensionManager.update.mock.calls.length > 0);
+    await waitFor(() => webExtensionManager.repair.mock.calls.length > 0);
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(webExtensionManager.update).toHaveBeenCalledWith("test.incompatible-ext");
+    expect(webExtensionManager.repair).toHaveBeenCalledWith("test.incompatible-ext");
+
+    const statusAfter = rootEl.querySelector(
+      '[data-testid="installed-extension-status-test.incompatible-ext"]',
+    ) as HTMLDivElement | null;
+    expect(statusAfter).toBeTruthy();
+    expect(statusAfter?.textContent).toBe("OK");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });
