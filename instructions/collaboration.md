@@ -125,6 +125,7 @@ pnpm dev:sync
 | `SYNC_SERVER_JWT_SECRET` | JWT secret (HS256) |
 | `SYNC_SERVER_PERSISTENCE_BACKEND` | `leveldb` or `file` |
 | `SYNC_SERVER_PERSISTENCE_ENCRYPTION` | `keyring` for encryption at rest |
+| `SYNC_SERVER_MAX_MESSAGE_BYTES` | Max websocket message size (defaults to 2MB; see close code `1009`) |
 
 ### Client Connection
 
