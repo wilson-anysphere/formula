@@ -29,6 +29,12 @@ export function normalizeExcelColorToCss(input) {
   if (!/^[0-9a-fA-F]+$/.test(raw)) return undefined;
 
   // #RRGGBB / RRGGBB
+  if (raw.length === 3) {
+    // CSS shorthand hex: #RGB / RGB
+    const [r, g, b] = raw.toLowerCase().split("");
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+
   if (raw.length === 6) {
     return `#${raw.toLowerCase()}`;
   }

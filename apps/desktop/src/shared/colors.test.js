@@ -9,6 +9,7 @@ test("normalizeExcelColorToCss converts Excel ARGB to canvas-safe CSS colors", (
   // 0x80 / 255 = 0.50196..., rounded to 3 decimals for deterministic serialization.
   assert.equal(normalizeExcelColorToCss("#80112233"), "rgba(17,34,51,0.502)");
 
+  assert.equal(normalizeExcelColorToCss("#fff"), "#ffffff");
   assert.equal(normalizeExcelColorToCss("112233"), "#112233");
   assert.equal(normalizeExcelColorToCss("rebeccapurple"), "rebeccapurple");
 
@@ -16,4 +17,3 @@ test("normalizeExcelColorToCss converts Excel ARGB to canvas-safe CSS colors", (
   assert.equal(normalizeExcelColorToCss("#12345"), undefined);
   assert.equal(normalizeExcelColorToCss(""), undefined);
 });
-
