@@ -100,6 +100,13 @@ pub fn sniff_csv_delimiter_with_decimal_separator(sample: &[u8], decimal_separat
             .map(|(_, delimiter)| delimiter)
             .unwrap_or(b',');
     }
+    if let Some(encoding) = detect_utf16_bomless_encoding(sample) {
+        let utf8 = Utf16ToUtf8Reader::new(Cursor::new(sample), encoding.new_decoder_with_bom_removal());
+        let mut reader = BufReader::new(utf8);
+        return sniff_csv_delimiter_prefix(&mut reader, decimal_separator)
+            .map(|(_, delimiter)| delimiter)
+            .unwrap_or(b',');
+    }
 
     let mut cursor = Cursor::new(sample);
     sniff_csv_delimiter_prefix(&mut cursor, decimal_separator)
@@ -175,7 +182,7 @@ pub fn import_csv_to_columnar_table<R: BufRead>(
     options: CsvOptions,
 ) -> Result<ColumnarTable, CsvImportError> {
     // Excel can export delimited text as UTF-16LE/BE (commonly via "Unicode Text"). The CSV parser
-    // expects an 8-bit stream, so detect a UTF-16 BOM and transcode to UTF-8 on the fly.
+    // expects an 8-bit stream, so detect UTF-16 and transcode to UTF-8 on the fly.
     let buf = reader.fill_buf().map_err(CsvImportError::Io)?;
     if buf.starts_with(&[0xFF, 0xFE]) || buf.starts_with(&[0xFE, 0xFF]) {
         let decoder = if buf.starts_with(&[0xFF, 0xFE]) {
@@ -186,6 +193,12 @@ pub fn import_csv_to_columnar_table<R: BufRead>(
         let utf8 = Utf16ToUtf8Reader::new(reader, decoder);
         let mut options = options;
         // The transcoder yields valid UTF-8, so force UTF-8 decoding for field values.
+        options.encoding = CsvTextEncoding::Utf8;
+        return import_csv_to_columnar_table_impl(BufReader::new(utf8), options);
+    }
+    if let Some(encoding) = detect_utf16_bomless_encoding(buf) {
+        let utf8 = Utf16ToUtf8Reader::new(reader, encoding.new_decoder_with_bom_removal());
+        let mut options = options;
         options.encoding = CsvTextEncoding::Utf8;
         return import_csv_to_columnar_table_impl(BufReader::new(utf8), options);
     }
@@ -460,6 +473,47 @@ impl<R: Read> Read for Utf16ToUtf8Reader<R> {
                 }
             }
         }
+    }
+}
+
+fn detect_utf16_bomless_encoding(buf: &[u8]) -> Option<&'static encoding_rs::Encoding> {
+    // Best-effort detection for UTF-16 inputs that lack a BOM.
+    //
+    // This is intentionally conservative: only treat the stream as UTF-16 if it contains a high
+    // proportion of NUL bytes that are overwhelmingly concentrated on either the even or odd byte
+    // positions (ASCII-like UTF-16LE/BE pattern).
+    let len = buf.len().min(2048);
+    let len = len - (len % 2);
+    if len < 4 {
+        return None;
+    }
+    let sample = &buf[..len];
+
+    let mut even_zero = 0usize;
+    let mut odd_zero = 0usize;
+    for (idx, b) in sample.iter().enumerate() {
+        if *b != 0 {
+            continue;
+        }
+        if idx % 2 == 0 {
+            even_zero += 1;
+        } else {
+            odd_zero += 1;
+        }
+    }
+    let zeros = even_zero + odd_zero;
+    if zeros * 4 < len {
+        // Fewer than 25% NUL bytes is unlikely to be UTF-16 text.
+        return None;
+    }
+
+    // Require a strong skew toward one byte position.
+    if odd_zero > even_zero.saturating_mul(3) {
+        Some(UTF_16LE)
+    } else if even_zero > odd_zero.saturating_mul(3) {
+        Some(UTF_16BE)
+    } else {
+        None
     }
 }
 

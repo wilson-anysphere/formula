@@ -624,6 +624,68 @@ fn open_workbook_model_sniffs_utf16be_tab_delimited_text() {
 }
 
 #[test]
+fn open_workbook_model_sniffs_utf16le_tab_delimited_text_without_bom() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let path = tmp.path().join("data_no_bom.txt");
+
+    let tsv = "col1\tcol2\r\n1\thello\r\n2\tworld\r\n";
+    let mut bytes = Vec::new();
+    for unit in tsv.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    std::fs::write(&path, &bytes).expect("write utf16le tsv");
+
+    let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "data_no_bom");
+
+    let sheet = workbook
+        .sheet_by_name("data_no_bom")
+        .expect("data_no_bom sheet missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value_a1("A2").unwrap(), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value_a1("B2").unwrap(),
+        CellValue::String("world".to_string())
+    );
+}
+
+#[test]
+fn open_workbook_model_sniffs_utf16be_tab_delimited_text_without_bom() {
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let path = tmp.path().join("data_no_bom.txt");
+
+    let tsv = "col1\tcol2\r\n1\thello\r\n2\tworld\r\n";
+    let mut bytes = Vec::new();
+    for unit in tsv.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_be_bytes());
+    }
+    std::fs::write(&path, &bytes).expect("write utf16be tsv");
+
+    let workbook = formula_io::open_workbook_model(&path).expect("open workbook model");
+    assert_eq!(workbook.sheets.len(), 1);
+    assert_eq!(workbook.sheets[0].name, "data_no_bom");
+
+    let sheet = workbook
+        .sheet_by_name("data_no_bom")
+        .expect("data_no_bom sheet missing");
+    assert_eq!(sheet.value_a1("A1").unwrap(), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value_a1("B1").unwrap(),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value_a1("A2").unwrap(), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value_a1("B2").unwrap(),
+        CellValue::String("world".to_string())
+    );
+}
+
+#[test]
 fn open_workbook_model_csv_honors_excel_sep_directive() {
     let tmp = tempfile::tempdir().expect("temp dir");
     let path = tmp.path().join("sep.csv");

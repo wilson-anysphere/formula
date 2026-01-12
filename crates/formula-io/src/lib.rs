@@ -165,6 +165,13 @@ fn looks_like_text_csv_prefix(prefix: &[u8]) -> bool {
 
     // Avoid misclassifying binary formats as text.
     if prefix.iter().any(|b| *b == 0) {
+        // Best-effort: handle UTF-16 inputs that lack a BOM by detecting the "ASCII UTF-16" NUL
+        // byte pattern and running heuristics on a decoded preview instead of rejecting as binary.
+        if let Some(encoding) = detect_utf16_bomless_encoding(prefix) {
+            let prefix = &prefix[..prefix.len().saturating_sub(prefix.len() % 2)];
+            let (cow, _) = encoding.decode_without_bom_handling(prefix);
+            return looks_like_text_csv_str(cow.as_ref());
+        }
         return false;
     }
 
@@ -193,6 +200,41 @@ fn looks_like_text_csv_prefix(prefix: &[u8]) -> bool {
     let decoded = decoded.as_ref();
 
     looks_like_text_csv_str(decoded)
+}
+
+fn detect_utf16_bomless_encoding(prefix: &[u8]) -> Option<&'static encoding_rs::Encoding> {
+    let len = prefix.len().min(TEXT_SNIFF_LEN);
+    let len = len - (len % 2);
+    if len < 4 {
+        return None;
+    }
+    let sample = &prefix[..len];
+
+    let mut even_zero = 0usize;
+    let mut odd_zero = 0usize;
+    for (idx, b) in sample.iter().enumerate() {
+        if *b != 0 {
+            continue;
+        }
+        if idx % 2 == 0 {
+            even_zero += 1;
+        } else {
+            odd_zero += 1;
+        }
+    }
+    let zeros = even_zero + odd_zero;
+    if zeros * 4 < len {
+        // <25% NUL bytes is unlikely to be UTF-16 text.
+        return None;
+    }
+
+    if odd_zero > even_zero.saturating_mul(3) {
+        Some(UTF_16LE)
+    } else if even_zero > odd_zero.saturating_mul(3) {
+        Some(UTF_16BE)
+    } else {
+        None
+    }
 }
 
 fn looks_like_text_csv_str(decoded: &str) -> bool {
