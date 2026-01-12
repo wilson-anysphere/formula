@@ -211,6 +211,9 @@ localStorage.removeItem("formula.extensions.contributedPanels.v1");
   - **Application → Local Storage →** `formula.extensions.contributedPanels.v1` (contributed panel seed store)
   - **Sources → Workers** to debug the extension worker runtime (`extension-worker.mjs`)
 
+To open the built-in Extensions panel (and trigger the lazy extension host boot), use the ribbon:
+**Home → Panels → Extensions**.
+
 ### Marketplace base URL (Desktop)
 
 The marketplace base URL is chosen by `getMarketplaceBaseUrl()` (`apps/desktop/src/panels/marketplace/getMarketplaceBaseUrl.ts`).
