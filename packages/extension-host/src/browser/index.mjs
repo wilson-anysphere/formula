@@ -1455,11 +1455,10 @@ class BrowserExtensionHost {
     const worker = extension.worker;
 
     extension.active = false;
-    try {
-      extension.taintedRanges = [];
-    } catch {
-      // ignore
-    }
+    // Intentionally preserve `taintedRanges` across worker restarts/crashes. Extensions can persist
+    // spreadsheet data outside worker memory (e.g. storage/IndexedDB) and later attempt clipboard
+    // writes from a fresh worker. Clearing taint on termination would allow bypassing clipboard DLP
+    // enforcement via a deliberate crash/timeout/restart.
 
     // Best-effort cleanup for runtime registrations that were tied to the crashed worker.
     // Contributed commands stay registered so the app can still route them for future activations.

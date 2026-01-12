@@ -1045,6 +1045,80 @@ test("BrowserExtensionHost: clipboard.writeText blocks when guard throws", async
   await assert.rejects(() => host._executeApi("clipboard", "writeText", ["nope"], extension), /blocked/);
   assert.deepEqual(writes, []);
 });
+
+test("BrowserExtensionHost: taint persists across worker termination + restart", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  // Two workers: initial load + restart after termination.
+  installFakeWorker(t, [{}, {}]);
+
+  /** @type {any} */
+  let guardArgs = null;
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      getActiveSheet() {
+        return { id: "sheet1", name: "Sheet1" };
+      },
+      async getCell() {
+        return "secret";
+      },
+      async setCell() {},
+    },
+    clipboardApi: {
+      readText: async () => "",
+      writeText: async () => {},
+    },
+    clipboardWriteGuard: async (args) => {
+      guardArgs = args;
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.taint-persist";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "taint-persist",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["cells.read", "clipboard"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+  extension.active = true;
+
+  await host._executeApi("cells", "getCell", [5, 6], extension);
+  assert.deepEqual(sortRanges(extension.taintedRanges), [
+    { sheetId: "sheet1", startRow: 5, startCol: 6, endRow: 5, endCol: 6 },
+  ]);
+
+  host._terminateWorker(extension, { reason: "crash", cause: new Error("boom") });
+
+  // Restart the worker and ensure the clipboard guard still sees the previous taint.
+  await host._ensureWorker(extension);
+  extension.active = true;
+
+  await host._executeApi("clipboard", "writeText", ["hello"], extension);
+
+  assert.deepEqual(guardArgs, {
+    extensionId,
+    taintedRanges: [{ sheetId: "sheet1", startRow: 5, startCol: 6, endRow: 5, endCol: 6 }],
+  });
+});
+
 test("BrowserExtensionHost: taint list is capped to the most recent ranges", async (t) => {
   const { BrowserExtensionHost } = await importBrowserHost();
 
