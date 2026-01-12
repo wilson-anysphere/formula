@@ -7022,7 +7022,12 @@ export class SpreadsheetApp {
         for (let c = 0; c < row.length; c += 1) {
           const cell = row[c];
           if (!cell || cell.formula == null) continue;
-          cell.value = this.getCellComputedValue({ row: cellRange.start.row + r, col: cellRange.start.col + c }) as any;
+          // When copying formulas, the clipboard payload should include the displayed value
+          // (including the computed result of the formula). If the computed value is `null`,
+          // treat it as an empty cell so plain-text consumers (and Paste Values) don't fall
+          // back to copying the formula text.
+          const computed = this.getCellComputedValue({ row: cellRange.start.row + r, col: cellRange.start.col + c }) as any;
+          cell.value = computed ?? "";
         }
       }
       const payload = serializeCellGridToClipboardPayload(grid as any);
@@ -7197,7 +7202,8 @@ export class SpreadsheetApp {
         for (let c = 0; c < row.length; c += 1) {
           const cell = row[c];
           if (!cell || cell.formula == null) continue;
-          cell.value = this.getCellComputedValue({ row: cellRange.start.row + r, col: cellRange.start.col + c }) as any;
+          const computed = this.getCellComputedValue({ row: cellRange.start.row + r, col: cellRange.start.col + c }) as any;
+          cell.value = computed ?? "";
         }
       }
       const payload = serializeCellGridToClipboardPayload(grid as any);
