@@ -2307,6 +2307,7 @@ window.addEventListener(
     if (!primary) return;
     if (e.shiftKey || e.altKey) return;
     if (e.key !== "PageUp" && e.key !== "PageDown") return;
+    if (app.isEditing()) return;
 
     const target = e.target as EventTarget | null;
     if (target instanceof HTMLElement) {
@@ -2315,14 +2316,9 @@ window.addEventListener(
       // button) should still allow Ctrl/Cmd+PgUp/PgDn navigation.
       if (target.closest?.("#sheet-tabs .sheet-tabs")) return;
 
-      // Never steal the shortcut from arbitrary text inputs / contenteditable surfaces.
-      //
-      // Exception: allow it while actively editing in the formula bar so users can
-      // navigate sheets during range selection (Excel behavior).
+      // Never steal the shortcut from text inputs / contenteditable surfaces.
       const tag = target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) {
-        if (!formulaBarRoot.contains(target) || !app.isFormulaBarEditing()) return;
-      }
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return;
     }
 
     const ordered = workbookSheetStore.listVisible();

@@ -334,25 +334,55 @@ test.describe("sheet tabs", () => {
     // Active sheet is still Sheet3, but its position is now 2nd.
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
 
-    // Ctrl+PgDn should follow the new order. We dispatch the key event directly to avoid
-    // platform/browser-specific tab switching behavior.
+    // Focus the grid: Ctrl/Cmd+PgUp/PgDn must work when the grid is focused (real workflow).
+    await page.click("#grid", { position: { x: 5, y: 5 } });
+    await expect
+      .poll(() => page.evaluate(() => (document.activeElement as HTMLElement | null)?.id))
+      .toBe("grid");
+
+    // Ctrl+PgDn should follow the new order. Dispatch the key event directly on the grid element
+    // (not window) to ensure we exercise the focused-grid shortcut path.
     await page.evaluate(() => {
-      const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
-      document.getElementById("grid")?.dispatchEvent(evt);
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid");
+      const evt = new KeyboardEvent("keydown", {
+        key: "PageDown",
+        ctrlKey: true,
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      grid.dispatchEvent(evt);
     });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet2");
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 3 of 3");
 
     await page.evaluate(() => {
-      const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
-      document.getElementById("grid")?.dispatchEvent(evt);
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid");
+      const evt = new KeyboardEvent("keydown", {
+        key: "PageDown",
+        ctrlKey: true,
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      grid.dispatchEvent(evt);
     });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 1 of 3");
 
     await page.evaluate(() => {
-      const evt = new KeyboardEvent("keydown", { key: "PageDown", ctrlKey: true, bubbles: true, cancelable: true });
-      document.getElementById("grid")?.dispatchEvent(evt);
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid");
+      const evt = new KeyboardEvent("keydown", {
+        key: "PageDown",
+        ctrlKey: true,
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      grid.dispatchEvent(evt);
     });
     await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet3");
     await expect(page.getByTestId("sheet-position")).toHaveText("Sheet 2 of 3");
