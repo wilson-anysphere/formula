@@ -902,11 +902,16 @@ def generate(
         description="ODDLYIELD basis=1 with last_interest=2020-04-30 (month-end but not 31st)",
     )
 
-    # Invalid schedule/alignment cases (ODDF*/ODDL*).
+    # Schedule alignment / misalignment cases (ODDF*/ODDL*).
     #
     # These scenarios are intended to pin Excel's subtle schedule validation rules around:
     # - `first_coupon` / `maturity` alignment for ODDF* (maturity-anchored coupon stepping)
     # - `last_interest` / `maturity` alignment for ODDL*
+    #
+    # Note: these cases are tagged `invalid_schedule` for historical reasons, but the slice includes
+    # both true `#NUM!` invalid-schedule errors *and* "misaligned but chronologically valid" inputs
+    # that the engine currently accepts/pins to numeric results. Validate against real Excel before
+    # tightening schedule constraints.
     #
     # NOTE: The pinned dataset in CI is currently a synthetic baseline generated from the engine.
     # Treat these as regression tests for current engine behavior until we can patch with real Excel
