@@ -124,8 +124,10 @@ export function normalizeFormula(formula) {
 export function normalizeFormulaText(formula) {
   if (formula == null) return null;
   const trimmed = String(formula).trim();
-  if (!trimmed) return null;
-  return trimmed.startsWith("=") ? trimmed : `=${trimmed}`;
+  const withoutEquals = trimmed.startsWith("=") ? trimmed.slice(1) : trimmed;
+  const stripped = withoutEquals.trim();
+  if (!stripped) return null;
+  return `=${stripped}`;
 }
 
 /**

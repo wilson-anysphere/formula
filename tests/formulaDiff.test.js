@@ -72,6 +72,8 @@ test("diffFormula: deletion around ranges/punctuation", () => {
 test("diffFormula: null/empty handling", () => {
   assert.deepEqual(diffFormula(null, null), { equal: true, ops: [] });
   assert.deepEqual(diffFormula("", "   "), { equal: true, ops: [] });
+  // Excel-style input handling treats a bare "=" as an empty formula.
+  assert.deepEqual(diffFormula("=", null), { equal: true, ops: [] });
 
   assert.deepEqual(simplifyOps(diffFormula(null, "=1+2").ops), [
     { type: "insert", tokens: ["op:=", "number:1", "op:+", "number:2"] },
@@ -125,5 +127,11 @@ test("diffFormula: normalize=true treats identifier case changes as equal", () =
 
 test("diffFormula: normalize=false treats identifier case changes as edits", () => {
   const result = diffFormula("=sum(a1:a2)", "=SUM(A1:A2)", { normalize: false });
+  assert.equal(result.equal, false);
+});
+
+test("diffFormula: does not throw on unterminated string literals", () => {
+  assert.doesNotThrow(() => diffFormula('=IF(A1="Hello', '=IF(A1="Hello!")'));
+  const result = diffFormula('=IF(A1="Hello', '=IF(A1="Hello!")');
   assert.equal(result.equal, false);
 });

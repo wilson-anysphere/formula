@@ -33,10 +33,22 @@ function tokenEquals(a, b, opts) {
  */
 function tokenizeForDiff(formula) {
   if (formula == null) return [];
-  const tokens = tokenizeFormula(formula);
-  // The EOF token is useful for parsing but noisy for UI-level diffs.
-  if (tokens.length > 0 && tokens[tokens.length - 1]?.type === "eof") tokens.pop();
-  return tokens;
+  try {
+    const tokens = tokenizeFormula(formula);
+    // The EOF token is useful for parsing but noisy for UI-level diffs.
+    if (tokens.length > 0 && tokens[tokens.length - 1]?.type === "eof") tokens.pop();
+    return tokens;
+  } catch {
+    // Tokenization can fail on incomplete formulas (e.g. unterminated string
+    // literals). For diffs/history UI we prefer a best-effort token stream
+    // rather than throwing.
+    const text = String(formula);
+    if (text.startsWith("=")) {
+      const rest = text.slice(1);
+      return rest ? [{ type: "op", value: "=" }, { type: "ident", value: rest }] : [{ type: "op", value: "=" }];
+    }
+    return [{ type: "ident", value: text }];
+  }
 }
 
 /**
