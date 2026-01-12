@@ -4,6 +4,16 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const mocks = vi.hoisted(() => {
+  return {
+    shellOpen: vi.fn<[string], Promise<void>>().mockResolvedValue(undefined),
+  };
+});
+
+vi.mock("../shellOpen", () => ({
+  shellOpen: mocks.shellOpen,
+}));
+
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
   return {
@@ -47,6 +57,7 @@ describe("updaterUi (dialog + download)", () => {
   });
 
   afterEach(() => {
+    mocks.shellOpen.mockClear();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     document.body.replaceChildren();
@@ -155,5 +166,23 @@ describe("updaterUi (dialog + download)", () => {
     const restartBtn = document.querySelector<HTMLButtonElement>('[data-testid="updater-restart"]');
     expect(restartBtn).not.toBeNull();
     expect(restartBtn?.style.display).not.toBe("none");
+  });
+
+  it("opens the GitHub Releases page from the update dialog (manual rollback path)", async () => {
+    const { handleUpdaterEvent, FORMULA_RELEASES_URL } = await import("../updaterUi");
+
+    await handleUpdaterEvent("update-available", { source: "manual", version: "1.2.3", body: "Notes" });
+    await flushMicrotasks();
+
+    const dialog = document.querySelector('[data-testid="updater-dialog"]') as HTMLElement | null;
+    expect(dialog).not.toBeNull();
+
+    const viewBtn = dialog?.querySelector<HTMLButtonElement>('[data-testid="updater-view-versions"]');
+    expect(viewBtn).not.toBeNull();
+
+    viewBtn?.click();
+
+    expect(mocks.shellOpen).toHaveBeenCalledTimes(1);
+    expect(mocks.shellOpen).toHaveBeenCalledWith(FORMULA_RELEASES_URL);
   });
 });

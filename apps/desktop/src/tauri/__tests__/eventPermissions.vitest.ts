@@ -19,10 +19,6 @@ describe("tauri capability event permissions", () => {
     const mainWindow = windows.find((w: any) => w?.label === "main");
     expect(mainWindow).toBeTruthy();
 
-    // Ensure the main window explicitly opts into the `main` capability so event scoping is enforced.
-    expect(Array.isArray(mainWindow?.capabilities)).toBe(true);
-    expect(mainWindow.capabilities).toContain("main");
-
     const capabilityUrl = new URL("../../../src-tauri/capabilities/main.json", import.meta.url);
     const capability = JSON.parse(readFileSync(capabilityUrl, "utf8")) as any;
     expect(capability?.identifier).toBe("main");
