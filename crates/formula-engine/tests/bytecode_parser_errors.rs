@@ -77,3 +77,21 @@ fn parses_error_literals_case_insensitively() {
         Expr::Literal(Value::Error(ErrorKind::Spill))
     );
 }
+
+#[test]
+fn parses_error_literals_without_equals_and_with_whitespace() {
+    let origin = CellCoord::new(0, 0);
+
+    assert_eq!(
+        parse_formula("#DIV/0!", origin).unwrap(),
+        Expr::Literal(Value::Error(ErrorKind::Div0))
+    );
+    assert_eq!(
+        parse_formula("  #REF!  ", origin).unwrap(),
+        Expr::Literal(Value::Error(ErrorKind::Ref))
+    );
+    assert_eq!(
+        parse_formula("=  #REF!  ", origin).unwrap(),
+        Expr::Literal(Value::Error(ErrorKind::Ref))
+    );
+}
