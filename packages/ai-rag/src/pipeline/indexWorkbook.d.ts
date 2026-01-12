@@ -16,4 +16,5 @@ export function indexWorkbook(params: {
   transform?: (
     record: { id: string; text: string; metadata: any }
   ) => { text?: string; metadata?: any } | null | Promise<{ text?: string; metadata?: any } | null>;
+  signal?: AbortSignal;
 }): Promise<{ totalChunks: number; upserted: number; skipped: number; deleted: number }>;

@@ -66,3 +66,11 @@ test("chunkWorkbook detects formula-heavy regions", () => {
   assert.ok(formulaRegions.length >= 1, "expected at least one formula region");
   assert.ok(formulaRegions[0].cells.some((row) => row.some((cell) => cell.f)), "expected formulas in chunk cells");
 });
+
+test("chunkWorkbook respects AbortSignal", () => {
+  const workbook = makeWorkbook();
+  const abortController = new AbortController();
+  abortController.abort();
+
+  assert.throws(() => chunkWorkbook(workbook, { signal: abortController.signal }), { name: "AbortError" });
+});

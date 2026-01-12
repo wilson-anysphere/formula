@@ -7,5 +7,5 @@ export function workbookFromSpreadsheetApi(params: {
   };
   workbookId: string;
   coordinateBase?: "one" | "zero" | "auto";
+  signal?: AbortSignal;
 }): any;
-

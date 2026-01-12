@@ -12,6 +12,16 @@ import { CLASSIFICATION_LEVEL, DEFAULT_CLASSIFICATION, maxClassification } from 
 import { effectiveCellClassification, effectiveRangeClassification, normalizeRange } from "../../security/dlp/src/selectors.js";
 import { DlpViolationError } from "../../security/dlp/src/errors.js";
 
+function createAbortError(message = "Aborted") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
 /**
  * @typedef {{ type: "range"|"formula"|"table"|"chart", reference: string, data?: any }} Attachment
  */
@@ -53,6 +63,7 @@ export class ContextManager {
    *   sampleRows?: number,
    *   samplingStrategy?: "random" | "stratified",
    *   stratifyByColumn?: number,
+   *   signal?: AbortSignal,
    *   dlp?: {
    *     documentId: string,
    *     sheetId?: string,
@@ -65,6 +76,8 @@ export class ContextManager {
    * }} params
    */
   async buildContext(params) {
+    const signal = params.signal;
+    throwIfAborted(signal);
     const dlp = params.dlp;
     const rawSheet = params.sheet;
 
@@ -155,11 +168,15 @@ export class ContextManager {
       sheetForContext = { ...rawSheet, name: sheetId, values: nextValues };
     }
 
+    throwIfAborted(signal);
     const schema = extractSheetSchema(sheetForContext);
 
     // Index once per build for now; in the app this should be cached per sheet.
+    throwIfAborted(signal);
     await this.ragIndex.indexSheet(sheetForContext);
+    throwIfAborted(signal);
     const retrieved = await this.ragIndex.search(params.query, 5);
+    throwIfAborted(signal);
 
     const sampleRows = params.sampleRows ?? 20;
     const dataForSampling = sheetForContext.values; // already capped
@@ -207,7 +224,9 @@ export class ContextManager {
       },
     ].filter((s) => s.text);
 
+    throwIfAborted(signal);
     const packed = packSectionsToTokenBudget(sections, this.tokenBudgetTokens, this.estimator);
+    throwIfAborted(signal);
 
     if (dlp) {
       dlp.auditLogger?.log({
@@ -247,6 +266,7 @@ export class ContextManager {
    *   skipIndexing?: boolean,
    *   skipIndexingWithDlp?: boolean,
    *   includePromptContext?: boolean,
+   *   signal?: AbortSignal,
    *   dlp?: {
    *     documentId: string,
    *     policy: any,
@@ -258,6 +278,8 @@ export class ContextManager {
    * }} params
    */
   async buildWorkbookContext(params) {
+    const signal = params.signal;
+    throwIfAborted(signal);
     if (!this.workbookRag) throw new Error("ContextManager.buildWorkbookContext requires workbookRag");
     const { vectorStore, embedder } = this.workbookRag;
     const topK = params.topK ?? this.workbookRag.topK ?? 8;
@@ -347,12 +369,14 @@ export class ContextManager {
     const skipIndexingWithDlp = (params.skipIndexingWithDlp ?? false) === true;
     const shouldIndex = !skipIndexing || (Boolean(dlp) && !skipIndexingWithDlp);
 
+    throwIfAborted(signal);
     const indexStats = shouldIndex
       ? await indexWorkbook({
           workbook: params.workbook,
           vectorStore,
           embedder,
           sampleRows: this.workbookRag.sampleRows,
+          signal,
           transform: dlp
             ? (record) => {
                 const rawText = record.text ?? "";
@@ -445,11 +469,14 @@ export class ContextManager {
         : null;
     const queryForEmbedding =
       dlp && queryDecision && queryDecision.decision !== DLP_DECISION.ALLOW ? this.redactor(params.query) : params.query;
+    throwIfAborted(signal);
     const [queryVector] = await embedder.embedTexts([queryForEmbedding]);
+    throwIfAborted(signal);
     const hits = await vectorStore.query(queryVector, topK, {
       workbookId: params.workbook.id,
       filter: (metadata) => metadata && metadata.workbookId === params.workbook.id,
     });
+    throwIfAborted(signal);
 
     /** @type {{level: string, labels: string[]} } */
     let overallClassification = { level: CLASSIFICATION_LEVEL.PUBLIC, labels: [] };
@@ -476,6 +503,7 @@ export class ContextManager {
 
     // Evaluate policy for all retrieved chunks before returning any prompt context.
     for (const [idx, hit] of hits.entries()) {
+      throwIfAborted(signal);
       const meta = hit.metadata ?? {};
       const title = meta.title ?? hit.id;
       const kind = meta.kind ?? "chunk";
@@ -575,6 +603,7 @@ export class ContextManager {
       }
     }
 
+    throwIfAborted(signal);
     const retrievedChunks = hits.map((hit, idx) => {
       const meta = hit.metadata ?? {};
       const title = meta.title ?? hit.id;
@@ -672,6 +701,7 @@ export class ContextManager {
         },
       ].filter((s) => s.text);
 
+      throwIfAborted(signal);
       const packed = packSectionsToTokenBudget(sections, this.tokenBudgetTokens, this.estimator);
       promptContext = packed.map((s) => `## ${s.key}\n${s.text}`).join("\n\n");
     }
@@ -711,6 +741,7 @@ export class ContextManager {
    *   skipIndexing?: boolean,
    *   skipIndexingWithDlp?: boolean,
    *   includePromptContext?: boolean,
+   *   signal?: AbortSignal,
    *   dlp?: {
    *     documentId: string,
    *     policy: any,
@@ -722,6 +753,8 @@ export class ContextManager {
    * }} params
    */
   async buildWorkbookContextFromSpreadsheetApi(params) {
+    const signal = params.signal;
+    throwIfAborted(signal);
     const skipIndexing = (params.skipIndexing ?? false) === true;
     const skipIndexingWithDlp = (params.skipIndexingWithDlp ?? false) === true;
 
@@ -746,6 +779,7 @@ export class ContextManager {
             spreadsheet: params.spreadsheet,
             workbookId: params.workbookId,
             coordinateBase: "one",
+            signal,
           });
     return this.buildWorkbookContext({
       workbook,
@@ -756,6 +790,7 @@ export class ContextManager {
       skipIndexing: params.skipIndexing,
       skipIndexingWithDlp: params.skipIndexingWithDlp,
       includePromptContext: params.includePromptContext,
+      signal,
     });
   }
 }

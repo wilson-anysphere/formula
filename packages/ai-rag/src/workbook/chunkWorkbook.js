@@ -9,6 +9,16 @@ const DEFAULT_EXTRACT_MAX_COLS = 50;
 // Excel-scale sheets.
 const DEFAULT_DETECT_REGIONS_CELL_LIMIT = 200000;
 
+function createAbortError(message = "Aborted") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
 function isNonEmptyCell(cell) {
   if (!cell) return false;
   if (cell.f != null && String(cell.f).trim() !== "") return true;
@@ -37,9 +47,11 @@ function sheetMap(workbook) {
  *
  * @param {import('./workbookTypes').Sheet} sheet
  * @param {(cell: any) => boolean} predicate
+ * @param {AbortSignal | undefined} [signal]
  * @returns {{ r0: number, c0: number, r1: number, c1: number }[]}
  */
-function detectRegions(sheet, predicate) {
+function detectRegions(sheet, predicate, signal) {
+  throwIfAborted(signal);
   const matrix = getSheetMatrix(sheet);
   if (matrix) {
     /** @type {Map<string, { row: number, col: number }>} */
@@ -50,11 +62,13 @@ function detectRegions(sheet, predicate) {
     // rows/cols (avoids scanning/allocating for large sparse arrays).
     try {
       for (const rKey in matrix) {
+        throwIfAborted(signal);
         const r = Number(rKey);
         if (!Number.isInteger(r) || r < 0) continue;
         const row = matrix[r];
         if (!Array.isArray(row)) continue;
         for (const cKey in row) {
+          throwIfAborted(signal);
           const c = Number(cKey);
           if (!Number.isInteger(c) || c < 0) continue;
           const cell = normalizeCell(row[c]);
@@ -81,6 +95,7 @@ function detectRegions(sheet, predicate) {
 
     const entries = Array.from(coords.values()).sort((a, b) => a.row - b.row || a.col - b.col);
     for (const start of entries) {
+      throwIfAborted(signal);
       const startKey = `${start.row},${start.col}`;
       if (visited.has(startKey)) continue;
       visited.add(startKey);
@@ -92,6 +107,7 @@ function detectRegions(sheet, predicate) {
       let count = 0;
 
       while (stack.length) {
+        throwIfAborted(signal);
         const cur = stack.pop();
         if (!cur) continue;
         count += 1;
@@ -151,6 +167,7 @@ function detectRegions(sheet, predicate) {
     /** @type {Map<string, { row: number, col: number }>} */
     const coords = new Map();
     for (const [key, raw] of map.entries()) {
+      throwIfAborted(signal);
       const parsed = parseRowColKey(key);
       if (!parsed) continue;
       const cell = normalizeCell(raw);
@@ -165,6 +182,7 @@ function detectRegions(sheet, predicate) {
 
     const entries = Array.from(coords.values()).sort((a, b) => a.row - b.row || a.col - b.col);
     for (const start of entries) {
+      throwIfAborted(signal);
       const startKey = `${start.row},${start.col}`;
       if (visited.has(startKey)) continue;
       visited.add(startKey);
@@ -176,6 +194,7 @@ function detectRegions(sheet, predicate) {
       let count = 0;
 
       while (stack.length) {
+        throwIfAborted(signal);
         const cur = stack.pop();
         if (!cur) continue;
         count += 1;
@@ -240,9 +259,12 @@ function overlapsExisting(rect, existing) {
  * - Detect formula-heavy regions by connected formula blocks.
  *
  * @param {import('./workbookTypes').Workbook} workbook
+ * @param {{ signal?: AbortSignal }} [options]
  * @returns {import('./workbookTypes').WorkbookChunk[]}
  */
-function chunkWorkbook(workbook) {
+function chunkWorkbook(workbook, options = {}) {
+  const signal = options.signal;
+  throwIfAborted(signal);
   const sheets = sheetMap(workbook);
   /** @type {import('./workbookTypes').WorkbookChunk[]} */
   const chunks = [];
@@ -251,6 +273,7 @@ function chunkWorkbook(workbook) {
   const occupied = [];
 
   for (const table of workbook.tables || []) {
+    throwIfAborted(signal);
     const sheet = sheets.get(table.sheetName);
     if (!sheet) continue;
     const id = `${workbook.id}::${table.sheetName}::table::${table.name}`;
@@ -271,6 +294,7 @@ function chunkWorkbook(workbook) {
   }
 
   for (const nr of workbook.namedRanges || []) {
+    throwIfAborted(signal);
     const sheet = sheets.get(nr.sheetName);
     if (!sheet) continue;
     const id = `${workbook.id}::${nr.sheetName}::namedRange::${nr.name}`;
@@ -291,14 +315,16 @@ function chunkWorkbook(workbook) {
   }
 
   for (const sheet of workbook.sheets || []) {
+    throwIfAborted(signal);
     const existingRects = occupied
       .filter((o) => o.sheetName === sheet.name)
       .map((o) => o.rect);
 
-    const dataRegions = detectRegions(sheet, isNonEmptyCell).filter(
+    const dataRegions = detectRegions(sheet, isNonEmptyCell, signal).filter(
       (rect) => !overlapsExisting(rect, existingRects)
     );
     for (const rect of dataRegions) {
+      throwIfAborted(signal);
       const coordKey = `${rect.r0},${rect.c0},${rect.r1},${rect.c1}`;
       const id = `${workbook.id}::${sheet.name}::dataRegion::${coordKey}`;
       chunks.push({
@@ -315,10 +341,11 @@ function chunkWorkbook(workbook) {
       });
     }
 
-    const formulaRegions = detectRegions(sheet, isFormulaCell).filter(
+    const formulaRegions = detectRegions(sheet, isFormulaCell, signal).filter(
       (rect) => !overlapsExisting(rect, existingRects)
     );
     for (const rect of formulaRegions) {
+      throwIfAborted(signal);
       const coordKey = `${rect.r0},${rect.c0},${rect.r1},${rect.c1}`;
       const id = `${workbook.id}::${sheet.name}::formulaRegion::${coordKey}`;
       chunks.push({

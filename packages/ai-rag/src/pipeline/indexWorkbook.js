@@ -2,6 +2,16 @@ import { contentHash } from "../utils/hash.js";
 import { chunkWorkbook } from "../workbook/chunkWorkbook.js";
 import { chunkToText } from "../workbook/chunkToText.js";
 
+function createAbortError(message = "Aborted") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
 /**
  * @param {string} text
  */
@@ -25,17 +35,22 @@ export function approximateTokenCount(text) {
  *   embedder: { embedTexts(texts: string[]): Promise<ArrayLike<number>[]> },
  *   sampleRows?: number,
  *   transform?: (record: { id: string, text: string, metadata: any }) => ({ text?: string, metadata?: any } | null | Promise<{ text?: string, metadata?: any } | null>)
+ *   signal?: AbortSignal,
  * }} params
  */
 export async function indexWorkbook(params) {
+  const signal = params.signal;
+  throwIfAborted(signal);
   const { workbook, vectorStore, embedder } = params;
   const sampleRows = params.sampleRows ?? 5;
-  const chunks = chunkWorkbook(workbook);
+  const chunks = chunkWorkbook(workbook, { signal });
+  throwIfAborted(signal);
 
   const existingForWorkbook = await vectorStore.list({
     workbookId: workbook.id,
     includeVector: false,
   });
+  throwIfAborted(signal);
   const existingHashes = new Map(
     existingForWorkbook.map((r) => [r.id, r.metadata?.contentHash])
   );
@@ -45,6 +60,7 @@ export async function indexWorkbook(params) {
   const toUpsert = [];
 
   for (const chunk of chunks) {
+    throwIfAborted(signal);
     const originalText = chunkToText(chunk, { sampleRows });
 
     /** @type {{ id: string, text: string, metadata: any }} */
@@ -62,7 +78,9 @@ export async function indexWorkbook(params) {
     };
 
     if (typeof params.transform === "function") {
+      throwIfAborted(signal);
       const transformed = await params.transform(record);
+      throwIfAborted(signal);
       if (!transformed) continue;
 
       if (Object.prototype.hasOwnProperty.call(transformed, "text")) {
@@ -77,7 +95,9 @@ export async function indexWorkbook(params) {
       }
     }
 
+    throwIfAborted(signal);
     const chunkHash = await contentHash(record.text);
+    throwIfAborted(signal);
     currentIds.add(record.id);
 
     if (existingHashes.get(record.id) === chunkHash) continue;
@@ -93,8 +113,10 @@ export async function indexWorkbook(params) {
     });
   }
 
+  throwIfAborted(signal);
   const vectors =
     toUpsert.length > 0 ? await embedder.embedTexts(toUpsert.map((r) => r.text)) : [];
+  throwIfAborted(signal);
 
   if (toUpsert.length) {
     await vectorStore.upsert(
@@ -105,12 +127,14 @@ export async function indexWorkbook(params) {
       }))
     );
   }
+  throwIfAborted(signal);
 
   // Delete stale records for this workbook.
   const staleIds = existingForWorkbook
     .map((r) => r.id)
     .filter((id) => !currentIds.has(id));
   if (staleIds.length) await vectorStore.delete(staleIds);
+  throwIfAborted(signal);
 
   return {
     totalChunks: chunks.length,

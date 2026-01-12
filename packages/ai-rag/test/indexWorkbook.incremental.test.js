@@ -119,3 +119,26 @@ test("indexWorkbook deletes stale chunks", async () => {
   assert.equal(second.deleted, 1);
   assert.equal(await store.get(id2), null);
 });
+
+test("indexWorkbook respects AbortSignal and avoids partial writes", async () => {
+  const workbook = makeWorkbook();
+  const store = new InMemoryVectorStore({ dimension: 128 });
+  const abortController = new AbortController();
+
+  let embedCalls = 0;
+  const embedder = {
+    async embedTexts(texts) {
+      embedCalls += 1;
+      abortController.abort();
+      return texts.map(() => new Float32Array(128));
+    },
+  };
+
+  await assert.rejects(
+    indexWorkbook({ workbook, vectorStore: store, embedder, signal: abortController.signal }),
+    { name: "AbortError" }
+  );
+
+  assert.equal(embedCalls, 1);
+  assert.deepEqual(await store.list({ workbookId: workbook.id, includeVector: false }), []);
+});

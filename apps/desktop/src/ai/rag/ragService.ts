@@ -11,6 +11,39 @@ import { DlpViolationError } from "../../../../../packages/security/dlp/src/erro
 
 import { createDesktopRag } from "./index.js";
 
+function createAbortError(message = "Aborted"): Error {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw createAbortError();
+}
+
+async function awaitWithAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) throw createAbortError();
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      reject(createAbortError());
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 export type DesktopRagEmbedderConfig = {
   /**
    * Hash embeddings are deterministic and offline. Dimension controls the vector
@@ -103,6 +136,7 @@ export interface DesktopRagService {
     attachments?: any[];
     topK?: number;
     includePromptContext?: boolean;
+    signal?: AbortSignal;
     dlp?: any;
   }): Promise<any>;
   /**
@@ -228,25 +262,29 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     return ragPromise;
   }
 
-  async function ensureIndexed(spreadsheet: any): Promise<void> {
+  async function ensureIndexed(spreadsheet: any, signal?: AbortSignal): Promise<void> {
     if (disposed) throw new Error("DesktopRagService is disposed");
+    throwIfAborted(signal);
 
     // Avoid concurrent re-indexing (multiple chat messages, tool loops, etc).
-    if (indexPromise) await indexPromise;
+    if (indexPromise) await awaitWithAbort(indexPromise, signal);
+    throwIfAborted(signal);
 
     const versionNow = currentVersion();
     if (indexedVersion === versionNow) return;
 
     const run = (async () => {
+      throwIfAborted(signal);
       const rag = await getRag();
       const versionToIndex = currentVersion();
       const workbook = workbookFromSpreadsheetApi({
         spreadsheet,
         workbookId: options.workbookId,
         coordinateBase: "one",
+        signal,
       });
 
-      lastIndexStats = await rag.indexWorkbook(workbook, { sampleRows: options.sampleRows } as any);
+      lastIndexStats = await rag.indexWorkbook(workbook, { sampleRows: options.sampleRows, signal } as any);
       indexedVersion = versionToIndex;
       indexedDlpKey = null;
     })();
@@ -271,8 +309,11 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     attachments?: any[];
     topK?: number;
     includePromptContext?: boolean;
+    signal?: AbortSignal;
     dlp?: any;
   }): Promise<any> {
+    const signal = params.signal;
+    throwIfAborted(signal);
     if (params.workbookId !== options.workbookId) {
       throw new Error(
         `DesktopRagService workbookId mismatch: expected "${options.workbookId}", got "${params.workbookId}"`,
@@ -286,7 +327,8 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     // Non-DLP mode: we manage incremental indexing externally and always run
     // ContextManager in "cheap" mode to avoid workbook scans.
     if (!hasDlp) {
-      await ensureIndexed(params.spreadsheet);
+      await ensureIndexed(params.spreadsheet, signal);
+      throwIfAborted(signal);
 
       const ctx = await rag.contextManager.buildWorkbookContextFromSpreadsheetApi({
         ...params,
@@ -304,7 +346,8 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
     const dlpKey = dlpCacheKeyFor({ dlp: params.dlp });
 
     // Avoid concurrent re-indexing (multiple chat messages, tool loops, etc).
-    if (indexPromise) await indexPromise;
+    if (indexPromise) await awaitWithAbort(indexPromise, signal);
+    throwIfAborted(signal);
 
     const versionNow = currentVersion();
     const shouldIndex = indexedVersion !== versionNow || indexedDlpKey !== dlpKey;
@@ -336,7 +379,7 @@ export function createDesktopRagService(options: DesktopRagServiceOptions): Desk
 
       indexPromise = run;
       try {
-        const ctx = await run;
+        const ctx = await awaitWithAbort(run, signal);
         if (ctx && ctx.indexStats == null) ctx.indexStats = lastIndexStats;
         return ctx;
       } finally {

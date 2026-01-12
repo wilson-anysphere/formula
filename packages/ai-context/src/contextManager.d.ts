@@ -32,6 +32,7 @@ export class ContextManager {
     sampleRows?: number;
     samplingStrategy?: "random" | "stratified";
     stratifyByColumn?: number;
+    signal?: AbortSignal;
     dlp?: any;
   }): Promise<{ schema: any; retrieved: any[]; sampledRows: any[]; promptContext: string }>;
 
@@ -43,6 +44,7 @@ export class ContextManager {
     skipIndexing?: boolean;
     skipIndexingWithDlp?: boolean;
     includePromptContext?: boolean;
+    signal?: AbortSignal;
     dlp?: any;
   }): Promise<{ indexStats: any; retrieved: any[]; promptContext: string }>;
 
@@ -55,6 +57,7 @@ export class ContextManager {
     skipIndexing?: boolean;
     skipIndexingWithDlp?: boolean;
     includePromptContext?: boolean;
+    signal?: AbortSignal;
     dlp?: any;
   }): Promise<{ indexStats: any; retrieved: any[]; promptContext: string }>;
 }

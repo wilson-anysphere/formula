@@ -24,14 +24,17 @@
  *   },
  *   workbookId: string,
  *   coordinateBase?: "one" | "zero" | "auto"
+ *   signal?: AbortSignal
  * }} params
  */
 export function workbookFromSpreadsheetApi(params) {
   const { spreadsheet, workbookId } = params;
+  const signal = params.signal;
   const coordinateBase = params.coordinateBase ?? "one";
   if (coordinateBase !== "one" && coordinateBase !== "zero" && coordinateBase !== "auto") {
     throw new Error(`workbookFromSpreadsheetApi: invalid coordinateBase "${coordinateBase}"`);
   }
+  throwIfAborted(signal);
   const sheetNames = spreadsheet.listSheets();
 
   /** @type {Map<string, any[]>} */
@@ -39,22 +42,27 @@ export function workbookFromSpreadsheetApi(params) {
   let sawZeroBasedCoord = false;
 
   for (const sheetName of sheetNames) {
+    throwIfAborted(signal);
     const entries = spreadsheet.listNonEmptyCells(sheetName) ?? [];
     entriesBySheet.set(sheetName, entries);
     for (const entry of entries) {
+      throwIfAborted(signal);
       const row = entry?.address?.row;
       const col = entry?.address?.col;
       if (row === 0 || col === 0) sawZeroBasedCoord = true;
     }
   }
 
+  throwIfAborted(signal);
   const resolvedBase =
     coordinateBase === "auto" ? (sawZeroBasedCoord ? "zero" : "one") : coordinateBase;
 
   const sheets = sheetNames.map((sheetName) => {
+    throwIfAborted(signal);
     const cells = new Map();
     const entries = entriesBySheet.get(sheetName) ?? [];
     for (const entry of entries) {
+      throwIfAborted(signal);
       const inputRow = entry?.address?.row;
       const inputCol = entry?.address?.col;
       if (!Number.isInteger(inputRow) || !Number.isInteger(inputCol)) continue;
@@ -76,4 +84,14 @@ export function workbookFromSpreadsheetApi(params) {
   });
 
   return { id: workbookId, sheets };
+}
+
+function createAbortError(message = "Aborted") {
+  const err = new Error(message);
+  err.name = "AbortError";
+  return err;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
 }

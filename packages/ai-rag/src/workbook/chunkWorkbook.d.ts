@@ -1,2 +1,1 @@
-export function chunkWorkbook(workbook: any): any[];
-
+export function chunkWorkbook(workbook: any, options?: { signal?: AbortSignal }): any[];
