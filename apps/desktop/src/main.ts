@@ -3194,8 +3194,7 @@ if (
   ribbonLayoutController = layoutController;
 
   // Expose layout state for Playwright assertions (e.g. split view persistence).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (window as any).__layoutController = layoutController;
+  window.__layoutController = layoutController;
 
   let lastAppliedZoom: number | null = null;
 

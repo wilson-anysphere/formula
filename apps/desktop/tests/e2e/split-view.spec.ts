@@ -26,8 +26,8 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
   // Retry once if the execution context is destroyed mid-wait.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
-      await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+      await page.waitForFunction(() => Boolean((window.__formulaApp as any)?.whenIdle), null, { timeout: 10_000 });
+      await page.evaluate(() => (window.__formulaApp as any).whenIdle());
       return;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -211,7 +211,7 @@ test.describe("split view", () => {
     // Splitter drag should *not* emit layout changes on every pointermove (that would trigger
     // `renderLayout()` and cause jank). Expect a single layout change per completed drag.
     await page.evaluate(() => {
-      const controller = (window as any).__layoutController;
+      const controller = window.__layoutController as any;
       (window as any).__splitRatioChangeCount = 0;
       if (!controller || typeof controller.on !== "function") return;
       controller.on("change", () => {
@@ -224,7 +224,7 @@ test.describe("split view", () => {
     };
 
     const getInMemoryRatio = async () => {
-      return await page.evaluate(() => (window as any).__layoutController?.layout?.splitView?.ratio ?? 0);
+      return await page.evaluate(() => (window.__layoutController as any)?.layout?.splitView?.ratio ?? 0);
     };
 
     const getPersistedRatio = async () => {
@@ -1644,7 +1644,9 @@ test.describe("split view / shared grid zoom", () => {
     // Focus/select A1 in the secondary pane so the split view marks it active.
     await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } });
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
-    await expect.poll(() => page.evaluate(() => (window as any).__layoutController?.layout?.splitView?.activePane ?? null)).toBe("secondary");
+    await expect
+      .poll(() => page.evaluate(() => (window.__layoutController as any)?.layout?.splitView?.activePane ?? null))
+      .toBe("secondary");
 
     await page.keyboard.press("Shift+F10");
 
