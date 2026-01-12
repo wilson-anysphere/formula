@@ -595,7 +595,7 @@ export function inspectUpdate(params: InspectUpdateParams): InspectUpdateResult 
  * Collects *direct* root Y.Map key touches for the specified root names.
  *
  * This is primarily useful for server-side quota enforcement where we only need to
- * know which keys were set/deleted on a top-level root map (e.g. `versions.set(id, ...)`),
+ * know which keys were set/updated on a top-level root map (e.g. `versions.set(id, ...)`),
  * and we want to support incremental updates (client clock > 0) without applying the
  * update to a temporary document.
  */
