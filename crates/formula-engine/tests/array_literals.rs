@@ -89,6 +89,25 @@ fn array_literal_coerces_nested_arrays_to_value_errors() {
 }
 
 #[test]
+fn array_literal_coerces_lambda_elements_to_calc_error() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "={LAMBDA(x,x),0}")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("B1").unwrap());
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Error(ErrorKind::Calc)
+    );
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Number(0.0));
+}
+
+#[test]
 fn array_literal_supports_missing_elements() {
     let mut engine = Engine::new();
     engine.set_cell_formula("Sheet1", "A1", "={1,,3}").unwrap();

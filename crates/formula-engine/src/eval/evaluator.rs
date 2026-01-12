@@ -351,9 +351,7 @@ impl<'a, R: ValueResolver> Evaluator<'a, R> {
                     };
 
                     let v = match v {
-                        Value::Array(_) | Value::Lambda(_) | Value::Spill { .. } => {
-                            Value::Error(ErrorKind::Value)
-                        }
+                        Value::Array(_) | Value::Spill { .. } => Value::Error(ErrorKind::Value),
                         other => other,
                     };
                     out.push(v);
