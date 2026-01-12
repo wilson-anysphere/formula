@@ -680,3 +680,52 @@ test("Binder-origin undo captures comment edits when comments root itself was cr
 
   doc.destroy();
 });
+
+test("CollabSession undo captures comment edits when comments root is a foreign AbstractType placeholder (CJS Doc.get)", () => {
+  const Ycjs = requireYjsCjs();
+
+  const doc = new Y.Doc();
+  // Simulate another Yjs module instance calling `Doc.get(name)` (defaulting to
+  // AbstractType) on this doc. This creates a foreign `AbstractType` placeholder
+  // that would cause `doc.getMap("comments")` to throw from the ESM build.
+  Ycjs.Doc.prototype.get.call(doc, "comments");
+
+  assert.ok(doc.share.get("comments"));
+  // Note: other tests in this file create UndoManagers that patch foreign Yjs
+  // prototype chains so foreign types pass `instanceof Y.AbstractType` checks.
+  // We therefore can't reliably assert `instanceof Y.AbstractType === false`
+  // here. Instead, assert the symptom we care about: `doc.getMap("comments")`
+  // would throw "different constructor" without session normalization.
+  assert.throws(
+    () => doc.getMap("comments"),
+    /Type with the name comments has already been defined with a different constructor/,
+    "expected doc.getMap(\"comments\") to throw when the root is a foreign AbstractType placeholder"
+  );
+
+  const session = createCollabSession({ doc, undo: {} });
+
+  // The session should normalize the placeholder so the canonical root is usable.
+  assert.ok(doc.share.get("comments") instanceof Y.Map);
+
+  const mgr = createCommentManagerForSession(session);
+
+  const commentId = mgr.addComment({
+    id: "c1",
+    cellRef: "Sheet1:0:0",
+    kind: "threaded",
+    content: "Hello",
+    author: { id: "u1", name: "Alice" },
+    now: 1,
+  });
+  session.undo?.stopCapturing();
+
+  mgr.setCommentContent({ commentId, content: "Hello (edited)", now: 2 });
+  assert.equal(mgr.listAll()[0]?.content ?? null, "Hello (edited)");
+  assert.equal(session.undo?.canUndo(), true);
+
+  session.undo?.undo();
+  assert.equal(mgr.listAll()[0]?.content ?? null, "Hello");
+
+  session.destroy();
+  doc.destroy();
+});

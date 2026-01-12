@@ -54,6 +54,18 @@ function getYArray(value: unknown): Y.Array<any> | null {
   return maybe as Y.Array<any>;
 }
 
+function isYAbstractType(value: unknown): boolean {
+  if (value instanceof Y.AbstractType) return true;
+  if (!value || typeof value !== "object") return false;
+  const maybe = value as any;
+  // Bundlers can rename constructors and pnpm workspaces can load multiple `yjs`
+  // module instances (ESM + CJS). Avoid relying on `instanceof` / `constructor.name`;
+  // prefer a structural check instead.
+  if (typeof maybe.observeDeep !== "function") return false;
+  if (typeof maybe.unobserveDeep !== "function") return false;
+  return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
+}
+
 function isYText(value: unknown): value is Y.Text {
   if (value instanceof Y.Text) return true;
   if (!value || typeof value !== "object") return false;
@@ -129,6 +141,27 @@ export function getCommentsRoot(doc: Y.Doc): CommentsRoot {
   const kind: CommentsRoot["kind"] = hasStart && mapSize === 0 ? "array" : "map";
 
   if (kind === "array") {
+    // If another Yjs module instance called `Doc.prototype.get(name)` (defaulting
+    // to `AbstractType`) on this doc, `doc.share.get("comments")` can be a foreign
+    // `AbstractType` placeholder. Calling `doc.getArray("comments")` from this
+    // module would then throw "different constructor".
+    //
+    // In that case, re-wrap the placeholder into this module's constructor
+    // directly (mirrors Yjs' `Doc.get()` conversion logic).
+    // A foreign `AbstractType` placeholder can be patched to pass
+    // `instanceof Y.AbstractType` checks (see undo service prototype patching),
+    // so use constructor identity to detect foreign placeholders.
+    if (doc instanceof Y.Doc && isYAbstractType(existing) && (existing as any).constructor !== Y.AbstractType) {
+      return {
+        kind: "array",
+        array: replacePlaceholderRootType({
+          doc,
+          name: "comments",
+          existing: placeholder,
+          create: () => new Y.Array(),
+        }) as YCommentsArray,
+      };
+    }
     return { kind: "array", array: doc.getArray("comments") as YCommentsArray };
   }
 
@@ -159,6 +192,19 @@ export function getCommentsRoot(doc: Y.Doc): CommentsRoot {
       }
       break;
     }
+  }
+
+  // Fallback: choose the canonical map schema. Avoid calling `doc.getMap` when
+  // the existing placeholder is a foreign `AbstractType` instance, which would
+  // throw "different constructor" on local docs.
+  if (doc instanceof Y.Doc && isYAbstractType(existing) && (existing as any).constructor !== Y.AbstractType) {
+    const map = replacePlaceholderRootType({
+      doc,
+      name: "comments",
+      existing: placeholder,
+      create: () => new Y.Map(),
+    }) as YCommentsMap;
+    return { kind: "map", map };
   }
 
   return { kind: "map", map: doc.getMap("comments") as YCommentsMap };

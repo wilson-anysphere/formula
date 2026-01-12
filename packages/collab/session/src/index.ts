@@ -142,7 +142,11 @@ function getMapRoot<T = unknown>(doc: Y.Doc, name: string): Y.Map<T> {
     throw new Error(`Yjs root schema mismatch for "${name}": expected a Y.Map but found a Y.Text`);
   }
 
-  if (existing instanceof Y.AbstractType) return doc.getMap<T>(name);
+  // `instanceof Y.AbstractType` is not sufficient to detect whether the placeholder
+  // root was created by *this* Yjs module instance. In mixed-module environments
+  // (ESM + CJS), we patch foreign prototype chains so foreign types pass
+  // `instanceof` checks (needed by UndoManager). Use constructor identity instead.
+  if (existing instanceof Y.AbstractType && (existing as any).constructor === Y.AbstractType) return doc.getMap<T>(name);
   if (isYAbstractType(existing)) {
     return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() }) as any;
   }
@@ -187,10 +191,25 @@ function getCommentsRootForUndoScope(doc: Y.Doc): Y.AbstractType<any> {
         const placeholder = existing as any;
         const hasStart = placeholder?._start != null; // sequence item => likely array
         const mapSize = placeholder?._map instanceof Map ? placeholder._map.size : 0;
-      const kind = hasStart && mapSize === 0 ? "array" : "map";
-      root = kind === "array" ? doc.getArray("comments") : doc.getMap("comments");
+        const kind = hasStart && mapSize === 0 ? "array" : "map";
+        // If another Yjs module instance called `Doc.prototype.get(name)` on this
+        // doc (defaulting to `AbstractType`), the placeholder constructor can be
+        // foreign. Calling `doc.getMap/getArray` from this module would then throw
+        // "different constructor". Normalize the placeholder into this module's
+        // constructors directly.
+        // A foreign `AbstractType` placeholder can be patched to pass
+        // `instanceof Y.AbstractType` checks, so we must detect foreign placeholders
+        // by constructor identity (doc.getMap/getArray would otherwise throw).
+        if (doc instanceof Y.Doc && isYAbstractType(existing) && (existing as any).constructor !== Y.AbstractType) {
+          root =
+            kind === "array"
+              ? replaceForeignRootType({ doc, name: "comments", existing, create: () => new Y.Array() })
+              : replaceForeignRootType({ doc, name: "comments", existing, create: () => new Y.Map() });
+        } else {
+          root = kind === "array" ? doc.getArray("comments") : doc.getMap("comments");
+        }
+      }
     }
-  }
   }
 
   // If updates were applied using a different Yjs module instance (e.g. y-websocket
