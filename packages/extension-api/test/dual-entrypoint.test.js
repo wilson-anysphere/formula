@@ -243,7 +243,7 @@ test("dual entrypoint: CJS + ESM stay in lockstep", async (t) => {
       ]
     );
 
-    // Workbook path validation should reject non-string/empty args without sending RPC calls.
+    // Workbook path validation should reject non-string/empty/whitespace args without sending RPC calls.
     calls.length = 0;
     await assert.rejects(() => cjsApi.workbook.openWorkbook(123), {
       message: "Workbook path must be a non-empty string"
@@ -251,7 +251,31 @@ test("dual entrypoint: CJS + ESM stay in lockstep", async (t) => {
     assert.equal(calls.filter((m) => m.type === "api_call").length, 0);
 
     calls.length = 0;
+    await assert.rejects(() => cjsApi.workbook.openWorkbook(""), {
+      message: "Workbook path must be a non-empty string"
+    });
+    assert.equal(calls.filter((m) => m.type === "api_call").length, 0);
+
+    calls.length = 0;
+    await assert.rejects(() => cjsApi.workbook.openWorkbook("   "), {
+      message: "Workbook path must be a non-empty string"
+    });
+    assert.equal(calls.filter((m) => m.type === "api_call").length, 0);
+
+    calls.length = 0;
     await assert.rejects(() => esmApi.workbook.saveAs({}), {
+      message: "Workbook path must be a non-empty string"
+    });
+    assert.equal(calls.filter((m) => m.type === "api_call").length, 0);
+
+    calls.length = 0;
+    await assert.rejects(() => esmApi.workbook.saveAs(""), {
+      message: "Workbook path must be a non-empty string"
+    });
+    assert.equal(calls.filter((m) => m.type === "api_call").length, 0);
+
+    calls.length = 0;
+    await assert.rejects(() => esmApi.workbook.saveAs("   "), {
       message: "Workbook path must be a non-empty string"
     });
     assert.equal(calls.filter((m) => m.type === "api_call").length, 0);
