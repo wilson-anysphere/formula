@@ -428,6 +428,32 @@ fn bytecode_backend_matches_ast_for_let_shadowing() {
 }
 
 #[test]
+fn bytecode_backend_let_shadows_defined_name_constants() {
+    // LET locals should shadow workbook/sheet defined names, and bytecode compilation must not
+    // inline constant defined names in a way that breaks lexical scoping.
+    let mut engine = Engine::new();
+    engine
+        .define_name(
+            "X",
+            NameScope::Workbook,
+            NameDefinition::Constant(Value::Number(10.0)),
+        )
+        .unwrap();
+
+    // Use mixed-case references to assert case-insensitive shadowing of defined names.
+    engine
+        .set_cell_formula("Sheet1", "A1", "=LET(x, 1, X+1)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(2.0));
+    assert_engine_matches_ast(&engine, "=LET(x, 1, X+1)", "A1");
+}
+
+#[test]
 fn bytecode_backend_matches_ast_for_let_rebinding_same_name() {
     let mut engine = Engine::new();
 
