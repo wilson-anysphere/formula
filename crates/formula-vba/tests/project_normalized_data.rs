@@ -1,5 +1,6 @@
 use std::io::{Cursor, Write};
 
+use encoding_rs::WINDOWS_1251;
 use formula_vba::{
     compress_container, contents_hash_v3, project_normalized_data, project_normalized_data_v3,
     project_normalized_data_v3_dir_records, project_normalized_data_v3_transcript, DirParseError,
@@ -1718,6 +1719,84 @@ fn project_normalized_data_matches_baseclass_key_case_insensitively_but_preserve
     assert!(
         find_subslice(&normalized, b"BaseClassFormB").is_none(),
         "expected name token case to be preserved (no case normalization to `BaseClass`)"
+    );
+}
+
+#[test]
+fn project_normalized_data_decodes_baseclass_value_using_project_stream_codepage() {
+    // Regression: BaseClass values can contain non-ASCII module identifiers encoded in the VBA
+    // project's codepage. `project_normalized_data()` should:
+    // - detect `CodePage=` from the PROJECT stream,
+    // - decode the BaseClass value using that codepage,
+    // - match it to the corresponding `VBA/dir` module record, and
+    // - include the referenced designer storage bytes in the transcript.
+
+    let module_name = "Форма1";
+    let (module_name_bytes, _, _) = WINDOWS_1251.encode(module_name);
+
+    // Encode the PROJECT stream as Windows-1251, including a non-ASCII BaseClass value.
+    let project_stream_text = format!("CodePage=1251\r\nBaseClass={module_name}\r\n");
+    let (project_stream_bytes, _, _) = WINDOWS_1251.encode(&project_stream_text);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream_bytes.as_ref())
+            .expect("write PROJECT");
+    }
+
+    // Dir stream includes a conflicting PROJECTCODEPAGE to ensure we prefer the PROJECT stream's
+    // CodePage= line.
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let dir_decompressed = {
+            let mut out = Vec::new();
+            push_record(&mut out, 0x0003, &1252u16.to_le_bytes()); // PROJECTCODEPAGE (conflicts)
+
+            // Module record group for the designer module referenced by BaseClass=...
+            push_record(&mut out, 0x0019, module_name_bytes.as_ref()); // MODULENAME
+            let mut stream_name = Vec::new();
+            stream_name.extend_from_slice(module_name_bytes.as_ref());
+            stream_name.extend_from_slice(&0u16.to_le_bytes()); // reserved u16
+            push_record(&mut out, 0x001A, &stream_name); // MODULESTREAMNAME
+            push_record(&mut out, 0x0021, &3u16.to_le_bytes()); // MODULETYPE (UserForm)
+
+            out
+        };
+        let dir_container = compress_container(&dir_decompressed);
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    // Root-level designer storage referenced by BaseClass=... (storage name is MODULESTREAMNAME).
+    ole.create_storage(module_name).expect("designer storage");
+    {
+        let mut s = ole
+            .create_stream(format!("{module_name}/Payload"))
+            .expect("designer stream");
+        s.write_all(b"Q").expect("write designer bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized = project_normalized_data(&vba_project_bin).expect("ProjectNormalizedData");
+
+    let mut expected_padded = Vec::new();
+    expected_padded.extend_from_slice(b"Q");
+    expected_padded.extend(std::iter::repeat_n(0u8, 1022));
+
+    let mut expected_tokens = Vec::new();
+    expected_tokens.extend_from_slice(b"BaseClass");
+    expected_tokens.extend_from_slice(module_name_bytes.as_ref());
+
+    let idx_designer =
+        find_subslice(&normalized, &expected_padded).expect("expected designer bytes");
+    let idx_tokens =
+        find_subslice(&normalized, &expected_tokens).expect("expected BaseClass tokens");
+    assert!(
+        idx_designer < idx_tokens,
+        "expected designer bytes to appear before BaseClass property tokens"
     );
 }
 
