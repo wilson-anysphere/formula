@@ -59,6 +59,25 @@ test.describe("Extensions permissions UI", () => {
       await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("mode: allowlist");
       await expect(page.getByTestId(`permission-${extensionId}-network`)).toContainText("127.0.0.1");
 
+      // Revoke only network permission; ensure other grants remain.
+      await page.getByTestId(`revoke-permission-${extensionId}-network`).click();
+      await expect(page.getByTestId(`permission-${extensionId}-ui.commands`)).toBeVisible();
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toHaveCount(0);
+
+      // Re-run and deny only the network prompt.
+      await page.getByTestId("run-command-with-args-sampleHello.fetchText").click();
+      await expect(page.getByTestId("input-box")).toBeVisible();
+      await page.getByTestId("input-box-field").fill(JSON.stringify([url]));
+      await page.getByTestId("input-box-ok").click();
+
+      await expect(page.getByTestId("extension-permission-prompt")).toBeVisible();
+      await expect(page.getByTestId("extension-permission-network")).toBeVisible();
+      await page.getByTestId("extension-permission-deny").click();
+      await expect(page.getByTestId("extension-permission-network")).toHaveCount(0);
+      await expect(page.getByTestId("toast-root")).toContainText("Permission denied");
+      await expect(page.getByTestId(`permission-${extensionId}-ui.commands`)).toBeVisible();
+      await expect(page.getByTestId(`permission-${extensionId}-network`)).toHaveCount(0);
+
       await page.getByTestId(`revoke-all-permissions-${extensionId}`).click();
       await expect(page.getByTestId(`permissions-empty-${extensionId}`)).toBeVisible();
 
