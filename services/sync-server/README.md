@@ -240,23 +240,27 @@ Notable metrics (prefix `sync_server_`):
 
 - Hard maximum websocket message size:
 
-- `SYNC_SERVER_MAX_MESSAGE_BYTES` (default: `2097152` / 2 MiB)
+- `SYNC_SERVER_MAX_MESSAGE_BYTES` (default: `2097152` / 2 MiB). Set to `0` to disable (not recommended).
 
 - Connection limits:
   - `SYNC_SERVER_MAX_CONNECTIONS`
   - `SYNC_SERVER_MAX_CONNECTIONS_PER_IP`
-  - `SYNC_SERVER_MAX_CONN_ATTEMPTS_PER_WINDOW`
-  - `SYNC_SERVER_CONN_ATTEMPT_WINDOW_MS`
+  - Connection attempt rate limiting:
+    - `SYNC_SERVER_MAX_CONN_ATTEMPTS_PER_WINDOW`
+    - `SYNC_SERVER_CONN_ATTEMPT_WINDOW_MS`
+    - Set either to `0` to disable.
 
 - Per-connection message rate limiting:
 
   - `SYNC_SERVER_MAX_MESSAGES_PER_WINDOW`
   - `SYNC_SERVER_MESSAGE_WINDOW_MS`
+  - Set either to `0` to disable.
 
 - Per-document message rate limiting:
 
   - `SYNC_SERVER_MAX_MESSAGES_PER_DOC_WINDOW`
   - `SYNC_SERVER_DOC_MESSAGE_WINDOW_MS`
+  - Set either to `0` to disable.
 
 - Awareness payload limits:
 
