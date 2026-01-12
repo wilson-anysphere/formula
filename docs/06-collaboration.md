@@ -95,7 +95,7 @@ Implementation detail:
 
 - When `createCollabSession({ formulaConflicts: ... })` is enabled, `session.setCellFormula(...)`
   delegates to `FormulaConflictMonitor.setLocalFormula(...)`, which writes the `null` marker for clears.
-- In `mode: "formula+value"`, value writes also clear formulas via a `null` marker to support formula-vs-value conflict detection.
+- Value writes clear formulas via a `null` marker (even when value conflicts are not being monitored) so later formula writes can causally reference the clear via Yjs Item `origin`. This is important for cross-client determinism when some collaborators run conflict monitors and others do not.
 
 Formula normalization: most consumers normalize formula strings to a canonical **text** form (`=...` with surrounding whitespace stripped). The desktop binder normalizes formulas on read/write, and branching/versioning adapters normalize formulas when producing snapshots/diffs. Direct `session.setCellFormula(...)` writes preserve the input aside from basic trimming, so UI code should prefer writing canonical formula text.
 
