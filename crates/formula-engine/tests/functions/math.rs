@@ -78,6 +78,37 @@ fn count_counta_countblank() {
 }
 
 #[test]
+fn countif_reference_union_dedupes_overlaps() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A2", 2.0);
+    sheet.set("A3", 3.0);
+
+    // A2 overlaps between the two areas; it should only be counted once.
+    assert_number(&sheet.eval(r#"=COUNTIF((A1:A2,A2:A3),">1")"#), 2.0);
+}
+
+#[test]
+fn countif_reference_union_counts_missing_cells_as_blank() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A2", Value::Text("".to_string()));
+
+    // Union covers A1:A3, but only A2 is explicitly stored. Missing cells in the union
+    // should behave as blanks and should not be double-counted across overlaps.
+    assert_number(&sheet.eval(r#"=COUNTIF((A1:A2,A2:A3),"")"#), 3.0);
+}
+
+#[test]
+fn countif_reference_union_counts_blanks_across_non_overlapping_areas() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1.0);
+    sheet.set("C2", Value::Text("".to_string()));
+
+    // (A1:A2,C1:C2) is 4 cells total; A2/C1 are missing (blank) and C2 is an explicit empty
+    // string (also treated as blank).
+    assert_number(&sheet.eval(r#"=COUNTIF((A1:A2,C1:C2),"")"#), 3.0);
+}
+
+#[test]
 fn round_variants() {
     let mut sheet = TestSheet::new();
     assert_number(&sheet.eval("=ROUND(2.5,0)"), 3.0);
