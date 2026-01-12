@@ -39,6 +39,10 @@ for (const mod of builtinModules) {
   }
 }
 
+function toPosixPath(p) {
+  return p.replace(/\\/g, "/");
+}
+
 function isDesktopRendererSourceFile(absPath) {
   const ext = path.extname(absPath);
   if (!SOURCE_EXTENSIONS.has(ext)) return false;
@@ -168,7 +172,7 @@ for await (const absPath of walkFiles(desktopSrcDir)) {
       if (isPathWithin(resolved, desktopToolsDir) || isPathWithin(resolved, desktopScriptsDir)) {
         const { line, column } = lineAndColumnForIndex(sourceText, imp.index);
         violations.push({
-          file: path.relative(repoRoot, absPath),
+          file: toPosixPath(path.relative(repoRoot, absPath)),
           line,
           column,
           kind: `${imp.kind} (renderer-imports-node-only-tooling)`,
@@ -181,7 +185,7 @@ for await (const absPath of walkFiles(desktopSrcDir)) {
     if (!isBannedImport(imp.specifier)) continue;
     const { line, column } = lineAndColumnForIndex(sourceText, imp.index);
     violations.push({
-      file: path.relative(repoRoot, absPath),
+      file: toPosixPath(path.relative(repoRoot, absPath)),
       line,
       column,
       kind: imp.kind,
