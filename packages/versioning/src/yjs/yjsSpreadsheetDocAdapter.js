@@ -95,6 +95,40 @@ function isYAbstractType(value) {
   return Boolean(maybe._map instanceof Map || maybe._start || maybe._item || maybe._length != null);
 }
 
+function replaceForeignRootType(params) {
+  const { doc, name, existing, create } = params;
+  const t = create();
+
+  // Mirror Yjs' own Doc.get conversion logic for AbstractType placeholders, but
+  // also support roots instantiated by a different Yjs module instance (e.g.
+  // CJS `require("yjs")`).
+  //
+  // We intentionally only do this replacement when `doc` is from this module's
+  // Yjs instance (i.e. `doc instanceof Y.Doc`). If the entire doc was created by
+  // a foreign Yjs build, inserting local types into it can cause the same
+  // cross-instance integration errors we're trying to avoid.
+  (t)._map = existing?._map;
+  (t)._start = existing?._start;
+  (t)._length = existing?._length;
+
+  const map = existing?._map;
+  if (map instanceof Map) {
+    map.forEach((item) => {
+      for (let n = item; n !== null; n = n.left) {
+        n.parent = t;
+      }
+    });
+  }
+
+  for (let n = existing?._start ?? null; n !== null; n = n.right) {
+    n.parent = t;
+  }
+
+  doc.share.set(name, t);
+  t._integrate(doc, null);
+  return t;
+}
+
 /**
  * Returns true if the placeholder contains no visible data (no map entries and
  * no non-deleted list items). In this case we can safely ignore the root for
@@ -215,13 +249,33 @@ function deleteMapEntriesFromArrayRoot(transaction, arrayType) {
  */
 function getMapRoot(doc, name) {
   const existing = doc.share.get(name);
-  if (isYMap(existing)) return existing;
   if (existing == null) return doc.getMap(name);
+
+  if (isYMap(existing)) {
+    // If the map root was created by a different Yjs module instance (ESM vs CJS),
+    // `instanceof` checks fail and inserting local nested types can throw
+    // ("Unexpected content type"). Normalize the root to this module instance.
+    if (!(existing instanceof Y.Map) && doc instanceof Y.Doc) {
+      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
+    }
+    return existing;
+  }
+
+  if (isYArray(existing)) {
+    throw new Error(`Unsupported Yjs root type for "${name}" in current doc: Y.Array`);
+  }
+  if (isYText(existing)) {
+    throw new Error(`Unsupported Yjs root type for "${name}" in current doc: Y.Text`);
+  }
+
   // Placeholder root types should be coerced via Yjs' own constructors.
+  if (existing instanceof Y.AbstractType) return doc.getMap(name);
+  if (isYAbstractType(existing) && doc instanceof Y.Doc) {
+    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Map() });
+  }
   if (isYAbstractType(existing)) return doc.getMap(name);
-  throw new Error(
-    `Unsupported Yjs root type for "${name}" in current doc: ${existing?.constructor?.name ?? typeof existing}`,
-  );
+
+  throw new Error(`Unsupported Yjs root type for "${name}" in current doc`);
 }
 
 /**
@@ -230,12 +284,29 @@ function getMapRoot(doc, name) {
  */
 function getArrayRoot(doc, name) {
   const existing = doc.share.get(name);
-  if (isYArray(existing)) return existing;
   if (existing == null) return doc.getArray(name);
+
+  if (isYArray(existing)) {
+    if (!(existing instanceof Y.Array) && doc instanceof Y.Doc) {
+      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Array() });
+    }
+    return existing;
+  }
+
+  if (isYMap(existing)) {
+    throw new Error(`Unsupported Yjs root type for "${name}" in current doc: Y.Map`);
+  }
+  if (isYText(existing)) {
+    throw new Error(`Unsupported Yjs root type for "${name}" in current doc: Y.Text`);
+  }
+
+  if (existing instanceof Y.AbstractType) return doc.getArray(name);
+  if (isYAbstractType(existing) && doc instanceof Y.Doc) {
+    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Array() });
+  }
   if (isYAbstractType(existing)) return doc.getArray(name);
-  throw new Error(
-    `Unsupported Yjs root type for "${name}" in current doc: ${existing?.constructor?.name ?? typeof existing}`,
-  );
+
+  throw new Error(`Unsupported Yjs root type for "${name}" in current doc`);
 }
 
 /**
@@ -244,12 +315,29 @@ function getArrayRoot(doc, name) {
  */
 function getTextRoot(doc, name) {
   const existing = doc.share.get(name);
-  if (isYText(existing)) return existing;
   if (existing == null) return doc.getText(name);
+
+  if (isYText(existing)) {
+    if (!(existing instanceof Y.Text) && doc instanceof Y.Doc) {
+      return replaceForeignRootType({ doc, name, existing, create: () => new Y.Text() });
+    }
+    return existing;
+  }
+
+  if (isYMap(existing)) {
+    throw new Error(`Unsupported Yjs root type for "${name}" in current doc: Y.Map`);
+  }
+  if (isYArray(existing)) {
+    throw new Error(`Unsupported Yjs root type for "${name}" in current doc: Y.Array`);
+  }
+
+  if (existing instanceof Y.AbstractType) return doc.getText(name);
+  if (isYAbstractType(existing) && doc instanceof Y.Doc) {
+    return replaceForeignRootType({ doc, name, existing, create: () => new Y.Text() });
+  }
   if (isYAbstractType(existing)) return doc.getText(name);
-  throw new Error(
-    `Unsupported Yjs root type for "${name}" in current doc: ${existing?.constructor?.name ?? typeof existing}`,
-  );
+
+  throw new Error(`Unsupported Yjs root type for "${name}" in current doc`);
 }
 
 /**
