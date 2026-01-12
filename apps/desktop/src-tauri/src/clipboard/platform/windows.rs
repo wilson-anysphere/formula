@@ -8,6 +8,7 @@ mod win32_backend {
     use std::ptr;
     use std::thread;
     use std::time::Duration;
+
     use windows_sys::Win32::Foundation::GetLastError;
     use windows_sys::Win32::System::DataExchange::{
         CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
@@ -220,13 +221,17 @@ mod win32_backend {
     pub(super) fn read() -> Result<ClipboardContent, ClipboardError> {
         let _guard = open_clipboard_with_retries()?;
 
-        let text = read_unicode_text()?;
+        // Best-effort reads: if a particular format fails to decode, keep going.
+        let text = read_unicode_text().ok().flatten();
 
-        let html_format = register_format("HTML Format")?;
-        let html = read_clipboard_string(html_format, "HTML Format")?;
+        let html = register_format("HTML Format")
+            .ok()
+            .and_then(|fmt| read_clipboard_string(fmt, "HTML Format").ok().flatten())
+            .and_then(|payload| cf_html::decode_cf_html(&payload));
 
-        let rtf_format = register_format("Rich Text Format")?;
-        let rtf = read_clipboard_string(rtf_format, "Rich Text Format")?;
+        let rtf = register_format("Rich Text Format")
+            .ok()
+            .and_then(|fmt| read_clipboard_string(fmt, "Rich Text Format").ok().flatten());
 
         // PNG is a registered clipboard format on Windows. Some producers use `PNG`, others use
         // `image/png`. Try both.
@@ -277,9 +282,9 @@ mod win32_backend {
 
         if let Some(base64) = payload.png_base64.as_deref() {
             if !base64.is_empty() {
-                let bytes = STANDARD.decode(base64).map_err(|e| {
-                    ClipboardError::InvalidPayload(format!("invalid pngBase64: {e}"))
-                })?;
+                let bytes = STANDARD
+                    .decode(base64)
+                    .map_err(|e| ClipboardError::InvalidPayload(format!("invalid pngBase64: {e}")))?;
 
                 // Prefer the canonical Windows clipboard format name.
                 let fmt = register_format("PNG")?;
@@ -302,8 +307,8 @@ pub fn read() -> Result<ClipboardContent, ClipboardError> {
 }
 
 #[cfg(feature = "desktop")]
-pub fn write(_payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
-    win32_backend::write(_payload)
+pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
+    win32_backend::write(payload)
 }
 
 #[cfg(not(feature = "desktop"))]
@@ -319,3 +324,4 @@ pub fn write(_payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         "Windows clipboard backend requires the `desktop` feature".to_string(),
     ))
 }
+
