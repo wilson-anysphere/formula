@@ -128,6 +128,8 @@
     "window:allow-close",
     "clipboard:allow-read-text",
     "clipboard:allow-write-text",
-    "shell:allow-open"
+    "shell:allow-open",
+    "updater:allow-check",
+    "updater:allow-download-and-install"
   ]
 }

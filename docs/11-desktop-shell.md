@@ -202,6 +202,10 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
 }
 ```
 
+Note: calling the updater plugin from the **frontend** (via `globalThis.__TAURI__.updater`) is gated by Tauri v2 window
+capabilities. If you add/update updater UI flows, ensure the relevant `updater:allow-*` permissions are present in
+`apps/desktop/src-tauri/capabilities/main.json` (for example: `updater:allow-check`, `updater:allow-download-and-install`).
+
 #### Rollback / downgrade (rollback capability)
 
 Tauri's updater flow is designed to be **failure-safe** (signature verification + install handoff to the

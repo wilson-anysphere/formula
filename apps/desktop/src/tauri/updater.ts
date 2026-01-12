@@ -32,7 +32,6 @@ export async function installUpdateAndRestart(): Promise<void> {
     updater.installUpdate ??
     updater.downloadAndInstall ??
     updater.downloadAndInstallUpdate ??
-    updater.downloadAndInstallUpdate ??
     null;
 
   if (typeof directInstall === "function") {
@@ -101,4 +100,3 @@ export async function checkForUpdatesFromCommandPalette(source: UpdateCheckSourc
 
   await invoke("check_for_updates", { source });
 }
-
