@@ -193,15 +193,42 @@ export function SheetTabStrip({
     const sheet = store.getById(sheetId);
     if (!sheet) return;
 
-    // Prevent deleting the last visible sheet (we currently have no unhide UI, and
-    // having zero visible sheets would leave the workbook unusable).
+    const allSheets = store.listAll();
+    const hiddenSheets = allSheets.filter((s) => s.visibility !== "visible");
+
+    // Prevent deleting/hiding the last visible sheet.
     const canDelete = visibleSheets.length > 1;
+    const canHide = sheet.visibility === "visible" && visibleSheets.length > 1;
 
     const items: ContextMenuItem[] = [
       {
         type: "item",
         label: "Rename",
         onSelect: () => beginRenameWithGuard(sheet),
+      },
+      {
+        type: "item",
+        label: "Hide sheet",
+        enabled: canHide,
+        onSelect: () => {
+          try {
+            store.hide(sheet.id);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            onError?.(message);
+            return;
+          }
+
+          // If we hid the active sheet, activate the first remaining visible sheet.
+          if (sheet.id === activeSheetIdRef.current) {
+            const nextVisible = store.listVisible().at(0)?.id ?? null;
+            if (nextVisible) {
+              onActivateSheet(nextVisible);
+            }
+          } else {
+            onActivateSheet(activeSheetIdRef.current);
+          }
+        },
       },
       {
         type: "item",
@@ -212,6 +239,26 @@ export function SheetTabStrip({
         },
       },
     ];
+
+    if (hiddenSheets.length > 0) {
+      items.push({ type: "separator" });
+      for (const hidden of hiddenSheets) {
+        items.push({
+          type: "item",
+          label: `Unhide ${hidden.name}`,
+          onSelect: () => {
+            try {
+              store.unhide(hidden.id);
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              onError?.(message);
+              return;
+            }
+            onActivateSheet(activeSheetIdRef.current);
+          },
+        });
+      }
+    }
 
     tabContextMenu.open({ x: anchor.x, y: anchor.y, items });
   };
