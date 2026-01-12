@@ -653,6 +653,21 @@ mod tests {
     }
 
     #[test]
+    fn supbook_filename_heuristic_treats_template_extensions_as_external_workbooks() {
+        // SupBook records in external-link tables often store just the referenced workbook file
+        // name. Treat template/add-in extensions as external workbooks too so 3D references like
+        // `'[Book.xltx]Sheet1'!A1` decode correctly.
+        assert_eq!(
+            classify_supbook_name("Book.xltx"),
+            SupBookKind::ExternalWorkbook
+        );
+        assert_eq!(
+            classify_supbook_name("Book.xltm"),
+            SupBookKind::ExternalWorkbook
+        );
+    }
+
+    #[test]
     fn parse_workbook_populates_intern_extern_sheet_table() {
         // workbook.bin containing two sheets + an internal SupBook + ExternSheet table.
         let mut workbook_bin = Vec::new();
@@ -2581,6 +2596,8 @@ fn classify_supbook_name(raw_name: &str) -> SupBookKind {
         || name.ends_with(".xls")
         || name.ends_with(".xlsx")
         || name.ends_with(".xlsm")
+        || name.ends_with(".xltx")
+        || name.ends_with(".xltm")
         || name.ends_with(".xlsb")
         || name.ends_with(".xlam")
         || name.ends_with(".xll")
@@ -2601,6 +2618,8 @@ fn supbook_is_plausible(supbook: &SupBook) -> bool {
         || name.ends_with(".xls")
         || name.ends_with(".xlsx")
         || name.ends_with(".xlsm")
+        || name.ends_with(".xltx")
+        || name.ends_with(".xltm")
         || name.ends_with(".xlsb")
         || name.ends_with(".xlam")
         || name.ends_with(".xll")
