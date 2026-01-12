@@ -8,6 +8,7 @@ import { formatMs, runBenchmark, type BenchmarkResult } from './benchmark.ts';
 import { createCollaborationBenchmarks } from './benchmarks/collaboration.bench.ts';
 import { createRenderBenchmarks } from './benchmarks/render.bench.ts';
 import { createStartupBenchmarks } from './benchmarks/startup.bench.ts';
+import { runDesktopStartupBenchmarks } from './desktopStartupBench.ts';
 
 // Ensure paths are rooted at repo root even when invoked from elsewhere.
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
@@ -116,6 +117,10 @@ async function main(): Promise<void> {
 
   // Rust engine microbenchmarks (parse/eval/recalc).
   results.push(...runRustBenchmarks());
+
+  // Optional: real desktop startup (Tauri binary) cold-start timings.
+  // This is gated because it requires a built binary + a usable display environment.
+  results.push(...(await runDesktopStartupBenchmarks()));
 
   results.sort((a, b) => a.name.localeCompare(b.name));
 
