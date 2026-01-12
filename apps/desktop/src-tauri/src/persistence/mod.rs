@@ -903,4 +903,50 @@ mod write_xlsx_from_storage_tests {
 
         Ok(())
     }
+
+    #[test]
+    fn write_xlsx_from_storage_preserves_cached_values_when_engine_returns_error() -> anyhow::Result<()> {
+        let storage = formula_storage::Storage::open_in_memory().context("open in-memory storage")?;
+
+        // Seed the storage workbook with a formula cell that has a non-error cached value.
+        let mut workbook_for_storage = AppWorkbook::new_empty(None);
+        workbook_for_storage.add_sheet("Sheet1".to_string());
+        workbook_for_storage.ensure_sheet_ids();
+        workbook_for_storage.sheets[0].set_cell(
+            0,
+            0,
+            Cell::from_literal(Some(CellScalar::Number(1.0))),
+        );
+        let mut formula_cell = Cell::from_formula("=UNSUPPORTED(A1)".to_string());
+        formula_cell.computed_value = CellScalar::Number(99.0);
+        workbook_for_storage.sheets[0].set_cell(0, 1, formula_cell);
+
+        let workbook_id = import_app_workbook(&storage, &workbook_for_storage)?;
+
+        // Simulate the in-memory engine failing to evaluate the formula by reporting an error.
+        // The export should preserve the last known cached value from storage.
+        let mut workbook_meta = workbook_for_storage.clone();
+        let mut error_cell = Cell::from_formula("=UNSUPPORTED(A1)".to_string());
+        error_cell.computed_value = CellScalar::Error("#NAME?".to_string());
+        workbook_meta.sheets[0].set_cell(0, 1, error_cell);
+
+        let tmp = tempfile::tempdir().context("temp dir")?;
+        let out_path = tmp.path().join("cached-values.xlsx");
+        let bytes =
+            write_xlsx_from_storage(&storage, workbook_id, &workbook_meta, &out_path)?;
+
+        let reread = formula_xlsx::read_workbook_from_reader(Cursor::new(bytes.as_ref()))
+            .context("read exported workbook model")?;
+        let sheet = reread.sheets.first().context("missing first sheet")?;
+        let cell = sheet
+            .cell(CellRef::new(0, 1))
+            .context("missing B1 cell")?;
+        assert_eq!(
+            cell.value,
+            formula_model::CellValue::Number(99.0),
+            "expected export to preserve non-error cached value when the engine reports an error"
+        );
+
+        Ok(())
+    }
 }
