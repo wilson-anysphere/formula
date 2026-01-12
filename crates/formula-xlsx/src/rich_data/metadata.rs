@@ -284,6 +284,9 @@ fn parse_value_metadata_mappings(
 
     let mut out = HashMap::new();
 
+    let v_indexing_is_one_based =
+        infer_value_metadata_rc_v_indexing(doc, xlrichvalue_t_values, future_bk_indices);
+
     let mut vm_start_1_based: u32 = 1;
 
     for bk in value_metadata
@@ -309,21 +312,20 @@ fn parse_value_metadata_mappings(
             continue;
         };
 
-        let Some(v_idx) = rc.attribute("v").and_then(|v| v.parse::<u32>().ok()) else {
+        let Some(mut v_idx) = rc.attribute("v").and_then(|v| v.parse::<u32>().ok()) else {
             vm_start_1_based = vm_start_1_based.saturating_add(count);
             continue;
         };
 
-        let Some(v) = resolve_bk_run(future_bk_indices, v_idx)
-            // Some producers have been observed to use 1-based indices into the `<futureMetadata>`
-            // `<bk>` list. If the 0-based interpretation doesn't resolve, fall back to `v-1`.
-            .or_else(|| {
-                v_idx
-                    .checked_sub(1)
-                    .and_then(|idx| resolve_bk_run(future_bk_indices, idx))
-            })
-            .flatten()
-        else {
+        if v_indexing_is_one_based {
+            let Some(one_based) = v_idx.checked_sub(1) else {
+                vm_start_1_based = vm_start_1_based.saturating_add(count);
+                continue;
+            };
+            v_idx = one_based;
+        }
+
+        let Some(v) = resolve_bk_run(future_bk_indices, v_idx).flatten() else {
             vm_start_1_based = vm_start_1_based.saturating_add(count);
             continue;
         };
@@ -335,6 +337,60 @@ fn parse_value_metadata_mappings(
     }
 
     out
+}
+
+fn infer_value_metadata_rc_v_indexing(
+    doc: &Document<'_>,
+    xlrichvalue_t_values: &[u32],
+    future_bk_indices: &[BkRun<Option<u32>>],
+) -> bool {
+    let Some(value_metadata) = doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "valueMetadata")
+    else {
+        return false;
+    };
+
+    let mut zero_based_matches = 0usize;
+    let mut one_based_matches = 0usize;
+    let mut saw_zero = false;
+
+    for rc in value_metadata
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "rc")
+    {
+        let Some(t) = rc.attribute("t").and_then(|t| t.parse::<u32>().ok()) else {
+            continue;
+        };
+        if !xlrichvalue_t_values.contains(&t) {
+            continue;
+        }
+
+        let Some(v) = rc.attribute("v").and_then(|v| v.parse::<u32>().ok()) else {
+            continue;
+        };
+
+        if v == 0 {
+            saw_zero = true;
+        }
+
+        if resolve_bk_run(future_bk_indices, v).flatten().is_some() {
+            zero_based_matches += 1;
+        }
+        if v > 0 && resolve_bk_run(future_bk_indices, v - 1).flatten().is_some() {
+            one_based_matches += 1;
+        }
+    }
+
+    // If we saw any `v="0"` for a rich value entry, treat indices as 0-based. Interpreting the
+    // same file as 1-based would make those entries invalid and can also cause false positives
+    // by "shifting" out-of-bounds 0-based values back into range.
+    if saw_zero {
+        return false;
+    }
+
+    // Prefer the indexing scheme that yields more resolved links.
+    one_based_matches > zero_based_matches
 }
 
 fn resolve_bk_run<T: Copy>(runs: &[BkRun<T>], idx: u32) -> Option<T> {
