@@ -120,7 +120,7 @@ fn odd_coupon_settlement_boundary_behavior() {
     // - ODDL*: settlement < maturity, maturity > last_interest (settlement may be <= last_interest).
     //   If settlement < last_interest, the engine PVs remaining regular coupons through last_interest
     //   plus the final odd stub cashflow at maturity.
-    // - ODDF*: issue <= settlement <= first_coupon <= maturity
+    // - ODDF*: issue < settlement < first_coupon <= maturity
     //
     // ODDF* rejects settlement > first_coupon and settlement >= maturity (see
     // `crates/formula-engine/tests/odd_coupon_date_boundaries.rs` for pinned boundary behavior).
@@ -187,11 +187,11 @@ fn odd_coupon_settlement_boundary_behavior() {
     )
     .expect("ODDLYIELD should converge when settlement < last_interest");
     assert_close(yld_out, yld_in, 1e-6);
-    // ODDF*: settlement == first_coupon is allowed.
+    // ODDF*: settlement == first_coupon => #NUM! (pinned by excel-oracle).
     let issue = ymd_to_serial(ExcelDate::new(2022, 12, 15), system).unwrap();
     let first_coupon = ymd_to_serial(ExcelDate::new(2023, 1, 31), system).unwrap();
     let maturity2 = ymd_to_serial(ExcelDate::new(2024, 7, 31), system).unwrap();
-    let pr = oddfprice(
+    let result = oddfprice(
         first_coupon, // settlement == first_coupon
         maturity2,
         issue,
@@ -202,26 +202,21 @@ fn odd_coupon_settlement_boundary_behavior() {
         2,
         0,
         system,
-    )
-    .expect("ODDFPRICE should accept settlement == first_coupon");
-    assert!(
-        pr.is_finite() && pr > 0.0,
-        "expected positive finite price, got {pr}"
     );
-    let yld_out = oddfyield(
+    assert_eq!(result, Err(ExcelError::Num));
+    let result = oddfyield(
         first_coupon,
         maturity2,
         issue,
         first_coupon,
         0.05,
-        pr,
+        99.0,
         100.0,
         2,
         0,
         system,
-    )
-    .expect("ODDFYIELD should converge when settlement == first_coupon");
-    assert_close(yld_out, yld_in, 1e-6);
+    );
+    assert_eq!(result, Err(ExcelError::Num));
 
     // ODDF*: settlement > first_coupon => #NUM! (excel-oracle case id prefix:
     // fin_oddfprice_settle_after_first_b0_*)
@@ -278,14 +273,14 @@ fn odd_coupon_settlement_boundary_behavior() {
     );
     let v = sheet.eval("=ODDFPRICE(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)");
     assert!(
-        matches!(v, Value::Number(n) if n.is_finite()),
-        "expected finite number for worksheet ODDFPRICE when settlement == first_coupon, got {v:?}"
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDFPRICE when settlement == first_coupon, got {v:?}"
     );
     let v =
         sheet.eval("=ODDFYIELD(DATE(2023,1,31),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,99,100,2,0)");
     assert!(
-        matches!(v, Value::Number(n) if n.is_finite()),
-        "expected finite number for worksheet ODDFYIELD when settlement == first_coupon, got {v:?}"
+        matches!(v, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDFYIELD when settlement == first_coupon, got {v:?}"
     );
     let v = sheet.eval("=ODDFPRICE(DATE(2023,2,1),DATE(2024,7,31),DATE(2022,12,15),DATE(2023,1,31),0.05,0.06,100,2,0)");
     assert!(

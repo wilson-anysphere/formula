@@ -296,17 +296,12 @@ fn oddf_equation(
         return Err(ExcelError::Num);
     }
 
-    // Excel-style chronology constraints.
+    // Excel-style chronology: `issue < settlement < first_coupon <= maturity`.
     //
-    // - `issue` must be strictly before `first_coupon` (otherwise there's no odd first period).
-    // - `issue <= settlement <= first_coupon <= maturity`.
-    // - `settlement` must be strictly before `maturity`.
-    if !(issue <= settlement
-        && settlement <= first_coupon
-        && issue < first_coupon
-        && first_coupon <= maturity
-        && settlement < maturity)
-    {
+    // In particular, Excel rejects equality boundaries like `issue == settlement` and
+    // `settlement == first_coupon` (see `tests/odd_coupon_date_boundaries.rs` and the
+    // excel-oracle pinned dataset).
+    if !(issue < settlement && settlement < first_coupon && first_coupon <= maturity) {
         return Err(ExcelError::Num);
     }
 
