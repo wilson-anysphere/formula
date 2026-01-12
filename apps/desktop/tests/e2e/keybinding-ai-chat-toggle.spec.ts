@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop, waitForDesktopReady } from "./helpers";
 
 test.describe("keybindings: AI Chat toggle", () => {
-  test("Ctrl/Cmd+Shift+A toggles AI Chat without triggering Select All", async ({ page }) => {
+  test("Ctrl+Shift+A (Win/Linux) / Cmd+I (macOS) toggles AI Chat without triggering Select All", async ({ page }) => {
     await gotoDesktop(page);
     await page.evaluate(() => localStorage.clear());
     await page.reload();
@@ -27,23 +27,21 @@ test.describe("keybindings: AI Chat toggle", () => {
     await grid.click({ position: { x: b2.x + b2.width / 2, y: b2.y + b2.height / 2 } });
     await expect(page.getByTestId("active-cell")).toHaveText("B2");
 
-    const mod = process.platform === "darwin" ? { metaKey: true } : { ctrlKey: true };
+    const shortcut =
+      process.platform === "darwin"
+        ? // macOS: Cmd+I toggles AI chat.
+          { metaKey: true, shiftKey: false, key: "I", code: "KeyI" }
+        : // Windows/Linux: Ctrl+Shift+A toggles AI chat.
+          { ctrlKey: true, shiftKey: true, key: "A", code: "KeyA" };
 
     const dispatchShortcut = async () => {
       await page.evaluate((keys) => {
         const gridEl = document.getElementById("grid");
         if (!gridEl) throw new Error("Missing #grid");
         gridEl.dispatchEvent(
-          new KeyboardEvent("keydown", {
-            key: "A",
-            code: "KeyA",
-            shiftKey: true,
-            bubbles: true,
-            cancelable: true,
-            ...keys,
-          }),
+          new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...keys }),
         );
-      }, mod);
+      }, shortcut);
     };
 
     await dispatchShortcut();
@@ -55,4 +53,3 @@ test.describe("keybindings: AI Chat toggle", () => {
     await expect(page.getByTestId("active-cell")).toHaveText("B2");
   });
 });
-
