@@ -1187,9 +1187,10 @@ pub async fn save_workbook(
     memory.flush_dirty_pages().map_err(|e| e.to_string())?;
 
     let save_path_clone = save_path.clone();
-    let written_bytes = tauri::async_runtime::spawn_blocking(move || {
+    let (validated_save_path, written_bytes) = tauri::async_runtime::spawn_blocking(move || {
         let policy = PathScopePolicy::default_desktop();
         let validated_path = policy.validate_write_path(std::path::Path::new(&save_path_clone))?;
+        let validated_save_path = validated_path.to_string_lossy().to_string();
 
         let path = validated_path.as_path();
         let ext = path
@@ -1200,7 +1201,8 @@ pub async fn save_workbook(
         // XLSB saves must go through the `formula-xlsb` round-trip writer. The storage export
         // path only knows how to generate XLSX.
         if ext.eq_ignore_ascii_case("xlsb") {
-            return crate::file_io::write_xlsx_blocking(path, &workbook).map_err(|e| e.to_string());
+            let bytes = crate::file_io::write_xlsx_blocking(path, &workbook).map_err(|e| e.to_string())?;
+            return Ok::<_, String>((validated_save_path, bytes));
         }
 
         // Prefer the existing patch-based save path when we have the original XLSX bytes.
@@ -1209,12 +1211,13 @@ pub async fn save_workbook(
         //
         // Fall back to the storage->model export path for non-XLSX origins (csv/xls) and
         // for new workbooks without an `origin_xlsx_bytes` baseline.
-        if workbook.origin_xlsx_bytes.is_some() {
-            crate::file_io::write_xlsx_blocking(path, &workbook).map_err(|e| e.to_string())
+        let bytes = if workbook.origin_xlsx_bytes.is_some() {
+            crate::file_io::write_xlsx_blocking(path, &workbook).map_err(|e| e.to_string())?
         } else {
             crate::persistence::write_xlsx_from_storage(&storage, workbook_id, &workbook, path)
-                .map_err(|e| e.to_string())
-        }
+                .map_err(|e| e.to_string())?
+        };
+        Ok::<_, String>((validated_save_path, bytes))
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -1222,7 +1225,10 @@ pub async fn save_workbook(
     {
         let mut state = state.inner().lock().unwrap();
         state
-            .mark_saved(Some(save_path), wants_origin_bytes.then_some(written_bytes))
+            .mark_saved(
+                Some(validated_save_path),
+                wants_origin_bytes.then_some(written_bytes),
+            )
             .map_err(app_error)?;
     }
 

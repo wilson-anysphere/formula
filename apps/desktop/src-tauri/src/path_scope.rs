@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 /// Restricts filesystem access to a fixed set of allowed roots.
@@ -79,13 +80,14 @@ impl PathScopePolicy {
         let file_name = input
             .file_name()
             .ok_or_else(|| "Invalid path: expected a file path".to_string())?;
+        if file_name == OsStr::new(".") || file_name == OsStr::new("..") {
+            return Err("Invalid path: expected a file path".to_string());
+        }
 
-        // `Path::parent()` returns an empty path for single-component relative paths ("foo.xlsx").
-        // Canonicalize treats this inconsistently across platforms, so normalize to ".".
-        let parent = match input.parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => parent,
-            _ => Path::new("."),
-        };
+        let parent = input
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .ok_or_else(|| "Invalid path: expected a file path with a parent directory".to_string())?;
 
         let canonical_parent = dunce::canonicalize(parent).map_err(|e| e.to_string())?;
         let candidate = canonical_parent.join(file_name);
@@ -113,6 +115,7 @@ impl PathScopePolicy {
 #[cfg(test)]
 mod tests {
     use super::PathScopePolicy;
+    use directories::BaseDirs;
 
     #[test]
     fn read_allows_paths_within_allowed_root() {
@@ -142,6 +145,30 @@ mod tests {
     }
 
     #[test]
+    fn default_desktop_allows_home_reads_and_rejects_out_of_scope() {
+        let base_dirs = BaseDirs::new().expect("base dirs");
+        let in_scope_tmp = tempfile::tempdir_in(base_dirs.home_dir()).expect("tempdir in home");
+        let in_scope_file = in_scope_tmp.path().join("in-scope.txt");
+        std::fs::write(&in_scope_file, "hello").expect("write in-scope file");
+
+        let out_scope_tmp = tempfile::tempdir().expect("tempdir out-of-scope");
+        let out_scope_file = out_scope_tmp.path().join("out-of-scope.txt");
+        std::fs::write(&out_scope_file, "secret").expect("write out-of-scope file");
+
+        let policy = PathScopePolicy::default_desktop();
+        let validated = policy
+            .validate_read_path(&in_scope_file)
+            .expect("in-scope read");
+        assert!(validated.is_absolute());
+
+        let err = policy.validate_read_path(&out_scope_file).unwrap_err();
+        assert_eq!(
+            err,
+            "Access denied: path is outside the allowed filesystem scope"
+        );
+    }
+
+    #[test]
     fn write_allows_new_files_within_allowed_root() {
         let allowed_temp = tempfile::tempdir().unwrap();
         let candidate = allowed_temp.path().join("new.xlsx");
@@ -161,6 +188,31 @@ mod tests {
 
         let policy = PathScopePolicy::new(vec![allowed_root.path().to_path_buf()]);
         let err = policy.validate_write_path(&candidate).unwrap_err();
+        assert_eq!(
+            err,
+            "Access denied: path is outside the allowed filesystem scope"
+        );
+    }
+
+    #[test]
+    fn default_desktop_allows_home_writes_and_rejects_out_of_scope() {
+        let base_dirs = BaseDirs::new().expect("base dirs");
+        let in_scope_tmp = tempfile::tempdir_in(base_dirs.home_dir()).expect("tempdir in home");
+        let in_scope_dest = in_scope_tmp.path().join("new.xlsx");
+        assert!(!in_scope_dest.exists());
+
+        let out_scope_tmp = tempfile::tempdir().expect("tempdir out-of-scope");
+        let out_scope_dest = out_scope_tmp.path().join("new.xlsx");
+        assert!(!out_scope_dest.exists());
+
+        let policy = PathScopePolicy::default_desktop();
+        let validated = policy
+            .validate_write_path(&in_scope_dest)
+            .expect("in-scope write");
+        let expected_parent = dunce::canonicalize(in_scope_tmp.path()).expect("canonicalize parent");
+        assert_eq!(validated, expected_parent.join("new.xlsx"));
+
+        let err = policy.validate_write_path(&out_scope_dest).unwrap_err();
         assert_eq!(
             err,
             "Access denied: path is outside the allowed filesystem scope"
