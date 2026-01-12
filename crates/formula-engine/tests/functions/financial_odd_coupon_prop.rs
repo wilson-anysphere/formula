@@ -175,6 +175,30 @@ fn prop_oddf_yield_price_roundtrip_basis0() {
                 "ODDF roundtrip failed: yld_in={} yld_out={yld_out} price={price} case={case:?}",
                 case.yld
             );
+
+            // Secondary invariant: pricing at the recovered yield should reproduce the price.
+            let price_roundtrip = oddfprice(
+                case.settlement,
+                case.maturity,
+                case.issue,
+                case.first_coupon,
+                case.rate,
+                yld_out,
+                REDEMPTION,
+                case.frequency,
+                BASIS,
+                SYSTEM,
+            )
+            .map_err(|e| {
+                TestCaseError::fail(format!(
+                    "ODDFPRICE(yld_out) errored: {e:?} yld_out={yld_out} price={price} case={case:?}"
+                ))
+            })?;
+            prop_assert!(price_roundtrip.is_finite());
+            prop_assert!(
+                (price_roundtrip - price).abs() <= 1e-6,
+                "ODDF price roundtrip failed: price_in={price} price_out={price_roundtrip} yld_out={yld_out} case={case:?}",
+            );
             Ok(())
         })
         .unwrap();
@@ -232,6 +256,28 @@ fn prop_oddl_yield_price_roundtrip_basis0() {
                 (yld_out - case.yld).abs() <= TOLERANCE,
                 "ODDL roundtrip failed: yld_in={} yld_out={yld_out} price={price} case={case:?}",
                 case.yld
+            );
+
+            let price_roundtrip = oddlprice(
+                case.settlement,
+                case.maturity,
+                case.last_interest,
+                case.rate,
+                yld_out,
+                REDEMPTION,
+                case.frequency,
+                BASIS,
+                SYSTEM,
+            )
+            .map_err(|e| {
+                TestCaseError::fail(format!(
+                    "ODDLPRICE(yld_out) errored: {e:?} yld_out={yld_out} price={price} case={case:?}"
+                ))
+            })?;
+            prop_assert!(price_roundtrip.is_finite());
+            prop_assert!(
+                (price_roundtrip - price).abs() <= 1e-6,
+                "ODDL price roundtrip failed: price_in={price} price_out={price_roundtrip} yld_out={yld_out} case={case:?}",
             );
             Ok(())
         })
