@@ -74,9 +74,9 @@ Latency:       Latency:       Latency:     Latency:    Latency:
 - Suggest formulas, values, completions based on context
 - Aggressive caching for speed
 
-### Mode 2: Inline Edit (⌘K, <2s)
+### Mode 2: Inline Edit (Cmd/Ctrl+K, <2s)
 
-- Trigger: User selects range, presses ⌘K
+- Trigger: User selects range, presses Cmd/Ctrl+K
 - Natural language → data transformation
 - Preview before apply
 

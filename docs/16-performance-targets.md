@@ -75,7 +75,7 @@ Performance is a feature. Users should never wait, never see jank, never hit lim
 | Metric | Target | Measurement Method |
 |--------|--------|-------------------|
 | Tab completion | <100ms | Time from keystroke to suggestion |
-| Inline assist | <2s | Time from Cmd+K to result |
+| Inline assist | <2s | Time from Cmd/Ctrl+K to result |
 | Chat response | <5s | Time from Enter to first token |
 | Formula explanation | <3s | Time from request to explanation |
 

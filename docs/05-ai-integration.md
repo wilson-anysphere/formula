@@ -145,9 +145,9 @@ class TabCompletionEngine {
 }
 ```
 
-### Mode 2: Inline Edit (Cmd+K)
+### Mode 2: Inline Edit (Cmd/Ctrl+K)
 
-**Trigger:** User selects range and presses Cmd+K (or equivalent)
+**Trigger:** User selects range and presses Cmd/Ctrl+K
 **Latency requirement:** <2s for small operations
 **Backend:** Cursor servers
 
