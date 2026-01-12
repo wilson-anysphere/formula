@@ -3362,6 +3362,85 @@ export class CanvasGridRenderer {
               originY = y + height - paddingY - layout.height;
             }
 
+            const justifyEnabled =
+              horizontalAlign === "justify" && wrapMode !== "none" && rotationDeg === 0 && resolvedAlign === "left" && layout.lines.length > 1;
+            const justifiedLineWidths: number[] | null = justifyEnabled ? new Array(layout.lines.length) : null;
+
+            const drawLayoutText = () => {
+              if (!justifyEnabled) {
+                drawTextLayout(contentCtx, layout, originX, originY);
+                return;
+              }
+
+              const whitespaceRe = /^\s+$/;
+              const measureWidth = (token: string): number => {
+                const measured = layoutEngine.measure(token, fontSpec);
+                return measured?.width ?? contentCtx.measureText(token).width;
+              };
+
+              for (let i = 0; i < layout.lines.length; i++) {
+                const line = layout.lines[i];
+                const baselineY = originY + i * layout.lineHeight + line.ascent;
+
+                // Preserve non-justified semantics for the last line.
+                if (i === layout.lines.length - 1) {
+                  if (justifiedLineWidths) justifiedLineWidths[i] = line.width;
+                  contentCtx.fillText(line.text, originX + line.x, baselineY);
+                  continue;
+                }
+
+                const extra = maxWidth - line.width;
+                if (!(extra > 0) || !line.text) {
+                  if (justifiedLineWidths) justifiedLineWidths[i] = line.width;
+                  contentCtx.fillText(line.text, originX + line.x, baselineY);
+                  continue;
+                }
+
+                const tokens = line.text.split(/(\s+)/).filter((t) => t.length > 0);
+                if (tokens.length === 0) {
+                  if (justifiedLineWidths) justifiedLineWidths[i] = line.width;
+                  continue;
+                }
+
+                let gapCount = 0;
+                const adjustableGap = new Array(tokens.length).fill(false);
+                for (let ti = 0; ti < tokens.length; ti++) {
+                  const tok = tokens[ti];
+                  if (!whitespaceRe.test(tok)) continue;
+                  if (ti === 0 || ti === tokens.length - 1) continue;
+                  const left = tokens[ti - 1];
+                  const right = tokens[ti + 1];
+                  if (whitespaceRe.test(left) || whitespaceRe.test(right)) continue;
+                  adjustableGap[ti] = true;
+                  gapCount += 1;
+                }
+
+                if (gapCount === 0) {
+                  if (justifiedLineWidths) justifiedLineWidths[i] = line.width;
+                  contentCtx.fillText(line.text, originX + line.x, baselineY);
+                  continue;
+                }
+
+                const extraPerGap = extra / gapCount;
+                if (justifiedLineWidths) justifiedLineWidths[i] = maxWidth;
+
+                let xCursor = originX;
+                for (let ti = 0; ti < tokens.length; ti++) {
+                  const tok = tokens[ti];
+                  if (!tok) continue;
+                  const tokWidth = measureWidth(tok);
+
+                  if (whitespaceRe.test(tok)) {
+                    xCursor += tokWidth + (adjustableGap[ti] ? extraPerGap : 0);
+                    continue;
+                  }
+
+                  contentCtx.fillText(tok, xCursor, baselineY);
+                  xCursor += tokWidth;
+                }
+              }
+            };
+
             const shouldClip = layout.width > maxWidth || layout.height > availableHeight || rotationDeg !== 0;
             const drawLayoutDecorations = () => {
               if (!hasTextDecorations) return;
@@ -3373,7 +3452,8 @@ export class CanvasGridRenderer {
                   const line = layout.lines[i];
                   if (line.width <= 0) continue;
                   const x1 = originX + line.x;
-                  const x2 = x1 + line.width;
+                  const effectiveWidth = justifiedLineWidths?.[i] ?? line.width;
+                  const x2 = x1 + effectiveWidth;
                   const baselineY = originY + i * layout.lineHeight + line.ascent;
                   const underlineOffset = Math.max(1, Math.round(line.descent * 0.5));
                   const underlineY = alignDecorationY(baselineY + underlineOffset);
@@ -3393,7 +3473,8 @@ export class CanvasGridRenderer {
                   const line = layout.lines[i];
                   if (line.width <= 0) continue;
                   const x1 = originX + line.x;
-                  const x2 = x1 + line.width;
+                  const effectiveWidth = justifiedLineWidths?.[i] ?? line.width;
+                  const x2 = x1 + effectiveWidth;
                   const baselineY = originY + i * layout.lineHeight + line.ascent;
                   const strikeY = alignDecorationY(baselineY - Math.max(1, Math.round(line.ascent * 0.3)));
                   contentCtx.moveTo(x1, strikeY);
@@ -3417,11 +3498,11 @@ export class CanvasGridRenderer {
                 contentCtx.translate(-cx, -cy);
               }
 
-              drawTextLayout(contentCtx, layout, originX, originY);
+              drawLayoutText();
               drawLayoutDecorations();
               contentCtx.restore();
             } else {
-              drawTextLayout(contentCtx, layout, originX, originY);
+              drawLayoutText();
               drawLayoutDecorations();
             }
           } else {
