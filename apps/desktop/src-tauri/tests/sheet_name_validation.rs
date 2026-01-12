@@ -280,3 +280,50 @@ fn rename_sheet_rejects_duplicate_name_with_unicode_case_folding() {
         other => panic!("expected WhatIf error, got {other:?}"),
     }
 }
+
+#[test]
+fn rename_sheet_rejects_duplicate_name_with_unicode_nfkc_equivalence() {
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("fi".to_string());
+    workbook.add_sheet("Sheet2".to_string());
+    let sheet2_id = workbook.sheets[1].id.clone();
+
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    // The "fi" ligature (U+FB01) NFKC-normalizes to "fi".
+    let err = state
+        .rename_sheet(&sheet2_id, "\u{FB01}".to_string())
+        .expect_err("expected duplicate sheet name error");
+
+    match err {
+        AppStateError::WhatIf(msg) => assert!(
+            msg.contains("already exists"),
+            "expected duplicate error, got {msg:?}"
+        ),
+        other => panic!("expected WhatIf error, got {other:?}"),
+    }
+}
+
+#[test]
+fn create_sheet_rejects_duplicate_name_with_unicode_nfkc_equivalence() {
+    let mut workbook = Workbook::new_empty(None);
+    workbook.add_sheet("fi".to_string());
+    workbook.add_sheet("Sheet2".to_string());
+
+    let mut state = AppState::new();
+    state.load_workbook(workbook);
+
+    // The "fi" ligature (U+FB01) NFKC-normalizes to "fi".
+    let err = state
+        .create_sheet("\u{FB01}".to_string())
+        .expect_err("expected duplicate sheet name error");
+
+    match err {
+        AppStateError::WhatIf(msg) => assert!(
+            msg.contains("already exists"),
+            "expected duplicate error, got {msg:?}"
+        ),
+        other => panic!("expected WhatIf error, got {other:?}"),
+    }
+}
