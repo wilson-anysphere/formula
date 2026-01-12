@@ -91,13 +91,10 @@ import { buildContextMenuModel } from "./extensions/contextMenuModel.js";
 import {
   buildCommandKeybindingDisplayIndex,
   getPrimaryCommandKeybindingDisplay,
-  matchesKeybinding,
-  parseKeybinding,
-  platformKeybinding,
   type ContributedKeybinding,
 } from "./extensions/keybindings.js";
+import { KeybindingService } from "./extensions/keybindingService.js";
 import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js";
-import { evaluateWhenClause } from "./extensions/whenClause.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
 import { createCommandPalette } from "./command-palette/index.js";
 import { registerBuiltinCommands } from "./commands/registerBuiltinCommands.js";
@@ -2995,21 +2992,15 @@ if (
     true,
   );
 
-  // Keybindings (foundation): execute contributed commands.
-  const parsedKeybindings: Array<ReturnType<typeof parseKeybinding>> = [];
+  // Keybindings: central dispatch with built-in precedence over extensions.
   const commandKeybindingDisplayIndex = new Map<string, string[]>();
   let lastLoadedExtensionIds = new Set<string>();
-  const sheetNavigationKeybindings: Array<NonNullable<ReturnType<typeof parseKeybinding>>> = [
-    parseKeybinding("workbook.previousSheet", "ctrl+pageup"),
-    parseKeybinding("workbook.nextSheet", "ctrl+pagedown"),
-    parseKeybinding("workbook.previousSheet", "cmd+pageup"),
-    parseKeybinding("workbook.nextSheet", "cmd+pagedown"),
-  ].filter((binding): binding is NonNullable<ReturnType<typeof parseKeybinding>> => binding != null);
 
-  const aiChatToggleKeybindings: Array<NonNullable<ReturnType<typeof parseKeybinding>>> = [
-    parseKeybinding("view.togglePanel.aiChat", "ctrl+shift+a"),
-    parseKeybinding("view.togglePanel.aiChat", "cmd+shift+a"),
-  ].filter((binding): binding is NonNullable<ReturnType<typeof parseKeybinding>> => binding != null);
+  const platform = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "mac" : "other";
+
+  // Keybindings used for UI surfaces (command palette, context menu shortcut hints).
+  // Prefer using `./commands/builtinKeybindings.ts` for new bindings.
+  const builtinKeybindingHints = builtinKeybindingsCatalog;
 
   const syncContributedCommands = () => {
     if (!extensionHostManager.ready || extensionHostManager.error) return;
@@ -3091,10 +3082,25 @@ if (
     }
   };
 
+  const keybindingService = new KeybindingService({
+    commandRegistry,
+    contextKeys,
+    platform,
+    onBeforeExecuteCommand: async (_commandId, source) => {
+      if (source.kind !== "extension") return;
+      await ensureExtensionsLoaded();
+      syncContributedCommands();
+    },
+    onCommandError: (commandId, err) => {
+      showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
+    },
+  });
+  keybindingService.setBuiltinKeybindings(builtinKeybindingHints);
+  // Bubble-phase listener so SpreadsheetApp can `preventDefault()` first.
+  keybindingService.installWindowListener(window, { capture: false });
+
   const updateKeybindings = () => {
-    parsedKeybindings.length = 0;
     commandKeybindingDisplayIndex.clear();
-    const platform = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "mac" : "other";
     const contributed =
       extensionHostManager.ready && !extensionHostManager.error
         ? (extensionHostManager.getContributedKeybindings() as ContributedKeybinding[])
@@ -3107,11 +3113,7 @@ if (
     for (const [commandId, bindings] of nextKeybindingsIndex.entries()) {
       commandKeybindingDisplayIndex.set(commandId, bindings);
     }
-    for (const kb of contributed) {
-      const binding = platformKeybinding(kb, platform);
-      const parsed = parseKeybinding(kb.command, binding, kb.when ?? null);
-      if (parsed) parsedKeybindings.push(parsed);
-    }
+    keybindingService.setExtensionKeybindings(contributed);
   };
 
   const activateOpenExtensionPanels = () => {
@@ -3148,54 +3150,6 @@ if (
   syncContributedCommandsRef = syncContributedCommands;
   syncContributedPanelsRef = syncContributedPanels;
   updateKeybindingsRef = updateKeybindings;
-
-  window.addEventListener(
-    "keydown",
-    (e) => {
-      if (e.defaultPrevented) return;
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
-        return;
-      }
-
-      // Reserve Ctrl/Cmd+Shift+P for the command palette.
-      const primary = e.ctrlKey || e.metaKey;
-      if (primary && e.shiftKey && (e.key === "P" || e.key === "p")) return;
-      // Reserve Ctrl/Cmd+Shift+V for Paste Special.
-      if (primary && e.shiftKey && (e.key === "V" || e.key === "v")) return;
-
-      for (const binding of aiChatToggleKeybindings) {
-        if (!matchesKeybinding(binding, e)) continue;
-        e.preventDefault();
-        // Stop propagation so the grid doesn't interpret Ctrl/Cmd+Shift+A as "select all" (Ctrl/Cmd+A).
-        e.stopPropagation();
-        void commandRegistry.executeCommand(binding.command).catch((err) => {
-          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-        });
-        return;
-      }
-
-      for (const binding of sheetNavigationKeybindings) {
-        if (!matchesKeybinding(binding, e)) continue;
-        e.preventDefault();
-        void commandRegistry.executeCommand(binding.command).catch((err) => {
-          showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
-        });
-        return;
-      }
-
-      if (!extensionHostManager.ready) return;
-      for (const binding of parsedKeybindings) {
-        if (!binding) continue;
-        if (!matchesKeybinding(binding, e)) continue;
-        if (!evaluateWhenClause(binding.when, contextKeys.asLookup())) continue;
-        e.preventDefault();
-        executeExtensionCommand(binding.command);
-        return;
-      }
-    },
-    true,
-  );
 
   const contextMenu = new ContextMenu({
     onClose: () => {
@@ -4409,6 +4363,21 @@ if (
   });
 
   openCommandPalette = commandPalette.open;
+
+  // `registerBuiltinCommands(...)` wires this as a no-op so the Tauri shell can own
+  // opening the palette. Override it in the browser/desktop UI so keybinding dispatch
+  // through `CommandRegistry.executeCommand(...)` works as well.
+  commandRegistry.registerBuiltinCommand(
+    "workbench.showCommandPalette",
+    "Show Command Palette",
+    () => commandPalette.open(),
+    {
+      category: "Navigation",
+      icon: null,
+      description: "Show the command palette",
+      keywords: ["command palette", "commands"],
+    },
+  );
 
   // Paste Special… (Ctrl/Cmd+Shift+V)
   window.addEventListener("keydown", (e) => {

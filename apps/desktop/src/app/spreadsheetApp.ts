@@ -6246,7 +6246,7 @@ export class SpreadsheetApp {
     }
 
     // Selection shortcuts
-    if (primary && (e.key === "a" || e.key === "A")) {
+    if (primary && !e.shiftKey && (e.key === "a" || e.key === "A")) {
       e.preventDefault();
       this.selection = selectAll(this.limits);
       if (this.sharedGrid) this.syncSharedGridSelectionFromState();
