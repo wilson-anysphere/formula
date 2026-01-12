@@ -333,21 +333,35 @@ The repository already has fixtures/tests exercising preservation of these attri
 </c>
 ```
 
-### Images-in-cells cell shape (representative; confirm with fixture)
+### Images-in-cells cell shapes (observed)
 
-Cells containing an image-in-cell (either via `=IMAGE(...)` or a placed-in-cell picture) are expected to
-use `vm`/`cm` and/or an `<extLst>` to reference workbook-level rich value/image tables.
+Cells containing an image-in-cell typically signal that fact via metadata pointers (`c/@vm` and sometimes
+`c/@cm`). The cached `<v>` value does **not** directly reference the image bytes; it appears to be an
+internal placeholder/cache value used by Excel.
 
-Representative shape (exact details TBD; do not treat this as authoritative until a real Excel fixture is
-checked in):
+Observed shapes in **real Excel fixtures** in this repo:
 
-```xml
-<c r="A1" vm="1" cm="7">
-  <f>_xlfn.IMAGE("https://example.com/cat.png")</f>
-  <v>0</v>
-  <extLst>...</extLst>
-</c>
-```
+- **“Place in Cell” (embedded local image; richData-only / `rdRichValue*` mapping):** cells are
+  error-typed (`t="e"`) with cached `#VALUE!` and a `vm` attribute:
+
+  ```xml
+  <c r="B2" t="e" vm="1"><v>#VALUE!</v></c>
+  ```
+
+  (see `fixtures/xlsx/basic/image-in-cell.xlsx`)
+
+- **In-cell image with a `cellimages.xml` store part:** cells may be plain numeric with `vm` + `cm` and a
+  numeric cached `<v>`:
+
+  ```xml
+  <c r="A1" vm="1" cm="1"><v>0</v></c>
+  ```
+
+  (see `fixtures/xlsx/rich-data/images-in-cell.xlsx`)
+
+The exact cell shape for **`IMAGE()` formula results** still needs more real Excel samples; it may include
+a formula `<f>_xlfn.IMAGE(...)</f>` and/or an `<extLst>` payload. Treat all cell children and attributes as
+opaque and preserve them.
 
 **Round-trip rule:** `vm`, `cm`, and the entire `<extLst>` subtree must be preserved verbatim unless we
 explicitly implement full rich-value editing.
