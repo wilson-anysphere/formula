@@ -66,6 +66,25 @@ fn csv_import_rfc4180_quotes_newlines_and_crlf() {
 }
 
 #[test]
+fn csv_import_supports_cr_only_line_endings() {
+    let csv = "id,text\r1,hello\r2,world\r";
+    let sheet =
+        import_csv_to_worksheet(1, "Data", Cursor::new(csv.as_bytes()), CsvOptions::default())
+            .unwrap();
+
+    assert_eq!(sheet.value(CellRef::new(0, 0)), CellValue::Number(1.0));
+    assert_eq!(
+        sheet.value(CellRef::new(0, 1)),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(sheet.value(CellRef::new(1, 0)), CellValue::Number(2.0));
+    assert_eq!(
+        sheet.value(CellRef::new(1, 1)),
+        CellValue::String("world".to_string())
+    );
+}
+
+#[test]
 fn csv_import_trailing_delimiter_produces_empty_field() {
     let csv = "a,b,c\n1,2,\n";
     let sheet =
@@ -239,6 +258,37 @@ fn csv_import_supports_utf16be_tab_delimited_text_without_bom() {
     assert_eq!(
         sheet.value(CellRef::new(1, 1)),
         CellValue::String("world".to_string())
+    );
+}
+
+#[test]
+fn csv_import_supports_utf16le_tab_delimited_text_without_bom_mostly_non_ascii() {
+    // Regression test for BOM-less UTF-16 detection: if the content is mostly non-ASCII, the NUL
+    // byte ratio can be much lower than the typical ~50% seen in ASCII-heavy UTF-16.
+    let tsv = "こんにちは\t世界\r\n";
+    let mut bytes = Vec::new();
+    for unit in tsv.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(bytes),
+        CsvOptions {
+            has_header: false,
+            ..CsvOptions::default()
+        },
+    )
+    .expect("import utf16le tsv without bom");
+
+    assert_eq!(
+        sheet.value(CellRef::new(0, 0)),
+        CellValue::String("こんにちは".to_string())
+    );
+    assert_eq!(
+        sheet.value(CellRef::new(0, 1)),
+        CellValue::String("世界".to_string())
     );
 }
 

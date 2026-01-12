@@ -223,8 +223,8 @@ fn detect_utf16_bomless_encoding(prefix: &[u8]) -> Option<&'static encoding_rs::
         }
     }
     let zeros = even_zero + odd_zero;
-    if zeros * 4 < len {
-        // <25% NUL bytes is unlikely to be UTF-16 text.
+    if zeros * 8 < len {
+        // <~12.5% NUL bytes is unlikely to be UTF-16 text.
         return None;
     }
 
