@@ -578,13 +578,18 @@ export class CanvasGridRenderer {
     nextScroll.setViewportSize(prevViewport.width, prevViewport.height);
     nextScroll.setFrozen(prevViewport.frozenRows, prevViewport.frozenCols);
 
-    // Apply overrides in sorted order to keep VariableSizeAxis prefix diff updates predictable.
-    for (const [row, baseHeight] of Array.from(this.rowHeightOverridesBase.entries()).sort((a, b) => a[0] - b[0])) {
-      nextScroll.rows.setSize(row, baseHeight * clamped);
+    // Apply overrides in bulk to avoid O(n^2) prefix-diff updates when many overrides exist.
+    const nextRowOverrides = new Map<number, number>();
+    for (const [row, baseHeight] of this.rowHeightOverridesBase) {
+      nextRowOverrides.set(row, baseHeight * clamped);
     }
-    for (const [col, baseWidth] of Array.from(this.colWidthOverridesBase.entries()).sort((a, b) => a[0] - b[0])) {
-      nextScroll.cols.setSize(col, baseWidth * clamped);
+    nextScroll.rows.setOverrides(nextRowOverrides);
+
+    const nextColOverrides = new Map<number, number>();
+    for (const [col, baseWidth] of this.colWidthOverridesBase) {
+      nextColOverrides.set(col, baseWidth * clamped);
     }
+    nextScroll.cols.setOverrides(nextColOverrides);
 
     const viewportAfter = nextScroll.getViewportState();
 
