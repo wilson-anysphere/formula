@@ -142,6 +142,21 @@ test("clipboard HTML tolerates incorrect CF_HTML offsets when multiple tables ex
   assert.equal(grid[0][0].value, "RIGHT");
 });
 
+test("clipboard HTML uses fragment markers when fragment offsets are incorrect but StartHTML is valid", () => {
+  // Some producers include both markers + StartHTML offsets but have incorrect StartFragment offsets.
+  // Ensure we prefer the marker-delimited fragment over parsing the entire HTML (which might include
+  // other tables before the intended fragment).
+  const cfHtml = buildCfHtmlPayload("<table><tr><td>RIGHT</td></tr></table>", {
+    beforeFragmentHtml: "<table><tr><td>WRONG</td></tr></table>",
+  })
+    .replace(/StartFragment:\d{8}/, "StartFragment:00000010")
+    .replace(/EndFragment:\d{8}/, "EndFragment:00000020");
+
+  const grid = parseHtmlToCellGrid(cfHtml);
+  assert.ok(grid);
+  assert.equal(grid[0][0].value, "RIGHT");
+});
+
 test("clipboard HTML tolerates CF_HTML payloads with incorrect offsets", () => {
   const cfHtml = buildCfHtmlPayload("<table><tr><td>3</td><td>4</td></tr></table>")
     .replace(/StartHTML:\d{8}/, "StartHTML:00000010")

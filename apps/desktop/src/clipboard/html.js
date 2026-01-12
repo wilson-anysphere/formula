@@ -173,11 +173,13 @@ function normalizeClipboardHtml(html) {
 
   const containsCompleteTable = (s) => /<table\b[\s\S]*?<\/table>/i.test(s);
 
-  // Prefer fragment offsets when they look sane, but fall back to StartHTML/EndHTML.
-  for (const [start, end] of [
-    [startFragment, endFragment],
-    [startHtml, endHtml],
-  ]) {
+  /**
+   * @param {number | null} start
+   * @param {number | null} end
+   * @returns {string | null}
+   */
+  const tryOffsets = (start, end) => {
+    if (start == null || end == null) return null;
     for (const slicers of altSlicers ? [baseSlicers, altSlicers] : [baseSlicers]) {
       for (const candidate of [slicers.safeSliceUtf8(start, end), slicers.safeSliceCodeUnits(start, end)]) {
         if (!candidate) continue;
@@ -187,7 +189,12 @@ function normalizeClipboardHtml(html) {
         if (containsCompleteTable(stripped)) return stripped;
       }
     }
-  }
+    return null;
+  };
+
+  // Prefer fragment offsets when they look sane.
+  const fromFragmentOffsets = tryOffsets(startFragment, endFragment);
+  if (fromFragmentOffsets) return fromFragmentOffsets;
 
   // If offsets are missing/incorrect, CF_HTML payloads often include fragment comment markers.
   // Use them as a best-effort way to isolate the correct table when multiple tables are present.
@@ -201,6 +208,11 @@ function normalizeClipboardHtml(html) {
       if (containsCompleteTable(stripped)) return stripped;
     }
   }
+
+  // Fall back to StartHTML/EndHTML offsets when fragment offsets are missing/incorrect. This can still
+  // be more reliable than heuristic slicing when the payload includes binary prefixes or other noise.
+  const fromHtmlOffsets = tryOffsets(startHtml, endHtml);
+  if (fromHtmlOffsets) return fromHtmlOffsets;
 
   // Offsets missing or incorrect; fall back to heuristics on the full payload.
   return stripToMarkup(input);
