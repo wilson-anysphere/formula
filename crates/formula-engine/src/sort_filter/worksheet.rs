@@ -436,7 +436,9 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
 
 #[cfg(test)]
 mod tests {
-    use super::{model_cell_value_to_sort_value, rich_model_cell_value_to_sort_value};
+    use super::{
+        image_payload_to_sort_value, model_cell_value_to_sort_value, rich_model_cell_value_to_sort_value,
+    };
     use crate::sort_filter::CellValue;
     use formula_model::CellValue as ModelCellValue;
     use formula_model::ErrorValue;
@@ -812,6 +814,36 @@ mod tests {
         assert_eq!(
             rich_model_cell_value_to_sort_value(&record_display_field_image_no_alt),
             Some(CellValue::Text("[Image]".to_string()))
+        );
+    }
+
+    #[test]
+    fn image_payload_to_sort_value_alt_text_aliases() {
+        let payload_camel = json!({
+            "imageId": "logo.png",
+            "altText": "Logo (camelCase)"
+        });
+        assert_eq!(
+            image_payload_to_sort_value(Some(&payload_camel)),
+            CellValue::Text("Logo (camelCase)".to_string())
+        );
+
+        let payload_snake = json!({
+            "imageId": "logo.png",
+            "alt_text": "Logo (snake_case)"
+        });
+        assert_eq!(
+            image_payload_to_sort_value(Some(&payload_snake)),
+            CellValue::Text("Logo (snake_case)".to_string())
+        );
+
+        let payload_empty_alt = json!({
+            "imageId": "logo.png",
+            "altText": ""
+        });
+        assert_eq!(
+            image_payload_to_sort_value(Some(&payload_empty_alt)),
+            CellValue::Text("[Image]".to_string())
         );
     }
 }
