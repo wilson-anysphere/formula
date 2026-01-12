@@ -1,13 +1,8 @@
-use super::builtins_helpers::{coerce_to_finite_number, excel_result_number};
+use super::builtins_helpers::{eval_finite_number_arg, excel_result_number};
 use crate::eval::CompiledExpr;
 use crate::functions::{ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
-use crate::value::{ErrorKind, Value};
-
-fn eval_number_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<f64, ErrorKind> {
-    let v = ctx.eval_scalar(expr);
-    coerce_to_finite_number(ctx, &v)
-}
+use crate::value::Value;
 
 inventory::submit! {
     FunctionSpec {
@@ -24,27 +19,27 @@ inventory::submit! {
 }
 
 fn cumipmt_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let rate = match eval_number_arg(ctx, &args[0]) {
+    let rate = match eval_finite_number_arg(ctx, &args[0]) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
-    let nper = match eval_number_arg(ctx, &args[1]) {
+    let nper = match eval_finite_number_arg(ctx, &args[1]) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
-    let pv = match eval_number_arg(ctx, &args[2]) {
+    let pv = match eval_finite_number_arg(ctx, &args[2]) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
-    let start_period = match eval_number_arg(ctx, &args[3]) {
+    let start_period = match eval_finite_number_arg(ctx, &args[3]) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
-    let end_period = match eval_number_arg(ctx, &args[4]) {
+    let end_period = match eval_finite_number_arg(ctx, &args[4]) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
-    let typ = match eval_number_arg(ctx, &args[5]) {
+    let typ = match eval_finite_number_arg(ctx, &args[5]) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
@@ -74,27 +69,27 @@ inventory::submit! {
 }
 
 fn cumprinc_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let rate = match eval_number_arg(ctx, &args[0]) {
+    let rate = match eval_finite_number_arg(ctx, &args[0]) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
-    let nper = match eval_number_arg(ctx, &args[1]) {
+    let nper = match eval_finite_number_arg(ctx, &args[1]) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
-    let pv = match eval_number_arg(ctx, &args[2]) {
+    let pv = match eval_finite_number_arg(ctx, &args[2]) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
-    let start_period = match eval_number_arg(ctx, &args[3]) {
+    let start_period = match eval_finite_number_arg(ctx, &args[3]) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
-    let end_period = match eval_number_arg(ctx, &args[4]) {
+    let end_period = match eval_finite_number_arg(ctx, &args[4]) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };
-    let typ = match eval_number_arg(ctx, &args[5]) {
+    let typ = match eval_finite_number_arg(ctx, &args[5]) {
         Ok(n) => n,
         Err(e) => return Value::Error(e),
     };

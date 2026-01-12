@@ -1,13 +1,8 @@
-use super::builtins_helpers::{coerce_to_finite_number, excel_result_number};
+use super::builtins_helpers::{eval_finite_number_arg, excel_result_number};
 use crate::eval::CompiledExpr;
 use crate::functions::{ArraySupport, FunctionContext, FunctionSpec};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{ErrorKind, Value};
-
-fn eval_finite_number_arg(ctx: &dyn FunctionContext, expr: &CompiledExpr) -> Result<f64, ErrorKind> {
-    let v = ctx.eval_scalar(expr);
-    coerce_to_finite_number(ctx, &v)
-}
 
 fn eval_optional_finite_number_arg(
     ctx: &dyn FunctionContext,
