@@ -93,6 +93,20 @@ fn ceiling_and_floor_variants_match_excel_semantics() {
 }
 
 #[test]
+fn ceiling_and_floor_spill_elementwise_for_array_inputs() {
+    let mut sheet = TestSheet::new();
+    sheet.set_formula("A1", "=CEILING({4.3;5.1},2)");
+    sheet.recalculate();
+    assert_number(&sheet.get("A1"), 6.0);
+    assert_number(&sheet.get("A2"), 6.0);
+
+    sheet.set_formula("B1", "=FLOOR({4.3;5.1},2)");
+    sheet.recalculate();
+    assert_number(&sheet.get("B1"), 4.0);
+    assert_number(&sheet.get("B2"), 4.0);
+}
+
+#[test]
 fn criteria_aggregates_support_ranges_and_arrays() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1.0);

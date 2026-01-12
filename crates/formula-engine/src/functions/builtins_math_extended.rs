@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::error::ExcelError;
 use crate::eval::{CellAddr, CompiledExpr};
-use crate::functions::{ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference};
+use crate::functions::{array_lift, ArgValue, ArraySupport, FunctionContext, FunctionSpec, Reference};
 use crate::functions::{ThreadSafety, ValueType, Volatility};
 use crate::value::{Array, ErrorKind, Value};
 
@@ -753,7 +753,7 @@ inventory::submit! {
         max_args: 2,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number, ValueType::Number],
         implementation: ceiling_fn,
@@ -761,18 +761,16 @@ inventory::submit! {
 }
 
 fn ceiling_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let number = match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_number() {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    let significance = match scalar_from_arg(ctx, ctx.eval_arg(&args[1])).coerce_to_number() {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    match crate::functions::math::ceiling(number, significance) {
-        Ok(out) => Value::Number(out),
-        Err(e) => Value::Error(excel_error_kind(e)),
-    }
+    let number = array_lift::eval_arg(ctx, &args[0]);
+    let significance = array_lift::eval_arg(ctx, &args[1]);
+    array_lift::lift2(number, significance, |number, significance| {
+        let number = number.coerce_to_number()?;
+        let significance = significance.coerce_to_number()?;
+        match crate::functions::math::ceiling(number, significance) {
+            Ok(out) => Ok(Value::Number(out)),
+            Err(e) => Err(excel_error_kind(e)),
+        }
+    })
 }
 
 inventory::submit! {
@@ -782,7 +780,7 @@ inventory::submit! {
         max_args: 2,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number, ValueType::Number],
         implementation: floor_fn,
@@ -790,18 +788,16 @@ inventory::submit! {
 }
 
 fn floor_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let number = match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_number() {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    let significance = match scalar_from_arg(ctx, ctx.eval_arg(&args[1])).coerce_to_number() {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
-    };
-    match crate::functions::math::floor(number, significance) {
-        Ok(out) => Value::Number(out),
-        Err(e) => Value::Error(excel_error_kind(e)),
-    }
+    let number = array_lift::eval_arg(ctx, &args[0]);
+    let significance = array_lift::eval_arg(ctx, &args[1]);
+    array_lift::lift2(number, significance, |number, significance| {
+        let number = number.coerce_to_number()?;
+        let significance = significance.coerce_to_number()?;
+        match crate::functions::math::floor(number, significance) {
+            Ok(out) => Ok(Value::Number(out)),
+            Err(e) => Err(excel_error_kind(e)),
+        }
+    })
 }
 
 inventory::submit! {
@@ -811,7 +807,7 @@ inventory::submit! {
         max_args: 3,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number, ValueType::Number, ValueType::Number],
         implementation: ceiling_math_fn,
@@ -819,30 +815,25 @@ inventory::submit! {
 }
 
 fn ceiling_math_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let number = match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_number() {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
+    let number = array_lift::eval_arg(ctx, &args[0]);
+    let significance = match args.get(1) {
+        Some(CompiledExpr::Blank) | None => Value::Number(1.0),
+        Some(expr) => array_lift::eval_arg(ctx, expr),
     };
-    let significance = if args.len() >= 2 {
-        match scalar_from_arg(ctx, ctx.eval_arg(&args[1])).coerce_to_number() {
-            Ok(v) => Some(v),
-            Err(e) => return Value::Error(e),
+    let mode = match args.get(2) {
+        Some(CompiledExpr::Blank) | None => Value::Number(0.0),
+        Some(expr) => array_lift::eval_arg(ctx, expr),
+    };
+
+    array_lift::lift3(number, significance, mode, |number, significance, mode| {
+        let number = number.coerce_to_number()?;
+        let significance = significance.coerce_to_number()?;
+        let mode = mode.coerce_to_number()?;
+        match crate::functions::math::ceiling_math(number, Some(significance), Some(mode)) {
+            Ok(out) => Ok(Value::Number(out)),
+            Err(e) => Err(excel_error_kind(e)),
         }
-    } else {
-        None
-    };
-    let mode = if args.len() >= 3 {
-        match scalar_from_arg(ctx, ctx.eval_arg(&args[2])).coerce_to_number() {
-            Ok(v) => Some(v),
-            Err(e) => return Value::Error(e),
-        }
-    } else {
-        None
-    };
-    match crate::functions::math::ceiling_math(number, significance, mode) {
-        Ok(out) => Value::Number(out),
-        Err(e) => Value::Error(excel_error_kind(e)),
-    }
+    })
 }
 
 inventory::submit! {
@@ -852,7 +843,7 @@ inventory::submit! {
         max_args: 3,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number, ValueType::Number, ValueType::Number],
         implementation: floor_math_fn,
@@ -860,30 +851,25 @@ inventory::submit! {
 }
 
 fn floor_math_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let number = match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_number() {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
+    let number = array_lift::eval_arg(ctx, &args[0]);
+    let significance = match args.get(1) {
+        Some(CompiledExpr::Blank) | None => Value::Number(1.0),
+        Some(expr) => array_lift::eval_arg(ctx, expr),
     };
-    let significance = if args.len() >= 2 {
-        match scalar_from_arg(ctx, ctx.eval_arg(&args[1])).coerce_to_number() {
-            Ok(v) => Some(v),
-            Err(e) => return Value::Error(e),
+    let mode = match args.get(2) {
+        Some(CompiledExpr::Blank) | None => Value::Number(0.0),
+        Some(expr) => array_lift::eval_arg(ctx, expr),
+    };
+
+    array_lift::lift3(number, significance, mode, |number, significance, mode| {
+        let number = number.coerce_to_number()?;
+        let significance = significance.coerce_to_number()?;
+        let mode = mode.coerce_to_number()?;
+        match crate::functions::math::floor_math(number, Some(significance), Some(mode)) {
+            Ok(out) => Ok(Value::Number(out)),
+            Err(e) => Err(excel_error_kind(e)),
         }
-    } else {
-        None
-    };
-    let mode = if args.len() >= 3 {
-        match scalar_from_arg(ctx, ctx.eval_arg(&args[2])).coerce_to_number() {
-            Ok(v) => Some(v),
-            Err(e) => return Value::Error(e),
-        }
-    } else {
-        None
-    };
-    match crate::functions::math::floor_math(number, significance, mode) {
-        Ok(out) => Value::Number(out),
-        Err(e) => Value::Error(excel_error_kind(e)),
-    }
+    })
 }
 
 inventory::submit! {
@@ -893,7 +879,7 @@ inventory::submit! {
         max_args: 2,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number, ValueType::Number],
         implementation: ceiling_precise_fn,
@@ -901,22 +887,20 @@ inventory::submit! {
 }
 
 fn ceiling_precise_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let number = match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_number() {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
+    let number = array_lift::eval_arg(ctx, &args[0]);
+    let significance = match args.get(1) {
+        Some(CompiledExpr::Blank) | None => Value::Number(1.0),
+        Some(expr) => array_lift::eval_arg(ctx, expr),
     };
-    let significance = if args.len() == 2 {
-        match scalar_from_arg(ctx, ctx.eval_arg(&args[1])).coerce_to_number() {
-            Ok(v) => Some(v),
-            Err(e) => return Value::Error(e),
+
+    array_lift::lift2(number, significance, |number, significance| {
+        let number = number.coerce_to_number()?;
+        let significance = significance.coerce_to_number()?;
+        match crate::functions::math::ceiling_precise(number, Some(significance)) {
+            Ok(out) => Ok(Value::Number(out)),
+            Err(e) => Err(excel_error_kind(e)),
         }
-    } else {
-        None
-    };
-    match crate::functions::math::ceiling_precise(number, significance) {
-        Ok(out) => Value::Number(out),
-        Err(e) => Value::Error(excel_error_kind(e)),
-    }
+    })
 }
 
 inventory::submit! {
@@ -926,7 +910,7 @@ inventory::submit! {
         max_args: 2,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number, ValueType::Number],
         implementation: floor_precise_fn,
@@ -934,22 +918,20 @@ inventory::submit! {
 }
 
 fn floor_precise_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let number = match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_number() {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
+    let number = array_lift::eval_arg(ctx, &args[0]);
+    let significance = match args.get(1) {
+        Some(CompiledExpr::Blank) | None => Value::Number(1.0),
+        Some(expr) => array_lift::eval_arg(ctx, expr),
     };
-    let significance = if args.len() == 2 {
-        match scalar_from_arg(ctx, ctx.eval_arg(&args[1])).coerce_to_number() {
-            Ok(v) => Some(v),
-            Err(e) => return Value::Error(e),
+
+    array_lift::lift2(number, significance, |number, significance| {
+        let number = number.coerce_to_number()?;
+        let significance = significance.coerce_to_number()?;
+        match crate::functions::math::floor_precise(number, Some(significance)) {
+            Ok(out) => Ok(Value::Number(out)),
+            Err(e) => Err(excel_error_kind(e)),
         }
-    } else {
-        None
-    };
-    match crate::functions::math::floor_precise(number, significance) {
-        Ok(out) => Value::Number(out),
-        Err(e) => Value::Error(excel_error_kind(e)),
-    }
+    })
 }
 
 inventory::submit! {
@@ -959,7 +941,7 @@ inventory::submit! {
         max_args: 2,
         volatility: Volatility::NonVolatile,
         thread_safety: ThreadSafety::ThreadSafe,
-        array_support: ArraySupport::ScalarOnly,
+        array_support: ArraySupport::SupportsArrays,
         return_type: ValueType::Number,
         arg_types: &[ValueType::Number, ValueType::Number],
         implementation: iso_ceiling_fn,
@@ -967,22 +949,20 @@ inventory::submit! {
 }
 
 fn iso_ceiling_fn(ctx: &dyn FunctionContext, args: &[CompiledExpr]) -> Value {
-    let number = match scalar_from_arg(ctx, ctx.eval_arg(&args[0])).coerce_to_number() {
-        Ok(v) => v,
-        Err(e) => return Value::Error(e),
+    let number = array_lift::eval_arg(ctx, &args[0]);
+    let significance = match args.get(1) {
+        Some(CompiledExpr::Blank) | None => Value::Number(1.0),
+        Some(expr) => array_lift::eval_arg(ctx, expr),
     };
-    let significance = if args.len() == 2 {
-        match scalar_from_arg(ctx, ctx.eval_arg(&args[1])).coerce_to_number() {
-            Ok(v) => Some(v),
-            Err(e) => return Value::Error(e),
+
+    array_lift::lift2(number, significance, |number, significance| {
+        let number = number.coerce_to_number()?;
+        let significance = significance.coerce_to_number()?;
+        match crate::functions::math::iso_ceiling(number, Some(significance)) {
+            Ok(out) => Ok(Value::Number(out)),
+            Err(e) => Err(excel_error_kind(e)),
         }
-    } else {
-        None
-    };
-    match crate::functions::math::iso_ceiling(number, significance) {
-        Ok(out) => Value::Number(out),
-        Err(e) => Value::Error(excel_error_kind(e)),
-    }
+    })
 }
 
 inventory::submit! {
