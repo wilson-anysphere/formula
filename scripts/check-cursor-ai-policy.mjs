@@ -27,6 +27,8 @@ const DEFAULT_REPO_ROOT = path.resolve(path.dirname(SCRIPT_PATH), "..");
 //   can't accidentally reintroduce provider-specific deps/config.
 // - `scripts/` and `python/` so CI/util scripts can't silently add provider
 //   integrations outside the main app/package trees.
+// - `fixtures/` so fixture generators and committed test assets can't hide
+//   provider integrations or config.
 const INCLUDED_DIRS = [
   "apps",
   "packages",
@@ -35,6 +37,7 @@ const INCLUDED_DIRS = [
   "tools",
   "shared",
   "extensions",
+  "fixtures",
   "patches",
   ".github",
   ".cargo",
