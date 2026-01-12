@@ -38,6 +38,8 @@ import {
 import { DocumentController } from "../document/documentController.js";
 import { MockEngine } from "../document/engine.js";
 import { isRedoKeyboardEvent, isUndoKeyboardEvent } from "../document/shortcuts.js";
+import { showToast } from "../extensions/ui.js";
+import { applyNumberFormatPreset, toggleBold, toggleItalic, toggleUnderline } from "../formatting/toolbar.js";
 import { createDesktopDlpContext } from "../dlp/desktopDlp.js";
 import {
   createEngineClient,
@@ -86,6 +88,8 @@ type AuditingCacheEntry = {
   precedentsError: string | null;
   dependentsError: string | null;
 };
+
+const MAX_KEYBOARD_FORMATTING_CELLS = 50_000;
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {
   return typeof (value as { then?: unknown } | null)?.then === "function";
@@ -6129,6 +6133,7 @@ export class SpreadsheetApp {
     if (this.handleShowFormulasShortcut(e)) return;
     if (this.handleAuditingShortcut(e)) return;
     if (this.handleClipboardShortcut(e)) return;
+    if (this.handleFormattingShortcut(e)) return;
     if (this.handleInsertDateTimeShortcut(e)) return;
     if (this.handleAutoSumShortcut(e)) return;
 
@@ -6416,14 +6421,6 @@ export class SpreadsheetApp {
     // Do not trigger while editing.
     if (this.editor.isOpen()) return false;
     if (this.inlineEditController.isOpen()) return false;
-    if (this.formulaBar?.isEditing() || this.formulaEditCell) return false;
-
-    const target = e.target as HTMLElement | null;
-    if (target) {
-      const tag = target.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return false;
-    }
-
     e.preventDefault();
     if (e.shiftKey) this.insertTime();
     else this.insertDate();
@@ -6576,6 +6573,124 @@ export class SpreadsheetApp {
     });
   }
 
+  private handleFormattingShortcut(e: KeyboardEvent): boolean {
+    if (e.altKey) return false;
+
+    // Formatting shortcuts should never fire while editing text.
+    if (this.formulaBar?.isEditing() || this.formulaEditCell) return false;
+
+    const target = e.target as HTMLElement | null;
+    if (target) {
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable) return false;
+    }
+
+    const keyLower = e.key.toLowerCase();
+    const primary = e.ctrlKey || e.metaKey;
+
+    const action:
+      | { kind: "bold" }
+      | { kind: "underline" }
+      | { kind: "italic" }
+      | { kind: "numberFormat"; preset: "currency" | "percent" | "date" }
+      | null = (() => {
+      // Text formatting.
+      if (primary && !e.shiftKey && keyLower === "b") return { kind: "bold" };
+      if (primary && !e.shiftKey && keyLower === "u") return { kind: "underline" };
+
+      // IMPORTANT: Cmd+I is reserved for the AI sidebar. Only bind italic to Ctrl+I.
+      if (e.ctrlKey && !e.metaKey && !e.shiftKey && keyLower === "i") return { kind: "italic" };
+
+      // Number formats.
+      if (primary && e.shiftKey && (e.key === "$" || e.code === "Digit4"))
+        return { kind: "numberFormat", preset: "currency" };
+      if (primary && e.shiftKey && (e.key === "%" || e.code === "Digit5"))
+        return { kind: "numberFormat", preset: "percent" };
+      if (primary && e.shiftKey && (e.key === "#" || e.code === "Digit3")) return { kind: "numberFormat", preset: "date" };
+
+      return null;
+    })();
+
+    if (!action) return false;
+
+    e.preventDefault();
+
+    const ranges = this.selection.ranges.length
+      ? this.selection.ranges
+      : [
+          {
+            startRow: this.selection.active.row,
+            endRow: this.selection.active.row,
+            startCol: this.selection.active.col,
+            endCol: this.selection.active.col
+          }
+        ];
+
+    let totalCells = 0;
+    for (const range of ranges) {
+      const rows = Math.max(0, range.endRow - range.startRow + 1);
+      const cols = Math.max(0, range.endCol - range.startCol + 1);
+      totalCells += rows * cols;
+      if (totalCells > MAX_KEYBOARD_FORMATTING_CELLS) break;
+    }
+
+    if (totalCells > MAX_KEYBOARD_FORMATTING_CELLS) {
+      try {
+        showToast(
+          `Selection too large to apply formatting (>${MAX_KEYBOARD_FORMATTING_CELLS.toLocaleString()} cells). Select fewer cells and try again.`,
+          "warning"
+        );
+      } catch {
+        // `showToast` requires a #toast-root; unit tests don't always include it.
+      }
+      return true;
+    }
+
+    const batchLabel = (() => {
+      switch (action.kind) {
+        case "bold":
+          return "Bold";
+        case "italic":
+          return "Italic";
+        case "underline":
+          return "Underline";
+        case "numberFormat":
+          return "Number format";
+      }
+    })();
+
+    this.document.beginBatch({ label: batchLabel });
+    try {
+      for (const range of ranges) {
+        const docRange = {
+          start: { row: range.startRow, col: range.startCol },
+          end: { row: range.endRow, col: range.endCol }
+        };
+
+        switch (action.kind) {
+          case "bold":
+            toggleBold(this.document, this.sheetId, docRange);
+            break;
+          case "italic":
+            toggleItalic(this.document, this.sheetId, docRange);
+            break;
+          case "underline":
+            toggleUnderline(this.document, this.sheetId, docRange);
+            break;
+          case "numberFormat":
+            applyNumberFormatPreset(this.document, this.sheetId, docRange, action.preset);
+            break;
+        }
+      }
+    } finally {
+      this.document.endBatch();
+    }
+
+    this.refresh();
+    this.updateStatus();
+    this.focus();
+    return true;
+  }
   private handleClipboardShortcut(e: KeyboardEvent): boolean {
     const primary = e.ctrlKey || e.metaKey;
     if (!primary || e.altKey || e.shiftKey) return false;
