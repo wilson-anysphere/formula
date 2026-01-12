@@ -14,6 +14,42 @@ export type BuiltinKeybinding = {
  */
 export const builtinKeybindings: BuiltinKeybinding[] = [
   {
+    command: "edit.undo",
+    key: "ctrl+z",
+    mac: "cmd+z",
+    when: null,
+  },
+  {
+    command: "edit.redo",
+    key: "ctrl+y",
+    mac: "cmd+shift+z",
+    when: null,
+  },
+  {
+    command: "edit.redo",
+    key: "ctrl+shift+z",
+    mac: "cmd+shift+z",
+    when: null,
+  },
+  {
+    command: "view.toggleShowFormulas",
+    key: "ctrl+`",
+    mac: "cmd+`",
+    when: null,
+  },
+  {
+    command: "audit.togglePrecedents",
+    key: "ctrl+[",
+    mac: "cmd+[",
+    when: null,
+  },
+  {
+    command: "audit.toggleDependents",
+    key: "ctrl+]",
+    mac: "cmd+]",
+    when: null,
+  },
+  {
     command: "workbench.showCommandPalette",
     key: "ctrl+shift+p",
     mac: "cmd+shift+p",

@@ -59,6 +59,75 @@ export function registerBuiltinCommands(params: {
   };
 
   commandRegistry.registerBuiltinCommand(
+    "edit.undo",
+    "Undo",
+    () => app.undo(),
+    {
+      category: "Edit",
+      icon: null,
+      description: "Undo the last action",
+      keywords: ["undo", "history"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "edit.redo",
+    "Redo",
+    () => app.redo(),
+    {
+      category: "Edit",
+      icon: null,
+      description: "Redo the last undone action",
+      keywords: ["redo", "history"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "view.toggleShowFormulas",
+    "Toggle Show Formulas",
+    () => {
+      if (app.isEditing()) return;
+      app.toggleShowFormulas();
+    },
+    {
+      category: "View",
+      icon: null,
+      description: "Toggle between displaying formulas and computed values in cells",
+      keywords: ["show formulas", "formulas", "values", "display"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "audit.togglePrecedents",
+    "Toggle Trace Precedents",
+    () => {
+      if (app.isEditing()) return;
+      app.toggleAuditingPrecedents();
+    },
+    {
+      category: "Audit",
+      icon: null,
+      description: "Toggle precedent arrows for the active cell",
+      keywords: ["audit", "precedents", "trace", "toggle"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
+    "audit.toggleDependents",
+    "Toggle Trace Dependents",
+    () => {
+      if (app.isEditing()) return;
+      app.toggleAuditingDependents();
+    },
+    {
+      category: "Audit",
+      icon: null,
+      description: "Toggle dependent arrows for the active cell",
+      keywords: ["audit", "dependents", "trace", "toggle"],
+    },
+  );
+
+  commandRegistry.registerBuiltinCommand(
     "workbench.showCommandPalette",
     t("command.workbench.showCommandPalette"),
     () => {

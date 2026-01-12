@@ -1289,6 +1289,11 @@ function currentSelectionRect(): SelectionRect {
 let openCommandPalette: (() => void) | null = null;
 const commandRegistry = new CommandRegistry();
 
+// Expose for Playwright e2e so tests can execute commands by id without going
+// through UI affordances.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(window as any).__formulaCommandRegistry = commandRegistry;
+
 // --- Sheet tabs (Excel-like multi-sheet UI) -----------------------------------
 
 const sheetTabsRoot = document.getElementById("sheet-tabs");
@@ -2998,22 +3003,23 @@ if (
   const primaryShiftShortcut = (key: string) => (isMac ? `⌘⇧${key}` : `Ctrl+Shift+${key}`);
 
   const buildGridContextMenuItems = (): ContextMenuItem[] => {
-    const doc = app.getDocument();
-    const undoLabel = doc.undoLabel;
-    const redoLabel = doc.redoLabel;
+    const undoRedo = app.getUndoRedoState();
+    const undoLabel = undoRedo.undoLabel ? `${t("command.edit.undo")} ${undoRedo.undoLabel}` : t("command.edit.undo");
+    const redoLabel = undoRedo.redoLabel ? `${t("command.edit.redo")} ${undoRedo.redoLabel}` : t("command.edit.redo");
+    const allowEditCommands = !app.isEditing();
 
     const menuItems: ContextMenuItem[] = [
       {
         type: "item",
-        label: undoLabel ? `${t("command.edit.undo")} ${undoLabel}` : t("command.edit.undo"),
-        enabled: doc.canUndo,
+        label: undoLabel,
+        enabled: undoRedo.canUndo,
         shortcut: getPrimaryCommandKeybindingDisplay("edit.undo", commandKeybindingDisplayIndex) ?? primaryShortcut("Z"),
         onSelect: () => executeBuiltinCommand("edit.undo"),
       },
       {
         type: "item",
-        label: redoLabel ? `${t("command.edit.redo")} ${redoLabel}` : t("command.edit.redo"),
-        enabled: doc.canRedo,
+        label: redoLabel,
+        enabled: undoRedo.canRedo,
         shortcut:
           getPrimaryCommandKeybindingDisplay("edit.redo", commandKeybindingDisplayIndex) ?? (isMac ? "⇧⌘Z" : "Ctrl+Y"),
         onSelect: () => executeBuiltinCommand("edit.redo"),
@@ -3121,6 +3127,30 @@ if (
         label: t("menu.addComment"),
         shortcut: getPrimaryCommandKeybindingDisplay("comments.addComment", commandKeybindingDisplayIndex) ?? undefined,
         onSelect: () => executeBuiltinCommand("comments.addComment"),
+      },
+      {
+        type: "item",
+        label: "Show Formulas",
+        enabled: allowEditCommands,
+        shortcut:
+          getPrimaryCommandKeybindingDisplay("view.toggleShowFormulas", commandKeybindingDisplayIndex) ?? primaryShortcut("`"),
+        onSelect: () => executeBuiltinCommand("view.toggleShowFormulas"),
+      },
+      {
+        type: "item",
+        label: "Toggle Trace Precedents",
+        enabled: allowEditCommands,
+        shortcut:
+          getPrimaryCommandKeybindingDisplay("audit.togglePrecedents", commandKeybindingDisplayIndex) ?? primaryShortcut("["),
+        onSelect: () => executeBuiltinCommand("audit.togglePrecedents"),
+      },
+      {
+        type: "item",
+        label: "Toggle Trace Dependents",
+        enabled: allowEditCommands,
+        shortcut:
+          getPrimaryCommandKeybindingDisplay("audit.toggleDependents", commandKeybindingDisplayIndex) ?? primaryShortcut("]"),
+        onSelect: () => executeBuiltinCommand("audit.toggleDependents"),
       },
     ];
 
