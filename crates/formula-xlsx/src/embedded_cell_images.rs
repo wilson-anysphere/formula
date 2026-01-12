@@ -362,7 +362,17 @@ fn parse_rich_value_rel_image_targets(rels_xml: &[u8]) -> Result<HashMap<String,
         if target.is_empty() {
             continue;
         }
-        let resolved = resolve_target(RICH_VALUE_REL_PART, target);
+        let target = target.strip_prefix("./").unwrap_or(target);
+        // Some producers emit `Target="media/image1.png"` (relative to `xl/`) rather than the more
+        // common `Target="../media/image1.png"` (relative to `xl/richData/`). Make a best-effort
+        // guess for this case.
+        let resolved = if target.starts_with("media/") {
+            format!("xl/{target}")
+        } else if target.starts_with("xl/") {
+            target.to_string()
+        } else {
+            resolve_target(RICH_VALUE_REL_PART, target)
+        };
         out.insert(rel.id, resolved);
     }
     Ok(out)
