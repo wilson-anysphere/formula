@@ -3883,6 +3883,12 @@ export class SpreadsheetApp {
       target === this.referenceCanvas ||
       target === this.auditingCanvas ||
       target === this.presenceCanvas;
+    // Only refresh cached root position when we need to fall back to client-relative coords.
+    // This mirrors the legacy grid path and avoids per-move layout reads for the common case
+    // where pointermove targets a full-viewport canvas overlay (selection/grid/etc).
+    if (!useOffsetCoords) {
+      this.maybeRefreshRootPosition();
+    }
     const x = useOffsetCoords ? e.offsetX : e.clientX - this.rootLeft;
     const y = useOffsetCoords ? e.offsetY : e.clientY - this.rootTop;
     if (x < 0 || y < 0 || x > this.width || y > this.height) {
