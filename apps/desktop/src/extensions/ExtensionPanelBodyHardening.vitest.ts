@@ -65,6 +65,47 @@ describe("ExtensionPanelBody hardening script", () => {
     expect(desc.enumerable).toBe(true);
   });
 
+  it("deletes configurable Tauri globals without reintroducing them", async () => {
+    const html = injectWebviewCsp("<!doctype html><html><head></head><body></body></html>");
+    const scriptSource = extractHardeningScriptSource(html);
+
+    const listeners: Record<string, Array<() => void>> = {};
+    const timeouts: Array<{ delay: number; callback: () => void }> = [];
+
+    const fakeWindow: any = {
+      addEventListener(type: string, cb: () => void) {
+        (listeners[type] ||= []).push(cb);
+      },
+    };
+    const fakeDocument: any = {
+      addEventListener(type: string, cb: () => void) {
+        (listeners[type] ||= []).push(cb);
+      },
+    };
+    const fakeSetTimeout = (cb: () => void, delay?: number) => {
+      timeouts.push({ delay: Number(delay ?? 0), callback: cb });
+      return timeouts.length;
+    };
+
+    fakeWindow.__TAURI__ = { secret: "x" };
+
+    const run = new Function("window", "document", "setTimeout", "Promise", scriptSource) as (
+      win: any,
+      doc: any,
+      st: any,
+      prom: any,
+    ) => void;
+    run(fakeWindow, fakeDocument, fakeSetTimeout, Promise);
+    await Promise.resolve();
+
+    expect(fakeWindow.__formulaWebviewSandbox).toBeDefined();
+    expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsPresent).toBe(true);
+    expect(fakeWindow.__formulaWebviewSandbox.tauriGlobalsScrubbed).toBe(true);
+
+    expect(typeof fakeWindow.__TAURI__).toBe("undefined");
+    expect("__TAURI__" in fakeWindow).toBe(false);
+  });
+
   it("scrubs globals injected after initial evaluation (via delayed scrub passes)", async () => {
     const html = injectWebviewCsp("<!doctype html><html><head></head><body></body></html>");
     const scriptSource = extractHardeningScriptSource(html);
