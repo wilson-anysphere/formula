@@ -50,6 +50,21 @@ fn ptg_spill_range() -> [u8; 1] {
 }
 
 #[test]
+fn decodes_structured_ref_union_inside_function_arg() {
+    // Build SUM((Table1[Column2],Table1[Column4])) to ensure union-containing args are
+    // parenthesized (union uses ',' which is also the function arg separator).
+    let mut rgce = ptg_list(1, 0x0000, 2, 2, 0x18);
+    rgce.extend_from_slice(&ptg_list(1, 0x0000, 4, 4, 0x18));
+    rgce.push(0x10); // PtgUnion
+    rgce.extend_from_slice(&ptg_funcvar(1, 4)); // SUM
+    let text = decode_rgce(&rgce).expect("decode");
+    assert_eq!(
+        normalize(&text),
+        normalize("SUM((Table1[Column2],Table1[Column4]))")
+    );
+}
+
+#[test]
 fn decodes_structured_ref_ignores_reserved_field() {
     let mut rgce = ptg_list(1, 0x0000, 2, 2, 0x18);
     // Reserved u16 is the final 2 bytes of the fixed 12-byte payload.
