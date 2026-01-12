@@ -1717,6 +1717,24 @@ def main() -> int:
     payload = generate_cases()
     _validate_against_function_catalog(payload)
 
+    # Keep the corpus bounded so it remains runnable in real Excel (COM automation) and in CI.
+    max_cases = 2000
+    cases = payload.get("cases", [])
+    if not isinstance(cases, list):
+        raise SystemExit("Generated payload.cases must be an array")
+    if len(cases) > max_cases:
+        raise SystemExit(f"Generated oracle corpus too large: {len(cases)} cases (max {max_cases})")
+
+    # The stable case id should be unique; duplicates indicate accidentally identical cases.
+    from collections import Counter
+
+    ids = [c.get("id") for c in cases if isinstance(c, dict)]
+    counts = Counter(cid for cid in ids if isinstance(cid, str))
+    dup_ids = sorted([cid for cid, n in counts.items() if n > 1])
+    if dup_ids:
+        dup_preview = ", ".join(dup_ids[:10])
+        raise SystemExit(f"Generated oracle corpus contains duplicate case ids: {dup_preview}")
+
     # Stable JSON formatting for review diffs.
     out_path = args.out
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
