@@ -186,6 +186,74 @@ fn extracts_spc_indirect_data_digest_from_ber_indefinite_cms_with_definite_lengt
 }
 
 #[test]
+fn extracts_spc_indirect_data_digest_from_ber_indefinite_cms_with_nested_constructed_octet_string_econtent(
+) {
+    // SpcIndirectDataContent (DER) whose digest is 0..31.
+    let mut spc = vec![
+        0x30, 0x41, // SEQUENCE
+        0x30, 0x0c, // SEQUENCE
+        0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x0f, // 1.3.6.1.4.1.311.2.1.15
+        0x30, 0x31, // SEQUENCE
+        0x30, 0x0d, // SEQUENCE
+        0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, // 2.16.840.1.101.3.4.2.1 (sha256)
+        0x05, 0x00, // NULL
+        0x04, 0x20, // OCTET STRING (32 bytes)
+    ];
+    spc.extend(0u8..0x20);
+
+    // eContent is encoded as an *indefinite-length constructed OCTET STRING* (0x24 0x80) whose
+    // children include another *definite-length constructed OCTET STRING*. This exercises nested
+    // constructed OCTET STRING parsing + concatenation.
+    let split1 = 10;
+    let split2 = 30;
+    let (part1, rest) = spc.split_at(split1);
+    let (part2, part3) = rest.split_at(split2 - split1);
+    assert!(part1.len() < 128 && part2.len() < 128 && part3.len() < 128);
+
+    // Inner constructed OCTET STRING (definite length) contains part2 + part3.
+    let inner_content_len = (2 + part2.len()) + (2 + part3.len());
+    assert!(inner_content_len < 128);
+
+    let mut pkcs7 = vec![
+        0x30, 0x80, // ContentInfo SEQUENCE (indefinite)
+        0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x07, 0x02, // OID 1.2.840.113549.1.7.2 (signedData)
+        0xA0, 0x80, // [0] EXPLICIT (indefinite)
+        0x30, 0x80, // SignedData SEQUENCE (indefinite)
+        0x02, 0x01, 0x03, // version INTEGER 3
+        0x31, 0x00, // digestAlgorithms SET (empty; we don't validate it here)
+        0x30, 0x80, // encapContentInfo SEQUENCE (indefinite)
+        0x06, 0x0A, 0x2B, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x01, 0x04, // OID 1.3.6.1.4.1.311.2.1.4 (SpcIndirectDataContent)
+        0xA0, 0x80, // eContent [0] EXPLICIT (indefinite)
+        0x24, 0x80, // OCTET STRING (constructed, indefinite)
+        // Child 1: primitive OCTET STRING(part1)
+        0x04,
+        part1.len() as u8,
+    ];
+    pkcs7.extend_from_slice(part1);
+
+    // Child 2: constructed OCTET STRING(definite) containing two primitive segments.
+    pkcs7.extend_from_slice(&[0x24, inner_content_len as u8, 0x04, part2.len() as u8]);
+    pkcs7.extend_from_slice(part2);
+    pkcs7.extend_from_slice(&[0x04, part3.len() as u8]);
+    pkcs7.extend_from_slice(part3);
+
+    pkcs7.extend_from_slice(&[
+        0x00, 0x00, // EOC for outer constructed OCTET STRING
+        0x00, 0x00, // EOC for eContent [0]
+        0x00, 0x00, // EOC for encapContentInfo
+        0x00, 0x00, // EOC for SignedData
+        0x00, 0x00, // EOC for [0] EXPLICIT
+        0x00, 0x00, // EOC for ContentInfo
+    ]);
+
+    let digest_info = extract_vba_signature_signed_digest(&pkcs7)
+        .expect("extract should succeed")
+        .expect("digest info should be present");
+    assert_eq!(digest_info.digest_algorithm_oid, "2.16.840.1.101.3.4.2.1"); // SHA-256
+    assert_eq!(digest_info.digest, (0u8..0x20).collect::<Vec<_>>());
+}
+
+#[test]
 fn extracts_digest_from_indefinite_length_detached_signeddata_with_indefinite_encap_content_info() {
     // SpcIndirectDataContent (DER) whose digest is 0..31.
     let mut spc = vec![
