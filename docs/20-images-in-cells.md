@@ -532,16 +532,23 @@ And observed that **no override** may be present (default `application/xml`), in
 Note: some workbooks omit the override entirely and rely on the package default
 `<Default Extension="xml" ContentType="application/xml"/>` (e.g. `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`).
 
-### `xl/richData/*` content types (TODO: fixture-driven)
+### `xl/richData/*` content types (observed + TODO)
 
-Content types for `xl/richData/*` still need confirmation from a real Excel-exported workbook *that emits
-explicit overrides* for these parts.
+Content types for `xl/richData/*` vary across Excel/producers and across the two naming schemes
+(`richValue*.xml` vs `rdRichValue*`).
 
 Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`: no explicit `[Content_Types].xml` overrides
 for `xl/richData/*` (falls back to the package default `application/xml`).
 
-Likely patterns seen in the ecosystem (unverified; do not hardcode without a real Excel fixture in
-`fixtures/xlsx/**`):
+Observed in `fixtures/xlsx/basic/image-in-cell.xlsx` (explicit overrides present):
+
+- `/xl/richData/richValueRel.xml`: `application/vnd.ms-excel.richvaluerel+xml`
+- `/xl/richData/rdrichvalue.xml`: `application/vnd.ms-excel.rdrichvalue+xml`
+- `/xl/richData/rdrichvaluestructure.xml`: `application/vnd.ms-excel.rdrichvaluestructure+xml`
+- `/xl/richData/rdRichValueTypes.xml`: `application/vnd.ms-excel.rdrichvaluetypes+xml`
+
+Likely patterns seen in the ecosystem for the *unprefixed* `richValue.xml` / `richValueTypes.xml` /
+`richValueStructure.xml` parts (unverified; do not hardcode without a real Excel fixture in `fixtures/xlsx/**`):
 
 - `application/vnd.ms-excel.richvalue+xml` (for `/xl/richData/richValue.xml`)
 - `application/vnd.ms-excel.richvaluerel+xml` (for `/xl/richData/richValueRel.xml`)
@@ -565,7 +572,7 @@ Likely patterns seen in the ecosystem (unverified; do not hardcode without a rea
   <Override PartName="/xl/richData/richValueTypes.xml" ContentType="TODO"/>
   <Override PartName="/xl/richData/richValueStructure.xml" ContentType="TODO"/>
   <Override PartName="/xl/richData/richValue.xml" ContentType="TODO"/>
-  <Override PartName="/xl/richData/richValueRel.xml" ContentType="TODO"/>
+  <Override PartName="/xl/richData/richValueRel.xml" ContentType="application/vnd.ms-excel.richvaluerel+xml"/>
 </Types>
 ```
 
