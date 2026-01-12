@@ -167,7 +167,7 @@ pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSe
                 }
 
                 let sig_slice = &stream[pkcs7_offset..sig_end];
-                let Some(pkcs7_len) = der_total_len(sig_slice) else {
+                let Some(pkcs7_len) = ber_total_len(sig_slice) else {
                     continue;
                 };
                 if pkcs7_len == 0 || pkcs7_len > sig_slice.len() {
@@ -198,32 +198,97 @@ pub(crate) fn parse_digsig_info_serialized(stream: &[u8]) -> Option<DigSigInfoSe
     best.map(|(_, info)| info)
 }
 
-fn der_header(bytes: &[u8]) -> Option<(u8 /* tag */, usize /* content len */, usize /* header len */)> {
-    let tag = *bytes.first()?;
-    let len_byte = *bytes.get(1)?;
-    if len_byte & 0x80 == 0 {
-        return Some((tag, len_byte as usize, 2));
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BerLen {
+    Definite(usize),
+    Indefinite,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BerTag {
+    tag_byte: u8,
+    constructed: bool,
+}
+
+fn ber_parse_tag(bytes: &[u8]) -> Option<(BerTag, usize /* tag len */)> {
+    let b0 = *bytes.first()?;
+    let constructed = b0 & 0x20 != 0;
+    let mut idx = 1;
+
+    // High-tag-number form: base-128 tag number across subsequent bytes.
+    if b0 & 0x1F == 0x1F {
+        // Limit tag length to avoid pathological inputs; CMS structures should never hit this.
+        loop {
+            let b = *bytes.get(idx)?;
+            idx += 1;
+            if b & 0x80 == 0 {
+                break;
+            }
+            if idx > 6 {
+                return None;
+            }
+        }
     }
 
-    let n = (len_byte & 0x7F) as usize;
-    if n == 0 {
-        // Indefinite lengths are not permitted in DER.
+    Some((BerTag { tag_byte: b0, constructed }, idx))
+}
+
+fn ber_parse_len(bytes: &[u8]) -> Option<(BerLen, usize /* len len */)> {
+    let b0 = *bytes.first()?;
+    if b0 < 0x80 {
+        return Some((BerLen::Definite(b0 as usize), 1));
+    }
+    if b0 == 0x80 {
+        return Some((BerLen::Indefinite, 1));
+    }
+
+    let n = (b0 & 0x7F) as usize;
+    if n == 0 || n > 8 {
         return None;
     }
-    let len_start: usize = 2;
-    let len_end = len_start.checked_add(n)?;
-    let len_bytes = bytes.get(len_start..len_end)?;
+    if bytes.len() < 1 + n {
+        return None;
+    }
     let mut len: usize = 0;
-    for &b in len_bytes {
+    for &b in &bytes[1..1 + n] {
         len = len.checked_shl(8)?;
         len = len.checked_add(b as usize)?;
     }
-    Some((tag, len, len_end))
+    Some((BerLen::Definite(len), 1 + n))
 }
 
-fn der_total_len(bytes: &[u8]) -> Option<usize> {
-    let (_tag, content_len, header_len) = der_header(bytes)?;
-    header_len.checked_add(content_len).filter(|&n| n <= bytes.len())
+fn ber_header(bytes: &[u8]) -> Option<(BerTag, BerLen, usize /* header len */)> {
+    let (tag, tag_len) = ber_parse_tag(bytes)?;
+    let (len, len_len) = ber_parse_len(bytes.get(tag_len..)?)?;
+    Some((tag, len, tag_len + len_len))
+}
+
+fn ber_skip_any(bytes: &[u8]) -> Option<&[u8]> {
+    let (tag, len, hdr_len) = ber_header(bytes)?;
+    let rest = bytes.get(hdr_len..)?;
+    match len {
+        BerLen::Definite(l) => rest.get(l..),
+        BerLen::Indefinite => {
+            if !tag.constructed {
+                return None;
+            }
+            let mut cur = rest;
+            loop {
+                if cur.len() < 2 {
+                    return None;
+                }
+                if cur[0] == 0x00 && cur[1] == 0x00 {
+                    return cur.get(2..);
+                }
+                cur = ber_skip_any(cur)?;
+            }
+        }
+    }
+}
+
+fn ber_total_len(bytes: &[u8]) -> Option<usize> {
+    let rem = ber_skip_any(bytes)?;
+    Some(bytes.len().saturating_sub(rem.len()))
 }
 
 fn looks_like_pkcs7_signed_data(bytes: &[u8]) -> bool {
@@ -231,22 +296,25 @@ fn looks_like_pkcs7_signed_data(bytes: &[u8]) -> bool {
     // For SignedData, contentType == 1.2.840.113549.1.7.2
     const SIGNED_DATA_OID: &[u8] = b"\x2A\x86\x48\x86\xF7\x0D\x01\x07\x02";
 
-    let (tag, _len, hdr_len) = match der_header(bytes) {
+    let (tag, _len, hdr_len) = match ber_header(bytes) {
         Some(v) => v,
         None => return false,
     };
-    if tag != 0x30 {
+    if tag.tag_byte != 0x30 {
         return false;
     }
 
     let rest = &bytes[hdr_len..];
-    let (tag2, oid_len, hdr2_len) = match der_header(rest) {
+    let (tag2, oid_len, hdr2_len) = match ber_header(rest) {
         Some(v) => v,
         None => return false,
     };
-    if tag2 != 0x06 {
+    if tag2.tag_byte != 0x06 {
         return false;
     }
+    let BerLen::Definite(oid_len) = oid_len else {
+        return false;
+    };
     let oid_bytes = match rest.get(hdr2_len..hdr2_len + oid_len) {
         Some(v) => v,
         None => return false,
@@ -344,5 +412,39 @@ mod tests {
 
         let pkcs7_slice = &stream[parsed.pkcs7_offset..parsed.pkcs7_offset + parsed.pkcs7_len];
         Pkcs7::from_der(pkcs7_slice).expect("openssl should parse extracted pkcs7");
+    }
+
+    #[test]
+    fn parses_ber_indefinite_pkcs7_payload_from_digsig_info_serialized_wrapper() {
+        // This fixture is a CMS/PKCS#7 SignedData blob emitted by OpenSSL with `cms -stream`,
+        // which uses BER indefinite-length encodings.
+        let pkcs7 = include_bytes!("../tests/fixtures/cms_indefinite.der");
+
+        // Synthetic DigSigInfoSerialized-like stream:
+        // [cbSignature, cbSigningCertStore, cchProjectName] (LE u32)
+        // [projectName UTF-16LE] [certStore bytes] [signature bytes]
+        let project_name_utf16: Vec<u16> = "VBAProject\0".encode_utf16().collect();
+        let mut project_name_bytes = Vec::new();
+        for ch in &project_name_utf16 {
+            project_name_bytes.extend_from_slice(&ch.to_le_bytes());
+        }
+        let cert_store = vec![0xAA, 0xBB, 0xCC, 0xDD];
+
+        let cb_signature = pkcs7.len() as u32;
+        let cb_cert_store = cert_store.len() as u32;
+        let cch_project = project_name_utf16.len() as u32;
+
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&cb_signature.to_le_bytes());
+        stream.extend_from_slice(&cb_cert_store.to_le_bytes());
+        stream.extend_from_slice(&cch_project.to_le_bytes());
+        stream.extend_from_slice(&project_name_bytes);
+        stream.extend_from_slice(&cert_store);
+        stream.extend_from_slice(pkcs7);
+
+        let parsed = parse_digsig_info_serialized(&stream).expect("should parse");
+        let expected_offset = 12 + project_name_bytes.len() + cert_store.len();
+        assert_eq!(parsed.pkcs7_offset, expected_offset);
+        assert_eq!(parsed.pkcs7_len, pkcs7.len());
     }
 }
