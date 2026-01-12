@@ -4710,13 +4710,11 @@ if (
   // copy/cut handlers already enforce clipboard-copy DLP, but extensions would otherwise bypass it.
   //
   // BrowserExtensionHost tracks read taint (API reads + event payloads) and passes those ranges to this
-  // optional `clipboardWriteGuard`, which runs *before* any clipboard write. Enforce clipboard-copy DLP
-  // against:
-  //   - the current UI selection (active-cell fallback), and
-  //   - any workbook ranges the extension has observed (taintedRanges).
+  // optional `clipboardWriteGuard`, which runs *before* any clipboard write. Here we enforce clipboard-copy
+  // DLP against any workbook ranges the extension has observed (taintedRanges).
   //
-  // This mirrors the built-in copy/cut DLP enforcement and prevents extensions from bypassing policy
-  // checks by writing arbitrary text to the clipboard.
+  // Selection-based clipboard-copy DLP enforcement (active-cell fallback) is handled separately by the
+  // desktop adapter's `clipboardApi.writeText` implementation.
   const extensionClipboardDlp = createDesktopDlpContext({ documentId: workbookId });
 
   const normalizeSelectionRange = (range: { startRow: number; startCol: number; endRow: number; endCol: number }) => {
@@ -4745,52 +4743,6 @@ if (
 
   const clipboardWriteGuard = async (params: { extensionId: string; taintedRanges: any[] }) => {
     try {
-      // Always enforce selection-based clipboard DLP for extensions. Even if an extension writes a
-      // constant string, we treat clipboard writes as equivalent to a user copy operation from the
-      // currently selected range (and block if that selection contains Restricted data).
-      try {
-        const sheetId = app.getCurrentSheetId();
-        const selectionRanges = app.getSelectionRanges?.() ?? [];
-        if (selectionRanges.length === 0) {
-          const active = app.getActiveCell?.();
-          const activeRow = Number((active as any)?.row);
-          const activeCol = Number((active as any)?.col);
-          if (Number.isFinite(activeRow) && Number.isFinite(activeCol)) {
-            enforceExtensionClipboardDlpForRange({
-              sheetId,
-              range: normalizeSelectionRange({
-                startRow: Math.trunc(activeRow),
-                startCol: Math.trunc(activeCol),
-                endRow: Math.trunc(activeRow),
-                endCol: Math.trunc(activeCol),
-              }),
-            });
-          }
-        } else {
-          for (const range of selectionRanges) {
-            if (!range || typeof range !== "object") continue;
-            const startRow = Number((range as any).startRow);
-            const startCol = Number((range as any).startCol);
-            const endRow = Number((range as any).endRow);
-            const endCol = Number((range as any).endCol);
-            if (![startRow, startCol, endRow, endCol].every((v) => Number.isFinite(v))) continue;
-            enforceExtensionClipboardDlpForRange({
-              sheetId,
-              range: normalizeSelectionRange({
-                startRow: Math.trunc(startRow),
-                startCol: Math.trunc(startCol),
-                endRow: Math.trunc(endRow),
-                endCol: Math.trunc(endCol),
-              }),
-            });
-          }
-        }
-      } catch (err) {
-        const isDlpViolation = err instanceof DlpViolationError || (err as any)?.name === "DlpViolationError";
-        if (isDlpViolation) throw err;
-        // Ignore selection query errors; if the selection is unavailable we'll fall back to taint-based DLP.
-      }
-
       const taintedRanges = Array.isArray(params.taintedRanges) ? params.taintedRanges : [];
       if (taintedRanges.length === 0) return;
       for (const raw of taintedRanges) {
@@ -5185,9 +5137,14 @@ if (
             } catch {
               // `showToast` requires a #toast-root; unit tests don't always include it.
             }
-            // Throw a generic Error so extension commands fail without depending on the host-side
-            // DlpViolationError type.
-            throw new Error(message);
+            // Surface DLP violations to the extension worker as a normal Error (serialized across
+            // the worker boundary), preserving the `name` so extensions can detect policy blocks.
+            if (err instanceof Error) {
+              throw err;
+            }
+            const normalized = new Error(message);
+            normalized.name = "DlpViolationError";
+            throw normalized;
           }
           throw err;
         }
@@ -5373,6 +5330,9 @@ if (
       syncContributedCommands();
       await commandRegistry.executeCommand(commandId, ...args);
     } catch (err) {
+      // DLP policy violations are already surfaced via a dedicated toast (e.g. clipboard copy blocked).
+      // Avoid double-toasting "Command failed" for expected policy restrictions.
+      if ((err as any)?.name === "DlpViolationError") return;
       showToast(`Command failed: ${String((err as any)?.message ?? err)}`, "error");
     }
   };
