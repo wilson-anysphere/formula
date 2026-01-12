@@ -2238,6 +2238,19 @@ if (
       }
     }
 
+    function sanitizeDomId(value: string): string {
+      // HTML `id` must not contain ASCII whitespace.
+      return String(value).replace(/\s+/g, "-");
+    }
+
+    function dockTabDomId(panelId: string): string {
+      return sanitizeDomId(`dock-tab-${panelId}`);
+    }
+
+    function dockTabPanelDomId(panelId: string): string {
+      return sanitizeDomId(`dock-tabpanel-${panelId}`);
+    }
+
     const panel = document.createElement("div");
     panel.className = "dock-panel";
     panel.dataset.testid = `panel-${active}`;
@@ -2265,10 +2278,12 @@ if (
         tab.type = "button";
         tab.className = "dock-panel__tab";
         tab.dataset.testid = `dock-tab-${panelId}`;
+        tab.id = dockTabDomId(panelId);
         tab.textContent = panelTitle(panelId);
         tab.title = tab.textContent ?? "";
         tab.setAttribute("role", "tab");
         tab.setAttribute("aria-selected", panelId === active ? "true" : "false");
+        if (panelId === active) tab.setAttribute("aria-controls", dockTabPanelDomId(panelId));
         tab.tabIndex = panelId === active ? 0 : -1;
         tab.addEventListener("click", (e) => {
           e.preventDefault();
@@ -2367,6 +2382,11 @@ if (
 
     const body = document.createElement("div");
     body.className = "dock-panel__body";
+    if (zone.panels.length > 1) {
+      body.id = dockTabPanelDomId(active);
+      body.setAttribute("role", "tabpanel");
+      body.setAttribute("aria-labelledby", dockTabDomId(active));
+    }
     renderPanelBody(active, body);
 
     panel.appendChild(header);
