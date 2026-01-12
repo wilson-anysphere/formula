@@ -2377,7 +2377,13 @@ mod encode_ast {
                 .table_id_by_name(table_name)
                 .ok_or_else(|| EncodeError::Parse(format!("unknown table: {table_name}")))?,
             None => {
-                if let Some(sheet) = sheet {
+                // Always prefer the "single table in workbook" heuristic when possible. This is
+                // the only inference path when we lack sheet+range information, and is consistent
+                // with Excel's `[@Col]` / `[@]` shorthand in workbooks where the target table is
+                // unambiguous.
+                if let Some(table_id) = ctx.single_table_id() {
+                    table_id
+                } else if let Some(sheet) = sheet {
                     ctx.table_id_for_cell(sheet, base.row, base.col).ok_or_else(|| {
                         EncodeError::Parse(format!(
                             "cannot infer table for structured reference without an explicit table name at '{sheet}'!R{}C{} (cell must be inside exactly one table)",
@@ -2386,14 +2392,10 @@ mod encode_ast {
                         ))
                     })?
                 } else {
-                    // Fall back to a "single table in workbook" heuristic when the caller doesn't
-                    // know the base sheet.
-                    ctx.single_table_id().ok_or_else(|| {
-                        EncodeError::Parse(
-                            "structured references without an explicit table name are ambiguous; specify TableName[...]"
-                                .to_string(),
-                        )
-                    })?
+                    return Err(EncodeError::Parse(
+                        "structured references without an explicit table name are ambiguous; specify TableName[...]"
+                            .to_string(),
+                    ));
                 }
             }
         };
