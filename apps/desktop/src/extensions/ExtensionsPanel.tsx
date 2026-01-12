@@ -119,6 +119,8 @@ export function ExtensionsPanel({
     version: string;
     corrupted?: boolean;
     corruptedReason?: string;
+    incompatible?: boolean;
+    incompatibleReason?: string;
   }> | null>(null);
   const [installError, setInstallError] = React.useState<string | null>(null);
   const [repairingId, setRepairingId] = React.useState<string | null>(null);
@@ -263,6 +265,7 @@ export function ExtensionsPanel({
             <div className="extensions-panel__installed-list">
               {installed.map((item) => {
                 const isCorrupted = Boolean(item.corrupted);
+                const isIncompatible = Boolean(item.incompatible);
                 return (
                   <div key={item.id} data-testid={`installed-extension-${item.id}`} className="extensions-panel__installed-item">
                     <div className="extensions-panel__installed-item-id">{item.id}</div>
@@ -272,12 +275,18 @@ export function ExtensionsPanel({
                       className={
                         isCorrupted
                           ? "extensions-panel__installed-item-status extensions-panel__installed-item-status--corrupted"
+                          : isIncompatible
+                            ? "extensions-panel__installed-item-status extensions-panel__installed-item-status--incompatible"
                           : "extensions-panel__installed-item-status"
                       }
                     >
-                      {isCorrupted ? `Corrupted: ${item.corruptedReason ?? "unknown reason"}` : "OK"}
+                      {isCorrupted
+                        ? `Corrupted: ${item.corruptedReason ?? "unknown reason"}`
+                        : isIncompatible
+                          ? `Incompatible: ${item.incompatibleReason ?? "unknown reason"}`
+                          : "OK"}
                     </div>
-                    {isCorrupted ? (
+                    {isCorrupted || isIncompatible ? (
                       <button
                         type="button"
                         data-testid={`repair-extension-${item.id}`}
@@ -287,8 +296,12 @@ export function ExtensionsPanel({
                             if (!webExtensionManager) return;
                             setRepairingId(item.id);
                             try {
-                              await webExtensionManager.repair(item.id);
-                              await webExtensionManager.loadInstalled(item.id);
+                              if (isIncompatible) {
+                                await webExtensionManager.update(item.id);
+                              } else {
+                                await webExtensionManager.repair(item.id);
+                              }
+                              await webExtensionManager.loadInstalled(item.id).catch(() => {});
                               await refreshInstalled();
                               onSyncExtensions?.();
                               bump((v) => v + 1);
@@ -301,7 +314,13 @@ export function ExtensionsPanel({
                         }}
                         className="extensions-panel__button extensions-panel__reset-button extensions-panel__repair-button"
                       >
-                        {repairingId === item.id ? "Repairing…" : "Repair"}
+                        {repairingId === item.id
+                          ? isIncompatible
+                            ? "Updating…"
+                            : "Repairing…"
+                          : isIncompatible
+                            ? "Update"
+                            : "Repair"}
                       </button>
                     ) : null}
                   </div>

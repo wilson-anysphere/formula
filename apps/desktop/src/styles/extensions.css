@@ -123,6 +123,10 @@
   color: var(--error);
 }
 
+.extensions-panel__installed-item-status--incompatible {
+  color: var(--warning);
+}
+
 .extensions-panel__repair-button {
   align-self: flex-start;
 }
