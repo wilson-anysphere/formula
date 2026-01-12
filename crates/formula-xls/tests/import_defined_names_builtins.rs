@@ -33,6 +33,7 @@ fn imports_biff8_builtin_defined_names_with_scope_and_hidden() {
     assert_eq!(print_area.name, XLNM_PRINT_AREA);
     assert_eq!(print_area.scope, DefinedNameScope::Sheet(sheet1_id));
     assert!(print_area.hidden, "Print_Area should be hidden");
+    assert_eq!(print_area.xlsx_local_sheet_id, Some(0));
     assert_eq!(
         print_area.refers_to,
         "Sheet1!$A$1:$A$2,Sheet1!$C$1:$C$2"
@@ -44,6 +45,7 @@ fn imports_biff8_builtin_defined_names_with_scope_and_hidden() {
     assert_eq!(print_titles.name, XLNM_PRINT_TITLES);
     assert_eq!(print_titles.scope, DefinedNameScope::Sheet(sheet2_id));
     assert!(!print_titles.hidden, "Print_Titles should not be hidden");
+    assert_eq!(print_titles.xlsx_local_sheet_id, Some(1));
     assert_eq!(print_titles.refers_to, "Sheet2!$1:$1,Sheet2!$A:$A");
 
     let filter_db = workbook
@@ -52,6 +54,6 @@ fn imports_biff8_builtin_defined_names_with_scope_and_hidden() {
     assert_eq!(filter_db.name, XLNM_FILTER_DATABASE);
     assert_eq!(filter_db.scope, DefinedNameScope::Sheet(sheet1_id));
     assert!(filter_db.hidden, "_FilterDatabase should be hidden");
+    assert_eq!(filter_db.xlsx_local_sheet_id, Some(0));
     assert_eq!(filter_db.refers_to, "Sheet1!$A$1:$C$10");
 }
-
