@@ -17,7 +17,14 @@ fn normalize_base64_str(mut base64: &str) -> &str {
         .get(0..5)
         .is_some_and(|prefix| prefix.eq_ignore_ascii_case("data:"))
     {
-        if let Some(comma) = base64.find(',') {
+        // Scan only a small prefix for the comma separator so malformed inputs like
+        // `data:AAAAA...` don't force an O(n) search over huge payloads.
+        let comma = base64
+            .as_bytes()
+            .iter()
+            .take(1024)
+            .position(|&b| b == b',');
+        if let Some(comma) = comma {
             base64 = &base64[comma + 1..];
         }
     }

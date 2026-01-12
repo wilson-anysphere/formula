@@ -55,7 +55,17 @@ function base64Bounds(base64) {
   while (start < base64.length && isTrimChar(base64.charCodeAt(start))) start += 1;
 
   if (hasDataUrlPrefixAt(base64, start)) {
-    const commaIndex = base64.indexOf(",", start);
+    // Scan only a small prefix for the comma separator so malformed inputs like
+    // `data:AAAAA...` don't force an O(n) search over huge payloads.
+    let commaIndex = -1;
+    const maxHeaderScan = Math.min(base64.length, start + 1024);
+    for (let i = start; i < maxHeaderScan; i += 1) {
+      if (base64.charCodeAt(i) === 0x2c) {
+        // ','
+        commaIndex = i;
+        break;
+      }
+    }
     if (commaIndex >= 0) start = commaIndex + 1;
     while (start < base64.length && isTrimChar(base64.charCodeAt(start))) start += 1;
   }
