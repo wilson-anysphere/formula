@@ -151,3 +151,19 @@ test("semanticDiff: encrypted cell format-only changes are detected", () => {
   assert.equal(diff.formatOnly[0].newKeyId, "k1");
   assert.equal(diff.modified.length, 0);
 });
+
+test("semanticDiff: enc=null is treated as unencrypted (backwards compatible)", () => {
+  const before = sheetFromObject({
+    [cellKey(0, 0)]: { enc: null, value: 1 },
+  });
+  const after = sheetFromObject({
+    [cellKey(0, 0)]: { value: 2 },
+  });
+  const diff = semanticDiff(before, after);
+  assert.equal(diff.modified.length, 1);
+  assert.deepEqual(diff.modified[0].cell, { row: 0, col: 0 });
+  assert.equal(diff.modified[0].oldValue, 1);
+  assert.equal(diff.modified[0].newValue, 2);
+  assert.equal("oldEncrypted" in diff.modified[0], false);
+  assert.equal("newEncrypted" in diff.modified[0], false);
+ });
