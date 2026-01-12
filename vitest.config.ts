@@ -16,6 +16,7 @@ const collabSessionEntry = resolve(repoRoot, "packages/collab/session/src/index.
 const collabVersioningEntry = resolve(repoRoot, "packages/collab/versioning/src/index.ts");
 const collabPersistenceEntry = resolve(repoRoot, "packages/collab/persistence/src/index.ts");
 const collabPersistenceIndexedDbEntry = resolve(repoRoot, "packages/collab/persistence/src/indexeddb.ts");
+const marketplaceSharedEntry = resolve(repoRoot, "shared");
 
 function resolveJsToTs() {
   return {
@@ -57,6 +58,10 @@ export default defineConfig({
       { find: "@formula/collab-versioning", replacement: collabVersioningEntry },
       { find: "@formula/collab-persistence/indexeddb", replacement: collabPersistenceIndexedDbEntry },
       { find: /^@formula\/collab-persistence$/, replacement: collabPersistenceEntry },
+      // `@formula/marketplace-shared` lives under the repo `shared/` directory. Like the collab
+      // workspace aliases above, we keep an explicit mapping here so Vitest stays resilient in
+      // cached/stale `node_modules` environments that may be missing the pnpm workspace link.
+      { find: /^@formula\/marketplace-shared/, replacement: marketplaceSharedEntry }
     ],
   },
   test: {
