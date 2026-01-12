@@ -42,21 +42,16 @@ pub fn resolve_relationship_target(
             {
                 return Ok(None);
             }
-            let target = strip_fragment(&rel.target);
-            if target.is_empty() {
+            // Resolve the target using the same URI normalization as other code paths (including
+            // fragment stripping). Note that a target of just `#fragment` refers to the source part.
+            let resolved = resolve_target(part_name, &rel.target);
+            if resolved.is_empty() {
                 return Ok(None);
             }
-            return Ok(Some(resolve_target(part_name, target)));
+            return Ok(Some(resolved));
         }
     }
     Ok(None)
-}
-
-fn strip_fragment(target: &str) -> &str {
-    target
-        .split_once('#')
-        .map(|(base, _)| base)
-        .unwrap_or(target)
 }
 
 pub fn resolve_target(base_part: &str, target: &str) -> String {
@@ -226,6 +221,25 @@ mod tests {
                 .expect("resolve internal")
                 .as_deref(),
             Some("xl/media/image1.png")
+        );
+    }
+
+    #[test]
+    fn resolve_relationship_target_handles_fragment_only_targets() {
+        let rels = br##"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="urn:example:self" Target="#frag"/>
+</Relationships>"##;
+
+        let pkg = build_package(&[
+            ("xl/worksheets/sheet1.xml", br#"<worksheet/>"#),
+            ("xl/worksheets/_rels/sheet1.xml.rels", rels),
+        ]);
+
+        assert_eq!(
+            resolve_relationship_target(&pkg, "xl/worksheets/sheet1.xml", "rId1")
+                .expect("resolve fragment-only"),
+            Some("xl/worksheets/sheet1.xml".to_string())
         );
     }
 
