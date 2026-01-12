@@ -223,6 +223,11 @@ fn parse_workbook_xml(workbook_xml: &[u8]) -> Result<WorkbookInfo, PrintError> {
                     dn.value.push_str(&e.unescape()?.to_string());
                 }
             }
+            Event::CData(e) if current_defined.is_some() => {
+                if let Some(ref mut dn) = current_defined {
+                    dn.value.push_str(std::str::from_utf8(e.as_ref())?);
+                }
+            }
             Event::End(e) if e.local_name().as_ref() == b"definedName" => {
                 if let Some(dn) = current_defined.take() {
                     defined_names.push(dn);
