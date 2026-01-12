@@ -649,12 +649,12 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
 
     const connectionLabel = connected ? "Connected" : connecting ? "Connecting…" : "Disconnected";
 
-    const syncLabel = connected ? (synced ? "Synced" : "Syncing…") : hasEverSynced ? "Not synced" : "Syncing…";
+    const syncLabel = connected ? (synced ? "Synced" : "Syncing…") : connecting ? "Syncing…" : hasEverSynced ? "Not synced" : "Syncing…";
 
     setIndicatorText(`${docId} • ${connectionLabel} • ${syncLabel}`, {
       mode: "collab",
       conn: connected ? "connected" : connecting ? "connecting" : "disconnected",
-      sync: connected ? (synced ? "synced" : "syncing") : hasEverSynced ? "unsynced" : "syncing",
+      sync: connected ? (synced ? "synced" : "syncing") : connecting ? "syncing" : hasEverSynced ? "unsynced" : "syncing",
       docId,
     });
   };
