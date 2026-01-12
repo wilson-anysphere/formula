@@ -23,7 +23,7 @@ function renderRibbon() {
 }
 
 describe("Ribbon icons", () => {
-  it("renders an SVG icon for a known command", () => {
+  it("renders an SVG icon when the schema provides an iconId", () => {
     const { container, root } = renderRibbon();
 
     const paste = container.querySelector<HTMLButtonElement>("[data-testid=\"ribbon-paste\"]");
@@ -35,4 +35,3 @@ describe("Ribbon icons", () => {
     act(() => root.unmount());
   });
 });
-

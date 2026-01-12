@@ -17,7 +17,7 @@ function collectButtonsBySize(size: "icon" | "large"): RibbonButtonDefinition[] 
   return buttons;
 }
 
-describe("Ribbon schema icon coverage", () => {
+describe("Ribbon schema iconId coverage", () => {
   it('assigns an iconId for every schema button with size: "icon"', () => {
     const iconButtons = collectButtonsBySize("icon");
 
