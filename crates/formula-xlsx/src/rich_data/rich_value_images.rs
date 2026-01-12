@@ -331,4 +331,3 @@ fn parse_metadata_rich_value_indices(metadata: &[u8]) -> Result<Vec<u32>, XlsxEr
 
     Ok(out)
 }
-
