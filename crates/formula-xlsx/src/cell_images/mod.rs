@@ -182,68 +182,68 @@ fn parse_cell_images_part(
 
     let doc = Document::parse(xml)?;
 
-    let mut images = Vec::new();
-    // Excel emits DrawingML `<xdr:pic>` payloads for in-cell images, which reference the media via
-    // `<a:blip r:embed="…">`.
-    for pic in doc
-        .root_element()
-        .descendants()
-        .filter(|n| n.is_element() && n.tag_name().name() == "pic")
-    {
-        let Some(blip) = pic
-            .descendants()
-            .find(|n| n.is_element() && n.tag_name().name() == "blip")
-        else {
-            continue;
-        };
-
-        let Some(embed_rel_id) = get_blip_embed_rel_id(&blip) else {
-            continue;
-        };
-
-        let target = rid_to_target.get(&embed_rel_id).cloned();
-        images.push(CellImageEntry {
-            embed_rel_id,
-            target,
-            raw_xml: slice_node_xml(&pic, xml).unwrap_or_default(),
-        });
+    // Basic validation: ensure this is actually a `cellImages` document. We only match on local
+    // name to ignore prefixes like `cx:cellImages` / `etc:cellImages`.
+    let root = doc.root_element();
+    if !root.tag_name().name().eq_ignore_ascii_case("cellImages") {
+        return Err(XlsxError::Invalid(format!(
+            "unexpected root element in {path}: {}",
+            root.tag_name().name()
+        )));
     }
 
-    // Some Excel-generated `cellimages.xml` payloads use a lightweight schema where the image
-    // relationship ID is stored directly on a `<cellImage r:id="…">` element (rather than
-    // embedding a full DrawingML `<pic>` subtree). Some variants also wrap a raw `<a:blip>` under
-    // `<cellImage>` without including `<pic>`.
-    for cell_image in doc
-        .root_element()
-        .descendants()
-        .filter(|n| n.is_element() && n.tag_name().name() == "cellImage")
-    {
-        // If this `<cellImage>` includes a full `<pic>` payload, the `<pic>` loop above will pick
-        // it up (and preserve the actual `<pic>` XML). Avoid double-counting in that case.
-        if cell_image
-            .descendants()
-            .any(|n| n.is_element() && n.tag_name().name() == "pic")
-        {
+    let mut images = Vec::new();
+    // Collect images in document order. Excel can represent the image relationship ID either:
+    // - as DrawingML `<xdr:pic>` payloads referencing `<a:blip r:embed="…">`, or
+    // - via a lightweight `<cellImage r:id="…">` schema.
+    for node in root.descendants().filter(|n| n.is_element()) {
+        let name = node.tag_name().name();
+        if name.eq_ignore_ascii_case("pic") {
+            // Excel emits DrawingML `<xdr:pic>` payloads for in-cell images, which reference the
+            // media via `<a:blip r:embed="…">`.
+            let Some(blip) = node
+                .descendants()
+                .find(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("blip"))
+            else {
+                continue;
+            };
+            let Some(embed_rel_id) = get_blip_embed_rel_id(&blip) else {
+                continue;
+            };
+            let target = rid_to_target.get(&embed_rel_id).cloned();
+            images.push(CellImageEntry {
+                embed_rel_id,
+                target,
+                raw_xml: slice_node_xml(&node, xml).unwrap_or_default(),
+            });
             continue;
         }
-
-        let embed_rel_id = get_cell_image_rel_id(&cell_image).or_else(|| {
-            // Some minimal schemas store the relationship on a nested `<a:blip r:embed="...">`.
-            cell_image
+        if name.eq_ignore_ascii_case("cellImage") {
+            // If this `<cellImage>` includes a full `<pic>` payload, we'll pick it up when we hit
+            // the `<pic>` node itself. Avoid double-counting in that case.
+            if node
                 .descendants()
-                .find(|n| n.is_element() && n.tag_name().name() == "blip")
-                .and_then(|blip| get_blip_embed_rel_id(&blip))
-        });
-        let Some(embed_rel_id) = embed_rel_id else {
-            continue;
-        };
+                .any(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("pic"))
+            {
+                continue;
+            }
 
-        let target = rid_to_target.get(&embed_rel_id).cloned();
-        images.push(CellImageEntry {
-            embed_rel_id,
-            target,
-            raw_xml: slice_node_xml(&cell_image, xml).unwrap_or_default(),
-        });
+            let embed_rel_id = get_cell_image_rel_id(&node).or_else(|| {
+                // Some minimal schemas store the relationship on a nested `<a:blip r:embed="...">`.
+                node.descendants()
+                    .find(|n| n.is_element() && n.tag_name().name().eq_ignore_ascii_case("blip"))
+                    .and_then(|blip| get_blip_embed_rel_id(&blip))
+            });
+            let Some(embed_rel_id) = embed_rel_id else {
+                continue;
+            };
+            let target = rid_to_target.get(&embed_rel_id).cloned();
+            images.push(CellImageEntry {
+                embed_rel_id,
+                target,
+                raw_xml: slice_node_xml(&node, xml).unwrap_or_default(),
+            });
+        }
     }
 
     Ok(CellImagesPart {
