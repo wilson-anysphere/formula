@@ -63,4 +63,8 @@ describe("toggleA1AbsoluteAtCursor", () => {
   it("returns null when the selection is not contained within a reference token", () => {
     expect(toggleA1AbsoluteAtCursor("=A1+B1", 1, 4)).toBeNull();
   });
+
+  it("returns null when the caret is not within a reference token", () => {
+    expect(toggleA1AbsoluteAtCursor("=SUM(", 5, 5)).toBeNull();
+  });
 });
