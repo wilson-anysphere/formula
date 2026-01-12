@@ -93,11 +93,16 @@ In the wild, the signature stream bytes are not always “just a PKCS#7 blob”.
        byte length)
      - followed by variable-size blobs (often: `projectNameUtf16le`, `certStoreBytes`, `signatureBytes`)
      - some producers include a `version` and/or `reserved` DWORD before the length fields.
-   - The ordering of the variable blobs can vary across producers/versions. A robust parser should
-     compute candidate offsets and **validate** by checking that the bytes at the computed offset
-     parse as a CMS `signedData` `ContentInfo`.
-   - The wrapper's `cbSignature` region can include padding; prefer using the DER length inside the
-     region to find the actual CMS payload size.
+    - The ordering of the variable blobs can vary across producers/versions. A robust parser should
+      compute candidate offsets and **validate** by checking that the bytes at the computed offset
+      parse as a CMS `signedData` `ContentInfo`.
+    - The wrapper's `cbSignature` region can include padding; prefer using the DER length inside the
+      region to find the actual CMS payload size.
+    - ⚠️ The `cbSigningCertStore` blob may itself contain a PKCS#7/CMS structure (often beginning
+      with `0x30`). This means naive “scan for the first PKCS#7 SignedData” logic can pick the
+      **certificate store** rather than the actual signature. Prefer the `DigSigInfoSerialized`-derived
+      `(offset, len)` when available, and when falling back to scanning heuristics, prefer the **last**
+      plausible `SignedData` candidate in the stream.
 3. **Detached `content || pkcs7`**
    - The stream contains `signed_content_bytes` followed by a detached CMS signature (`pkcs7_der`).
    - Verification must pass the prefix bytes as the detached content when verifying the CMS blob.
