@@ -194,3 +194,79 @@ fn sheet_metadata_round_trips_through_persistence_and_xlsx_save() {
         })
     );
 }
+
+#[test]
+fn sheet_metadata_edits_preserve_unknown_origin_parts_on_patch_save() {
+    // Build a small XLSX workbook and inject a synthetic "unknown" part to prove the save path
+    // preserves origin ZIP contents (i.e. it uses the patch-based save path rather than exporting
+    // a fresh XLSX from storage/model).
+    let mut model = formula_model::Workbook::new();
+    model.add_sheet("Sheet1".to_string()).expect("add sheet1");
+    model.add_sheet("Sheet2".to_string()).expect("add sheet2");
+
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    formula_xlsx::write_workbook_to_writer(&model, &mut cursor).expect("write base xlsx bytes");
+    let base_bytes = cursor.into_inner();
+
+    let mut pkg = formula_xlsx::XlsxPackage::from_bytes(&base_bytes).expect("parse base package");
+    pkg.set_part("customXml/item1.xml", b"<custom>Hello</custom>".to_vec());
+    let bytes = pkg.write_to_bytes().expect("write package with custom part");
+
+    let dir = tempdir().expect("tempdir");
+    let input_path = dir.path().join("input.xlsx");
+    std::fs::write(&input_path, &bytes).expect("write input xlsx");
+
+    let mut state = AppState::new();
+    let workbook = desktop::file_io::read_xlsx_blocking(&input_path).expect("read input xlsx");
+    assert!(
+        workbook.origin_xlsx_bytes.is_some(),
+        "expected read_xlsx_blocking to retain origin bytes"
+    );
+    state
+        .load_workbook_persistent(workbook, WorkbookPersistenceLocation::InMemory)
+        .expect("load workbook");
+
+    // Apply sheet metadata edits via the same AppState APIs the Tauri commands call.
+    state
+        .set_sheet_visibility("Sheet2", SheetVisibility::Hidden)
+        .expect("set sheet2 hidden");
+    state
+        .set_sheet_tab_color("Sheet1", Some(TabColor::rgb("FFFF0000")))
+        .expect("set sheet1 tab color");
+
+    let workbook = state.get_workbook().expect("workbook should be loaded");
+    assert!(
+        workbook.origin_xlsx_bytes.is_some(),
+        "expected sheet metadata edits to preserve origin_xlsx_bytes so save can patch in-place"
+    );
+
+    let out_path = dir.path().join("out.xlsx");
+    let written =
+        desktop::file_io::write_xlsx_blocking(&out_path, workbook).expect("write patched workbook");
+
+    let out_pkg = formula_xlsx::XlsxPackage::from_bytes(written.as_ref()).expect("parse output pkg");
+    assert!(
+        out_pkg.part("customXml/item1.xml").is_some(),
+        "expected custom part to be preserved by patch-based save path"
+    );
+
+    let roundtrip =
+        formula_xlsx::read_workbook_from_reader(std::io::Cursor::new(written.as_ref()))
+            .expect("read workbook model from patched bytes");
+    assert_eq!(
+        roundtrip
+            .sheet_by_name("Sheet2")
+            .expect("Sheet2 exists")
+            .visibility,
+        SheetVisibility::Hidden
+    );
+    assert_eq!(
+        roundtrip
+            .sheet_by_name("Sheet1")
+            .expect("Sheet1 exists")
+            .tab_color
+            .as_ref()
+            .and_then(|c| c.rgb.as_deref()),
+        Some("FFFF0000")
+    );
+}
