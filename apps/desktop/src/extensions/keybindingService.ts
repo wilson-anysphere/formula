@@ -76,6 +76,8 @@ const DEFAULT_RESERVED_EXTENSION_SHORTCUTS = [
   "ctrl+cmd+k",
   // Edit cell (Excel-style).
   "f2",
+  // Add comment (Excel-style).
+  "shift+f2",
   // AI Chat toggle (core UX shortcut; extensions should not claim it).
   // - Windows/Linux: Ctrl+Shift+A
   // - macOS: Cmd+Shift+A (with Ctrl+Cmd+Shift+A fallback for some remote/VM keyboard setups)
