@@ -3,7 +3,6 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { builtinModules, createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(new URL(".", import.meta.url).pathname, "..");
 const require = createRequire(import.meta.url);
@@ -461,6 +460,15 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
   /** @type {Set<string>} */
   const visiting = new Set();
   const builtins = new Set(builtinModules);
+  /**
+   * Map an arbitrary directory to the nearest enclosing package.json (if any).
+   * The cache stores the *resolved* nearest package for that directory (not just
+   * whether that directory itself contains a package.json), so nested dirs inside a
+   * workspace package can still resolve package self-references.
+   *
+   * @type {Map<string, { rootDir: string, name: string | null, exports: any, main: string | null } | null>}
+   */
+  const packageInfoCache = new Map();
 
   const importFromRe = /\b(?:import|export)\s+(type\s+)?[^"']*?\sfrom\s+["']([^"']+)["']/g;
   const sideEffectImportRe = /\bimport\s+["']([^"']+)["']/g;
@@ -469,6 +477,48 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
   function isBuiltin(specifier) {
     if (specifier.startsWith("node:")) return true;
     return builtins.has(specifier);
+  }
+
+  async function nearestPackageInfo(startDir) {
+    let dir = startDir;
+    /** @type {string[]} */
+    const visited = [];
+    while (true) {
+      const cached = packageInfoCache.get(dir);
+      if (cached !== undefined) {
+        for (const entry of visited) packageInfoCache.set(entry, cached);
+        return cached;
+      }
+
+      visited.push(dir);
+
+      const candidate = path.join(dir, "package.json");
+      try {
+        const raw = await readFile(candidate, "utf8");
+        const parsed = JSON.parse(raw);
+        const info = {
+          rootDir: dir,
+          name: typeof parsed?.name === "string" ? parsed.name : null,
+          exports: parsed?.exports ?? null,
+          main: typeof parsed?.main === "string" ? parsed.main : null,
+        };
+        for (const entry of visited) packageInfoCache.set(entry, info);
+        return info;
+      } catch {
+        // ignore; walk upward
+      }
+
+      if (dir === repoRoot) {
+        for (const entry of visited) packageInfoCache.set(entry, null);
+        return null;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) {
+        for (const entry of visited) packageInfoCache.set(entry, null);
+        return null;
+      }
+      dir = parent;
+    }
   }
 
   /**
@@ -525,22 +575,124 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
    * @returns {string | null}
    */
   function resolveWorkspaceSpecifier(specifier, importingFile) {
-    try {
-      const parentUrl = pathToFileURL(importingFile).href;
-      if (typeof import.meta.resolve === "function") {
-        const resolved = import.meta.resolve(specifier, parentUrl);
-        if (resolved && resolved.startsWith("file:")) return fileURLToPath(resolved);
-        return null;
-      }
-    } catch {
-      return null;
-    }
-
+    // `import.meta.resolve()` currently resolves relative to the module it's invoked from
+    // (this runner), so it's not suitable for checking whether a workspace package is
+    // installed relative to an arbitrary test file directory. Use `require.resolve()`
+    // with explicit `paths` instead so pnpm's per-package `node_modules/` layouts work.
     try {
       return require.resolve(specifier, { paths: [path.dirname(importingFile), repoRoot] });
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Resolve Node.js package self-references (e.g. `@formula/python-runtime/native`) to a
+   * concrete file path so we can analyze its transitive dependencies.
+   *
+   * Node supports these self-references even without `node_modules/` when the
+   * importing file is inside the package boundary.
+   *
+   * @param {string} specifier
+   * @param {string} importingFile
+   */
+  async function resolveSelfReference(specifier, importingFile) {
+    if (isBuiltin(specifier)) return null;
+
+    const pkgInfo = await nearestPackageInfo(path.dirname(importingFile));
+    if (!pkgInfo?.name || !pkgInfo.rootDir) return null;
+    if (specifier !== pkgInfo.name && !specifier.startsWith(`${pkgInfo.name}/`)) return null;
+
+    const exportKey =
+      specifier === pkgInfo.name ? "." : `./${specifier.slice(pkgInfo.name.length + 1)}`;
+
+    /**
+     * @param {any} entry
+     * @returns {string | null}
+     */
+    function pickExportPath(entry) {
+      if (typeof entry === "string") return entry;
+      if (Array.isArray(entry)) {
+        for (const item of entry) {
+          const picked = pickExportPath(item);
+          if (picked) return picked;
+        }
+        return null;
+      }
+      if (entry && typeof entry === "object") {
+        // Node's default export conditions include `node` + `import` with `default` fallback.
+        if (typeof entry.node === "string") return entry.node;
+        if (typeof entry.import === "string") return entry.import;
+        if (typeof entry.default === "string") return entry.default;
+        if (typeof entry.require === "string") return entry.require;
+
+        // Fall back to searching nested condition objects.
+        for (const value of Object.values(entry)) {
+          const picked = pickExportPath(value);
+          if (picked) return picked;
+        }
+      }
+      return null;
+    }
+
+    let target = null;
+    const exportsMap = pkgInfo.exports;
+
+    if (exportsMap) {
+      if (typeof exportsMap === "string") {
+        if (exportKey === ".") target = exportsMap;
+      } else if (exportsMap && typeof exportsMap === "object") {
+        target = pickExportPath(exportsMap?.[exportKey]);
+      }
+    }
+
+    if (!target && exportKey === "." && pkgInfo.main) target = pkgInfo.main;
+    if (!target) return null;
+
+    const cleanedTarget =
+      target.startsWith("./") || target.startsWith("../") || target.startsWith("/")
+        ? target
+        : `./${target}`;
+    const basePath = path.resolve(pkgInfo.rootDir, cleanedTarget.split("?")[0].split("#")[0]);
+    if (path.extname(basePath)) {
+      try {
+        const stats = await stat(basePath);
+        if (stats.isFile()) return basePath;
+      } catch {
+        return null;
+      }
+      return null;
+    }
+
+    for (const ext of candidateExtensions) {
+      const candidate = `${basePath}${ext}`;
+      try {
+        const stats = await stat(candidate);
+        if (stats.isFile()) return candidate;
+      } catch {
+        // continue
+      }
+    }
+
+    // Directory export: try index files.
+    try {
+      const stats = await stat(basePath);
+      if (stats.isDirectory()) {
+        for (const ext of candidateExtensions) {
+          const candidate = path.join(basePath, `index${ext}`);
+          try {
+            const idxStats = await stat(candidate);
+            if (idxStats.isFile()) return candidate;
+          } catch {
+            // continue
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    return null;
   }
 
   /**
@@ -593,6 +745,21 @@ async function filterMissingWorkspaceDependencyTests(files, opts) {
       // Only check workspace packages; external deps are handled by the normal
       // `node_modules` installation check above.
       if (!specifier.startsWith("@formula/")) continue;
+
+      const selfResolved = await resolveSelfReference(specifier, file);
+      if (selfResolved) {
+        if (!opts.canStripTypes && /\.(ts|tsx)$/.test(selfResolved)) {
+          missing = true;
+          break;
+        }
+
+        if (selfResolved.startsWith(repoRoot) && (await fileHasMissingWorkspaceDeps(selfResolved))) {
+          missing = true;
+          break;
+        }
+
+        continue;
+      }
 
       const resolved = resolveWorkspaceSpecifier(specifier, file);
       if (!resolved) {
