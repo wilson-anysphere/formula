@@ -620,7 +620,8 @@ test.describe("clipboard shortcuts (copy/cut/paste)", () => {
       .poll(() => page.evaluate(async () => (await navigator.clipboard.readText()).trim()), { timeout: 10_000 })
       .toBe(sentinel);
 
-    const a1ValueAfterCut = await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"));
-    expect(a1ValueAfterCut).toBe("Secret");
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1")))
+      .toBe("Secret");
   });
 });
