@@ -7971,6 +7971,22 @@ fn bytecode_expr_is_eligible_inner(
             // scalar-only bytecode contexts (e.g. ABS / CONCAT_OP), which would otherwise compile to
             // bytecode but produce incorrect `#SPILL!` errors at runtime.
             bytecode::Expr::FuncCall { func, args } => match func {
+                // Field access (`A1.Price`) lifts over array/range bases and returns an array in
+                // those cases. Treat it as array-producing when its base is range/array-like so LET
+                // locals cannot smuggle dynamic arrays into scalar-only contexts.
+                Function::FieldAccess => {
+                    if args.len() != 2 {
+                        return BytecodeLocalBindingKind::Scalar;
+                    }
+                    match infer_binding_kind(&args[0], scopes) {
+                        BytecodeLocalBindingKind::Scalar | BytecodeLocalBindingKind::RefSingle => {
+                            BytecodeLocalBindingKind::Scalar
+                        }
+                        BytecodeLocalBindingKind::Range | BytecodeLocalBindingKind::ArrayLiteral => {
+                            BytecodeLocalBindingKind::ArrayLiteral
+                        }
+                    }
+                }
                 // CHOOSE can return either scalars, ranges, or array literals depending on the
                 // selected value argument. Use the "widest" kind across its value args so LET
                 // locals cannot smuggle range/array results into scalar-only bytecode contexts.
@@ -8148,6 +8164,24 @@ fn bytecode_expr_is_eligible_inner(
             }
         },
         bytecode::Expr::FuncCall { func, args } => match func {
+            bytecode::ast::Function::FieldAccess => {
+                if args.len() != 2 {
+                    return false;
+                }
+                // Field access evaluates its base with dynamic dereference semantics (and may
+                // therefore spill when the base is a multi-cell reference). Gate the base by the
+                // caller's allow_range/allow_array_literals flags.
+                //
+                // The field name is a scalar argument, but callers can provide references via
+                // direct `_FIELDACCESS` calls, so allow range values here and let the runtime apply
+                // implicit intersection.
+                bytecode_expr_is_eligible_inner(
+                    &args[0],
+                    allow_range,
+                    allow_array_literals,
+                    lexical_scopes,
+                ) && bytecode_expr_is_eligible_inner(&args[1], true, false, lexical_scopes)
+            }
             bytecode::ast::Function::If => {
                 if args.len() < 2 || args.len() > 3 {
                     return false;

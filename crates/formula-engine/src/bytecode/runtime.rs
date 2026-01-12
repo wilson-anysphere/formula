@@ -1713,6 +1713,7 @@ pub fn call_function(
     locale: &crate::LocaleConfig,
 ) -> Value {
     match func {
+        Function::FieldAccess => fn_fieldaccess(args, grid, base),
         // LET is lowered to bytecode locals by the compiler; it should not be invoked via the
         // generic function-call path (its "name" arguments are not evaluated values).
         Function::Let => Value::Error(ErrorKind::Value),
@@ -1827,6 +1828,98 @@ fn fn_false(args: &[Value]) -> Value {
         return Value::Error(ErrorKind::Value);
     }
     Value::Bool(false)
+}
+
+fn fn_fieldaccess(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
+    if args.len() != 2 {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    // Match the AST evaluator's behavior (see `functions::builtins_rich_values::_FIELDACCESS`):
+    // - The base expression is evaluated with reference semantics and then dereferenced into either
+    //   a scalar (single-cell) or array (multi-cell) value.
+    // - The field argument is evaluated as a scalar (with implicit intersection for references).
+    let base_val = deref_value_dynamic(args[0].clone(), grid, base);
+
+    let field_val = match args[1] {
+        // `_FIELDACCESS` is an internal lowering builtin; callers may still provide a reference as
+        // the field name via direct calls, so apply implicit intersection like normal scalar args.
+        Value::Range(_) | Value::MultiRange(_) => apply_implicit_intersection(args[1].clone(), grid, base),
+        _ => args[1].clone(),
+    };
+
+    let field = match &field_val {
+        Value::Error(e) => return Value::Error(*e),
+        Value::Text(s) => s.to_string(),
+        other => match coerce_to_string(other) {
+            Ok(s) => s,
+            Err(e) => return Value::Error(e),
+        },
+    };
+    let field_key = field.trim();
+    if field_key.is_empty() {
+        return Value::Error(ErrorKind::Value);
+    }
+
+    match base_val {
+        Value::Error(e) => Value::Error(e),
+        Value::Array(arr) => {
+            let mut out = Vec::with_capacity(arr.values.len());
+            for elem in arr.iter() {
+                out.push(fieldaccess_scalar(elem, field_key));
+            }
+            Value::Array(ArrayValue::new(arr.rows, arr.cols, out))
+        }
+        other => fieldaccess_scalar(&other, field_key),
+    }
+}
+
+fn fieldaccess_scalar(base: &Value, field: &str) -> Value {
+    match base {
+        Value::Error(e) => Value::Error(*e),
+        Value::Entity(entity) => match entity.get_field_case_insensitive(field) {
+            Some(v) => engine_value_to_bytecode(v),
+            None => Value::Error(ErrorKind::Field),
+        },
+        Value::Record(record) => match record.get_field_case_insensitive(field) {
+            Some(v) => engine_value_to_bytecode(v),
+            None => Value::Error(ErrorKind::Field),
+        },
+        _ => Value::Error(ErrorKind::Value),
+    }
+}
+
+fn engine_value_to_bytecode(value: EngineValue) -> Value {
+    match value {
+        EngineValue::Number(n) => Value::Number(n),
+        EngineValue::Bool(b) => Value::Bool(b),
+        EngineValue::Text(s) => Value::Text(Arc::from(s)),
+        EngineValue::Entity(e) => Value::Entity(Arc::new(e)),
+        EngineValue::Record(r) => Value::Record(Arc::new(r)),
+        EngineValue::Blank => Value::Empty,
+        EngineValue::Error(e) => Value::Error(e.into()),
+        EngineValue::Array(arr) => {
+            let total = match arr.rows.checked_mul(arr.cols) {
+                Some(v) => v,
+                None => return Value::Error(ErrorKind::Num),
+            };
+            let mut values = Vec::new();
+            if values.try_reserve_exact(total).is_err() {
+                return Value::Error(ErrorKind::Num);
+            }
+            for v in arr.values {
+                values.push(engine_value_to_bytecode(v));
+            }
+            Value::Array(ArrayValue::new(arr.rows, arr.cols, values))
+        }
+        // Reference-producing values are not expected inside rich-value field payloads; treat them
+        // as scalar type errors when surfaced.
+        EngineValue::Reference(_) | EngineValue::ReferenceUnion(_) => Value::Error(ErrorKind::Value),
+        // Lambdas cannot be represented in the bytecode runtime value model; match the engine's
+        // cell-value conversion by surfacing `#CALC!`.
+        EngineValue::Lambda(_) => Value::Error(ErrorKind::Calc),
+        EngineValue::Spill { .. } => Value::Error(ErrorKind::Spill),
+    }
 }
 
 fn fn_rand(args: &[Value], base: CellCoord) -> Value {

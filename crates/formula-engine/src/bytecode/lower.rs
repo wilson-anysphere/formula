@@ -791,7 +791,20 @@ fn lower_canonical_expr_inner(
                 )?,
             ))),
         },
-        crate::Expr::FieldAccess(_) => Err(LowerError::Unsupported),
+        crate::Expr::FieldAccess(access) => Ok(BytecodeExpr::FuncCall {
+            func: Function::FieldAccess,
+            args: vec![
+                lower_canonical_expr_inner(
+                    &access.base,
+                    origin,
+                    current_sheet,
+                    resolve_sheet,
+                    scopes,
+                    lambda_self_name,
+                )?,
+                BytecodeExpr::Literal(Value::Text(Arc::from(access.field.as_str()))),
+            ],
+        }),
         crate::Expr::StructuredRef(_) => Err(LowerError::Unsupported),
     }
 }

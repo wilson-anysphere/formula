@@ -29,6 +29,11 @@ pub enum BinaryOp {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Function {
+    /// Internal synthetic function used by lowering field-access expressions (`A1.Price`).
+    ///
+    /// This is not an Excel worksheet function; it is emitted by the canonical AST lowering
+    /// pipeline as an implementation detail of the `.` operator.
+    FieldAccess,
     Let,
     IsOmitted,
     True,
@@ -136,6 +141,7 @@ impl Function {
         let upper = name.to_ascii_uppercase();
         let base = upper.strip_prefix("_XLFN.").unwrap_or(upper.as_str());
         match base {
+            "_FIELDACCESS" => Function::FieldAccess,
             "LET" => Function::Let,
             "ISOMITTED" => Function::IsOmitted,
             "TRUE" => Function::True,
@@ -235,6 +241,7 @@ impl Function {
 
     pub fn name(&self) -> &str {
         match self {
+            Function::FieldAccess => "_FIELDACCESS",
             Function::Let => "LET",
             Function::IsOmitted => "ISOMITTED",
             Function::True => "TRUE",
