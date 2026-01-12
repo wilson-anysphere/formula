@@ -63,6 +63,7 @@ import type { CreateChartResult, CreateChartSpec } from "../../../../packages/ai
 import { colToName as colToNameA1, fromA1 as fromA1A1 } from "@formula/spreadsheet-frontend/a1";
 import { shiftA1References } from "@formula/spreadsheet-frontend";
 import { createSchemaProviderFromSearchWorkbook } from "../ai/context/searchWorkbookSchemaProvider.js";
+import type { WorkbookContextBuildStats } from "../ai/context/WorkbookContextBuilder.js";
 import { InlineEditController, type InlineEditLLMClient } from "../ai/inline-edit/inlineEditController";
 import type { AIAuditStore } from "../../../../packages/ai-audit/src/store.js";
 import type { CellRange as GridCellRange, GridAxisSizeChange, GridPresence, GridViewportState } from "@formula/grid";
@@ -685,6 +686,7 @@ export class SpreadsheetApp {
         llmClient?: InlineEditLLMClient;
         model?: string;
         auditStore?: AIAuditStore;
+        onWorkbookContextBuildStats?: (stats: WorkbookContextBuildStats) => void;
       };
     } = {}
   ) {
@@ -1074,7 +1076,8 @@ export class SpreadsheetApp {
       },
       llmClient: opts.inlineEdit?.llmClient,
       model: opts.inlineEdit?.model,
-      auditStore: opts.inlineEdit?.auditStore
+      auditStore: opts.inlineEdit?.auditStore,
+      onWorkbookContextBuildStats: opts.inlineEdit?.onWorkbookContextBuildStats,
     });
 
     if (this.gridMode === "shared") {

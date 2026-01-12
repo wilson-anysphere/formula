@@ -77,7 +77,9 @@ export interface WorkbookContextBuildStats {
   promptContextChars: number;
   promptContextTokens: number;
   readBlockCount: number;
+  readBlockCellCount: number;
   readBlockCountByKind: Record<WorkbookContextBlockKind, number>;
+  readBlockCellCountByKind: Record<WorkbookContextBlockKind, number>;
   cache: {
     schema: { hits: number; misses: number };
     block: { hits: number; misses: number };
@@ -347,16 +349,18 @@ export class WorkbookContextBuilder {
           durationMs: 0,
           mode: this.options.mode,
           model: this.options.model,
-          sheetCountSummarized: 0,
-          blockCount: 0,
-          promptContextChars: 0,
-          promptContextTokens: 0,
-          readBlockCount: 0,
-          readBlockCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
-          cache: {
-            schema: { hits: 0, misses: 0 },
-            block: { hits: 0, misses: 0 },
-          },
+           sheetCountSummarized: 0,
+           blockCount: 0,
+           promptContextChars: 0,
+           promptContextTokens: 0,
+           readBlockCount: 0,
+           readBlockCellCount: 0,
+           readBlockCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
+           readBlockCellCountByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
+           cache: {
+             schema: { hits: 0, misses: 0 },
+             block: { hits: 0, misses: 0 },
+           },
           rag: { enabled: false, retrievedCount: 0, retrievedBlockCount: 0 },
           timingsMs: {
             ragMs: 0,
@@ -1000,6 +1004,9 @@ export class WorkbookContextBuilder {
       stats.cache.block.misses += 1;
       stats.readBlockCount += 1;
       stats.readBlockCountByKind[params.kind] += 1;
+      const cells = Math.max(0, (clamped.endRow - clamped.startRow + 1) * (clamped.endCol - clamped.startCol + 1));
+      stats.readBlockCellCount += cells;
+      stats.readBlockCellCountByKind[params.kind] += cells;
     }
     const startedAt = stats ? nowMs() : 0;
     const toolResult = await executor.execute({

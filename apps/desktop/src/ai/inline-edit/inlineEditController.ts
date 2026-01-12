@@ -49,6 +49,13 @@ export interface InlineEditControllerOptions {
   llmClient?: InlineEditLLMClient;
   model?: string;
   auditStore?: AIAuditStore;
+  /**
+   * Optional hook for workbook context build telemetry emitted by the underlying
+   * `WorkbookContextBuilder`.
+   *
+   * NOTE: Inline-edit runs in the UI thread; keep this callback lightweight.
+   */
+  onWorkbookContextBuildStats?: (stats: WorkbookContextBuildStats) => void;
 
   /**
    * Optional override for the strict inline-edit prompt budget. The effective
@@ -160,7 +167,7 @@ export class InlineEditController {
 
       this.overlay.setRunning("Building context…");
       throwIfAborted(signal);
-      const onBuildStats =
+      const devOnBuildStats =
         import.meta.env.MODE === "development"
           ? (stats: WorkbookContextBuildStats) => {
               try {
@@ -168,6 +175,13 @@ export class InlineEditController {
               } catch {
                 // ignore
               }
+            }
+          : undefined;
+      const onBuildStats =
+        devOnBuildStats || this.options.onWorkbookContextBuildStats
+          ? (stats: WorkbookContextBuildStats) => {
+              devOnBuildStats?.(stats);
+              this.options.onWorkbookContextBuildStats?.(stats);
             }
           : undefined;
       const contextBuilder = new WorkbookContextBuilder({
