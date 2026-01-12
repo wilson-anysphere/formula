@@ -367,14 +367,10 @@ export class WorkbookContextBuilder {
             schemaMs: 0,
             readBlockMs: 0,
             promptContextMs: 0,
-            readBlockMsByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
-          },
-        }
+           readBlockMsByKind: { selection: 0, sheet_sample: 0, retrieved: 0 },
+         },
+       }
       : null;
-
-    const sheetIds =
-      this.options.mode === "inline_edit" ? [input.activeSheetId] : this.resolveSheetIds({ activeSheetId: input.activeSheetId });
-
     const selection = input.selectedRange;
     const schemaProvider = this.options.schemaProvider ?? null;
 
@@ -430,6 +426,9 @@ export class WorkbookContextBuilder {
     const indexStats = ragResult?.indexStats;
     if (stats) stats.rag.retrievedCount = retrieved.length;
 
+    const retrievalEnabled = Boolean(input.focusQuestion && this.options.ragService);
+    const retrievedSheetIds = retrievalEnabled ? extractRetrievedSheetIds(retrieved) : [];
+
     const selectionBlock = selection
       ? await this.readBlock(
           executor,
@@ -449,7 +448,15 @@ export class WorkbookContextBuilder {
     const sheetsToSummarize =
       this.options.mode === "inline_edit"
         ? [input.activeSheetId]
-        : [input.activeSheetId, ...sheetIds.filter((id) => id !== input.activeSheetId)];
+        : this.resolveSheetsToSummarize({
+            activeSheetId: input.activeSheetId,
+            // Selection prioritization only applies when retrieval is enabled (chat/agent surfaces).
+            selectionSheetId: retrievalEnabled ? selection?.sheetId : null,
+            retrievedSheetIds,
+            // When retrieval yields relevant sheets, summarize only those (active/selection/retrieved) for latency.
+            // When retrieval is disabled or yields no sheets, fall back to the legacy behavior of filling up to maxSheets.
+            includeFallbackSheets: !retrievalEnabled || retrievedSheetIds.length === 0,
+          });
 
     const sheetSummaries: WorkbookContextSheetSummary[] = [];
     const blocks: WorkbookContextDataBlock[] = [];
@@ -586,18 +593,40 @@ export class WorkbookContextBuilder {
     }
   }
 
-  private resolveSheetIds(params: { activeSheetId: string }): string[] {
-    const ids = Array.isArray(this.options.spreadsheet.listSheets?.()) ? this.options.spreadsheet.listSheets() : [];
-    const unique = Array.from(new Set(ids.map((s) => String(s)))).filter(Boolean);
-    unique.sort((a, b) => a.localeCompare(b));
-
-    // Always include the active sheet, even if adapters return a stale list.
-    if (!unique.includes(params.activeSheetId)) unique.unshift(params.activeSheetId);
-
+  private resolveSheetsToSummarize(params: {
+    activeSheetId: string;
+    selectionSheetId?: string | null;
+    retrievedSheetIds: string[];
+    includeFallbackSheets: boolean;
+  }): string[] {
     const cap = Math.max(1, this.options.maxSheets);
-    const out = unique.slice(0, cap);
-    if (!out.includes(params.activeSheetId)) {
-      // Ensure active sheet inclusion when it was pushed out by the cap.
+
+    const candidates: string[] = [];
+    const seen = new Set<string>();
+    const pushUnique = (id: string | null | undefined) => {
+      const normalized = typeof id === "string" ? id.trim() : "";
+      if (!normalized) return;
+      if (seen.has(normalized)) return;
+      seen.add(normalized);
+      candidates.push(normalized);
+    };
+
+    // Stable priority order:
+    // 1) active sheet
+    // 2) selection sheet (if any)
+    // 3) sheets referenced by retrieved chunks
+    // 4) optionally fill with remaining sheets (legacy behavior)
+    pushUnique(params.activeSheetId);
+    pushUnique(params.selectionSheetId);
+    for (const id of params.retrievedSheetIds) pushUnique(id);
+
+    if (params.includeFallbackSheets) {
+      for (const id of this.listSheetIdsSortedUnique()) pushUnique(id);
+    }
+
+    // Cap, but always keep the active sheet included.
+    const out = candidates.slice(0, cap);
+    if (!out.includes(params.activeSheetId) && params.activeSheetId) {
       out.pop();
       out.unshift(params.activeSheetId);
     }
@@ -666,6 +695,13 @@ export class WorkbookContextBuilder {
       if (!oldest) break;
       this.blockCache.delete(oldest);
     }
+  }
+
+  private listSheetIdsSortedUnique(): string[] {
+    const ids = Array.isArray(this.options.spreadsheet.listSheets?.()) ? this.options.spreadsheet.listSheets() : [];
+    const unique = Array.from(new Set(ids.map((s) => String(s).trim()))).filter(Boolean);
+    unique.sort((a, b) => a.localeCompare(b));
+    return unique;
   }
 
   private async buildSheetSummary(
@@ -1374,4 +1410,18 @@ function extractRetrievedRanges(retrieved: unknown[]): string[] {
     }
   }
   return out.sort();
+}
+
+function extractRetrievedSheetIds(retrieved: unknown[]): string[] {
+  const sheetIds: string[] = [];
+  for (const chunk of retrieved) {
+    const meta = (chunk as any)?.metadata;
+    if (!meta) continue;
+    const sheetName = typeof meta.sheetName === "string" ? meta.sheetName.trim() : "";
+    if (!sheetName) continue;
+    sheetIds.push(sheetName);
+  }
+  const unique = Array.from(new Set(sheetIds));
+  unique.sort((a, b) => a.localeCompare(b));
+  return unique;
 }

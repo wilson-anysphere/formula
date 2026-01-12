@@ -20,6 +20,8 @@ import { DocumentController } from "../../../document/documentController.js";
 
 import { ContextManager } from "../../../../../../packages/ai-context/src/contextManager.js";
 import { HashEmbedder, InMemoryVectorStore } from "../../../../../../packages/ai-rag/src/index.js";
+import type { RangeAddress } from "../../../../../../packages/ai-tools/src/spreadsheet/a1.js";
+import type { CellData } from "../../../../../../packages/ai-tools/src/spreadsheet/types.js";
 
 import { DLP_ACTION } from "../../../../../../packages/security/dlp/src/actions.js";
 import { createDefaultOrgPolicy } from "../../../../../../packages/security/dlp/src/policy.js";
@@ -28,6 +30,15 @@ import { LocalClassificationStore, createMemoryStorage } from "../../../../../..
 
 import { DocumentControllerSpreadsheetApi } from "../../tools/documentControllerSpreadsheetApi.js";
 import { WorkbookContextBuilder } from "../WorkbookContextBuilder.js";
+
+class CountingSpreadsheetApi extends DocumentControllerSpreadsheetApi {
+  readonly readRangeCalls: RangeAddress[] = [];
+
+  override readRange(range: RangeAddress): CellData[][] {
+    this.readRangeCalls.push(range);
+    return super.readRange(range);
+  }
+}
 
 describe("WorkbookContextBuilder", () => {
   beforeEach(() => {
@@ -785,5 +796,78 @@ describe("WorkbookContextBuilder", () => {
     expect(readRangeCalls["Sheet2"] ?? 0).toBe(firstSheet2Reads);
 
     spy.mockRestore();
+  });
+
+  it("includes retrieved sheets even when they would be excluded by maxSheets capping", async () => {
+    const documentController = new DocumentController();
+
+    const sheetIds = Array.from({ length: 12 }, (_v, idx) => `Sheet${String(idx + 1).padStart(2, "0")}`);
+    for (const sheetId of sheetIds) {
+      documentController.setRangeValues(sheetId, "A1", [["Value"], [sheetId]]);
+    }
+
+    const spreadsheet = new DocumentControllerSpreadsheetApi(documentController);
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_retrieval_sheet_selection",
+      documentController,
+      spreadsheet,
+      mode: "chat",
+      model: "unit-test-model",
+      maxSheets: 3,
+      ragService: {
+        buildWorkbookContextFromSpreadsheetApi: async () => ({
+          retrieved: [
+            {
+              id: "chunk_sheet12",
+              text: "Sheet12 has the value.",
+              metadata: { sheetName: "Sheet12", rect: { r0: 0, c0: 0, r1: 1, c1: 0 } },
+            },
+          ],
+        }),
+      },
+    });
+
+    // Without retrieval, maxSheets=3 would only include Sheet01..Sheet03 (plus active).
+    // With retrieval, the referenced sheet should be summarized even if it sorts outside the cap.
+    const ctx = await builder.build({ activeSheetId: "Sheet01", focusQuestion: "what is on Sheet12?" });
+
+    const summarizedSheetIds = ctx.payload.sheets.map((s) => s.sheetId);
+    expect(summarizedSheetIds).toContain("Sheet01");
+    expect(summarizedSheetIds).toContain("Sheet12");
+  });
+
+  it("does not read schema samples for unrelated sheets when retrieval narrows to specific sheets", async () => {
+    const documentController = new DocumentController();
+
+    const sheetIds = Array.from({ length: 15 }, (_v, idx) => `Sheet${String(idx + 1).padStart(2, "0")}`);
+    for (const sheetId of sheetIds) {
+      documentController.setRangeValues(sheetId, "A1", [["Value"], [sheetId]]);
+    }
+
+    const spreadsheet = new CountingSpreadsheetApi(documentController);
+    const builder = new WorkbookContextBuilder({
+      workbookId: "wb_retrieval_perf",
+      documentController,
+      spreadsheet,
+      mode: "chat",
+      model: "unit-test-model",
+      maxSheets: 10,
+      // Keep the test focused on schema sampling rather than extra retrieved block reads.
+      maxRetrievedBlocks: 0,
+      ragService: {
+        buildWorkbookContextFromSpreadsheetApi: async () => ({
+          retrieved: [
+            { id: "chunk_sheet10", text: "Relevant", metadata: { sheetName: "Sheet10", rect: { r0: 0, c0: 0, r1: 1, c1: 0 } } },
+            { id: "chunk_sheet11", text: "Relevant", metadata: { sheetName: "Sheet11", rect: { r0: 0, c0: 0, r1: 1, c1: 0 } } },
+          ],
+        }),
+      },
+    });
+
+    const ctx = await builder.build({ activeSheetId: "Sheet01", focusQuestion: "compare Sheet10 and Sheet11" });
+    expect(ctx.payload.sheets.map((s) => s.sheetId).sort()).toEqual(["Sheet01", "Sheet10", "Sheet11"].sort());
+
+    const sheetsRead = new Set(spreadsheet.readRangeCalls.map((call) => call.sheet));
+    expect([...sheetsRead].sort()).toEqual(["Sheet01", "Sheet10", "Sheet11"].sort());
   });
 });
