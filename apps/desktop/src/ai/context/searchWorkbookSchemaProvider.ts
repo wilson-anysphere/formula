@@ -23,6 +23,17 @@ function isValidRange(value: unknown): value is Range {
  * that `WorkbookContextBuilder` can consume.
  */
 export function createSchemaProviderFromSearchWorkbook(workbook: any): WorkbookSchemaProvider {
+  const resolveSheetId = (sheetName: string): string => {
+    const raw = typeof sheetName === "string" ? sheetName.trim() : "";
+    if (!raw) return "";
+    const resolver = workbook?.sheetNameResolver;
+    const resolved =
+      resolver && typeof resolver.getSheetIdByName === "function"
+        ? (resolver.getSheetIdByName(raw) as string | null)
+        : null;
+    return resolved ?? raw;
+  };
+
   return {
     getSchemaVersion: () => (typeof workbook?.schemaVersion === "number" ? workbook.schemaVersion : 0),
     getNamedRanges: () => {
@@ -30,7 +41,7 @@ export function createSchemaProviderFromSearchWorkbook(workbook: any): WorkbookS
       const out: Array<{ name: string; sheetId: string; range: Range }> = [];
       for (const entry of values) {
         const name = typeof entry?.name === "string" ? entry.name.trim() : "";
-        const sheetId = typeof entry?.sheetName === "string" ? entry.sheetName : "";
+        const sheetId = typeof entry?.sheetName === "string" ? resolveSheetId(entry.sheetName) : "";
         const range = entry?.range;
         if (!name || !sheetId || !isValidRange(range)) continue;
         out.push({ name, sheetId, range });
@@ -42,7 +53,7 @@ export function createSchemaProviderFromSearchWorkbook(workbook: any): WorkbookS
       const out: Array<{ name: string; sheetId: string; range: Range }> = [];
       for (const table of values) {
         const name = typeof table?.name === "string" ? table.name.trim() : "";
-        const sheetId = typeof table?.sheetName === "string" ? table.sheetName : "";
+        const sheetId = typeof table?.sheetName === "string" ? resolveSheetId(table.sheetName) : "";
         const startRow = table?.startRow;
         const endRow = table?.endRow;
         const startCol = table?.startCol;

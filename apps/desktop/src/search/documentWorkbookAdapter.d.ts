@@ -1,7 +1,8 @@
 export class DocumentWorkbookAdapter {
-  constructor(params: { document: any });
+  constructor(params: { document: any; sheetNameResolver?: any });
 
   document: any;
+  sheetNameResolver: any;
   schemaVersion: number;
   names: Map<string, any>;
   tables: Map<string, any>;
@@ -17,4 +18,3 @@ export class DocumentWorkbookAdapter {
 
   clearSchema(): void;
 }
-

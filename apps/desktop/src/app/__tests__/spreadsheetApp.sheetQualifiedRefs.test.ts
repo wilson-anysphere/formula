@@ -147,4 +147,49 @@ describe("SpreadsheetApp fallback evaluator", () => {
     app.destroy();
     root.remove();
   });
+
+  it("resolves sheet-qualified references using display names (supports rename where id !== name)", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const namesById = new Map<string, string>([
+      ["Sheet1", "Sheet1"],
+      ["Sheet2", "Sheet2"],
+    ]);
+    const resolver = {
+      getSheetNameById: (id: string) => namesById.get(id) ?? null,
+      getSheetIdByName: (name: string) => {
+        const needle = name.trim().toLowerCase();
+        if (!needle) return null;
+        for (const [id, sheetName] of namesById.entries()) {
+          if (sheetName.toLowerCase() === needle) return id;
+        }
+        return null;
+      },
+    };
+
+    const app = new SpreadsheetApp(root, status, { sheetNameResolver: resolver });
+    const doc = app.getDocument();
+
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, 123);
+    doc.setCellFormula("Sheet1", { row: 0, col: 1 }, "=Sheet2!A1+1");
+    expect((app as any).getCellComputedValue({ row: 0, col: 1 })).toBe(124);
+
+    // Rename Sheet2 (id stays "Sheet2", display name becomes "Budget").
+    namesById.set("Sheet2", "Budget");
+
+    // New formulas should resolve display names back to sheet ids.
+    doc.setCellFormula("Sheet1", { row: 0, col: 2 }, "=Budget!A1+1");
+    expect((app as any).getCellComputedValue({ row: 0, col: 2 })).toBe(124);
+
+    // Must not create a new sheet for the display name.
+    expect(doc.getSheetIds()).not.toContain("Budget");
+
+    app.destroy();
+    root.remove();
+  });
 });

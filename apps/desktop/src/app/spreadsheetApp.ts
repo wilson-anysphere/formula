@@ -48,6 +48,7 @@ import { drawCommentIndicator } from "../comments/CommentIndicator";
 import { evaluateFormula, type SpreadsheetValue } from "../spreadsheet/evaluateFormula";
 import { AiCellFunctionEngine } from "../spreadsheet/AiCellFunctionEngine.js";
 import { DocumentWorkbookAdapter } from "../search/documentWorkbookAdapter.js";
+import type { SheetNameResolver } from "../sheet/sheetNameResolver";
 import { parseGoTo } from "../../../../packages/search/index.js";
 import type { CreateChartResult, CreateChartSpec } from "../../../../packages/ai-tools/src/spreadsheet/api.js";
 import { colToName as colToNameA1, fromA1 as fromA1A1 } from "@formula/spreadsheet-frontend/a1";
@@ -370,6 +371,7 @@ export class SpreadsheetApp {
   private readonly idle = new IdleTracker();
   private readonly computedValues = new Map<string, SpreadsheetValue>();
   private uiReady = false;
+  private readonly sheetNameResolver: SheetNameResolver | null;
   private readonly gridMode: DesktopGridMode;
   private readonly engine = new IdleTrackingEngine(
     new MockEngine(),
@@ -378,7 +380,7 @@ export class SpreadsheetApp {
     (changes) => this.applyComputedChanges(changes)
   );
   private readonly document = new DocumentController({ engine: this.engine });
-  private readonly searchWorkbook = new DocumentWorkbookAdapter({ document: this.document });
+  private readonly searchWorkbook: DocumentWorkbookAdapter;
   private readonly aiCellFunctions: AiCellFunctionEngine;
   private limits: GridLimits;
   private sharedGrid: DesktopSharedGrid | null = null;
@@ -598,6 +600,7 @@ export class SpreadsheetApp {
       limits?: GridLimits;
       formulaBar?: HTMLElement;
       collab?: SpreadsheetAppCollabOptions;
+      sheetNameResolver?: SheetNameResolver;
       inlineEdit?: {
         llmClient?: InlineEditLLMClient;
         model?: string;
@@ -605,6 +608,8 @@ export class SpreadsheetApp {
       };
     } = {}
   ) {
+    this.sheetNameResolver = opts.sheetNameResolver ?? null;
+    this.searchWorkbook = new DocumentWorkbookAdapter({ document: this.document, sheetNameResolver: this.sheetNameResolver ?? undefined });
     this.gridMode = resolveDesktopGridMode();
     this.limits =
       opts.limits ??
@@ -2583,10 +2588,11 @@ export class SpreadsheetApp {
     this.syncSharedGridInteractionMode();
     const docRange = this.docRangeFromGridRange(range);
     const rangeSheetId = this.formulaEditCell && this.formulaEditCell.sheetId !== this.sheetId ? this.sheetId : undefined;
+    const rangeSheetName = rangeSheetId ? this.resolveSheetDisplayNameById(rangeSheetId) : undefined;
     this.formulaBar.beginRangeSelection({
       start: { row: docRange.startRow, col: docRange.startCol },
       end: { row: docRange.endRow, col: docRange.endCol }
-    }, rangeSheetId);
+    }, rangeSheetName);
   }
 
   private onSharedRangeSelectionChange(range: GridCellRange): void {
@@ -2594,10 +2600,11 @@ export class SpreadsheetApp {
     this.syncSharedGridInteractionMode();
     const docRange = this.docRangeFromGridRange(range);
     const rangeSheetId = this.formulaEditCell && this.formulaEditCell.sheetId !== this.sheetId ? this.sheetId : undefined;
+    const rangeSheetName = rangeSheetId ? this.resolveSheetDisplayNameById(rangeSheetId) : undefined;
     this.formulaBar.updateRangeSelection({
       start: { row: docRange.startRow, col: docRange.startCol },
       end: { row: docRange.endRow, col: docRange.endCol }
-    }, rangeSheetId);
+    }, rangeSheetName);
   }
 
   private onSharedRangeSelectionEnd(): void {
@@ -2660,14 +2667,17 @@ export class SpreadsheetApp {
 
   private goTo(reference: string): void {
     try {
-      const parsed = parseGoTo(reference, { workbook: this.searchWorkbook, currentSheetName: this.sheetId });
+      const currentSheetName = this.resolveSheetDisplayNameById(this.sheetId);
+      const parsed = parseGoTo(reference, { workbook: this.searchWorkbook, currentSheetName });
       if (parsed.type !== "range") return;
 
       const { range } = parsed;
+      const targetSheetId = this.resolveSheetIdByName(parsed.sheetName);
+      if (!targetSheetId) return;
       if (range.startRow === range.endRow && range.startCol === range.endCol) {
-        this.activateCell({ sheetId: parsed.sheetName, row: range.startRow, col: range.startCol });
+        this.activateCell({ sheetId: targetSheetId, row: range.startRow, col: range.startCol });
       } else {
-        this.selectRange({ sheetId: parsed.sheetName, range });
+        this.selectRange({ sheetId: targetSheetId, range });
       }
     } catch {
       // Ignore invalid Go To inputs for now.
@@ -5168,12 +5178,13 @@ export class SpreadsheetApp {
           if (r) {
             const rangeSheetId =
               this.formulaEditCell && this.formulaEditCell.sheetId !== this.sheetId ? this.sheetId : undefined;
+            const rangeSheetName = rangeSheetId ? this.resolveSheetDisplayNameById(rangeSheetId) : undefined;
             this.formulaBar.updateRangeSelection(
               {
                 start: { row: r.startRow, col: r.startCol },
                 end: { row: r.endRow, col: r.endCol }
               },
-              rangeSheetId
+              rangeSheetName
             );
           }
         }
@@ -5276,12 +5287,13 @@ export class SpreadsheetApp {
       this.updateStatus();
       const rangeSheetId =
         this.formulaEditCell && this.formulaEditCell.sheetId !== this.sheetId ? this.sheetId : undefined;
+      const rangeSheetName = rangeSheetId ? this.resolveSheetDisplayNameById(rangeSheetId) : undefined;
       this.formulaBar.beginRangeSelection(
         {
           start: { row: cell.row, col: cell.col },
           end: { row: cell.row, col: cell.col }
         },
-        rangeSheetId
+        rangeSheetName
       );
       return;
     }
@@ -5426,12 +5438,13 @@ export class SpreadsheetApp {
         const r = this.selection.ranges[0];
         const rangeSheetId =
           this.formulaEditCell && this.formulaEditCell.sheetId !== this.sheetId ? this.sheetId : undefined;
+        const rangeSheetName = rangeSheetId ? this.resolveSheetDisplayNameById(rangeSheetId) : undefined;
         this.formulaBar.updateRangeSelection(
           {
             start: { row: r.startRow, col: r.startCol },
             end: { row: r.endRow, col: r.endCol }
           },
-          rangeSheetId
+          rangeSheetName
         );
       }
 
@@ -6537,6 +6550,22 @@ export class SpreadsheetApp {
     return `${sheetId}:${address.replaceAll("$", "").toUpperCase()}`;
   }
 
+  private resolveSheetIdByName(name: string): string | null {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+
+    const resolved = this.sheetNameResolver?.getSheetIdByName(trimmed);
+    if (resolved) return resolved;
+
+    // Fallback to sheet ids to keep legacy formulas (and test fixtures) working.
+    const knownSheets = this.document.getSheetIds();
+    return knownSheets.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
+  }
+
+  private resolveSheetDisplayNameById(sheetId: string): string {
+    return this.sheetNameResolver?.getSheetNameById(sheetId) ?? sheetId;
+  }
+
   private invalidateComputedValues(changes: unknown): void {
     if (!Array.isArray(changes)) return;
     for (const change of changes) {
@@ -6569,7 +6598,7 @@ export class SpreadsheetApp {
       if (address.includes("!")) {
         const [maybeSheet, cell] = address.split("!", 2);
         if (maybeSheet && cell) {
-          sheetId = maybeSheet;
+          sheetId = this.resolveSheetIdByName(maybeSheet) ?? maybeSheet;
           address = cell;
         }
       }
@@ -6613,13 +6642,6 @@ export class SpreadsheetApp {
     let value: SpreadsheetValue;
 
     if (state?.formula != null) {
-      const resolveSheetId = (name: string): string | null => {
-        const trimmed = name.trim();
-        if (!trimmed) return null;
-        const knownSheets = this.document.getSheetIds();
-        return knownSheets.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
-      };
-
       value = evaluateFormula(state.formula, (ref) => {
         const normalized = ref.replaceAll("$", "").trim();
         let targetSheet = sheetId;
@@ -6627,7 +6649,7 @@ export class SpreadsheetApp {
         if (normalized.includes("!")) {
           const [maybeSheet, addr] = normalized.split("!", 2);
           if (maybeSheet && addr) {
-            const resolved = resolveSheetId(maybeSheet);
+            const resolved = this.resolveSheetIdByName(maybeSheet);
             if (!resolved) return "#REF!";
             targetSheet = resolved;
             targetAddress = addr.trim();

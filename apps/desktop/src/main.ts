@@ -1,4 +1,5 @@
 import { SpreadsheetApp } from "./app/spreadsheetApp";
+import type { SheetNameResolver } from "./sheet/sheetNameResolver";
 import "./styles/tokens.css";
 import "./styles/ui.css";
 import "./styles/command-palette.css";
@@ -248,6 +249,19 @@ function installExternalLinkInterceptor(): void {
 
 installExternalLinkInterceptor();
 
+const sheetNameResolver: SheetNameResolver = {
+  getSheetNameById(id: string): string | null {
+    const key = String(id ?? "").trim();
+    if (!key) return null;
+    return workbookSheetStore.getName(key) ?? key;
+  },
+  getSheetIdByName(name: string): string | null {
+    const trimmed = String(name ?? "").trim();
+    if (!trimmed) return null;
+    return workbookSheetStore.resolveIdByName(trimmed) ?? null;
+  },
+};
+
 // Cursor desktop no longer supports user-provided LLM settings, but legacy builds
 // persisted provider + API keys in localStorage. Best-effort purge on startup so
 // we don't leave stale secrets behind.
@@ -369,7 +383,7 @@ const workbookId = "local-workbook";
 const app = new SpreadsheetApp(
   gridRoot,
   { activeCell, selectionRange, activeValue, selectionSum, selectionAverage, selectionCount },
-  { formulaBar: formulaBarRoot, workbookId },
+  { formulaBar: formulaBarRoot, workbookId, sheetNameResolver },
 );
 
 // Expose a small API for Playwright assertions early so e2e can still attach even if
@@ -1424,18 +1438,17 @@ if (
     const query = String(name ?? "").trim();
     if (!query) return null;
 
-    // Prefer matching against display names loaded from the workbook backend.
-    for (const [sheetId, sheetName] of workbookSheetNames.entries()) {
-      if (sheetName === query) return sheetId;
-    }
+    // Prefer matching against display names from the sheet metadata store.
+    const resolved = workbookSheetStore.resolveIdByName(query);
+    if (resolved) return resolved;
 
     // Fall back to treating the name as a raw sheet id (eg: in-memory sessions where
-    // sheet ids are "Sheet1", "Sheet2", ... and `workbookSheetNames` is empty).
-    if (workbookSheetNames.has(query)) return query;
+    // sheet ids are "Sheet1", "Sheet2", ...).
+    if (workbookSheetStore.getById(query)) return query;
     if (app.getDocument().getSheetIds().includes(query)) return query;
 
     const activeSheetId = app.getCurrentSheetId();
-    const activeSheetName = workbookSheetNames.get(activeSheetId) ?? activeSheetId;
+    const activeSheetName = workbookSheetStore.getName(activeSheetId) ?? activeSheetId;
     if (query === activeSheetId || query === activeSheetName) return activeSheetId;
 
     return null;
@@ -1507,7 +1520,7 @@ if (
     async getSheet(name: string) {
       const sheetId = findSheetIdByName(name);
       if (!sheetId) return undefined;
-      return { id: sheetId, name: workbookSheetNames.get(sheetId) ?? sheetId };
+      return { id: sheetId, name: workbookSheetStore.getName(sheetId) ?? sheetId };
     },
     async activateSheet(name: string) {
       const sheetId = findSheetIdByName(name);
@@ -1516,7 +1529,7 @@ if (
       }
       app.activateSheet(sheetId);
       app.focus();
-      return { id: sheetId, name: workbookSheetNames.get(sheetId) ?? sheetId };
+      return { id: sheetId, name: workbookSheetStore.getName(sheetId) ?? sheetId };
     },
     async createSheet(_name: string) {
       throw new Error("Not implemented");
@@ -3185,14 +3198,34 @@ if (
 
 const workbook = app.getSearchWorkbook();
 
+function currentSheetDisplayName(): string {
+  return sheetNameResolver.getSheetNameById(app.getCurrentSheetId()) ?? app.getCurrentSheetId();
+}
+
+function resolveSheetIdFromName(name: string): string | null {
+  const trimmed = String(name ?? "").trim();
+  if (!trimmed) return null;
+  const resolved = sheetNameResolver.getSheetIdByName(trimmed);
+  if (resolved) return resolved;
+
+  // Allow addressing sheets by id as a fallback (e.g. older formulas or empty-sheet metadata).
+  const needle = trimmed.toLowerCase();
+  const docIds = app.getDocument().getSheetIds();
+  return docIds.find((id) => id.toLowerCase() === needle) ?? null;
+}
+
 const findReplaceController = new FindReplaceController({
   workbook,
-  getCurrentSheetName: () => app.getCurrentSheetId(),
+  getCurrentSheetName: () => currentSheetDisplayName(),
   getActiveCell: () => {
     const cell = app.getActiveCell();
-    return { sheetName: app.getCurrentSheetId(), row: cell.row, col: cell.col };
+    return { sheetName: currentSheetDisplayName(), row: cell.row, col: cell.col };
   },
-  setActiveCell: ({ sheetName, row, col }) => app.activateCell({ sheetId: sheetName, row, col }),
+  setActiveCell: ({ sheetName, row, col }) => {
+    const sheetId = resolveSheetIdFromName(sheetName);
+    if (!sheetId) return;
+    app.activateCell({ sheetId, row, col });
+  },
   getSelectionRanges: () => app.getSelectionRanges(),
   beginBatch: (opts) => app.getDocument().beginBatch(opts),
   endBatch: () => app.getDocument().endBatch()
@@ -3201,9 +3234,17 @@ const findReplaceController = new FindReplaceController({
 const { findDialog, replaceDialog, goToDialog } = registerFindReplaceShortcuts({
   controller: findReplaceController,
   workbook,
-  getCurrentSheetName: () => app.getCurrentSheetId(),
-  setActiveCell: ({ sheetName, row, col }) => app.activateCell({ sheetId: sheetName, row, col }),
-  selectRange: ({ sheetName, range }) => app.selectRange({ sheetId: sheetName, range })
+  getCurrentSheetName: () => currentSheetDisplayName(),
+  setActiveCell: ({ sheetName, row, col }) => {
+    const sheetId = resolveSheetIdFromName(sheetName);
+    if (!sheetId) return;
+    app.activateCell({ sheetId, row, col });
+  },
+  selectRange: ({ sheetName, range }) => {
+    const sheetId = resolveSheetIdFromName(sheetName);
+    if (!sheetId) return;
+    app.selectRange({ sheetId, range });
+  }
 });
 
 function showDialogAndFocus(dialog: HTMLDialogElement): void {
@@ -4409,8 +4450,9 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     const sheetIdFromRef = explicitSheetName ? workbookSheetStore.resolveIdByName(explicitSheetName) ?? explicitSheetName : null;
     const rawScopeSheet = typeof (entry as any)?.sheet_id === "string" ? String((entry as any).sheet_id) : null;
     const sheetIdFromScope = rawScopeSheet ? workbookSheetStore.resolveIdByName(rawScopeSheet) ?? rawScopeSheet : null;
-    const sheetName = sheetIdFromRef ?? sheetIdFromScope;
-    if (!sheetName) continue;
+    const sheetId = sheetIdFromRef ?? sheetIdFromScope;
+    if (!sheetId) continue;
+    const sheetName = workbookSheetStore.getName(sheetId) ?? sheetId;
 
     let range: { startRow: number; endRow: number; startCol: number; endCol: number } | null = null;
     try {
@@ -4425,8 +4467,8 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
 
   for (const table of normalizedTables) {
     const name = typeof (table as any)?.name === "string" ? String((table as any).name) : "";
-    const rawSheetName = typeof (table as any)?.sheet_id === "string" ? String((table as any).sheet_id) : "";
-    const sheetName = rawSheetName ? workbookSheetStore.resolveIdByName(rawSheetName) ?? rawSheetName : "";
+    const sheetId = typeof (table as any)?.sheet_id === "string" ? String((table as any).sheet_id) : "";
+    const sheetName = sheetId ? workbookSheetStore.getName(sheetId) ?? sheetId : "";
     const columns = Array.isArray((table as any)?.columns) ? (table as any).columns.map(String) : [];
     if (!name || !sheetName || columns.length === 0) continue;
 

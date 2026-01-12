@@ -30,11 +30,13 @@ export class DocumentWorkbookAdapter {
   /**
    * @param {{
    *   document: import("../document/documentController.js").DocumentController,
+   *   sheetNameResolver?: import("../sheet/sheetNameResolver.ts").SheetNameResolver,
    * }} params
    */
-  constructor({ document }) {
+  constructor({ document, sheetNameResolver } = {}) {
     if (!document) throw new Error("DocumentWorkbookAdapter: document is required");
     this.document = document;
+    this.sheetNameResolver = sheetNameResolver ?? null;
     /** @type {Map<string, DocumentSheetAdapter>} */
     this.#sheetsById = new Map();
 
@@ -59,17 +61,15 @@ export class DocumentWorkbookAdapter {
     const ids = typeof this.document.getSheetIds === "function" ? this.document.getSheetIds() : [];
     if (ids.length === 0) return [];
 
-    return ids.map((id) => this.getSheet(id));
+    return ids.map((id) => this.#getSheetById(id));
   }
 
   getSheet(sheetName) {
-    const key = String(sheetName);
-    let sheet = this.#sheetsById.get(key);
-    if (!sheet) {
-      sheet = new DocumentSheetAdapter(this.document, key);
-      this.#sheetsById.set(key, sheet);
+    const sheetId = this.#resolveSheetIdByName(sheetName);
+    if (!sheetId) {
+      throw new Error(`Unknown sheet: ${sheetName}`);
     }
-    return sheet;
+    return this.#getSheetById(sheetId);
   }
 
   defineName(name, ref) {
@@ -95,27 +95,55 @@ export class DocumentWorkbookAdapter {
     this.names.clear();
     this.tables.clear();
   }
+
+  #resolveSheetIdByName(sheetName) {
+    const trimmed = String(sheetName ?? "").trim();
+    if (!trimmed) return null;
+
+    const resolved = this.sheetNameResolver?.getSheetIdByName?.(trimmed);
+    if (typeof resolved === "string" && resolved.trim()) return resolved;
+
+    // Fallback: allow referring to sheets by id (legacy behavior).
+    const ids = typeof this.document.getSheetIds === "function" ? this.document.getSheetIds() : [];
+    return ids.find((id) => id.toLowerCase() === trimmed.toLowerCase()) ?? null;
+  }
+
+  #getSheetById(sheetId) {
+    const key = String(sheetId);
+    let sheet = this.#sheetsById.get(key);
+    if (!sheet) {
+      sheet = new DocumentSheetAdapter(this.document, key, this.sheetNameResolver);
+      this.#sheetsById.set(key, sheet);
+    }
+    return sheet;
+  }
 }
 
 class DocumentSheetAdapter {
   /**
    * @param {import("../document/documentController.js").DocumentController} document
    * @param {string} sheetId
+   * @param {import("../sheet/sheetNameResolver.ts").SheetNameResolver | null} sheetNameResolver
    */
-  constructor(document, sheetId) {
+  constructor(document, sheetId, sheetNameResolver) {
     this.document = document;
-    this.name = sheetId;
+    this.sheetId = sheetId;
+    this.sheetNameResolver = sheetNameResolver ?? null;
+  }
+
+  get name() {
+    return this.sheetNameResolver?.getSheetNameById?.(this.sheetId) ?? this.sheetId;
   }
 
   getUsedRange() {
     if (typeof this.document.getUsedRange === "function") {
-      return this.document.getUsedRange(this.name);
+      return this.document.getUsedRange(this.sheetId);
     }
     return null;
   }
 
   getCell(row, col) {
-    const state = this.document.getCell(this.name, { row, col });
+    const state = this.document.getCell(this.sheetId, { row, col });
     const formula = normalizeFormula(state.formula);
     const value = state.value ?? null;
 
@@ -127,7 +155,7 @@ class DocumentSheetAdapter {
 
   setCell(row, col, cell) {
     if (!cell || (cell.value == null && (cell.formula == null || cell.formula === ""))) {
-      this.document.clearCell(this.name, { row, col });
+      this.document.clearCell(this.sheetId, { row, col });
       return;
     }
 
@@ -136,11 +164,11 @@ class DocumentSheetAdapter {
         const normalized = normalizeFormula(formula);
         // DocumentController stores formulas with a leading "=". Normalize here so callers
         // can provide formula text with or without "=" (e.g. from user edits/search replace).
-        this.document.setCellFormula(this.name, { row, col }, normalized);
+        this.document.setCellFormula(this.sheetId, { row, col }, normalized);
         return;
       }
 
-    this.document.setCellValue(this.name, { row, col }, cell.value);
+    this.document.setCellValue(this.sheetId, { row, col }, cell.value);
   }
 
   *iterateCells(range, { order = "byRows" } = {}) {
@@ -153,7 +181,7 @@ class DocumentSheetAdapter {
     const endCol = Math.min(used.endCol, range.endCol);
     if (startRow > endRow || startCol > endCol) return;
 
-    const sheet = this.document.model?.sheets?.get(this.name);
+    const sheet = this.document.model?.sheets?.get(this.sheetId);
     const entries = sheet?.cells ? Array.from(sheet.cells.entries()) : [];
 
     const results = [];
