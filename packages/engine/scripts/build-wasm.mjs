@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readFile, readdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,11 +32,18 @@ if (!childEnv.PATH?.split(path.delimiter).includes(cargoBinDir)) {
 const crateDir = path.join(repoRoot, "crates", "formula-wasm");
 
 const outDir = path.join(repoRoot, "packages", "engine", "pkg");
+// Build into a separate directory and swap it into place on success. This prevents an
+// interrupted build (Ctrl+C, OOM, CI cancellation, etc) from deleting the last-known-good
+// WASM bundle and forcing every subsequent workflow (dev server / e2e) to do a full rebuild.
+const buildOutDir = `${outDir}-build`;
+const backupOutDir = `${outDir}-backup`;
 // Note: `wasm-pack build --out-dir` is documented as a *relative* path and is
 // resolved from the crate directory, not `cwd`. Use an absolute path to ensure
 // output always lands in this repo's deterministic location.
 const wrapper = path.join(outDir, "formula_wasm.js");
 const wasm = path.join(outDir, "formula_wasm_bg.wasm");
+const buildWrapper = path.join(buildOutDir, "formula_wasm.js");
+const buildWasm = path.join(buildOutDir, "formula_wasm_bg.wasm");
 
 const targets = [
   path.join(repoRoot, "apps", "web", "public", "engine"),
@@ -351,7 +358,7 @@ function runWasmPack({ jobs, makeflags, releaseCodegenUnits, rayonThreads, binar
     "web",
     "--release",
     "--out-dir",
-    outDir,
+    buildOutDir,
     "--out-name",
     "formula_wasm",
     // Avoid generating a nested package.json in the output directory; consumers
@@ -385,8 +392,10 @@ function runWasmPack({ jobs, makeflags, releaseCodegenUnits, rayonThreads, binar
   );
 }
 
-// `wasm-pack` refuses to overwrite some files if the output already exists.
-await rm(outDir, { recursive: true, force: true });
+// `wasm-pack` refuses to overwrite some files if the output already exists. Build into a
+// dedicated directory and swap it into place once the build completes successfully.
+await rm(buildOutDir, { recursive: true, force: true });
+await rm(backupOutDir, { recursive: true, force: true });
 
 const concurrency = defaultWasmConcurrency();
 let result = runWasmPack({
@@ -419,7 +428,7 @@ if ((result.status ?? 0) !== 0) {
     process.env.FORMULA_BINARYEN_CORES;
   if (!userProvidedConcurrency && concurrency.jobs !== "1") {
     console.warn("[formula] wasm-pack build failed; retrying with CARGO_BUILD_JOBS=1 for stability.");
-    await rm(outDir, { recursive: true, force: true });
+    await rm(buildOutDir, { recursive: true, force: true });
     result = runWasmPack({
       jobs: "1",
       makeflags: "-j1",
@@ -438,11 +447,40 @@ if (result.status !== 0) {
   process.exit(result.status ?? 1);
 }
 
+if (!existsSync(buildWrapper) || !existsSync(buildWasm)) {
+  const missing = [];
+  if (!existsSync(buildWrapper)) missing.push(`Missing: ${path.relative(repoRoot, buildWrapper)}`);
+  if (!existsSync(buildWasm)) missing.push(`Missing: ${path.relative(repoRoot, buildWasm)}`);
+  fatal(["[formula] wasm-pack completed but build artifacts are missing.", ...missing].join("\n"));
+}
+
+// Swap the freshly built artifacts into place so downstream workflows (dev servers, tests)
+// always see a complete `pkg/` directory.
+try {
+  if (existsSync(outDir)) {
+    await rm(backupOutDir, { recursive: true, force: true });
+    await rename(outDir, backupOutDir);
+  }
+  await rename(buildOutDir, outDir);
+  await rm(backupOutDir, { recursive: true, force: true });
+} catch (err) {
+  console.error("[formula] Failed to swap WASM build output into place:", err);
+  try {
+    // Best-effort restore of the previous artifacts.
+    if (!existsSync(outDir) && existsSync(backupOutDir)) {
+      await rename(backupOutDir, outDir);
+    }
+  } catch {
+    // ignore
+  }
+  process.exit(1);
+}
+
 if (!existsSync(wrapper) || !existsSync(wasm)) {
   const missing = [];
   if (!existsSync(wrapper)) missing.push(`Missing: ${path.relative(repoRoot, wrapper)}`);
   if (!existsSync(wasm)) missing.push(`Missing: ${path.relative(repoRoot, wasm)}`);
-  fatal(["[formula] wasm-pack completed but expected artifacts are missing.", ...missing].join("\n"));
+  fatal(["[formula] WASM output swap succeeded but expected artifacts are missing.", ...missing].join("\n"));
 }
 
 await copyToPublic();
