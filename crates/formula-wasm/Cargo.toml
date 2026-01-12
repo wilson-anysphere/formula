@@ -2,6 +2,9 @@
 name = "formula-wasm"
 version = "0.1.0"
 edition = "2021"
+description = "WASM bindings for the Formula spreadsheet engine."
+repository = "https://github.com/wilson-anysphere/formula"
+publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
