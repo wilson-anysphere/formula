@@ -1,4 +1,7 @@
 import type { VerifiedExtensionPackageV2 } from "../../../../../shared/extension-package/v2-browser.mjs";
+// `shared/` is a CommonJS workspace package, but the desktop webview/dev runtime executes ESM.
+// Import the ESM wrapper so Vite can serve it without relying on CommonJS transforms (which
+// are only applied during production builds).
 import v2Core from "../../../../../shared/extension-package/core/v2-core.mjs";
 
 const {
