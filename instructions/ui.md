@@ -157,12 +157,18 @@ FUNCTIONALITY (# of Excel buttons/features)
 | `Alt+=` | AutoSum |
 | `Ctrl+C/V/X/Z/Y` | Standard clipboard/undo |
 
+### App Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Cmd/Ctrl+Shift+P` | Open command palette |
+
 ### AI Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
-| `⌘K` | Inline AI edit |
-| `⌘I` | Toggle AI sidebar |
+| `Cmd/Ctrl+K` | Inline AI edit |
+| `Cmd+I` (macOS) | Toggle AI sidebar |
 | `Tab` | Accept AI suggestion |
 
 ---
