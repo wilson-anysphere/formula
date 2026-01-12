@@ -854,20 +854,21 @@ fn oddlprice_eom_prev_coupon_basis1_uses_month_end() {
 }
 
 #[test]
-fn odd_coupon_yield_inverts_zero_coupon_prices() {
+fn oddfprice_zero_coupon_basis2_uses_fixed_360_over_frequency_for_e() {
     let system = ExcelDateSystem::EXCEL_1900;
 
-    // ODDF*
-    let issue = ymd_to_serial(ExcelDate::new(2019, 10, 1), system).unwrap();
-    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
-    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
-    let maturity = ymd_to_serial(ExcelDate::new(2021, 7, 1), system).unwrap();
+    // Semiannual schedule aligned from `first_coupon` by 6 months:
+    // 2020-07-31, 2021-01-31, 2021-07-31 (maturity) => N = 3.
+    let issue = serial(2020, 1, 1, system);
+    let settlement = serial(2020, 2, 15, system);
+    let first_coupon = serial(2020, 7, 31, system);
+    let maturity = serial(2021, 7, 31, system);
 
     let rate = 0.0;
     let yld = 0.1;
     let redemption = 100.0;
     let frequency = 2;
-    let basis = 0;
+    let basis = 2; // Actual/360
 
     let price = oddfprice(
         settlement,
@@ -882,30 +883,39 @@ fn odd_coupon_yield_inverts_zero_coupon_prices() {
         system,
     )
     .unwrap();
+    assert!(price.is_finite());
 
-    let solved = oddfyield(
+    // With rate=0, ODDFPRICE reduces to a discounted redemption:
+    // P = redemption / (1 + yld/frequency)^((N-1) + DSC/E)
+    //
+    // For basis=2 (Actual/360), Excel treats E as fixed 360/frequency and DSC as actual days.
+    let e = 360.0 / (frequency as f64);
+    let dsc = (first_coupon - settlement) as f64;
+    let n = 3.0;
+    let exponent = (n - 1.0) + dsc / e;
+
+    let y = yld / (frequency as f64);
+    let expected = redemption / (1.0 + y).powf(exponent);
+    assert_close(price, expected, 1e-12);
+}
+
+#[test]
+fn oddlprice_zero_coupon_basis2_uses_fixed_360_over_frequency_for_e() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    let last_interest = serial(2020, 8, 31, system);
+    let settlement = serial(2020, 10, 15, system);
+    let maturity = serial(2021, 2, 15, system);
+
+    let rate = 0.0;
+    let yld = 0.1;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 2; // Actual/360
+
+    let price = oddlprice(
         settlement,
         maturity,
-        issue,
-        first_coupon,
-        rate,
-        price,
-        redemption,
-        frequency,
-        basis,
-        system,
-    )
-    .unwrap();
-    assert_close(solved, yld, 1e-10);
-
-    // ODDL*
-    let last_interest = ymd_to_serial(ExcelDate::new(2021, 1, 1), system).unwrap();
-    let settlement2 = ymd_to_serial(ExcelDate::new(2021, 2, 1), system).unwrap();
-    let maturity2 = ymd_to_serial(ExcelDate::new(2021, 5, 1), system).unwrap();
-
-    let price2 = oddlprice(
-        settlement2,
-        maturity2,
         last_interest,
         rate,
         yld,
@@ -915,20 +925,259 @@ fn odd_coupon_yield_inverts_zero_coupon_prices() {
         system,
     )
     .unwrap();
+    assert!(price.is_finite());
 
-    let solved2 = oddlyield(
-        settlement2,
-        maturity2,
-        last_interest,
+    // With rate=0, ODDLPRICE reduces to a discounted redemption:
+    // P = redemption / (1 + yld/frequency)^(DSM/E)
+    //
+    // For basis=2 (Actual/360), Excel treats E as fixed 360/frequency and DSM as actual days.
+    let e = 360.0 / (frequency as f64);
+    let dsm = (maturity - settlement) as f64;
+    let exponent = dsm / e;
+
+    let y = yld / (frequency as f64);
+    let expected = redemption / (1.0 + y).powf(exponent);
+    assert_close(price, expected, 1e-12);
+}
+
+#[test]
+fn oddfprice_zero_coupon_basis3_uses_fixed_365_over_frequency_for_e() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // Reuse the basis=2 ODDF schedule for easier comparison.
+    let issue = serial(2020, 1, 1, system);
+    let settlement = serial(2020, 2, 15, system);
+    let first_coupon = serial(2020, 7, 31, system);
+    let maturity = serial(2021, 7, 31, system);
+
+    let rate = 0.0;
+    let yld = 0.1;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 3; // Actual/365
+
+    let price = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
         rate,
-        price2,
+        yld,
         redemption,
         frequency,
         basis,
         system,
     )
     .unwrap();
-    assert_close(solved2, yld, 1e-10);
+    assert!(price.is_finite());
+
+    // With rate=0:
+    // P = redemption / (1 + yld/frequency)^((N-1) + DSC/E)
+    //
+    // For basis=3 (Actual/365), Excel treats E as fixed 365/frequency and DSC as actual days.
+    let e = 365.0 / (frequency as f64);
+    let dsc = (first_coupon - settlement) as f64;
+    let n = 3.0;
+    let exponent = (n - 1.0) + dsc / e;
+
+    let y = yld / (frequency as f64);
+    let expected = redemption / (1.0 + y).powf(exponent);
+    assert_close(price, expected, 1e-12);
+}
+
+#[test]
+fn oddlprice_zero_coupon_basis3_uses_fixed_365_over_frequency_for_e() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    let last_interest = serial(2020, 8, 31, system);
+    let settlement = serial(2020, 10, 15, system);
+    let maturity = serial(2021, 2, 15, system);
+
+    let rate = 0.0;
+    let yld = 0.1;
+    let redemption = 100.0;
+    let frequency = 2;
+    let basis = 3; // Actual/365
+
+    let price = oddlprice(
+        settlement,
+        maturity,
+        last_interest,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        basis,
+        system,
+    )
+    .unwrap();
+    assert!(price.is_finite());
+
+    // With rate=0:
+    // P = redemption / (1 + yld/frequency)^(DSM/E)
+    //
+    // For basis=3 (Actual/365), Excel treats E as fixed 365/frequency and DSM as actual days.
+    let e = 365.0 / (frequency as f64);
+    let dsm = (maturity - settlement) as f64;
+    let exponent = dsm / e;
+
+    let y = yld / (frequency as f64);
+    let expected = redemption / (1.0 + y).powf(exponent);
+    assert_close(price, expected, 1e-12);
+}
+
+#[test]
+fn oddfprice_basis0_vs_basis4_diverge_on_february_eom_day_count() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // US 30/360 (basis=0) treats "end of February" as day 30, while European 30/360 (basis=4)
+    // only adjusts 31st-of-month dates. This creates a measurable difference in DSC for:
+    //   settlement = 2021-02-28 (end-of-February, non-leap year)
+    //   first_coupon = 2021-03-31 (31st-of-month)
+    //
+    // Keep rate=0 so the price depends only on discounting the redemption.
+    let issue = serial(2021, 1, 31, system);
+    let settlement = serial(2021, 2, 28, system);
+    let first_coupon = serial(2021, 3, 31, system);
+    let maturity = serial(2021, 9, 30, system); // aligns with EDATE stepping from first_coupon
+
+    let rate = 0.0;
+    let yld = 0.1;
+    let redemption = 100.0;
+    let frequency = 2;
+
+    let price_us = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        0,
+        system,
+    )
+    .unwrap();
+    let price_eu = oddfprice(
+        settlement,
+        maturity,
+        issue,
+        first_coupon,
+        rate,
+        yld,
+        redemption,
+        frequency,
+        4,
+        system,
+    )
+    .unwrap();
+
+    assert!(price_us.is_finite());
+    assert!(price_eu.is_finite());
+
+    // With rate=0, ODDFPRICE = redemption / (1 + yld/frequency)^((N-1) + DSC/E).
+    // For frequency=2, E=180 and N=2 (first_coupon and maturity).
+    let y = yld / (frequency as f64);
+    let e = 360.0 / (frequency as f64);
+    let n = 2.0;
+
+    // DSC under 30/360 US vs European:
+    // - US (basis 0): Feb 28 (EOM) -> day 30, Mar 31 (EOM) -> day 30 => 30 days
+    // - EU (basis 4): Feb 28 stays day 28, Mar 31 -> day 30 => 32 days
+    let dsc_us = 30.0;
+    let dsc_eu = 32.0;
+
+    let expected_us = redemption / (1.0 + y).powf((n - 1.0) + dsc_us / e);
+    let expected_eu = redemption / (1.0 + y).powf((n - 1.0) + dsc_eu / e);
+
+    assert_close(price_us, expected_us, 1e-12);
+    assert_close(price_eu, expected_eu, 1e-12);
+    assert!(
+        (price_us - price_eu).abs() > 1e-6,
+        "expected basis=0 and basis=4 to diverge (basis0={price_us}, basis4={price_eu})"
+    );
+}
+
+#[test]
+fn odd_coupon_yield_inverts_zero_coupon_prices() {
+    let system = ExcelDateSystem::EXCEL_1900;
+
+    // ODDF*
+    let issue = ymd_to_serial(ExcelDate::new(2019, 10, 1), system).unwrap();
+    let settlement = ymd_to_serial(ExcelDate::new(2020, 1, 1), system).unwrap();
+    let first_coupon = ymd_to_serial(ExcelDate::new(2020, 7, 1), system).unwrap();
+    let maturity = ymd_to_serial(ExcelDate::new(2021, 7, 1), system).unwrap();
+
+    let rate = 0.0;
+    let yld = 0.1;
+    let redemption = 100.0;
+    let frequency = 2;
+
+    for basis in [0, 2] {
+        let price = oddfprice(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .unwrap();
+
+        let solved = oddfyield(
+            settlement,
+            maturity,
+            issue,
+            first_coupon,
+            rate,
+            price,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .unwrap();
+        assert_close(solved, yld, 1e-10);
+    }
+
+    // ODDL*
+    let last_interest = ymd_to_serial(ExcelDate::new(2021, 1, 1), system).unwrap();
+    let settlement2 = ymd_to_serial(ExcelDate::new(2021, 2, 1), system).unwrap();
+    let maturity2 = ymd_to_serial(ExcelDate::new(2021, 5, 1), system).unwrap();
+
+    for basis in [0, 2] {
+        let price2 = oddlprice(
+            settlement2,
+            maturity2,
+            last_interest,
+            rate,
+            yld,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .unwrap();
+
+        let solved2 = oddlyield(
+            settlement2,
+            maturity2,
+            last_interest,
+            rate,
+            price2,
+            redemption,
+            frequency,
+            basis,
+            system,
+        )
+        .unwrap();
+        assert_close(solved2, yld, 1e-10);
+    }
 }
 
 #[test]
