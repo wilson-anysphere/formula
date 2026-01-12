@@ -5076,10 +5076,11 @@ mountRibbon(ribbonRoot, {
         app.focus();
         return;
       case "home.clipboard.pasteSpecial":
+      case "home.clipboard.pasteSpecial.dialog":
         void (async () => {
           const picked = await showQuickPick(
             getPasteSpecialMenuItems().map((item) => ({ label: item.label, value: item })),
-            { placeHolder: "Paste Special" },
+            { placeHolder: t("clipboard.pasteSpecial.title") },
           );
           if (picked == null) {
             app.focus();
@@ -5088,6 +5089,18 @@ mountRibbon(ribbonRoot, {
           await app.clipboardPasteSpecial(picked.mode);
           app.focus();
         })();
+        return;
+      case "home.clipboard.pasteSpecial.values":
+        void app.clipboardPasteSpecial("values");
+        app.focus();
+        return;
+      case "home.clipboard.pasteSpecial.formats":
+        void app.clipboardPasteSpecial("formats");
+        app.focus();
+        return;
+      case "home.clipboard.pasteSpecial.transpose":
+        showToast("Paste Transpose not implemented");
+        app.focus();
         return;
       case "insert.tables.pivotTable":
         ribbonLayoutController?.openPanel(PanelIds.PIVOT_BUILDER);
