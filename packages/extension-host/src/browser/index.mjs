@@ -1184,21 +1184,9 @@ class BrowserExtensionHost {
       // ignore
     }
 
-    const disposedPanelIds = [];
-    for (const [panelId, panel] of this._panels.entries()) {
-      if (panel?.extensionId !== extension.id) continue;
-      this._panels.delete(panelId);
-      disposedPanelIds.push(panelId);
-    }
-    if (disposedPanelIds.length > 0) {
-      for (const panelId of disposedPanelIds) {
-        try {
-          this._uiApi?.onPanelDisposed?.(panelId);
-        } catch {
-          // ignore
-        }
-      }
-    }
+    // Panels created by the extension are cleaned up in `_terminateWorker()`, which also notifies
+    // the UI via `onPanelDisposed`. (Keeping the disposal logic centralized avoids leaving dangling
+    // UI panels when the worker crashes/timeouts.)
 
     for (const [registrationId, record] of this._contextMenus.entries()) {
       if (record?.extensionId === extension.id) this._contextMenus.delete(registrationId);
@@ -1297,8 +1285,20 @@ class BrowserExtensionHost {
       // ignore
     }
 
+    const disposedPanelIds = [];
     for (const [panelId, panel] of this._panels.entries()) {
-      if (panel?.extensionId === extension.id) this._panels.delete(panelId);
+      if (panel?.extensionId !== extension.id) continue;
+      this._panels.delete(panelId);
+      disposedPanelIds.push(panelId);
+    }
+    if (disposedPanelIds.length > 0) {
+      for (const panelId of disposedPanelIds) {
+        try {
+          this._uiApi?.onPanelDisposed?.(panelId);
+        } catch {
+          // ignore
+        }
+      }
     }
 
     // Remove context menus registered by this extension worker; they would otherwise leak.
