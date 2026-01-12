@@ -1,4 +1,4 @@
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{Duration, NaiveDate, NaiveDateTime};
 
 use crate::locale::{DateOrder, ValueLocaleConfig};
 
@@ -143,6 +143,26 @@ pub(crate) fn parse_text_datetime(text: &str, value_locale: ValueLocaleConfig) -
             }
             if let Ok(date) = NaiveDate::parse_from_str(s, "%Y.%m.%d") {
                 return Some(date.and_hms_opt(0, 0, 0)?);
+            }
+        }
+    }
+
+    // Time-only values (e.g. "2:30", "2 PM") should sort/filter like Excel time serials.
+    // Interpret them as DateTime values anchored at the Excel 1900 epoch date (1899-12-31),
+    // which yields the same numeric serial behavior as `datetime_to_excel_serial_1900`.
+    let tokens: Vec<&str> = s.split_whitespace().collect();
+    let looks_like_time_only = match tokens.as_slice() {
+        [_] => true,
+        [_, suffix] => suffix.eq_ignore_ascii_case("AM") || suffix.eq_ignore_ascii_case("PM"),
+        _ => false,
+    };
+    if looks_like_time_only {
+        if let Ok(fraction) = crate::coercion::datetime::parse_timevalue_text(s, value_locale) {
+            let base = NaiveDate::from_ymd_opt(1899, 12, 31)?;
+            let base_dt = base.and_hms_opt(0, 0, 0)?;
+            let seconds = (fraction * 86_400.0).round() as i64;
+            if let Some(dt) = base_dt.checked_add_signed(Duration::seconds(seconds)) {
+                return Some(dt);
             }
         }
     }

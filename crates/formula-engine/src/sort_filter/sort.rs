@@ -535,6 +535,39 @@ mod tests {
     }
 
     #[test]
+    fn time_strings_are_sorted_by_time_not_lexicographically() {
+        let mut data = range(vec![
+            vec![CellValue::Text("Val".into())],
+            vec![CellValue::Text("12:00".into())],
+            vec![CellValue::Text("2:00".into())],
+        ]);
+
+        let spec = SortSpec {
+            header: HeaderOption::HasHeader,
+            keys: vec![SortKey {
+                column: 0,
+                order: SortOrder::Ascending,
+                value_type: SortValueType::Auto,
+                case_sensitive: false,
+            }],
+        };
+
+        sort_range(&mut data, &spec);
+
+        assert_eq!(
+            data.rows
+                .iter()
+                .skip(1)
+                .map(|r| match &r[0] {
+                    CellValue::Text(s) => s.as_str(),
+                    _ => "?",
+                })
+                .collect::<Vec<_>>(),
+            vec!["2:00", "12:00"]
+        );
+    }
+
+    #[test]
     fn blanks_are_sorted_last_even_descending() {
         let mut data = range(vec![
             vec![CellValue::Text("Val".into())],
