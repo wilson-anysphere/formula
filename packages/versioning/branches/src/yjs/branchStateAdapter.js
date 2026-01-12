@@ -655,7 +655,15 @@ export function applyBranchStateToYjsDoc(doc, state, opts = {}) {
           const entry = new Y.Map();
           if (existing) {
             for (const key of Array.from(existing.keys()).sort()) {
-              if (key === "id" || key === "name" || key === "view" || key === "frozenRows" || key === "frozenCols") {
+              if (
+                key === "id" ||
+                key === "name" ||
+                key === "view" ||
+                key === "frozenRows" ||
+                key === "frozenCols" ||
+                key === "colWidths" ||
+                key === "rowHeights"
+              ) {
                 continue;
               }
               entry.set(key, cloneYjsValue(existing.get(key)));

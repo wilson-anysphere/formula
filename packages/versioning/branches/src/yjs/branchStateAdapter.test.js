@@ -222,6 +222,42 @@ test("branchStateFromYjsDoc: reads legacy top-level sheet view fields (frozen pa
   assert.equal(sheet2.get("frozenCols"), undefined);
 });
 
+test("applyBranchStateToYjsDoc: drops legacy top-level axis sizes when applying snapshot", () => {
+  const doc = new Y.Doc();
+  doc.transact(() => {
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Sheet1");
+    sheet.set("name", "Sheet1");
+    sheet.set("color", "red");
+    // Legacy top-level fields that should be canonicalized into `view`.
+    sheet.set("frozenRows", 2);
+    sheet.set("frozenCols", 1);
+    sheet.set("colWidths", { "0": 120 });
+    sheet.set("rowHeights", { "1": 40 });
+    sheets.push([sheet]);
+  });
+
+  const state = branchStateFromYjsDoc(doc);
+  assert.deepEqual(state.sheets.metaById.Sheet1?.view, {
+    frozenRows: 2,
+    frozenCols: 1,
+    colWidths: { "0": 120 },
+    rowHeights: { "1": 40 },
+  });
+
+  applyBranchStateToYjsDoc(doc, state);
+
+  const sheet1 = doc.getArray("sheets").get(0);
+  assert.ok(sheet1 instanceof Y.Map);
+  assert.equal(sheet1.get("color"), "red");
+  assert.deepEqual(sheet1.get("view"), { frozenRows: 2, frozenCols: 1, colWidths: { "0": 120 }, rowHeights: { "1": 40 } });
+  assert.equal(sheet1.get("frozenRows"), undefined);
+  assert.equal(sheet1.get("frozenCols"), undefined);
+  assert.equal(sheet1.get("colWidths"), undefined);
+  assert.equal(sheet1.get("rowHeights"), undefined);
+});
+
 test("branchStateFromYjsDoc: prefers encrypted payloads over plaintext duplicates across legacy cell keys", () => {
   const enc = {
     v: 1,
