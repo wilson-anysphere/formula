@@ -10436,6 +10436,11 @@ mod tests {
             engine.set_cell_value("Sheet1", "D500000", 200.0).unwrap();
             engine.set_cell_value("Sheet1", "D1048576", 100.0).unwrap();
 
+            // Boolean values spread across a full Excel column.
+            engine.set_cell_value("Sheet1", "E1", true).unwrap();
+            engine.set_cell_value("Sheet1", "E500000", false).unwrap();
+            engine.set_cell_value("Sheet1", "E1048576", true).unwrap();
+
             engine
                 .set_cell_formula("Sheet1", "B1", "=SUM(A:A)")
                 .unwrap();
@@ -10468,6 +10473,31 @@ mod tests {
             engine
                 .set_cell_formula("Sheet1", "B10", r#"=COUNTIFS(A:A,"",D:D,"")"#)
                 .unwrap();
+
+            // Non-criteria aggregates over full-column ranges should also take the sparse iteration path.
+            engine
+                .set_cell_formula("Sheet1", "B11", "=COUNT(A:A)")
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B12", "=AVERAGE(A:A)")
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B13", "=MIN(A:A)")
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B14", "=MAX(A:A)")
+                .unwrap();
+
+            // Logical aggregations over full-column ranges should also take the sparse iteration path.
+            engine
+                .set_cell_formula("Sheet1", "B15", "=AND(E:E)")
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B16", "=OR(E:E)")
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B17", "=XOR(E:E)")
+                .unwrap();
         }
 
         let mut bytecode_engine = Engine::new();
@@ -10475,7 +10505,10 @@ mod tests {
 
         // Ensure the full-column formulas are actually bytecode-compiled.
         let sheet_id = bytecode_engine.workbook.sheet_id("Sheet1").unwrap();
-        let formula_cells = ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10"];
+        let formula_cells = [
+            "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10", "B11", "B12", "B13",
+            "B14", "B15", "B16", "B17",
+        ];
         let mut tasks: Vec<(CellKey, CompiledFormula)> = Vec::with_capacity(formula_cells.len());
         for cell in formula_cells {
             let addr = parse_a1(cell).unwrap();
@@ -10524,6 +10557,13 @@ mod tests {
         let bc_minifs = bytecode_engine.get_cell_value("Sheet1", "B8");
         let bc_maxifs = bytecode_engine.get_cell_value("Sheet1", "B9");
         let bc_countifs_blank = bytecode_engine.get_cell_value("Sheet1", "B10");
+        let bc_count = bytecode_engine.get_cell_value("Sheet1", "B11");
+        let bc_average = bytecode_engine.get_cell_value("Sheet1", "B12");
+        let bc_min = bytecode_engine.get_cell_value("Sheet1", "B13");
+        let bc_max = bytecode_engine.get_cell_value("Sheet1", "B14");
+        let bc_and = bytecode_engine.get_cell_value("Sheet1", "B15");
+        let bc_or = bytecode_engine.get_cell_value("Sheet1", "B16");
+        let bc_xor = bytecode_engine.get_cell_value("Sheet1", "B17");
 
         let mut ast_engine = Engine::new();
         ast_engine.set_bytecode_enabled(false);
@@ -10539,6 +10579,13 @@ mod tests {
         let ast_minifs = ast_engine.get_cell_value("Sheet1", "B8");
         let ast_maxifs = ast_engine.get_cell_value("Sheet1", "B9");
         let ast_countifs_blank = ast_engine.get_cell_value("Sheet1", "B10");
+        let ast_count = ast_engine.get_cell_value("Sheet1", "B11");
+        let ast_average = ast_engine.get_cell_value("Sheet1", "B12");
+        let ast_min = ast_engine.get_cell_value("Sheet1", "B13");
+        let ast_max = ast_engine.get_cell_value("Sheet1", "B14");
+        let ast_and = ast_engine.get_cell_value("Sheet1", "B15");
+        let ast_or = ast_engine.get_cell_value("Sheet1", "B16");
+        let ast_xor = ast_engine.get_cell_value("Sheet1", "B17");
 
         assert_eq!(bc_sum, ast_sum, "SUM mismatch");
         assert_eq!(bc_countif, ast_countif, "COUNTIF mismatch");
@@ -10553,6 +10600,13 @@ mod tests {
             bc_countifs_blank, ast_countifs_blank,
             "COUNTIFS blank mismatch"
         );
+        assert_eq!(bc_count, ast_count, "COUNT mismatch");
+        assert_eq!(bc_average, ast_average, "AVERAGE mismatch");
+        assert_eq!(bc_min, ast_min, "MIN mismatch");
+        assert_eq!(bc_max, ast_max, "MAX mismatch");
+        assert_eq!(bc_and, ast_and, "AND mismatch");
+        assert_eq!(bc_or, ast_or, "OR mismatch");
+        assert_eq!(bc_xor, ast_xor, "XOR mismatch");
 
         // Sanity check expected values.
         assert_eq!(bc_sum, Value::Number(6.0));
@@ -10565,6 +10619,13 @@ mod tests {
         assert_eq!(bc_minifs, Value::Number(20.0));
         assert_eq!(bc_maxifs, Value::Number(20.0));
         assert_eq!(bc_countifs_blank, Value::Number(1_048_573.0));
+        assert_eq!(bc_count, Value::Number(3.0));
+        assert_eq!(bc_average, Value::Number(2.0));
+        assert_eq!(bc_min, Value::Number(1.0));
+        assert_eq!(bc_max, Value::Number(3.0));
+        assert_eq!(bc_and, Value::Bool(false));
+        assert_eq!(bc_or, Value::Bool(true));
+        assert_eq!(bc_xor, Value::Bool(false));
     }
 
     #[test]
