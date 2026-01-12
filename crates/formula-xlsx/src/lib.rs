@@ -24,49 +24,49 @@ pub mod calc_settings;
 pub mod cell_images;
 pub mod charts;
 pub mod comments;
-pub mod embedded_images;
 mod compare;
-mod formula_text;
-mod macro_repair;
-mod macro_strip;
-mod model_package;
-pub mod openxml;
-mod preserve;
-mod xml;
-mod content_types;
 pub mod conditional_formatting;
+mod content_types;
 pub mod drawingml;
 pub mod drawings;
 pub mod embedded_cell_images;
+pub mod embedded_images;
+mod formula_text;
 pub mod hyperlinks;
+mod macro_repair;
+mod macro_strip;
 pub mod merge_cells;
 pub mod metadata;
 pub mod minimal;
+mod model_package;
+pub mod openxml;
 pub mod outline;
-pub mod rich_data;
 mod package;
 pub mod patch;
 mod path;
 pub mod pivots;
+mod preserve;
 pub mod print;
 mod read;
 #[cfg(not(target_arch = "wasm32"))]
 mod reader;
 mod recalc_policy;
 mod relationships;
+pub mod rich_data;
 pub mod shared_strings;
 mod sheet_metadata;
 pub mod streaming;
 pub mod styles;
 pub mod tables;
 pub mod theme;
-mod zip_util;
 #[cfg(feature = "vba")]
 pub mod vba;
 mod workbook;
 pub mod write;
 #[cfg(not(target_arch = "wasm32"))]
 mod writer;
+mod xml;
+mod zip_util;
 
 pub use crate::macro_strip::validate_opc_relationships;
 
@@ -114,11 +114,13 @@ pub use rich_data::{
 };
 pub use rich_data::metadata::parse_value_metadata_vm_to_rich_value_index_map;
 pub use rich_data::resolve_rich_value_image_targets;
-pub use rich_data::{ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning};
 pub use rich_data::rich_value_structure::{
-    parse_rich_value_structure_xml, RichValueStructure, RichValueStructureMember, RichValueStructures,
+    parse_rich_value_structure_xml, RichValueStructure, RichValueStructureMember,
+    RichValueStructures,
 };
 pub use rich_data::rich_value_types::{parse_rich_value_types_xml, RichValueType, RichValueTypes};
+pub use rich_data::scan_cells_with_metadata_indices;
+pub use rich_data::{ExtractedRichValueImages, RichValueEntry, RichValueIndex, RichValueWarning};
 pub use sheet_metadata::{
     parse_sheet_tab_color, parse_workbook_sheets, write_sheet_tab_color, write_workbook_sheets,
     WorkbookSheetInfo,
@@ -136,7 +138,6 @@ pub use streaming::{
 };
 pub use styles::*;
 pub use workbook::ChartExtractionError;
-pub use rich_data::scan_cells_with_metadata_indices;
 #[cfg(not(target_arch = "wasm32"))]
 pub use writer::{
     write_workbook, write_workbook_to_writer, write_workbook_to_writer_with_kind, XlsxWriteError,
@@ -373,7 +374,7 @@ impl XlsxDocument {
             .map(|record| record.value.clone())
             .unwrap_or(CellValue::Empty);
         let value_changed = old_value != value;
-
+ 
         // `vm="..."` is a SpreadsheetML value-metadata pointer (typically into `xl/metadata*.xml`).
         // If the cached value changes we can't update the corresponding metadata records, so drop
         // `vm` to avoid leaving dangling rich-data references.
@@ -761,7 +762,11 @@ impl XlsxDocument {
 
             // Relationship targets may include URI fragments (`../media/image.png#foo`); those are
             // not part names.
-            let target = rel.target.split_once('#').map(|(t, _)| t).unwrap_or(&rel.target);
+            let target = rel
+                .target
+                .split_once('#')
+                .map(|(t, _)| t)
+                .unwrap_or(&rel.target);
             if target.is_empty() {
                 return Ok(None);
             }
@@ -882,9 +887,8 @@ impl XlsxDocument {
             let Some(bytes) = self.parts.get(part_name) else {
                 continue;
             };
-            let xml = std::str::from_utf8(bytes).map_err(|e| {
-                XlsxError::Invalid(format!("{part_name} is not valid UTF-8: {e}"))
-            })?;
+            let xml = std::str::from_utf8(bytes)
+                .map_err(|e| XlsxError::Invalid(format!("{part_name} is not valid UTF-8: {e}")))?;
             let doc = roxmltree::Document::parse(xml)?;
 
             for rv in doc

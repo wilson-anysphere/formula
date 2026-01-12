@@ -23,7 +23,9 @@ use crate::recalc_policy::{apply_recalc_policy_to_parts, RecalcPolicyError};
 use crate::shared_strings::preserve::SharedStringsEditor;
 use crate::sheet_metadata::{parse_sheet_tab_color, write_sheet_tab_color};
 use crate::styles::XlsxStylesEditor;
-use crate::{CellValueKind, DateSystem, RecalcPolicy, SheetMeta, WorkbookKind, XlsxDocument, XlsxError};
+use crate::{
+    CellValueKind, DateSystem, RecalcPolicy, SheetMeta, WorkbookKind, XlsxDocument, XlsxError,
+};
 
 const WORKBOOK_PART: &str = "xl/workbook.xml";
 const WORKBOOK_RELS_PART: &str = "xl/_rels/workbook.xml.rels";
@@ -722,65 +724,66 @@ fn build_parts(
             orig_autofilter,
             orig_sheet_protection,
         ) = if let Some(orig) = orig {
-                let orig_xml = std::str::from_utf8(orig).map_err(|e| {
-                    WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            let orig_xml = std::str::from_utf8(orig).map_err(|e| {
+                WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            })?;
+            let orig_tab_color = parse_sheet_tab_color(orig_xml)?;
+
+            let orig_views = parse_sheet_view_settings(orig_xml)?;
+            let orig_cols = parse_col_properties(orig_xml)?;
+            let orig_sheet_protection = parse_sheet_protection(orig_xml)?;
+
+            let orig_merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(orig_xml)
+                .map_err(|err| match err {
+                    crate::merge_cells::MergeCellsError::Xml(e) => WriteError::Xml(e),
+                    crate::merge_cells::MergeCellsError::Attr(e) => WriteError::XmlAttr(e),
+                    crate::merge_cells::MergeCellsError::Utf8(e) => {
+                        WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    }
+                    crate::merge_cells::MergeCellsError::InvalidRef(r) => {
+                        WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, r))
+                    }
+                    crate::merge_cells::MergeCellsError::Zip(e) => WriteError::Zip(e),
+                    crate::merge_cells::MergeCellsError::Io(e) => WriteError::Io(e),
                 })?;
-                let orig_tab_color = parse_sheet_tab_color(orig_xml)?;
 
-                let orig_views = parse_sheet_view_settings(orig_xml)?;
-                let orig_cols = parse_col_properties(orig_xml)?;
-                let orig_sheet_protection = parse_sheet_protection(orig_xml)?;
+            let orig_hyperlinks = crate::parse_worksheet_hyperlinks(orig_xml, rels_xml)?;
 
-                let orig_merges = crate::merge_cells::read_merge_cells_from_worksheet_xml(orig_xml)
-                    .map_err(|err| match err {
-                        crate::merge_cells::MergeCellsError::Xml(e) => WriteError::Xml(e),
-                        crate::merge_cells::MergeCellsError::Attr(e) => WriteError::XmlAttr(e),
-                        crate::merge_cells::MergeCellsError::Utf8(e) => {
-                            WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                        }
-                        crate::merge_cells::MergeCellsError::InvalidRef(r) => {
-                            WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, r))
-                        }
-                        crate::merge_cells::MergeCellsError::Zip(e) => WriteError::Zip(e),
-                        crate::merge_cells::MergeCellsError::Io(e) => WriteError::Io(e),
-                    })?;
+            let orig_autofilter = crate::autofilter::parse_worksheet_autofilter(orig_xml).map_err(
+                |err| match err {
+                    AutoFilterParseError::Xml(e) => WriteError::Xml(e),
+                    AutoFilterParseError::Attr(e) => WriteError::XmlAttr(e),
+                    AutoFilterParseError::MissingRef => WriteError::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "missing worksheet autoFilter ref attribute",
+                    )),
+                    AutoFilterParseError::InvalidRef(e) => WriteError::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        e.to_string(),
+                    )),
+                },
+            )?;
 
-                let orig_hyperlinks = crate::parse_worksheet_hyperlinks(orig_xml, rels_xml)?;
-
-                let orig_autofilter = crate::autofilter::parse_worksheet_autofilter(orig_xml)
-                    .map_err(|err| match err {
-                        AutoFilterParseError::Xml(e) => WriteError::Xml(e),
-                        AutoFilterParseError::Attr(e) => WriteError::XmlAttr(e),
-                        AutoFilterParseError::MissingRef => WriteError::Io(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "missing worksheet autoFilter ref attribute",
-                        )),
-                        AutoFilterParseError::InvalidRef(e) => WriteError::Io(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            e.to_string(),
-                        )),
-                    })?;
-
-                (
-                    orig_tab_color,
-                    orig_merges,
-                    orig_hyperlinks,
-                    orig_views,
-                    orig_cols,
-                    orig_autofilter,
-                    orig_sheet_protection,
-                )
-            } else {
-                (
-                    None,
-                    Vec::new(),
-                    Vec::new(),
-                    SheetViewSettings::default(),
-                    BTreeMap::new(),
-                    None,
-                    SheetProtection::default(),
-                )
-            };
+            (
+                orig_tab_color,
+                orig_merges,
+                orig_hyperlinks,
+                orig_views,
+                orig_cols,
+                orig_autofilter,
+                orig_sheet_protection,
+            )
+        } else {
+            (
+                None,
+                Vec::new(),
+                Vec::new(),
+                SheetViewSettings::default(),
+                BTreeMap::new(),
+                None,
+                SheetProtection::default(),
+            )
+        };
 
         let current_merges = normalize_merge_ranges(sheet.merged_regions.iter().map(|r| r.range));
         let orig_merges = normalize_merge_ranges(orig_merges.iter().copied());
@@ -1135,7 +1138,9 @@ fn parse_sheet_protection(xml: &str) -> Result<SheetProtection, WriteError> {
                     let val = attr.unescape_value()?.into_owned();
                     match attr.key.as_ref() {
                         b"sheet" => protection.enabled = parse_xml_bool(&val),
-                        b"selectLockedCells" => protection.select_locked_cells = parse_xml_bool(&val),
+                        b"selectLockedCells" => {
+                            protection.select_locked_cells = parse_xml_bool(&val)
+                        }
                         b"selectUnlockedCells" => {
                             protection.select_unlocked_cells = parse_xml_bool(&val)
                         }
@@ -1226,7 +1231,9 @@ fn update_sheet_protection_xml(
                     inserted = true;
                 }
             }
-            Event::Start(ref e) | Event::Empty(ref e) if e.local_name().as_ref() == b"autoFilter" => {
+            Event::Start(ref e) | Event::Empty(ref e)
+                if e.local_name().as_ref() == b"autoFilter" =>
+            {
                 // If `sheetData` is missing (unexpected), fall back to inserting before autoFilter
                 // so the worksheet remains schema-valid.
                 if !replaced && !inserted && !new_section.is_empty() {
@@ -2488,8 +2495,9 @@ fn patch_workbook_xml(
                 for sheet_meta in sheets {
                     let sheet = doc.workbook.sheet(sheet_meta.worksheet_id);
                     let name = sheet.map(|s| s.name.as_str()).unwrap_or("Sheet");
-                    let visibility =
-                        sheet.map(|s| s.visibility).unwrap_or(SheetVisibility::Visible);
+                    let visibility = sheet
+                        .map(|s| s.visibility)
+                        .unwrap_or(SheetVisibility::Visible);
                     writer.get_mut().extend_from_slice(b"<");
                     writer.get_mut().extend_from_slice(sheet_tag.as_bytes());
                     writer.get_mut().extend_from_slice(b" name=\"");
@@ -2505,9 +2513,9 @@ fn patch_workbook_xml(
                     writer.get_mut().push(b' ');
                     writer.get_mut().extend_from_slice(rel_id_attr.as_bytes());
                     writer.get_mut().extend_from_slice(b"=\"");
-                    writer.get_mut().extend_from_slice(
-                        escape_attr(&sheet_meta.relationship_id).as_bytes(),
-                    );
+                    writer
+                        .get_mut()
+                        .extend_from_slice(escape_attr(&sheet_meta.relationship_id).as_bytes());
                     writer.get_mut().push(b'"');
                     match visibility {
                         SheetVisibility::Visible => {}
@@ -2554,8 +2562,9 @@ fn patch_workbook_xml(
                 for sheet_meta in sheets {
                     let sheet = doc.workbook.sheet(sheet_meta.worksheet_id);
                     let name = sheet.map(|s| s.name.as_str()).unwrap_or("Sheet");
-                    let visibility =
-                        sheet.map(|s| s.visibility).unwrap_or(SheetVisibility::Visible);
+                    let visibility = sheet
+                        .map(|s| s.visibility)
+                        .unwrap_or(SheetVisibility::Visible);
                     writer.get_mut().extend_from_slice(b"<");
                     writer.get_mut().extend_from_slice(sheet_tag.as_bytes());
                     writer.get_mut().extend_from_slice(b" name=\"");
@@ -2571,9 +2580,9 @@ fn patch_workbook_xml(
                     writer.get_mut().push(b' ');
                     writer.get_mut().extend_from_slice(rel_id_attr.as_bytes());
                     writer.get_mut().extend_from_slice(b"=\"");
-                    writer.get_mut().extend_from_slice(
-                        escape_attr(&sheet_meta.relationship_id).as_bytes(),
-                    );
+                    writer
+                        .get_mut()
+                        .extend_from_slice(escape_attr(&sheet_meta.relationship_id).as_bytes());
                     writer.get_mut().push(b'"');
                     match visibility {
                         SheetVisibility::Visible => {}
@@ -2884,7 +2893,9 @@ fn write_workbook_protection(
     }
     if let Some(hash) = protection.password_hash {
         if !wrote_password {
-            writer.get_mut().extend_from_slice(br#" workbookPassword=""#);
+            writer
+                .get_mut()
+                .extend_from_slice(br#" workbookPassword=""#);
             writer
                 .get_mut()
                 .extend_from_slice(format!("{:04X}", hash).as_bytes());
@@ -2911,7 +2922,9 @@ fn write_new_workbook_protection(
         writer.get_mut().extend_from_slice(br#" lockWindows="1""#);
     }
     if let Some(hash) = protection.password_hash {
-        writer.get_mut().extend_from_slice(br#" workbookPassword=""#);
+        writer
+            .get_mut()
+            .extend_from_slice(br#" workbookPassword=""#);
         writer
             .get_mut()
             .extend_from_slice(format!("{:04X}", hash).as_bytes());
@@ -3018,11 +3031,19 @@ fn render_sheet_protection(protection: &SheetProtection, prefix: Option<&str>) -
     // unambiguous (especially for `objects`/`scenarios`, whose defaults vary across producers).
     out.push_str(&format!(
         r#" selectLockedCells="{}""#,
-        if protection.select_locked_cells { "1" } else { "0" }
+        if protection.select_locked_cells {
+            "1"
+        } else {
+            "0"
+        }
     ));
     out.push_str(&format!(
         r#" selectUnlockedCells="{}""#,
-        if protection.select_unlocked_cells { "1" } else { "0" }
+        if protection.select_unlocked_cells {
+            "1"
+        } else {
+            "0"
+        }
     ));
     out.push_str(&format!(
         r#" formatCells="{}""#,
@@ -3046,7 +3067,11 @@ fn render_sheet_protection(protection: &SheetProtection, prefix: Option<&str>) -
     ));
     out.push_str(&format!(
         r#" insertHyperlinks="{}""#,
-        if protection.insert_hyperlinks { "1" } else { "0" }
+        if protection.insert_hyperlinks {
+            "1"
+        } else {
+            "0"
+        }
     ));
     out.push_str(&format!(
         r#" deleteColumns="{}""#,
@@ -4908,8 +4933,8 @@ fn ensure_content_types_default(
         match event {
             Event::Start(ref e) if local_name(e.name().as_ref()) == b"Types" => {
                 if types_prefix.is_none() {
-                    types_prefix =
-                        element_prefix(e.name().as_ref()).map(|p| String::from_utf8_lossy(p).into_owned());
+                    types_prefix = element_prefix(e.name().as_ref())
+                        .map(|p| String::from_utf8_lossy(p).into_owned());
                 }
                 if !has_default_ns {
                     has_default_ns = content_types_has_default_ns(e)?;
@@ -4920,8 +4945,8 @@ fn ensure_content_types_default(
                 // Some producers emit an empty content-types part as `<Types .../>`.
                 // Expand it so we can insert the required Default.
                 if types_prefix.is_none() {
-                    types_prefix =
-                        element_prefix(e.name().as_ref()).map(|p| String::from_utf8_lossy(p).into_owned());
+                    types_prefix = element_prefix(e.name().as_ref())
+                        .map(|p| String::from_utf8_lossy(p).into_owned());
                 }
                 if !has_default_ns {
                     has_default_ns = content_types_has_default_ns(e)?;
@@ -4955,8 +4980,8 @@ fn ensure_content_types_default(
             }
             Event::Start(ref e) if local_name(e.name().as_ref()) == b"Default" => {
                 if default_prefix.is_none() {
-                    default_prefix =
-                        element_prefix(e.name().as_ref()).map(|p| String::from_utf8_lossy(p).into_owned());
+                    default_prefix = element_prefix(e.name().as_ref())
+                        .map(|p| String::from_utf8_lossy(p).into_owned());
                 }
                 for attr in e.attributes() {
                     let attr = attr?;
@@ -4969,8 +4994,8 @@ fn ensure_content_types_default(
             }
             Event::Empty(ref e) if local_name(e.name().as_ref()) == b"Default" => {
                 if default_prefix.is_none() {
-                    default_prefix =
-                        element_prefix(e.name().as_ref()).map(|p| String::from_utf8_lossy(p).into_owned());
+                    default_prefix = element_prefix(e.name().as_ref())
+                        .map(|p| String::from_utf8_lossy(p).into_owned());
                 }
                 for attr in e.attributes() {
                     let attr = attr?;
@@ -5012,7 +5037,10 @@ fn ensure_content_types_default(
     Ok(())
 }
 
-fn relationship_target_by_type(rels_xml: &[u8], rel_type: &str) -> Result<Option<String>, WriteError> {
+fn relationship_target_by_type(
+    rels_xml: &[u8],
+    rel_type: &str,
+) -> Result<Option<String>, WriteError> {
     let mut reader = Reader::from_reader(rels_xml);
     reader.config_mut().trim_text(false);
     let mut buf = Vec::new();
@@ -5089,11 +5117,14 @@ fn ensure_workbook_rels_has_relationship(
                         let attr = attr?;
                         let key = attr.key.as_ref();
                         if key == b"xmlns"
-                            && attr.value.as_ref() == crate::relationships::PACKAGE_REL_NS.as_bytes()
+                            && attr.value.as_ref()
+                                == crate::relationships::PACKAGE_REL_NS.as_bytes()
                         {
                             root_has_default_ns = true;
                         } else if let Some(prefix) = key.strip_prefix(b"xmlns:") {
-                            if attr.value.as_ref() == crate::relationships::PACKAGE_REL_NS.as_bytes() {
+                            if attr.value.as_ref()
+                                == crate::relationships::PACKAGE_REL_NS.as_bytes()
+                            {
                                 if let Ok(prefix) = std::str::from_utf8(prefix) {
                                     root_declared_prefixes.insert(prefix.to_string());
                                 }
@@ -5241,11 +5272,14 @@ fn patch_workbook_rels_for_sheet_edits(
                         let attr = attr?;
                         let key = attr.key.as_ref();
                         if key == b"xmlns"
-                            && attr.value.as_ref() == crate::relationships::PACKAGE_REL_NS.as_bytes()
+                            && attr.value.as_ref()
+                                == crate::relationships::PACKAGE_REL_NS.as_bytes()
                         {
                             root_has_default_ns = true;
                         } else if let Some(prefix) = key.strip_prefix(b"xmlns:") {
-                            if attr.value.as_ref() == crate::relationships::PACKAGE_REL_NS.as_bytes() {
+                            if attr.value.as_ref()
+                                == crate::relationships::PACKAGE_REL_NS.as_bytes()
+                            {
                                 if let Ok(prefix) = std::str::from_utf8(prefix) {
                                     root_declared_prefixes.insert(prefix.to_string());
                                 }
@@ -5270,11 +5304,14 @@ fn patch_workbook_rels_for_sheet_edits(
                         let attr = attr?;
                         let key = attr.key.as_ref();
                         if key == b"xmlns"
-                            && attr.value.as_ref() == crate::relationships::PACKAGE_REL_NS.as_bytes()
+                            && attr.value.as_ref()
+                                == crate::relationships::PACKAGE_REL_NS.as_bytes()
                         {
                             root_has_default_ns = true;
                         } else if let Some(prefix) = key.strip_prefix(b"xmlns:") {
-                            if attr.value.as_ref() == crate::relationships::PACKAGE_REL_NS.as_bytes() {
+                            if attr.value.as_ref()
+                                == crate::relationships::PACKAGE_REL_NS.as_bytes()
+                            {
                                 if let Ok(prefix) = std::str::from_utf8(prefix) {
                                     root_declared_prefixes.insert(prefix.to_string());
                                 }
