@@ -3009,7 +3009,7 @@ impl Engine {
                 .unwrap_or_else(|| expr.clone()),
             crate::Expr::FieldAccess(access) => crate::Expr::FieldAccess(crate::FieldAccessExpr {
                 base: Box::new(self.inline_static_defined_names_for_bytecode_inner(
-                    &access.base,
+                    access.base.as_ref(),
                     current_sheet,
                     visiting,
                 )),
@@ -4800,7 +4800,9 @@ fn expand_nodes_to_cells(nodes: &[PrecedentNode], limit: usize) -> Vec<(SheetId,
 fn canonical_expr_contains_structured_refs(expr: &crate::Expr) -> bool {
     match expr {
         crate::Expr::StructuredRef(_) => true,
-        crate::Expr::FieldAccess(access) => canonical_expr_contains_structured_refs(access.base.as_ref()),
+        crate::Expr::FieldAccess(access) => {
+            canonical_expr_contains_structured_refs(access.base.as_ref())
+        }
         crate::Expr::FunctionCall(call) => call
             .args
             .iter()
@@ -4842,7 +4844,9 @@ fn canonical_expr_contains_external_workbook_refs(expr: &crate::Expr) -> bool {
         crate::Expr::ColRef(r) => r.workbook.is_some(),
         crate::Expr::RowRef(r) => r.workbook.is_some(),
         crate::Expr::StructuredRef(r) => r.workbook.is_some(),
-        crate::Expr::FieldAccess(access) => canonical_expr_contains_external_workbook_refs(access.base.as_ref()),
+        crate::Expr::FieldAccess(access) => {
+            canonical_expr_contains_external_workbook_refs(access.base.as_ref())
+        }
         crate::Expr::FunctionCall(call) => call
             .args
             .iter()
@@ -4968,6 +4972,12 @@ fn canonical_expr_depends_on_external_workbook_refs_inner(
                 visiting,
             )
         }),
+        crate::Expr::FieldAccess(access) => canonical_expr_depends_on_external_workbook_refs_inner(
+            access.base.as_ref(),
+            current_sheet,
+            workbook,
+            visiting,
+        ),
         crate::Expr::Call(call) => {
             canonical_expr_depends_on_external_workbook_refs_inner(
                 call.callee.as_ref(),
@@ -5595,14 +5605,11 @@ fn rewrite_defined_name_constants_for_bytecode(
     ) -> Option<crate::Expr> {
         match expr {
             crate::Expr::NameRef(nref) => inline_name_ref(nref, current_sheet, workbook),
-            crate::Expr::FieldAccess(access) => {
-                rewrite_inner(access.base.as_ref(), current_sheet, workbook).map(|base| {
-                    crate::Expr::FieldAccess(crate::FieldAccessExpr {
-                        base: Box::new(base),
-                        field: access.field.clone(),
-                    })
-                })
-            },
+            crate::Expr::FieldAccess(access) => rewrite_inner(access.base.as_ref(), current_sheet, workbook)
+                .map(|base| crate::Expr::FieldAccess(crate::FieldAccessExpr {
+                    base: Box::new(base),
+                    field: access.field.clone(),
+                })),
             crate::Expr::FunctionCall(call) => {
                 if matches!(
                     bytecode::ast::Function::from_name(&call.name.name_upper),

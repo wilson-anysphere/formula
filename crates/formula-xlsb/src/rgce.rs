@@ -2306,7 +2306,7 @@ mod encode_ast {
                 emit_structured_ref(r, ctx, sheet, base, rgce, PtgClass::Ref)?;
             }
             fe::Expr::FieldAccess(_) => {
-                return Err(EncodeError::Unsupported("field access expressions"));
+                return Err(EncodeError::Unsupported("field access"));
             }
         }
 
