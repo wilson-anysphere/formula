@@ -139,3 +139,23 @@ fn format_cell_display_for_entity_and_record_uses_display_string() {
     assert_eq!(entity_display.text, "Entity Display");
     assert_eq!(record_display.text, "Record Display");
 }
+
+#[test]
+fn record_json_without_display_value_deserializes_and_uses_display_field_for_display() {
+    let json = r#"
+    {
+      "type": "record",
+      "value": {
+        "fields": {
+          "name": { "type": "string", "value": "Ada" }
+        },
+        "displayField": "name"
+      }
+    }
+    "#;
+
+    let value: CellValue = serde_json::from_str(json).unwrap();
+    let options = FormatOptions::default();
+    let display = format_cell_display(&value, None, &options);
+    assert_eq!(display.text, "Ada");
+}
