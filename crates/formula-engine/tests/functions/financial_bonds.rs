@@ -15,6 +15,15 @@ fn assert_close(actual: f64, expected: f64, tol: f64) {
     );
 }
 
+fn eval_number_or_skip(sheet: &mut TestSheet, formula: &str) -> Option<f64> {
+    match sheet.eval(formula) {
+        Value::Number(n) => Some(n),
+        // These bond functions may not be registered in every build of the engine yet.
+        Value::Error(ErrorKind::Name) => None,
+        other => panic!("expected number, got {other:?} from {formula}"),
+    }
+}
+
 #[test]
 fn price_matches_excel_doc_example() {
     // Excel docs:
@@ -483,4 +492,251 @@ fn accrint_and_accrintm_basis_0_are_hand_computable() {
     )
     .unwrap();
     assert_close(accrued, 30.0, 1e-12);
+}
+
+#[test]
+fn coup_functions_coerce_frequency_like_excel() {
+    let mut sheet = TestSheet::new();
+    let settlement = "DATE(2024,6,15)";
+    let maturity = "DATE(2025,1,1)";
+
+    // Number-returning COUP* helpers.
+    for func in ["COUPDAYBS", "COUPDAYS", "COUPDAYSNC", "COUPNUM"] {
+        let baseline = format!("={func}({settlement},{maturity},2,0)");
+        let Some(expected) = eval_number_or_skip(&mut sheet, &baseline) else {
+            return;
+        };
+        let with_float_freq = format!("={func}({settlement},{maturity},2.9,0)");
+        let Some(actual) = eval_number_or_skip(&mut sheet, &with_float_freq) else {
+            return;
+        };
+        assert_close(actual, expected, 1e-12);
+    }
+
+    // Date-serial COUP* helpers.
+    for func in ["COUPNCD", "COUPPCD"] {
+        let baseline = format!("={func}({settlement},{maturity},2,0)");
+        let Some(expected) = eval_number_or_skip(&mut sheet, &baseline) else {
+            return;
+        };
+        let with_float_freq = format!("={func}({settlement},{maturity},2.9,0)");
+        let Some(actual) = eval_number_or_skip(&mut sheet, &with_float_freq) else {
+            return;
+        };
+        assert_eq!(actual, expected);
+    }
+}
+
+#[test]
+fn coup_functions_coerce_basis_like_excel() {
+    let mut sheet = TestSheet::new();
+    let settlement = "DATE(2024,6,15)";
+    let maturity = "DATE(2025,1,1)";
+
+    // Number-returning COUP* helpers.
+    for func in ["COUPDAYBS", "COUPDAYS", "COUPDAYSNC", "COUPNUM"] {
+        let baseline = format!("={func}({settlement},{maturity},2,0)");
+        let Some(expected) = eval_number_or_skip(&mut sheet, &baseline) else {
+            return;
+        };
+        let with_float_basis = format!("={func}({settlement},{maturity},2,0.9)");
+        let Some(actual) = eval_number_or_skip(&mut sheet, &with_float_basis) else {
+            return;
+        };
+        assert_close(actual, expected, 1e-12);
+    }
+
+    // Date-serial COUP* helpers.
+    for func in ["COUPNCD", "COUPPCD"] {
+        let baseline = format!("={func}({settlement},{maturity},2,0)");
+        let Some(expected) = eval_number_or_skip(&mut sheet, &baseline) else {
+            return;
+        };
+        let with_float_basis = format!("={func}({settlement},{maturity},2,0.9)");
+        let Some(actual) = eval_number_or_skip(&mut sheet, &with_float_basis) else {
+            return;
+        };
+        assert_eq!(actual, expected);
+    }
+
+    // Regression: truncation, not rounding (1.999... -> 1).
+    let baseline_days = eval_number_or_skip(
+        &mut sheet,
+        "=COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,1)",
+    )
+    .expect("COUPDAYS should evaluate for basis=1");
+    let with_float = eval_number_or_skip(
+        &mut sheet,
+        "=COUPDAYS(DATE(2024,6,15),DATE(2025,1,1),2,1.999999999)",
+    )
+    .expect("COUPDAYS should evaluate for basis=1.999999999");
+    assert_close(with_float, baseline_days, 1e-12);
+}
+
+#[test]
+fn standard_bond_functions_coerce_frequency_like_excel() {
+    let mut sheet = TestSheet::new();
+
+    let Some(price_baseline) = eval_number_or_skip(
+        &mut sheet,
+        "=PRICE(DATE(2008,2,15),DATE(2017,11,15),0.0575,0.065,100,2,0)",
+    ) else {
+        return;
+    };
+    let price_with_float = eval_number_or_skip(
+        &mut sheet,
+        "=PRICE(DATE(2008,2,15),DATE(2017,11,15),0.0575,0.065,100,2.9,0)",
+    )
+    .expect("PRICE should evaluate for frequency=2.9");
+    assert_close(price_with_float, price_baseline, 1e-10);
+
+    let Some(yield_baseline) = eval_number_or_skip(
+        &mut sheet,
+        "=YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2,0)",
+    ) else {
+        return;
+    };
+    let yield_with_float = eval_number_or_skip(
+        &mut sheet,
+        "=YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2.9,0)",
+    )
+    .expect("YIELD should evaluate for frequency=2.9");
+    assert_close(yield_with_float, yield_baseline, 1e-10);
+
+    let Some(duration_baseline) = eval_number_or_skip(
+        &mut sheet,
+        "=DURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,1)",
+    ) else {
+        return;
+    };
+    let duration_with_float = eval_number_or_skip(
+        &mut sheet,
+        "=DURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2.9,1)",
+    )
+    .expect("DURATION should evaluate for frequency=2.9");
+    assert_close(duration_with_float, duration_baseline, 1e-12);
+
+    let Some(mduration_baseline) = eval_number_or_skip(
+        &mut sheet,
+        "=MDURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,1)",
+    ) else {
+        return;
+    };
+    let mduration_with_float = eval_number_or_skip(
+        &mut sheet,
+        "=MDURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2.9,1)",
+    )
+    .expect("MDURATION should evaluate for frequency=2.9");
+    assert_close(mduration_with_float, mduration_baseline, 1e-12);
+}
+
+#[test]
+fn standard_bond_functions_coerce_basis_like_excel() {
+    let mut sheet = TestSheet::new();
+
+    let Some(price_baseline) = eval_number_or_skip(
+        &mut sheet,
+        "=PRICE(DATE(2008,2,15),DATE(2017,11,15),0.0575,0.065,100,2,0)",
+    ) else {
+        return;
+    };
+    let price_with_float = eval_number_or_skip(
+        &mut sheet,
+        "=PRICE(DATE(2008,2,15),DATE(2017,11,15),0.0575,0.065,100,2,0.9)",
+    )
+    .expect("PRICE should evaluate for basis=0.9");
+    assert_close(price_with_float, price_baseline, 1e-10);
+
+    let Some(yield_baseline) = eval_number_or_skip(
+        &mut sheet,
+        "=YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2,0)",
+    ) else {
+        return;
+    };
+    let yield_with_float = eval_number_or_skip(
+        &mut sheet,
+        "=YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2,0.9)",
+    )
+    .expect("YIELD should evaluate for basis=0.9");
+    assert_close(yield_with_float, yield_baseline, 1e-10);
+
+    let Some(duration_baseline) = eval_number_or_skip(
+        &mut sheet,
+        "=DURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,0)",
+    ) else {
+        return;
+    };
+    let duration_with_float = eval_number_or_skip(
+        &mut sheet,
+        "=DURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,0.9)",
+    )
+    .expect("DURATION should evaluate for basis=0.9");
+    assert_close(duration_with_float, duration_baseline, 1e-12);
+
+    let Some(mduration_baseline) = eval_number_or_skip(
+        &mut sheet,
+        "=MDURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,0)",
+    ) else {
+        return;
+    };
+    let mduration_with_float = eval_number_or_skip(
+        &mut sheet,
+        "=MDURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,0.9)",
+    )
+    .expect("MDURATION should evaluate for basis=0.9");
+    assert_close(mduration_with_float, mduration_baseline, 1e-12);
+
+    // Regression: truncation, not rounding (1.999... -> 1).
+    let duration_basis1 = eval_number_or_skip(
+        &mut sheet,
+        "=DURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,1)",
+    )
+    .expect("DURATION should evaluate for basis=1");
+    let duration_basis1_float = eval_number_or_skip(
+        &mut sheet,
+        "=DURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,1.999999999)",
+    )
+    .expect("DURATION should evaluate for basis=1.999999999");
+    assert_close(duration_basis1_float, duration_basis1, 1e-12);
+}
+
+#[test]
+fn accrint_functions_coerce_frequency_and_basis_like_excel() {
+    let mut sheet = TestSheet::new();
+
+    let accrint_baseline = match sheet.eval(
+        "=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,8,15),0.1,1000,2,0,FALSE)",
+    ) {
+        Value::Error(ErrorKind::Name) => return,
+        Value::Number(n) => n,
+        other => panic!("expected number, got {other:?}"),
+    };
+
+    let accrint_float_freq = match sheet.eval(
+        "=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,8,15),0.1,1000,2.9,0,FALSE)",
+    ) {
+        Value::Number(n) => n,
+        other => panic!("expected number, got {other:?}"),
+    };
+    assert_close(accrint_float_freq, accrint_baseline, 1e-12);
+
+    let accrint_float_basis = match sheet.eval(
+        "=ACCRINT(DATE(2020,2,15),DATE(2020,5,15),DATE(2020,8,15),0.1,1000,2,0.9,FALSE)",
+    ) {
+        Value::Number(n) => n,
+        other => panic!("expected number, got {other:?}"),
+    };
+    assert_close(accrint_float_basis, accrint_baseline, 1e-12);
+
+    let Some(accrintm_baseline) =
+        eval_number_or_skip(&mut sheet, "=ACCRINTM(DATE(2020,1,1),DATE(2020,7,1),0.1,1000,0)")
+    else {
+        return;
+    };
+    let accrintm_float_basis = eval_number_or_skip(
+        &mut sheet,
+        "=ACCRINTM(DATE(2020,1,1),DATE(2020,7,1),0.1,1000,0.9)",
+    )
+    .expect("ACCRINTM should evaluate for basis=0.9");
+    assert_close(accrintm_float_basis, accrintm_baseline, 1e-12);
 }

@@ -32010,6 +32010,48 @@
       "id": "couppcd_fb1f66d541f3"
     },
     {
+      "formula": "=COUPDAYBS(A1,A2,2.9,0)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 45458
+        },
+        {
+          "cell": "A2",
+          "value": 45658
+        }
+      ],
+      "tags": [
+        "financial",
+        "COUPDAYBS",
+        "coercion"
+      ],
+      "description": "frequency=2.9",
+      "id": "coupdaybs_2fce79ecc760"
+    },
+    {
+      "formula": "=COUPNCD(A1,A2,2,0.9)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 45458
+        },
+        {
+          "cell": "A2",
+          "value": 45658
+        }
+      ],
+      "tags": [
+        "financial",
+        "COUPNCD",
+        "coercion"
+      ],
+      "description": "basis=0.9",
+      "id": "coupncd_1eaa19739c11"
+    },
+    {
       "formula": "=FVSCHEDULE(100,{0.1,0.2})",
       "outputCell": "C1",
       "inputs": [],
@@ -32701,6 +32743,30 @@
       "id": "price_8e866432f10a"
     },
     {
+      "formula": "=PRICE(DATE(2008,2,15),DATE(2017,11,15),0.0575,0.065,100,2.9,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PRICE",
+        "coercion"
+      ],
+      "description": "frequency=2.9",
+      "id": "price_470c8142a1d2"
+    },
+    {
+      "formula": "=PRICE(DATE(2008,2,15),DATE(2017,11,15),0.0575,0.065,100,2,0.9)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "PRICE",
+        "coercion"
+      ],
+      "description": "basis=0.9",
+      "id": "price_940f35e319ac"
+    },
+    {
       "formula": "=YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2,0)",
       "outputCell": "C1",
       "inputs": [],
@@ -32709,6 +32775,30 @@
         "YIELD"
       ],
       "id": "yield_23f382f2d8d1"
+    },
+    {
+      "formula": "=YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2.9,0)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "YIELD",
+        "coercion"
+      ],
+      "description": "frequency=2.9",
+      "id": "yield_68f53eb8e1f8"
+    },
+    {
+      "formula": "=YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2,0.9)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "YIELD",
+        "coercion"
+      ],
+      "description": "basis=0.9",
+      "id": "yield_a92815f356a6"
     },
     {
       "formula": "=DURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,1)",
@@ -32721,6 +32811,30 @@
       "id": "duration_5d31c3b2fd90"
     },
     {
+      "formula": "=DURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2.9,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "DURATION",
+        "coercion"
+      ],
+      "description": "frequency=2.9",
+      "id": "duration_f0732ed4711f"
+    },
+    {
+      "formula": "=DURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,0.9)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "DURATION",
+        "coercion"
+      ],
+      "description": "basis=0.9",
+      "id": "duration_d8a0e117c623"
+    },
+    {
       "formula": "=MDURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,1)",
       "outputCell": "C1",
       "inputs": [],
@@ -32729,6 +32843,30 @@
         "MDURATION"
       ],
       "id": "mduration_4b098423c29a"
+    },
+    {
+      "formula": "=MDURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2.9,1)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "MDURATION",
+        "coercion"
+      ],
+      "description": "frequency=2.9",
+      "id": "mduration_a4df83158842"
+    },
+    {
+      "formula": "=MDURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,0.9)",
+      "outputCell": "C1",
+      "inputs": [],
+      "tags": [
+        "financial",
+        "MDURATION",
+        "coercion"
+      ],
+      "description": "basis=0.9",
+      "id": "mduration_709c85e602af"
     },
     {
       "formula": "=ACCRINTM(A1,A2,0.1,1000,0)",
@@ -32748,6 +32886,27 @@
         "ACCRINTM"
       ],
       "id": "accrintm_ca118fca3956"
+    },
+    {
+      "formula": "=ACCRINTM(A1,A2,0.1,1000,0.9)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 43831
+        },
+        {
+          "cell": "A2",
+          "value": 44013
+        }
+      ],
+      "tags": [
+        "financial",
+        "ACCRINTM",
+        "coercion"
+      ],
+      "description": "basis=0.9",
+      "id": "accrintm_ab6bbd09d80f"
     },
     {
       "formula": "=ACCRINT(A1,A2,A3,0.1,1000,2,0,FALSE)",
@@ -32771,6 +32930,56 @@
         "ACCRINT"
       ],
       "id": "accrint_07705eb064f2"
+    },
+    {
+      "formula": "=ACCRINT(A1,A2,A3,0.1,1000,2.9,0,FALSE)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 43876
+        },
+        {
+          "cell": "A2",
+          "value": 43966
+        },
+        {
+          "cell": "A3",
+          "value": 44058
+        }
+      ],
+      "tags": [
+        "financial",
+        "ACCRINT",
+        "coercion"
+      ],
+      "description": "frequency=2.9",
+      "id": "accrint_4b1d3de73f86"
+    },
+    {
+      "formula": "=ACCRINT(A1,A2,A3,0.1,1000,2,0.9,FALSE)",
+      "outputCell": "C1",
+      "inputs": [
+        {
+          "cell": "A1",
+          "value": 43876
+        },
+        {
+          "cell": "A2",
+          "value": 43966
+        },
+        {
+          "cell": "A3",
+          "value": 44058
+        }
+      ],
+      "tags": [
+        "financial",
+        "ACCRINT",
+        "coercion"
+      ],
+      "description": "basis=0.9",
+      "id": "accrint_55f8d2407524"
     },
     {
       "formula": "=ACCRINT(A1,A2,A3,0.1,1000,2,0)",

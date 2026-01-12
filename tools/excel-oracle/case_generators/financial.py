@@ -136,6 +136,23 @@ def generate(
         formula="=COUPPCD(A1,A2,2,0)",
         inputs=coup_inputs,
     )
+    # Integer-coercion variants for `frequency` and `basis` (truncate toward zero).
+    add_case(
+        cases,
+        prefix="coupdaybs",
+        tags=["financial", "COUPDAYBS", "coercion"],
+        formula="=COUPDAYBS(A1,A2,2.9,0)",
+        inputs=coup_inputs,
+        description="frequency=2.9",
+    )
+    add_case(
+        cases,
+        prefix="coupncd",
+        tags=["financial", "COUPNCD", "coercion"],
+        formula="=COUPNCD(A1,A2,2,0.9)",
+        inputs=coup_inputs,
+        description="basis=0.9",
+    )
     add_case(
         cases,
         prefix="fvschedule",
@@ -484,9 +501,37 @@ def generate(
     )
     add_case(
         cases,
+        prefix="price",
+        tags=["financial", "PRICE", "coercion"],
+        formula="=PRICE(DATE(2008,2,15),DATE(2017,11,15),0.0575,0.065,100,2.9,0)",
+        description="frequency=2.9",
+    )
+    add_case(
+        cases,
+        prefix="price",
+        tags=["financial", "PRICE", "coercion"],
+        formula="=PRICE(DATE(2008,2,15),DATE(2017,11,15),0.0575,0.065,100,2,0.9)",
+        description="basis=0.9",
+    )
+    add_case(
+        cases,
         prefix="yield",
         tags=["financial", "YIELD"],
         formula="=YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2,0)",
+    )
+    add_case(
+        cases,
+        prefix="yield",
+        tags=["financial", "YIELD", "coercion"],
+        formula="=YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2.9,0)",
+        description="frequency=2.9",
+    )
+    add_case(
+        cases,
+        prefix="yield",
+        tags=["financial", "YIELD", "coercion"],
+        formula="=YIELD(DATE(2008,2,15),DATE(2017,11,15),0.0575,95.04287,100,2,0.9)",
+        description="basis=0.9",
     )
     add_case(
         cases,
@@ -496,9 +541,37 @@ def generate(
     )
     add_case(
         cases,
+        prefix="duration",
+        tags=["financial", "DURATION", "coercion"],
+        formula="=DURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2.9,1)",
+        description="frequency=2.9",
+    )
+    add_case(
+        cases,
+        prefix="duration",
+        tags=["financial", "DURATION", "coercion"],
+        formula="=DURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,0.9)",
+        description="basis=0.9",
+    )
+    add_case(
+        cases,
         prefix="mduration",
         tags=["financial", "MDURATION"],
         formula="=MDURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,1)",
+    )
+    add_case(
+        cases,
+        prefix="mduration",
+        tags=["financial", "MDURATION", "coercion"],
+        formula="=MDURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2.9,1)",
+        description="frequency=2.9",
+    )
+    add_case(
+        cases,
+        prefix="mduration",
+        tags=["financial", "MDURATION", "coercion"],
+        formula="=MDURATION(DATE(2008,1,1),DATE(2016,1,1),0.08,0.09,2,0.9)",
+        description="basis=0.9",
     )
 
     # Accrued interest.
@@ -511,6 +584,14 @@ def generate(
     )
     add_case(
         cases,
+        prefix="accrintm",
+        tags=["financial", "ACCRINTM", "coercion"],
+        formula="=ACCRINTM(A1,A2,0.1,1000,0.9)",
+        inputs=[CellInput("A1", excel_serial_1900(2020, 1, 1)), CellInput("A2", excel_serial_1900(2020, 7, 1))],
+        description="basis=0.9",
+    )
+    add_case(
+        cases,
         prefix="accrint",
         tags=["financial", "ACCRINT"],
         formula="=ACCRINT(A1,A2,A3,0.1,1000,2,0,FALSE)",
@@ -519,6 +600,30 @@ def generate(
             CellInput("A2", excel_serial_1900(2020, 5, 15)),
             CellInput("A3", excel_serial_1900(2020, 8, 15)),
         ],
+    )
+    add_case(
+        cases,
+        prefix="accrint",
+        tags=["financial", "ACCRINT", "coercion"],
+        formula="=ACCRINT(A1,A2,A3,0.1,1000,2.9,0,FALSE)",
+        inputs=[
+            CellInput("A1", excel_serial_1900(2020, 2, 15)),
+            CellInput("A2", excel_serial_1900(2020, 5, 15)),
+            CellInput("A3", excel_serial_1900(2020, 8, 15)),
+        ],
+        description="frequency=2.9",
+    )
+    add_case(
+        cases,
+        prefix="accrint",
+        tags=["financial", "ACCRINT", "coercion"],
+        formula="=ACCRINT(A1,A2,A3,0.1,1000,2,0.9,FALSE)",
+        inputs=[
+            CellInput("A1", excel_serial_1900(2020, 2, 15)),
+            CellInput("A2", excel_serial_1900(2020, 5, 15)),
+            CellInput("A3", excel_serial_1900(2020, 8, 15)),
+        ],
+        description="basis=0.9",
     )
     add_case(
         cases,

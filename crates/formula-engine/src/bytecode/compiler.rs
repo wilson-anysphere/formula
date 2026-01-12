@@ -683,6 +683,7 @@ impl<'a> CompileCtx<'a> {
             self.program.instrs[idx] = Instruction::new(OpCode::Jump, end_target, 0);
         }
     }
+
     fn compile_func_arg(&mut self, func: &Function, arg_idx: usize, arg: &Expr) {
         // Preserve `Missing` for *direct* blank arguments so functions can distinguish a
         // syntactically omitted argument from a blank cell value.

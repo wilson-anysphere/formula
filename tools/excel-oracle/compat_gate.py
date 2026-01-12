@@ -155,7 +155,7 @@ def _build_engine_cmd(
     max_cases: int,
     include_tags: list[str],
     exclude_tags: list[str],
-    use_cargo_agent: bool,
+    use_cargo_agent: bool = False,
 ) -> list[str]:
     if use_cargo_agent:
         cmd = ["bash", "scripts/cargo_agent.sh", "run"]
