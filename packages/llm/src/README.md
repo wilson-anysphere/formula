@@ -10,10 +10,10 @@ This package provides a small, dependency-free LLM client that talks to the **Cu
 
 ## Backend protocol
 
-The Cursor backend is expected to expose an **OpenAI-compatible** endpoint:
+The Cursor backend is expected to expose a **Chat Completions-compatible** endpoint:
 
 - `POST /chat/completions`
-- `messages` + `tools` + `tool_calls` follow the OpenAI Chat Completions tool-calling format.
+- `messages` + `tools` + `tool_calls` follow the Chat Completions tool-calling format.
 
 ## Auth injection
 
