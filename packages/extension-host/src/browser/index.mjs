@@ -1504,10 +1504,24 @@ class BrowserExtensionHost {
         const ref = args[0];
         const { sheetName, ref: a1Ref } = this._splitSheetQualifier(ref);
         const sheetId = await this._resolveSheetId(sheetName);
-        const result =
-          typeof this._spreadsheet.getRange === "function"
-            ? await this._spreadsheet.getRange(ref)
-            : await this._defaultGetRange(a1Ref);
+        const hasGetRange = typeof this._spreadsheet.getRange === "function";
+        /** @type {any} */
+        let result;
+        if (hasGetRange) {
+          result = await this._spreadsheet.getRange(ref);
+        } else {
+          const activeSheetId = await this._resolveActiveSheetId();
+          // `getCell` is scoped to the active sheet in most host implementations; without a
+          // sheet-aware `getRange` implementation we cannot safely service cross-sheet reads.
+          if (sheetName != null && sheetId !== activeSheetId) {
+            throw new Error(
+              `Sheet-qualified ranges require spreadsheetApi.getRange (cannot read '${String(
+                sheetName
+              )}' while active sheet is '${activeSheetId}')`
+            );
+          }
+          result = await this._defaultGetRange(a1Ref);
+        }
 
         if (result && typeof result === "object") {
           const coords = {

@@ -449,3 +449,66 @@ test("BrowserExtensionHost: taint list is capped to the most recent ranges", asy
   assert.deepEqual(extension.taintedRanges[0], { sheetId: "sheet1", startRow: 10, startCol: 10, endRow: 10, endCol: 10 });
   assert.deepEqual(extension.taintedRanges[49], { sheetId: "sheet1", startRow: 59, startCol: 59, endRow: 59, endCol: 59 });
 });
+
+test("BrowserExtensionHost: cells.getRange without spreadsheetApi.getRange rejects non-active sheet-qualified refs", async (t) => {
+  const { BrowserExtensionHost } = await importBrowserHost();
+
+  installFakeWorker(t, [{}]);
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: {
+      getActiveSheet() {
+        return { id: "sheet1", name: "Sheet1" };
+      },
+      listSheets() {
+        return [
+          { id: "sheet1", name: "Sheet1" },
+          { id: "sheet2", name: "Data" },
+        ];
+      },
+      async getSheet(name) {
+        const n = String(name);
+        if (n === "Sheet1") return { id: "sheet1", name: "Sheet1" };
+        if (n === "Data") return { id: "sheet2", name: "Data" };
+        return undefined;
+      },
+      async getSelection() {
+        return { startRow: 0, startCol: 0, endRow: 0, endCol: 0, values: [[null]] };
+      },
+      async getCell(_row, _col) {
+        return null;
+      },
+      async setCell() {},
+    },
+    permissionPrompt: async () => true,
+  });
+
+  t.after(async () => {
+    await host.dispose();
+  });
+
+  const extensionId = "test.range-sheet-qualified";
+  await host.loadExtension({
+    extensionId,
+    extensionPath: "http://example.invalid/",
+    mainUrl: "http://example.invalid/main.js",
+    manifest: {
+      name: "range-sheet-qualified",
+      publisher: "test",
+      version: "1.0.0",
+      engines: { formula: "^1.0.0" },
+      contributes: { commands: [], customFunctions: [] },
+      activationEvents: [],
+      permissions: ["cells.read"],
+    },
+  });
+
+  const extension = host._extensions.get(extensionId);
+  assert.ok(extension);
+
+  await assert.rejects(
+    () => host._executeApi("cells", "getRange", ["Data!A1:A1"], extension),
+    /Sheet-qualified ranges require spreadsheetApi\.getRange/
+  );
+});
