@@ -212,13 +212,8 @@ fn cell_images_import_loads_referenced_media() {
 
     let image = &parsed.parts[0].images[0];
     assert_eq!(image.embed_rel_id, "rId1");
-    assert_eq!(image.target_path, "xl/media/image1.png");
-    assert_eq!(image.image_id, ImageId::new("image1.png"));
-    assert!(image
-        .pic_xml
-        .as_deref()
-        .unwrap_or_default()
-        .contains("<xdr:pic>"));
+    assert_eq!(image.target.as_deref(), Some("xl/media/image1.png"));
+    assert!(image.raw_xml.contains("<xdr:pic>"));
 
     assert_eq!(
         workbook
@@ -343,7 +338,10 @@ fn cell_images_import_tolerates_parent_media_targets_lightweight_schema() {
 
     assert_eq!(parsed.parts.len(), 1);
     assert_eq!(parsed.parts[0].images.len(), 1);
-    assert_eq!(parsed.parts[0].images[0].target_path, "xl/media/image1.png");
+    assert_eq!(
+        parsed.parts[0].images[0].target.as_deref(),
+        Some("xl/media/image1.png")
+    );
     assert_eq!(
         workbook
             .images
@@ -366,7 +364,10 @@ fn cell_images_import_handles_cellimage_wrapping_blip() {
 
     assert_eq!(parsed.parts.len(), 1);
     assert_eq!(parsed.parts[0].images.len(), 1);
-    assert_eq!(parsed.parts[0].images[0].target_path, "xl/media/image1.png");
+    assert_eq!(
+        parsed.parts[0].images[0].target.as_deref(),
+        Some("xl/media/image1.png")
+    );
     assert_eq!(
         workbook
             .images

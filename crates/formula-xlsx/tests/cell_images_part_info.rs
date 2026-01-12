@@ -64,11 +64,14 @@ fn discovers_cell_images_part_and_resolves_image_targets() {
     assert_eq!(part.rels_path, "xl/_rels/cellimages.xml.rels");
     assert_eq!(part.images.len(), 1);
     assert_eq!(part.images[0].embed_rel_id, "rId1");
-    assert_eq!(part.images[0].target_path, "xl/media/image1.png");
+    assert_eq!(
+        part.images[0].target.as_deref(),
+        Some("xl/media/image1.png")
+    );
 
     let image_data = workbook
         .images
-        .get(&part.images[0].image_id)
+        .get(&formula_model::drawings::ImageId::new("image1.png"))
         .expect("expected image bytes to be loaded into workbook image store");
     assert_eq!(image_data.bytes.as_slice(), png_bytes);
 }

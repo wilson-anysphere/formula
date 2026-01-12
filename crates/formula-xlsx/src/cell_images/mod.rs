@@ -39,7 +39,9 @@ pub fn load_cell_images_from_parts(
             continue;
         }
         // Best-effort: ignore parse errors for cell image parts.
-        let _ = parse_cell_images_part(path, parts, workbook);
+        if let Ok(part) = parse_cell_images_part(path, parts) {
+            load_cell_images_part_media(&part, parts, workbook);
+        }
     }
 }
 /// Parsed workbook-level cell images parts.
@@ -63,12 +65,11 @@ pub struct CellImagesPart {
 pub struct CellImageEntry {
     /// Relationship ID referenced by `<a:blip r:embed="…">` (e.g. `rId1`).
     pub embed_rel_id: String,
-    /// Resolved target part path (e.g. `xl/media/image1.png`).
-    pub target_path: String,
-    /// Workbook image identifier (usually the media file name, like `image1.png`).
-    pub image_id: ImageId,
-    /// Best-effort raw XML for the `<pic>` subtree for future round-trip support.
-    pub pic_xml: Option<String>,
+    /// Resolved target part path (e.g. `xl/media/image1.png`), if the embed relationship can be
+    /// resolved to an image target.
+    pub target: Option<String>,
+    /// Best-effort raw XML for the `<cellImage>` subtree (or `<xdr:pic>` when present).
+    pub raw_xml: String,
 }
 
 impl CellImages {
@@ -89,13 +90,34 @@ impl CellImages {
                 continue;
             }
 
-            let part = parse_cell_images_part(path, parts, workbook)?;
+            let part = parse_cell_images_part(path, parts)?;
+            load_cell_images_part_media(&part, parts, workbook);
             cell_images_parts.push(part);
         }
 
         Ok(Self {
             parts: cell_images_parts,
         })
+    }
+}
+
+impl CellImagesPart {
+    /// Parse the canonical workbook-level `xl/cellImages.xml` part (if present).
+    ///
+    /// This mirrors the low-level "parts map" parsing style used by other parsers in this crate
+    /// (e.g. drawings). It intentionally does *not* attempt to map images to cells; it only parses
+    /// the `cellImages.xml` schema and resolves image relationship IDs to media targets.
+    pub fn from_parts(parts: &BTreeMap<String, Vec<u8>>) -> Result<Option<Self>> {
+        // Excel uses `xl/cellImages.xml` (capital I) today, but be permissive and accept any
+        // casing.
+        let part_path = parts
+            .keys()
+            .find(|p| p.to_ascii_lowercase() == "xl/cellimages.xml")
+            .cloned();
+        let Some(part_path) = part_path else {
+            return Ok(None);
+        };
+        parse_cell_images_part(&part_path, parts).map(Some)
     }
 }
 
@@ -119,18 +141,39 @@ fn is_cell_images_part(path: &str) -> bool {
 fn parse_cell_images_part(
     path: &str,
     parts: &BTreeMap<String, Vec<u8>>,
-    workbook: &mut formula_model::Workbook,
 ) -> Result<CellImagesPart> {
     let rels_path = crate::openxml::rels_part_name(path);
 
-    let rels_bytes = parts
+    let rid_to_target: HashMap<String, String> = parts
         .get(&rels_path)
-        .ok_or_else(|| XlsxError::MissingPart(format!("missing cell images rels: {rels_path}")))?;
-    let relationships = crate::openxml::parse_relationships(rels_bytes)?;
-    let rels_by_id: HashMap<String, crate::openxml::Relationship> = relationships
-        .into_iter()
-        .map(|rel| (rel.id.clone(), rel))
-        .collect();
+        .and_then(|rels_bytes| crate::openxml::parse_relationships(rels_bytes).ok())
+        .map(|relationships| {
+            relationships
+                .into_iter()
+                .filter(|rel| {
+                    !rel
+                        .target_mode
+                        .as_deref()
+                        .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+                        && rel.type_uri == REL_TYPE_IMAGE
+                })
+                .map(|rel| {
+                    let target_path = resolve_target_best_effort(path, &rels_path, &rel.target, parts)
+                        .unwrap_or_else(|_| {
+                            // Fall back to strict URI resolution if the target cannot be found in
+                            // `parts`. This preserves a deterministic output even for incomplete
+                            // workbooks.
+                            let mut strict = resolve_target(path, &rel.target);
+                            if strict.starts_with("media/") {
+                                strict = format!("xl/{strict}");
+                            }
+                            strict
+                        });
+                    (rel.id, target_path)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     let xml_bytes = parts
         .get(path)
@@ -159,55 +202,11 @@ fn parse_cell_images_part(
             continue;
         };
 
-        let Some(rel) = rels_by_id.get(&embed_rel_id) else {
-            // Best-effort: skip broken references instead of failing the whole workbook load.
-            continue;
-        };
-
-        if rel
-            .target_mode
-            .as_deref()
-            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
-        {
-            // External relationships are not backed by OPC parts.
-            continue;
-        }
-        if rel.type_uri != REL_TYPE_IMAGE {
-            // Be conservative: `<a:blip r:embed>` should refer to an image relationship.
-            continue;
-        }
-
-        let target_path = match resolve_target_best_effort(path, &rels_path, &rel.target, parts) {
-            Ok(path) => path,
-            Err(_) => continue,
-        };
-        let image_id = image_id_from_target_path(&target_path);
-
-        if workbook.images.get(&image_id).is_none() {
-            let Some(bytes) = parts.get(&target_path) else {
-                // Best-effort: missing media should not prevent the workbook from loading.
-                continue;
-            };
-            let bytes = bytes.clone();
-            let ext = image_id
-                .as_str()
-                .rsplit_once('.')
-                .map(|(_, ext)| ext)
-                .unwrap_or("");
-            workbook.images.insert(
-                image_id.clone(),
-                ImageData {
-                    bytes,
-                    content_type: Some(content_type_for_extension(ext).to_string()),
-                },
-            );
-        }
-
+        let target = rid_to_target.get(&embed_rel_id).cloned();
         images.push(CellImageEntry {
             embed_rel_id,
-            target_path,
-            image_id,
-            pic_xml: slice_node_xml(&pic, xml),
+            target,
+            raw_xml: slice_node_xml(&pic, xml).unwrap_or_default(),
         });
     }
 
@@ -240,52 +239,11 @@ fn parse_cell_images_part(
             continue;
         };
 
-        let Some(rel) = rels_by_id.get(&embed_rel_id) else {
-            // Best-effort: skip broken references instead of failing the whole workbook load.
-            continue;
-        };
-        if rel
-            .target_mode
-            .as_deref()
-            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
-        {
-            continue;
-        }
-        if rel.type_uri != REL_TYPE_IMAGE {
-            continue;
-        }
-
-        let target_path = match resolve_target_best_effort(path, &rels_path, &rel.target, parts) {
-            Ok(path) => path,
-            Err(_) => continue,
-        };
-        let image_id = image_id_from_target_path(&target_path);
-
-        if workbook.images.get(&image_id).is_none() {
-            let Some(bytes) = parts.get(&target_path) else {
-                // Best-effort: missing media should not prevent the workbook from loading.
-                continue;
-            };
-            let bytes = bytes.clone();
-            let ext = image_id
-                .as_str()
-                .rsplit_once('.')
-                .map(|(_, ext)| ext)
-                .unwrap_or("");
-            workbook.images.insert(
-                image_id.clone(),
-                ImageData {
-                    bytes,
-                    content_type: Some(content_type_for_extension(ext).to_string()),
-                },
-            );
-        }
-
+        let target = rid_to_target.get(&embed_rel_id).cloned();
         images.push(CellImageEntry {
             embed_rel_id,
-            target_path,
-            image_id,
-            pic_xml: slice_node_xml(&cell_image, xml),
+            target,
+            raw_xml: slice_node_xml(&cell_image, xml).unwrap_or_default(),
         });
     }
 
@@ -294,6 +252,40 @@ fn parse_cell_images_part(
         rels_path,
         images,
     })
+}
+
+fn load_cell_images_part_media(
+    part: &CellImagesPart,
+    parts: &BTreeMap<String, Vec<u8>>,
+    workbook: &mut formula_model::Workbook,
+) {
+    for image in &part.images {
+        let Some(target_path) = image.target.as_deref() else {
+            continue;
+        };
+        let Some(bytes) = parts.get(target_path) else {
+            continue;
+        };
+        let image_id = image_id_from_target_path(target_path);
+        if workbook.images.get(&image_id).is_some() {
+            continue;
+        }
+        let content_type = {
+            let ext = image_id
+                .as_str()
+                .rsplit_once('.')
+                .map(|(_, ext)| ext)
+                .unwrap_or("");
+            content_type_for_extension(ext).to_string()
+        };
+        workbook.images.insert(
+            image_id,
+            ImageData {
+                bytes: bytes.clone(),
+                content_type: Some(content_type),
+            },
+        );
+    }
 }
 
 fn resolve_target_best_effort(
@@ -392,4 +384,55 @@ fn image_id_from_target_path(target_path: &str) -> ImageId {
 fn slice_node_xml(node: &roxmltree::Node<'_, '_>, doc: &str) -> Option<String> {
     let range = node.range();
     doc.get(range).map(|s| s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cell_images_part_from_parts_extracts_embeds_and_resolves_targets() {
+        let xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cx:cellImages xmlns:cx="http://schemas.microsoft.com/office/spreadsheetml/2019/cellimages"
+               xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+               xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+               xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cx:cellImage>
+    <xdr:pic>
+      <xdr:blipFill><a:blip r:embed="rId1"/></xdr:blipFill>
+    </xdr:pic>
+  </cx:cellImage>
+  <cx:cellImage>
+    <xdr:pic>
+      <xdr:blipFill><a:blip r:embed="rId2"/></xdr:blipFill>
+    </xdr:pic>
+  </cx:cellImage>
+</cx:cellImages>"#;
+
+        let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image2.png"/>
+</Relationships>"#;
+
+        let parts: BTreeMap<String, Vec<u8>> = [
+            ("xl/cellImages.xml".to_string(), xml.to_vec()),
+            ("xl/_rels/cellImages.xml.rels".to_string(), rels.to_vec()),
+        ]
+        .into_iter()
+        .collect();
+
+        let part = CellImagesPart::from_parts(&parts)
+            .expect("parse")
+            .expect("expected part");
+        assert_eq!(part.path, "xl/cellImages.xml");
+        assert_eq!(part.rels_path, "xl/_rels/cellImages.xml.rels");
+        assert_eq!(part.images.len(), 2);
+        assert_eq!(part.images[0].embed_rel_id, "rId1");
+        assert_eq!(part.images[0].target.as_deref(), Some("xl/media/image1.png"));
+        assert!(!part.images[0].raw_xml.is_empty());
+
+        assert_eq!(part.images[1].embed_rel_id, "rId2");
+        assert_eq!(part.images[1].target.as_deref(), Some("xl/media/image2.png"));
+    }
 }

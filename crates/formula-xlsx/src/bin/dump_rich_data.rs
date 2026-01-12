@@ -269,7 +269,11 @@ fn dump_cell_images(pkg: &XlsxPackage) -> Option<CellImages> {
                 }
                 println!("    images ({}):", part.images.len());
                 for (idx, img) in part.images.iter().enumerate() {
-                    println!("      [{idx}] {} -> {}", img.embed_rel_id, img.target_path);
+                    println!(
+                        "      [{idx}] {} -> {}",
+                        img.embed_rel_id,
+                        img.target.as_deref().unwrap_or("<unresolved>")
+                    );
                 }
             }
             Some(cell_images)
@@ -739,16 +743,18 @@ fn expand_cellimages_target(
     // - Otherwise, if `rv` is in-bounds, assume `rv` is the image entry index.
     let mut out = Vec::new();
     if part.images.len() == 1 {
+        let target = part.images[0].target.as_deref().unwrap_or("<unresolved>");
         out.push(format!(
             "{} (via {}[0])",
-            part.images[0].target_path, part.path
+            target, part.path
         ));
         return Some(out);
     }
 
     let idx = rv as usize;
     if let Some(img) = part.images.get(idx) {
-        out.push(format!("{} (via {}[{idx}])", img.target_path, part.path));
+        let target = img.target.as_deref().unwrap_or("<unresolved>");
+        out.push(format!("{} (via {}[{idx}])", target, part.path));
         return Some(out);
     }
 
