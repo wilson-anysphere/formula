@@ -2937,7 +2937,7 @@ fn parse_autofilter_range_from_defined_name(refers_to: &str) -> Result<Range, St
     let mut idx = 0usize;
     while idx < bytes.len() {
         match bytes[idx] {
-            b'"' => {
+            b'"' if !in_single_quote => {
                 in_double_quote = !in_double_quote;
                 idx += 1;
             }
@@ -3583,6 +3583,20 @@ mod tests {
     fn parse_autofilter_range_rejects_union_even_when_wrapped_in_parentheses() {
         let err = parse_autofilter_range_from_defined_name(
             "=(Sheet1!$A$1:$A$2,Sheet1!$C$1:$C$2)",
+        )
+        .expect_err("expected union formula to be rejected");
+        assert!(
+            err.contains("union"),
+            "expected union error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn parse_autofilter_range_rejects_union_when_sheet_name_contains_double_quotes() {
+        // Sheet names can be quoted with `'` and may still contain `"`; ensure we don't treat
+        // `"` as starting a string literal inside a quoted sheet name.
+        let err = parse_autofilter_range_from_defined_name(
+            r#"=('My"Sheet'!$A$1:$A$2,'My"Sheet'!$C$1:$C$2)"#,
         )
         .expect_err("expected union formula to be rejected");
         assert!(
