@@ -1632,6 +1632,7 @@ class BrowserExtensionHost {
               Number.isInteger(v)
             );
           let normalizedCoords = null;
+          let rangeSheetId = sheetId;
           if (hasNumeric) {
             normalizedCoords = coords;
           } else {
@@ -1639,11 +1640,37 @@ class BrowserExtensionHost {
               normalizedCoords = this._parseA1RangeRef(a1Ref);
             } catch {
               normalizedCoords = null;
+              // Some host implementations may support named ranges / other range identifiers and
+              // return a canonical A1 address without providing numeric coords. Fall back to parsing
+              // the returned address so we still record read taint (best-effort).
+              try {
+                const addr = typeof result.address === "string" ? result.address : null;
+                if (addr) {
+                  const { sheetName: addrSheetName, ref: addrRef } = this._splitSheetQualifier(addr);
+                  if (addrRef) {
+                    normalizedCoords = this._parseA1RangeRef(addrRef);
+                    if (addrSheetName != null) {
+                      // Best-effort: update the resolved sheet id to match the returned address
+                      // when the host provides one.
+                      try {
+                        const addrSheetId = await this._resolveSheetId(addrSheetName);
+                        if (typeof addrSheetId === "string" && addrSheetId.trim()) {
+                          rangeSheetId = addrSheetId.trim();
+                        }
+                      } catch {
+                        // ignore
+                      }
+                    }
+                  }
+                }
+              } catch {
+                normalizedCoords = null;
+              }
             }
           }
 
           if (normalizedCoords) {
-            this._taintExtensionRange(extension, { sheetId, ...normalizedCoords });
+            this._taintExtensionRange(extension, { sheetId: rangeSheetId, ...normalizedCoords });
           }
         }
 
