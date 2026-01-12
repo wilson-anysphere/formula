@@ -12,7 +12,7 @@ use windows::Win32::System::Memory::{
 };
 
 use super::cf_html::{build_cf_html_payload, extract_cf_html_fragment_best_effort};
-use super::windows_dib::{dibv5_to_png, png_to_dibv5};
+use super::windows_dib::{dibv5_to_png, png_to_dib_and_dibv5};
 use super::{
     normalize_base64_str, ClipboardContent, ClipboardError, ClipboardWritePayload, MAX_IMAGE_BYTES,
     MAX_RICH_TEXT_BYTES,
@@ -347,12 +347,12 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         })
         .transpose()?;
 
-    // Interop: provide a DIBV5 representation when possible, but treat conversion as best-effort.
+    // Interop: provide DIB representations when possible, but treat conversion as best-effort.
     //
     // DIBs are uncompressed; if the PNG has huge dimensions (e.g. a compression bomb), decoding it
     // into a full BGRA buffer can be extremely memory-intensive. Skip DIB generation when the
     // decoded pixel buffer would exceed our DIB size cap.
-    let dib_bytes = png_bytes.as_deref().and_then(|png| {
+    let dibs = png_bytes.as_deref().and_then(|png| {
         if let Some((w, h)) = parse_png_dimensions(png) {
             let decoded_len = (w as usize)
                 .checked_mul(h as usize)
@@ -362,8 +362,13 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
             }
         }
 
-        png_to_dibv5(png).ok()
+        png_to_dib_and_dibv5(png).ok()
     });
+
+    let (dib_bytes, dibv5_bytes) = match dibs {
+        Some((dib, dibv5)) => (Some(dib), Some(dibv5)),
+        None => (None, None),
+    };
 
     let format_html = html_bytes
         .as_ref()
@@ -426,11 +431,16 @@ pub fn write(payload: &ClipboardWritePayload) -> Result<(), ClipboardError> {
         let _ = set_clipboard_bytes(format, bytes);
     }
 
-    // Interop: also provide a DIBV5 representation.
-    if let Some(bytes) = dib_bytes.as_deref() {
+    // Interop: also provide DIB representations.
+    //
+    // - CF_DIBV5 supports alpha and modern headers.
+    // - CF_DIB is more widely supported but may ignore alpha; we provide an opaque buffer to avoid
+    //   consumers accidentally treating the 4th byte as transparent alpha.
+    if let Some(bytes) = dibv5_bytes.as_deref() {
         set_clipboard_bytes(CF_DIBV5, bytes)?;
-        // Additional interop: provide the older CF_DIB flavor too. Many consumers accept a
-        // BITMAPV5HEADER payload even when requesting CF_DIB.
+    }
+    if let Some(bytes) = dib_bytes.as_deref() {
+        // Best-effort: don't fail the entire clipboard write if the legacy format can't be set.
         let _ = set_clipboard_bytes(CF_DIB, bytes);
     }
 

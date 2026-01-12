@@ -141,23 +141,48 @@ fn encode_png_rgba8(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, Str
     Ok(out)
 }
 
-/// Convert PNG bytes into CF_DIBV5 bytes (BITMAPV5HEADER + BGRA pixels).
-pub fn png_to_dibv5(png_bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let (width, height, mut rgba) = decode_png_rgba8(png_bytes)?;
-
-    let width_i32 = i32::try_from(width).map_err(|_| "png width exceeds DIB limits".to_string())?;
-    let height_i32 = i32::try_from(height).map_err(|_| "png height exceeds DIB limits".to_string())?;
-
-    // Convert RGBA -> BGRA in place.
-    for px in rgba.chunks_exact_mut(4) {
-        px.swap(0, 2);
+fn rgba_to_bgra_bottom_up_opaque(
+    width: usize,
+    height: usize,
+    rgba: &[u8],
+) -> Result<Vec<u8>, String> {
+    let row_bytes = width
+        .checked_mul(4)
+        .ok_or_else(|| "image width exceeds supported limits".to_string())?;
+    let expected_len = row_bytes
+        .checked_mul(height)
+        .ok_or_else(|| "image dimensions exceed supported limits".to_string())?;
+    if rgba.len() != expected_len {
+        return Err("png pixel buffer length does not match dimensions".to_string());
     }
 
-    let size_image =
-        u32::try_from(rgba.len()).map_err(|_| "DIB pixel buffer exceeds u32 limits".to_string())?;
+    let mut bgra = vec![0u8; rgba.len()];
 
+    for y in 0..height {
+        let src_row = &rgba[y * row_bytes..(y + 1) * row_bytes];
+        let dst_y = height - 1 - y;
+        let dst_row = &mut bgra[dst_y * row_bytes..(dst_y + 1) * row_bytes];
+        for (src_px, dst_px) in src_row
+            .chunks_exact(4)
+            .zip(dst_row.chunks_exact_mut(4))
+        {
+            let r = src_px[0];
+            let g = src_px[1];
+            let b = src_px[2];
+            // Opaque alpha for maximum compatibility with consumers that treat BI_RGB 32bpp as
+            // BGRX (unused 4th byte) or as BGRA alpha.
+            dst_px.copy_from_slice(&[b, g, r, 255]);
+        }
+    }
+
+    Ok(bgra)
+}
+
+fn bgra_top_down_to_dibv5(width_i32: i32, height_i32: i32, bgra: &[u8]) -> Result<Vec<u8>, String> {
+    let size_image =
+        u32::try_from(bgra.len()).map_err(|_| "DIB pixel buffer exceeds u32 limits".to_string())?;
     let out_capacity = BITMAPV5HEADER_SIZE
-        .checked_add(rgba.len())
+        .checked_add(bgra.len())
         .ok_or_else(|| "dib size overflow".to_string())?;
     let mut out = Vec::with_capacity(out_capacity);
 
@@ -197,8 +222,97 @@ pub fn png_to_dibv5(png_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     debug_assert_eq!(out.len(), BITMAPV5HEADER_SIZE);
 
-    out.extend_from_slice(&rgba);
+    out.extend_from_slice(bgra);
     Ok(out)
+}
+
+fn bgra_bottom_up_to_dib(width_i32: i32, height_i32: i32, bgra: &[u8]) -> Result<Vec<u8>, String> {
+    let size_image =
+        u32::try_from(bgra.len()).map_err(|_| "DIB pixel buffer exceeds u32 limits".to_string())?;
+    let out_capacity = BITMAPINFOHEADER_SIZE
+        .checked_add(bgra.len())
+        .ok_or_else(|| "dib size overflow".to_string())?;
+    let mut out = Vec::with_capacity(out_capacity);
+
+    // BITMAPINFOHEADER
+    push_u32_le(&mut out, BITMAPINFOHEADER_SIZE as u32); // biSize
+    push_i32_le(&mut out, width_i32); // biWidth
+    push_i32_le(&mut out, height_i32); // biHeight (positive => bottom-up)
+    push_u16_le(&mut out, 1); // biPlanes
+    push_u16_le(&mut out, 32); // biBitCount
+    push_u32_le(&mut out, BI_RGB); // biCompression
+    push_u32_le(&mut out, size_image); // biSizeImage
+    push_i32_le(&mut out, 0); // biXPelsPerMeter
+    push_i32_le(&mut out, 0); // biYPelsPerMeter
+    push_u32_le(&mut out, 0); // biClrUsed
+    push_u32_le(&mut out, 0); // biClrImportant
+
+    debug_assert_eq!(out.len(), BITMAPINFOHEADER_SIZE);
+
+    out.extend_from_slice(bgra);
+    Ok(out)
+}
+
+/// Convert PNG bytes into CF_DIBV5 bytes (BITMAPV5HEADER + BGRA pixels).
+pub fn png_to_dibv5(png_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let (width, height, mut rgba) = decode_png_rgba8(png_bytes)?;
+
+    let width_i32 = i32::try_from(width).map_err(|_| "png width exceeds DIB limits".to_string())?;
+    let height_i32 = i32::try_from(height).map_err(|_| "png height exceeds DIB limits".to_string())?;
+
+    // Convert RGBA -> BGRA in place.
+    for px in rgba.chunks_exact_mut(4) {
+        px.swap(0, 2);
+    }
+
+    bgra_top_down_to_dibv5(width_i32, height_i32, &rgba)
+}
+
+/// Convert PNG bytes into CF_DIB bytes (BITMAPINFOHEADER + BGRA pixels).
+///
+/// This is a more widely supported clipboard format than CF_DIBV5, but it does not reliably
+/// preserve alpha in consumers. We therefore force all pixels opaque for best compatibility.
+pub fn png_to_dib(png_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let (width, height, rgba) = decode_png_rgba8(png_bytes)?;
+
+    let width_i32 = i32::try_from(width).map_err(|_| "png width exceeds DIB limits".to_string())?;
+    let height_i32 =
+        i32::try_from(height).map_err(|_| "png height exceeds DIB limits".to_string())?;
+
+    let width_usize =
+        usize::try_from(width).map_err(|_| "png width exceeds platform limits".to_string())?;
+    let height_usize =
+        usize::try_from(height).map_err(|_| "png height exceeds platform limits".to_string())?;
+    let bgra = rgba_to_bgra_bottom_up_opaque(width_usize, height_usize, &rgba)?;
+    bgra_bottom_up_to_dib(width_i32, height_i32, &bgra)
+}
+
+/// Convert PNG bytes into both CF_DIB and CF_DIBV5 payloads.
+///
+/// Returned as `(dib, dibv5)`.
+pub fn png_to_dib_and_dibv5(png_bytes: &[u8]) -> Result<(Vec<u8>, Vec<u8>), String> {
+    let (width, height, mut rgba) = decode_png_rgba8(png_bytes)?;
+
+    let width_i32 = i32::try_from(width).map_err(|_| "png width exceeds DIB limits".to_string())?;
+    let height_i32 =
+        i32::try_from(height).map_err(|_| "png height exceeds DIB limits".to_string())?;
+
+    let width_usize =
+        usize::try_from(width).map_err(|_| "png width exceeds platform limits".to_string())?;
+    let height_usize =
+        usize::try_from(height).map_err(|_| "png height exceeds platform limits".to_string())?;
+
+    // DIB (BITMAPINFOHEADER): bottom-up, opaque.
+    let bgra_dib = rgba_to_bgra_bottom_up_opaque(width_usize, height_usize, &rgba)?;
+    let dib = bgra_bottom_up_to_dib(width_i32, height_i32, &bgra_dib)?;
+
+    // DIBV5: top-down with alpha.
+    for px in rgba.chunks_exact_mut(4) {
+        px.swap(0, 2);
+    }
+    let dibv5 = bgra_top_down_to_dibv5(width_i32, height_i32, &rgba)?;
+
+    Ok((dib, dibv5))
 }
 
 /// Convert CF_DIBV5 bytes (BITMAPV5HEADER + pixels) into PNG bytes.
@@ -450,6 +564,51 @@ mod tests {
 
         assert_eq!((w1, h1), (w2, h2));
         assert_eq!(px1, px2);
+    }
+
+    #[test]
+    fn png_dib_png_roundtrip_forces_opaque() {
+        let png = encode_test_png();
+        let dib = png_to_dib(&png).expect("png_to_dib failed");
+
+        // Header sanity checks.
+        assert_eq!(read_u32_le(&dib, 0), Some(BITMAPINFOHEADER_SIZE as u32));
+        assert_eq!(read_i32_le(&dib, 4), Some(2));
+        assert_eq!(read_i32_le(&dib, 8), Some(2), "DIB should be bottom-up (positive height)");
+        assert_eq!(read_u16_le(&dib, 12), Some(1));
+        assert_eq!(read_u16_le(&dib, 14), Some(32));
+        assert_eq!(read_u32_le(&dib, 16), Some(BI_RGB));
+
+        let png2 = dibv5_to_png(&dib).expect("dibv5_to_png failed");
+        let (_w, _h, px) = decode_png(&png2);
+
+        // Alpha should be forced to opaque.
+        assert_eq!(
+            px,
+            vec![
+                255, 0, 0, 255,     // red
+                0, 255, 0, 255,     // green (was 128)
+                0, 0, 255, 255,     // blue
+                255, 255, 0, 255,   // yellow (was 0)
+            ]
+        );
+    }
+
+    #[test]
+    fn png_to_dib_and_dibv5_produces_expected_headers() {
+        let png = encode_test_png();
+        let (dib, dibv5) = png_to_dib_and_dibv5(&png).expect("png_to_dib_and_dibv5 failed");
+
+        assert_eq!(read_u32_le(&dib, 0), Some(BITMAPINFOHEADER_SIZE as u32));
+        assert_eq!(read_i32_le(&dib, 4), Some(2));
+        assert_eq!(read_i32_le(&dib, 8), Some(2));
+        assert_eq!(read_u16_le(&dib, 14), Some(32));
+
+        assert_eq!(read_u32_le(&dibv5, 0), Some(BITMAPV5HEADER_SIZE as u32));
+        assert_eq!(read_i32_le(&dibv5, 4), Some(2));
+        assert_eq!(read_i32_le(&dibv5, 8), Some(-2));
+        assert_eq!(read_u16_le(&dibv5, 14), Some(32));
+        assert_eq!(read_u32_le(&dibv5, 16), Some(BI_BITFIELDS));
     }
 
     #[test]
