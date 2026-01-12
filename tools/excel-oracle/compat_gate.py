@@ -37,6 +37,7 @@ SMOKE_INCLUDE_TAGS = [
     "range",
     "TRANSPOSE",
     "SEQUENCE",
+    "FREQUENCY",
     # Representative deterministic functions beyond the arithmetic baseline.
     "COUNT",
     "COUNTIF",
