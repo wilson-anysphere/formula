@@ -305,8 +305,10 @@ fn is_len_prefixed_unicode_record_id(id: u16) -> bool {
         id,
         // Project Unicode/alternate variants.
         0x0040 | 0x003C | 0x003D
+            // Reference Unicode/alternate variants.
+            | 0x003E
             // Module Unicode/alternate variants.
-            | 0x0047 | 0x0032 | 0x0048
+            | 0x0047 | 0x0032 | 0x0048 | 0x0049
     )
 }
 
