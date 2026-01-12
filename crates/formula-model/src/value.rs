@@ -94,17 +94,17 @@ impl From<RichText> for CellValue {
 #[serde(rename_all = "camelCase")]
 pub struct EntityValue {
     /// Entity type discriminator (e.g. `"stock"`, `"geography"`).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub entity_type: String,
     /// Entity identifier (e.g. `"AAPL"`).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub entity_id: String,
     /// User-visible string representation (what Excel renders in the grid).
     ///
     /// Accept the legacy `"display"` key as an alias for backward compatibility.
     #[serde(default, alias = "display")]
     pub display_value: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub properties: HashMap<String, CellValue>,
 }
 
@@ -114,6 +114,30 @@ impl EntityValue {
             display_value: display.into(),
             ..Self::default()
         }
+    }
+
+    #[must_use]
+    pub fn with_entity_type(mut self, entity_type: impl Into<String>) -> Self {
+        self.entity_type = entity_type.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_entity_id(mut self, entity_id: impl Into<String>) -> Self {
+        self.entity_id = entity_id.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_properties(mut self, properties: HashMap<String, CellValue>) -> Self {
+        self.properties = properties;
+        self
+    }
+
+    #[must_use]
+    pub fn with_property(mut self, name: impl Into<String>, value: impl Into<CellValue>) -> Self {
+        self.properties.insert(name.into(), value.into());
+        self
     }
 }
 
@@ -133,7 +157,7 @@ impl From<EntityValue> for CellValue {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordValue {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub fields: HashMap<String, CellValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_field: Option<String>,
@@ -151,6 +175,24 @@ impl RecordValue {
             display_value: display.into(),
             ..Self::default()
         }
+    }
+
+    #[must_use]
+    pub fn with_fields(mut self, fields: HashMap<String, CellValue>) -> Self {
+        self.fields = fields;
+        self
+    }
+
+    #[must_use]
+    pub fn with_field(mut self, name: impl Into<String>, value: impl Into<CellValue>) -> Self {
+        self.fields.insert(name.into(), value.into());
+        self
+    }
+
+    #[must_use]
+    pub fn with_display_field(mut self, display_field: impl Into<String>) -> Self {
+        self.display_field = Some(display_field.into());
+        self
     }
 
     fn display_text(&self) -> Option<String> {
