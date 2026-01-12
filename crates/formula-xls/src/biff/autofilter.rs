@@ -32,6 +32,12 @@ const PTG_AREA: [u8; 3] = [0x25, 0x45, 0x65];
 const PTG_REF3D: [u8; 3] = [0x3A, 0x5A, 0x7A];
 const PTG_AREA3D: [u8; 3] = [0x3B, 0x5B, 0x7B];
 
+// BIFF8 worksheets (`.xls`) are limited to 256 columns (A..IV). Column indices are stored in a
+// 2-byte field that also contains relative/absolute flags; in practice only the low 8 bits are
+// meaningful for `.xls` column indices. Some producers also use `0x3FFF` as a "max column"
+// sentinel; masking to 8 bits maps that to `0x00FF` (IV), matching Excel's limits.
+const BIFF8_COL_INDEX_MASK: u16 = 0x00FF;
+
 /// BIFF8 `XTI` entry from the `EXTERNSHEET` record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Xti {
@@ -536,7 +542,7 @@ fn decode_ptg_ref(payload: &[u8]) -> Result<(Range, usize), String> {
     }
     let row = u16::from_le_bytes([payload[0], payload[1]]) as u32;
     let col_field = u16::from_le_bytes([payload[2], payload[3]]);
-    let col = (col_field & 0x3FFF) as u32;
+    let col = (col_field & BIFF8_COL_INDEX_MASK) as u32;
     Ok((
         Range::new(CellRef::new(row, col), CellRef::new(row, col)),
         4,
@@ -551,8 +557,8 @@ fn decode_ptg_area(payload: &[u8]) -> Result<(Range, usize), String> {
     let row_last = u16::from_le_bytes([payload[2], payload[3]]) as u32;
     let col_first_field = u16::from_le_bytes([payload[4], payload[5]]);
     let col_last_field = u16::from_le_bytes([payload[6], payload[7]]);
-    let col_first = (col_first_field & 0x3FFF) as u32;
-    let col_last = (col_last_field & 0x3FFF) as u32;
+    let col_first = (col_first_field & BIFF8_COL_INDEX_MASK) as u32;
+    let col_last = (col_last_field & BIFF8_COL_INDEX_MASK) as u32;
     Ok((
         Range::new(
             CellRef::new(row_first, col_first),
@@ -574,7 +580,7 @@ fn decode_ptg_ref3d(
     let ixti = u16::from_le_bytes([payload[0], payload[1]]);
     let row = u16::from_le_bytes([payload[2], payload[3]]) as u32;
     let col_field = u16::from_le_bytes([payload[4], payload[5]]);
-    let col = (col_field & 0x3FFF) as u32;
+    let col = (col_field & BIFF8_COL_INDEX_MASK) as u32;
 
     let sheet =
         resolve_ixti_to_internal_sheet(ixti, externsheets, internal_supbook_index, sheet_count);
@@ -596,8 +602,8 @@ fn decode_ptg_area3d(
     let row_last = u16::from_le_bytes([payload[4], payload[5]]) as u32;
     let col_first_field = u16::from_le_bytes([payload[6], payload[7]]);
     let col_last_field = u16::from_le_bytes([payload[8], payload[9]]);
-    let col_first = (col_first_field & 0x3FFF) as u32;
-    let col_last = (col_last_field & 0x3FFF) as u32;
+    let col_first = (col_first_field & BIFF8_COL_INDEX_MASK) as u32;
+    let col_last = (col_last_field & BIFF8_COL_INDEX_MASK) as u32;
 
     let sheet =
         resolve_ixti_to_internal_sheet(ixti, externsheets, internal_supbook_index, sheet_count);
@@ -663,6 +669,46 @@ mod tests {
         out[0..2].copy_from_slice(&0x0600u16.to_le_bytes()); // BIFF8
         out[2..4].copy_from_slice(&0x0005u16.to_le_bytes()); // workbook globals
         out.to_vec()
+    }
+
+    #[test]
+    fn decodes_filter_database_area_with_high_col_bits_set() {
+        // Some producers set unused high bits in the BIFF8 col fields. `.xls` worksheets are limited
+        // to 256 columns, so we treat column indices as 8-bit and ignore those higher bits.
+        //
+        // Encode `$A$1:$C$5`, but with colLast having an extra bit set (0x0400).
+        let mut rgce = Vec::new();
+        rgce.push(0x25); // PtgArea
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // rwFirst
+        rgce.extend_from_slice(&4u16.to_le_bytes()); // rwLast
+        rgce.extend_from_slice(&0u16.to_le_bytes()); // colFirst
+        rgce.extend_from_slice(&0x0402u16.to_le_bytes()); // colLast (C with a high bit set)
+
+        let mut name_data = Vec::new();
+        name_data.extend_from_slice(&NAME_FLAG_BUILTIN.to_le_bytes()); // grbit (builtin)
+        name_data.push(0); // chKey
+        name_data.push(1); // cch (builtin id length)
+        name_data.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
+        name_data.extend_from_slice(&0u16.to_le_bytes()); // ixals
+        name_data.extend_from_slice(&1u16.to_le_bytes()); // itab (sheet 1)
+        name_data.extend_from_slice(&[0, 0, 0, 0]); // cchCustMenu..cchStatusText
+        name_data.push(BUILTIN_NAME_FILTER_DATABASE); // built-in name id
+        name_data.extend_from_slice(&rgce);
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &bof_globals()),
+            record(RECORD_NAME, &name_data),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff_filter_database_ranges(&stream, BiffVersion::Biff8, 1252, Some(1))
+            .expect("parse");
+
+        assert_eq!(
+            parsed.by_sheet.get(&0).copied(),
+            Some(Range::new(CellRef::new(0, 0), CellRef::new(4, 2)))
+        );
     }
 
     #[test]
