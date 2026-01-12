@@ -721,30 +721,22 @@ pub fn verify_vba_signature_certificate_trust(
 
 fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
     match oid.trim() {
+        // RFC 1321 / PKCS#1
         "1.2.840.113549.2.5" => Some(DigestAlg::Md5),
+        // SHA-1 (OID 1.3.14.3.2.26)
         "1.3.14.3.2.26" => Some(DigestAlg::Sha1),
+        // SHA-256 (OID 2.16.840.1.101.3.4.2.1)
         "2.16.840.1.101.3.4.2.1" => Some(DigestAlg::Sha256),
         _ => None,
     }
 }
+
 fn digest_name_from_oid_str(oid: &str) -> Option<&'static str> {
     digest_alg_from_oid_str(oid).map(|alg| match alg {
         DigestAlg::Md5 => "MD5",
         DigestAlg::Sha1 => "SHA-1",
         DigestAlg::Sha256 => "SHA-256",
     })
-}
-
-fn digest_alg_from_oid_str(oid: &str) -> Option<DigestAlg> {
-    match oid {
-        // MD5
-        "1.2.840.113549.2.5" => Some(DigestAlg::Md5),
-        // SHA-1
-        "1.3.14.3.2.26" => Some(DigestAlg::Sha1),
-        // SHA-256
-        "2.16.840.1.101.3.4.2.1" => Some(DigestAlg::Sha256),
-        _ => None,
-    }
 }
 
 fn is_signature_component(component: &str) -> bool {

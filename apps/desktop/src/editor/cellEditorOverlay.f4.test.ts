@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { CellEditorOverlay } from "./cellEditorOverlay.js";
 
 describe("CellEditorOverlay F4 absolute reference toggle", () => {
-  it("toggles the active A1 reference and preserves a sane caret position", () => {
+  it("toggles the active A1 reference and selects the updated token", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
 
