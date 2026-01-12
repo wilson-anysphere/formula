@@ -221,6 +221,14 @@ export class DesktopExtensionHostManager {
     const extensionId = `${String(manifest.publisher)}.${String(manifest.name)}`;
     if (this._loadedBuiltIns.has(extensionId)) return;
 
+    // The e2e-events extension is an internal Playwright harness that activates on
+    // startup and writes its last-seen event payloads via `formula.storage.*`.
+    //
+    // In e2e/headless runs there is no user to respond to the interactive permission
+    // prompt, so pre-grant `storage` to keep the UI unblocked. (The extension has no
+    // UI contributions; it only writes diagnostic state for tests.)
+    pregrantPermissions(extensionId, ["storage"]);
+
     // E2E extension code imports `@formula/extension-api` and must run without Vite's import
     // rewriting in production/preview builds. Use the same shim + rewrite flow as sample-hello.
     this._extensionApiModule ??= createModuleUrlFromText(EXTENSION_API_SHIM_SOURCE);
@@ -362,6 +370,29 @@ function createModuleUrl(bytes: Uint8Array, mime = "text/javascript"): { url: st
 function createModuleUrlFromText(source: string): { url: string; revoke: () => void } {
   const bytes = new TextEncoder().encode(source);
   return createModuleUrl(bytes);
+}
+
+function pregrantPermissions(extensionId: string, permissions: string[]): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const key = "formula.extensionHost.permissions";
+    const existing = (() => {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : {};
+      } catch {
+        return {};
+      }
+    })();
+    const record = { ...(existing?.[extensionId] ?? {}) };
+    for (const perm of permissions) {
+      record[String(perm)] = true;
+    }
+    existing[extensionId] = record;
+    localStorage.setItem(key, JSON.stringify(existing));
+  } catch {
+    // ignore
+  }
 }
 
 function rewriteEntrypointSource(source: string, { extensionApiUrl }: { extensionApiUrl: string }): string {
