@@ -523,4 +523,33 @@ mod tests {
 
         roxmltree::Document::parse(updated).expect("updated workbook xml should parse");
     }
+
+    #[test]
+    fn workbook_rels_remove_calc_chain_removes_non_empty_relationship_element() {
+        // Some producers emit relationships with explicit end tags (not self-closing). Ensure we
+        // still remove calcChain and preserve other relationships.
+        let rels_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<r:Relationships xmlns:r="http://schemas.openxmlformats.org/package/2006/relationships">
+  <r:Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"></r:Relationship>
+  <r:Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"></r:Relationship>
+</r:Relationships>
+"#;
+
+        let updated = workbook_rels_remove_calc_chain(rels_xml.as_bytes())
+            .expect("remove calc chain relationship from workbook.xml.rels");
+        let updated = std::str::from_utf8(&updated).expect("utf8 workbook rels");
+
+        assert!(
+            !updated.contains("calcChain.xml"),
+            "expected calc chain relationship to be removed, got: {updated}"
+        );
+        assert!(
+            updated.contains(r#"Id="rId9""#) && updated.contains(r#"Target="metadata.xml""#),
+            "expected metadata relationship to be preserved, got: {updated}"
+        );
+        assert!(
+            updated.contains("<r:Relationship"),
+            "expected relationship elements to keep their prefix, got: {updated}"
+        );
+    }
 }
