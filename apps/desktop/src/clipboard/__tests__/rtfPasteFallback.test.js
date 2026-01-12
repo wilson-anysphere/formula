@@ -60,3 +60,15 @@ test("RTF fallback preserves literal leading spaces after control word delimiter
   assert.ok(grid);
   assert.equal(grid[0][0].value, " A");
 });
+
+test("RTF fallback preserves trailing tab separators for empty last cells", () => {
+  // No trailing \par here: we want to ensure we don't strip the final tab, which represents
+  // an empty last cell when parsing as TSV.
+  const rtf = "{\\rtf1\\ansi\\deff0\\uc1\\pard A\\tab }";
+  const grid = parseClipboardContentToCellGrid({ rtf });
+  assert.ok(grid);
+  assert.equal(grid.length, 1);
+  assert.equal(grid[0].length, 2);
+  assert.equal(grid[0][0].value, "A");
+  assert.equal(grid[0][1].value, null);
+});

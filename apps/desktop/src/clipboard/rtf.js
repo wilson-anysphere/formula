@@ -513,7 +513,6 @@ export function extractPlainTextFromRtf(rtf) {
   let atStart = true;
   let inTable = false;
   let lastTabFromCell = false;
-
   /** @type {{ ignorable: boolean, ucSkip: number, atStart: boolean, inTable: boolean }[]} */
   const stack = [];
 
@@ -726,7 +725,9 @@ export function extractPlainTextFromRtf(rtf) {
     }
   }
 
-  // Avoid a phantom empty column when the payload ends with a table cell terminator.
+  // Avoid a phantom empty column when the payload ends with a table cell terminator (`\cell`).
+  // We track this explicitly so we don't strip trailing `\tab` separators from non-table RTF,
+  // since those can represent empty trailing columns during TSV parsing.
   if (lastTabFromCell && out.endsWith("\t")) out = out.slice(0, -1);
   return out;
 }
