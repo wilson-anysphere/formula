@@ -11,7 +11,6 @@ function argbToCss(argb) {
  */
 export function renderCellStyle(style) {
   const rules = [];
-  const rgb = "rgb";
 
   const font = style.font ?? {};
   if (font.bold) rules.push("font-weight:bold");
