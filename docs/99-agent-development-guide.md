@@ -81,6 +81,11 @@ source scripts/agent-init.sh  # or: . scripts/agent-init.sh
 FORMULA_CARGO_JOBS=8 source scripts/agent-init.sh
 ```
 
+### Rust formatting (avoid noisy diffs)
+
+For small fixes, prefer formatting the specific Rust files you touched (e.g. `rustfmt path/to/file.rs`)
+instead of running `cargo fmt` across the whole workspace, which can produce large unrelated diffs.
+
 ### Running Commands with Memory Limits
 
 #### `scripts/run_limited.sh` - Universal Memory Cap
