@@ -101,13 +101,13 @@ pub fn build_encrypted_filepass_fixture_xls() -> Vec<u8> {
     ole.into_inner().into_inner()
 }
 
-/// Build a BIFF8 `.xls` fixture that forces sheet-name sanitization and includes a
-/// cross-sheet formula referencing the unsanitized name.
+/// Build a BIFF8 `.xls` fixture that forces sheet-name sanitization via truncation and includes a
+/// cross-sheet formula referencing the original (over-long) name.
 ///
 /// This exercises the importer’s ability to rewrite formula sheet references after
 /// sanitizing invalid sheet names.
-pub fn build_sheet_name_sanitization_formula_fixture_xls() -> Vec<u8> {
-    let workbook_stream = build_sheet_name_sanitization_formula_workbook_stream();
+pub fn build_formula_sheet_name_truncation_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_formula_sheet_name_truncation_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -1659,62 +1659,57 @@ fn build_rich_styles_sheet_stream(xf_rich: u16, xf_rich_medium_gray: u16) -> Vec
     sheet
 }
 
-fn build_sheet_name_sanitization_formula_workbook_stream() -> Vec<u8> {
-    // -- Globals -----------------------------------------------------------------
+fn build_formula_sheet_name_truncation_workbook_stream() -> Vec<u8> {
+    // This workbook contains:
+    // - Sheet 0: an over-long name (invalid; will be truncated on import), with a numeric A1.
+    // - Sheet 1: `Ref`, with a formula in A1 that references Sheet0!A1.
+    //
+    // The important part is that the formula token stream encodes a 3D reference using an
+    // EXTERNSHEET table entry, so calamine decodes it back into a sheet-qualified formula.
+    let long_name = "A".repeat(40);
     let mut globals = Vec::<u8>::new();
 
-    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS)); // BOF: workbook globals
-    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes()); // CODEPAGE: Windows-1252
-    push_record(&mut globals, RECORD_WINDOW1, &window1()); // WINDOW1
-    push_record(&mut globals, RECORD_FONT, &font("Arial")); // FONT
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    push_record(&mut globals, RECORD_CODEPAGE, &1252u16.to_le_bytes());
+    push_record(&mut globals, RECORD_WINDOW1, &window1());
+    push_record(&mut globals, RECORD_FONT, &font("Arial"));
 
-    // XF table. Many readers expect at least 16 style XFs before cell XFs.
+    // XF table: 16 style XFs + one cell XF.
     for _ in 0..16 {
         push_record(&mut globals, RECORD_XF, &xf_record(0, 0, true));
     }
     let xf_cell = 16u16;
     push_record(&mut globals, RECORD_XF, &xf_record(0, 0, false));
 
-    // Minimal external reference table required for 3D references (ptgRef3d).
-    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal_workbook(2));
-    push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_single_sheet(0));
+    // BoundSheet records (workbook sheet list).
+    let mut boundsheet_offset_positions: Vec<usize> = Vec::new();
+    for name in [long_name.as_str(), "Ref"] {
+        let boundsheet_start = globals.len();
+        let mut boundsheet = Vec::<u8>::new();
+        boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+        boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+        write_short_unicode_string(&mut boundsheet, name);
+        push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+        boundsheet_offset_positions.push(boundsheet_start + 4);
+    }
 
-    // Two worksheets.
-    //
-    // Use an over-long sheet name so `formula_model::validate_sheet_name` rejects it and the
-    // importer must sanitize/truncate it when constructing the destination workbook.
-    let long_name = "A".repeat(40);
-    let boundsheet1_start = globals.len();
-    let mut boundsheet1 = Vec::<u8>::new();
-    boundsheet1.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
-    boundsheet1.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
-    write_short_unicode_string(&mut boundsheet1, &long_name);
-    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet1);
-    let boundsheet1_offset_pos = boundsheet1_start + 4;
+    // External reference tables used by 3D formula tokens.
+    push_record(&mut globals, RECORD_SUPBOOK, &supbook_internal(2));
+    push_record(&mut globals, RECORD_EXTERNSHEET, &externsheet_record(&[(0, 0)]));
 
-    let boundsheet2_start = globals.len();
-    let mut boundsheet2 = Vec::<u8>::new();
-    boundsheet2.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
-    boundsheet2.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
-    write_short_unicode_string(&mut boundsheet2, "Ref");
-    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet2);
-    let boundsheet2_offset_pos = boundsheet2_start + 4;
+    push_record(&mut globals, RECORD_EOF, &[]);
 
-    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+    // -- Sheet 0 ------------------------------------------------------------------
+    let sheet0_offset = globals.len();
+    globals[boundsheet_offset_positions[0]..boundsheet_offset_positions[0] + 4]
+        .copy_from_slice(&(sheet0_offset as u32).to_le_bytes());
+    globals.extend_from_slice(&build_simple_number_sheet_stream(xf_cell, 1.0));
 
-    // -- Sheet 1 -----------------------------------------------------------------
+    // -- Sheet 1 ------------------------------------------------------------------
     let sheet1_offset = globals.len();
-    globals[boundsheet1_offset_pos..boundsheet1_offset_pos + 4]
+    globals[boundsheet_offset_positions[1]..boundsheet_offset_positions[1] + 4]
         .copy_from_slice(&(sheet1_offset as u32).to_le_bytes());
-    let sheet1 = build_single_number_sheet_stream(xf_cell, 1.0);
-    globals.extend_from_slice(&sheet1);
-
-    // -- Sheet 2 -----------------------------------------------------------------
-    let sheet2_offset = globals.len();
-    globals[boundsheet2_offset_pos..boundsheet2_offset_pos + 4]
-        .copy_from_slice(&(sheet2_offset as u32).to_le_bytes());
-    let sheet2 = build_single_formula_3d_ref_sheet_stream(xf_cell, 0, 0, 0);
-    globals.extend_from_slice(&sheet2);
+    globals.extend_from_slice(&build_simple_ref3d_formula_sheet_stream(xf_cell));
 
     globals
 }
@@ -4549,59 +4544,6 @@ fn build_merged_non_anchor_conflicting_blank_formats_sheet_stream(
     sheet
 }
 
-fn build_single_number_sheet_stream(xf_cell: u16, v: f64) -> Vec<u8> {
-    let mut sheet = Vec::<u8>::new();
-
-    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
-
-    // DIMENSIONS: rows [0, 1) cols [0, 1) (A1)
-    let mut dims = Vec::<u8>::new();
-    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
-    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
-    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
-    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
-    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
-    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
-
-    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
-
-    push_record(&mut sheet, RECORD_NUMBER, &number_cell(0, 0, xf_cell, v));
-
-    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
-    sheet
-}
-
-fn build_single_formula_3d_ref_sheet_stream(
-    xf_cell: u16,
-    ixti: u16,
-    target_row: u16,
-    target_col: u16,
-) -> Vec<u8> {
-    let mut sheet = Vec::<u8>::new();
-
-    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
-
-    // DIMENSIONS: rows [0, 1) cols [0, 1) (A1)
-    let mut dims = Vec::<u8>::new();
-    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
-    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
-    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
-    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
-    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
-    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
-
-    push_record(&mut sheet, RECORD_WINDOW2, &window2()); // WINDOW2
-
-    push_record(
-        &mut sheet,
-        RECORD_FORMULA,
-        &formula_cell_3d_ref(0, 0, xf_cell, ixti, target_row, target_col),
-    );
-
-    push_record(&mut sheet, RECORD_EOF, &[]); // EOF worksheet
-    sheet
-}
-
 fn build_sheet_stream(
     xf_currency: u16,
     xf_percent: u16,
@@ -5432,66 +5374,6 @@ fn xf_record_rich_with_fill_pattern(fill_pattern: u8) -> [u8; 20] {
     out[14..18].copy_from_slice(&border2.to_le_bytes());
     out
 }
-
-fn supbook_internal_workbook(sheet_count: u16) -> [u8; 4] {
-    // BIFF8 SUPBOOK record payload for internal workbook references.
-    // cTab (u16) + special marker 0x0401 (u16).
-    let mut out = [0u8; 4];
-    out[0..2].copy_from_slice(&sheet_count.to_le_bytes());
-    out[2..4].copy_from_slice(&0x0401u16.to_le_bytes());
-    out
-}
-
-fn externsheet_single_sheet(sheet_index: u16) -> [u8; 8] {
-    // BIFF8 EXTERNSHEET record payload with a single XTI entry pointing at `sheet_index`.
-    // cXTI (u16) + [iSupBook, itabFirst, itabLast] (3x u16).
-    let mut out = [0u8; 8];
-    out[0..2].copy_from_slice(&1u16.to_le_bytes()); // cXTI = 1
-    out[2..4].copy_from_slice(&0u16.to_le_bytes()); // iSupBook = 0 (internal workbook)
-    out[4..6].copy_from_slice(&sheet_index.to_le_bytes()); // itabFirst
-    out[6..8].copy_from_slice(&sheet_index.to_le_bytes()); // itabLast
-    out
-}
-
-fn formula_cell_3d_ref(
-    row: u16,
-    col: u16,
-    xf: u16,
-    ixti: u16,
-    target_row: u16,
-    target_col: u16,
-) -> Vec<u8> {
-    // BIFF8 FORMULA record payload referencing a 3D cell.
-    // We only need enough structure for calamine to surface the formula text via
-    // `worksheet_formula()`.
-    let mut out = Vec::<u8>::new();
-    out.extend_from_slice(&row.to_le_bytes());
-    out.extend_from_slice(&col.to_le_bytes());
-    out.extend_from_slice(&xf.to_le_bytes());
-
-    // Cached result (IEEE 754). Value doesn't matter for our test cases.
-    out.extend_from_slice(&0f64.to_le_bytes());
-
-    out.extend_from_slice(&0u16.to_le_bytes()); // option flags
-    out.extend_from_slice(&0u32.to_le_bytes()); // reserved
-
-    // rgce length
-    const CCE: u16 = 7;
-    out.extend_from_slice(&CCE.to_le_bytes());
-
-    // ptgRef3dV [MS-XLS 2.5.198.61]:
-    // 0x5A + ixti (u16) + row (u16) + col (u16 with relative flags).
-    out.push(0x5A);
-    out.extend_from_slice(&ixti.to_le_bytes());
-    out.extend_from_slice(&target_row.to_le_bytes());
-
-    // Set both row/col relative flags (0xC000) to keep the printed formula as `A1`.
-    let col_flags: u16 = 0xC000 | (target_col & 0x3FFF);
-    out.extend_from_slice(&col_flags.to_le_bytes());
-
-    out
-}
-
 fn number_cell(row: u16, col: u16, xf: u16, v: f64) -> [u8; 14] {
     let mut out = [0u8; 14];
     out[0..2].copy_from_slice(&row.to_le_bytes());
