@@ -526,7 +526,7 @@ For update-driven restarts prefer `restart_app` (graceful).
 - **Notifications**
   - `show_system_notification` (best-effort native notification via `tauri-plugin-notification`; used as a fallback by `apps/desktop/src/tauri/notifications.ts`, and restricted to the main window)
 - **External URLs**
-  - `open_external_url` (opens URLs in the OS via `tauri_plugin_shell`; allowlists `http:`, `https:`, `mailto:` and rejects everything else, including `javascript:`, `data:`, and `file:`)
+  - `open_external_url` (opens URLs in the OS via `tauri_plugin_shell`; allowlists `http:`, `https:`, `mailto:` and rejects everything else, including `javascript:`, `data:`, and `file:`; restricted to the main window + trusted app-local origins)
 
 ### Backend → frontend events
 
@@ -766,6 +766,7 @@ External URL opening is also routed through a custom Rust IPC command:
 - `open_external_url`
   - Enforces a strict scheme allowlist in Rust (`http:`, `https:`, `mailto:`).
   - Rejects dangerous/unsupported schemes (`javascript:`, `data:`, `file:`, and anything else).
+  - Only callable from the **main** window and from trusted app-local origins (to prevent navigated-to remote content from using IPC to open links).
 
 Note: this capability intentionally does **not** grant `shell:allow-open` (the JS shell plugin API). Prefer using the `open_external_url`
 command (via `apps/desktop/src/tauri/shellOpen.ts`) so link handling remains consistent and scheme allowlisting lives at a

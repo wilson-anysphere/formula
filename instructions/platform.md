@@ -131,8 +131,9 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
 }
 ```
 
-Note: external URL opening should go through the `open_external_url` Rust command (scheme allowlist enforced in Rust)
-rather than granting the webview direct access to the shell plugin (`shell:allow-open`).
+Note: external URL opening should go through the `open_external_url` Rust command (scheme allowlist enforced in Rust,
+and restricted to the main window + trusted app-local origins) rather than granting the webview direct access to the
+shell plugin (`shell:allow-open`).
 
 Note: `clipboard-manager:allow-read-text` / `clipboard-manager:allow-write-text` grant access to the plain-text
 clipboard helpers (`globalThis.__TAURI__.clipboard.readText` / `writeText`). Rich clipboard formats (HTML/RTF/PNG)

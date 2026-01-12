@@ -3799,8 +3799,10 @@ pub fn check_for_updates(
 #[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(), String> {
-    // Restrict URL opening to the main application window to avoid accidental abuse if we ever
-    // embed untrusted content in secondary webviews.
+    use tauri::Manager as _;
+
+    // Restrict URL opening to the main application window. This avoids accidental abuse if we
+    // ever embed untrusted content in secondary webviews.
     if window.label() != "main" {
         return Err("external URL opening is only allowed from the main window".to_string());
     }
@@ -3810,28 +3812,12 @@ pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(),
     // from accessing the invoke API by default, keep the command itself resilient.
     //
     // Mirrors the trusted-origin checks used by other privileged commands in `main.rs`.
-    fn is_trusted_origin(url: &tauri::Url) -> bool {
-        match url.scheme() {
-            "data" => return false,
-            // Best-effort compatibility fallback.
-            "file" => return true,
-            _ => {}
-        }
-
-        let Some(host) = url.host_str() else {
-            return false;
-        };
-
-        host == "localhost" || host == "127.0.0.1" || host == "::1" || host.ends_with(".localhost")
-    }
-
     {
-        use tauri::Manager as _;
         let Some(webview) = window.app_handle().get_webview_window(window.label()) else {
             return Err("main webview window not available".to_string());
         };
         let origin_url = webview.url().map_err(|err| err.to_string())?;
-        if !is_trusted_origin(&origin_url) {
+        if !is_trusted_ipc_origin(&origin_url) {
             return Err("external URL opening is not allowed from this origin".to_string());
         }
     }
@@ -3861,6 +3847,26 @@ pub async fn open_external_url(window: tauri::Window, url: String) -> Result<(),
         .open(parsed.as_str(), None)
         .map_err(|e| format!("Failed to open URL: {e}"))?;
     Ok(())
+}
+
+#[cfg(feature = "desktop")]
+fn is_trusted_ipc_origin(url: &tauri::Url) -> bool {
+    // Treat app-local content as trusted:
+    // - packaged builds typically run on an internal `*.localhost` origin
+    // - dev builds run on `http://localhost:<port>`
+    //
+    // Note: `file://` is included as a best-effort compatibility fallback.
+    match url.scheme() {
+        "data" => return false,
+        "file" => return true,
+        _ => {}
+    }
+
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+
+    host == "localhost" || host == "127.0.0.1" || host == "::1" || host.ends_with(".localhost")
 }
 
 #[cfg(feature = "desktop")]
