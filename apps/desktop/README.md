@@ -310,6 +310,7 @@ Params:
 - `wsUrl` is the base sync-server URL (no trailing `/docId`)
 - `docId` is the shared document/room name (must match across clients)
 - `token` must match the sync-server auth token (defaults to `dev-token`)
+- `collabOffline=0` disables offline persistence (IndexedDB) for debugging/tests (default: enabled)
 - `userId`, `userName`, `userColor` control presence/awareness identity
   - `userColor` must be URL-encoded (`#` → `%23`)
 
@@ -318,6 +319,7 @@ Params:
 With two clients connected to the same `docId` you should see:
 
 - Cell edits sync between windows/tabs
+- Cell edits persist across reloads/crash via IndexedDB (offline-first); on reconnect, Yjs merges offline edits into the shared doc
 - Comments sync between windows/tabs
 - Presence (remote cursors / selections) rendered in the grid
 - A conflicts UI when two clients concurrently edit the same cell
