@@ -274,12 +274,12 @@ fn odd_coupon_boundary_date_validations_match_engine_behavior() {
         Value::Error(ErrorKind::Name) => return,
         Value::Number(n) => assert!(n.is_finite(), "expected finite number, got {n}"),
         other => panic!("expected number from ODDLPRICE boundary case, got {other:?}"),
-    }
+    };
     match sheet.eval("=ODDLYIELD(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,ODDLPRICE(DATE(2020,10,15),DATE(2021,3,1),DATE(2020,10,15),0.05,0.06,100,2,0),100,2,0)") {
         Value::Error(ErrorKind::Name) => return,
         Value::Number(n) => assert!(n.is_finite(), "expected finite number, got {n}"),
         other => panic!("expected number from ODDLYIELD boundary case, got {other:?}"),
-    }
+    };
 
     // settlement == maturity
     if !assert_num_error_or_skip(
@@ -4178,7 +4178,7 @@ fn oddlprice_matches_excel_model_for_30_360_bases() {
     // for an end-of-month schedule.
     //
     // last_interest is EOM Feb 28, so the EOM-pinned prior coupon date is Aug 31.
-    // DAYS360_EU(Aug 31, Feb 28) = 178 (while 360/frequency would be 180 for semiannual).
+    // DAYS360_EU(Aug 31, Feb 28) = 178 != 180 (=360/frequency).
     let months_per_period = 12 / frequency;
     let eom = is_end_of_month(last_interest, system);
     assert!(eom, "expected last_interest to be EOM for this scenario");
