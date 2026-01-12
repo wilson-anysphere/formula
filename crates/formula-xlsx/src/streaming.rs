@@ -3735,9 +3735,11 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         patch.value,
         CellValue::Error(formula_model::ErrorValue::Value)
     );
+    let clear_cached_value = patch.clear_cached_value && patch_formula.is_some();
     let drop_vm = has_vm
-        && !patch_value_is_value_error
-        && (existing_value_is_value_error || drop_vm_on_patched_cells);
+        && (clear_cached_value
+            || (!patch_value_is_value_error
+                && (existing_value_is_value_error || drop_vm_on_patched_cells)));
 
     let mut c = BytesStart::new(cell_tag.as_str());
     let mut has_r = false;
@@ -3799,7 +3801,7 @@ fn patch_existing_cell<R: BufRead, W: Write>(
         &inner_events,
         patch_formula,
         &body_kind,
-        patch.clear_cached_value && patch_formula.is_some(),
+        clear_cached_value,
         &f_tag,
         &v_tag,
         &is_tag,
