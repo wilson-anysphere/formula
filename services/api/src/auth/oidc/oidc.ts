@@ -445,16 +445,46 @@ export async function oidcStart(request: FastifyRequest, reply: FastifyReply): P
   try {
     const secret = await getSecret(request.server.db, request.server.config.secretStoreKeys, secretName);
     if (!secret) {
+      request.server.metrics.authFailuresTotal.inc({ reason: "oidc_not_configured" });
+      await writeOidcFailureAudit({
+        request,
+        orgId,
+        providerId,
+        errorCode: "oidc_not_configured",
+        errorMessage: "OIDC client secret not configured"
+      });
       reply.code(500).send({ error: "oidc_not_configured" });
       return;
     }
   } catch (err) {
     request.server.log.warn({ err, orgId, providerId }, "oidc_client_secret_load_failed");
+    request.server.metrics.authFailuresTotal.inc({ reason: "oidc_not_configured" });
+    await writeOidcFailureAudit({
+      request,
+      orgId,
+      providerId,
+      errorCode: "oidc_not_configured",
+      errorMessage: err instanceof Error ? err.message : undefined
+    });
     reply.code(500).send({ error: "oidc_not_configured" });
     return;
   }
 
-  const discovery = await getOidcDiscovery(provider.issuerUrl);
+  let discovery;
+  try {
+    discovery = await getOidcDiscovery(provider.issuerUrl);
+  } catch (err) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "oidc_discovery_failed" });
+    await writeOidcFailureAudit({
+      request,
+      orgId,
+      providerId,
+      errorCode: "oidc_discovery_failed",
+      errorMessage: err instanceof Error ? err.message : undefined
+    });
+    reply.code(502).send({ error: "oidc_discovery_failed" });
+    return;
+  }
 
   const state = randomBase64Url(32);
   const nonce = randomBase64Url(32);
@@ -471,13 +501,26 @@ export async function oidcStart(request: FastifyRequest, reply: FastifyReply): P
     return;
   }
 
-  await request.server.db.query(
-    `
-      INSERT INTO oidc_auth_states (state, org_id, provider_id, nonce, pkce_verifier, redirect_uri)
-      VALUES ($1, $2, $3, $4, $5, $6)
-    `,
-    [state, orgId, providerId, nonce, pkceVerifier, redirectUri]
-  );
+  try {
+    await request.server.db.query(
+      `
+        INSERT INTO oidc_auth_states (state, org_id, provider_id, nonce, pkce_verifier, redirect_uri)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `,
+      [state, orgId, providerId, nonce, pkceVerifier, redirectUri]
+    );
+  } catch (err) {
+    request.server.metrics.authFailuresTotal.inc({ reason: "oidc_state_store_failed" });
+    await writeOidcFailureAudit({
+      request,
+      orgId,
+      providerId,
+      errorCode: "oidc_state_store_failed",
+      errorMessage: err instanceof Error ? err.message : undefined
+    });
+    reply.code(500).send({ error: "oidc_state_store_failed" });
+    return;
+  }
 
   const authUrl = new URL(discovery.authorization_endpoint);
   authUrl.search = new URLSearchParams({

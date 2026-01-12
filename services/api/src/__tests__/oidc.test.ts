@@ -448,6 +448,49 @@ describe("OIDC SSO", () => {
     }
   });
 
+  it("surfaces discovery failures on /start (502 oidc_discovery_failed)", async () => {
+    const { db, config, app } = await createTestApp();
+    try {
+      const ownerRegister = await app.inject({
+        method: "POST",
+        url: "/auth/register",
+        payload: {
+          email: "sso-bad-issuer-owner@example.com",
+          password: "password1234",
+          name: "Owner",
+          orgName: "SSO Bad Issuer Org"
+        }
+      });
+      expect(ownerRegister.statusCode).toBe(200);
+      const orgId = (ownerRegister.json() as any).organization.id as string;
+
+      await db.query("UPDATE org_settings SET allowed_auth_methods = $2::jsonb WHERE org_id = $1", [
+        orgId,
+        JSON.stringify(["password", "oidc"])
+      ]);
+
+      await db.query(
+        `
+          INSERT INTO org_oidc_providers (org_id, provider_id, issuer_url, client_id, scopes, enabled)
+          VALUES ($1,$2,$3,$4,$5::jsonb,$6)
+        `,
+        [orgId, "mock", "http://127.0.0.1:0", provider.clientId, JSON.stringify(["openid", "email"]), true]
+      );
+
+      await putSecret(db, config.secretStoreKeys, `oidc:${orgId}:mock`, provider.clientSecret);
+
+      const startRes = await app.inject({
+        method: "GET",
+        url: `/auth/oidc/${orgId}/mock/start`
+      });
+      expect(startRes.statusCode).toBe(502);
+      expect((startRes.json() as any).error).toBe("oidc_discovery_failed");
+    } finally {
+      await app.close();
+      await db.end();
+    }
+  });
+
   it("derives redirect_uri from request headers only when PUBLIC_BASE_URL is unset and TRUST_PROXY=true (allowlisted)", async () => {
     const { db, config, app } = await createTestApp();
     let noBaseUrlApp: ReturnType<typeof buildApp> | null = null;
