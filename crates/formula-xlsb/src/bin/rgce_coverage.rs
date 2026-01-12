@@ -4,6 +4,7 @@ use std::io::{self, Write};
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 
+use formula_model::sheet_name_eq_case_insensitive;
 use formula_xlsb::format::{format_a1, format_hex};
 use formula_xlsb::rgce::{decode_rgce_with_context_and_rgcb_and_base, CellCoord};
 use formula_xlsb::{Formula, SheetMeta, XlsbWorkbook};
@@ -253,16 +254,10 @@ fn resolve_sheets(sheets: &[SheetMeta], selector: Option<&str>) -> Result<Vec<us
         return Ok(vec![idx]);
     }
 
-    if let Some((idx, _)) = sheets.iter().enumerate().find(|(_, s)| s.name == selector) {
-        return Ok(vec![idx]);
-    }
-
-    // Fall back to case-insensitive matching for ergonomics.
-    let selector_folded = selector.to_lowercase();
     if let Some((idx, _)) = sheets
         .iter()
         .enumerate()
-        .find(|(_, s)| s.name.to_lowercase() == selector_folded)
+        .find(|(_, s)| sheet_name_eq_case_insensitive(&s.name, selector))
     {
         return Ok(vec![idx]);
     }

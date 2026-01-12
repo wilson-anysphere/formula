@@ -2,6 +2,7 @@ use std::env;
 use std::io;
 use std::path::PathBuf;
 
+use formula_model::sheet_name_eq_case_insensitive;
 use formula_xlsb::errors::xlsb_error_display;
 use formula_xlsb::format::{format_a1, format_hex};
 use formula_xlsb::rgce::decode_rgce_with_rgcb;
@@ -145,7 +146,11 @@ fn resolve_sheets(sheets: &[SheetMeta], selector: Option<&str>) -> Result<Vec<us
         return Ok(vec![idx]);
     }
 
-    if let Some((idx, _)) = sheets.iter().enumerate().find(|(_, s)| s.name == selector) {
+    if let Some((idx, _)) = sheets
+        .iter()
+        .enumerate()
+        .find(|(_, s)| sheet_name_eq_case_insensitive(&s.name, selector))
+    {
         return Ok(vec![idx]);
     }
 

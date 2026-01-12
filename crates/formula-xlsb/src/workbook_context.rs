@@ -1,5 +1,9 @@
 use std::collections::HashMap;
 
+#[cfg(feature = "write")]
+use formula_model::sheet_name_eq_case_insensitive;
+use unicode_normalization::UnicodeNormalization;
+
 /// Workbook metadata needed to encode/decode sheet-qualified references and defined names.
 ///
 /// In XLSB formulas, 3D references (e.g. `Sheet2!A1` or `Sheet1:Sheet3!A1`) are encoded via an
@@ -9,7 +13,7 @@ use std::collections::HashMap;
 pub struct WorkbookContext {
     /// Maps a sheet or sheet range `(first, last)` to the corresponding ExternSheet index (`ixti`).
     ///
-    /// Keys are normalized (ASCII-lowercased) for case-insensitive lookup.
+    /// Keys are normalized (Unicode NFKC + uppercasing) for Excel-like case-insensitive lookup.
     extern_sheets: HashMap<(String, String), u16>,
     /// Reverse lookup for `ixti` -> `(first, last)` display names.
     extern_sheets_rev: HashMap<u16, (String, String)>,
@@ -21,7 +25,7 @@ pub struct WorkbookContext {
 
     /// Maps `(scope, name)` to the defined name index.
     ///
-    /// Keys are normalized (ASCII-lowercased) for case-insensitive lookup.
+    /// Keys are normalized (Unicode NFKC + uppercasing) for Excel-like case-insensitive lookup.
     names: HashMap<NameKey, u32>,
     /// Reverse lookup for name index -> definition (display name + scope).
     names_rev: HashMap<u32, NameDefinition>,
@@ -54,7 +58,7 @@ struct TableInfo {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TableRange {
-    /// Normalized (ASCII-lowercased) sheet name.
+    /// Normalized (Unicode NFKC + uppercasing) sheet name.
     sheet_key: String,
     /// Bounding box (0-indexed, inclusive) for the table's `ref` range.
     min_row: u32,
@@ -456,7 +460,7 @@ impl WorkbookContext {
                 let Some(sheet_name) = sheet_name else {
                     continue;
                 };
-                if !sheet_name.eq_ignore_ascii_case(wanted_sheet) {
+                if !sheet_name_eq_case_insensitive(sheet_name, wanted_sheet) {
                     continue;
                 }
             } else if workbook.is_some() && extern_name.scope_sheet.is_some() {
@@ -626,7 +630,9 @@ impl WorkbookContext {
 }
 
 fn normalize_key(s: &str) -> String {
-    s.to_ascii_lowercase()
+    // Must match Excel's case-insensitive name matching. We follow the same strategy as
+    // `formula_model::sheet_name_eq_case_insensitive`: Unicode NFKC + Unicode uppercasing.
+    s.nfkc().flat_map(|c| c.to_uppercase()).collect()
 }
 
 pub(crate) fn display_supbook_name(raw: &str) -> String {
@@ -728,6 +734,13 @@ mod tests {
         let txt = ctx.format_namex(0, 1).expect("format");
         assert_eq!(txt, "'[Book2.xlsb]Sheet1'!MyName");
         parse_formula(&format!("={txt}"), Default::default()).expect("should parse");
+    }
+
+    #[test]
+    fn extern_sheet_index_is_unicode_case_insensitive() {
+        let mut ctx = WorkbookContext::default();
+        ctx.add_extern_sheet("Ünicode", "Ünicode", 7u16);
+        assert_eq!(ctx.extern_sheet_index("ünicode"), Some(7u16));
     }
 
     #[test]

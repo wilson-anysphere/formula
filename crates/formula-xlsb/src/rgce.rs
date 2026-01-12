@@ -10,6 +10,7 @@ use crate::errors::{xlsb_error_code_from_literal, xlsb_error_literal};
 use crate::format::push_column_label;
 use crate::formula_text::escape_excel_string_literal;
 use crate::workbook_context::{NameScope, WorkbookContext};
+use formula_model::sheet_name_eq_case_insensitive;
 use thiserror::Error;
 
 /// Structured `rgce` decode failure with ptg id + offset.
@@ -421,7 +422,7 @@ fn format_sheet_prefix(first: &str, last: &str) -> String {
 }
 
 fn format_external_sheet_prefix(book: &str, first: &str, last: &str) -> String {
-    let same_sheet = first.eq_ignore_ascii_case(last);
+    let same_sheet = sheet_name_eq_case_insensitive(first, last);
     if !same_sheet {
         // Keep external workbook 3D spans parseable by `formula-engine` by emitting a single
         // quoted identifier before `!` (e.g. `'[Book.xlsx]Sheet1:Sheet3'!A1`).
@@ -2072,6 +2073,7 @@ mod encode_ast {
     use crate::errors::xlsb_error_code_from_literal;
 
     use formula_engine as fe;
+    use formula_model::sheet_name_eq_case_insensitive;
 
     const PTG_ERR: u8 = 0x1C;
     const PTG_BOOL: u8 = 0x1D;
@@ -2776,11 +2778,14 @@ mod encode_ast {
         match (a, b) {
             (SheetSpec::Current, SheetSpec::Current) => Some(SheetSpec::Current),
             (SheetSpec::Current, other) | (other, SheetSpec::Current) => Some(other.clone()),
-            (SheetSpec::Single(a), SheetSpec::Single(b)) if a.eq_ignore_ascii_case(b) => {
+            (SheetSpec::Single(a), SheetSpec::Single(b))
+                if sheet_name_eq_case_insensitive(a, b) =>
+            {
                 Some(SheetSpec::Single(a.clone()))
             }
             (SheetSpec::Range(af, al), SheetSpec::Range(bf, bl))
-                if af.eq_ignore_ascii_case(bf) && al.eq_ignore_ascii_case(bl) =>
+                if sheet_name_eq_case_insensitive(af, bf)
+                    && sheet_name_eq_case_insensitive(al, bl) =>
             {
                 Some(SheetSpec::Range(af.clone(), al.clone()))
             }
@@ -3720,7 +3725,7 @@ fn extern_sheet_range_index_with_fallback(
         split_external_workbook_prefix(first),
         split_external_workbook_prefix(last),
     ) {
-        if prefix1.eq_ignore_ascii_case(prefix2) {
+        if sheet_name_eq_case_insensitive(prefix1, prefix2) {
             if let Some(ixti) = ctx.extern_sheet_range_index(first, last_sheet) {
                 return Some(ixti);
             }
