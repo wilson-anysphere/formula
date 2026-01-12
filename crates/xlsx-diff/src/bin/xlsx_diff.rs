@@ -49,9 +49,8 @@ fn main() -> Result<()> {
         Glob::new(pattern)?;
     }
 
-    let expected = xlsx_diff::WorkbookArchive::open(&args.original)?;
-    let actual = xlsx_diff::WorkbookArchive::open(&args.modified)?;
-    let mut report = xlsx_diff::diff_archives_with_options(&expected, &actual, &options);
+    let mut report =
+        xlsx_diff::diff_workbooks_with_options(&args.original, &args.modified, &options)?;
     report.differences.sort_by(|a, b| {
         let rank = |s: xlsx_diff::Severity| match s {
             xlsx_diff::Severity::Critical => 0u8,

@@ -182,6 +182,16 @@ pub fn diff_workbooks(expected: &Path, actual: &Path) -> Result<DiffReport> {
     Ok(diff_archives(&expected, &actual))
 }
 
+pub fn diff_workbooks_with_options(
+    expected: &Path,
+    actual: &Path,
+    options: &DiffOptions,
+) -> Result<DiffReport> {
+    let expected = WorkbookArchive::open(expected)?;
+    let actual = WorkbookArchive::open(actual)?;
+    Ok(diff_archives_with_options(&expected, &actual, options))
+}
+
 pub fn diff_archives(expected: &WorkbookArchive, actual: &WorkbookArchive) -> DiffReport {
     diff_archives_with_options(expected, actual, &DiffOptions::default())
 }
