@@ -271,7 +271,11 @@ for (const f of files) {
 }
 
 const nodeOnlyAbsFiles = new Set(nodeOnlyFiles.map((f) => f.abs));
-const nodeOnlyAbsDirs = NODE_ONLY_PATH_PREFIXES.map((prefix) => path.join(desktopRoot, prefix));
+// Normalize Node-only directories (strip trailing slashes) so prefix checks work reliably.
+const nodeOnlyAbsDirs = NODE_ONLY_PATH_PREFIXES.map((prefix) => path.resolve(desktopRoot, prefix));
+const nodeOnlyImportHints = NODE_ONLY_FILES.map((file) =>
+  path.posix.basename(file).replace(/\.[^/.]+$/, ""),
+);
 
 /** @type {Array<{ file: string, line: number, message: string, snippet: string }>} */
 const violations = [];
@@ -309,14 +313,12 @@ for (const file of runtimeFiles) {
     const specifier = ref.specifier.split("?", 1)[0]?.split("#", 1)[0] ?? "";
     if (!specifier.startsWith(".")) continue;
 
-    // Fast path: only resolve specifiers that could plausibly target the known Node-only modules.
-    if (
-      !specifier.includes("marketplace") &&
-      !specifier.includes("ExtensionHostManager") &&
-      !specifier.includes("security")
-    ) {
-      continue;
-    }
+    const baseAbs = path.resolve(path.dirname(file.abs), specifier);
+    const couldTargetNodeOnlyDir = nodeOnlyAbsDirs.some((dir) => baseAbs === dir || baseAbs.startsWith(`${dir}${path.sep}`));
+    const couldTargetNodeOnlyFile = nodeOnlyImportHints.some((hint) => hint && specifier.includes(hint));
+    // Fast path: only resolve specifiers that could plausibly target a known Node-only module.
+    // This is intentionally conservative (false positives are ok; false negatives are not).
+    if (!couldTargetNodeOnlyDir && !couldTargetNodeOnlyFile) continue;
 
     const resolved = await resolveRelativeImport(file.abs, specifier);
     if (!resolved) continue;
