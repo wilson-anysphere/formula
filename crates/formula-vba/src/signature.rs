@@ -1,11 +1,8 @@
 use thiserror::Error;
 
 use crate::{
-    authenticode::extract_vba_signature_signed_digest,
-    compute_vba_project_digest_v3,
-    contents_hash::content_normalized_data,
-    normalized_data::forms_normalized_data,
-    OleError,
+    authenticode::extract_vba_signature_signed_digest, compute_vba_project_digest_v3,
+    contents_hash::content_normalized_data, normalized_data::forms_normalized_data, OleError,
     OleFile,
 };
 
@@ -1523,7 +1520,9 @@ pub fn verify_vba_project_signature_binding(
             first_comparison = Some(debug.clone());
         }
 
-        if signed_digest == content_hash_md5 || matches!(agile_hash_md5, Some(h) if signed_digest == h) {
+        if signed_digest == content_hash_md5
+            || matches!(agile_hash_md5, Some(h) if signed_digest == h)
+        {
             return Ok(VbaProjectBindingVerification::BoundVerified(debug));
         }
 
