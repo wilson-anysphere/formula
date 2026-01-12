@@ -11,7 +11,7 @@ From repo root:
 python tools/excel-oracle/compat_gate.py
 ```
 
-This runs:
+This runs the default **smoke** tier gate:
 
 1. `cargo run -p formula-excel-oracle` → writes `datasets/engine-results.json`
 2. `python tools/excel-oracle/compare.py` → writes `reports/mismatch-report.json`
@@ -56,6 +56,71 @@ The default tag slice also includes representative **value coercion / conversion
 coverage (tagged `coercion` / `VALUE` / `DATEVALUE` / `TIMEVALUE`), so changes to
 text→number/date/time semantics are exercised in CI even before a full Excel
 oracle dataset is generated.
+
+## Tiered compatibility gates (`--tier`)
+
+`compat_gate.py` supports tier presets so you can run progressively larger
+Excel-compatibility checks without hand-editing `--include-tag` lists.
+
+### Smoke (default, CI-friendly)
+
+Runs a small, high-signal slice of the corpus (fast).
+
+Preset include tags:
+
+`add`, `sub`, `mul`, `div`, `cmp`, `SUM`, `IF`, `IFERROR`, `error`, `range`, `TRANSPOSE`, `SEQUENCE`
+
+```bash
+python tools/excel-oracle/compat_gate.py --tier smoke
+# or just:
+python tools/excel-oracle/compat_gate.py
+```
+
+### P0 (broader common-function slice)
+
+Runs a broader but still bounded set that aims to cover the most common
+functions/operators in the curated corpus.
+
+Preset include tags:
+
+`arith`, `cmp`, `math`, `agg`, `logical`, `text`, `date`, `lookup`, `spill`, `dynarr`, `error`
+
+```bash
+python tools/excel-oracle/compat_gate.py --tier p0
+```
+
+### Full (no include-tag filtering)
+
+Runs the full case corpus (no `--include-tag` filtering unless you explicitly
+pass `--include-tag`).
+
+```bash
+python tools/excel-oracle/compat_gate.py --tier full
+```
+
+### Precedence / interaction with tag flags
+
+- If you pass **any** `--include-tag`, it **overrides** the tier preset.
+- `--exclude-tag` always applies (regardless of tier).
+
+### Runtime tradeoffs & pinned datasets
+
+- `--tier smoke` is intended to stay fast for CI.
+- `--tier p0` and `--tier full` are better suited for local runs or nightly CI.
+
+The gate **does not require Excel** at runtime; it compares against a pinned
+Excel dataset (`datasets/excel-oracle.pinned.json` or the newest file in
+`datasets/versioned/`).
+
+Important: the pinned dataset must contain results for the cases you choose to
+run. With a **full pinned dataset**, using tag filtering (tiers or explicit
+`--include-tag`) is recommended to control runtime. If the repo only has a
+smaller pinned dataset, use `--tier smoke` or cap runs with `--max-cases` when
+sanity-checking:
+
+```bash
+python tools/excel-oracle/compat_gate.py --tier full --max-cases 50
+```
 
 ## Regenerate the case corpus
 

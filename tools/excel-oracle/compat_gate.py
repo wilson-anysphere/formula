@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 
-DEFAULT_INCLUDE_TAGS = [
+SMOKE_INCLUDE_TAGS = [
     # Keep CI bounded to a small, high-signal slice of the corpus.
     "add",
     "sub",
@@ -56,6 +56,34 @@ DEFAULT_INCLUDE_TAGS = [
     "coercion",
 ]
 
+P0_INCLUDE_TAGS = [
+    # A broader but still bounded set intended to cover common "P0" Excel behavior.
+    #
+    # Note: include-tag filtering uses OR semantics (a case is included if it contains
+    # ANY include tag). These tags map to the curated corpus tags produced by
+    # tools/excel-oracle/generate_cases.py.
+    "arith",
+    "cmp",
+    "math",
+    "agg",
+    "logical",
+    "text",
+    "date",
+    "lookup",
+    # Dynamic arrays / spilling.
+    "spill",
+    "dynarr",
+    # Explicit error cases (and any cases tagged as error).
+    "error",
+]
+
+_TIER_TO_INCLUDE_TAGS: dict[str, list[str]] = {
+    "smoke": list(SMOKE_INCLUDE_TAGS),
+    "p0": list(P0_INCLUDE_TAGS),
+    # Full corpus run: no include-tag filtering unless the user passes --include-tag.
+    "full": [],
+}
+
 
 def _sha256_file(path: Path) -> str:
     h = hashlib.sha256()
@@ -86,6 +114,10 @@ def _default_expected_dataset(*, cases_path: Path) -> Path:
         "\n"
         "See tests/compatibility/excel-oracle/README.md for how to generate/pin datasets."
     )
+
+
+def _normalize_tags(tags: list[str]) -> list[str]:
+    return [t for t in (s.strip() for s in tags) if t]
 
 
 def main() -> int:
@@ -124,10 +156,22 @@ def main() -> int:
         help="Optional cap (after tag filtering): evaluate/compare only first N cases (0 = all).",
     )
     p.add_argument(
+        "--tier",
+        choices=["smoke", "p0", "full"],
+        default="smoke",
+        help=(
+            "Which Excel-compatibility gate to run: "
+            "'smoke' (default, fast CI slice), "
+            "'p0' (broader common-function slice), "
+            "'full' (no include-tag filtering; runs all cases). "
+            "If --include-tag is provided, it overrides tier presets."
+        ),
+    )
+    p.add_argument(
         "--include-tag",
         action="append",
         default=[],
-        help="Only include cases containing this tag (can be repeated). Defaults to a curated set.",
+        help="Only include cases containing this tag (can be repeated). Overrides --tier presets.",
     )
     p.add_argument(
         "--exclude-tag",
@@ -150,8 +194,9 @@ def main() -> int:
     actual_path = Path(args.actual)
     report_path = Path(args.report)
 
-    include_tags = args.include_tag or list(DEFAULT_INCLUDE_TAGS)
-    exclude_tags = args.exclude_tag
+    user_include_tags = _normalize_tags(args.include_tag)
+    include_tags = user_include_tags if user_include_tags else list(_TIER_TO_INCLUDE_TAGS[args.tier])
+    exclude_tags = _normalize_tags(args.exclude_tag)
 
     repo_root = Path(__file__).resolve().parents[2]
     env = os.environ.copy()
