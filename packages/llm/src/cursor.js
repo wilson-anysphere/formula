@@ -1,7 +1,7 @@
 /**
  * Cursor-only LLM client (dependency-free).
  *
- * The Cursor backend speaks an OpenAI-compatible Chat Completions protocol:
+ * The Cursor backend speaks a Chat Completions protocol:
  * `POST /chat/completions` (typically under a `/v1` base path).
  *
  * This client is intentionally *not* provider-selectable and does *not* read
@@ -36,7 +36,7 @@ function tryParseJson(input) {
 /**
  * @param {import("./types.js").LLMMessage[]} messages
  */
-function toOpenAIMessages(messages) {
+function toChatCompletionsMessages(messages) {
   return messages.map((m) => {
     if (m.role === "tool") {
       return {
@@ -68,7 +68,7 @@ function toOpenAIMessages(messages) {
 /**
  * @param {import("./types.js").ToolDefinition[]} tools
  */
-function toOpenAITools(tools) {
+function toChatCompletionsTools(tools) {
   return tools.map((t) => ({
     type: "function",
     function: {
@@ -141,7 +141,7 @@ function resolveTimeoutMs(explicitTimeoutMs) {
 }
 
 /**
- * Compute the OpenAI-compatible chat completions endpoint from a configured base URL.
+ * Compute the chat completions endpoint from a configured base URL.
  *
  * Examples:
  * - `https://cursor.test` => `https://cursor.test/v1/chat/completions`
@@ -250,8 +250,8 @@ export class CursorLLMClient {
         credentials: "include",
         body: JSON.stringify({
           model: request.model ?? this.model,
-          messages: toOpenAIMessages(request.messages),
-          tools: request.tools?.length ? toOpenAITools(request.tools) : undefined,
+          messages: toChatCompletionsMessages(request.messages),
+          tools: request.tools?.length ? toChatCompletionsTools(request.tools) : undefined,
           tool_choice: request.tools?.length ? request.toolChoice ?? "auto" : undefined,
           temperature: request.temperature,
           max_tokens: request.maxTokens,
@@ -313,8 +313,8 @@ export class CursorLLMClient {
 
       const requestBody = {
         model: request.model ?? this.model,
-        messages: toOpenAIMessages(request.messages),
-        tools: request.tools?.length ? toOpenAITools(request.tools) : undefined,
+        messages: toChatCompletionsMessages(request.messages),
+        tools: request.tools?.length ? toChatCompletionsTools(request.tools) : undefined,
         tool_choice: request.tools?.length ? request.toolChoice ?? "auto" : undefined,
         temperature: request.temperature,
         max_tokens: request.maxTokens,
@@ -339,7 +339,7 @@ export class CursorLLMClient {
 
       if (!response.ok) {
         const text = await response.text().catch(() => "");
-        // Some OpenAI-compatible backends don't support `stream_options`. Retry
+        // Some backends don't support `stream_options`. Retry
         // without it so streaming still works.
         if (response.status === 400 && /stream_options/i.test(text)) {
           response = await doFetch(false);
@@ -380,12 +380,12 @@ export class CursorLLMClient {
       /** @type {{ promptTokens?: number, completionTokens?: number, totalTokens?: number } | null} */
       let usage = null;
       /**
-       * OpenAI identifies tool calls by a stable `index` and sometimes omits the
+       * Tool calls are identified by a stable `index` and some backends omit the
        * `id` field on early chunks. Buffer argument fragments by index until we
        * learn the stable `id` + `name`, then emit `tool_call_start` followed by
        * the buffered `tool_call_delta` fragments.
        *
-       * Some OpenAI-compatible backends incorrectly stream the full arguments
+       * Some backends incorrectly stream the full arguments
        * string repeatedly (instead of deltas). Track the reconstructed argument
        * string so we can diff and only emit the incremental suffix.
        *
@@ -403,7 +403,7 @@ export class CursorLLMClient {
       }
 
       /**
-       * OpenAI tool calls are logically ordered by the numeric `index` field.
+       * Tool calls are logically ordered by the numeric `index` field.
        * Some backends can emit tool call chunks out of order; only emit tool call
        * start events once we've seen contiguous indexes starting from 0 so the
        * downstream tool loop executes calls in a deterministic order.
@@ -546,4 +546,3 @@ export class CursorLLMClient {
     }
   }
 }
-

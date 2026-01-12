@@ -46,6 +46,19 @@ test("cursor AI policy guard fails when forbidden provider strings are present",
   }
 });
 
+test("cursor AI policy guard fails when OpenAI appears in non-test source files (even without imports)", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-openai-source-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "packages/example/src/index.js", 'const provider = "OpenAI";\n');
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard fails when forbidden provider strings are present in root config files", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-root-config-fail-"));
   try {

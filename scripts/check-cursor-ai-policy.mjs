@@ -208,6 +208,11 @@ const CONTENT_SUBSTRING_RULES = [
     message: "Forbidden: direct OpenAI API endpoint reference (Cursor-only AI).",
   },
   {
+    id: "openai",
+    needleLower: "openai",
+    message: "Forbidden: OpenAI integration reference (Cursor-only AI).",
+  },
+  {
     id: "anthropic",
     needleLower: "anthropic",
     message: "Forbidden: Anthropic integration reference (Cursor-only AI).",
@@ -246,34 +251,6 @@ const OPENAI_IN_CONFIG_RULE = {
   needleLower: "openai",
   message: "Forbidden: OpenAI references are not allowed in config/dependency files (Cursor-only AI).",
 };
-
-const OPENAI_IMPORT_REGEXES = [
-  {
-    id: "openai-import-from",
-    re: /\b(?:import|export)\s+(?:type\s+)?[^"']*?\sfrom\s+["'][^"']*openai[^"']*["']/i,
-    message: "Forbidden: OpenAI import specifier (Cursor-only AI).",
-  },
-  {
-    id: "openai-import-side-effect",
-    re: /\bimport\s+["'][^"']*openai[^"']*["']/i,
-    message: "Forbidden: OpenAI import specifier (Cursor-only AI).",
-  },
-  {
-    id: "openai-import-dynamic",
-    re: /\bimport\(\s*["'][^"']*openai[^"']*["']\s*\)/i,
-    message: "Forbidden: OpenAI dynamic import specifier (Cursor-only AI).",
-  },
-  {
-    id: "openai-require",
-    re: /\brequire\(\s*["'][^"']*openai[^"']*["']\s*\)/i,
-    message: "Forbidden: OpenAI require() specifier (Cursor-only AI).",
-  },
-  {
-    id: "openai-require-resolve",
-    re: /\brequire\.resolve\(\s*["'][^"']*openai[^"']*["']\s*\)/i,
-    message: "Forbidden: OpenAI require.resolve() specifier (Cursor-only AI).",
-  },
-];
 
 /**
  * @param {string} absoluteDir
@@ -414,16 +391,6 @@ export async function checkCursorAiPolicy(options = {}) {
     for (const rule of CONTENT_SUBSTRING_RULES) {
       const idx = contentLower.indexOf(rule.needleLower);
       if (idx === -1) continue;
-      const { line, column } = computeLineColumn(content, idx);
-      record({ file: rel, ruleId: rule.id, message: rule.message, line, column });
-      return;
-    }
-
-    // OpenAI is checked more narrowly (import specifiers) to reduce accidental matches.
-    for (const rule of OPENAI_IMPORT_REGEXES) {
-      const m = rule.re.exec(content);
-      if (!m) continue;
-      const idx = m.index ?? contentLower.indexOf("openai");
       const { line, column } = computeLineColumn(content, idx);
       record({ file: rel, ruleId: rule.id, message: rule.message, line, column });
       return;

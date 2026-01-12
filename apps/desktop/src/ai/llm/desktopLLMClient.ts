@@ -82,7 +82,7 @@ export function purgeLegacyDesktopLLMSettings(): void {
   const prefix = "formula:";
   const llmPrefix = prefix + "llm:";
   const completionPrefix = prefix + "aiCompletion:";
-  const legacyOpenAIKey = prefix + "open" + "ai" + "ApiKey";
+  const legacyApiKeyStorageKey = prefix + "open" + "ai" + "ApiKey";
 
   const safeRemove = (key: string): void => {
     try {
@@ -93,7 +93,7 @@ export function purgeLegacyDesktopLLMSettings(): void {
   };
 
   // Known legacy keys.
-  safeRemove(legacyOpenAIKey);
+  safeRemove(legacyApiKeyStorageKey);
   safeRemove(llmPrefix + "provider");
 
   // Legacy formula-bar tab completion local model settings.
