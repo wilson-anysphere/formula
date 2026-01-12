@@ -97,4 +97,27 @@ describe("tauri/updaterUi dismissal persistence", () => {
 
     expect(document.querySelector('[data-testid="updater-dialog"]')).toBeTruthy();
   });
+
+  it("shows the startup dialog again once the dismissal TTL expires", async () => {
+    const { handleUpdaterEvent } = await loadUpdaterUi();
+
+    const eightDaysAgoMs = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    localStorage.setItem(DISMISSED_VERSION_KEY, "1.2.3");
+    localStorage.setItem(DISMISSED_AT_KEY, String(eightDaysAgoMs));
+
+    await handleUpdaterEvent("update-available", { source: "startup", version: "1.2.3", body: "Notes" });
+    expect(document.querySelector('[data-testid="updater-dialog"]')).toBeTruthy();
+  });
+
+  it("clears stored dismissal when a different version becomes available", async () => {
+    const { handleUpdaterEvent } = await loadUpdaterUi();
+
+    localStorage.setItem(DISMISSED_VERSION_KEY, "1.2.3");
+    localStorage.setItem(DISMISSED_AT_KEY, String(Date.now()));
+
+    await handleUpdaterEvent("update-available", { source: "startup", version: "1.2.4", body: "Notes" });
+    expect(document.querySelector('[data-testid="updater-dialog"]')).toBeTruthy();
+    expect(localStorage.getItem(DISMISSED_VERSION_KEY)).toBeNull();
+    expect(localStorage.getItem(DISMISSED_AT_KEY)).toBeNull();
+  });
 });
