@@ -293,3 +293,27 @@ fn csv_import_strips_utf8_bom_when_first_header_field_is_quoted() {
         import_csv_to_columnar_table(Cursor::new(bytes), CsvOptions::default()).unwrap();
     assert_eq!(table.schema()[0].name, "id");
 }
+
+#[test]
+fn csv_import_strips_utf8_bom_from_first_data_field_when_no_header() {
+    let bytes = b"\xEF\xBB\xBFhello,world\nfoo,bar\n".to_vec();
+    let sheet = import_csv_to_worksheet(
+        1,
+        "Data",
+        Cursor::new(bytes),
+        CsvOptions {
+            has_header: false,
+            ..CsvOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        sheet.value(CellRef::new(0, 0)),
+        CellValue::String("hello".to_string())
+    );
+    assert_eq!(
+        sheet.value(CellRef::new(0, 1)),
+        CellValue::String("world".to_string())
+    );
+}
