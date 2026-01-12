@@ -149,6 +149,13 @@ const keyTokenToCodeFallback: Record<string, KeyboardEvent["code"] | KeyboardEve
 
   // Digits often produce different characters under Shift (e.g. "1" -> "!"),
   // but the physical key stays stable via `KeyboardEvent.code`.
+  //
+  // Excel number-format presets use `Ctrl/Cmd+Shift+$`, `Ctrl/Cmd+Shift+%`, and
+  // `Ctrl/Cmd+Shift+#`. On many layouts the literal `$`/`%`/`#` character may not be
+  // reported in `event.key` for the chord, but the physical Digit keys are stable.
+  "$": "Digit4",
+  "%": "Digit5",
+  "#": "Digit3",
   "0": "Digit0",
   "1": "Digit1",
   "2": "Digit2",

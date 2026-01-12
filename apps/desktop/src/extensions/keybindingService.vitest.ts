@@ -310,6 +310,28 @@ describe("KeybindingService", () => {
     expect(extRun).toHaveBeenCalledTimes(1);
   });
 
+  it("matches Excel-style number-format shortcuts via KeyboardEvent.code fallback (Ctrl+Shift+$)", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const run = vi.fn();
+    commandRegistry.registerBuiltinCommand("builtin.currency", "Currency", run);
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "other" });
+    service.setBuiltinKeybindings([{ command: "builtin.currency", key: "ctrl+shift+$" }]);
+
+    // Keep the display string Excel-like (show "$", not "4").
+    expect(service.getCommandKeybindingDisplayIndex().get("builtin.currency")).toEqual(["Ctrl+Shift+$"]);
+
+    // Simulate a non-US layout where the physical Digit4 key does not produce "$" for the chord.
+    const event = makeKeydownEvent({ key: "4", code: "Digit4", ctrlKey: true, shiftKey: true });
+    const handled = await service.dispatchKeydown(event);
+
+    expect(handled).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
   it("supports mac-specific builtins while still allowing the base keybinding as a fallback", async () => {
     const contextKeys = new ContextKeyService();
     const commandRegistry = new CommandRegistry();
