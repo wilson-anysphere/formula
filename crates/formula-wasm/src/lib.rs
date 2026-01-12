@@ -2797,6 +2797,13 @@ mod tests {
     }
 
     #[test]
+    fn fallback_context_scanner_handles_unterminated_quoted_identifier() {
+        let ctx = scan_fallback_function_context("=SUM('My Sheet", ',').unwrap();
+        assert_eq!(ctx.name, "SUM");
+        assert_eq!(ctx.arg_index, 0);
+    }
+
+    #[test]
     fn fallback_context_scanner_ignores_commas_in_brackets_with_escaped_close() {
         let ctx = scan_fallback_function_context("=FOO([a]],b],1", ',').unwrap();
         assert_eq!(ctx.name, "FOO");
