@@ -7,6 +7,7 @@ export type ClipboardContentLike = {
   html?: unknown;
   rtf?: unknown;
   imagePng?: unknown;
+  pngBase64?: unknown;
 };
 
 function normalizeClipboardText(text: string): string {
@@ -29,7 +30,8 @@ function hasUsableClipboardContent(content: ClipboardContentLike): boolean {
     typeof content.text === "string" ||
     typeof content.html === "string" ||
     typeof content.rtf === "string" ||
-    content.imagePng != null
+    content.imagePng != null ||
+    typeof content.pngBase64 === "string"
   );
 }
 

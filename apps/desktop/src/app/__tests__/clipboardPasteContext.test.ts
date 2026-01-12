@@ -28,4 +28,19 @@ describe("clipboardPasteContext", () => {
     expect(isInternalPaste).toBe(true);
     expect(nextContext).toEqual(initialContext);
   });
+
+  it("treats image-only clipboard reads (pngBase64) as usable and clears stale context", () => {
+    const initialContext = {
+      range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
+      payload: { text: "A" },
+      cells: [[{ value: "A", formula: null, styleId: 0 }]],
+    };
+
+    const { isInternalPaste, nextContext } = reconcileClipboardCopyContextForPaste(initialContext, {
+      pngBase64: "data:image/png;base64,AAAA",
+    });
+
+    expect(isInternalPaste).toBe(false);
+    expect(nextContext).toBeNull();
+  });
 });
