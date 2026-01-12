@@ -1456,6 +1456,14 @@ export class SpreadsheetApp {
         },
       });
 
+      if (this.pendingFormulaConflicts.length > 0) {
+        const queued = this.pendingFormulaConflicts;
+        this.pendingFormulaConflicts = [];
+        for (const conflict of queued) {
+          this.conflictUi.addConflict(conflict);
+        }
+      }
+
       // Re-enable pointer events for the conflict UX primitives.
       const toastRoot = this.conflictUiContainer.querySelector<HTMLElement>('[data-testid="conflict-toast-root"]');
       if (toastRoot) {
@@ -1478,14 +1486,6 @@ export class SpreadsheetApp {
         dialogRoot.style.borderRadius = "10px";
         dialogRoot.style.padding = "12px";
         dialogRoot.style.boxShadow = "var(--dialog-shadow)";
-      }
-
-      if (this.pendingFormulaConflicts.length > 0) {
-        const queued = this.pendingFormulaConflicts;
-        this.pendingFormulaConflicts = [];
-        for (const conflict of queued) {
-          this.conflictUi.addConflict(conflict);
-        }
       }
 
       this.structuralConflictUi = new StructuralConflictUiController({
