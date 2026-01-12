@@ -161,6 +161,33 @@ describe("DocumentControllerSpreadsheetApi", () => {
     }
   });
 
+  it("uses the display sheet name in apply_formatting error messages when a sheetNameResolver is provided", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const controller = new DocumentController();
+      controller.setCellValue("Sheet2", "A1", 1);
+
+      const sheetNames = new Map<string, string>([["Sheet2", "Budget"]]);
+      const sheetNameResolver = createSheetNameResolverFromIdToNameMap(sheetNames);
+      const api = new DocumentControllerSpreadsheetApi(controller, { sheetNameResolver });
+      const executor = new ToolExecutor(api, { default_sheet: "Sheet2" });
+
+      const result = await executor.execute({
+        name: "apply_formatting",
+        // Full-width formatting over >50k rows is rejected by DocumentController's safety cap.
+        parameters: { range: "A1:XFD60000", format: { bold: true } },
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.tool).toBe("apply_formatting");
+      if (result.ok) throw new Error("Expected apply_formatting to fail");
+      expect(result.error?.message ?? "").toContain("Budget!A1:XFD60000");
+      expect(result.error?.message ?? "").not.toContain("Sheet2!A1:XFD60000");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   it("preserves existing formatting when write_cell updates values", async () => {
     const controller = new DocumentController();
     controller.setCellValue("Sheet1", "A1", 1);
