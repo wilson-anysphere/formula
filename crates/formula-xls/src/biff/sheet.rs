@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
 
 use formula_model::{
-    CellRef, Hyperlink, HyperlinkTarget, OutlinePr, Range, SheetPane, SheetSelection,
-    SheetProtection, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
+    CellRef, Hyperlink, HyperlinkTarget, OutlinePr, Range, SheetPane, SheetProtection,
+    SheetSelection, EXCEL_MAX_COLS, EXCEL_MAX_ROWS,
 };
 
 use super::records;
@@ -168,8 +168,10 @@ pub(crate) fn parse_biff_sheet_protection(
         match record.record_id {
             RECORD_PROTECT => {
                 if data.len() < 2 {
-                    out.warnings
-                        .push(format!("truncated PROTECT record at offset {}", record.offset));
+                    out.warnings.push(format!(
+                        "truncated PROTECT record at offset {}",
+                        record.offset
+                    ));
                     continue;
                 }
                 let flag = u16::from_le_bytes([data[0], data[1]]);
@@ -177,8 +179,10 @@ pub(crate) fn parse_biff_sheet_protection(
             }
             RECORD_PASSWORD => {
                 if data.len() < 2 {
-                    out.warnings
-                        .push(format!("truncated PASSWORD record at offset {}", record.offset));
+                    out.warnings.push(format!(
+                        "truncated PASSWORD record at offset {}",
+                        record.offset
+                    ));
                     continue;
                 }
                 let hash = u16::from_le_bytes([data[0], data[1]]);
@@ -1074,26 +1078,45 @@ fn parse_hyperlink_moniker(input: &[u8], codepage: u16) -> Result<(Option<String
             None
         };
 
-        // Optional Unicode path extension. Many producers include it; consuming it is important so
-        // following HLINK fields parse correctly.
+        // Optional Unicode path extension.
+        //
+        // Many producers include it; consuming it is important so following HLINK fields parse
+        // correctly. Some producers may omit the Unicode tail entirely, so treat it as present only
+        // when it looks plausible (otherwise we risk consuming the next HLINK field, e.g. the
+        // `location` or `tooltip` string).
         let mut unicode_path: Option<String> = None;
         if input.len() >= pos + 8 {
-            // endServer + reserved/version (ignored)
-            pos += 4;
+            let end_server = u16::from_le_bytes([input[pos], input[pos + 1]]) as usize;
+            // reserved/version (ignored)
+            let _reserved = u16::from_le_bytes([input[pos + 2], input[pos + 3]]);
+            let unicode_len = u32::from_le_bytes([
+                input[pos + 4],
+                input[pos + 5],
+                input[pos + 6],
+                input[pos + 7],
+            ]) as usize;
 
-            let unicode_len = u32::from_le_bytes([input[pos], input[pos + 1], input[pos + 2], input[pos + 3]])
-                as usize;
-            pos += 4;
+            let available = input.len().saturating_sub(pos + 8);
+            let end_server_plausible = ansi_len == 0 || end_server <= ansi_len;
+            let unicode_len_plausible = unicode_len == 0
+                || (unicode_len <= available && unicode_len % 2 == 0)
+                || unicode_len
+                    .checked_mul(2)
+                    .is_some_and(|byte_len| byte_len <= available);
 
-            if unicode_len > 0 {
-                let (s, consumed) = parse_utf16_prefixed_string(&input[pos..], unicode_len)?;
-                pos = pos
-                    .checked_add(consumed)
-                    .ok_or_else(|| "file moniker length overflow".to_string())?;
+            if end_server_plausible && unicode_len_plausible {
+                pos += 8;
 
-                let s = trim_at_first_nul(s);
-                if !s.is_empty() {
-                    unicode_path = Some(s);
+                if unicode_len > 0 {
+                    let (s, consumed) = parse_utf16_prefixed_string(&input[pos..], unicode_len)?;
+                    pos = pos
+                        .checked_add(consumed)
+                        .ok_or_else(|| "file moniker length overflow".to_string())?;
+
+                    let s = trim_at_first_nul(s);
+                    if !s.is_empty() {
+                        unicode_path = Some(s);
+                    }
                 }
             }
         }
