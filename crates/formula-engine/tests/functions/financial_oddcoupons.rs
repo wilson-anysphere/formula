@@ -111,7 +111,10 @@ fn oddfprice_basis1_uses_prev_coupon_period_for_e() {
 fn odd_coupon_settlement_equal_coupon_dates_are_allowed() {
     let system = ExcelDateSystem::EXCEL_1900;
 
-    // Confirmed via Excel oracle: settlement must fall strictly inside the odd coupon period.
+    // Pinned by current engine behavior; verify against real Excel via
+    // tools/excel-oracle/run-excel-oracle.ps1 (Task 393).
+    //
+    // Settlement must fall strictly inside the odd coupon period:
     // - ODDL*: last_interest < settlement < maturity
     // - ODDF*: issue < settlement < first_coupon <= maturity
 
@@ -135,7 +138,7 @@ fn odd_coupon_settlement_equal_coupon_dates_are_allowed() {
         "expected finite number for ODDLPRICE when last_interest == settlement, got {result:?}"
     );
 
-    // ODDL*: settlement < last_interest => #NUM! (oracle case: fin_oddlprice_settle_before_last_b0_*)
+    // ODDL*: settlement < last_interest => #NUM! (excel-oracle case id prefix: fin_oddlprice_settle_before_last_b0_*)
     let settlement_before_last = ymd_to_serial(ExcelDate::new(2022, 11, 1), system).unwrap();
     let result = oddlprice(
         settlement_before_last,
@@ -183,7 +186,7 @@ fn odd_coupon_settlement_equal_coupon_dates_are_allowed() {
         "expected finite number for ODDFPRICE when settlement == first_coupon, got {result:?}"
     );
 
-    // ODDF*: settlement > first_coupon => #NUM! (oracle case: fin_oddfprice_settle_after_first_b0_*)
+    // ODDF*: settlement > first_coupon => #NUM! (excel-oracle case id prefix: fin_oddfprice_settle_after_first_b0_*)
     let settlement_after_first = ymd_to_serial(ExcelDate::new(2023, 2, 1), system).unwrap();
     let result = oddfprice(
         settlement_after_first,

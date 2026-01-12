@@ -790,7 +790,8 @@ fn odd_coupon_yield_inverts_zero_coupon_prices() {
 fn builtins_odd_coupon_zero_coupon_rate_oracle_cases() {
     let mut sheet = TestSheet::new();
 
-    // Deterministic oracle values (Excel 1900 date system).
+    // Pinned by current engine behavior (Excel 1900 date system); verify against real Excel via
+    // tools/excel-oracle/run-excel-oracle.ps1 (Task 393).
     let price = match eval_number_or_skip(
         &mut sheet,
         "=ODDFPRICE(DATE(2020,1,1),DATE(2021,7,1),DATE(2019,10,1),DATE(2020,7,1),0,0.1,100,2,0)",
@@ -2060,8 +2061,9 @@ fn odd_first_coupon_bond_functions_round_trip_long_stub() {
     // Also includes a basis=1 variant that crosses the 2020 leap day, exercising
     // E computation for actual/actual.
     //
-    // (Excel oracle values are validated separately; this unit test asserts ODDFPRICE/ODDFYIELD
-    // are internally consistent.)
+    // (Pinned by current engine behavior; verify against real Excel via
+    // tools/excel-oracle/run-excel-oracle.ps1 (Task 393). This unit test asserts
+    // ODDFPRICE/ODDFYIELD are internally consistent.)
     let yield_target = 0.0625;
     let rate = 0.0785;
 
