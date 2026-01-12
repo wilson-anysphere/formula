@@ -119,3 +119,33 @@ fn parse_root_digital_signature_ext_sets_stream_kind() {
     assert!(sig.stream_path.contains("DigitalSignatureExt"));
     assert_eq!(sig.signature, b"ext-signature");
 }
+
+#[test]
+fn parse_signature_like_stream_sets_stream_kind_unknown() {
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create compound file");
+
+    // Some producers may use a signature-like stream/storage name that doesn't exactly match one of
+    // the known `DigitalSignature*` variants. We should still detect it as a signature candidate,
+    // but surface the kind as `Unknown` so callers don't accidentally apply the wrong binding/digest
+    // rules.
+    ole.create_storage("\u{0005}DigitalSignatureExWeird")
+        .expect("create signature-like storage");
+    {
+        let mut stream = ole
+            .create_stream("\u{0005}DigitalSignatureExWeird/sig")
+            .expect("create nested signature stream");
+        stream
+            .write_all(b"weird-signature")
+            .expect("write signature bytes");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let sig = parse_vba_digital_signature(&vba_project_bin)
+        .expect("parse should succeed")
+        .expect("signature should be present");
+
+    assert_eq!(sig.stream_kind, VbaSignatureStreamKind::Unknown);
+    assert!(sig.stream_path.contains("DigitalSignatureExWeird"));
+    assert_eq!(sig.signature, b"weird-signature");
+}
