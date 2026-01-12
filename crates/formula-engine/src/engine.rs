@@ -4765,9 +4765,7 @@ fn expand_nodes_to_cells(nodes: &[PrecedentNode], limit: usize) -> Vec<(SheetId,
 fn canonical_expr_contains_structured_refs(expr: &crate::Expr) -> bool {
     match expr {
         crate::Expr::StructuredRef(_) => true,
-        crate::Expr::FieldAccess(access) => {
-            canonical_expr_contains_structured_refs(access.base.as_ref())
-        }
+        crate::Expr::FieldAccess(access) => canonical_expr_contains_structured_refs(access.base.as_ref()),
         crate::Expr::FunctionCall(call) => call
             .args
             .iter()
@@ -4805,13 +4803,13 @@ fn canonical_expr_contains_structured_refs(expr: &crate::Expr) -> bool {
 fn canonical_expr_contains_external_workbook_refs(expr: &crate::Expr) -> bool {
     match expr {
         crate::Expr::NameRef(r) => r.workbook.is_some(),
-        crate::Expr::FieldAccess(access) => {
-            canonical_expr_contains_external_workbook_refs(access.base.as_ref())
-        }
         crate::Expr::CellRef(r) => r.workbook.is_some(),
         crate::Expr::ColRef(r) => r.workbook.is_some(),
         crate::Expr::RowRef(r) => r.workbook.is_some(),
         crate::Expr::StructuredRef(r) => r.workbook.is_some(),
+        crate::Expr::FieldAccess(access) => {
+            canonical_expr_contains_external_workbook_refs(access.base.as_ref())
+        }
         crate::Expr::FunctionCall(call) => call
             .args
             .iter()
@@ -6753,6 +6751,8 @@ fn bytecode_expr_is_eligible_inner(
                 array_ok && lookup_ok && match_type_ok
             }
             bytecode::ast::Function::Abs
+            | bytecode::ast::Function::Now
+            | bytecode::ast::Function::Today
             | bytecode::ast::Function::Int
             | bytecode::ast::Function::Round
             | bytecode::ast::Function::RoundUp
@@ -6760,9 +6760,7 @@ fn bytecode_expr_is_eligible_inner(
             | bytecode::ast::Function::Mod
             | bytecode::ast::Function::Sign
             | bytecode::ast::Function::Concat
-            | bytecode::ast::Function::Not
-            | bytecode::ast::Function::Now
-            | bytecode::ast::Function::Today => args
+            | bytecode::ast::Function::Not => args
                 .iter()
                 .all(|arg| bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)),
             bytecode::ast::Function::IsBlank
@@ -8215,6 +8213,156 @@ mod tests {
                 "mismatch at {addr}"
             );
         }
+    }
+
+    #[test]
+    fn now_and_today_compile_to_bytecode() {
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=NOW()")
+            .expect("set NOW()");
+        engine
+            .set_cell_formula("Sheet1", "A2", "=TODAY()")
+            .expect("set TODAY()");
+
+        let sheet_id = engine.workbook.sheet_id("Sheet1").expect("sheet exists");
+        for addr in ["A1", "A2"] {
+            let addr = parse_a1(addr).unwrap();
+            let cell = engine.workbook.sheets[sheet_id]
+                .cells
+                .get(&addr)
+                .expect("cell stored");
+            assert!(
+                matches!(cell.compiled.as_ref(), Some(CompiledFormula::Bytecode(_))),
+                "{addr:?} should compile to bytecode"
+            );
+        }
+    }
+
+    #[test]
+    fn now_and_today_bytecode_matches_ast_within_recalc_context() {
+        fn setup(engine: &mut Engine) {
+            engine
+                .set_cell_formula("Sheet1", "A1", "=NOW()")
+                .expect("set NOW()");
+            engine
+                .set_cell_formula("Sheet1", "A2", "=TODAY()")
+                .expect("set TODAY()");
+        }
+
+        let mut bytecode = Engine::new();
+        setup(&mut bytecode);
+
+        let mut ast = Engine::new();
+        ast.set_bytecode_enabled(false);
+        setup(&mut ast);
+
+        let recalc_ctx = crate::eval::RecalcContext {
+            now_utc: chrono::Utc
+                .timestamp_opt(1_700_000_000, 123_456_789)
+                .single()
+                .unwrap(),
+            recalc_id: 42,
+            number_locale: crate::value::NumberLocale::en_us(),
+        };
+
+        let levels_ast = ast.calc_graph.calc_levels_for_dirty().expect("calc levels");
+        let _ = ast.recalculate_levels(
+            levels_ast,
+            RecalcMode::SingleThreaded,
+            &recalc_ctx,
+            ast.date_system,
+            None,
+        );
+
+        let levels_bytecode = bytecode
+            .calc_graph
+            .calc_levels_for_dirty()
+            .expect("calc levels");
+        let _ = bytecode.recalculate_levels(
+            levels_bytecode,
+            RecalcMode::SingleThreaded,
+            &recalc_ctx,
+            bytecode.date_system,
+            None,
+        );
+
+        for addr in ["A1", "A2"] {
+            assert_eq!(
+                bytecode.get_cell_value("Sheet1", addr),
+                ast.get_cell_value("Sheet1", addr),
+                "mismatch at {addr}"
+            );
+        }
+    }
+
+    #[test]
+    fn now_and_today_bytecode_respects_date_system() {
+        use crate::date::{ymd_to_serial, ExcelDate, ExcelDateSystem};
+        use chrono::{Datelike, Timelike};
+
+        let mut engine = Engine::new();
+        engine
+            .set_cell_formula("Sheet1", "A1", "=TODAY()")
+            .expect("set TODAY()");
+        engine
+            .set_cell_formula("Sheet1", "A2", "=NOW()")
+            .expect("set NOW()");
+
+        let recalc_ctx = crate::eval::RecalcContext {
+            now_utc: chrono::Utc
+                .timestamp_opt(1_700_000_000, 123_456_789)
+                .single()
+                .unwrap(),
+            recalc_id: 42,
+            number_locale: crate::value::NumberLocale::en_us(),
+        };
+
+        let run = |engine: &mut Engine, ctx: &crate::eval::RecalcContext| {
+            let levels = engine.calc_graph.calc_levels_for_dirty().expect("calc levels");
+            let _ = engine.recalculate_levels(
+                levels,
+                RecalcMode::SingleThreaded,
+                ctx,
+                engine.date_system,
+                None,
+            );
+        };
+
+        // Default: 1900 date system.
+        run(&mut engine, &recalc_ctx);
+        let now = recalc_ctx.now_utc;
+        let date = now.date_naive();
+        let seconds = now.time().num_seconds_from_midnight() as f64
+            + (now.time().nanosecond() as f64 / 1_000_000_000.0);
+
+        let base_1900 = ymd_to_serial(
+            ExcelDate::new(date.year(), date.month() as u8, date.day() as u8),
+            ExcelDateSystem::EXCEL_1900,
+        )
+        .unwrap() as f64;
+
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(base_1900));
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A2"),
+            Value::Number(base_1900 + seconds / 86_400.0)
+        );
+
+        // Switch to 1904 date system and ensure NOW/TODAY shift appropriately.
+        engine.set_date_system(ExcelDateSystem::Excel1904);
+        run(&mut engine, &recalc_ctx);
+
+        let base_1904 = ymd_to_serial(
+            ExcelDate::new(date.year(), date.month() as u8, date.day() as u8),
+            ExcelDateSystem::Excel1904,
+        )
+        .unwrap() as f64;
+
+        assert_eq!(engine.get_cell_value("Sheet1", "A1"), Value::Number(base_1904));
+        assert_eq!(
+            engine.get_cell_value("Sheet1", "A2"),
+            Value::Number(base_1904 + seconds / 86_400.0)
+        );
     }
 
     #[test]
