@@ -14,7 +14,6 @@ pub(crate) mod sheet;
 pub(crate) mod strings;
 
 pub(crate) use globals::{parse_biff_bound_sheets, parse_biff_workbook_globals, BoundSheetInfo};
-pub(crate) use records::read_biff_record;
 pub(crate) use sheet::{
     parse_biff_sheet_cell_xf_indices_filtered, parse_biff_sheet_row_col_properties,
     SheetRowColProperties,
@@ -50,12 +49,12 @@ pub(crate) fn open_xls_workbook_stream<R: Read + Seek>(
 }
 
 pub(crate) fn detect_biff_version(workbook_stream: &[u8]) -> BiffVersion {
-    let Some((record_id, data)) = read_biff_record(workbook_stream, 0) else {
+    let Some((record_id, data)) = records::read_biff_record(workbook_stream, 0) else {
         return BiffVersion::Biff8;
     };
 
     // BOF record type. Use BIFF8 heuristics compatible with calamine.
-    if record_id != 0x0809 && record_id != 0x0009 {
+    if !records::is_bof_record(record_id) {
         return BiffVersion::Biff8;
     }
 
