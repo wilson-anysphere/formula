@@ -10,13 +10,11 @@ describe("openFileIpc wiring", () => {
     const mainUrl = new URL("../../main.ts", import.meta.url);
     const source = readFileSync(mainUrl, "utf8");
 
-    // Ensure the helper is imported.
-    expect(source).toMatch(/from\s+["']\.\/tauri\/openFileIpc["']/);
+    // Ensure the helper is imported (as an actual import statement, not just mentioned in a comment).
+    expect(source).toMatch(/^\s*import\s+\{[^}]*\binstallOpenFileIpc\b[^}]*\}\s+from\s+["']\.\/tauri\/openFileIpc["']/m);
 
     // Ensure the helper is actually used. This guards against a regression where the helper
     // remains in the tree but the startup wiring is removed.
-    expect(source).toMatch(
-      /installOpenFileIpc\(\s*\{[\s\S]*?\blisten\b[\s\S]*?\bemit\b[\s\S]*?\bonOpenPath\b[\s\S]*?\}\s*\)/,
-    );
+    expect(source).toMatch(/^\s*(?:void\s+)?installOpenFileIpc\(\s*\{[\s\S]*?\blisten\b[\s\S]*?\bemit\b[\s\S]*?\bonOpenPath\b/m);
   });
 });
