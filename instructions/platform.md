@@ -117,7 +117,8 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
     "clipboard:allow-write-text",
     "shell:allow-open",
     "updater:allow-check",
-    "updater:allow-download-and-install"
+    "updater:allow-download",
+    "updater:allow-install"
   ]
 }
 ```
