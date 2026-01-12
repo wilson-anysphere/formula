@@ -152,4 +152,140 @@ describe("SpreadsheetApp goTo", () => {
     app.destroy();
     root.remove();
   });
+
+  it("resolves named range sheetName display names to stable ids", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const sheetNames = new Map<string, string>();
+    const app = new SpreadsheetApp(root, status, {
+      sheetNameResolver: {
+        getSheetNameById: (sheetId) => sheetNames.get(sheetId) ?? null,
+        getSheetIdByName: (sheetName) => {
+          const trimmed = String(sheetName).trim().toLowerCase();
+          if (!trimmed) return null;
+          for (const [id, name] of sheetNames.entries()) {
+            if (name.toLowerCase() === trimmed) return id;
+          }
+          return null;
+        },
+      },
+    });
+
+    const doc = app.getDocument();
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "NamedRangeTarget");
+    sheetNames.set("Sheet2", "Budget");
+
+    // Define a name scoped to the renamed sheet using its *display* name.
+    app.getSearchWorkbook().defineName("MyName", {
+      sheetName: "Budget",
+      range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
+    });
+
+    app.activateSheet("Sheet1");
+    app.goTo("MyName");
+
+    expect(app.getCurrentSheetId()).toBe("Sheet2");
+    expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+    expect(doc.getSheetIds()).not.toContain("Budget");
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("resolves table structured ref sheetName display names to stable ids", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const sheetNames = new Map<string, string>();
+    const app = new SpreadsheetApp(root, status, {
+      sheetNameResolver: {
+        getSheetNameById: (sheetId) => sheetNames.get(sheetId) ?? null,
+        getSheetIdByName: (sheetName) => {
+          const trimmed = String(sheetName).trim().toLowerCase();
+          if (!trimmed) return null;
+          for (const [id, name] of sheetNames.entries()) {
+            if (name.toLowerCase() === trimmed) return id;
+          }
+          return null;
+        },
+      },
+    });
+
+    const doc = app.getDocument();
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "TableTarget");
+    sheetNames.set("Sheet2", "Budget");
+
+    // Define a table with its sheetName set to the *display* name.
+    app.getSearchWorkbook().addTable({
+      name: "Table1",
+      sheetName: "Budget",
+      startRow: 0,
+      startCol: 0,
+      endRow: 1,
+      endCol: 1,
+      columns: ["Col1", "Col2"],
+    });
+
+    app.activateSheet("Sheet1");
+    app.goTo("Table1[#All]");
+
+    expect(app.getCurrentSheetId()).toBe("Sheet2");
+    expect(app.getActiveCell()).toEqual({ row: 0, col: 0 });
+    expect(app.getSelectionRanges()[0]).toEqual({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 });
+    expect(doc.getSheetIds()).not.toContain("Budget");
+
+    app.destroy();
+    root.remove();
+  });
+
+  it("passes through stable sheet ids returned by named ranges/tables when resolver recognizes the id", () => {
+    const root = createRoot();
+    const status = {
+      activeCell: document.createElement("div"),
+      selectionRange: document.createElement("div"),
+      activeValue: document.createElement("div"),
+    };
+
+    const sheetNames = new Map<string, string>();
+    const app = new SpreadsheetApp(root, status, {
+      sheetNameResolver: {
+        getSheetNameById: (sheetId) => sheetNames.get(sheetId) ?? null,
+        // Resolver intentionally does *not* treat ids as names. We rely on pass-through behavior.
+        getSheetIdByName: (sheetName) => {
+          const trimmed = String(sheetName).trim().toLowerCase();
+          if (!trimmed) return null;
+          for (const [id, name] of sheetNames.entries()) {
+            if (name.toLowerCase() === trimmed) return id;
+          }
+          return null;
+        },
+      },
+    });
+
+    const doc = app.getDocument();
+    doc.setCellValue("Sheet2", { row: 0, col: 0 }, "IdTarget");
+    sheetNames.set("Sheet2", "Budget");
+
+    // Name defined with stable id instead of display name.
+    app.getSearchWorkbook().defineName("MyIdName", {
+      sheetName: "Sheet2",
+      range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 },
+    });
+
+    app.activateSheet("Sheet1");
+    app.goTo("MyIdName");
+    expect(app.getCurrentSheetId()).toBe("Sheet2");
+
+    app.destroy();
+    root.remove();
+  });
 });
