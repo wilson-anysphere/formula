@@ -1326,6 +1326,7 @@ const ERROR_LITERALS: &[&str] = &[
     "#NAME?",
     "#NUM!",
     "#N/A",
+    "#N/A!",
     "#GETTING_DATA",
     "#SPILL!",
     "#CALC!",
