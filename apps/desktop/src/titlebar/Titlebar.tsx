@@ -88,7 +88,7 @@ function stripLeadingDocSeparator(documentName: string): string {
   // The titlebar visually separates app name and document name with an em dash.
   // Some callers may already include a leading dash in `documentName` (e.g. from
   // mockups). Strip it so we don't render a doubled separator.
-  let result = documentName.trimStart();
+  let result = documentName.trim();
   // Remove any leading separator characters and following whitespace.
   // (em dash, en dash, hyphen-minus)
   result = result.replace(/^[—–-]+\s*/, "");
