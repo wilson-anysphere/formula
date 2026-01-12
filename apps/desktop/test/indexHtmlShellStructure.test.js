@@ -51,27 +51,6 @@ test("desktop index.html exposes required shell containers and testids", () => {
     "zoom-control",
     "status-zoom",
     "sheet-position",
-
-    // Debug/test controls (kept in static HTML for Playwright)
-    "audit-precedents",
-    "audit-dependents",
-    "audit-transitive",
-    "split-vertical",
-    "split-horizontal",
-    "split-none",
-    "freeze-panes",
-    "freeze-top-row",
-    "freeze-first-column",
-    "unfreeze-panes",
-    "open-panel-ai-chat",
-    "open-panel-ai-audit",
-    "open-data-queries-panel",
-    "open-macros-panel",
-    "open-script-editor-panel",
-    "open-python-panel",
-    "open-extensions-panel",
-    "open-vba-migrate-panel",
-    "open-comments-panel",
   ];
 
   const missingIds = requiredIds
@@ -92,6 +71,8 @@ test("desktop index.html exposes required shell containers and testids", () => {
   // static `index.html` status bar. Duplicating them here causes Playwright strict-mode
   // failures because `getByTestId(...)` matches multiple elements with the same test id.
   const forbiddenSnippets = [
+    'data-testid="open-ai-panel"',
+    'data-testid="open-ai-audit-panel"',
     'data-testid="open-panel-ai-chat"',
     'data-testid="open-panel-ai-audit"',
     'data-testid="open-data-queries-panel"',
