@@ -29,9 +29,10 @@ services:
       SYNC_TOKEN_TTL_SECONDS: "300"
       # Used to encrypt values in the database-backed secret store (`secrets` table),
       # e.g. OIDC client secrets and SIEM auth configuration.
-      # Prefer configuring `SECRET_STORE_KEYS_JSON` for key rotation support; `SECRET_STORE_KEY`
-      # remains supported as a backwards-compatible single-key mode.
+      # Prefer configuring `SECRET_STORE_KEYS` (or `SECRET_STORE_KEYS_JSON`) for key rotation
+      # support; `SECRET_STORE_KEY` remains supported as a backwards-compatible single-key mode.
       SECRET_STORE_KEYS_JSON: ${SECRET_STORE_KEYS_JSON:-}
+      SECRET_STORE_KEYS: ${SECRET_STORE_KEYS:-}
       SECRET_STORE_KEY: ${SECRET_STORE_KEY:-dev-secret-store-key-change-me}
       # Set to "0" to disable background retention sweeps.
       RETENTION_SWEEP_INTERVAL_MS: "3600000"

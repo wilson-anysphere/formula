@@ -32,7 +32,7 @@ The API automatically runs SQL migrations on startup.
 
 - `NODE_ENV=development`
 - `COOKIE_SECURE=false`
-- development secrets for `SYNC_TOKEN_SECRET` / `SECRET_STORE_KEY` unless overridden
+- development secrets for `SYNC_TOKEN_SECRET` / secret store keyring unless overridden
 
 The production API Docker image sets `NODE_ENV=production`, and the API will **fail fast**
 on insecure defaults (for example `COOKIE_SECURE!=true` or known dev secrets). In particular,
@@ -40,7 +40,8 @@ production requires:
 
 - `COOKIE_SECURE=true`
 - `SYNC_TOKEN_SECRET` set to a non-dev value
-- `SECRET_STORE_KEYS_JSON` configured (recommended), or `SECRET_STORE_KEY` set to a non-dev value
+- secret store keyring configured via `SECRET_STORE_KEYS` (recommended) or `SECRET_STORE_KEYS_JSON` (also supported)
+  - legacy: `SECRET_STORE_KEY` is still supported for smooth upgrades
 - (Legacy-only) `LOCAL_KMS_MASTER_KEY` set to a non-dev value if you need to decrypt/migrate historical encrypted rows
 - (Optional, AWS KMS) `AWS_KMS_ENABLED=true` + `AWS_REGION` when using `org_settings.kms_provider = 'aws'`
   - Ensure `@aws-sdk/client-kms` is installed in the API runtime image
@@ -114,7 +115,23 @@ The API includes a small database-backed encrypted secret store (`secrets` table
 
 ### Key configuration
 
-The preferred configuration is `SECRET_STORE_KEYS_JSON`, which enables key rotation without downtime:
+The secret store supports multiple keys for rotation without downtime.
+
+Configuration options (highest priority first):
+
+- `SECRET_STORE_KEYS_JSON`: JSON encoded keyring.
+- `SECRET_STORE_KEYS` (recommended): comma-separated list of `<keyId>:<base64>` entries (the last entry is current).
+- legacy `SECRET_STORE_KEY`: a single secret which is hashed with SHA-256 to derive the AES-256 key.
+
+Examples:
+
+`SECRET_STORE_KEYS`:
+
+```bash
+SECRET_STORE_KEYS="k2025-12:<base64(32-byte key)>,k2026-01:<base64(32-byte key)>"
+```
+
+`SECRET_STORE_KEYS_JSON`:
 
 ```json
 {
@@ -134,13 +151,13 @@ node -e 'console.log(require("crypto").randomBytes(32).toString("base64"))'
 
 Key ids are application-defined (e.g. a date string), but must be non-empty and must not include `:` (the delimiter used in the on-disk encoding).
 
-If `SECRET_STORE_KEYS_JSON` is not set, the API falls back to legacy single-key mode using `SECRET_STORE_KEY` (compatible with older deployments).
+If neither `SECRET_STORE_KEYS_JSON` nor `SECRET_STORE_KEYS` is set, the API falls back to legacy single-key mode using `SECRET_STORE_KEY` (compatible with older deployments).
 
-Note: legacy deployments derive the actual AES-256 key as `sha256(SECRET_STORE_KEY)`. When migrating from `SECRET_STORE_KEY` to `SECRET_STORE_KEYS_JSON`, include the derived key as one of the entries so existing secrets remain decryptable.
+Note: legacy deployments derive the actual AES-256 key as `sha256(SECRET_STORE_KEY)`. When migrating from `SECRET_STORE_KEY` to a multi-key ring (`SECRET_STORE_KEYS` / `SECRET_STORE_KEYS_JSON`), include the derived key as one of the entries so existing secrets remain decryptable.
 
 ### Rotation tooling
 
-After updating `SECRET_STORE_KEYS_JSON.currentKeyId` to a new key, re-encrypt existing rows with:
+After adding a new key (and making it current), re-encrypt existing rows with:
 
 ```bash
 pnpm -C services/api secrets:rotate
