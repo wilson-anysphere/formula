@@ -132,6 +132,33 @@ fn parse_supbook_record(
 ) -> (SupBookInfo, Vec<String>) {
     let mut warnings = Vec::new();
 
+    // Best-effort handling for minimal internal SUPBOOK marker payloads.
+    //
+    // Some producers emit an "internal references" SUPBOOK record as a 4-byte payload:
+    //   [ctab: u16][marker: u16]
+    // where `marker == 0x0401` (little-endian bytes 0x01 0x04).
+    //
+    // This is not an XLUnicodeString `virtPath` and will not parse via the standard string path.
+    // Treat it as an internal workbook reference.
+    let raw = record.data.as_ref();
+    if raw.len() == 4 {
+        let ctab = u16::from_le_bytes([raw[0], raw[1]]);
+        let marker = u16::from_le_bytes([raw[2], raw[3]]);
+        if marker == 0x0401 {
+            return (
+                SupBookInfo {
+                    ctab,
+                    virt_path: "\u{0001}\u{0004}".to_string(),
+                    kind: SupBookKind::Internal,
+                    workbook_name: None,
+                    sheet_names: Vec::new(),
+                    extern_names: Vec::new(),
+                },
+                warnings,
+            );
+        }
+    }
+
     let fragments: Vec<&[u8]> = record.fragments().collect();
     let mut cursor = FragmentCursor::new(&fragments, 0, 0);
 
@@ -225,8 +252,8 @@ fn parse_supbook_record(
 
 fn is_internal_virt_path(virt_path: &str) -> bool {
     // There are multiple conventions in the wild for internal marker strings. Excel typically uses
-    // a single 0x0001 character, but some writers appear to use NUL.
-    virt_path == "\u{0001}" || virt_path == "\u{0000}"
+    // a single 0x0001 character, but some writers appear to use NUL or a multi-character marker.
+    virt_path == "\u{0001}" || virt_path == "\u{0000}" || virt_path == "\u{0001}\u{0004}"
 }
 
 fn is_addin_virt_path(virt_path: &str) -> bool {
@@ -626,6 +653,32 @@ mod tests {
         let sb = &parsed.supbooks[0];
         assert_eq!(sb.kind, SupBookKind::Internal);
         assert_eq!(sb.virt_path, "\u{0001}");
+        assert_eq!(sb.workbook_name, None);
+        assert!(sb.sheet_names.is_empty());
+        assert!(sb.extern_names.is_empty());
+    }
+
+    #[test]
+    fn parses_internal_supbook_marker_0401_without_sheet_names() {
+        // Internal SUPBOOK via minimal 4-byte payload:
+        //   [ctab: u16][marker: u16=0x0401]
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&3u16.to_le_bytes()); // ctab (sheet count)
+        payload.extend_from_slice(&0x0401u16.to_le_bytes()); // marker
+
+        let stream = [
+            record(records::RECORD_BOF_BIFF8, &[0u8; 16]),
+            record(RECORD_SUPBOOK, &payload),
+            record(records::RECORD_EOF, &[]),
+        ]
+        .concat();
+
+        let parsed = parse_biff8_supbook_table(&stream, 1252);
+        assert!(parsed.warnings.is_empty(), "warnings={:?}", parsed.warnings);
+        assert_eq!(parsed.supbooks.len(), 1);
+        let sb = &parsed.supbooks[0];
+        assert_eq!(sb.kind, SupBookKind::Internal);
+        assert_eq!(sb.virt_path, "\u{0001}\u{0004}");
         assert_eq!(sb.workbook_name, None);
         assert!(sb.sheet_names.is_empty());
         assert!(sb.extern_names.is_empty());
