@@ -118,6 +118,39 @@ fn looks_like_txo_formatting_runs(fragment: &[u8]) -> bool {
     false
 }
 
+fn split_txo_text_and_formatting_run_suffix(bytes: &[u8]) -> (&[u8], bool) {
+    // Some malformed `.xls` writers appear to append TXO rich-text formatting run data directly
+    // after the text bytes within the *same* CONTINUE fragment. When the TXO header is truncated
+    // (missing `cbRuns`) we don't know where the text ends, and decoding those bytes can leak
+    // control characters into the recovered comment text.
+    //
+    // Best-effort: detect a formatting-run suffix (array of 4-byte records) and strip it.
+    //
+    // Be conservative:
+    // - only consider suffixes whose length is a multiple of 4 bytes
+    // - require the first formatting run to start at character position 0 (`ich=0`)
+    if bytes.len() < 4 {
+        return (bytes, false);
+    }
+
+    let max_suffix_len = bytes.len().saturating_sub(bytes.len() % 4);
+    let mut suffix_len = max_suffix_len;
+    while suffix_len >= 4 {
+        let start = bytes.len().saturating_sub(suffix_len);
+        let suffix = &bytes[start..];
+        if suffix.len() >= 4
+            && suffix[0] == 0
+            && suffix[1] == 0
+            && looks_like_txo_formatting_runs(suffix)
+        {
+            return (&bytes[..start], true);
+        }
+        suffix_len -= 4;
+    }
+
+    (bytes, false)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BiffNote {
     pub(crate) cell: CellRef,
@@ -616,8 +649,9 @@ fn parse_txo_text_biff5(
     // `cchText` is larger than the available text bytes.
     let cb_runs = first
         .get(TXO_RUNS_LEN_OFFSET..TXO_RUNS_LEN_OFFSET + 2)
-        .map(|v| u16::from_le_bytes([v[0], v[1]]) as usize)
-        .unwrap_or(0);
+        .map(|v| u16::from_le_bytes([v[0], v[1]]) as usize);
+    let has_cb_runs = cb_runs.is_some();
+    let cb_runs = cb_runs.unwrap_or(0);
     let total_continue_bytes: usize = continues.iter().map(|frag| frag.len()).sum();
     let mut text_continue_bytes = total_continue_bytes.saturating_sub(cb_runs);
     if cb_runs > total_continue_bytes {
@@ -748,7 +782,19 @@ fn parse_txo_text_biff5(
             continue;
         }
 
-        let take = remaining.min(frag.len());
+        // If `cbRuns` is missing (truncated header), some malformed files still append formatting
+        // run bytes to the end of the *text* fragment. Strip such suffixes best-effort so we don't
+        // decode them as characters.
+        let mut frag = frag;
+        let mut take = remaining.min(frag.len());
+        if !has_cb_runs && take == frag.len() {
+            let (trimmed, _) = split_txo_text_and_formatting_run_suffix(frag);
+            frag = trimmed;
+            take = remaining.min(frag.len());
+        }
+        if take == 0 {
+            continue;
+        }
         bytes.extend_from_slice(&frag[..take]);
         remaining -= take;
     }
@@ -826,8 +872,9 @@ fn parse_txo_text_biff8(
     // as characters if `cchText` is larger than the available text bytes (truncated/corrupt files).
     let cb_runs = first
         .get(TXO_RUNS_LEN_OFFSET..TXO_RUNS_LEN_OFFSET + 2)
-        .map(|v| u16::from_le_bytes([v[0], v[1]]) as usize)
-        .unwrap_or(0);
+        .map(|v| u16::from_le_bytes([v[0], v[1]]) as usize);
+    let has_cb_runs = cb_runs.is_some();
+    let cb_runs = cb_runs.unwrap_or(0);
     let total_continue_bytes: usize = continues.iter().map(|frag| frag.len()).sum();
     let mut text_continue_bytes = total_continue_bytes.saturating_sub(cb_runs);
     if cb_runs > total_continue_bytes {
@@ -874,7 +921,7 @@ fn parse_txo_text_biff8(
         let Some((&first, rest)) = frag.split_first() else {
             continue;
         };
-        let (bytes, is_unicode, has_flags) = if matches!(first, 0 | 1) {
+        let (mut bytes, is_unicode, has_flags) = if matches!(first, 0 | 1) {
             let is_unicode = (first & 0x01) != 0;
             (rest, is_unicode, true)
         } else {
@@ -900,6 +947,19 @@ fn parse_txo_text_biff8(
             if !ansi_bytes.is_empty() {
                 out.push_str(&strings::decode_ansi(codepage, &ansi_bytes));
                 ansi_bytes.clear();
+            }
+
+            if !has_cb_runs {
+                // If `cbRuns` is missing, some malformed files append formatting run bytes directly
+                // after UTF-16LE text bytes within the same fragment. When we would otherwise
+                // consume the full fragment (because `cchText` is too large), strip a formatting-run
+                // suffix best-effort so we don't decode it as text.
+                let combined_len = bytes.len() + usize::from(pending_unicode_byte.is_some());
+                let available_chars = combined_len / 2;
+                if available_chars > 0 && remaining >= available_chars {
+                    let (trimmed, _) = split_txo_text_and_formatting_run_suffix(bytes);
+                    bytes = trimmed;
+                }
             }
 
             // Best-effort: some files split UTF-16LE code units across CONTINUE fragments. Buffer
@@ -946,6 +1006,10 @@ fn parse_txo_text_biff8(
             pending_unicode_byte = None;
             // Accumulate and decode once to preserve stateful multibyte encodings (e.g. Shift-JIS)
             // when a character boundary is split across CONTINUE records.
+            if !has_cb_runs && remaining >= bytes.len() {
+                let (trimmed, _) = split_txo_text_and_formatting_run_suffix(bytes);
+                bytes = trimmed;
+            }
             let available_chars = bytes.len();
             if available_chars == 0 {
                 continue;
@@ -1193,10 +1257,18 @@ fn fallback_decode_continue_fragments(
             );
         }
 
+        let mut bytes = bytes;
         if is_unicode {
             if !ansi_bytes.is_empty() {
                 out.push_str(&strings::decode_ansi(codepage, &ansi_bytes));
                 ansi_bytes.clear();
+            }
+
+            let combined_len = bytes.len() + usize::from(pending_unicode_byte.is_some());
+            let available_chars = combined_len / 2;
+            if available_chars > 0 && remaining_chars >= available_chars {
+                let (trimmed, _) = split_txo_text_and_formatting_run_suffix(bytes);
+                bytes = trimmed;
             }
 
             let combined_len = bytes.len() + usize::from(pending_unicode_byte.is_some());
@@ -1236,6 +1308,10 @@ fn fallback_decode_continue_fragments(
                 utf16_bytes.clear();
             }
             pending_unicode_byte = None;
+            if remaining_chars >= bytes.len() {
+                let (trimmed, _) = split_txo_text_and_formatting_run_suffix(bytes);
+                bytes = trimmed;
+            }
             let available_chars = bytes.len();
             if available_chars == 0 {
                 continue;
@@ -1825,6 +1901,40 @@ mod tests {
     }
 
     #[test]
+    fn does_not_decode_biff5_formatting_runs_appended_to_text_fragment_when_cb_runs_is_missing() {
+        // Similar to `does_not_decode_biff5_formatting_runs_as_text_when_txo_header_is_truncated`,
+        // but the formatting run bytes are appended to the end of the text bytes within the same
+        // CONTINUE fragment.
+        let mut txo_header = vec![0u8; 8];
+        txo_header[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2]
+            .copy_from_slice(&10u16.to_le_bytes());
+
+        let mut mixed = Vec::new();
+        mixed.extend_from_slice(b"Hello");
+        // Formatting run bytes: [ich=0][ifnt=1].
+        mixed.extend_from_slice(&[0x00, 0x00, 0x01, 0x00]);
+
+        let stream = [
+            bof_biff5(),
+            note_biff5(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            record(RECORD_TXO, &txo_header),
+            continue_text_biff5(&mixed),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff5, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("truncated text")),
+            "expected truncation warning; warnings={warnings:?}"
+        );
+    }
+
+    #[test]
     fn parses_biff5_txo_text_when_cchtext_is_stored_at_alternate_offset() {
         // The spec-defined cchText field (offset 6) is zero, but offset 4 contains the correct
         // value. Best-effort decoding should still recover the full text.
@@ -2235,6 +2345,40 @@ mod tests {
             continue_text_ascii("Hello"),
             // Formatting run bytes: [ich=0][ifnt=1] (no leading flags byte).
             record(records::RECORD_CONTINUE, &[0x00, 0x00, 0x01, 0x00]),
+            eof(),
+        ]
+        .concat();
+
+        let ParsedSheetNotes { notes, warnings } =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
+        assert!(
+            warnings.iter().any(|w| w.contains("truncated text")),
+            "expected truncation warning; warnings={warnings:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_decode_biff8_formatting_runs_appended_to_text_fragment_when_cb_runs_is_missing() {
+        // Similar to `does_not_decode_biff8_formatting_runs_as_text_when_cb_runs_is_missing`, but
+        // the formatting runs are appended to the end of the *text* bytes within the same CONTINUE
+        // fragment (after the 1-byte fHighByte flag).
+        let mut txo_header = vec![0u8; 8];
+        txo_header[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2]
+            .copy_from_slice(&10u16.to_le_bytes());
+
+        let mut mixed = Vec::new();
+        mixed.extend_from_slice(b"Hello");
+        // Formatting run bytes: [ich=0][ifnt=1].
+        mixed.extend_from_slice(&[0x00, 0x00, 0x01, 0x00]);
+
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            record(RECORD_TXO, &txo_header),
+            continue_text_compressed_bytes(&mixed),
             eof(),
         ]
         .concat();
