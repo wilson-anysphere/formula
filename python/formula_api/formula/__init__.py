@@ -67,6 +67,11 @@ def get_sheet(name: str) -> "Sheet":
 
 def create_sheet(name: str, index: Optional[int] = None) -> "Sheet":
     bridge = _require_bridge()
+    if index is not None:
+        if not isinstance(index, int) or isinstance(index, bool):
+            raise TypeError("index must be an integer (0-based) or None")
+        if index < 0:
+            raise ValueError("index must be >= 0")
     sheet_id = bridge.create_sheet(name, index=index)
     return Sheet(sheet_id=sheet_id, bridge=bridge)
 

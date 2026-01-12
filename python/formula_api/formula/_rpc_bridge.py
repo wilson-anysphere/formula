@@ -50,6 +50,10 @@ class StdioRpcBridge:
     def create_sheet(self, name: str, index: Optional[int] = None) -> str:
         params: Dict[str, Any] = {"name": name}
         if index is not None:
+            if not isinstance(index, int) or isinstance(index, bool):
+                raise TypeError("index must be an integer (0-based) or None")
+            if index < 0:
+                raise ValueError("index must be >= 0")
             params["index"] = index
         return str(self._request("create_sheet", params))
 

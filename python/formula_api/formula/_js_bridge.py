@@ -28,6 +28,10 @@ class JsBridge:
     def create_sheet(self, name: str, index: Optional[int] = None) -> str:
         if index is None:
             return str(formula_bridge.create_sheet(name))
+        if not isinstance(index, int) or isinstance(index, bool):
+            raise TypeError("index must be an integer (0-based) or None")
+        if index < 0:
+            raise ValueError("index must be >= 0")
         return str(formula_bridge.create_sheet(name, index))
 
     def get_sheet_name(self, sheet_id: str) -> str:
