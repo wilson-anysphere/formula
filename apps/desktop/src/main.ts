@@ -8,6 +8,7 @@ import "./styles/extensions-ui.css";
 import "./styles/extensions.css";
 import "./styles/workspace.css";
 import "./styles/ai-chat.css";
+import "./styles/query-editor.css";
 import "./styles/charts-overlay.css";
 import "./styles/scrollbars.css";
 import "./styles/comments.css";

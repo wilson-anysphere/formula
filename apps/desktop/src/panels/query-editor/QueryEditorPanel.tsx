@@ -99,10 +99,10 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
   }, [props.refreshEvent, props.query.id]);
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", height: "100%" }}>
-      <div style={{ borderInlineEnd: "1px solid var(--border)", padding: 12, overflow: "auto" }}>
-        <h3 style={{ marginTop: 0 }}>{props.query.name}</h3>
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+    <div className="query-editor">
+      <div className="query-editor__sidebar">
+        <h3 className="query-editor__title">{props.query.name}</h3>
+        <div className="query-editor__sidebar-actions">
           {props.onLoadToSheet ? (
             <button type="button" onClick={() => props.onLoadToSheet?.(props.query)}>
               Load to sheet
@@ -133,13 +133,13 @@ export function QueryEditorPanel(props: QueryEditorPanelProps) {
         <StepsList steps={props.query.steps} selectedIndex={effectiveSelectedStepIndex} onSelect={setSelectedStepIndex} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateRows: "auto 1fr", overflow: "hidden" }}>
-        <div style={{ borderBottom: "1px solid var(--border)", padding: 12 }}>
+      <div className="query-editor__main">
+        <div className="query-editor__schema">
           <SchemaView table={preview} />
-          {refreshStatus ? <div style={{ marginTop: 8, color: "var(--text-muted)" }}>{refreshStatus}</div> : null}
-          {error ? <div style={{ color: "var(--error)", marginTop: 8 }}>{error}</div> : null}
+          {refreshStatus ? <div className="query-editor__status">{refreshStatus}</div> : null}
+          {error ? <div className="query-editor__error">{error}</div> : null}
         </div>
-        <div style={{ overflow: "auto" }}>
+        <div className="query-editor__preview">
           <PreviewGrid table={preview} />
         </div>
       </div>

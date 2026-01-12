@@ -12,11 +12,11 @@ export function AddStepMenu(props: {
   const [suggestions, setSuggestions] = useState<QueryOperation[] | null>(null);
 
   return (
-    <div style={{ marginBottom: 12 }}>
+    <div className="query-editor-add-step">
       <button
         type="button"
         onClick={() => props.onAddStep({ type: "filterRows", predicate: { type: "comparison", column: "", operator: "isNotNull" } } as any)}
-        style={{ width: "100%", marginBottom: 8 }}
+        className="query-editor-add-step__starter"
       >
         {t("queryEditor.addStep.addStarter")}
       </button>
@@ -27,7 +27,7 @@ export function AddStepMenu(props: {
             value={intent}
             onChange={(e) => setIntent(e.target.value)}
             placeholder={t("queryEditor.addStep.aiPlaceholder")}
-            style={{ width: "100%", boxSizing: "border-box", marginBottom: 6 }}
+            className="query-editor-add-step__ai-input"
           />
           <button
             type="button"
@@ -36,21 +36,21 @@ export function AddStepMenu(props: {
               setSuggestions(ops ?? []);
             }}
             disabled={!intent.trim()}
-            style={{ width: "100%" }}
+            className="query-editor-add-step__ai-button"
           >
             {t("queryEditor.addStep.suggestNext")}
           </button>
           {suggestions ? (
-            <div style={{ marginTop: 8 }}>
+            <div className="query-editor-add-step__suggestions">
               {suggestions.length === 0 ? (
-                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{t("queryEditor.addStep.noSuggestions")}</div>
+                <div className="query-editor-add-step__no-suggestions">{t("queryEditor.addStep.noSuggestions")}</div>
               ) : (
                 suggestions.map((op, idx) => (
                   <button
                     key={idx}
                     type="button"
                     onClick={() => props.onAddStep(op)}
-                    style={{ width: "100%", marginTop: 4, textAlign: "start" }}
+                    className="query-editor-add-step__suggestion"
                   >
                     {op.type}
                   </button>

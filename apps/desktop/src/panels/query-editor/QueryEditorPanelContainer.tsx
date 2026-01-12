@@ -487,27 +487,31 @@ export function QueryEditorPanelContainer(props: Props) {
   const engineError = service?.engineError ?? null;
 
   if (!engine) {
-    return <div style={{ padding: 12, color: "var(--text-muted)" }}>Power Query service not available.</div>;
+    return <div className="query-editor-container__message">Power Query service not available.</div>;
   }
 
   return (
-    <div style={{ flex: 1, minHeight: 0 }}>
+    <div className="query-editor-container">
       {engineError ? (
-        <div style={{ padding: 12, color: "var(--text-muted)", borderBottom: "1px solid var(--border)" }}>
+        <div className="query-editor-container__engine-warning">
           Power Query engine running in fallback mode: {engineError}
         </div>
       ) : null}
 
-      <div style={{ padding: 12, borderBottom: "1px solid var(--border)", display: "flex", flexWrap: "wrap", gap: 8 }}>
-        <select value={activeQueryId ?? query.id} onChange={(e) => switchActiveQuery(e.target.value)} style={{ padding: 6 }}>
+      <div className="query-editor-container__toolbar">
+        <select
+          value={activeQueryId ?? query.id}
+          onChange={(e) => switchActiveQuery(e.target.value)}
+          className="query-editor-container__select"
+        >
           {queries.map((q) => (
             <option key={q.id} value={q.id}>
               {q.name}
             </option>
           ))}
         </select>
-        <div style={{ color: "var(--text-muted)", fontSize: 12, marginRight: 8 }}>Source: {describeSource(query.source)}</div>
-        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--text-muted)" }}>
+        <div className="query-editor-container__source">Source: {describeSource(query.source)}</div>
+        <label className="query-editor-container__refresh-policy">
           Refresh:
           <select
             value={query.refreshPolicy?.type ?? "manual"}
@@ -554,7 +558,7 @@ export function QueryEditorPanelContainer(props: Props) {
       </div>
 
       {actionError ? (
-        <div style={{ padding: 12, color: "var(--error)", borderBottom: "1px solid var(--border)" }}>{actionError}</div>
+        <div className="query-editor-container__action-error">{actionError}</div>
       ) : null}
 
       <QueryEditorPanel

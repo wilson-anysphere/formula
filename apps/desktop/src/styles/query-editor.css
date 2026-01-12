@@ -1,0 +1,212 @@
+/*
+  Query Editor panel UI (src/panels/query-editor/*).
+
+  This file intentionally uses only design tokens from `tokens.css` and does not
+  hardcode colors (enforced by `noHardcodedColors.test.js`).
+*/
+
+.query-editor-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.query-editor-container__message {
+  padding: 12px;
+  color: var(--text-muted);
+}
+
+.query-editor-container__engine-warning {
+  padding: 12px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.query-editor-container__toolbar {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.query-editor-container__select {
+  padding: 6px;
+}
+
+.query-editor-container__source {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-right: 8px;
+}
+
+.query-editor-container__refresh-policy {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.query-editor-container__action-error {
+  padding: 12px;
+  color: var(--error);
+  border-bottom: 1px solid var(--border);
+}
+
+.query-editor {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  height: 100%;
+}
+
+.query-editor__sidebar {
+  border-inline-end: 1px solid var(--border);
+  padding: 12px;
+  overflow: auto;
+  min-width: 0;
+}
+
+.query-editor__title {
+  margin-top: 0;
+}
+
+.query-editor__sidebar-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.query-editor__main {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+
+.query-editor__schema {
+  border-bottom: 1px solid var(--border);
+  padding: 12px;
+}
+
+.query-editor__status {
+  margin-top: 8px;
+  color: var(--text-muted);
+}
+
+.query-editor__error {
+  margin-top: 8px;
+  color: var(--error);
+}
+
+.query-editor__preview {
+  overflow: auto;
+}
+
+.query-editor-schema {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.query-editor-schema__chip {
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.query-editor-steps__title {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.query-editor-steps__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.query-editor-steps__button {
+  width: 100%;
+  text-align: start;
+  border: none;
+  background: transparent;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.query-editor-steps__button:hover {
+  background: var(--bg-hover);
+}
+
+.query-editor-steps__button--selected {
+  background: var(--selection-bg);
+}
+
+.query-editor-add-step {
+  margin-bottom: 12px;
+}
+
+.query-editor-add-step__starter {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.query-editor-add-step__ai-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 6px;
+}
+
+.query-editor-add-step__ai-button {
+  width: 100%;
+}
+
+.query-editor-add-step__suggestions {
+  margin-top: 8px;
+}
+
+.query-editor-add-step__no-suggestions {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.query-editor-add-step__suggestion {
+  width: 100%;
+  margin-top: 4px;
+  text-align: start;
+}
+
+.query-editor-preview__empty {
+  padding: 12px;
+  color: var(--text-secondary);
+}
+
+.query-editor-preview__table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.query-editor-preview__th {
+  position: sticky;
+  top: 0;
+  background: var(--grid-header-bg);
+  border-bottom: 1px solid var(--border);
+  padding: 6px;
+}
+
+.query-editor-preview__td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px;
+  font-size: 12px;
+}
+
