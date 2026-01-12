@@ -706,6 +706,8 @@ cd services/api
 npm run secrets:rotate
 ```
 
+This also migrates any early v2 rows that were encrypted with the legacy AAD context (`secret:${name}`) so deployments can eventually drop legacy AAD support.
+
 Optional env vars:
 
 - `PREFIX="oidc:<orgId>:"` to scope by name prefix
