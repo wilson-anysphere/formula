@@ -182,6 +182,22 @@ fn sumif_propagates_sum_range_errors_only_when_included() {
 }
 
 #[test]
+fn sumif_error_precedence_is_row_major_for_sparse_iteration() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", 1);
+    sheet.set("A2", 1);
+
+    // Both errors are included by the criteria. Excel returns the first error in range order.
+    sheet.set("B1", Value::Error(ErrorKind::Ref));
+    sheet.set("B2", Value::Error(ErrorKind::Div0));
+
+    assert_eq!(
+        sheet.eval(r#"=SUMIF(A1:A2,">0",B1:B2)"#),
+        Value::Error(ErrorKind::Ref)
+    );
+}
+
+#[test]
 fn sumifs_multiple_criteria_and_shape_mismatch() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", "A");

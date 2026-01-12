@@ -1936,12 +1936,12 @@ impl Engine {
                         if let Some(changes) = value_changes.as_deref_mut() {
                             let before =
                                 snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
-                            snapshot.values.remove(&cleared_key);
+                            snapshot.remove_value(&cleared_key);
                             let after =
                                 snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
                             changes.record(cleared_key, before, after);
                         } else {
-                            snapshot.values.remove(&cleared_key);
+                            snapshot.remove_value(&cleared_key);
                         }
                         snapshot.spill_origin_by_cell.remove(&cleared_key);
                         spill_dirty_roots.push(cell_id_from_key(cleared_key));
@@ -1955,7 +1955,7 @@ impl Engine {
                     }
                     let cell = self.workbook.get_or_create_cell_mut(key);
                     cell.value = after.clone();
-                    snapshot.values.insert(key, after);
+                    snapshot.insert_value(key, after);
                 };
 
                 let row_delta = match u32::try_from(array.rows.saturating_sub(1)) {
@@ -2000,7 +2000,7 @@ impl Engine {
                         }
                         let cell = self.workbook.get_or_create_cell_mut(key);
                         cell.value = top_left.clone();
-                        snapshot.values.insert(key, top_left);
+                        snapshot.insert_value(key, top_left);
 
                         for r in 0..array.rows {
                             for c in 0..array.cols {
@@ -2021,7 +2021,7 @@ impl Engine {
                                             .get_cell_value(spill_key.sheet, spill_key.addr);
                                         changes.record(spill_key, before, v.clone());
                                     }
-                                    snapshot.values.insert(spill_key, v);
+                                    snapshot.insert_value(spill_key, v);
                                 }
                             }
                         }
@@ -2036,11 +2036,11 @@ impl Engine {
                 for cleared_key in cleared {
                     if let Some(changes) = value_changes.as_deref_mut() {
                         let before = snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
-                        snapshot.values.remove(&cleared_key);
+                        snapshot.remove_value(&cleared_key);
                         let after = snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
                         changes.record(cleared_key, before, after);
                     } else {
-                        snapshot.values.remove(&cleared_key);
+                        snapshot.remove_value(&cleared_key);
                     }
                     snapshot.spill_origin_by_cell.remove(&cleared_key);
                     spill_dirty_roots.push(cell_id_from_key(cleared_key));
@@ -2056,7 +2056,7 @@ impl Engine {
                     }
                     let cell = self.workbook.get_or_create_cell_mut(key);
                     cell.value = after.clone();
-                    snapshot.values.insert(key, after);
+                    snapshot.insert_value(key, after);
                     return;
                 }
 
@@ -2068,11 +2068,11 @@ impl Engine {
                 for cleared_key in cleared {
                     if let Some(changes) = value_changes.as_deref_mut() {
                         let before = snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
-                        snapshot.values.remove(&cleared_key);
+                        snapshot.remove_value(&cleared_key);
                         let after = snapshot.get_cell_value(cleared_key.sheet, cleared_key.addr);
                         changes.record(cleared_key, before, after);
                     } else {
-                        snapshot.values.remove(&cleared_key);
+                        snapshot.remove_value(&cleared_key);
                     }
                     snapshot.spill_origin_by_cell.remove(&cleared_key);
                     spill_dirty_roots.push(cell_id_from_key(cleared_key));
@@ -2085,7 +2085,7 @@ impl Engine {
                 }
                 let cell = self.workbook.get_or_create_cell_mut(key);
                 cell.value = other.clone();
-                snapshot.values.insert(key, other);
+                snapshot.insert_value(key, other);
             }
         }
     }
@@ -2268,7 +2268,7 @@ impl Engine {
 
         let cell = self.workbook.get_or_create_cell_mut(origin);
         cell.value = top_left.clone();
-        snapshot.values.insert(origin, top_left);
+        snapshot.insert_value(origin, top_left);
 
         self.spills.by_origin.insert(
             origin,
@@ -2301,7 +2301,7 @@ impl Engine {
                         let before = snapshot.get_cell_value(key.sheet, key.addr);
                         changes.record(key, before, v.clone());
                     }
-                    snapshot.values.insert(key, v);
+                    snapshot.insert_value(key, v);
                 }
 
                 // Register spill cells as formula nodes that depend on the origin so they participate in
@@ -3742,6 +3742,13 @@ struct Snapshot {
     sheets: HashSet<SheetId>,
     sheet_names_by_id: Vec<String>,
     values: HashMap<CellKey, Value>,
+    /// Stable ordering of stored cell keys (sheet, row, col) for deterministic sparse iteration.
+    ///
+    /// The evaluator's `iter_reference_cells` prefers iterating stored cells when the backend
+    /// supports it. `HashMap` iteration order is non-deterministic across process runs, so keep a
+    /// `BTreeSet` index that we can range-scan for a given sheet to preserve Excel-like row-major
+    /// behavior (and stable error precedence) without scanning implicit blanks.
+    ordered_cells: BTreeSet<CellKey>,
     spill_end_by_origin: HashMap<CellKey, CellAddr>,
     spill_origin_by_cell: HashMap<CellKey, CellKey>,
     tables: Vec<Vec<Table>>,
@@ -3759,15 +3766,15 @@ impl Snapshot {
         let sheets: HashSet<SheetId> = (0..workbook.sheets.len()).collect();
         let sheet_names_by_id = workbook.sheet_names.clone();
         let mut values = HashMap::new();
+        let mut ordered_cells = BTreeSet::new();
         for (sheet_id, sheet) in workbook.sheets.iter().enumerate() {
             for (addr, cell) in &sheet.cells {
-                values.insert(
-                    CellKey {
-                        sheet: sheet_id,
-                        addr: *addr,
-                    },
-                    cell.value.clone(),
-                );
+                let key = CellKey {
+                    sheet: sheet_id,
+                    addr: *addr,
+                };
+                values.insert(key, cell.value.clone());
+                ordered_cells.insert(key);
             }
         }
 
@@ -3791,6 +3798,7 @@ impl Snapshot {
                     };
                     if let Some(v) = spill.array.get(r, c).cloned() {
                         values.insert(key, v);
+                        ordered_cells.insert(key);
                     }
                 }
             }
@@ -3829,6 +3837,7 @@ impl Snapshot {
             sheets,
             sheet_names_by_id,
             values,
+            ordered_cells,
             spill_end_by_origin,
             spill_origin_by_cell,
             tables,
@@ -3836,6 +3845,16 @@ impl Snapshot {
             sheet_names,
             external_value_provider,
         }
+    }
+
+    fn insert_value(&mut self, key: CellKey, value: Value) {
+        self.values.insert(key, value);
+        self.ordered_cells.insert(key);
+    }
+
+    fn remove_value(&mut self, key: &CellKey) {
+        self.values.remove(key);
+        self.ordered_cells.remove(key);
     }
 }
 
@@ -3879,13 +3898,22 @@ impl crate::eval::ValueResolver for Snapshot {
         if !self.sheet_exists(sheet_id) {
             return None;
         }
-        Some(Box::new(self.values.keys().filter_map(move |k| {
-            if k.sheet == sheet_id {
-                Some(k.addr)
-            } else {
-                None
-            }
-        })))
+        let start = CellKey {
+            sheet: sheet_id,
+            addr: CellAddr { row: 0, col: 0 },
+        };
+        let end = CellKey {
+            sheet: sheet_id,
+            addr: CellAddr {
+                row: u32::MAX,
+                col: u32::MAX,
+            },
+        };
+        Some(Box::new(
+            self.ordered_cells
+                .range(start..=end)
+                .map(|k| k.addr),
+        ))
     }
 
     fn resolve_structured_ref(
