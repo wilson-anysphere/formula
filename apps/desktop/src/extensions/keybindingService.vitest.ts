@@ -135,6 +135,32 @@ describe("KeybindingService", () => {
     expect(extRun).toHaveBeenCalledTimes(1);
   });
 
+  it("supports mac-specific builtins while still allowing the base keybinding as a fallback", async () => {
+    const contextKeys = new ContextKeyService();
+    const commandRegistry = new CommandRegistry();
+
+    const run = vi.fn();
+    commandRegistry.registerBuiltinCommand("cmd.replace", "Replace", run);
+
+    const service = new KeybindingService({ commandRegistry, contextKeys, platform: "mac" });
+    service.setBuiltinKeybindings([{ command: "cmd.replace", key: "ctrl+h", mac: "cmd+option+f" }]);
+
+    // mac-specific binding works.
+    const handledMac = await service.dispatchKeydown(makeKeydownEvent({ key: "f", metaKey: true, altKey: true }));
+    expect(handledMac).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+
+    // Base binding still works on macOS as a fallback (Windows/Linux-style shortcut).
+    const handledFallback = await service.dispatchKeydown(makeKeydownEvent({ key: "h", ctrlKey: true }));
+    expect(handledFallback).toBe(true);
+    expect(run).toHaveBeenCalledTimes(2);
+
+    // System-reserved Cmd+H should not match either binding.
+    const handledCmdH = await service.dispatchKeydown(makeKeydownEvent({ key: "h", metaKey: true }));
+    expect(handledCmdH).toBe(false);
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
   it("does not dispatch on repeated keydown events", async () => {
     const contextKeys = new ContextKeyService();
     const commandRegistry = new CommandRegistry();
