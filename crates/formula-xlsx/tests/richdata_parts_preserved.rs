@@ -32,6 +32,14 @@ fn build_richdata_xlsx() -> Vec<u8> {
   <Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata" Target="metadata.xml"/>
 </Relationships>"#;
 
+    // Include an A1 formula so the patch will *remove* a material formula. That triggers
+    // `RecalcPolicy::default()` behavior, which rewrites:
+    // - `xl/workbook.xml` (fullCalcOnLoad)
+    // - `xl/_rels/workbook.xml.rels` (calcChain relationship removal)
+    // - `[Content_Types].xml` (calcChain override removal)
+    //
+    // This regression focuses on ensuring those rewrites don't drop unrelated rich-data parts
+    // like `xl/metadata.xml` and `xl/richData/*`.
     let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetData>
@@ -119,6 +127,17 @@ fn apply_cell_patches_preserves_richdata_parts_and_relationships() {
     );
     pkg.apply_cell_patches(&patches).expect("apply patches");
 
+    // Sanity check: ensure we actually exercised the workbook-level rewrite paths.
+    assert!(
+        pkg.part("xl/calcChain.xml").is_none(),
+        "expected xl/calcChain.xml to be removed after formula-affecting cell edits"
+    );
+    let workbook_xml = std::str::from_utf8(pkg.part("xl/workbook.xml").unwrap()).unwrap();
+    assert!(
+        workbook_xml.contains(r#"fullCalcOnLoad="1""#),
+        "expected recalc policy to set fullCalcOnLoad=1 in workbook.xml, got:\n{workbook_xml}"
+    );
+
     assert_eq!(
         pkg.part("xl/metadata.xml").unwrap(),
         metadata_before.as_slice(),
@@ -143,11 +162,19 @@ fn apply_cell_patches_preserves_richdata_parts_and_relationships() {
     let workbook_rels = std::str::from_utf8(pkg.part("xl/_rels/workbook.xml.rels").unwrap())
         .expect("utf8 workbook rels");
     assert!(
+        !workbook_rels.contains("calcChain.xml"),
+        "expected workbook.xml.rels to drop calcChain relationship, got:\n{workbook_rels}"
+    );
+    assert!(
         workbook_rels.contains(r#"Id="rId9""#) && workbook_rels.contains(r#"Target="metadata.xml""#),
         "expected workbook.xml.rels to preserve metadata relationship, got:\n{workbook_rels}"
     );
 
     let ct = std::str::from_utf8(pkg.part("[Content_Types].xml").unwrap()).expect("utf8 content types");
+    assert!(
+        !ct.contains("/xl/calcChain.xml"),
+        "expected [Content_Types].xml to drop calcChain override, got:\n{ct}"
+    );
     for part in [
         r#"PartName="/xl/metadata.xml""#,
         r#"PartName="/xl/richData/richValueTypes.xml""#,
@@ -159,4 +186,3 @@ fn apply_cell_patches_preserves_richdata_parts_and_relationships() {
         );
     }
 }
-

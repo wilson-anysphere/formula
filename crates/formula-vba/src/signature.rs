@@ -917,6 +917,7 @@ fn signature_path_stream_kind(path: &str) -> Option<VbaSignatureStreamKind> {
     }
     best.map(|(_, kind)| kind)
 }
+
 fn is_signature_component(component: &str) -> bool {
     signature_component_stream_kind(component).is_some()
 }
