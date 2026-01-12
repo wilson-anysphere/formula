@@ -2200,6 +2200,70 @@ mod tests {
     }
 
     #[test]
+    fn decodes_ptg_refn3d_with_base() {
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+        let base = CellCoord::new(10, 10); // K11 (0-based)
+
+        // ixti=0, row offset=-2, col offset=+3 (both relative) => Sheet1!N9.
+        let row_raw = (-2i16) as u16;
+        let col_field = encode_col_field(3, true, true);
+        let rgce = [
+            0x3E, // PtgRefN3d
+            0x00, 0x00, // ixti
+            row_raw.to_le_bytes()[0],
+            row_raw.to_le_bytes()[1],
+            col_field.to_le_bytes()[0],
+            col_field.to_le_bytes()[1],
+        ];
+
+        let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
+        assert_eq!(decoded.text, "Sheet1!N9");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_print_area_parseable("Sheet1", &decoded.text);
+    }
+
+    #[test]
+    fn decodes_ptg_arean3d_with_base() {
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+        let base = CellCoord::new(10, 10); // K11 (0-based)
+
+        // ixti=0, rows -2..-1 and cols +3..+4 (all relative) => Sheet1!N9:O10.
+        let row_first_raw = (-2i16) as u16;
+        let row_last_raw = (-1i16) as u16;
+        let col_first_field = encode_col_field(3, true, true);
+        let col_last_field = encode_col_field(4, true, true);
+        let rgce = [
+            0x3F, // PtgAreaN3d
+            0x00, 0x00, // ixti
+            row_first_raw.to_le_bytes()[0],
+            row_first_raw.to_le_bytes()[1],
+            row_last_raw.to_le_bytes()[0],
+            row_last_raw.to_le_bytes()[1],
+            col_first_field.to_le_bytes()[0],
+            col_first_field.to_le_bytes()[1],
+            col_last_field.to_le_bytes()[0],
+            col_last_field.to_le_bytes()[1],
+        ];
+
+        let decoded = decode_biff8_rgce_with_base(&rgce, &ctx, Some(base));
+        assert_eq!(decoded.text, "Sheet1!N9:O10");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+        assert_print_area_parseable("Sheet1", &decoded.text);
+    }
+
+    #[test]
     fn decodes_ptg_ref3d_with_missing_sheet_to_placeholder_sheet_name() {
         let sheet_names: Vec<String> = Vec::new();
         let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
