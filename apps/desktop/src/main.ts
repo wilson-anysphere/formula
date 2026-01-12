@@ -3070,45 +3070,55 @@ if (
           {
             type: "item",
             label: "Bold",
-            shortcut: primaryShortcut("B"),
+            shortcut: getPrimaryCommandKeybindingDisplay("format.toggleBold", commandKeybindingDisplayIndex) ?? primaryShortcut("B"),
             onSelect: () => executeBuiltinCommand("format.toggleBold"),
           },
           {
             type: "item",
             label: "Italic",
-            shortcut: primaryShortcut("I"),
+            shortcut:
+              getPrimaryCommandKeybindingDisplay("format.toggleItalic", commandKeybindingDisplayIndex) ?? primaryShortcut("I"),
             onSelect: () => executeBuiltinCommand("format.toggleItalic"),
           },
           {
             type: "item",
             label: "Underline",
-            shortcut: primaryShortcut("U"),
+            shortcut:
+              getPrimaryCommandKeybindingDisplay("format.toggleUnderline", commandKeybindingDisplayIndex) ??
+              primaryShortcut("U"),
             onSelect: () => executeBuiltinCommand("format.toggleUnderline"),
           },
           { type: "separator" },
           {
             type: "item",
             label: "Currency",
-            shortcut: primaryShiftShortcut("$"),
+            shortcut:
+              getPrimaryCommandKeybindingDisplay("format.numberFormat.currency", commandKeybindingDisplayIndex) ??
+              primaryShiftShortcut("$"),
             onSelect: () => executeBuiltinCommand("format.numberFormat.currency"),
           },
           {
             type: "item",
             label: "Percent",
-            shortcut: primaryShiftShortcut("%"),
+            shortcut:
+              getPrimaryCommandKeybindingDisplay("format.numberFormat.percent", commandKeybindingDisplayIndex) ??
+              primaryShiftShortcut("%"),
             onSelect: () => executeBuiltinCommand("format.numberFormat.percent"),
           },
           {
             type: "item",
             label: "Date",
-            shortcut: primaryShiftShortcut("#"),
+            shortcut:
+              getPrimaryCommandKeybindingDisplay("format.numberFormat.date", commandKeybindingDisplayIndex) ??
+              primaryShiftShortcut("#"),
             onSelect: () => executeBuiltinCommand("format.numberFormat.date"),
           },
           { type: "separator" },
           {
             type: "item",
             label: "Format Cells…",
-            shortcut: primaryShortcut("1"),
+            shortcut:
+              getPrimaryCommandKeybindingDisplay("format.openFormatCells", commandKeybindingDisplayIndex) ?? primaryShortcut("1"),
             onSelect: () => executeBuiltinCommand("format.openFormatCells"),
           },
         ],

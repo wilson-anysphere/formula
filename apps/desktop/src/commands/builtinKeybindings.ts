@@ -27,8 +27,10 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
   },
   {
     command: "view.togglePanel.aiChat",
-    key: "ctrl+shift+a",
-    mac: "cmd+shift+a",
+    // macOS-only shortcut (Cmd+Shift+I) — avoid advertising a non-mac binding
+    // until we wire one up.
+    key: "",
+    mac: "cmd+shift+i",
     when: null,
   },
   {
@@ -59,6 +61,18 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "clipboard.paste",
     key: "ctrl+v",
     mac: "cmd+v",
+    when: null,
+  },
+  {
+    command: "edit.undo",
+    key: "ctrl+z",
+    mac: "cmd+z",
+    when: null,
+  },
+  {
+    command: "edit.redo",
+    key: "ctrl+y",
+    mac: "cmd+shift+z",
     when: null,
   },
   {
@@ -114,6 +128,45 @@ export const builtinKeybindings: BuiltinKeybinding[] = [
     command: "edit.autoSum",
     key: "alt+=",
     mac: "option+=",
+    when: null,
+  },
+  {
+    command: "format.toggleBold",
+    key: "ctrl+b",
+    mac: "cmd+b",
+    when: null,
+  },
+  {
+    // Cmd+I is reserved for toggling the AI sidebar; use Excel-style Ctrl+I on macOS.
+    command: "format.toggleItalic",
+    key: "ctrl+i",
+    when: null,
+  },
+  {
+    command: "format.toggleUnderline",
+    key: "ctrl+u",
+    mac: "cmd+u",
+    when: null,
+  },
+  {
+    command: "format.numberFormat.currency",
+    key: "ctrl+shift+$",
+    when: null,
+  },
+  {
+    command: "format.numberFormat.percent",
+    key: "ctrl+shift+%",
+    when: null,
+  },
+  {
+    command: "format.numberFormat.date",
+    key: "ctrl+shift+#",
+    when: null,
+  },
+  {
+    command: "format.openFormatCells",
+    key: "ctrl+1",
+    mac: "cmd+1",
     when: null,
   },
   {
