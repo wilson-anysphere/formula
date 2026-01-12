@@ -42,7 +42,10 @@ pub(crate) struct BiffDefinedName {
     pub(crate) refers_to: String,
     pub(crate) hidden: bool,
     pub(crate) comment: Option<String>,
-    /// Built-in defined name id (NAME.chKey) when `fBuiltin` is set.
+    /// Built-in defined name id when `fBuiltin` is set.
+    ///
+    /// In BIFF8 this is typically stored as a single-byte id in `rgchName` (with `cch=1`), but we
+    /// also fall back to `chKey` if the `rgchName` payload is missing.
     pub(crate) builtin_id: Option<u8>,
     /// Raw BIFF8 `rgce` bytes for the defined name formula.
     pub(crate) rgce: Vec<u8>,
@@ -206,8 +209,7 @@ fn parse_biff8_name_record(
         // Built-in names are special:
         //
         // In BIFF8, `rgchName` is stored as a *single byte* built-in name id (no XLUnicodeString
-        // option flags), and `cch` MUST be 1. Some producers may also populate `chKey`; when
-        // present we prefer `chKey` as the authoritative id.
+        // option flags), and `cch` MUST be 1.
         //
         // We still consume `rgchName` so `rgce` parsing stays aligned.
         let id_from_name = if cch > 0 { Some(cursor.read_u8()?) } else { None };
@@ -215,17 +217,18 @@ fn parse_biff8_name_record(
             cursor.skip_bytes(cch - 1)?;
         }
 
-        let id = if ch_key != 0 {
-            if let Some(id_from_name) = id_from_name {
-                if id_from_name != ch_key {
-                    log::warn!(
-                        "NAME record built-in id mismatch: chKey=0x{ch_key:02X} rgchName=0x{id_from_name:02X}"
-                    );
-                }
+        let id = match (id_from_name, ch_key) {
+            (Some(id_from_name), ch_key) if ch_key != 0 && id_from_name != ch_key => {
+                // `chKey` is documented as a keyboard shortcut, but some producers may populate
+                // both fields. Prefer the `rgchName` id when present to match Excel / POI
+                // behavior, while surfacing a debug hint for corrupt/ambiguous files.
+                log::debug!(
+                    "NAME record built-in id mismatch: rgchName=0x{id_from_name:02X} chKey=0x{ch_key:02X} (using rgchName)"
+                );
+                id_from_name
             }
-            ch_key
-        } else {
-            id_from_name.unwrap_or(0)
+            (Some(id_from_name), _) => id_from_name,
+            (None, ch_key) => ch_key,
         };
 
         (Some(id), builtin_name_to_string(id))
@@ -1425,18 +1428,18 @@ mod tests {
     }
 
     #[test]
-    fn builtin_name_prefers_chkey_when_present() {
-        // Some `.xls` producers populate both `chKey` and the `rgchName` built-in id byte. When
-        // they disagree, we prefer `chKey` (matching the parser's best-effort behavior).
+    fn builtin_name_prefers_rgchname_when_chkey_is_nonzero() {
+        // `chKey` is documented as a keyboard shortcut. Ensure we still interpret the built-in id
+        // from `rgchName` even when `chKey` is non-zero (and different).
         let rgce: Vec<u8> = vec![0x1E, 0x01, 0x00]; // PtgInt 1
 
         let grbit = NAME_FLAG_BUILTIN;
-        let ch_key_builtin_id = 0x06u8; // Print_Area
-        let rgch_builtin_id = 0x07u8; // Print_Titles (mismatched)
+        let rgch_builtin_id = 0x06u8; // Print_Area
+        let ch_key = b'P'; // Arbitrary non-zero keyboard shortcut.
 
         let mut header = Vec::new();
         header.extend_from_slice(&grbit.to_le_bytes());
-        header.push(ch_key_builtin_id); // chKey
+        header.push(ch_key); // chKey
         header.push(1); // cch (built-in id length)
         header.extend_from_slice(&(rgce.len() as u16).to_le_bytes()); // cce
         header.extend_from_slice(&0u16.to_le_bytes()); // ixals
@@ -1457,7 +1460,7 @@ mod tests {
             parse_biff_defined_names(&stream, BiffVersion::Biff8, 1252, &[]).expect("parse names");
         assert_eq!(parsed.names.len(), 1);
         assert_eq!(parsed.names[0].name, formula_model::XLNM_PRINT_AREA);
-        assert_eq!(parsed.names[0].builtin_id, Some(ch_key_builtin_id));
+        assert_eq!(parsed.names[0].builtin_id, Some(rgch_builtin_id));
         assert_eq!(parsed.names[0].itab, 0);
         assert_eq!(parsed.names[0].scope_sheet, None);
         assert_eq!(parsed.names[0].rgce, rgce);
