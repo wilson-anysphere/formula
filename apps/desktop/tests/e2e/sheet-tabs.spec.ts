@@ -110,6 +110,96 @@ test.describe("sheet tabs", () => {
       .toEqual(initialSheetIds);
   });
 
+  test("rename sheet marks the document dirty and undo returns to clean state", async ({ page }) => {
+    await gotoDesktop(page);
+
+    await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().markSaved();
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
+
+    const tab = page.getByTestId("sheet-tab-Sheet1");
+    await expect(tab).toBeVisible();
+
+    await tab.dblclick();
+    const input = tab.locator("input.sheet-tab__input");
+    await expect(input).toBeVisible();
+
+    await input.fill("Budget");
+    await input.press("Enter");
+
+    await expect(tab.locator(".sheet-tab__name")).toHaveText("Budget");
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+
+    // Undo should restore the old sheet name and return to the last-saved dirty state.
+    await page.evaluate(async () => {
+      const app = (window as any).__formulaApp;
+      app.undo();
+      await app.whenIdle();
+    });
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
+    await expect(tab.locator(".sheet-tab__name")).toHaveText("Sheet1");
+  });
+
+  test("delete sheet marks the document dirty and undo returns to clean state", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.confirm = () => true;
+    });
+    await gotoDesktop(page);
+
+    const nextSheetId = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      const ids = app.getWorkbookSheetStore().listAll().map((s: any) => s.id);
+      const existing = new Set(ids);
+      let n = 1;
+      while (existing.has(`Sheet${n}`)) n += 1;
+      return `Sheet${n}`;
+    });
+
+    await page.getByTestId("sheet-add").click();
+    await expect(page.getByTestId(`sheet-tab-${nextSheetId}`)).toBeVisible();
+
+    const initialSheetIds = await page.evaluate(() => {
+      const app = (window as any).__formulaApp;
+      app.getDocument().markSaved();
+      return app.getWorkbookSheetStore().listAll().map((s: any) => s.id);
+    });
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
+
+    // Delete the newly-created sheet via the tab context menu.
+    await page.evaluate((sheetId) => {
+      const tab = document.querySelector(`[data-testid=\"sheet-tab-${sheetId}\"]`) as HTMLElement | null;
+      if (!tab) throw new Error(`Missing ${sheetId} tab`);
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          clientX: rect.left + 10,
+          clientY: rect.top + 10,
+        }),
+      );
+    }, nextSheetId);
+    await page.getByTestId("sheet-tab-context-menu").getByRole("button", { name: "Delete" }).click();
+
+    await expect(page.getByTestId(`sheet-tab-${nextSheetId}`)).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+
+    // Undo should restore the deleted sheet and return to the last-saved dirty state.
+    await page.evaluate(async () => {
+      const app = (window as any).__formulaApp;
+      app.undo();
+      await app.whenIdle();
+    });
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(false);
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__formulaApp.getWorkbookSheetStore().listAll().map((s: any) => s.id)))
+      .toEqual(initialSheetIds);
+  });
+
   test("sheet overflow menu activates the selected sheet", async ({ page }) => {
     await gotoDesktop(page);
 

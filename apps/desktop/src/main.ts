@@ -2758,10 +2758,6 @@ function renderSheetTabs(): void {
         } catch (err) {
           showToast(`Failed to update formulas after delete: ${String((err as any)?.message ?? err)}`, "error");
         }
-
-        // Deleting sheets affects workbook metadata but does not always produce cell deltas. Mark
-        // the document dirty explicitly so unsaved-changes prompts behave as expected.
-        app.getDocument().markDirty();
       },
       onSheetMoved: async ({ sheetId, toIndex }) => {
         const collabSession = app.getCollabSession?.() ?? null;
