@@ -127,21 +127,29 @@ if cap_dir.is_dir():
                         f"{cap_file}: references window label '{win}', but it was not found under app.windows[].label in {path}"
                     )
 
-        perms = cap_data.get("permissions")
-        if not isinstance(perms, list) or not perms:
-            problems.append(f"{cap_file}: permissions must be a non-empty array")
-        else:
-            # Best-effort guardrail: avoid obviously over-broad permissions.
-            for p in perms:
-                if isinstance(p, str) and "allow-all" in p:
-                    problems.append(f"{cap_file}: permission '{p}' looks overly broad (avoid *:allow-all)")
-                elif isinstance(p, dict):
-                    pid = p.get("identifier")
-                    if isinstance(pid, str) and "allow-all" in pid:
-                        problems.append(f"{cap_file}: permission '{pid}' looks overly broad (avoid *:allow-all)")
+         perms = cap_data.get("permissions")
+         if not isinstance(perms, list) or not perms:
+             problems.append(f"{cap_file}: permissions must be a non-empty array")
+         else:
+             # Best-effort guardrail: avoid obviously over-broad permissions.
+             for p in perms:
+                 # Shell plugin access from the webview is intentionally not granted in this repo.
+                 # External URL opening must go through a validated Rust command boundary instead.
+                 if p in ("shell:allow-open", "shell:default"):
+                     problems.append(f"{cap_file}: disallowed shell permission '{p}' (use a Rust command allowlist instead)")
+                 if isinstance(p, str) and "allow-all" in p:
+                     problems.append(f"{cap_file}: permission '{p}' looks overly broad (avoid *:allow-all)")
+                 elif isinstance(p, dict):
+                     pid = p.get("identifier")
+                     if pid in ("shell:allow-open", "shell:default"):
+                         problems.append(
+                             f"{cap_file}: disallowed shell permission '{pid}' (use a Rust command allowlist instead)"
+                         )
+                     if isinstance(pid, str) and "allow-all" in pid:
+                         problems.append(f"{cap_file}: permission '{pid}' looks overly broad (avoid *:allow-all)")
 elif window_labels:
-    # If we have a desktop app config but no capabilities directory, call it out explicitly.
-    problems.append(f"Missing capabilities directory: {cap_dir} (expected Tauri v2 capability files under src-tauri/capabilities/)")
+     # If we have a desktop app config but no capabilities directory, call it out explicitly.
+     problems.append(f"Missing capabilities directory: {cap_dir} (expected Tauri v2 capability files under src-tauri/capabilities/)")
 
 if problems:
     print("    ❌ FAIL")
