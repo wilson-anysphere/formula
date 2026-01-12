@@ -40,14 +40,24 @@ Build real-time collaboration that doesn't break at scale. Seamless, conflict-fr
 ```typescript
 interface SpreadsheetDoc {
   doc: Y.Doc;
-  sheets: Y.Array<Y.Map<any>>;       // Sheet list (each entry has { id, name, view? })
-  cells: Y.Map<Y.Map<any>>;          // Key: `${sheetId}:${row}:${col}` (canonical)
+  // Sheet list. Each entry is a Y.Map containing (at minimum) `{ id, name }` plus
+  // optional shared per-sheet state like:
+  // - `view` (frozen panes + row/col sizes)
+  // - `visibility`, `tabColor` (sheet metadata)
+  // - formatting defaults (`defaultFormat`, `rowFormats`, `colFormats`, `formatRunsByCol`)
+  sheets: Y.Array<Y.Map<any>>;
+  // Cell map keyed by canonical cell keys `${sheetId}:${row}:${col}` (0-based row/col).
+  cells: Y.Map<Y.Map<any>>;
   metadata: Y.Map<any>;              // Workbook metadata
   namedRanges: Y.Map<any>;           // Named range definitions
+  // Optional comments root. Canonical schema uses a Map keyed by comment id, but
+  // legacy docs may store an Array.
+  comments?: Y.Map<any> | Y.Array<Y.Map<any>>;
 }
 ```
 
-Important nuance (formula clears): when clearing a formula, prefer writing an explicit
+Important nuance (formula clears): for deterministic conflict detection (when
+`FormulaConflictMonitor` is enabled), represent clears with an explicit
 `formula = null` marker rather than deleting the `formula` key. Yjs map deletes do not create
 Items; a `null` marker preserves causal history used by conflict detection.
 
