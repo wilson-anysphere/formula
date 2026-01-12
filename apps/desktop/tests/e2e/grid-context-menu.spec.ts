@@ -21,10 +21,7 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
   }
 }
 
-async function waitForGridCanvasesToBeSized(
-  page: import("@playwright/test").Page,
-  rootSelector: string,
-): Promise<void> {
+async function waitForGridCanvasesToBeSized(page: import("@playwright/test").Page, rootSelector: string): Promise<void> {
   // Canvas sizing happens asynchronously (ResizeObserver + rAF). Ensure the renderer
   // has produced non-zero backing buffers before attempting hit-testing.
   await page.waitForFunction(
@@ -144,6 +141,8 @@ test.describe("Grid context menus", () => {
     await page.keyboard.press("ArrowLeft");
     await expect(submenu).toBeHidden();
     await expect(pasteSpecial).toBeFocused();
+  });
+
   test("legacy mode: Hide/Unhide row + column via header context menu affects keyboard navigation", async ({ page }) => {
     await gotoDesktop(page, "/?grid=legacy");
     await waitForIdle(page);
@@ -226,6 +225,64 @@ test.describe("Grid context menus", () => {
     await expect.poll(() => getActiveCell(page)).toEqual({ row: 0, col: 1 });
   });
 
+  test("Row Height… rejects Excel-scale selections in shared-grid mode", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await waitForIdle(page);
+
+    await expect(page.locator("#grid")).toBeVisible();
+    await waitForGridCanvasesToBeSized(page, "#grid");
+
+    // Use the corner context menu "Select All" to create an Excel-scale selection.
+    await openGridContextMenuAt(page, "#grid", { x: 10, y: 10 });
+    const cornerMenu = page.getByTestId("context-menu");
+    await expect(cornerMenu).toBeVisible();
+    await cornerMenu.getByRole("button", { name: "Select All" }).click();
+    await expect(cornerMenu).toBeHidden();
+
+    // Attempt to apply a row height to the full-sheet selection.
+    await openGridContextMenuAt(page, "#grid", { x: 10, y: 40 });
+    const rowMenu = page.getByTestId("context-menu");
+    await expect(rowMenu).toBeVisible();
+    await rowMenu.getByRole("button", { name: "Row Height…" }).click();
+
+    const toast = page
+      .getByTestId("toast")
+      .filter({ hasText: "Selection too large to resize rows. Select fewer rows and try again." });
+    await expect(toast).toBeVisible();
+    await expect(toast).toHaveAttribute("data-type", "warning");
+
+    await expect(page.getByTestId("input-box")).toHaveCount(0);
+  });
+
+  test("Column Width… rejects Excel-scale selections in shared-grid mode", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await waitForIdle(page);
+
+    await expect(page.locator("#grid")).toBeVisible();
+    await waitForGridCanvasesToBeSized(page, "#grid");
+
+    // Use the corner context menu "Select All" to create an Excel-scale selection.
+    await openGridContextMenuAt(page, "#grid", { x: 10, y: 10 });
+    const cornerMenu = page.getByTestId("context-menu");
+    await expect(cornerMenu).toBeVisible();
+    await cornerMenu.getByRole("button", { name: "Select All" }).click();
+    await expect(cornerMenu).toBeHidden();
+
+    // Attempt to apply a column width to the full-sheet selection.
+    await openGridContextMenuAt(page, "#grid", { x: 100, y: 10 });
+    const colMenu = page.getByTestId("context-menu");
+    await expect(colMenu).toBeVisible();
+    await colMenu.getByRole("button", { name: "Column Width…" }).click();
+
+    const toast = page
+      .getByTestId("toast")
+      .filter({ hasText: "Selection too large to resize columns. Select fewer columns and try again." });
+    await expect(toast).toBeVisible();
+    await expect(toast).toHaveAttribute("data-type", "warning");
+
+    await expect(page.getByTestId("input-box")).toHaveCount(0);
+  });
+
   test("right-clicking a row header in split-view secondary pane opens a menu with Row Height…", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await waitForIdle(page);
@@ -258,3 +315,4 @@ test.describe("Grid context menus", () => {
     await expect(menu.getByRole("button", { name: "Column Width…" })).toBeVisible();
   });
 });
+
