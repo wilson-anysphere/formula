@@ -2585,6 +2585,41 @@ mod tests {
     }
 
     #[test]
+    fn patch_save_rewrites_workbook_xml_sheet_order_when_reordered() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let origin_path = tmp.path().join("origin.xlsx");
+
+        // Build a simple 3-sheet XLSX so `write_xlsx_blocking` takes the patch-based save path.
+        let mut model = formula_model::Workbook::new();
+        model.add_sheet("Sheet1").expect("add Sheet1");
+        model.add_sheet("Sheet2").expect("add Sheet2");
+        model.add_sheet("Sheet3").expect("add Sheet3");
+
+        let mut cursor = Cursor::new(Vec::new());
+        formula_xlsx::write_workbook_to_writer(&model, &mut cursor).expect("write xlsx bytes");
+        std::fs::write(&origin_path, cursor.into_inner()).expect("write origin xlsx");
+
+        let mut workbook = read_xlsx_blocking(&origin_path).expect("read origin xlsx");
+        assert!(workbook.origin_xlsx_bytes.is_some(), "expected origin bytes baseline");
+        assert_eq!(
+            workbook.sheets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            vec!["Sheet1", "Sheet2", "Sheet3"]
+        );
+
+        // Reorder: move Sheet3 to the front.
+        let sheet = workbook.sheets.remove(2);
+        workbook.sheets.insert(0, sheet);
+
+        let out_path = tmp.path().join("reordered.xlsx");
+        let written = write_xlsx_blocking(&out_path, &workbook).expect("write reordered xlsx");
+
+        let parts = formula_xlsx::worksheet_parts_from_reader(Cursor::new(written.as_ref()))
+            .expect("read worksheet parts");
+        let names: Vec<String> = parts.iter().map(|p| p.name.clone()).collect();
+        assert_eq!(names, vec!["Sheet3", "Sheet1", "Sheet2"]);
+    }
+
+    #[test]
     fn record_value_to_scalar_prefers_display_field_over_display_value() {
         let record = formula_model::RecordValue::default()
             .with_display_field("Name")
