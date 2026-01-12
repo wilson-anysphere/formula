@@ -308,17 +308,31 @@ export function documentControllerToBranchState(doc) {
       metaOut.visibility = visibility;
     }
 
+    // Tab color is optional metadata. DocumentController uses an object shape (e.g. `{ rgb }`),
+    // while BranchService stores an ARGB string.
     const rawTabColor = readSheetMetaField(sheetMeta, "tabColor");
     const rawTabColorLegacy = readSheetMetaField(sheetMeta, "tab_color");
-    if (sheetMeta && (rawTabColor !== undefined || rawTabColorLegacy !== undefined)) {
-      // Collab schema uses an 8-digit ARGB string. Be tolerant of other shapes
-      // (e.g. { rgb }) during Task 201 rollout.
+    const supportsTabColor =
+      // Task 201+ DocumentController API
+      typeof doc.setSheetTabColor === "function" ||
+      // Fallback for alternate metadata shapes
+      rawTabColor !== undefined ||
+      rawTabColorLegacy !== undefined;
+
+    // Treat "missing" as an explicit clear (null) *when* we know tabColor is supported, so
+    // tab-color removals can be committed.
+    if (sheetMeta && supportsTabColor) {
+      // Collab schema uses an 8-digit ARGB string. Be tolerant of other shapes (e.g. `{ rgb }`)
+      // during Task 201 rollout.
       let tabColor;
       if (rawTabColor !== undefined) tabColor = rawTabColor;
-      else tabColor = rawTabColorLegacy;
+      else if (rawTabColorLegacy !== undefined) tabColor = rawTabColorLegacy;
+      else tabColor = null;
+
       if (tabColor && typeof tabColor === "object" && typeof tabColor.rgb === "string") {
         tabColor = tabColor.rgb;
       }
+
       if (tabColor === null) {
         metaOut.tabColor = null;
       } else if (typeof tabColor === "string") {
@@ -410,7 +424,9 @@ export function applyBranchStateToDocumentController(doc, state) {
     if (meta.tabColor === null) {
       outSheet.tabColor = null;
     } else if (typeof meta.tabColor === "string") {
-      outSheet.tabColor = meta.tabColor;
+      // DocumentController expects a tabColor object (see `TabColor` in documentController).
+      // BranchService stores a canonical ARGB string, so wrap it.
+      outSheet.tabColor = { rgb: meta.tabColor };
     }
 
     // --- Layered formats (sheet/row/col defaults) ---

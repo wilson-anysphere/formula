@@ -52,7 +52,11 @@ function attachSheetMetadataShim(doc) {
       if (typeof id !== "string" || id.length === 0) continue;
       const name = sheet?.name;
       const visibility = sheet?.visibility;
-      const tabColor = sheet?.tabColor;
+      const rawTabColor = sheet?.tabColor;
+      const tabColor =
+        rawTabColor && typeof rawTabColor === "object" && typeof rawTabColor.rgb === "string"
+          ? rawTabColor.rgb
+          : rawTabColor;
       metaById.set(id, {
         id,
         name: typeof name === "string" && name.length > 0 ? name : id,
