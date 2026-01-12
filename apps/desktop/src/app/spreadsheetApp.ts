@@ -3264,16 +3264,13 @@ export class SpreadsheetApp {
       }
 
       if (!this.sharedHoverCellHasComment) {
-        if (this.commentTooltip.classList.contains("comment-tooltip--visible")) {
-          this.hideCommentTooltip();
-        }
+        if (this.lastHoveredCommentCellKey != null) this.hideCommentTooltip();
         return;
       }
 
       if (
         this.lastHoveredCommentCellKey === cellKey &&
-        this.lastHoveredCommentIndexVersion === this.commentIndexVersion &&
-        this.commentTooltip.classList.contains("comment-tooltip--visible")
+        this.lastHoveredCommentIndexVersion === this.commentIndexVersion
       ) {
         return;
       }
@@ -3330,8 +3327,7 @@ export class SpreadsheetApp {
 
     if (
       this.lastHoveredCommentCellKey === cellKey &&
-      this.lastHoveredCommentIndexVersion === this.commentIndexVersion &&
-      this.commentTooltip.classList.contains("comment-tooltip--visible")
+      this.lastHoveredCommentIndexVersion === this.commentIndexVersion
     ) {
       return;
     }
