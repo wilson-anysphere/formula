@@ -37,6 +37,13 @@ fn main() {}
 fn usage() -> &'static str {
     "dump_rich_data <path.xlsx> [--print-parts] [--extract-cell-images] [--extract-cell-images-out <dir>]\n\
 \n\
+Print a best-effort overview of rich-data related parts:\n\
+  - xl/metadata.xml presence/size\n\
+  - xl/richData/* part list + sizes\n\
+  - likely in-cell image parts (xl/cellImages*, xl/media/*, etc)\n\
+  - workbook.xml.rels entries involving metadata/richData\n\
+  - per-worksheet vm/cm usage + a few sample cells\n\
+\n\
 Print a best-effort mapping from worksheet cells with `vm` attributes to:\n\
   - xl/metadata.xml valueMetadata indices (vm)\n\
   - xl/richData/richValue*.xml indices (rv)\n\
@@ -152,10 +159,10 @@ fn dump_required_part_presence(pkg: &XlsxPackage) {
     eprintln!();
     eprintln!("parts:");
 
-    match pkg.part("xl/metadata.xml") {
-        Some(bytes) => eprintln!("  xl/metadata.xml: present ({} bytes)", bytes.len()),
+    match find_part_bytes_case_insensitive(pkg, "xl/metadata.xml") {
+        Some((name, bytes)) => eprintln!("  {name}: present ({} bytes)", bytes.len()),
         None => eprintln!("  xl/metadata.xml: missing"),
-    }
+    };
 
     let mut rich_data_parts: Vec<(&str, usize)> = pkg
         .part_names()
@@ -220,12 +227,15 @@ fn is_in_cell_image_candidate_part(part_name: &str) -> bool {
 #[cfg(not(target_arch = "wasm32"))]
 fn dump_workbook_relationships(pkg: &XlsxPackage) {
     eprintln!();
-    eprintln!("xl/_rels/workbook.xml.rels (filtered metadata/richData):");
+    eprintln!("workbook.xml.rels (filtered metadata/richData):");
 
-    let Some(rels_bytes) = pkg.part("xl/_rels/workbook.xml.rels") else {
+    let Some((rels_part_name, rels_bytes)) =
+        find_part_bytes_case_insensitive(pkg, "xl/_rels/workbook.xml.rels")
+    else {
         eprintln!("  (missing)");
         return;
     };
+    eprintln!("  part: {rels_part_name}");
 
     let relationships = match openxml::parse_relationships(rels_bytes) {
         Ok(r) => r,
@@ -542,7 +552,7 @@ fn scan_sheet_vm_cm_best_effort(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn parse_shared_strings_best_effort(pkg: &XlsxPackage) -> Option<Vec<String>> {
-    let bytes = pkg.part("xl/sharedStrings.xml")?;
+    let (_part_name, bytes) = find_part_bytes_case_insensitive(pkg, "xl/sharedStrings.xml")?;
     let mut reader = Reader::from_reader(bytes);
     reader.config_mut().trim_text(false);
 
@@ -598,6 +608,20 @@ fn parse_shared_strings_best_effort(pkg: &XlsxPackage) -> Option<Vec<String>> {
     }
 
     Some(out)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn find_part_bytes_case_insensitive<'a>(
+    pkg: &'a XlsxPackage,
+    desired: &str,
+) -> Option<(&'a str, &'a [u8])> {
+    for name in pkg.part_names() {
+        if name.eq_ignore_ascii_case(desired) {
+            let bytes = pkg.part(name)?;
+            return Some((name, bytes));
+        }
+    }
+    None
 }
 
 #[cfg(not(target_arch = "wasm32"))]
