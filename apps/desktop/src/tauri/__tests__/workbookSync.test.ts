@@ -9,6 +9,14 @@ async function flushMicrotasks(times = 4): Promise<void> {
   }
 }
 
+function createMaterializedDocument(): DocumentController {
+  const document = new DocumentController();
+  // DocumentController lazily materializes sheets. workbookSync captures an initial sheet snapshot
+  // when it starts, so ensure at least the default sheet exists before wiring up sync.
+  document.getCell("Sheet1", { row: 0, col: 0 });
+  return document;
+}
+
 describe("workbookSync", () => {
   const originalTauri = (globalThis as any).__TAURI__;
 
@@ -23,7 +31,7 @@ describe("workbookSync", () => {
   });
 
   it("batches consecutive change events into a single set_range call", async () => {
-    const document = new DocumentController();
+    const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
 
@@ -53,7 +61,7 @@ describe("workbookSync", () => {
   });
 
   it("maps formulas and literals into the value/formula shape expected by the backend", async () => {
-    const document = new DocumentController();
+    const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
 
@@ -82,7 +90,7 @@ describe("workbookSync", () => {
   });
 
   it("ignores document changes tagged as macro updates (already applied in the backend)", async () => {
-    const document = new DocumentController();
+    const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
 
@@ -110,7 +118,7 @@ describe("workbookSync", () => {
   });
 
   it("ignores document changes tagged as native python updates (already applied in the backend)", async () => {
-    const document = new DocumentController();
+    const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
 
@@ -157,7 +165,7 @@ describe("workbookSync", () => {
     });
     (globalThis as any).__TAURI__ = { core: { invoke } };
 
-    const document = new DocumentController();
+    const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });
 
     document.setCellValue("Sheet1", { row: 0, col: 0 }, 1);
@@ -178,7 +186,7 @@ describe("workbookSync", () => {
   });
 
   it("ignores document changes tagged as pivot updates (already applied in the backend)", async () => {
-    const document = new DocumentController();
+    const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
 
@@ -193,7 +201,7 @@ describe("workbookSync", () => {
   });
 
   it("markSaved flushes pending edits before saving and clears frontend dirty state", async () => {
-    const document = new DocumentController();
+    const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
 
@@ -212,7 +220,7 @@ describe("workbookSync", () => {
   });
 
   it("clears the backend dirty flag when undo returns the document to a saved state", async () => {
-    const document = new DocumentController();
+    const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
 
@@ -234,7 +242,7 @@ describe("workbookSync", () => {
   });
 
   it("clears the backend dirty flag when undo returns the document to a saved state (sheet metadata only)", async () => {
-    const document = new DocumentController();
+    const document = createMaterializedDocument();
     const sync = startWorkbookSync({ document: document as any });
     const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
 
