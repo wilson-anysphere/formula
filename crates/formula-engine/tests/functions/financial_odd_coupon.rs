@@ -2904,6 +2904,50 @@ fn oddlprice_rejects_yield_at_or_below_negative_frequency() {
 }
 
 #[test]
+fn odd_coupon_worksheet_price_rejects_yield_at_or_below_negative_frequency() {
+    let mut sheet = TestSheet::new();
+
+    // Use frequency=2 (so the domain boundary is yld=-2).
+    let oddf_boundary = "=ODDFPRICE(DATE(2020,1,15),DATE(2033,1,15),DATE(2020,1,1),DATE(2020,7,15),0.05,-2,100,2,0)";
+    let oddf_below = "=ODDFPRICE(DATE(2020,1,15),DATE(2033,1,15),DATE(2020,1,1),DATE(2020,7,15),0.05,-2.5,100,2,0)";
+
+    let Some(out) = eval_value_or_skip(&mut sheet, oddf_boundary) else {
+        return;
+    };
+    assert!(
+        matches!(out, Value::Error(ErrorKind::Div0)),
+        "expected #DIV/0! for worksheet ODDFPRICE at yld=-frequency, got {out:?}"
+    );
+
+    let Some(out) = eval_value_or_skip(&mut sheet, oddf_below) else {
+        return;
+    };
+    assert!(
+        matches!(out, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDFPRICE when yld < -frequency, got {out:?}"
+    );
+
+    let oddl_boundary = "=ODDLPRICE(DATE(2020,7,15),DATE(2033,1,15),DATE(2020,1,15),0.05,-2,100,2,0)";
+    let oddl_below = "=ODDLPRICE(DATE(2020,7,15),DATE(2033,1,15),DATE(2020,1,15),0.05,-2.5,100,2,0)";
+
+    let Some(out) = eval_value_or_skip(&mut sheet, oddl_boundary) else {
+        return;
+    };
+    assert!(
+        matches!(out, Value::Error(ErrorKind::Div0)),
+        "expected #DIV/0! for worksheet ODDLPRICE at yld=-frequency, got {out:?}"
+    );
+
+    let Some(out) = eval_value_or_skip(&mut sheet, oddl_below) else {
+        return;
+    };
+    assert!(
+        matches!(out, Value::Error(ErrorKind::Num)),
+        "expected #NUM! for worksheet ODDLPRICE when yld < -frequency, got {out:?}"
+    );
+}
+
+#[test]
 fn odd_coupon_bond_price_allows_negative_yield() {
     let mut sheet = TestSheet::new();
 
