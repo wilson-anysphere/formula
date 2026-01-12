@@ -845,7 +845,9 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
                     out.extend_from_slice(&encode_col_with_flags(col, col_abs, row_abs));
                 }
                 Expr::StructuredRef(_) => {
-                    return Err(EncodeRgceError::Unsupported("structured references"));
+                    return Err(EncodeRgceError::Unsupported(
+                        "structured references require workbook table-id context",
+                    ));
                 }
                 Expr::Binary(b) if b.op == BinaryOp::Range => {
                     // Encode `@A1:A2` as PtgAreaV.
@@ -957,7 +959,11 @@ fn encode_expr(expr: &formula_engine::Expr, out: &mut Vec<u8>) -> Result<(), Enc
         Expr::NameRef(_) => return Err(EncodeRgceError::Unsupported("named references")),
         Expr::ColRef(_) => return Err(EncodeRgceError::Unsupported("column references")),
         Expr::RowRef(_) => return Err(EncodeRgceError::Unsupported("row references")),
-        Expr::StructuredRef(_) => return Err(EncodeRgceError::Unsupported("structured references")),
+        Expr::StructuredRef(_) => {
+            return Err(EncodeRgceError::Unsupported(
+                "structured references require workbook table-id context",
+            ))
+        }
         Expr::Array(_) => return Err(EncodeRgceError::Unsupported("array literals")),
     }
 

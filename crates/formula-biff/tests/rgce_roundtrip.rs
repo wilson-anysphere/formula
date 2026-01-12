@@ -59,11 +59,15 @@ fn rgce_roundtrip_spill_range() {
 fn rgce_encode_structured_ref_is_unsupported() {
     assert!(matches!(
         encode_rgce("Table1[Col]"),
-        Err(EncodeRgceError::Unsupported("structured references"))
+        Err(EncodeRgceError::Unsupported(
+            "structured references require workbook table-id context"
+        ))
     ));
     assert!(matches!(
         encode_rgce("[@Col]"),
-        Err(EncodeRgceError::Unsupported("structured references"))
+        Err(EncodeRgceError::Unsupported(
+            "structured references require workbook table-id context"
+        ))
     ));
 }
 
