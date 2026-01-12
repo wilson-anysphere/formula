@@ -1532,13 +1532,26 @@ impl AppState {
                     }
                 }
 
+                // We currently only support setting explicit ARGB tab colors from the host.
+                //
+                // While XLSX allows colors to be specified via theme/indexed palettes (+ optional
+                // tint), those can only be resolved with workbook theme context. We preserve these
+                // values when importing/exporting workbooks, but refuse to set them via the IPC
+                // surface (otherwise the UI could appear to "set" a color that cannot be rendered
+                // or round-tripped consistently).
+                if color.theme.is_some()
+                    || color.indexed.is_some()
+                    || color.tint.is_some()
+                    || color.auto.is_some()
+                {
+                    return Err(AppStateError::WhatIf(
+                        "tab color updates must use an explicit ARGB hex value via `rgb`; theme/indexed/tint/auto updates are not supported"
+                            .to_string(),
+                    ));
+                }
+
                 // Treat an all-empty payload as clearing the tab color.
-                let is_empty = color.rgb.is_none()
-                    && color.theme.is_none()
-                    && color.indexed.is_none()
-                    && color.tint.is_none()
-                    && color.auto.is_none();
-                if is_empty {
+                if color.rgb.is_none() {
                     None
                 } else {
                     Some(color)
