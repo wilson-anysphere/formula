@@ -267,6 +267,7 @@ the `:` key on layouts where that shares the same physical key.
 - Built-in keybindings always win over extension keybindings (extensions cannot override core shortcuts).
 - When an extension keybinding matches, the desktop host calls `preventDefault()` and executes the extension command.
 - Some shortcuts are reserved and extensions can never claim them (safety net):
+  - `Escape` (core cancellation key; closing dialogs/menus, canceling interactions, etc)
   - `Ctrl+C`, `Cmd+C`, `Ctrl+Cmd+C` (copy; some keyboards emit both Ctrl+Meta for the same chord)
   - `Ctrl+X`, `Cmd+X`, `Ctrl+Cmd+X` (cut; some keyboards emit both Ctrl+Meta for the same chord)
   - `Ctrl+V`, `Cmd+V`, `Ctrl+Cmd+V` (paste; some keyboards emit both Ctrl+Meta for the same chord)
@@ -281,6 +282,7 @@ the `:` key on layouts where that shares the same physical key.
   - `Ctrl+Shift+M`, `Cmd+Shift+M`, `Ctrl+Cmd+Shift+M` (comments panel toggle)
   - `Cmd+H` (macOS: Hide app, system shortcut)
   - `Ctrl+Cmd+H` (some keyboards emit both Ctrl+Meta for the same chord)
+  - `Ctrl/Cmd+N`, `Ctrl/Cmd+O`, `Ctrl/Cmd+S`, `Ctrl/Cmd+Shift+S`, `Ctrl/Cmd+W`, `Ctrl/Cmd+Q` (core file/app shortcuts)
 
 ---
 
