@@ -16,7 +16,7 @@ use crate::graph::{CellDeps, DependencyGraph as CalcGraph, Precedent, SheetRange
 use crate::iterative;
 use crate::locale::{canonicalize_formula, canonicalize_formula_with_style, FormulaLocale, ValueLocaleConfig};
 use crate::value::{Array, ErrorKind, Value};
-use formula_model::{CellId, CellRef, Range, Table};
+use formula_model::{CellId, CellRef, Range, Table, EXCEL_MAX_COLS, EXCEL_MAX_ROWS};
 #[cfg(all(feature = "parallel", not(target_arch = "wasm32")))]
 use rayon::prelude::*;
 use std::cell::RefCell;
@@ -2100,6 +2100,15 @@ impl Engine {
                     row: end_row,
                     col: end_col,
                 };
+
+                // Excel worksheets have fixed bounds (1,048,576 rows x 16,384 columns). If the
+                // spilled result would extend beyond those bounds, the origin evaluates to
+                // `#SPILL!` ("Spill range is too big") and no out-of-bounds spill cells should be
+                // materialized.
+                if end_row >= EXCEL_MAX_ROWS || end_col >= EXCEL_MAX_COLS {
+                    spill_too_big();
+                    return;
+                }
 
                 // Fast path: if the spill shape is unchanged, update the stored array and
                 // overwrite spill cell values in the snapshot without reshaping dependency nodes.

@@ -78,6 +78,34 @@ fn randarray_spill_blocking_produces_spill_error_and_resolves_after_clear() {
 }
 
 #[test]
+fn randarray_spill_too_big_returns_spill_error() {
+    let mut engine = Engine::new();
+
+    // Last column in Excel is XFD. Spilling two columns from there would exceed the sheet bounds.
+    engine
+        .set_cell_formula("Sheet1", "XFD1", "=RANDARRAY(1,2)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "XFD1"),
+        Value::Error(ErrorKind::Spill)
+    );
+    assert!(engine.spill_range("Sheet1", "XFD1").is_none());
+
+    // Similarly, spilling down from the last row should fail.
+    engine
+        .set_cell_formula("Sheet1", "A1048576", "=RANDARRAY(2,1)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1048576"),
+        Value::Error(ErrorKind::Spill)
+    );
+    assert!(engine.spill_range("Sheet1", "A1048576").is_none());
+}
+
+#[test]
 fn randarray_missing_rows_uses_default() {
     let mut engine = Engine::new();
     engine
