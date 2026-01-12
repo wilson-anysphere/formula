@@ -111,8 +111,8 @@ Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the ful
   "local": true,
   "windows": ["main"],
   "permissions": [
-    { "identifier": "core:event:allow-listen", "allow": [{ "event": "open-file" }] },
-    { "identifier": "core:event:allow-emit", "allow": [{ "event": "open-file-ready" }] },
+    { "identifier": "event:allow-listen", "allow": [{ "event": "open-file" }] },
+    { "identifier": "event:allow-emit", "allow": [{ "event": "open-file-ready" }] },
     "core:event:allow-unlisten",
     "dialog:allow-open",
     "dialog:allow-save",
@@ -141,12 +141,12 @@ are handled via custom Rust commands (`__TAURI__.core.invoke(...)`) and must be 
 
 If you add new desktop IPC surface area, you must update the capability allowlists:
 
-- new frontend↔backend events → `core:event:allow-listen` / `core:event:allow-emit`
+- new frontend↔backend events → `event:allow-listen` / `event:allow-emit` (sometimes `core:event:*`, depending on Tauri toolchain)
 - new plugin API usage → add the corresponding `*:allow-*` permission string(s)
 
 We keep guardrail tests to ensure we don't accidentally broaden the desktop IPC surface:
 
-- **Event allowlists**: enforce the **exact** `core:event:allow-listen` / `core:event:allow-emit` sets (no wildcard / allow-all):
+- **Event allowlists**: enforce the **exact** `event:allow-listen` / `event:allow-emit` sets (no wildcard / allow-all):
   - `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts`
 - **Core/plugin permissions**: ensure required plugin APIs are explicitly granted (dialogs, clipboard, updater, etc):
   - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts`

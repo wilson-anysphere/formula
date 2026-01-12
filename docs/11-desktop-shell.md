@@ -781,7 +781,9 @@ by the config schema (`tauri-build` will error). Scope capabilities using the ca
 
 `apps/desktop/src-tauri/capabilities/main.json` is intentionally an explicit allowlist for what the webview is allowed to do:
 
-- **`core:event:allow-listen` / `core:event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
+- **`event:allow-listen` / `event:allow-emit`**: which event names the frontend can `listen(...)` for or `emit(...)`.
+  - Note: depending on Tauri/plugin versions these may be namespaced as `core:event:*`; see the allowlist in
+    `apps/desktop/src-tauri/capabilities/main.json` (and the guardrail tests) for the exact identifiers.
 - Additional plugin permissions for using JS plugin APIs (dialog/window/clipboard/updater), for example:
   - `dialog:allow-open`, `dialog:allow-save`, `dialog:allow-confirm`, `dialog:allow-message`
   - `core:window:allow-hide`, `core:window:allow-show`, `core:window:allow-set-focus`, `core:window:allow-close`
@@ -806,7 +808,7 @@ single trusted boundary.
 High-level contents (see the file for the exhaustive list):
 
 - We avoid `core:default` to keep the permission surface minimal/explicit.
-- `core:event:allow-listen` includes:
+- `event:allow-listen` includes:
   - close flow: `close-prep`, `close-requested`
   - open flow: `open-file`, `file-dropped`
   - deep links / OAuth: `oauth-redirect`
@@ -814,7 +816,7 @@ High-level contents (see the file for the exhaustive list):
   - tray + shortcuts (e.g. `tray-open`, `shortcut-command-palette`)
   - startup timing instrumentation (e.g. `startup:webview-loaded`, `startup:tti`)
   - updater events (e.g. `update-check-started`, `update-available`)
-- `core:event:allow-emit` includes acknowledgements and check-mode signals:
+- `event:allow-emit` includes acknowledgements and check-mode signals:
   - `open-file-ready`, `oauth-redirect-ready`
   - `close-prep-done`, `close-handled`
   - `updater-ui-ready`
@@ -826,19 +828,22 @@ trust, DLP, extension permissions) for privileged operations.
 
 Guardrail tests (to prevent accidental “allow everything” capability drift):
 
-- `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts` — asserts the `core:event:allow-listen` / `core:event:allow-emit` allowlists match the desktop shell’s real event usage (and contain no wildcards).
+- `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts` — asserts the `event:allow-listen` / `event:allow-emit`
+  allowlists (including any `core:`-namespaced variants, depending on the Tauri toolchain) match the desktop shell’s real
+  event usage (and contain no wildcards).
 - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` — asserts required plugin permissions stay explicit/minimal (dialog, clipboard plain text, window ops, updater).
 
 ### Practical workflow
 
-- If you add a new event name used by `listen(...)` or `emit(...)`, update the `core:event:allow-listen` / `core:event:allow-emit` allowlists.
+- If you add a new event name used by `listen(...)` or `emit(...)`, update the `event:allow-listen` / `event:allow-emit` allowlists (in `apps/desktop/src-tauri/capabilities/main.json`).
 - If the frontend starts using a new Tauri core/plugin API (dialog/window/clipboard/updater), add the corresponding `*:allow-*` permission string.
 - For **custom Rust commands** (`__TAURI__.core.invoke(...)`), keep input validation and scope checks in Rust (there is no
   per-command capability allowlist in this repo’s current Tauri permission schema).
 
 Guardrails (CI/tests):
 
-- `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts` enforces that `core:event:allow-listen` / `core:event:allow-emit` are explicit (no allow-all) and match the events used by the desktop code.
+- `apps/desktop/src/tauri/__tests__/eventPermissions.vitest.ts` enforces that the event allowlists are explicit (no
+  allow-all) and match the events used by the desktop code.
 - `apps/desktop/src/tauri/__tests__/capabilitiesPermissions.vitest.ts` asserts the updater permission surface stays minimal (split `allow-check` / `allow-download` / `allow-install`).
 
 For background on capability syntax/semantics, see the upstream Tauri v2 docs:
