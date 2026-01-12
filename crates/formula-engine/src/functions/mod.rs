@@ -166,16 +166,6 @@ pub trait FunctionContext {
         &'a self,
         reference: &'a Reference,
     ) -> Box<dyn Iterator<Item = CellAddr> + 'a>;
-    /// Returns the logical worksheet `(rows, cols)` dimensions for `sheet_id` (if known).
-    ///
-    /// This allows functions like `ROW(5:7)` / `COLUMN(D:F)` to treat full-row / full-column
-    /// references as 1D, even when the sheet uses non-default dimensions.
-    ///
-    /// Implementations that don't track sheet dimensions can rely on the default, which matches
-    /// Excel's default worksheet bounds.
-    fn sheet_dimensions(&self, _sheet_id: &SheetId) -> (u32, u32) {
-        (EXCEL_MAX_ROWS, EXCEL_MAX_COLS)
-    }
     /// Records that `reference` was dereferenced during evaluation.
     ///
     /// Implementations may use this to build dynamic dependency sets. The default is a no-op so
@@ -200,6 +190,15 @@ pub trait FunctionContext {
     /// Convenience wrapper around [`FunctionContext::sheet_name`] for the current sheet.
     fn current_sheet_name(&self) -> Option<&str> {
         self.sheet_name(self.current_sheet_id())
+    }
+    /// Returns the logical worksheet dimensions (row/column count) for `sheet_id`.
+    ///
+    /// This is used by functions that need to validate or reason about worksheet bounds (e.g.
+    /// `OFFSET`, or special-casing whole-row/whole-column references in `ROW`/`COLUMN`).
+    ///
+    /// Implementations that do not track sheet dimensions can fall back to Excel's defaults.
+    fn sheet_dimensions(&self, _sheet_id: &SheetId) -> (u32, u32) {
+        (EXCEL_MAX_ROWS, EXCEL_MAX_COLS)
     }
     /// Returns the stored formula text for a cell (including the leading `=`), if available.
     ///

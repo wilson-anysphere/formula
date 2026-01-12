@@ -5795,7 +5795,7 @@ impl Snapshot {
     ) -> Self {
         let sheets: HashSet<SheetId> = (0..workbook.sheets.len()).collect();
         let sheet_names_by_id = workbook.sheet_names.clone();
-        let sheet_dimensions: Vec<(u32, u32)> = workbook
+        let sheet_dimensions = workbook
             .sheets
             .iter()
             .map(|s| (s.row_count, s.col_count))
