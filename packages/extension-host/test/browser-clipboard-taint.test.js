@@ -638,8 +638,8 @@ test("BrowserExtensionHost: taints selectionChanged events when payload is trunc
     selection: {
       startRow: 0,
       startCol: 0,
-      endRow: 1_000_000,
-      endCol: 100,
+      endRow: 0,
+      endCol: 2,
       values: [[1]],
       truncated: true,
     },
@@ -690,8 +690,8 @@ test("BrowserExtensionHost: taints truncated selectionChanged events when values
     selection: {
       startRow: 10,
       startCol: 20,
-      endRow: 1_000_000,
-      endCol: 100,
+      endRow: 10,
+      endCol: 30,
       values: [[1, 2, 3]],
       truncated: true,
     },
