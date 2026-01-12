@@ -1,50 +1,106 @@
 use serde_json::Value;
+use std::ffi::OsStr;
 use std::path::Path;
 use std::process::Command;
+
+use formula_xlsb::XlsbWorkbook;
+
+fn run_rgce_coverage(path: &Path, extra_args: &[&str]) -> Vec<Value> {
+    let rgce_coverage_exe = env!("CARGO_BIN_EXE_rgce_coverage");
+    let mut cmd = Command::new(rgce_coverage_exe);
+    cmd.arg(path).arg("--max").arg("100000");
+    cmd.args(extra_args);
+
+    let output = cmd.output().expect("run rgce_coverage");
+    let fixture_name = path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .unwrap_or("<unknown>");
+
+    assert!(
+        output.status.success(),
+        "rgce_coverage failed for fixture {fixture_name}: status={:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout is utf-8");
+    let mut values = Vec::new();
+    for (idx, line) in stdout.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let value: Value = serde_json::from_str(line).unwrap_or_else(|err| {
+            panic!(
+                "fixture {fixture_name}: invalid JSON on line {}: {err}: {line}",
+                idx + 1
+            )
+        });
+        values.push(value);
+    }
+    values
+}
+
+fn summary_from_output(values: &[Value]) -> &Value {
+    let summary = values.last().expect("expected summary line");
+    assert_eq!(summary["kind"], "summary");
+    summary
+}
 
 #[test]
 fn rgce_coverage_cli_reports_zero_failures_for_fixtures() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let rgce_coverage_exe = env!("CARGO_BIN_EXE_rgce_coverage");
     let fixtures = [
         "tests/fixtures/simple.xlsb",
         "tests/fixtures/date1904.xlsb",
         "tests/fixtures/rich_shared_strings.xlsb",
         "tests/fixtures/udf.xlsb",
+        "tests/fixtures_styles/date.xlsb",
     ];
 
     for rel in fixtures {
         let path = manifest_dir.join(rel);
-        let output = Command::new(rgce_coverage_exe)
-            .arg(&path)
-            .arg("--max")
-            .arg("100000")
-            .output()
-            .expect("run rgce_coverage");
-        assert!(
-            output.status.success(),
-            "rgce_coverage failed for fixture {rel}: status={:?}\nstdout:\n{}\nstderr:\n{}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let stdout = String::from_utf8(output.stdout).expect("stdout is utf-8");
+        let output = run_rgce_coverage(&path, &[]);
+        let summary = summary_from_output(&output);
 
-        let mut last_nonempty = None;
-        for (idx, line) in stdout.lines().enumerate() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            serde_json::from_str::<Value>(line).unwrap_or_else(|err| {
-                panic!("fixture {rel}: invalid JSON on line {}: {err}: {line}", idx + 1)
-            });
-            last_nonempty = Some(line);
-        }
-
-        let summary_line = last_nonempty.expect("expected summary line");
-        let summary: Value = serde_json::from_str(summary_line).expect("parse summary JSON");
-        assert_eq!(summary["kind"], "summary", "fixture {rel}");
         assert_eq!(summary["decoded_failed"], 0, "fixture {rel}");
+        assert_eq!(
+            summary["formulas_total"],
+            summary["decoded_ok"].as_u64().unwrap_or(0) + summary["decoded_failed"].as_u64().unwrap_or(0),
+            "fixture {rel}: totals should add up"
+        );
+
+        // Ensure selector options work and don't introduce decode failures.
+        // (If the workbook has multiple sheets, totals may differ from the all-sheets run.)
+        let wb = XlsbWorkbook::open(&path).expect("open xlsb fixture");
+        let first_sheet_name = wb
+            .sheet_metas()
+            .first()
+            .expect("fixture has at least one sheet")
+            .name
+            .clone();
+
+        let sheet0 = run_rgce_coverage(&path, &["--sheet", "0"]);
+        let sheet0_summary = summary_from_output(&sheet0);
+        assert_eq!(sheet0_summary["decoded_failed"], 0, "fixture {rel} --sheet 0");
+
+        let by_name = run_rgce_coverage(&path, &["--sheet", &first_sheet_name]);
+        let by_name_summary = summary_from_output(&by_name);
+        assert_eq!(
+            by_name_summary["decoded_failed"],
+            0,
+            "fixture {rel} --sheet {first_sheet_name}"
+        );
+
+        // Max should cap formulas_total when formulas exist.
+        let capped = run_rgce_coverage(&path, &["--max", "1"]);
+        let capped_summary = summary_from_output(&capped);
+        assert_eq!(capped_summary["decoded_failed"], 0, "fixture {rel} --max 1");
+        assert!(
+            capped_summary["formulas_total"].as_u64().unwrap_or(0) <= 1,
+            "fixture {rel} --max 1 should cap formulas_total"
+        );
     }
 }
