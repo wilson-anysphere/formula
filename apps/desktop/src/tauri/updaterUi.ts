@@ -759,14 +759,17 @@ export async function handleUpdaterEvent(name: UpdaterEventName, payload: Update
   if (name === "update-available" && source === "startup" && !manualUpdateCheckFollowUp) {
     const version = typeof payload?.version === "string" ? payload.version.trim() : "";
     const body = typeof payload?.body === "string" ? payload.body.trim() : "";
+    const appName = t("app.title");
     const message =
       version && body
-        ? `Formula ${version} is available.\n\n${body}`
+        ? tWithVars("updater.systemNotificationBodyWithNotes", { appName, version, notes: body })
         : version
-          ? `Formula ${version} is available.`
-          : body || "A new version of Formula is available.";
+          ? tWithVars("updater.systemNotificationBodyWithVersion", { appName, version })
+          : body
+            ? tWithVars("updater.systemNotificationBodyWithNotesUnknownVersion", { appName, notes: body })
+            : tWithVars("updater.systemNotificationBodyGeneric", { appName });
 
-    void notify({ title: "Update available", body: message });
+    void notify({ title: t("updater.updateAvailableTitle"), body: message });
   }
 
   // Tray-triggered manual checks can happen while the app is hidden to tray. Ensure the

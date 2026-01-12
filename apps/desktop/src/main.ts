@@ -48,7 +48,7 @@ import { mountScriptEditorPanel } from "./panels/script-editor/index.js";
 import { installUnsavedChangesPrompt } from "./document/index.js";
 import { DocumentControllerWorkbookAdapter } from "./scripting/documentControllerWorkbookAdapter.js";
 import { registerFindReplaceShortcuts, FindReplaceController } from "./panels/find-replace/index.js";
-import { t } from "./i18n/index.js";
+import { t, tWithVars } from "./i18n/index.js";
 import { getOpenFileFilters } from "./file_dialog_filters.js";
 import { formatRangeAddress, parseRangeAddress } from "@formula/scripting";
 import { normalizeFormulaTextOpt } from "@formula/engine";
@@ -5536,7 +5536,11 @@ try {
       lastManualUpdateCheckEventAtMs = Date.now();
       void checkForUpdatesFromCommandPalette("manual").catch((err) => {
         console.error("Failed to check for updates:", err);
-        showToast(`Update check failed: ${String((err as any)?.message ?? err)}`, "error", { timeoutMs: 10_000 });
+        showToast(
+          tWithVars("updater.checkFailedWithMessage", { message: String((err as any)?.message ?? err) }),
+          "error",
+          { timeoutMs: 10_000 },
+        );
       });
     }, fallbackDelayMs);
   });
