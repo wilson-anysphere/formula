@@ -210,6 +210,44 @@ fn concat_broadcasts_scalars_over_arrays() {
 }
 
 #[test]
+fn concat_broadcasts_outer_arrays() {
+    let mut engine = Engine::new();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=SEQUENCE(2,1)&SEQUENCE(1,3)")
+        .unwrap();
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "A1").expect("spill range");
+    assert_eq!(start, parse_a1("A1").unwrap());
+    assert_eq!(end, parse_a1("C2").unwrap());
+
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A1"),
+        Value::Text("11".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B1"),
+        Value::Text("12".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C1"),
+        Value::Text("13".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "A2"),
+        Value::Text("21".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "B2"),
+        Value::Text("22".to_string())
+    );
+    assert_eq!(
+        engine.get_cell_value("Sheet1", "C2"),
+        Value::Text("23".to_string())
+    );
+}
+
+#[test]
 fn spill_range_operator_participates_in_elementwise_ops() {
     let mut engine = Engine::new();
     engine
