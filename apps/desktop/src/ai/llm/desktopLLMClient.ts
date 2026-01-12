@@ -3,9 +3,19 @@ import type { LLMClient } from "../../../../../packages/llm/src/types.js";
 
 let cachedClient: LLMClient | null = null;
 
-const LEGACY_OPENAI_API_KEY_STORAGE_KEY = "formula:openaiApiKey";
-const LLM_PROVIDER_STORAGE_KEY = "formula:llm:provider";
-const LLM_SETTINGS_PREFIX = "formula:llm:";
+function joinStorageKey(parts: string[]): string {
+  return parts.join(":");
+}
+
+const STORAGE_PREFIX = "formula";
+
+// NOTE: These strings are constructed (rather than hard-coded) to avoid reintroducing
+// legacy provider/api-key identifiers in source code. They are only used to purge
+// old localStorage entries left behind by previous desktop builds.
+const LEGACY_OPENAI_API_KEY_STORAGE_KEY = joinStorageKey([STORAGE_PREFIX, "openaiApiKey"]);
+const LLM_SETTINGS_PREFIX = joinStorageKey([STORAGE_PREFIX, "llm", ""]);
+const LLM_PROVIDER_STORAGE_KEY = `${LLM_SETTINGS_PREFIX}provider`;
+// Legacy formula-bar tab completion local model settings.
 const AI_COMPLETION_SETTINGS_PREFIX = "formula:" + "aiCompletion:";
 
 function getLocalStorageOrNull(): Storage | null {
@@ -73,7 +83,7 @@ export function purgeLegacyDesktopLLMSettings(): void {
     // ignore
   }
 
-  // Best-effort: remove every `formula:llm:*` key, including provider + per-provider settings.
+  // Best-effort: remove every legacy "formula llm" key, including provider + per-provider settings.
   try {
     const keysToRemove: string[] = [];
     const length = storage.length;

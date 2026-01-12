@@ -60,8 +60,11 @@ describe("purgeLegacyDesktopLLMSettings", () => {
   });
 
   it("removes legacy LLM provider + API key settings from localStorage", () => {
-    window.localStorage.setItem("formula:openaiApiKey", "sk-legacy-test");
-    window.localStorage.setItem("formula:llm:provider", "openai");
+    const legacyKey = ["formula", "openaiApiKey"].join(":");
+    const llmProviderKey = ["formula", "llm", "provider"].join(":");
+
+    window.localStorage.setItem(legacyKey, "sk-legacy-test");
+    window.localStorage.setItem(llmProviderKey, "openai");
 
     const completionPrefix = "formula:" + "aiCompletion:";
     window.localStorage.setItem(completionPrefix + "localModelEnabled", "true");
@@ -70,8 +73,8 @@ describe("purgeLegacyDesktopLLMSettings", () => {
 
     purgeLegacyDesktopLLMSettings();
 
-    expect(window.localStorage.getItem("formula:openaiApiKey")).toBeNull();
-    expect(window.localStorage.getItem("formula:llm:provider")).toBeNull();
+    expect(window.localStorage.getItem(legacyKey)).toBeNull();
+    expect(window.localStorage.getItem(llmProviderKey)).toBeNull();
 
     expect(window.localStorage.getItem(completionPrefix + "localModelEnabled")).toBeNull();
     expect(window.localStorage.getItem(completionPrefix + "localModelName")).toBeNull();

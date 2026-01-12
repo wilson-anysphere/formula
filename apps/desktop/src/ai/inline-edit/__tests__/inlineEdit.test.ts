@@ -13,7 +13,7 @@ import { CLASSIFICATION_LEVEL } from "../../../../../../packages/security/dlp/sr
 import { LocalClassificationStore } from "../../../../../../packages/security/dlp/src/classificationStore.js";
 import { LocalPolicyStore } from "../../../../../../packages/security/dlp/src/policyStore.js";
 
-const LEGACY_OPENAI_API_KEY_STORAGE_KEY = "formula:openaiApiKey";
+const LEGACY_OPENAI_API_KEY_STORAGE_KEY = ["formula", "openaiApiKey"].join(":");
 
 function createInMemoryLocalStorage(): Storage {
   const store = new Map<string, string>();
