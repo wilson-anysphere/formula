@@ -67,6 +67,8 @@ Routes (org admin only; session or API key auth; session auth requires MFA):
 
 Production deployments **must** set `PUBLIC_BASE_URL` so the OIDC login flow can construct redirect URIs without trusting `Host` / `X-Forwarded-*` headers.
 
+The OIDC `/auth/oidc/:orgId/:provider/start` and `/auth/oidc/:orgId/:provider/callback` endpoints are rate limited per IP. When limited, the API returns `429 { error: "too_many_requests" }` and includes a `Retry-After` header (seconds).
+
 ```typescript
 interface SSOConfig {
   provider: "saml" | "oidc";
@@ -160,6 +162,8 @@ Configuration changes emit audit events:
 - `POST /auth/saml/:orgId/:provider/callback` — ACS endpoint (POST binding). On success, issues the standard session cookie.
 
 `user_identities.provider` is namespaced as `saml:<providerId>` to avoid collisions with other identity types (e.g. OIDC).
+
+The SAML `/start` and `/callback` endpoints are rate limited per IP. When limited, the API returns `429 { error: "too_many_requests" }` and includes a `Retry-After` header (seconds).
 
 #### Assertion validation (defense-in-depth)
 
