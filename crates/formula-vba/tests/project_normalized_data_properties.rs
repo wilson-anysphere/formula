@@ -160,6 +160,8 @@ fn project_normalized_data_project_properties_accepts_lfcr_newlines() {
     let normalized =
         project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
 
+    // `ProjectNormalizedData` should be insensitive to NWLN being encoded as LFCR instead of CRLF.
+    // In particular, the designer storage bytes referenced by `BaseClass=` must still be appended.
     let mut expected_designer_storage = Vec::new();
     expected_designer_storage.extend_from_slice(b"DESIGNER");
     expected_designer_storage.extend(std::iter::repeat(0u8).take(1023 - b"DESIGNER".len()));

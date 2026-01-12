@@ -4,6 +4,7 @@ use std::io::{Cursor, Write};
 
 use formula_vba::{
     compress_container, content_normalized_data, verify_vba_digital_signature, VBAProject,
+    project_normalized_data_v3_dir_records,
     VbaSignatureBinding, VbaSignatureVerification,
 };
 use md5::{Digest as _, Md5};
@@ -326,6 +327,54 @@ fn vba_project_parse_accepts_spec_dir_stream() {
         module.attributes.get("VB_Name").map(String::as_str),
         Some("Module1")
     );
+}
+
+#[test]
+fn project_normalized_data_v3_dir_records_accepts_spec_dir_stream() {
+    // Ensure the v3 dir-record-only transcript helper can scan spec-compliant `VBA/dir` streams
+    // that include the fixed-length PROJECTVERSION (0x0009) record layout.
+    let module_source = b"Attribute VB_Name = \"Module1\"\r\nSub Foo()\r\nEnd Sub\r\n";
+    let vba_project_bin = build_vba_project_bin_spec(module_source, None);
+
+    let normalized =
+        project_normalized_data_v3_dir_records(&vba_project_bin).expect("ProjectNormalizedDataV3 dir-record transcript");
+
+    let mut expected = Vec::new();
+    // PROJECTSYSKIND.SysKind
+    expected.extend_from_slice(&0x0000_0003u32.to_le_bytes());
+    // PROJECTLCID.Lcid
+    expected.extend_from_slice(&0x0000_0409u32.to_le_bytes());
+    // PROJECTLCIDINVOKE.LcidInvoke
+    expected.extend_from_slice(&0x0000_0409u32.to_le_bytes());
+    // PROJECTCODEPAGE.CodePage (u16)
+    expected.extend_from_slice(&1252u16.to_le_bytes());
+    // PROJECTNAME.ProjectName
+    expected.extend_from_slice(b"VBAProject");
+    // PROJECTHELPCONTEXT.HelpContext
+    expected.extend_from_slice(&0u32.to_le_bytes());
+    // PROJECTLIBFLAGS.ProjectLibFlags
+    expected.extend_from_slice(&0u32.to_le_bytes());
+    // PROJECTVERSION: Reserved(u32) || VersionMajor(u32) || VersionMinor(u16)
+    expected.extend_from_slice(&0u32.to_le_bytes());
+    expected.extend_from_slice(&1u32.to_le_bytes());
+    expected.extend_from_slice(&0u16.to_le_bytes());
+
+    // PROJECTCONSTANTSUNICODE payload bytes ("Answer=42" as UTF-16LE).
+    let mut constants_unicode = Vec::new();
+    push_utf16le(&mut constants_unicode, "Answer=42");
+    expected.extend_from_slice(&constants_unicode);
+
+    // Module group:
+    // - MODULENAME bytes ("Module1")
+    expected.extend_from_slice(b"Module1");
+    // - MODULESTREAMNAMEUNICODE payload bytes ("Module1" as UTF-16LE)
+    let mut stream_name_unicode = Vec::new();
+    push_utf16le(&mut stream_name_unicode, "Module1");
+    expected.extend_from_slice(&stream_name_unicode);
+    // - MODULEHELPCONTEXT (u32)
+    expected.extend_from_slice(&0u32.to_le_bytes());
+
+    assert_eq!(normalized, expected);
 }
 
 #[test]

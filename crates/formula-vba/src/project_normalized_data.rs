@@ -200,6 +200,34 @@ fn read_dir_record<'a>(
         return Err(DirParseError::Truncated);
     }
     let id = u16::from_le_bytes([buf[offset], buf[offset + 1]]);
+
+    // MS-OVBA `VBA/dir` streams are usually encoded as `Id(u16) || Size(u32) || Data(Size)`.
+    // However, some fixed-length records (notably PROJECTVERSION) are stored without an explicit
+    // `Size` field in real-world projects.
+    //
+    // PROJECTVERSION (0x0009) record layout:
+    //   Id(u16) || Reserved(u32) || VersionMajor(u32) || VersionMinor(u16)
+    // (12 bytes total, with 10 bytes of "data" after the Id).
+    //
+    // For v3 transcripts, we want to be able to scan past this record even when it uses the
+    // spec-compliant fixed-length form.
+    if id == 0x0009 {
+        let reserved_or_size = u32::from_le_bytes([
+            buf[offset + 2],
+            buf[offset + 3],
+            buf[offset + 4],
+            buf[offset + 5],
+        ]) as usize;
+        if reserved_or_size == 0 {
+            let end = offset + 12;
+            if end > buf.len() {
+                return Err(DirParseError::Truncated);
+            }
+            // Return the record "data" bytes following the Id.
+            return Ok((id, &buf[offset + 2..end], end));
+        }
+    }
+
     let len = u32::from_le_bytes([
         buf[offset + 2],
         buf[offset + 3],
