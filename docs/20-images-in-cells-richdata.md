@@ -691,14 +691,15 @@ Current Formula behavior:
 
 Notes:
 
-* The `metadata.xml` schema varies across Excel builds. Some files do not include `futureMetadata`/`rvb`;
-  in those, `rc/@v` may directly refer to the rich value index (or be interpreted via other extension
-  tables). Preserve unknown metadata and implement mapping best-effort.
+* The `metadata.xml` schema varies across Excel builds. In this repo’s images-in-cell fixtures, rich value
+  binding uses the `futureMetadata` + `xlrd:rvb` indirection. Other schemas may exist in the wild; if a
+  workbook lacks `futureMetadata`/`rvb`, `rc/@v` may need alternate interpretation (e.g. directly as a rich
+  value index, or via other extension tables). Preserve unknown metadata and implement mapping best-effort.
 
 ### Rich value instance table (`richValue*.xml` / `rdrichvalue.xml`) — **0-based**
 
 Rich values are stored in a list; the rich value index is **0-based** and is referenced from `xl/metadata.xml`
-either directly (e.g. `rc/@v = richValueIndex`) or indirectly (e.g. via `xlrd:rvb/@i`).
+in this repo’s fixtures via `xlrd:rvb/@i` (other mapping schemas may exist in the wild).
 
 ### `richValueRel.xml` relationship table — **0-based**
 
