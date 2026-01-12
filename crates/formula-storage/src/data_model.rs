@@ -1,6 +1,7 @@
 use crate::storage::{Result, StorageError};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -422,14 +423,13 @@ pub(crate) fn load_data_model(
         };
         // `page_size_rows` is persisted as part of the table schema so we can map a row index to
         // its encoded chunk (`chunk_idx = row / page_size_rows`). If this value is corrupted (e.g.
-        // `0`), downstream accessors in `formula-columnar` will panic on division/modulo by zero.
+        // `0` or mismatched with the persisted chunks), downstream accessors in `formula-columnar`
+        // can panic on division/modulo by zero or out-of-bounds indexing.
         //
-        // Prefer the persisted value when it looks valid, but fall back to the maximum encoded
-        // chunk length we observe while decoding columns. This keeps the loaded model usable even
-        // when `schema_json` has been corrupted, without silently shifting chunk boundaries.
+        // Prefer inferring a usable page size from the persisted chunks (best-effort), falling
+        // back to the schema value when no chunks are available.
         let mut page_size_rows = schema.page_size_rows;
         let cache_max_entries = schema.cache_max_entries;
-        let mut max_chunk_len: usize = 0;
 
         let mut col_stmt = conn.prepare(
             r#"
@@ -440,8 +440,14 @@ pub(crate) fn load_data_model(
             "#,
         )?;
 
-        let mut schema_out = Vec::new();
-        let mut columns_out = Vec::new();
+        struct LoadedColumn {
+            schema: formula_columnar::ColumnSchema,
+            chunks: Vec<formula_columnar::EncodedChunk>,
+            stats: formula_columnar::ColumnStats,
+            dictionary: Option<Arc<Vec<Arc<str>>>>,
+            max_chunk_len: usize,
+        }
+        let mut loaded_columns: Vec<LoadedColumn> = Vec::new();
 
         let cols = col_stmt.query_map(params![table_id], |row| {
             Ok((
@@ -493,6 +499,7 @@ pub(crate) fn load_data_model(
             )?;
 
             let mut chunks: Vec<formula_columnar::EncodedChunk> = Vec::new();
+            let mut max_chunk_len = 0usize;
             let rows_iter = match chunk_stmt.query_map(params![column_id], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
@@ -505,10 +512,18 @@ pub(crate) fn load_data_model(
             };
             let mut chunk_failed = false;
             for chunk_row in rows_iter {
-                let Ok((_chunk_index, kind_raw, data)) = chunk_row else {
+                let Ok((chunk_index, kind_raw, data)) = chunk_row else {
                     chunk_failed = true;
                     break;
                 };
+                let Ok(chunk_index) = usize::try_from(chunk_index) else {
+                    chunk_failed = true;
+                    break;
+                };
+                if chunk_index != chunks.len() {
+                    chunk_failed = true;
+                    break;
+                }
                 let Some(kind) = DataModelChunkKind::parse(&kind_raw) else {
                     chunk_failed = true;
                     break;
@@ -531,24 +546,109 @@ pub(crate) fn load_data_model(
                 name: name.clone(),
                 column_type,
             };
-            schema_out.push(col_schema.clone());
-            columns_out.push(formula_columnar::EncodedColumn {
+            loaded_columns.push(LoadedColumn {
                 schema: col_schema,
                 chunks,
                 stats,
                 dictionary,
+                max_chunk_len,
+            });
+        }
+
+        if loaded_columns.is_empty() {
+            continue;
+        }
+
+        // Pick the most common maximum chunk length as the inferred page size. This avoids being
+        // skewed by a single corrupted column that reports an absurd chunk length.
+        let mut page_size_counts: HashMap<usize, usize> = HashMap::new();
+        for col in &loaded_columns {
+            if col.max_chunk_len > 0 {
+                *page_size_counts.entry(col.max_chunk_len).or_insert(0) += 1;
+            }
+        }
+        if !page_size_counts.is_empty() {
+            let mut best_size = 0usize;
+            let mut best_count = 0usize;
+            for (size, count) in page_size_counts {
+                if count > best_count || (count == best_count && size > best_size) {
+                    best_size = size;
+                    best_count = count;
+                }
+            }
+            page_size_rows = best_size;
+        }
+        if page_size_rows == 0 {
+            page_size_rows = 1;
+        }
+
+        fn max_rows_safe_for_chunks(
+            chunks: &[formula_columnar::EncodedChunk],
+            page_size_rows: usize,
+        ) -> Option<usize> {
+            if page_size_rows == 0 || chunks.is_empty() {
+                return None;
+            }
+            if chunks.len() > 1 {
+                for chunk in &chunks[..chunks.len() - 1] {
+                    if chunk.len() != page_size_rows {
+                        return None;
+                    }
+                }
+            }
+            let last_len = chunks.last()?.len();
+            if last_len > page_size_rows {
+                return None;
+            }
+            Some((chunks.len() - 1).saturating_mul(page_size_rows).saturating_add(last_len))
+        }
+
+        // Clamp the table row count to the largest safe chunk-derived row count so we don't create
+        // a columnar table that can panic on out-of-bounds accesses when the persisted row count is
+        // corrupted.
+        let mut max_rows_any = 0usize;
+        for col in &loaded_columns {
+            if col.chunks.is_empty() {
+                continue;
+            }
+            let Some(rows) = max_rows_safe_for_chunks(&col.chunks, page_size_rows) else {
+                continue;
+            };
+            max_rows_any = max_rows_any.max(rows);
+        }
+
+        let row_count = if max_rows_any == 0 {
+            0
+        } else if row_count == 0 {
+            max_rows_any
+        } else {
+            row_count.min(max_rows_any)
+        };
+
+        let mut schema_out = Vec::new();
+        let mut columns_out = Vec::new();
+
+        for col in loaded_columns {
+            if !col.chunks.is_empty() {
+                let Some(max_rows) = max_rows_safe_for_chunks(&col.chunks, page_size_rows) else {
+                    continue;
+                };
+                if max_rows < row_count {
+                    continue;
+                }
+            }
+
+            schema_out.push(col.schema.clone());
+            columns_out.push(formula_columnar::EncodedColumn {
+                schema: col.schema,
+                chunks: col.chunks,
+                stats: col.stats,
+                dictionary: col.dictionary,
             });
         }
 
         if schema_out.is_empty() {
             continue;
-        }
-
-        if max_chunk_len > 0 && (page_size_rows == 0 || page_size_rows < max_chunk_len) {
-            page_size_rows = max_chunk_len;
-        }
-        if page_size_rows == 0 {
-            page_size_rows = 1;
         }
         let options = formula_columnar::TableOptions {
             page_size_rows,
@@ -1084,12 +1184,58 @@ fn decode_chunk(kind: DataModelChunkKind, bytes: &[u8]) -> Result<formula_column
         return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
     }
 
+    fn sanitize_validity(
+        validity: Option<formula_columnar::BitVec>,
+        len: usize,
+    ) -> Option<formula_columnar::BitVec> {
+        let Some(bits) = validity else {
+            return None;
+        };
+        let required_words = len.saturating_add(63) / 64;
+        if bits.as_words().len() < required_words {
+            return None;
+        }
+        Some(bits)
+    }
+
+    fn rle_ends_are_sane(ends: &[u32], len: usize) -> bool {
+        if len == 0 {
+            return true;
+        }
+        let Some(&last) = ends.last() else {
+            return false;
+        };
+        if (last as usize) < len {
+            return false;
+        }
+        let mut prev: u32 = 0;
+        for &end in ends {
+            if end == 0 || end < prev {
+                return false;
+            }
+            prev = end;
+        }
+        true
+    }
+
     Ok(match kind {
         DataModelChunkKind::Int => {
             let min = cursor.read_i64()?;
             let len = cursor.read_u32()? as usize;
             let offsets = decode_u64_sequence(&mut cursor)?;
-            let validity = decode_validity(&mut cursor)?;
+            match &offsets {
+                formula_columnar::U64SequenceEncoding::Bitpacked { bit_width, .. } => {
+                    if *bit_width > 64 {
+                        return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+                    }
+                }
+                formula_columnar::U64SequenceEncoding::Rle(rle) => {
+                    if !rle_ends_are_sane(&rle.ends, len) {
+                        return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+                    }
+                }
+            }
+            let validity = sanitize_validity(decode_validity(&mut cursor)?, len);
             formula_columnar::EncodedChunk::Int(formula_columnar::ValueEncodedChunk {
                 min,
                 len,
@@ -1103,14 +1249,18 @@ fn decode_chunk(kind: DataModelChunkKind, bytes: &[u8]) -> Result<formula_column
             for _ in 0..len {
                 values.push(cursor.read_f64()?);
             }
-            let validity = decode_validity(&mut cursor)?;
+            let validity = sanitize_validity(decode_validity(&mut cursor)?, values.len());
             formula_columnar::EncodedChunk::Float(formula_columnar::FloatChunk { values, validity })
         }
         DataModelChunkKind::Bool => {
             let len = cursor.read_u32()? as usize;
             let data_len = cursor.read_u32()? as usize;
             let data = cursor.read_bytes(data_len)?.to_vec();
-            let validity = decode_validity(&mut cursor)?;
+            let needed_bytes = len.saturating_add(7) / 8;
+            if data.len() < needed_bytes {
+                return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+            }
+            let validity = sanitize_validity(decode_validity(&mut cursor)?, len);
             formula_columnar::EncodedChunk::Bool(formula_columnar::BoolChunk {
                 len,
                 data,
@@ -1120,7 +1270,19 @@ fn decode_chunk(kind: DataModelChunkKind, bytes: &[u8]) -> Result<formula_column
         DataModelChunkKind::Dict => {
             let len = cursor.read_u32()? as usize;
             let indices = decode_u32_sequence(&mut cursor)?;
-            let validity = decode_validity(&mut cursor)?;
+            match &indices {
+                formula_columnar::U32SequenceEncoding::Bitpacked { bit_width, .. } => {
+                    if *bit_width > 32 {
+                        return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+                    }
+                }
+                formula_columnar::U32SequenceEncoding::Rle(rle) => {
+                    if !rle_ends_are_sane(&rle.ends, len) {
+                        return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+                    }
+                }
+            }
+            let validity = sanitize_validity(decode_validity(&mut cursor)?, len);
             formula_columnar::EncodedChunk::Dict(formula_columnar::DictionaryEncodedChunk {
                 len,
                 indices,
@@ -1188,6 +1350,9 @@ fn decode_u64_sequence(cursor: &mut Cursor<'_>) -> Result<formula_columnar::U64S
     Ok(match tag {
         1 => {
             let bit_width = cursor.read_u8()?;
+            if bit_width > 64 {
+                return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+            }
             let data_len = cursor.read_u32()? as usize;
             let data = cursor.read_bytes(data_len)?.to_vec();
             formula_columnar::U64SequenceEncoding::Bitpacked { bit_width, data }
@@ -1237,6 +1402,9 @@ fn decode_u32_sequence(cursor: &mut Cursor<'_>) -> Result<formula_columnar::U32S
     Ok(match tag {
         1 => {
             let bit_width = cursor.read_u8()?;
+            if bit_width > 32 {
+                return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+            }
             let data_len = cursor.read_u32()? as usize;
             let data = cursor.read_bytes(data_len)?.to_vec();
             formula_columnar::U32SequenceEncoding::Bitpacked { bit_width, data }
