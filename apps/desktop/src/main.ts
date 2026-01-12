@@ -593,6 +593,7 @@ if (!formulaBarRoot) {
   throw new Error("Missing #formula-bar container");
 }
 
+const statusMode = document.querySelector<HTMLElement>('[data-testid="status-mode"]');
 const activeCell = document.querySelector<HTMLElement>('[data-testid="active-cell"]');
 const selectionRange = document.querySelector<HTMLElement>('[data-testid="selection-range"]');
 const activeValue = document.querySelector<HTMLElement>('[data-testid="active-value"]');
@@ -600,7 +601,6 @@ const collabStatus = document.querySelector<HTMLElement>('[data-testid="collab-s
 const selectionSum = document.querySelector<HTMLElement>('[data-testid="selection-sum"]');
 const selectionAverage = document.querySelector<HTMLElement>('[data-testid="selection-avg"]');
 const selectionCount = document.querySelector<HTMLElement>('[data-testid="selection-count"]');
-const statusMode = document.querySelector<HTMLElement>('[data-testid="status-mode"]');
 const sheetSwitcher = document.querySelector<HTMLSelectElement>('[data-testid="sheet-switcher"]');
 const zoomControl = document.querySelector<HTMLSelectElement>('[data-testid="zoom-control"]');
 const sheetPosition = document.querySelector<HTMLElement>('[data-testid="sheet-position"]');
@@ -934,9 +934,15 @@ const syncTitlebar = () => {
   titlebar.update(buildTitlebarProps());
 };
 
+function renderStatusMode(): void {
+  statusMode.textContent = app.isEditing() ? "Edit" : "Ready";
+}
+
+renderStatusMode();
+
 const unsubscribeTitlebarHistory = app.getDocument().on("history", () => syncTitlebar());
-const unsubscribeTitlebarEditState = app.onEditStateChange((isEditing) => {
-  statusMode.textContent = isEditing ? "Edit" : "Ready";
+const unsubscribeTitlebarEditState = app.onEditStateChange(() => {
+  renderStatusMode();
   syncTitlebar();
 });
 window.addEventListener("unload", () => {
@@ -1032,7 +1038,10 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
   });
 }
 
-app.subscribeSelection(() => scheduleRibbonSelectionFormatStateUpdate());
+app.subscribeSelection(() => {
+  renderStatusMode();
+  scheduleRibbonSelectionFormatStateUpdate();
+});
 app.getDocument().on("change", () => scheduleRibbonSelectionFormatStateUpdate());
 app.onEditStateChange(() => scheduleRibbonSelectionFormatStateUpdate());
 window.addEventListener("formula:view-changed", () => scheduleRibbonSelectionFormatStateUpdate());

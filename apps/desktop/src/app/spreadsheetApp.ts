@@ -910,6 +910,7 @@ export class SpreadsheetApp {
       },
       onClosed: () => {
         this.focus();
+        this.updateEditState();
       },
       llmClient: opts.inlineEdit?.llmClient,
       model: opts.inlineEdit?.model,
@@ -1622,7 +1623,7 @@ export class SpreadsheetApp {
   }
 
   isEditing(): boolean {
-    return this.isCellEditorOpen() || this.isFormulaBarEditing();
+    return this.isCellEditorOpen() || this.isFormulaBarEditing() || this.inlineEditController.isOpen();
   }
 
   onEditStateChange(listener: (isEditing: boolean) => void): () => void {
@@ -2767,6 +2768,7 @@ export class SpreadsheetApp {
       start: { row: docRange.startRow, col: docRange.startCol },
       end: { row: docRange.endRow, col: docRange.endCol }
     }, rangeSheetName);
+    this.updateEditState();
   }
 
   private onSharedRangeSelectionChange(range: GridCellRange): void {
@@ -6196,6 +6198,7 @@ export class SpreadsheetApp {
       if (this.formulaBar?.isEditing() || this.formulaEditCell) return;
       e.preventDefault();
       this.inlineEditController.open();
+      this.updateEditState();
       return;
     }
     if (e.key === "Delete") {
@@ -7317,6 +7320,7 @@ export class SpreadsheetApp {
     this.referencePreview = null;
     this.referenceHighlights = [];
     this.referenceHighlightsSource = [];
+    this.updateEditState();
 
     if (this.sharedGrid) {
       this.syncSharedGridInteractionMode();
@@ -7344,6 +7348,8 @@ export class SpreadsheetApp {
       this.sharedGrid.clearRangeSelection();
       this.sharedGrid.renderer.setReferenceHighlights(null);
     }
+
+    this.updateEditState();
 
     if (target) {
       // Restore the original edit location (sheet + cell).

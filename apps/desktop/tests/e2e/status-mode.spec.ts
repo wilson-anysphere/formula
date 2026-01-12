@@ -1,0 +1,27 @@
+import { expect, test } from "@playwright/test";
+
+import { gotoDesktop } from "./helpers";
+
+async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
+  await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
+  await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+}
+
+test.describe("status bar mode indicator", () => {
+  test("shows Ready by default and toggles to Edit during F2 editing", async ({ page }) => {
+    await gotoDesktop(page);
+    await waitForIdle(page);
+
+    await expect(page.getByTestId("status-mode")).toHaveText("Ready");
+
+    // Focus the grid so keyboard shortcuts target the sheet.
+    await page.click("#grid", { position: { x: 5, y: 5 } });
+
+    await page.keyboard.press("F2");
+    await expect(page.getByTestId("status-mode")).toHaveText("Edit");
+
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("status-mode")).toHaveText("Ready");
+  });
+});
+
