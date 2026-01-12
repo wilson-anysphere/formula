@@ -149,6 +149,19 @@ export class DesktopExtensionHostManager {
     // `workbookOpened` event behave consistently for built-in *and* installed extensions.
     try {
       await this.getMarketplaceExtensionManager().loadAllInstalled();
+      // If any extensions were loaded (built-in or marketplace-installed) before the manager
+      // ran `host.startup()`, calling `loadAllInstalled()` may have skipped the global startup
+      // broadcast to avoid duplicate `workbookOpened` events. Ensure any `onStartupFinished`
+      // extensions that are currently loaded still get started.
+      if (typeof (this.host as any).startupExtension === "function") {
+        const extensions = this.host.listExtensions?.() ?? [];
+        for (const ext of extensions as any[]) {
+          const id = typeof ext?.id === "string" ? ext.id : null;
+          if (!id) continue;
+          // eslint-disable-next-line no-await-in-loop
+          await (this.host as any).startupExtension(id);
+        }
+      }
     } catch (err) {
       // Fallback: if loading installed extensions fails (IndexedDB unavailable/corrupted),
       // still attempt to start the host so built-in extensions can run.

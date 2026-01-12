@@ -521,6 +521,66 @@ test("loadAllInstalled triggers onStartupFinished + workbookOpened and is idempo
   }
 });
 
+test("loadInstalled then loadAllInstalled does not duplicate the startup workbookOpened event", async () => {
+  const keys = generateEd25519KeyPair();
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-installed-then-all-"));
+  const extDir = path.join(tmpRoot, "ext");
+  await fs.mkdir(path.join(extDir, "dist"), { recursive: true });
+
+  const manifest = {
+    name: "startup-installed-then-all",
+    publisher: "test",
+    version: "1.0.0",
+    main: "./dist/extension.js",
+    browser: "./dist/extension.js",
+    engines: { formula: "^1.0.0" },
+    activationEvents: ["onStartupFinished"],
+    permissions: ["storage"],
+    contributes: {}
+  };
+
+  await fs.writeFile(path.join(extDir, "package.json"), JSON.stringify(manifest, null, 2));
+  await fs.writeFile(
+    path.join(extDir, "dist", "extension.js"),
+    `import * as formula from "@formula/extension-api";\nexport async function activate() {\n  formula.events.onWorkbookOpened(() => {\n    void (async () => {\n      const prev = await formula.storage.get("startup.count");\n      const next = (typeof prev === "number" ? prev : 0) + 1;\n      await formula.storage.set("startup.count", next);\n    })().catch(() => {});\n  });\n}\n`
+  );
+
+  const pkgBytes = await createExtensionPackageV2(extDir, { privateKeyPem: keys.privateKeyPem });
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "test.startup-installed-then-all",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes }
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host });
+
+  try {
+    await manager.install("test.startup-installed-then-all");
+
+    // First, load a single extension.
+    await manager.loadInstalled("test.startup-installed-then-all");
+    const store = (host as any)._storageApi.getExtensionStore("test.startup-installed-then-all");
+    await waitFor(() => store["startup.count"] === 1);
+    expect(store["startup.count"]).toBe(1);
+
+    // Then, call the boot helper. It should not re-broadcast the startup workbookOpened event
+    // to extensions that were already started via startupExtension().
+    await manager.loadAllInstalled();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(store["startup.count"]).toBe(1);
+  } finally {
+    await manager.dispose();
+    await host.dispose();
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("update reloads onStartupFinished extension and re-delivers workbookOpened", async () => {
   const keys = generateEd25519KeyPair();
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-update-"));

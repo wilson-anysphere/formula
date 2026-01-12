@@ -1038,6 +1038,7 @@ export class WebExtensionManager {
         // eslint-disable-next-line no-await-in-loop
         await this.host.startupExtension(id);
       }
+      this._didHostStartup = true;
     }
 
     return newlyLoaded;
@@ -1159,6 +1160,12 @@ export class WebExtensionManager {
     if (options.start) {
       if (this.host.startupExtension) {
         await this.host.startupExtension(installed.id);
+        // Treat any call to `startupExtension()` as having started the host from the perspective
+        // of this manager. Calling `host.startup()` afterwards would re-broadcast the initial
+        // `workbookOpened` event to *all* extensions, potentially causing duplicate deliveries
+        // for extensions already started via `startupExtension()` (e.g. desktop flows that load
+        // an extension before the app's main `loadAllInstalled()` boot hook runs).
+        this._didHostStartup = true;
       } else if (this.host.startup && !hadOtherExtensions && !this._didHostStartup) {
         // Fallback for older hosts: only call startup() when we're confident it won't
         // re-emit startup events to extensions that were already running.
