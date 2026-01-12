@@ -105,11 +105,9 @@ Tauri v2 permissions are granted via **capabilities**:
 - `apps/desktop/src-tauri/capabilities/*.json`
 - capability files scope themselves to window labels via the capability file’s `"windows": [...]` list (matches `app.windows[].label` in `apps/desktop/src-tauri/tauri.conf.json`)
   - the main window label is `main`, and `apps/desktop/src-tauri/capabilities/main.json` applies to it via `"windows": ["main"]`
-- windows explicitly opt into capability identifiers via `app.windows[].capabilities` in `apps/desktop/src-tauri/tauri.conf.json`
-  - the main window opts into the `main` capability via `"capabilities": ["main"]`
 
-Keep the window’s `capabilities` list and the capability file’s `"windows": [...]` scoping in sync so adding a new
-window never implicitly grants it the main capability.
+Note: our current `tauri-build` toolchain does **not** support window-level opt-in via `app.windows[].capabilities` (it causes
+a build error). Keep window scoping in the capability file.
 
 Example excerpt (see `apps/desktop/src-tauri/capabilities/main.json` for the full allowlists):
 
