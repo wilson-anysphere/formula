@@ -42,6 +42,7 @@ import {
   DocConnectionTracker,
   LeveldbRetentionManager,
   type LeveldbPersistenceLike,
+  type RetentionSweepResult,
 } from "./retention.js";
 import { requireLevelForYLeveldb } from "./leveldbLevel.js";
 import { TombstoneStore, docKeyFromDocName } from "./tombstones.js";
@@ -320,6 +321,7 @@ export function createSyncServer(
 
   let retentionManager: LeveldbRetentionManager | null = null;
   let retentionSweepTimer: NodeJS.Timeout | null = null;
+  let retentionSweepInFlight: Promise<RetentionSweepResult> | null = null;
 
   const leveldbDocNameHashingEnabled =
     config.persistence.backend === "leveldb" && config.persistence.leveldbDocNameHashing;
@@ -337,26 +339,43 @@ export function createSyncServer(
     }
 
     retentionSweepTimer = setInterval(() => {
-      void retentionManager
-        ?.sweep()
-        .then((result) => {
-          recordLeveldbRetentionSweep(result);
-          logger.info(
-            {
-              ...result,
-              ttlMs: config.retention.ttlMs,
-              intervalMs: config.retention.sweepIntervalMs,
-            },
-            "retention_sweep_completed"
-          );
-        })
-        .catch((err) => {
-          metrics.retentionSweepsTotal.inc({ sweep: "leveldb" });
-          metrics.retentionSweepErrorsTotal.inc({ sweep: "leveldb" }, 1);
-          logger.error({ err }, "retention_sweep_failed");
-        });
+      void triggerRetentionSweep();
     }, config.retention.sweepIntervalMs);
     retentionSweepTimer.unref();
+  };
+
+  const triggerRetentionSweep = async (): Promise<RetentionSweepResult> => {
+    if (!retentionManager) {
+      throw new Error("Retention is not initialized");
+    }
+
+    if (retentionSweepInFlight) return await retentionSweepInFlight;
+
+    retentionSweepInFlight = retentionManager
+      .sweep()
+      .then((result) => {
+        recordLeveldbRetentionSweep(result);
+        logger.info(
+          {
+            ...result,
+            ttlMs: config.retention.ttlMs,
+            intervalMs: config.retention.sweepIntervalMs,
+          },
+          "retention_sweep_completed"
+        );
+        return result;
+      })
+      .catch((err) => {
+        metrics.retentionSweepsTotal.inc({ sweep: "leveldb" });
+        metrics.retentionSweepErrorsTotal.inc({ sweep: "leveldb" }, 1);
+        logger.error({ err }, "retention_sweep_failed");
+        throw err;
+      })
+      .finally(() => {
+        retentionSweepInFlight = null;
+      });
+
+    return await retentionSweepInFlight;
   };
 
   const initPersistence = async () => {
@@ -1103,8 +1122,7 @@ export function createSyncServer(
               return;
             }
 
-            const result = await retentionManager.sweep();
-            recordLeveldbRetentionSweep(result);
+            const result = await triggerRetentionSweep();
             sendJson(res, 200, { ok: true, ...result });
             return;
           }
@@ -1633,6 +1651,14 @@ export function createSyncServer(
       if (retentionSweepTimer) {
         clearInterval(retentionSweepTimer);
         retentionSweepTimer = null;
+      }
+      if (retentionSweepInFlight) {
+        try {
+          await retentionSweepInFlight;
+        } catch (err) {
+          errors.push(err);
+          logger.warn({ err }, "shutdown_retention_sweep_failed");
+        }
       }
 
       if (persistenceCleanup) {

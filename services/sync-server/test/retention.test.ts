@@ -39,7 +39,9 @@ function waitForProviderSync(provider: {
 class InMemoryLeveldbPersistence {
   private readonly docs = new Map<string, Y.Doc>();
   private readonly metas = new Map<string, Map<string, unknown>>();
+  getMetaCalls = 0;
   beforeClearDocument?: (docName: string) => Promise<void> | void;
+  beforeGetMeta?: (docName: string, metaKey: string) => Promise<void> | void;
 
   async getYDoc(docName: string): Promise<Y.Doc> {
     return this.docs.get(docName) ?? new Y.Doc();
@@ -76,6 +78,8 @@ class InMemoryLeveldbPersistence {
   }
 
   async getMeta(docName: string, metaKey: string): Promise<unknown> {
+    this.getMetaCalls += 1;
+    await this.beforeGetMeta?.(docName, metaKey);
     return this.metas.get(docName)?.get(metaKey);
   }
 }
@@ -515,4 +519,51 @@ test("retention sweep purges docs using y-leveldb + level-mem (no native LevelDB
 
   const remaining = (await ldb.getAllDocNames()).sort();
   assert.deepEqual(remaining, ["keep-me", "no-meta"]);
+});
+
+test("retention sweep endpoint de-duplicates concurrent requests", async (t) => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), "sync-server-retention-"));
+
+  const ldb = new InMemoryLeveldbPersistence();
+  await ldb.storeUpdate("keep-me", seedUpdate("hello"));
+  await ldb.setMeta("keep-me", LAST_SEEN_META_KEY, Date.now());
+
+  // Slow down the sweep so we can overlap two requests.
+  ldb.beforeGetMeta = async (_docName, metaKey) => {
+    if (metaKey !== LAST_SEEN_META_KEY) return;
+    await new Promise((r) => setTimeout(r, 200));
+  };
+
+  const logger = createLogger("silent");
+  const server = createSyncServer(createConfig(60_000, dataDir), logger, {
+    createLeveldbPersistence: () => ldb as any,
+  });
+
+  await server.start();
+  t.after(async () => {
+    await server.stop();
+  });
+  t.after(async () => {
+    await rm(dataDir, { recursive: true, force: true });
+  });
+
+  const url = `${server.getHttpUrl()}/internal/retention/sweep`;
+  const requestInit: RequestInit = {
+    method: "POST",
+    headers: {
+      "x-internal-admin-token": "admin-token",
+    },
+  };
+
+  const [resA, resB] = await Promise.all([fetch(url, requestInit), fetch(url, requestInit)]);
+  assert.equal(resA.status, 200);
+  assert.equal(resB.status, 200);
+
+  const [bodyA, bodyB] = await Promise.all([(await resA.json()) as any, (await resB.json()) as any]);
+  assert.equal(bodyA.ok, true);
+  assert.equal(bodyB.ok, true);
+
+  // Two concurrent requests should share the same in-flight sweep rather than
+  // scanning LevelDB twice.
+  assert.equal(ldb.getMetaCalls, 1);
 });
