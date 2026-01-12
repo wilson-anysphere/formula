@@ -79,6 +79,14 @@ export interface RibbonFileActions {
   openWorkbook?: () => void;
   saveWorkbook?: () => void;
   saveWorkbookAs?: () => void;
+  /**
+   * Toggle the desktop AutoSave feature.
+   *
+   * This intentionally takes the *next* state (rather than "toggle") so callers
+   * can keep UI and persisted state in sync even when the user cancels a required
+   * Save As flow.
+   */
+  toggleAutoSave?: (enabled: boolean) => void;
   versionHistory?: () => void;
   branchManager?: () => void;
   print?: () => void;

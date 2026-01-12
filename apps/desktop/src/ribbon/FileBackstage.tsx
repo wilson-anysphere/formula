@@ -2,6 +2,7 @@ import React from "react";
 
 import type { RibbonFileActions } from "./ribbonSchema.js";
 import { RibbonIcon, type RibbonIconId } from "./icons/index.js";
+import { getRibbonUiStateSnapshot, subscribeRibbonUiState } from "./ribbonUiState.js";
 
 export interface FileBackstageProps {
   open: boolean;
@@ -17,11 +18,16 @@ type BackstageItem = {
   testId: string;
   ariaLabel: string;
   onInvoke?: () => void;
+  kind?: "command" | "toggle";
+  pressed?: boolean;
 };
 
 export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const firstButtonRef = React.useRef<HTMLButtonElement | null>(null);
+
+  const uiState = React.useSyncExternalStore(subscribeRibbonUiState, getRibbonUiStateSnapshot, getRibbonUiStateSnapshot);
+  const autoSavePressed = Boolean(uiState.pressedById["file.save.autoSave"]);
 
   const isMac = React.useMemo(() => {
     if (typeof navigator === "undefined") return false;
@@ -88,6 +94,17 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.saveWorkbookAs,
       },
       {
+        iconId: "cloud",
+        label: "AutoSave",
+        hint: autoSavePressed ? "On" : "Off",
+        ariaKeyShortcuts: "",
+        testId: "file-auto-save",
+        ariaLabel: "Toggle AutoSave",
+        kind: "toggle",
+        pressed: autoSavePressed,
+        onInvoke: actions?.toggleAutoSave ? () => actions.toggleAutoSave?.(!autoSavePressed) : undefined,
+      },
+      {
         iconId: "clock",
         label: "Version History",
         hint: "",
@@ -151,7 +168,7 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.quit,
       },
     ],
-    [actions, ariaShortcut, shortcut],
+    [actions, ariaShortcut, autoSavePressed, shortcut],
   );
 
   const focusFirst = React.useCallback(() => {
@@ -256,7 +273,9 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
                 data-testid={item.testId}
                 aria-label={item.ariaLabel}
                 aria-keyshortcuts={item.ariaKeyShortcuts || undefined}
-                role="menuitem"
+                role={item.kind === "toggle" ? "menuitemcheckbox" : "menuitem"}
+                aria-checked={item.kind === "toggle" ? Boolean(item.pressed) : undefined}
+                aria-pressed={item.kind === "toggle" ? Boolean(item.pressed) : undefined}
                 disabled={disabled}
                 onClick={() => {
                   onClose();

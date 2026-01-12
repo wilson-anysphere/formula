@@ -33,6 +33,7 @@ function enableFileActions(): RibbonActions {
       openWorkbook: vi.fn(),
       saveWorkbook: vi.fn(),
       saveWorkbookAs: vi.fn(),
+      toggleAutoSave: vi.fn(),
       versionHistory: vi.fn(),
       branchManager: vi.fn(),
       print: vi.fn(),
@@ -90,6 +91,7 @@ describe("FileBackstage", () => {
     const openItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-open"]');
     const saveItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-save"]');
     const saveAsItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-save-as"]');
+    const autoSaveItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-auto-save"]');
     const versionHistoryItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-version-history"]');
     const branchManagerItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-branch-manager"]');
     const quitItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-quit"]');
@@ -97,6 +99,7 @@ describe("FileBackstage", () => {
     expect(openItem).toBeInstanceOf(HTMLButtonElement);
     expect(saveItem).toBeInstanceOf(HTMLButtonElement);
     expect(saveAsItem).toBeInstanceOf(HTMLButtonElement);
+    expect(autoSaveItem).toBeInstanceOf(HTMLButtonElement);
     expect(versionHistoryItem).toBeInstanceOf(HTMLButtonElement);
     expect(branchManagerItem).toBeInstanceOf(HTMLButtonElement);
     expect(quitItem).toBeInstanceOf(HTMLButtonElement);
@@ -130,6 +133,11 @@ describe("FileBackstage", () => {
 
     act(() => {
       saveAsItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(autoSaveItem);
+
+    act(() => {
+      autoSaveItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
     });
     expect(document.activeElement).toBe(versionHistoryItem);
 

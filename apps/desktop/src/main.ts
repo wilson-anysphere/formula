@@ -502,6 +502,233 @@ let syncContributedCommandsRef: (() => void) | null = null;
 let syncContributedPanelsRef: (() => void) | null = null;
 let updateKeybindingsRef: (() => void) | null = null;
 
+// --- AutoSave ---------------------------------------------------------------
+// Persisted globally (not per-workbook) since the ribbon toggle is global.
+const AUTO_SAVE_STORAGE_KEY = "formula.desktop.autoSave.enabled";
+// Debounce time after the most recent change before attempting an autosave.
+// Keep this relatively short so background saves feel responsive, but long enough
+// to avoid saving on every keystroke.
+const AUTO_SAVE_DEBOUNCE_MS = 4_000;
+
+function readAutoSaveEnabledFromStorage(): boolean {
+  try {
+    const raw = globalThis.localStorage?.getItem(AUTO_SAVE_STORAGE_KEY);
+    return raw === "true" || raw === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeAutoSaveEnabledToStorage(enabled: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(AUTO_SAVE_STORAGE_KEY, enabled ? "true" : "false");
+  } catch {
+    // Ignore storage errors (disabled/quota/etc).
+  }
+}
+
+let autoSaveEnabled = readAutoSaveEnabledFromStorage();
+
+let autoSaveTimer: number | null = null;
+let autoSaveLastChangeAt = 0;
+let autoSaveSaving = false;
+let autoSaveNeedsSaveAfterFlight = false;
+let autoSaveNeedsSaveAfterEditing = false;
+// When true, run an autosave even if the DocumentController is currently "clean".
+// This protects against edge cases where a save marks the document saved while edits
+// are still queued behind that save.
+let autoSaveForceNextSave = false;
+
+function isTauriInvokeAvailable(): boolean {
+  return typeof (globalThis as any).__TAURI__?.core?.invoke === "function";
+}
+
+// In web builds (no Tauri invoke), force AutoSave off regardless of any persisted value.
+if (!isTauriInvokeAvailable()) {
+  autoSaveEnabled = false;
+  writeAutoSaveEnabledToStorage(false);
+}
+
+function clearAutoSaveTimer(): void {
+  if (autoSaveTimer == null) return;
+  globalThis.clearTimeout(autoSaveTimer);
+  autoSaveTimer = null;
+}
+
+function scheduleAutoSaveFromLastChange(): void {
+  clearAutoSaveTimer();
+  if (!autoSaveEnabled) return;
+  // When not running under Tauri (e.g. web builds), the toggle is forced off and
+  // background saves are never scheduled.
+  if (!isTauriInvokeAvailable()) return;
+  if (!activeWorkbook) return;
+
+  const now = Date.now();
+  const delay = Math.max(0, autoSaveLastChangeAt + AUTO_SAVE_DEBOUNCE_MS - now);
+  autoSaveTimer = globalThis.setTimeout(() => {
+    autoSaveTimer = null;
+    void attemptAutoSave();
+  }, delay) as unknown as number;
+}
+
+function noteAutoSaveChange(): void {
+  if (!autoSaveEnabled) return;
+  if (!isTauriInvokeAvailable()) return;
+  autoSaveLastChangeAt = Date.now();
+  // If a save is already in-flight, coalesce into one additional save after it completes.
+  if (autoSaveSaving) autoSaveNeedsSaveAfterFlight = true;
+  scheduleAutoSaveFromLastChange();
+}
+
+async function attemptAutoSave(): Promise<void> {
+  if (!autoSaveEnabled) return;
+  if (!isTauriInvokeAvailable()) return;
+  if (!tauriBackend) return;
+  if (!activeWorkbook) return;
+
+  const doc = app.getDocument();
+
+  // Only autosave when we actually have something to persist, unless we're forcing a save
+  // due to a prior in-flight save that may have been superseded by later edits.
+  if (!doc.isDirty && !autoSaveForceNextSave) return;
+
+  // Never interrupt an in-progress edit: wait until editing ends.
+  if (isSpreadsheetEditing()) {
+    autoSaveNeedsSaveAfterEditing = true;
+    return;
+  }
+
+  if (autoSaveSaving) {
+    autoSaveNeedsSaveAfterFlight = true;
+    autoSaveForceNextSave = true;
+    return;
+  }
+
+  // If we don't have a path yet, autosave can't write to disk. Prompt for Save As.
+  if (!activeWorkbook.path) {
+    try {
+      await handleSaveAs({ throwOnCancel: true });
+      autoSaveForceNextSave = false;
+      return;
+    } catch (err) {
+      const name = (err as any)?.name;
+      if (name !== "AbortError") {
+        console.error("AutoSave Save As failed:", err);
+        showToast(`AutoSave failed: ${String(err)}`, "error");
+      }
+      // If the user cancels the Save As dialog, AutoSave must revert to OFF.
+      autoSaveEnabled = false;
+      writeAutoSaveEnabledToStorage(false);
+      clearAutoSaveTimer();
+      scheduleRibbonSelectionFormatStateUpdate();
+      return;
+    }
+  }
+
+  autoSaveSaving = true;
+  try {
+    // Ensure any pending microtask-batched workbook edits are flushed before saving.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await drainBackendSync();
+
+    if (workbookSync) {
+      await workbookSync.markSaved();
+    } else if (queuedInvoke) {
+      await queuedInvoke("save_workbook", {});
+      doc.markSaved();
+    } else {
+      await tauriBackend.saveWorkbook();
+      doc.markSaved();
+    }
+
+    autoSaveForceNextSave = false;
+  } catch (err) {
+    console.error("AutoSave failed:", err);
+    showToast(`AutoSave failed: ${String(err)}`, "error");
+    // Keep AutoSave enabled on failure.
+  } finally {
+    autoSaveSaving = false;
+  }
+
+  if (!autoSaveEnabled) return;
+  if (autoSaveNeedsSaveAfterEditing) {
+    autoSaveNeedsSaveAfterEditing = false;
+    autoSaveForceNextSave = true;
+    scheduleAutoSaveFromLastChange();
+    return;
+  }
+  if (autoSaveNeedsSaveAfterFlight) {
+    autoSaveNeedsSaveAfterFlight = false;
+    autoSaveForceNextSave = true;
+    scheduleAutoSaveFromLastChange();
+  }
+}
+
+async function setAutoSaveEnabledFromUi(nextEnabled: boolean): Promise<void> {
+  const invokeAvailable = isTauriInvokeAvailable();
+  if (!invokeAvailable) {
+    showDesktopOnlyToast("AutoSave is available in the desktop app.");
+    autoSaveEnabled = false;
+    writeAutoSaveEnabledToStorage(false);
+    clearAutoSaveTimer();
+    scheduleRibbonSelectionFormatStateUpdate();
+    return;
+  }
+
+  if (!nextEnabled) {
+    autoSaveEnabled = false;
+    writeAutoSaveEnabledToStorage(false);
+    clearAutoSaveTimer();
+    scheduleRibbonSelectionFormatStateUpdate();
+    return;
+  }
+
+  if (!tauriBackend || !activeWorkbook) {
+    autoSaveEnabled = false;
+    writeAutoSaveEnabledToStorage(false);
+    clearAutoSaveTimer();
+    scheduleRibbonSelectionFormatStateUpdate();
+    showToast("AutoSave is not available (workbook backend not ready).", "error");
+    return;
+  }
+
+  if (!activeWorkbook.path) {
+    try {
+      await handleSaveAs({ throwOnCancel: true });
+    } catch (err) {
+      const name = (err as any)?.name;
+      if (name !== "AbortError") {
+        console.error("Failed to enable AutoSave (Save As failed):", err);
+        showToast(`Failed to enable AutoSave: ${String(err)}`, "error");
+      }
+      autoSaveEnabled = false;
+      writeAutoSaveEnabledToStorage(false);
+      clearAutoSaveTimer();
+      scheduleRibbonSelectionFormatStateUpdate();
+      return;
+    }
+
+    if (!activeWorkbook.path) {
+      autoSaveEnabled = false;
+      writeAutoSaveEnabledToStorage(false);
+      clearAutoSaveTimer();
+      scheduleRibbonSelectionFormatStateUpdate();
+      return;
+    }
+  }
+
+  autoSaveEnabled = true;
+  writeAutoSaveEnabledToStorage(true);
+  scheduleRibbonSelectionFormatStateUpdate();
+
+  // If the document already has unsaved edits, schedule an autosave now.
+  if (app.getDocument().isDirty) {
+    autoSaveForceNextSave = true;
+    autoSaveLastChangeAt = Date.now();
+    scheduleAutoSaveFromLastChange();
+  }
+}
+
 function toggleDockPanel(panelId: string): void {
   const controller = ribbonLayoutController;
   if (!controller) return;
@@ -1234,6 +1461,35 @@ let recomputeKeyboardContextKeys: (() => void) | null = null;
 
 const isSpreadsheetEditing = (): boolean => app.isEditing() || splitViewSecondaryIsEditing;
 
+// --- AutoSave wiring ---------------------------------------------------------
+// Schedule autosave whenever the document becomes dirty or changes while dirty.
+const unsubscribeAutoSaveDocChange = app.getDocument().on("change", () => {
+  if (!autoSaveEnabled) return;
+  // Some change events (e.g. authoritative backend deltas) don't mark the document dirty.
+  // Only schedule autosave once we actually have local dirty state to persist.
+  if (!app.getDocument().isDirty) return;
+  noteAutoSaveChange();
+});
+const unsubscribeAutoSaveDocDirty = app.getDocument().on("dirty", (evt: any) => {
+  if (!autoSaveEnabled) return;
+  if (evt?.isDirty !== true) return;
+  noteAutoSaveChange();
+});
+const unsubscribeAutoSaveEditState = app.onEditStateChange(() => {
+  if (!autoSaveEnabled) return;
+  if (isSpreadsheetEditing()) return;
+  if (!autoSaveNeedsSaveAfterEditing) return;
+  autoSaveNeedsSaveAfterEditing = false;
+  autoSaveForceNextSave = true;
+  scheduleAutoSaveFromLastChange();
+});
+window.addEventListener("unload", () => {
+  unsubscribeAutoSaveDocChange();
+  unsubscribeAutoSaveDocDirty();
+  unsubscribeAutoSaveEditState();
+  clearAutoSaveTimer();
+});
+
 function openFormatCells(): void {
   openFormatCellsDialog({
     isEditing: () => isSpreadsheetEditing(),
@@ -1634,8 +1890,8 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
       "home.alignment.alignLeft": formatState.align === "left",
       "home.alignment.center": formatState.align === "center",
       "home.alignment.alignRight": formatState.align === "right",
-      // Keep AutoSave off until a real autosave implementation exists.
-      "file.save.autoSave": false,
+      // AutoSave is only supported in the desktop/Tauri runtime.
+      "file.save.autoSave": autoSaveEnabled && isTauriInvokeAvailable(),
       "view.show.showFormulas": app.getShowFormulas(),
       "formulas.formulaAuditing.showFormulas": app.getShowFormulas(),
       "view.show.performanceStats": perfStatsEnabled,
@@ -7353,6 +7609,9 @@ mountRibbon(ribbonReactRoot, {
         showToast(`Failed to save workbook: ${String(err)}`, "error");
       });
     },
+    toggleAutoSave: (enabled) => {
+      void setAutoSaveEnabledFromUi(enabled);
+    },
     versionHistory: () => {
       toggleDockPanel(PanelIds.VERSION_HISTORY);
     },
@@ -7410,6 +7669,11 @@ mountRibbon(ribbonReactRoot, {
   },
   onToggle: (commandId, pressed) => {
     switch (commandId) {
+      case "file.save.autoSave": {
+        void setAutoSaveEnabledFromUi(pressed);
+        app.focus();
+        return;
+      }
       case "data.queriesConnections.queriesConnections": {
         const layoutController = ribbonLayoutController;
         if (!layoutController) {
@@ -7507,6 +7771,7 @@ mountRibbon(ribbonReactRoot, {
       commandId === "view.show.performanceStats" ||
       commandId === "view.window.split" ||
       commandId === "review.comments.showComments" ||
+      commandId === "file.save.autoSave" ||
       commandId === "data.queriesConnections.queriesConnections"
     ) {
       return;
@@ -8090,7 +8355,7 @@ mountRibbon(ribbonReactRoot, {
       }
 
       case "file.save.autoSave": {
-        showToast("AutoSave is not implemented yet.");
+        void setAutoSaveEnabledFromUi(!autoSaveEnabled);
         return;
       }
 
