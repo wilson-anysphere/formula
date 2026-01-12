@@ -13,7 +13,9 @@ pub(crate) mod records;
 pub(crate) mod sheet;
 pub(crate) mod strings;
 
-pub(crate) use globals::{parse_biff_bound_sheets, parse_biff_workbook_globals, BoundSheetInfo};
+pub(crate) use globals::{
+    parse_biff_bound_sheets, parse_biff_codepage, parse_biff_workbook_globals, BoundSheetInfo,
+};
 pub(crate) use sheet::{
     parse_biff_sheet_cell_xf_indices_filtered, parse_biff_sheet_row_col_properties,
     SheetRowColProperties,

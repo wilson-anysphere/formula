@@ -33,7 +33,7 @@ fn strip_embedded_nuls(s: &mut String) {
     }
 }
 
-fn biff_codepage(workbook_stream: &[u8]) -> u16 {
+pub(crate) fn parse_biff_codepage(workbook_stream: &[u8]) -> u16 {
     let Ok(iter) = records::BestEffortSubstreamIter::from_offset(workbook_stream, 0) else {
         return 1252;
     };
@@ -59,8 +59,8 @@ fn biff_codepage(workbook_stream: &[u8]) -> u16 {
 pub(crate) fn parse_biff_bound_sheets(
     workbook_stream: &[u8],
     biff: BiffVersion,
+    codepage: u16,
 ) -> Result<Vec<BoundSheetInfo>, String> {
-    let codepage = biff_codepage(workbook_stream);
     let mut out = Vec::new();
 
     for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, 0)? {
@@ -167,9 +167,8 @@ impl BiffWorkbookGlobals {
 pub(crate) fn parse_biff_workbook_globals(
     workbook_stream: &[u8],
     biff: BiffVersion,
+    codepage: u16,
 ) -> Result<BiffWorkbookGlobals, String> {
-    let codepage = biff_codepage(workbook_stream);
-
     let mut out = BiffWorkbookGlobals::default();
 
     let mut saw_eof = false;
@@ -374,7 +373,8 @@ mod tests {
         truncated.extend_from_slice(&[1, 2]); // missing 2 bytes
 
         let stream = [record(RECORD_BOUNDSHEET, &bs_payload), truncated].concat();
-        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
+        let codepage = parse_biff_codepage(&stream);
+        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8, codepage).expect("parse");
         assert_eq!(
             sheets,
             vec![BoundSheetInfo {
@@ -399,7 +399,8 @@ mod tests {
             record(records::RECORD_EOF, &[]),
         ]
         .concat();
-        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
+        let codepage = parse_biff_codepage(&stream);
+        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8, codepage).expect("parse");
         assert_eq!(
             sheets,
             vec![BoundSheetInfo {
@@ -424,7 +425,8 @@ mod tests {
         let r_bs = record(RECORD_BOUNDSHEET, &bs_payload);
 
         let stream = [r_codepage, r_bs, record(records::RECORD_EOF, &[])].concat();
-        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
+        let codepage = parse_biff_codepage(&stream);
+        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8, codepage).expect("parse");
         assert_eq!(
             sheets,
             vec![BoundSheetInfo {
@@ -449,7 +451,8 @@ mod tests {
         let r_bs = record(RECORD_BOUNDSHEET, &bs_payload);
 
         let stream = [r_codepage, r_bs, record(records::RECORD_EOF, &[])].concat();
-        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
+        let codepage = parse_biff_codepage(&stream);
+        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8, codepage).expect("parse");
         assert_eq!(
             sheets,
             vec![BoundSheetInfo {
@@ -478,7 +481,8 @@ mod tests {
 
         // No EOF record; should still stop at the worksheet BOF.
         let stream = [r_codepage, r_bs, r_sheet_bof].concat();
-        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8).expect("parse");
+        let codepage = parse_biff_codepage(&stream);
+        let sheets = parse_biff_bound_sheets(&stream, BiffVersion::Biff8, codepage).expect("parse");
         assert_eq!(
             sheets,
             vec![BoundSheetInfo {
@@ -525,7 +529,9 @@ mod tests {
         ]
         .concat();
 
-        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8).expect("parse");
+        let codepage = parse_biff_codepage(&stream);
+        let globals =
+            parse_biff_workbook_globals(&stream, BiffVersion::Biff8, codepage).expect("parse");
         assert_eq!(globals.date_system, DateSystem::Excel1900);
         assert_eq!(globals.xf_count(), 1);
         assert_eq!(globals.resolve_number_format_code(0).as_deref(), Some("Ђ"));
@@ -542,7 +548,9 @@ mod tests {
 
         // No EOF record and no subsequent BOF; parser should return partial globals with a warning.
         let stream = [r_bof_globals, r_1904, r_xf].concat();
-        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8).expect("parse");
+        let codepage = parse_biff_codepage(&stream);
+        let globals =
+            parse_biff_workbook_globals(&stream, BiffVersion::Biff8, codepage).expect("parse");
         assert_eq!(globals.date_system, DateSystem::Excel1904);
         assert_eq!(globals.xf_count(), 1);
         assert!(
@@ -568,7 +576,9 @@ mod tests {
         truncated.extend_from_slice(&[1, 2]);
 
         let stream = [r_bof_globals, r_1904, truncated].concat();
-        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8).expect("parse");
+        let codepage = parse_biff_codepage(&stream);
+        let globals =
+            parse_biff_workbook_globals(&stream, BiffVersion::Biff8, codepage).expect("parse");
         assert_eq!(globals.date_system, DateSystem::Excel1904);
         assert!(
             globals
@@ -612,7 +622,9 @@ mod tests {
         stream.extend_from_slice(&r_xf);
         stream.extend_from_slice(&r_eof);
 
-        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8).expect("parse");
+        let codepage = parse_biff_codepage(&stream);
+        let globals =
+            parse_biff_workbook_globals(&stream, BiffVersion::Biff8, codepage).expect("parse");
         assert_eq!(globals.date_system, DateSystem::Excel1904);
         assert_eq!(
             globals.resolve_number_format_code(0).as_deref(),
@@ -641,7 +653,9 @@ mod tests {
         ]
         .concat();
 
-        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff8).expect("parse");
+        let codepage = parse_biff_codepage(&stream);
+        let globals =
+            parse_biff_workbook_globals(&stream, BiffVersion::Biff8, codepage).expect("parse");
         assert_eq!(
             globals.resolve_number_format_code(0).as_deref(),
             Some("m/d/yyyy")
@@ -673,7 +687,9 @@ mod tests {
         ]
         .concat();
 
-        let globals = parse_biff_workbook_globals(&stream, BiffVersion::Biff5).expect("parse");
+        let codepage = parse_biff_codepage(&stream);
+        let globals =
+            parse_biff_workbook_globals(&stream, BiffVersion::Biff5, codepage).expect("parse");
         assert_eq!(
             globals.resolve_number_format_code(0).as_deref(),
             Some("0.00")

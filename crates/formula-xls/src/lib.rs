@@ -178,8 +178,9 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
 
     if let Some(workbook_stream) = workbook_stream.as_deref() {
         let biff_version = biff::detect_biff_version(workbook_stream);
+        let codepage = biff::parse_biff_codepage(workbook_stream);
 
-        match biff::parse_biff_workbook_globals(workbook_stream, biff_version) {
+        match biff::parse_biff_workbook_globals(workbook_stream, biff_version, codepage) {
             Ok(mut globals) => {
                 out.date_system = globals.date_system;
                 warnings.extend(globals.warnings.drain(..).map(ImportWarning::new));
@@ -218,7 +219,7 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             ))),
         }
 
-        match biff::parse_biff_bound_sheets(workbook_stream, biff_version) {
+        match biff::parse_biff_bound_sheets(workbook_stream, biff_version, codepage) {
             Ok(sheets) => biff_sheets = Some(sheets),
             Err(err) => warnings.push(ImportWarning::new(format!(
                 "failed to import `.xls` sheet metadata: {err}"
