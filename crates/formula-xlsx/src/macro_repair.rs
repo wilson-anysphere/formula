@@ -51,6 +51,15 @@ pub(crate) fn ensure_xlsm_content_types(
     }
 
     const WORKBOOK_PART_NAME: &str = "/xl/workbook.xml";
+    // When a workbook contains `xl/vbaProject.bin`, Excel expects the main workbook content type
+    // to be one of the macro-enabled types:
+    // - `.xlsm`  → `sheet.macroEnabled`
+    // - `.xltm`  → `template.macroEnabled`
+    // - `.xlam`  → `addin.macroEnabled`
+    //
+    // This helper is invoked during `XlsxPackage::write_to(...)` to repair the package before
+    // writing. Importantly: callers may have already set a more specific macro-enabled workbook
+    // kind (e.g. `.xltm` / `.xlam`). Do not blindly rewrite those to `.xlsm`.
     const WORKBOOK_MACRO_CONTENT_TYPE: &str =
         "application/vnd.ms-excel.sheet.macroEnabled.main+xml";
     const WORKBOOK_TEMPLATE_CONTENT_TYPE: &str =

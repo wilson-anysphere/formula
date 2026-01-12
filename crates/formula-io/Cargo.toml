@@ -7,6 +7,11 @@ edition = "2021"
 default = []
 # Keep Parquet support behind a feature so `formula-io` stays lightweight by default.
 parquet = ["dep:formula-columnar"]
+# Enable `formula-xlsx`'s optional VBA helpers (`formula-vba` + OpenSSL).
+#
+# This is kept opt-in because it adds a significant dependency surface and build
+# time (vendored OpenSSL in some environments).
+vba = ["formula-xlsx/vba"]
 
 [dependencies]
 cfb = "0.10"
@@ -14,7 +19,10 @@ encoding_rs = "0.8"
 formula-columnar = { path = "../formula-columnar", optional = true, features = ["arrow"] }
 formula-format = { path = "../formula-format" }
 formula-model = { path = "../formula-model" }
-formula-xlsx = { path = "../formula-xlsx" }
+# Disable `formula-xlsx` default features so `formula-io` stays lightweight by
+# default. Consumers that need `formula_xlsx::vba` can opt in via the
+# `formula-io/vba` feature.
+formula-xlsx = { path = "../formula-xlsx", default-features = false }
 formula-xls = { path = "../formula-xls" }
 formula-xlsb = { path = "../formula-xlsb" }
 tempfile = "3.10"
