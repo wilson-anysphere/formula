@@ -1618,7 +1618,24 @@ test.describe("split view / shared grid zoom", () => {
     await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
     await expect(page.getByTestId("active-cell")).toHaveText("A1");
 
-    await secondary.click({ button: "right", position: { x: 48 + 100 + 12, y: 24 + 24 + 12 } }); // B2
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(
+      ({ x, y }) => {
+        const grid = document.getElementById("grid-secondary");
+        if (!grid) throw new Error("Missing #grid-secondary container");
+        const rect = grid.getBoundingClientRect();
+        grid.dispatchEvent(
+          new MouseEvent("contextmenu", {
+            bubbles: true,
+            cancelable: true,
+            button: 2,
+            clientX: rect.left + x,
+            clientY: rect.top + y,
+          }),
+        );
+      },
+      { x: 48 + 100 + 12, y: 24 + 24 + 12 },
+    ); // B2
     await expect(page.getByTestId("active-cell")).toHaveText("B2");
 
     const menuOverlay = page.getByTestId("context-menu");

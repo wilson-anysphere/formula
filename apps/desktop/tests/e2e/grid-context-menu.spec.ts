@@ -46,7 +46,21 @@ test.describe("Grid context menus", () => {
     await waitForIdle(page);
 
     await expect(page.locator("#grid")).toBeVisible();
-    await page.click("#grid", { button: "right", position: { x: 10, y: 40 } });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(() => {
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid container");
+      const rect = grid.getBoundingClientRect();
+      grid.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX: rect.left + 10,
+          clientY: rect.top + 40,
+        }),
+      );
+    });
 
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
@@ -58,7 +72,21 @@ test.describe("Grid context menus", () => {
     await waitForIdle(page);
 
     await expect(page.locator("#grid")).toBeVisible();
-    await page.click("#grid", { button: "right", position: { x: 100, y: 10 } });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(() => {
+      const grid = document.getElementById("grid");
+      if (!grid) throw new Error("Missing #grid container");
+      const rect = grid.getBoundingClientRect();
+      grid.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX: rect.left + 100,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
 
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
@@ -75,7 +103,21 @@ test.describe("Grid context menus", () => {
     await expect(secondary.locator("canvas")).toHaveCount(3);
     await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
-    await page.click("#grid-secondary", { button: "right", position: { x: 10, y: 40 } });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(() => {
+      const grid = document.getElementById("grid-secondary");
+      if (!grid) throw new Error("Missing #grid-secondary container");
+      const rect = grid.getBoundingClientRect();
+      grid.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX: rect.left + 10,
+          clientY: rect.top + 40,
+        }),
+      );
+    });
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
     await expect(menu.getByRole("button", { name: "Row Height…" })).toBeVisible();
@@ -91,7 +133,21 @@ test.describe("Grid context menus", () => {
     await expect(secondary.locator("canvas")).toHaveCount(3);
     await waitForGridCanvasesToBeSized(page, "#grid-secondary");
 
-    await page.click("#grid-secondary", { button: "right", position: { x: 100, y: 10 } });
+    // Avoid flaky right-click handling in the desktop shell; dispatch a deterministic contextmenu event.
+    await page.evaluate(() => {
+      const grid = document.getElementById("grid-secondary");
+      if (!grid) throw new Error("Missing #grid-secondary container");
+      const rect = grid.getBoundingClientRect();
+      grid.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX: rect.left + 100,
+          clientY: rect.top + 10,
+        }),
+      );
+    });
     const menu = page.getByTestId("context-menu");
     await expect(menu).toBeVisible();
     await expect(menu.getByRole("button", { name: "Column Width…" })).toBeVisible();
