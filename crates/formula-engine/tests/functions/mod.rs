@@ -17,6 +17,7 @@ mod financial_bonds_optional_args;
 mod financial_cashflows;
 mod financial_accrint;
 mod financial_bonds_date_system;
+mod financial_bonds_date_text;
 mod financial_coupons;
 mod financial_coupons_eom;
 mod financial_dollar_fractions;
