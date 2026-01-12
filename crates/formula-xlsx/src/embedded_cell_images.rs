@@ -26,6 +26,9 @@ pub struct EmbeddedCellImage {
     pub image_bytes: Vec<u8>,
     /// Rich value `CalcOrigin` flag (Excel-specific; observed values include `5` and `6`).
     ///
+    /// When `rdrichvalue.xml` local-image metadata is missing we cannot recover this value and
+    /// default it to `0` (unknown).
+    ///
     /// The exact meaning of this field is not publicly documented; treat it as opaque metadata and
     /// preserve it when round-tripping.
     pub calc_origin: u32,
