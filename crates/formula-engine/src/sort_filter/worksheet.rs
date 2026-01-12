@@ -263,21 +263,32 @@ fn rich_model_cell_value_to_sort_value(value: &ModelCellValue) -> Option<CellVal
         "entity" => {
             let value = serialized.get("value")?;
             let display_value = value
+                // `formula-model` uses camelCase for rich value payloads, but we also accept legacy
+                // snake_case / display aliases for robustness.
                 .get("displayValue")
                 .or_else(|| value.get("display_value"))
-                .or_else(|| value.get("display"))?
-                .as_str()?;
-            Some(CellValue::Text(display_value.to_string()))
+                .or_else(|| value.get("display"))
+                .and_then(|v| v.as_str())?
+                .to_string();
+            Some(CellValue::Text(display_value))
         }
         "record" => {
             let record = serialized.get("value")?;
+
+            // Current `formula-model` record values are a simple display string.
             if let Some(display) = record
                 .get("displayValue")
+                .or_else(|| record.get("display_value"))
                 .or_else(|| record.get("display"))
                 .and_then(|v| v.as_str())
             {
-                return Some(CellValue::Text(display.to_string()));
+                if !display.is_empty() {
+                    return Some(CellValue::Text(display.to_string()));
+                }
             }
+
+            // Backwards/forwards compatible fallback: treat record values like the old
+            // rich-data record structure (display_field + fields map) when present.
             let display_field = record
                 .get("displayField")
                 .or_else(|| record.get("display_field"))?

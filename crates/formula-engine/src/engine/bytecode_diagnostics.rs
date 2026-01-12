@@ -1,6 +1,7 @@
 use crate::bytecode;
 use crate::eval::CellAddr;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Reason a formula was not compiled to the bytecode backend.
 ///
@@ -30,6 +31,11 @@ pub enum BytecodeCompileReason {
     LowerError(bytecode::LowerError),
     /// The bytecode backend does not yet support this expression shape (even if lowering succeeded).
     IneligibleExpr,
+    /// The formula calls a worksheet function that the bytecode backend does not yet implement.
+    ///
+    /// This is reported separately from `IneligibleExpr` so coverage tools can see which missing
+    /// functions account for the majority of AST fallbacks.
+    UnsupportedFunction(Arc<str>),
     /// The formula references cells/ranges that fall outside the Excel grid.
     ExceedsGridLimits,
     /// The formula contains a range reference that exceeds the bytecode backend's cell-count limit.

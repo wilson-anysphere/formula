@@ -3047,6 +3047,9 @@ impl Engine {
                 bytecode::LowerError::Unsupported => BytecodeCompileReason::IneligibleExpr,
                 other => BytecodeCompileReason::LowerError(other),
             })?;
+        if let Some(name) = bytecode_expr_first_unsupported_function(&expr) {
+            return Err(BytecodeCompileReason::UnsupportedFunction(name));
+        }
         if !bytecode_expr_is_eligible(&expr) {
             return Err(BytecodeCompileReason::IneligibleExpr);
         }
@@ -6885,6 +6888,29 @@ fn bytecode_expr_is_eligible(expr: &bytecode::Expr) -> bool {
     // Array literals are also eligible at the top-level since the bytecode backend supports
     // spilling array results.
     bytecode_expr_is_eligible_inner(expr, true, true, &mut lexical_scopes)
+}
+
+fn bytecode_expr_first_unsupported_function(expr: &bytecode::Expr) -> Option<Arc<str>> {
+    match expr {
+        bytecode::Expr::FuncCall {
+            func: bytecode::ast::Function::Unknown(name),
+            ..
+        } => Some(name.clone()),
+        bytecode::Expr::FuncCall { args, .. } => args
+            .iter()
+            .find_map(|arg| bytecode_expr_first_unsupported_function(arg)),
+        bytecode::Expr::SpillRange(inner) => bytecode_expr_first_unsupported_function(inner),
+        bytecode::Expr::Unary { expr, .. } => bytecode_expr_first_unsupported_function(expr),
+        bytecode::Expr::Binary { left, right, .. } => {
+            bytecode_expr_first_unsupported_function(left)
+                .or_else(|| bytecode_expr_first_unsupported_function(right))
+        }
+        bytecode::Expr::Literal(_)
+        | bytecode::Expr::CellRef(_)
+        | bytecode::Expr::RangeRef(_)
+        | bytecode::Expr::MultiRangeRef(_)
+        | bytecode::Expr::NameRef(_) => None,
+    }
 }
 
 fn bytecode_expr_within_grid_limits(
