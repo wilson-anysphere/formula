@@ -58,7 +58,13 @@ impl XlsxPackage {
         let rich_value_rel_part = if self.part(RICH_VALUE_REL_PART).is_some() {
             Some(RICH_VALUE_REL_PART.to_string())
         } else {
+            // Most workbooks use the canonical `xl/richData/richValueRel.xml` part name, but some
+            // producers emit numbered variants (`richValueRel1.xml`, ...) or custom names.
+            //
+            // First attempt to find the numbered `richValueRel{N}.xml` pattern, then fall back to
+            // any `xl/richData/*RichValueRel{N}.xml` part.
             find_lowest_numbered_part(self, "xl/richData/richValueRel", ".xml")
+                .or_else(|| find_lowest_custom_rich_value_rel_part(self))
         };
         let Some(rich_value_rel_part) = rich_value_rel_part else {
             // Workbooks without in-cell images omit the entire `xl/richData/` tree.
@@ -472,6 +478,55 @@ fn find_lowest_numbered_part(pkg: &XlsxPackage, prefix: &str, suffix: &str) -> O
     }
 
     best.map(|(_, name)| name)
+}
+
+fn find_lowest_custom_rich_value_rel_part(pkg: &XlsxPackage) -> Option<String> {
+    let mut best: Option<(u32, String)> = None;
+
+    for part in pkg.part_names() {
+        let part = part.strip_prefix('/').unwrap_or(part);
+        let Some(num) = rich_value_rel_custom_suffix_index(part) else {
+            continue;
+        };
+
+        match &mut best {
+            Some((best_num, best_name)) => {
+                if num < *best_num || (num == *best_num && part < best_name.as_str()) {
+                    *best_num = num;
+                    *best_name = part.to_string();
+                }
+            }
+            None => best = Some((num, part.to_string())),
+        }
+    }
+
+    best.map(|(_, name)| name)
+}
+
+fn rich_value_rel_custom_suffix_index(part_path: &str) -> Option<u32> {
+    let part_path = part_path.strip_prefix('/').unwrap_or(part_path);
+    if !part_path.starts_with("xl/richData/") {
+        return None;
+    }
+
+    let file_name = part_path.rsplit('/').next()?;
+    let file_name_lower = file_name.to_ascii_lowercase();
+    if !file_name_lower.ends_with(".xml") {
+        return None;
+    }
+
+    let stem = &file_name_lower[..file_name_lower.len() - ".xml".len()];
+    let idx = stem.rfind("richvaluerel")?;
+    let suffix = &stem[idx + "richvaluerel".len()..];
+    if !suffix.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+
+    if suffix.is_empty() {
+        Some(0)
+    } else {
+        suffix.parse::<u32>().ok()
+    }
 }
 
 fn numeric_suffix(part_name: &str, prefix: &str, suffix: &str) -> Option<u32> {
