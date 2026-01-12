@@ -491,21 +491,37 @@ fn parse_txo_cch_text(header: &[u8], max_chars: usize) -> Option<usize> {
         return None;
     }
 
-    for off in [TXO_TEXT_LEN_OFFSET, 4usize, 8usize, 10usize, 12usize] {
+    // Spec-defined BIFF8 offset for cchText.
+    let cch_at_6 =
+        u16::from_le_bytes([header[TXO_TEXT_LEN_OFFSET], header[TXO_TEXT_LEN_OFFSET + 1]]) as usize;
+
+    // If we have no continuation bytes to sanity-check against, trust the header.
+    if max_chars == 0 {
+        return Some(cch_at_6);
+    }
+
+    // In truncated/corrupt files we may not have enough continuation bytes to satisfy `cchText`.
+    // In that case, prefer the spec-defined header field and let the decoder emit a truncation
+    // warning rather than guessing a different offset that happens to fit the observed payload.
+    if cch_at_6 != 0 {
+        return Some(cch_at_6);
+    }
+
+    // If the spec-defined field is zero but we have continuation bytes, the header may be
+    // malformed or use a non-standard layout. Fall back to scanning a few other offsets for a
+    // plausible length.
+    for off in [4usize, 8usize, 10usize, 12usize] {
         if header.len() < off + 2 {
             continue;
         }
         let cch = u16::from_le_bytes([header[off], header[off + 1]]) as usize;
-        // Prefer the spec-defined offset even if the payload looks truncated; we'll surface that as
-        // a decode warning instead of guessing a different offset.
-        if off == TXO_TEXT_LEN_OFFSET {
-            return Some(cch);
-        }
-        if max_chars == 0 || cch <= max_chars {
+        if cch != 0 && cch <= max_chars {
             return Some(cch);
         }
     }
-    None
+
+    // Last resort: decode as much as we can from the available continuation bytes.
+    Some(max_chars)
 }
 
 fn estimate_max_chars_with_byte_limit(continues: &[&[u8]], byte_limit: usize) -> usize {
@@ -736,6 +752,14 @@ mod tests {
         let mut payload = vec![0u8; 18];
         payload[TXO_TEXT_LEN_OFFSET..TXO_TEXT_LEN_OFFSET + 2].copy_from_slice(&cch_text.to_le_bytes());
         payload[TXO_RUNS_LEN_OFFSET..TXO_RUNS_LEN_OFFSET + 2].copy_from_slice(&cb_runs.to_le_bytes());
+        record(RECORD_TXO, &payload)
+    }
+
+    fn txo_with_cch_text_at_offset_4(cch_text: u16) -> Vec<u8> {
+        // Some sources disagree on the TXO header layout. This helper intentionally writes
+        // `cchText` at offset 4 instead of the spec-defined offset 6.
+        let mut payload = vec![0u8; 18];
+        payload[4..6].copy_from_slice(&cch_text.to_le_bytes());
         record(RECORD_TXO, &payload)
     }
 
@@ -1222,6 +1246,27 @@ mod tests {
             warnings.iter().any(|w| w.contains("truncated text")),
             "expected truncation warning; warnings={warnings:?}"
         );
+    }
+
+    #[test]
+    fn parses_txo_text_when_cchtext_is_stored_at_alternate_offset() {
+        // The spec-defined cchText field (offset 6) is zero, but offset 4 contains the correct
+        // value. Best-effort decoding should still recover the full text.
+        let stream = [
+            bof(),
+            note(0, 0, 1, "Alice"),
+            obj_with_id(1),
+            txo_with_cch_text_at_offset_4(5),
+            continue_text_ascii("Hello"),
+            eof(),
+        ]
+        .concat();
+
+        let (notes, warnings) =
+            parse_biff_sheet_notes(&stream, 0, BiffVersion::Biff8, 1252).expect("parse");
+        assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].text, "Hello");
     }
 
     #[test]
