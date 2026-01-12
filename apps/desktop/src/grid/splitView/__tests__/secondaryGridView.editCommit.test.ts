@@ -66,6 +66,7 @@ describe("SecondaryGridView edit commits", () => {
     document.body.appendChild(container);
 
     const doc = new DocumentController();
+    const editState = vi.fn();
     const gridView = new SecondaryGridView({
       container,
       document: doc,
@@ -74,6 +75,7 @@ describe("SecondaryGridView edit commits", () => {
       colCount: 11,
       showFormulas: () => false,
       getComputedValue: () => null,
+      onEditStateChange: editState,
     });
 
     // Select A1 (grid coordinates include a 1x1 header at row/col 0).
@@ -84,8 +86,10 @@ describe("SecondaryGridView edit commits", () => {
 
     // Start editing A1 and commit via Enter.
     (gridView as any).openEditor({ row: 1, col: 1, initialKey: "h" });
+    expect(editState).toHaveBeenCalledWith(true);
     (gridView as any).editor.element.value = "hello";
     (gridView as any).editor.commit("enter", false);
+    expect(editState).toHaveBeenLastCalledWith(false);
 
     expect(gridView.grid.renderer.getSelection()).toEqual({ row: 2, col: 1 }); // A2
 
@@ -100,6 +104,7 @@ describe("SecondaryGridView edit commits", () => {
     document.body.appendChild(container);
 
     const doc = new DocumentController();
+    const editState = vi.fn();
     const gridView = new SecondaryGridView({
       container,
       document: doc,
@@ -108,6 +113,7 @@ describe("SecondaryGridView edit commits", () => {
       colCount: 11,
       showFormulas: () => false,
       getComputedValue: () => null,
+      onEditStateChange: editState,
     });
 
     // Select A1:B2 with active cell at B1.
@@ -117,7 +123,9 @@ describe("SecondaryGridView edit commits", () => {
     });
 
     (gridView as any).openEditor({ row: 1, col: 2, initialKey: "x" });
+    expect(editState).toHaveBeenCalledWith(true);
     (gridView as any).editor.commit("tab", false);
+    expect(editState).toHaveBeenLastCalledWith(false);
 
     // Tab from B1 should wrap to A2 while preserving the selection range.
     expect(gridView.grid.renderer.getSelection()).toEqual({ row: 2, col: 1 }); // A2
@@ -127,4 +135,3 @@ describe("SecondaryGridView edit commits", () => {
     container.remove();
   });
 });
-

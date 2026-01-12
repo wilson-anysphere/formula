@@ -1048,9 +1048,16 @@ app.getDocument().markSaved();
 
 app.focus();
 
+// Split-view secondary pane mounts its own CellEditorOverlay. SpreadsheetApp's `isEditing()`
+// only reflects its *primary* editor/formula bar/inline edit state, so track the secondary
+// editor separately for global UI state (status bar, shortcut gating, etc).
+let splitViewSecondaryIsEditing = false;
+
+const isSpreadsheetEditing = (): boolean => app.isEditing() || splitViewSecondaryIsEditing;
+
 function openFormatCells(): void {
   openFormatCellsDialog({
-    isEditing: () => app.isEditing(),
+    isEditing: () => isSpreadsheetEditing(),
     getDocument: () => app.getDocument(),
     getSheetId: () => app.getCurrentSheetId(),
     getActiveCell: () => app.getActiveCell(),
@@ -1377,7 +1384,7 @@ const syncTitlebar = () => {
 };
 
 function renderStatusMode(): void {
-  statusMode.textContent = app.isEditing() ? "Edit" : "Ready";
+  statusMode.textContent = isSpreadsheetEditing() ? "Edit" : "Ready";
 }
 
 renderStatusMode();
@@ -1421,7 +1428,7 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const sheetId = app.getCurrentSheetId();
     const ranges = app.getSelectionRanges();
     const formatState = computeSelectionFormatState(app.getDocument(), sheetId, ranges);
-    const isEditing = app.isEditing();
+    const isEditing = isSpreadsheetEditing();
     const perfStats = app.getGridPerfStats() as any;
     const perfStatsSupported = perfStats != null;
     const perfStatsEnabled = Boolean(perfStats?.enabled);
@@ -1579,7 +1586,7 @@ function isTextInputTarget(target: EventTarget | null): boolean {
 
 function canRunGridFormattingShortcuts(event: KeyboardEvent): boolean {
   if (event.defaultPrevented) return false;
-  if (app.isEditing()) return false;
+  if (isSpreadsheetEditing()) return false;
   if (isTextInputTarget(event.target)) return false;
   return true;
 }
@@ -2487,7 +2494,7 @@ window.addEventListener(
     // inline AI edit, etc). Exception: when the formula bar is actively editing we still
     // allow sheet navigation so users can build cross-sheet references (Excel behavior).
     const formulaBarEditing = app.isFormulaBarEditing();
-    if (app.isEditing() && !formulaBarEditing) {
+    if (isSpreadsheetEditing() && !formulaBarEditing) {
       // Prevent browser tab switching / other defaults while editing spreadsheet content.
       e.preventDefault();
       e.stopPropagation();
@@ -2666,7 +2673,7 @@ if (
 
     // Match SpreadsheetApp guards: never steal shortcuts from active text editing.
     if (isTextInputTarget(e.target)) return;
-    if (app.isEditing()) return;
+    if (isSpreadsheetEditing()) return;
 
     // Excel semantics: Shift+F2 opens the comments panel.
     if (e.key === "F2" && e.shiftKey) {
@@ -3178,6 +3185,12 @@ if (
     if (split.direction === "none") {
       secondaryGridView?.destroy();
       secondaryGridView = null;
+      if (splitViewSecondaryIsEditing) {
+        splitViewSecondaryIsEditing = false;
+        renderStatusMode();
+        syncTitlebar();
+        scheduleRibbonSelectionFormatStateUpdate();
+      }
       stopPrimarySplitPanePersistence();
       primaryPaneViewportRestored = false;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -3243,6 +3256,13 @@ if (
           if (pane.zoom === zoom) return;
           layoutController.setSplitPaneZoom("secondary", zoom, { persist: false, emit: false });
           scheduleSplitPanePersist();
+        },
+        onEditStateChange: (isEditing) => {
+          if (splitViewSecondaryIsEditing === isEditing) return;
+          splitViewSecondaryIsEditing = isEditing;
+          renderStatusMode();
+          syncTitlebar();
+          scheduleRibbonSelectionFormatStateUpdate();
         },
       });
 
@@ -4361,7 +4381,7 @@ if (
     const redoLabel = redoLabelText
       ? tWithVars("menu.redoWithLabel", { label: redoLabelText })
       : t("command.edit.redo");
-    const allowEditCommands = !app.isEditing();
+    const allowEditCommands = !isSpreadsheetEditing();
 
     const menuItems: ContextMenuItem[] = [
       {

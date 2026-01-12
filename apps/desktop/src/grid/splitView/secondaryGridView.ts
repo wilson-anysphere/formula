@@ -49,6 +49,7 @@ export class SecondaryGridView {
   private readonly getSheetId: () => string;
   private readonly getComputedValue: (cell: { row: number; col: number }) => string | number | boolean | null;
   private readonly onRequestRefresh?: () => void;
+  private readonly onEditStateChange?: (isEditing: boolean) => void;
   private readonly headerRows = 1;
   private readonly headerCols = 1;
   private readonly editor: CellEditorOverlay;
@@ -100,6 +101,13 @@ export class SecondaryGridView {
      * (e.g. formula bar, charts, auditing overlays in the primary pane).
      */
     onRequestRefresh?: () => void;
+    /**
+     * Optional hook to notify when the secondary in-cell editor opens/closes.
+     *
+     * SpreadsheetApp's edit state does not include this secondary editor, so the desktop
+     * shell uses this to keep UI state (status bar, shortcut gating, etc) in sync.
+     */
+    onEditStateChange?: (isEditing: boolean) => void;
   }) {
     this.container = options.container;
     this.document = options.document;
@@ -110,6 +118,7 @@ export class SecondaryGridView {
     this.persistDebounceMs = options.persistDebounceMs ?? 150;
     this.sheetId = options.getSheetId();
     this.onRequestRefresh = options.onRequestRefresh;
+    this.onEditStateChange = options.onEditStateChange;
 
     // Clear any placeholder content from the split-view scaffolding.
     this.container.replaceChildren();
@@ -161,6 +170,7 @@ export class SecondaryGridView {
           commit.reason === "command" && this.suppressFocusRestoreOnNextCommandCommit;
         this.suppressFocusRestoreOnNextCommandCommit = false;
         this.editingCell = null;
+        this.onEditStateChange?.(false);
         this.applyEdit(commit.cell, commit.value);
         if (commit.reason === "enter" || commit.reason === "tab") {
           this.advanceSelectionAfterEdit(commit);
@@ -171,6 +181,7 @@ export class SecondaryGridView {
       onCancel: () => {
         this.suppressFocusRestoreOnNextCommandCommit = false;
         this.editingCell = null;
+        this.onEditStateChange?.(false);
         focusWithoutScroll(this.container);
       }
     });
@@ -352,6 +363,7 @@ export class SecondaryGridView {
     const initialValue = request.initialKey ?? this.getCellInputText(cell);
     this.editingCell = cell;
     this.editor.open(cell, rect, initialValue, { cursor: "end" });
+    this.onEditStateChange?.(true);
   }
 
   private getCellInputText(cell: { row: number; col: number }): string {

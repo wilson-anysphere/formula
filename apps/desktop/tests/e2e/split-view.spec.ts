@@ -197,9 +197,11 @@ test.describe("split view", () => {
     await page.keyboard.press("h");
     const editor = secondary.locator("textarea.cell-editor");
     await expect(editor).toBeVisible();
+    await expect(page.getByTestId("status-mode")).toHaveText("Edit");
     await page.keyboard.type("ello");
     await page.keyboard.press("Enter");
     await waitForIdle(page);
+    await expect(page.getByTestId("status-mode")).toHaveText("Ready");
 
     await expect(page.getByTestId("active-cell")).toHaveText("A2");
     expect(await page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("hello");
