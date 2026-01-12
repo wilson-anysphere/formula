@@ -607,6 +607,15 @@ impl<'a> FragmentCursor<'a> {
                     let bytes = self.read_bytes(10)?;
                     out.extend_from_slice(&bytes);
                 }
+                // 3D error references: PtgRefErr3d / PtgAreaErr3d.
+                0x3C | 0x5C | 0x7C => {
+                    let bytes = self.read_bytes(6)?;
+                    out.extend_from_slice(&bytes);
+                }
+                0x3D | 0x5D | 0x7D => {
+                    let bytes = self.read_bytes(10)?;
+                    out.extend_from_slice(&bytes);
+                }
                 // PtgMem* tokens: consume the nested rgce payload. These tokens have the form:
                 //   [ptg][cce: u16][rgce: cce bytes]
                 //

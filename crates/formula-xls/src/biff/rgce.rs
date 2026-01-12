@@ -668,6 +668,28 @@ pub(crate) fn decode_biff8_rgce(rgce: &[u8], ctx: &RgceDecodeContext<'_>) -> Dec
                 let area = format_area_ref(row1, col1, row2, col2);
                 stack.push(ExprFragment::new(format!("{sheet_prefix}{area}")));
             }
+            // PtgRefErr3d: consume payload and emit `#REF!`.
+            //
+            // Payload matches `PtgRef3d`: [ixti: u16][row: u16][col: u16]
+            0x3C | 0x5C | 0x7C => {
+                if input.len() < 6 {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                }
+                input = &input[6..];
+                stack.push(ExprFragment::new("#REF!".to_string()));
+            }
+            // PtgAreaErr3d: consume payload and emit `#REF!`.
+            //
+            // Payload matches `PtgArea3d`: [ixti: u16][row1: u16][row2: u16][col1: u16][col2: u16]
+            0x3D | 0x5D | 0x7D => {
+                if input.len() < 10 {
+                    warnings.push("unexpected end of rgce stream".to_string());
+                    return unsupported(ptg, warnings);
+                }
+                input = &input[10..];
+                stack.push(ExprFragment::new("#REF!".to_string()));
+            }
             other => {
                 warnings.push(format!("unsupported rgce token 0x{other:02X}"));
                 return unsupported(other, warnings);
@@ -1058,6 +1080,46 @@ mod tests {
 
         // Dummy payload (8 bytes).
         let rgce = [0x2B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#REF!");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+    }
+
+    #[test]
+    fn decodes_ptg_referr3d_to_ref() {
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // Dummy payload (6 bytes): ixti=0 row=0 col=0.
+        let rgce = [0x3C, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let decoded = decode_biff8_rgce(&rgce, &ctx);
+        assert_eq!(decoded.text, "#REF!");
+        assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
+    }
+
+    #[test]
+    fn decodes_ptg_areaerr3d_to_ref() {
+        let sheet_names: Vec<String> = vec!["Sheet1".to_string()];
+        let externsheet: Vec<ExternSheetRef> = vec![ExternSheetRef {
+            itab_first: 0,
+            itab_last: 0,
+        }];
+        let defined_names: Vec<DefinedNameMeta> = Vec::new();
+        let ctx = empty_ctx(&sheet_names, &externsheet, &defined_names);
+
+        // Dummy payload (10 bytes): ixti=0 + 8 bytes area.
+        let rgce = [
+            0x3D, 0x00, 0x00, // ixti
+            0x00, 0x00, // row1
+            0x00, 0x00, // row2
+            0x00, 0x00, // col1
+            0x00, 0x00, // col2
+        ];
         let decoded = decode_biff8_rgce(&rgce, &ctx);
         assert_eq!(decoded.text, "#REF!");
         assert!(decoded.warnings.is_empty(), "warnings={:?}", decoded.warnings);
