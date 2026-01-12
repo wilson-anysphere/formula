@@ -270,4 +270,54 @@ describe("SIEM outbound TLS policy (certificate pinning)", () => {
       await siem.close();
     }
   });
+
+  it("rejects http endpoints in production and emits a distinct error metric", async () => {
+    const previousEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      const orgId = crypto.randomUUID();
+      await insertOrg(db, orgId);
+
+      const eventId = crypto.randomUUID();
+      await insertAuditEvent({
+        db,
+        id: eventId,
+        orgId,
+        createdAt: new Date("2025-01-01T03:00:00.000Z"),
+        eventType: "test.http_in_production"
+      });
+
+      const config: SiemEndpointConfig = {
+        endpointUrl: "http://example.invalid/ingest",
+        format: "json",
+        retry: { maxAttempts: 10, baseDelayMs: 1, maxDelayMs: 5, jitter: false }
+      };
+
+      const metrics = createMetrics();
+      const worker = new SiemExportWorker({
+        db,
+        configProvider: new StaticConfigProvider([{ orgId, config }]),
+        metrics,
+        logger,
+        pollIntervalMs: 0
+      });
+
+      await worker.tick();
+
+      const state = await db.query(
+        "SELECT last_event_id, consecutive_failures, last_error FROM org_siem_export_state WHERE org_id = $1",
+        [orgId]
+      );
+      expect(state.rows[0].last_event_id).toBeNull();
+      expect(state.rows[0].consecutive_failures).toBe(1);
+      expect(String(state.rows[0].last_error)).toContain("SIEM endpoint must use https in production");
+
+      const errors = await metrics.siemBatchErrorsTotal.get();
+      expect(errors.values).toEqual(
+        expect.arrayContaining([expect.objectContaining({ labels: { reason: "insecure_http_endpoint" }, value: 1 })])
+      );
+    } finally {
+      process.env.NODE_ENV = previousEnv;
+    }
+  });
 });
