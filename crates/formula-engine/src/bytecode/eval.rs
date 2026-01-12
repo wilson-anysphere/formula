@@ -595,6 +595,21 @@ mod tests {
         assert_eq!(value, Value::Number(1.0));
         assert_eq!(grid.reads(), 0, "unused IFS condition should not be evaluated");
 
+        // IFS(TRUE, 1, SUM(A1:A10), 2) should not evaluate later conditions, even if they would use
+        // range reads.
+        let expr =
+            super::super::parse_formula("=IFS(TRUE, 1, SUM(A1:A10), 2)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Number(1.0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "unused IFS condition should not be evaluated (including range reads)"
+        );
+
         // IFS(FALSE, A1, TRUE, 2) should not evaluate the value for a FALSE condition.
         let expr = super::super::parse_formula("=IFS(FALSE, A1, TRUE, 2)", origin).expect("parse");
         let program = super::super::BytecodeCache::new().get_or_compile(&expr);
@@ -606,6 +621,21 @@ mod tests {
             grid.reads(),
             0,
             "unused IFS value expression should not be evaluated"
+        );
+
+        // IFS(FALSE, SUM(A1:A10), TRUE, 2) should not evaluate the value for a FALSE condition,
+        // even if it would use range reads.
+        let expr =
+            super::super::parse_formula("=IFS(FALSE, SUM(A1:A10), TRUE, 2)", origin).expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Number(2.0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "unused IFS value expression should not be evaluated (including range reads)"
         );
     }
 
@@ -624,6 +654,21 @@ mod tests {
         assert_eq!(value, Value::Number(10.0));
         assert_eq!(grid.reads(), 0, "unused SWITCH case value should not be evaluated");
 
+        // SWITCH(1, 1, 10, SUM(A1:A10), 20) should not evaluate later case values after a match,
+        // even if they would use range reads.
+        let expr = super::super::parse_formula("=SWITCH(1, 1, 10, SUM(A1:A10), 20)", origin)
+            .expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Number(10.0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "unused SWITCH case value should not be evaluated (including range reads)"
+        );
+
         // SWITCH(2, 1, A1, 2, 20) should not evaluate the result for a non-matching case.
         let expr =
             super::super::parse_formula("=SWITCH(2, 1, A1, 2, 20)", origin).expect("parse");
@@ -638,6 +683,21 @@ mod tests {
             "unused SWITCH result expression should not be evaluated"
         );
 
+        // SWITCH(2, 1, SUM(A1:A10), 2, 20) should not evaluate the result for a non-matching case,
+        // even if it would use range reads.
+        let expr = super::super::parse_formula("=SWITCH(2, 1, SUM(A1:A10), 2, 20)", origin)
+            .expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Number(20.0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "unused SWITCH result expression should not be evaluated (including range reads)"
+        );
+
         // If the discriminant expression is an error, SWITCH should not evaluate any case values.
         let expr =
             super::super::parse_formula("=SWITCH(1/0, 1, 10, A1, 20)", origin).expect("parse");
@@ -650,6 +710,21 @@ mod tests {
             grid.reads(),
             0,
             "SWITCH should not evaluate case values when discriminant is an error"
+        );
+
+        // If the discriminant expression is an error, SWITCH should not evaluate any case values,
+        // even if they would use range reads.
+        let expr = super::super::parse_formula("=SWITCH(1/0, 1, 10, SUM(A1:A10), 20)", origin)
+            .expect("parse");
+        let program = super::super::BytecodeCache::new().get_or_compile(&expr);
+        let grid = CountingGrid::new(10, 10);
+        let mut vm = Vm::with_capacity(32);
+        let value = vm.eval(&program, &grid, 0, origin, &locale);
+        assert_eq!(value, Value::Error(super::super::value::ErrorKind::Div0));
+        assert_eq!(
+            grid.reads(),
+            0,
+            "SWITCH should not evaluate case values when discriminant is an error (including range reads)"
         );
     }
 
