@@ -5,6 +5,7 @@ use formula_engine::{
     Engine, ErrorKind, NameDefinition, NameScope, ParseOptions, Span as EngineSpan, Token,
     TokenKind, Value as EngineValue,
 };
+use formula_engine::value::{EntityValue, RecordValue};
 use formula_engine::locale::{
     canonicalize_formula, get_locale, FormulaLocale, ValueLocaleConfig, EN_US,
 };
@@ -472,6 +473,97 @@ fn json_to_engine_value(value: &JsonValue) -> EngineValue {
     }
 }
 
+fn json_to_engine_value_rich(value: &JsonValue) -> Result<EngineValue, JsValue> {
+    if is_scalar_json(value) {
+        return Ok(json_to_engine_value(value));
+    }
+
+    match value {
+        JsonValue::Array(_) => Err(js_err("invalid rich value: arrays are not supported")),
+        JsonValue::Object(obj) => json_object_to_engine_value_rich(obj),
+        _ => Ok(json_to_engine_value(value)),
+    }
+}
+
+fn json_object_to_engine_value_rich(
+    obj: &serde_json::Map<String, JsonValue>,
+) -> Result<EngineValue, JsValue> {
+    let value_type = obj
+        .get("type")
+        .ok_or_else(|| js_err("invalid rich value: missing `type`"))?;
+    let value_type = value_type
+        .as_str()
+        .ok_or_else(|| js_err("invalid rich value: `type` must be a string"))?;
+
+    match value_type {
+        "entity" => {
+            let entity_type = json_object_require_string(obj, "entityType")?;
+            let entity_type = (!entity_type.is_empty()).then_some(entity_type);
+            let entity_id = json_object_require_string(obj, "entityId")?;
+            let entity_id = (!entity_id.is_empty()).then_some(entity_id);
+            let display_value = json_object_require_string(obj, "displayValue")?;
+            let properties = json_object_require_object(obj, "properties")?;
+
+            let mut out_fields = HashMap::new();
+            for (key, value) in properties {
+                out_fields.insert(key.clone(), json_to_engine_value_rich(value)?);
+            }
+
+            Ok(EngineValue::Entity(EntityValue {
+                display: display_value,
+                entity_type,
+                entity_id,
+                fields: out_fields,
+            }))
+        }
+        "record" => {
+            let display_field = json_object_require_string(obj, "displayField")?;
+            let fields = json_object_require_object(obj, "fields")?;
+
+            let mut out_fields = HashMap::new();
+            for (key, value) in fields {
+                out_fields.insert(key.clone(), json_to_engine_value_rich(value)?);
+            }
+
+            let display = out_fields
+                .get(&display_field)
+                .map(ToString::to_string)
+                .unwrap_or_default();
+            let display_field = (!display_field.is_empty()).then_some(display_field);
+
+            Ok(EngineValue::Record(RecordValue {
+                display,
+                display_field,
+                fields: out_fields,
+            }))
+        }
+        other => Err(js_err(format!(
+            "invalid rich value: unknown type `{other}`"
+        ))),
+    }
+}
+
+fn json_object_require_string(
+    obj: &serde_json::Map<String, JsonValue>,
+    key: &str,
+) -> Result<String, JsValue> {
+    obj.get(key)
+        .ok_or_else(|| js_err(format!("invalid rich value: missing `{key}`")))?
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| js_err(format!("invalid rich value: `{key}` must be a string")))
+}
+
+fn json_object_require_object<'a>(
+    obj: &'a serde_json::Map<String, JsonValue>,
+    key: &str,
+) -> Result<&'a serde_json::Map<String, JsonValue>, JsValue> {
+    obj.get(key)
+        .ok_or_else(|| js_err(format!("invalid rich value: missing `{key}`")))?
+        .as_object()
+        .ok_or_else(|| js_err(format!("invalid rich value: `{key}` must be an object")))
+}
+
 fn engine_value_to_json(value: EngineValue) -> JsonValue {
     match value {
         EngineValue::Blank => JsonValue::Null,
@@ -489,6 +581,50 @@ fn engine_value_to_json(value: EngineValue) -> JsonValue {
         // Degrade any rich/non-scalar value (references, lambdas, entities, records, etc.) to its
         // display string so existing `getCell` / `recalculate` callers keep receiving scalars.
         other => JsonValue::String(other.to_string()),
+    }
+}
+
+fn engine_value_to_json_rich(value: EngineValue) -> JsonValue {
+    match value {
+        EngineValue::Entity(entity) => {
+            let mut properties = serde_json::Map::new();
+            for (key, value) in entity.fields {
+                properties.insert(key, engine_value_to_json_rich(value));
+            }
+
+            let mut out = serde_json::Map::new();
+            out.insert("type".to_string(), JsonValue::String("entity".to_string()));
+            out.insert(
+                "entityType".to_string(),
+                JsonValue::String(entity.entity_type.unwrap_or_default()),
+            );
+            out.insert(
+                "entityId".to_string(),
+                JsonValue::String(entity.entity_id.unwrap_or_default()),
+            );
+            out.insert(
+                "displayValue".to_string(),
+                JsonValue::String(entity.display),
+            );
+            out.insert("properties".to_string(), JsonValue::Object(properties));
+            JsonValue::Object(out)
+        }
+        EngineValue::Record(record) => {
+            let mut fields = serde_json::Map::new();
+            for (key, value) in record.fields {
+                fields.insert(key, engine_value_to_json_rich(value));
+            }
+
+            let mut out = serde_json::Map::new();
+            out.insert("type".to_string(), JsonValue::String("record".to_string()));
+            out.insert(
+                "displayField".to_string(),
+                JsonValue::String(record.display_field.unwrap_or_default()),
+            );
+            out.insert("fields".to_string(), JsonValue::Object(fields));
+            JsonValue::Object(out)
+        }
+        other => engine_value_to_json(other),
     }
 }
 
@@ -1052,8 +1188,13 @@ impl WorkbookState {
         &mut self,
         sheet: &str,
         address: &str,
-        value: CellValue,
+        input: JsonValue,
     ) -> Result<(), JsValue> {
+        // Preserve the scalar-only JS worker protocol by delegating to the existing
+        // implementation for all scalar inputs (including formulas and null-clears).
+        if is_scalar_json(&input) {
+            return self.set_cell_internal(sheet, address, input);
+        }
         let sheet = self.ensure_sheet(sheet);
         let cell_ref = Self::parse_address(address)?;
         let address = cell_ref.to_a1();
@@ -1078,43 +1219,29 @@ impl WorkbookState {
             }
         }
 
-        let sheet_cells = self
-            .sheets
-            .get_mut(&sheet)
-            .expect("sheet just ensured must exist");
-        let sheet_cells_rich = self
-            .sheets_rich
-            .get_mut(&sheet)
-            .expect("sheet just ensured must exist");
-
-        if value.is_empty() {
-            self.engine
-                .clear_cell(&sheet, &address)
-                .map_err(|err| js_err(err.to_string()))?;
-            sheet_cells.remove(&address);
-            sheet_cells_rich.remove(&address);
-            self.pending_spill_clears
-                .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
-            self.pending_formula_baselines
-                .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
-            return Ok(());
+        // Clear any stored rich input for this cell. This keeps scalar IO stable even if callers
+        // mix the JSON-based rich API with the internal `CellValue` rich helpers.
+        if let Some(rich_cells) = self.sheets_rich.get_mut(&sheet) {
+            rich_cells.remove(&address);
         }
 
-        let engine_value = cell_value_to_engine_rich(&value)?;
+        let engine_value = json_to_engine_value_rich(&input).map_err(|err| {
+            let message = err
+                .as_string()
+                .unwrap_or_else(|| "invalid rich value".to_string());
+            js_err(format!("invalid cell value: {address}: {message}"))
+        })?;
         self.engine
             .set_cell_value(&sheet, &address, engine_value)
             .map_err(|err| js_err(err.to_string()))?;
 
-        // Preserve the legacy scalar workbook JSON schema by storing a degraded scalar input.
-        let scalar_input = cell_value_to_scalar_json_input(&value);
-        debug_assert!(is_scalar_json(&scalar_input));
-        if scalar_input.is_null() {
-            sheet_cells.remove(&address);
-        } else {
-            sheet_cells.insert(address.clone(), scalar_input);
-        }
-
-        sheet_cells_rich.insert(address.clone(), value);
+        // The scalar workbook JSON schema (`toJson`/`getCell.input`) cannot represent rich values.
+        // Remove any stored scalar input for this cell so scalar callers see an empty input.
+        let sheet_cells = self
+            .sheets
+            .get_mut(&sheet)
+            .expect("sheet just ensured must exist");
+        sheet_cells.remove(&address);
 
         self.pending_spill_clears
             .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
@@ -1122,15 +1249,6 @@ impl WorkbookState {
             .remove(&FormulaCellKey::new(sheet.clone(), cell_ref));
         Ok(())
     }
-
-    fn get_cell_rich_internal(&self, sheet: &str, address: &str) -> Result<CellValue, JsValue> {
-        let sheet = self.require_sheet(sheet)?.to_string();
-        let address = Self::parse_address(address)?.to_a1();
-        Ok(engine_value_to_cell_value_rich(
-            self.engine.get_cell_value(&sheet, &address),
-        ))
-    }
-
     fn get_cell_data(&self, sheet: &str, address: &str) -> Result<CellData, JsValue> {
         let sheet = self.require_sheet(sheet)?.to_string();
         let address = Self::parse_address(address)?.to_a1();
@@ -2463,17 +2581,6 @@ impl WasmWorkbook {
         cell_data_to_js(&cell)
     }
 
-    #[wasm_bindgen(js_name = "getCellRich")]
-    pub fn get_cell_rich(
-        &self,
-        address: String,
-        sheet: Option<String>,
-    ) -> Result<JsValue, JsValue> {
-        let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
-        let cell = self.inner.get_cell_rich_data(sheet, &address)?;
-        serde_wasm_bindgen::to_value(&cell).map_err(|err| js_err(err.to_string()))
-    }
-
     #[wasm_bindgen(js_name = "setCell")]
     pub fn set_cell(
         &mut self,
@@ -2495,21 +2602,26 @@ impl WasmWorkbook {
     #[wasm_bindgen(js_name = "setCellRich")]
     pub fn set_cell_rich(
         &mut self,
+        sheet: String,
         address: String,
         value: JsValue,
-        sheet: Option<String>,
     ) -> Result<(), JsValue> {
-        let sheet = sheet.as_deref().unwrap_or(DEFAULT_SHEET);
         if value.is_null() || value.is_undefined() {
             // Preserve sparse semantics: treat null/undefined as clearing the cell.
-            return self
-                .inner
-                .set_cell_internal(sheet, &address, JsonValue::Null);
+            return self.inner.set_cell_internal(&sheet, &address, JsonValue::Null);
         }
 
-        let value: CellValue =
+        let input: JsonValue =
             serde_wasm_bindgen::from_value(value).map_err(|err| js_err(err.to_string()))?;
-        self.inner.set_cell_rich_internal(sheet, &address, value)
+        self.inner.set_cell_rich_internal(&sheet, &address, input)
+    }
+
+    #[wasm_bindgen(js_name = "getCellRich")]
+    pub fn get_cell_rich(&self, sheet: String, address: String) -> Result<JsValue, JsValue> {
+        let sheet = self.inner.require_sheet(&sheet)?.to_string();
+        let address = WorkbookState::parse_address(&address)?.to_a1();
+        let value = engine_value_to_json_rich(self.inner.engine.get_cell_value(&sheet, &address));
+        serde_wasm_bindgen::to_value(&value).map_err(|err| js_err(err.to_string()))
     }
 
     #[wasm_bindgen(js_name = "setCells")]
@@ -2616,49 +2728,41 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn set_cell_rich_entity_roundtrips_through_get_cell_rich_and_degrades_in_get_cell() {
+    fn set_cell_rich_entity_roundtrips_and_degrades_in_get_cell() {
         let mut wb = WorkbookState::new_with_default_sheet();
 
-        wb.set_cell_rich_internal(
-            DEFAULT_SHEET,
-            "A1",
-            CellValue::Entity(formula_model::EntityValue::new("Acme")),
-        )
-        .unwrap();
+        let entity = json!({
+            "type": "entity",
+            "entityType": "",
+            "entityId": "",
+            "displayValue": "Acme",
+            "properties": {}
+        });
 
-        let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
-        assert_eq!(
-            serde_json::to_value(&rich.input).unwrap(),
-            json!({"type":"entity","value":{"displayValue":"Acme"}})
-        );
-        assert_eq!(
-            serde_json::to_value(&rich.value).unwrap(),
-            json!({"type":"entity","value":{"displayValue":"Acme"}})
-        );
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity.clone())
+            .unwrap();
+
+        let roundtripped = engine_value_to_json_rich(wb.engine.get_cell_value(DEFAULT_SHEET, "A1"));
+        assert_eq!(roundtripped, entity);
 
         let scalar = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(scalar.input, JsonValue::Null);
         assert_eq!(scalar.value, json!("Acme"));
     }
 
     #[test]
-    fn set_cell_rich_error_field_degrades_in_get_cell() {
+    fn set_cell_rich_accepts_scalar_error_inputs() {
         let mut wb = WorkbookState::new_with_default_sheet();
 
-        wb.set_cell_rich_internal(
-            DEFAULT_SHEET,
-            "A1",
-            CellValue::Error(formula_model::ErrorValue::Field),
-        )
-        .unwrap();
-
-        let rich = wb.get_cell_rich_data(DEFAULT_SHEET, "A1").unwrap();
-        assert_eq!(
-            serde_json::to_value(&rich.input).unwrap(),
-            json!({"type":"error","value":"#FIELD!"})
-        );
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", json!("#FIELD!"))
+            .unwrap();
 
         let scalar = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(scalar.input, json!("#FIELD!"));
         assert_eq!(scalar.value, json!("#FIELD!"));
+
+        let roundtripped = engine_value_to_json_rich(wb.engine.get_cell_value(DEFAULT_SHEET, "A1"));
+        assert_eq!(roundtripped, json!("#FIELD!"));
     }
 
     #[test]
@@ -2708,16 +2812,15 @@ mod tests {
     fn set_cell_rich_entity_properties_flow_through_to_field_access_formulas() {
         let mut wb = WorkbookState::new_with_default_sheet();
 
-        let mut props = HashMap::new();
-        props.insert("Price".to_string(), CellValue::Number(12.5));
-        let entity = formula_model::EntityValue {
-            entity_type: "stock".to_string(),
-            entity_id: "AAPL".to_string(),
-            display_value: "Apple".to_string(),
-            properties: props,
-        };
+        let entity = json!({
+            "type": "entity",
+            "entityType": "stock",
+            "entityId": "AAPL",
+            "displayValue": "Apple",
+            "properties": { "Price": 12.5 }
+        });
 
-        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", CellValue::Entity(entity.clone()))
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity.clone())
             .unwrap();
         wb.set_cell_internal(DEFAULT_SHEET, "B1", json!("=A1.Price"))
             .unwrap();
@@ -2726,17 +2829,65 @@ mod tests {
         let b1 = wb.get_cell_data(DEFAULT_SHEET, "B1").unwrap();
         assert_eq!(b1.value, json!(12.5));
 
-        let a1_rich = wb.get_cell_rich_internal(DEFAULT_SHEET, "A1").unwrap();
-        match a1_rich {
-            CellValue::Entity(roundtripped) => {
-                assert_eq!(roundtripped.display_value, "Apple");
-                assert_eq!(
-                    roundtripped.properties.get("Price"),
-                    Some(&CellValue::Number(12.5))
-                );
+        let roundtripped = engine_value_to_json_rich(wb.engine.get_cell_value(DEFAULT_SHEET, "A1"));
+        assert_eq!(roundtripped, entity);
+    }
+
+    #[test]
+    fn rich_value_json_roundtrips_entity_and_record() {
+        let input = json!({
+            "type": "entity",
+            "entityType": "stock",
+            "entityId": "AAPL",
+            "displayValue": "Apple Inc.",
+            "properties": {
+                "Price": 178.5,
+                "Owner": {
+                    "type": "record",
+                    "displayField": "Name",
+                    "fields": {
+                        "Name": "Alice",
+                        "Age": 42.0
+                    }
+                }
             }
-            other => panic!("expected entity value, got {other:?}"),
-        }
+        });
+
+        let engine_value = json_to_engine_value_rich(&input).unwrap();
+        let output = engine_value_to_json_rich(engine_value);
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn set_cell_rich_does_not_pollute_scalar_workbook_schema() {
+        let mut wb = WorkbookState::new_with_default_sheet();
+        let entity = json!({
+            "type": "entity",
+            "entityType": "stock",
+            "entityId": "AAPL",
+            "displayValue": "Apple Inc.",
+            "properties": { "Price": 178.5 }
+        });
+
+        wb.set_cell_rich_internal(DEFAULT_SHEET, "A1", entity.clone())
+            .unwrap();
+
+        // Scalar getCell should keep returning scalar inputs/values.
+        let cell = wb.get_cell_data(DEFAULT_SHEET, "A1").unwrap();
+        assert_eq!(cell.input, JsonValue::Null);
+        assert_eq!(cell.value, json!("Apple Inc."));
+
+        // Rich getter should roundtrip the full payload.
+        let roundtripped =
+            engine_value_to_json_rich(wb.engine.get_cell_value(DEFAULT_SHEET, "A1"));
+        assert_eq!(roundtripped, entity);
+
+        // Rich inputs are not representable in the scalar workbook JSON schema.
+        assert!(!wb
+            .sheets
+            .get(DEFAULT_SHEET)
+            .unwrap()
+            .contains_key("A1"));
     }
 
     #[test]

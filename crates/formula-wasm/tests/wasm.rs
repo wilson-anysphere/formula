@@ -1090,25 +1090,23 @@ fn parse_formula_partial_reports_error_span_utf16() {
 }
 
 #[wasm_bindgen_test]
-fn set_cell_rich_entity_properties_support_field_access_formulas() {
+fn rich_values_support_field_access_formulas() {
     let mut wb = WasmWorkbook::new();
 
     let entity = json!({
         "type": "entity",
-        "value": {
-            "entityType": "stock",
-            "entityId": "AAPL",
-            "displayValue": "Apple",
-            "properties": {
-                "Price": { "type": "number", "value": 12.5 }
-            }
+        "entityType": "stock",
+        "entityId": "AAPL",
+        "displayValue": "Apple Inc.",
+        "properties": {
+            "Price": 12.5
         }
     });
 
     wb.set_cell_rich(
+        DEFAULT_SHEET.to_string(),
         "A1".to_string(),
         serde_wasm_bindgen::to_value(&entity).unwrap(),
-        None,
     )
     .unwrap();
     wb.set_cell("B1".to_string(), JsValue::from_str("=A1.Price"), None)
@@ -1120,9 +1118,67 @@ fn set_cell_rich_entity_properties_support_field_access_formulas() {
     let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
     assert_json_number(&b1.value, 12.5);
 
-    let a1_rich_js = wb.get_cell_rich("A1".to_string(), None).unwrap();
-    let a1_rich: JsonValue = serde_wasm_bindgen::from_value(a1_rich_js).unwrap();
-    assert_eq!(a1_rich["type"], json!("entity"));
-    assert_eq!(a1_rich["value"]["displayValue"], json!("Apple"));
-    assert_json_number(&a1_rich["value"]["properties"]["Price"]["value"], 12.5);
+    let got_js = wb
+        .get_cell_rich(DEFAULT_SHEET.to_string(), "A1".to_string())
+        .unwrap();
+    let got: JsonValue = serde_wasm_bindgen::from_value(got_js).unwrap();
+    assert_eq!(got, entity);
+}
+
+#[wasm_bindgen_test]
+fn rich_values_roundtrip_through_wasm_exports() {
+    let mut wb = WasmWorkbook::new();
+
+    let entity = json!({
+        "type": "entity",
+        "entityType": "stock",
+        "entityId": "AAPL",
+        "displayValue": "Apple Inc.",
+        "properties": {
+            "Price": 178.5,
+            "Owner": {
+                "type": "record",
+                "displayField": "Name",
+                "fields": { "Name": "Alice", "Age": 42 }
+            }
+        }
+    });
+
+    wb.set_cell_rich(
+        DEFAULT_SHEET.to_string(),
+        "A1".to_string(),
+        serde_wasm_bindgen::to_value(&entity).unwrap(),
+    )
+    .unwrap();
+
+    let got_js = wb
+        .get_cell_rich(DEFAULT_SHEET.to_string(), "A1".to_string())
+        .unwrap();
+    let got: JsonValue = serde_wasm_bindgen::from_value(got_js).unwrap();
+    assert_eq!(got, entity);
+
+    // Scalar API remains scalar-only.
+    let cell_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert!(cell.input.is_null());
+    assert_eq!(cell.value, JsonValue::String("Apple Inc.".to_string()));
+}
+
+#[wasm_bindgen_test]
+fn rich_values_reject_invalid_payloads() {
+    let mut wb = WasmWorkbook::new();
+
+    let invalid = json!({ "foo": "bar" });
+    let err = wb
+        .set_cell_rich(
+            DEFAULT_SHEET.to_string(),
+            "A1".to_string(),
+            serde_wasm_bindgen::to_value(&invalid).unwrap(),
+        )
+        .unwrap_err();
+
+    let message = err
+        .as_string()
+        .unwrap_or_else(|| "missing error message".to_string());
+    assert!(message.contains("invalid rich value"), "{message}");
 }
