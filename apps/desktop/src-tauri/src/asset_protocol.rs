@@ -149,6 +149,21 @@ fn get_response(
     scope: &Scope,
     window_origin: &str,
 ) -> Result<Response<Vec<u8>>, Box<dyn std::error::Error>> {
+    // Support CORS preflight requests so `fetch()` can opt into non-simple headers (e.g. `Range`)
+    // without forcing the backend to read any file bytes.
+    if request.method() == tauri::http::Method::OPTIONS {
+        return Response::builder()
+            .status(StatusCode::NO_CONTENT)
+            .header("Access-Control-Allow-Origin", window_origin)
+            .header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+            // `Range` is not a simple request header, so it requires preflight when used from
+            // `fetch()`.
+            .header("Access-Control-Allow-Headers", "range")
+            .header("Cross-Origin-Resource-Policy", "cross-origin")
+            .body(Vec::new())
+            .map_err(Into::into);
+    }
+
     // skip leading `/`
     let path = percent_encoding::percent_decode(&request.uri().path().as_bytes()[1..])
         .decode_utf8_lossy()
