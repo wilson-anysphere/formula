@@ -149,4 +149,20 @@ describe("mountTitlebar", () => {
       handle?.dispose();
     });
   }, TEST_TIMEOUT_MS);
+
+  it("omits document name span when documentName is empty/separator-only", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    let handle: ReturnType<typeof mountTitlebar> | null = null;
+    await act(async () => {
+      handle = mountTitlebar(container, { documentName: "—", actions: [] });
+    });
+
+    expect(container.querySelector('[data-testid="titlebar-document-name"]')).toBeNull();
+
+    act(() => {
+      handle?.dispose();
+    });
+  }, TEST_TIMEOUT_MS);
 });
