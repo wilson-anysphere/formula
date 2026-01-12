@@ -57,6 +57,16 @@ export interface EvaluateFormulaOptions {
    * the full range so their semantics remain intact.
    */
   aiRangeSampleLimit?: number;
+  /**
+   * Safety guard: maximum number of cells to fully materialize for a rectangular range reference.
+   *
+   * This evaluator is used in the UI (e.g. formula previews, AI provenance, fallback computed values).
+   * Fully materializing very large ranges (hundreds of thousands to millions of cells) can exhaust
+   * memory or freeze the UI thread. When exceeded, the evaluator returns `#VALUE!`.
+   *
+   * Set to `Infinity` to disable the guard.
+   */
+  maxRangeCells?: number;
 }
 
 // Spreadsheet error codes are a small closed set in Excel (plus a couple of app-specific
@@ -237,6 +247,7 @@ const DEFAULT_CONTEXT: EvalContext = { preserveReferenceProvenance: false, sampl
 
 const DEFAULT_AI_RANGE_SAMPLE_LIMIT = 200;
 const DEFAULT_AI_RANGE_SAMPLE_PREFIX = 30;
+const DEFAULT_MAX_EVAL_RANGE_CELLS = 200_000;
 
 function clampInt(value: number, opts: { min: number; max: number }): number {
   const n = Number.isFinite(value) ? Math.trunc(value) : opts.min;
@@ -345,6 +356,15 @@ function readReference(
     return { __cellRef: cellRef, value };
   }
 
+  const totalCells = (range.end.row - range.start.row + 1) * (range.end.col - range.start.col + 1);
+  const maxRangeCells = options.maxRangeCells ?? DEFAULT_MAX_EVAL_RANGE_CELLS;
+  const maxRangeCellsNormalized =
+    typeof maxRangeCells === "number" && Number.isFinite(maxRangeCells) ? Math.max(0, Math.trunc(maxRangeCells)) : Infinity;
+  const willMaterializeFullRange = !context.sampleRangeReferences;
+  if (willMaterializeFullRange && totalCells > maxRangeCellsNormalized) {
+    return "#VALUE!";
+  }
+
   if (!context.preserveReferenceProvenance) {
     const values: SpreadsheetValue[] = [];
     for (let r = range.start.row; r <= range.end.row; r += 1) {
@@ -356,7 +376,6 @@ function readReference(
     return values;
   }
 
-  const totalCells = (range.end.row - range.start.row + 1) * (range.end.col - range.start.col + 1);
   const maxCells = context.sampleRangeReferences ? Math.min(totalCells, Math.max(1, context.maxRangeCells)) : totalCells;
 
   const values: ProvenanceCellValue[] = [];
