@@ -154,19 +154,25 @@ pub(crate) fn workbook_rels_remove_calc_chain(rels_xml: &[u8]) -> Result<Vec<u8>
         let event = reader.read_event_into(&mut buf)?;
         match event {
             Event::Eof => break,
-            Event::Start(ref e) if e.name().as_ref() == b"Relationship" => {
+            Event::Start(ref e)
+                if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
                 if relationship_is_calc_chain(e, CALC_CHAIN_REL_TYPE)? {
                     skipping = true;
                 } else {
                     writer.write_event(Event::Start(e.to_owned()))?;
                 }
             }
-            Event::Empty(ref e) if e.name().as_ref() == b"Relationship" => {
+            Event::Empty(ref e)
+                if crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
                 if !relationship_is_calc_chain(e, CALC_CHAIN_REL_TYPE)? {
                     writer.write_event(Event::Empty(e.to_owned()))?;
                 }
             }
-            Event::End(ref e) if skipping && e.name().as_ref() == b"Relationship" => {
+            Event::End(ref e)
+                if skipping && crate::openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
                 skipping = false;
             }
             ev if skipping => drop(ev),
@@ -184,10 +190,11 @@ fn relationship_is_calc_chain(e: &BytesStart<'_>, expected_type: &str) -> Result
     for attr in e.attributes() {
         let attr = attr?;
         let value = attr.unescape_value()?.into_owned();
-        match attr.key.as_ref() {
-            b"Type" => rel_type = Some(value),
-            b"Target" => target = Some(value),
-            _ => {}
+        let key = crate::openxml::local_name(attr.key.as_ref());
+        if key.eq_ignore_ascii_case(b"Type") {
+            rel_type = Some(value);
+        } else if key.eq_ignore_ascii_case(b"Target") {
+            target = Some(value);
         }
     }
 

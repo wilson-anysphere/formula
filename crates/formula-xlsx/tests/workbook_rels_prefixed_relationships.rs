@@ -5,6 +5,9 @@ use quick_xml::Reader;
 use zip::write::FileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+const REL_TYPE_STYLES: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles";
+
 fn build_prefixed_workbook_rels_xlsx() -> Vec<u8> {
     let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -73,6 +76,61 @@ fn build_prefixed_workbook_rels_xlsx() -> Vec<u8> {
 
     zip.start_file("xl/customStyles.xml", options).unwrap();
     zip.write_all(styles_xml.as_bytes()).unwrap();
+
+    zip.finish().unwrap().into_inner()
+}
+
+fn build_prefixed_workbook_rels_xlsx_missing_styles_relationship() -> Vec<u8> {
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/customSheet.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>"#;
+
+    let root_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#;
+
+    let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>"#;
+
+    let workbook_rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<rel:Relationships xmlns:rel="http://schemas.openxmlformats.org/package/2006/relationships">
+  <rel:Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/customSheet.xml"/>
+</rel:Relationships>"#;
+
+    let worksheet_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData/>
+</worksheet>"#;
+
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let options = FileOptions::<()>::default().compression_method(CompressionMethod::Deflated);
+
+    zip.start_file("[Content_Types].xml", options).unwrap();
+    zip.write_all(content_types.as_bytes()).unwrap();
+
+    zip.start_file("_rels/.rels", options).unwrap();
+    zip.write_all(root_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/workbook.xml", options).unwrap();
+    zip.write_all(workbook_xml.as_bytes()).unwrap();
+
+    zip.start_file("xl/_rels/workbook.xml.rels", options).unwrap();
+    zip.write_all(workbook_rels.as_bytes()).unwrap();
+
+    zip.start_file("xl/worksheets/customSheet.xml", options)
+        .unwrap();
+    zip.write_all(worksheet_xml.as_bytes()).unwrap();
 
     zip.finish().unwrap().into_inner()
 }
@@ -161,3 +219,27 @@ fn workbook_rels_prefixed_relationship_elements_load_and_save() -> Result<(), Bo
     Ok(())
 }
 
+#[test]
+fn writer_inserts_missing_styles_relationship_using_existing_prefix(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let bytes = build_prefixed_workbook_rels_xlsx_missing_styles_relationship();
+
+    let doc = formula_xlsx::load_from_bytes(&bytes)?;
+    let saved = doc.save_to_vec()?;
+
+    let rels_xml = String::from_utf8(zip_part(&saved, "xl/_rels/workbook.xml.rels"))?;
+    assert!(
+        rels_xml.contains(&format!(
+            r#"<rel:Relationship Id="rId2" Type="{REL_TYPE_STYLES}" Target="styles.xml"/>"#
+        )),
+        "expected writer to insert a prefixed styles relationship into workbook.xml.rels, got:\n{rels_xml}"
+    );
+
+    let mut archive = ZipArchive::new(Cursor::new(&saved))?;
+    assert!(
+        archive.by_name("xl/styles.xml").is_ok(),
+        "expected writer to synthesize xl/styles.xml when styles relationship was missing"
+    );
+
+    Ok(())
+}

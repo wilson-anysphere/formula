@@ -288,12 +288,12 @@ fn parse_workbook_rels(rels_xml: &[u8]) -> Result<HashMap<String, String>, Print
     let mut map = HashMap::new();
     loop {
         match reader.read_event_into(&mut buf)? {
-            Event::Start(e) if e.name().as_ref() == b"Relationship" => {
+            Event::Start(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"Relationship") => {
                 if let Some((id, target)) = parse_relationship(&e)? {
                     map.insert(id, target);
                 }
             }
-            Event::Empty(e) if e.name().as_ref() == b"Relationship" => {
+            Event::Empty(e) if e.local_name().as_ref().eq_ignore_ascii_case(b"Relationship") => {
                 if let Some((id, target)) = parse_relationship(&e)? {
                     map.insert(id, target);
                 }
@@ -312,10 +312,11 @@ fn parse_relationship(e: &BytesStart<'_>) -> Result<Option<(String, String)>, Pr
     let mut target: Option<String> = None;
     for attr in e.attributes().with_checks(false) {
         let attr = attr?;
-        match attr.key.as_ref() {
-            b"Id" => id = Some(attr.unescape_value()?.to_string()),
-            b"Target" => target = Some(attr.unescape_value()?.to_string()),
-            _ => {}
+        let key = crate::openxml::local_name(attr.key.as_ref());
+        if key.eq_ignore_ascii_case(b"Id") {
+            id = Some(attr.unescape_value()?.to_string());
+        } else if key.eq_ignore_ascii_case(b"Target") {
+            target = Some(attr.unescape_value()?.to_string());
         }
     }
 

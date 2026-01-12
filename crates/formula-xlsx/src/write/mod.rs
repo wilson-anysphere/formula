@@ -3491,20 +3491,90 @@ fn ensure_workbook_rels_has_relationship(
     let Some(existing) = parts.get(rels_name).cloned() else {
         return Ok(());
     };
-    let mut xml = String::from_utf8(existing)
-        .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
-    if xml.contains(rel_type) {
-        parts.insert(rels_name.to_string(), xml.into_bytes());
+    if relationship_target_by_type(&existing, rel_type)?.is_some() {
         return Ok(());
     }
+
+    let xml = String::from_utf8(existing.clone())
+        .map_err(|e| WriteError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
     let next = next_relationship_id_in_xml(&xml);
-    let rel = format!(
-        r#"<Relationship Id="rId{next}" Type="{rel_type}" Target="{target}"/>"#
-    );
-    if let Some(idx) = xml.rfind("</Relationships>") {
-        xml.insert_str(idx, &rel);
+    let id = format!("rId{next}");
+
+    let mut reader = Reader::from_reader(existing.as_slice());
+    reader.config_mut().trim_text(false);
+    let mut writer = Writer::new(Vec::with_capacity(existing.len() + 128));
+    let mut buf = Vec::new();
+
+    let mut root_prefix: Option<String> = None;
+    let mut root_has_default_ns = false;
+    let mut relationship_prefix: Option<String> = None;
+
+    loop {
+        let event = reader.read_event_into(&mut buf)?;
+        match event {
+            Event::Eof => break,
+            Event::Start(ref e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") =>
+            {
+                if root_prefix.is_none() {
+                    root_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                }
+                if !root_has_default_ns {
+                    for attr in e.attributes() {
+                        let attr = attr?;
+                        if attr.key.as_ref() == b"xmlns" {
+                            root_has_default_ns = true;
+                            break;
+                        }
+                    }
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Start(ref e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
+                if relationship_prefix.is_none() {
+                    relationship_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                }
+                writer.write_event(Event::Start(e.to_owned()))?;
+            }
+            Event::Empty(ref e)
+                if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationship") =>
+            {
+                if relationship_prefix.is_none() {
+                    relationship_prefix = element_prefix(e.name().as_ref())
+                        .and_then(|p| std::str::from_utf8(p).ok())
+                        .map(|s| s.to_string());
+                }
+                writer.write_event(Event::Empty(e.to_owned()))?;
+            }
+            Event::End(ref e) if local_name(e.name().as_ref()).eq_ignore_ascii_case(b"Relationships") => {
+                let prefix = relationship_prefix.as_deref().or_else(|| {
+                    if root_has_default_ns {
+                        None
+                    } else {
+                        root_prefix.as_deref()
+                    }
+                });
+                let relationship_tag = prefixed_tag(prefix, "Relationship");
+                let mut rel = quick_xml::events::BytesStart::new(relationship_tag.as_str());
+                rel.push_attribute(("Id", id.as_str()));
+                rel.push_attribute(("Type", rel_type));
+                rel.push_attribute(("Target", target));
+                writer.write_event(Event::Empty(rel))?;
+
+                writer.write_event(Event::End(e.to_owned()))?;
+            }
+            ev => writer.write_event(ev.into_owned())?,
+        }
+        buf.clear();
     }
-    parts.insert(rels_name.to_string(), xml.into_bytes());
+
+    parts.insert(rels_name.to_string(), writer.into_inner());
     Ok(())
 }
 
