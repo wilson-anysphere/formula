@@ -122,7 +122,9 @@ Minimal excerpt (not copy/pasteable; see the full file for everything):
     "security": {
       "csp": "default-src 'self'; ...; worker-src 'self' blob:; ...;"
     },
-    "windows": [{ "title": "Formula", "width": 1280, "height": 800, "dragDropEnabled": true }]
+    "windows": [
+      { "label": "main", "title": "Formula", "width": 1280, "height": 800, "dragDropEnabled": true, "capabilities": ["main"] }
+    ]
   },
   "bundle": {
     "fileAssociations": [{ "ext": ["xlsx"], "name": "Excel Spreadsheet", "role": "Editor" }]
