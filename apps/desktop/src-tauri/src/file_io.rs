@@ -1751,29 +1751,11 @@ fn app_workbook_to_formula_model(workbook: &Workbook) -> anyhow::Result<formula_
             .sheet_mut(model_sheet_id)
             .ok_or_else(|| anyhow::anyhow!("sheet missing from model: {}", sheet.id))?;
 
-        if let Some(columnar) = sheet.columnar.as_deref() {
-            for row in 0..columnar.row_count() {
-                let row_u32 = u32::try_from(row)
-                    .map_err(|_| anyhow::anyhow!("columnar row out of bounds: {row}"))?;
-                for col in 0..columnar.column_count() {
-                    let col_u32 = u32::try_from(col)
-                        .map_err(|_| anyhow::anyhow!("columnar col out of bounds: {col}"))?;
-                    let Some(cell_ref) = formula_model::CellRef::try_new(row_u32, col_u32) else {
-                        continue;
-                    };
-
-                    let col_type = columnar
-                        .schema()
-                        .get(col)
-                        .map(|c| c.column_type)
-                        .unwrap_or(ColumnarType::String);
-                    let scalar = columnar_to_scalar(columnar.get_cell(row, col), col_type);
-                    if matches!(scalar, CellScalar::Empty) {
-                        continue;
-                    }
-                    model_sheet.set_value(cell_ref, scalar_to_model_value(&scalar));
-                }
-            }
+        if let Some(columnar) = sheet.columnar.as_ref() {
+            // Preserve columnar-backed worksheets without materializing the full dataset
+            // into the sparse cell map. The XLSX writer can stream from the columnar
+            // table, while `sheet.cells` acts as an overlay for edits/formulas.
+            model_sheet.set_columnar_table(formula_model::CellRef::new(0, 0), columnar.clone());
         }
 
         for ((row, col), cell) in sheet.cells_iter() {
@@ -2621,6 +2603,52 @@ mod tests {
         );
         assert_eq!(sheet.get_cell(2, 2).computed_value, CellScalar::Bool(true));
         assert_eq!(sheet.get_cell(2, 3).computed_value, CellScalar::Number(3.75));
+    }
+
+    #[test]
+    fn app_workbook_to_formula_model_preserves_columnar_backing_and_overlay_cells() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let path = tmp.path().join("data.csv");
+        std::fs::write(&path, "id,name\n1,hello\n2,world\n").expect("write csv");
+
+        let mut workbook = read_csv_blocking(&path).expect("read csv");
+        assert_eq!(workbook.sheets.len(), 1);
+
+        // Override a single cell on top of the columnar backing.
+        workbook.sheets[0].set_cell(
+            0,
+            1,
+            Cell::from_literal(Some(CellScalar::Text("override".to_string()))),
+        );
+
+        let model = app_workbook_to_formula_model(&workbook).expect("convert workbook to model");
+        let model_sheet = model
+            .sheet_by_name(&workbook.sheets[0].name)
+            .expect("sheet exists");
+
+        assert!(
+            model_sheet.columnar_table().is_some(),
+            "expected model worksheet to preserve columnar backing"
+        );
+
+        // Non-overridden cells should not be materialized into the sparse cell map.
+        let a2 = formula_model::CellRef::new(1, 0);
+        assert!(
+            model_sheet.cell(a2).is_none(),
+            "expected A2 to be served from columnar backing, not stored as a cell record"
+        );
+        assert_eq!(model_sheet.value(a2), ModelCellValue::Number(2.0));
+
+        // Overridden cells should appear in the sparse cell overlay and take precedence.
+        let b1 = formula_model::CellRef::new(0, 1);
+        assert!(
+            model_sheet.cell(b1).is_some(),
+            "expected B1 override to be stored as a sparse cell record"
+        );
+        assert_eq!(
+            model_sheet.value(b1),
+            ModelCellValue::String("override".to_string())
+        );
     }
 
     #[test]
