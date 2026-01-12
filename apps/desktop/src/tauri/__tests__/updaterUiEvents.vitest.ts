@@ -127,6 +127,34 @@ describe("updaterUi (events)", () => {
     expect(toastSpy).not.toHaveBeenCalled();
   });
 
+  it("shows toasts for manual update-check-started and update-check-error events", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="toast-root"></div>';
+
+    const show = vi.fn(async () => {});
+    const setFocus = vi.fn(async () => {});
+    const handle = { show, setFocus };
+
+    vi.stubGlobal("__TAURI__", {
+      window: {
+        getCurrentWindow: () => handle,
+      },
+    });
+
+    const toastSpy = vi.spyOn(ui, "showToast");
+
+    await handleUpdaterEvent("update-check-started", { source: "manual" });
+    await handleUpdaterEvent("update-check-error", { source: "manual", message: "network down" });
+
+    expect(toastSpy).toHaveBeenCalledTimes(2);
+
+    const toasts = document.querySelectorAll<HTMLElement>('[data-testid="toast"]');
+    expect(toasts).toHaveLength(2);
+    expect(toasts[0]?.textContent).toBe(t("updater.checking"));
+    expect(toasts[1]?.dataset.type).toBe("error");
+    expect(toasts[1]?.textContent).toBe(tWithVars("updater.errorWithMessage", { message: "network down" }));
+  });
+
   it("surfaces startup completion events after the user clicks 'Check for Updates' during a startup check", async () => {
     vi.useFakeTimers();
     document.body.innerHTML = '<div id="toast-root"></div>';
