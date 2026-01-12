@@ -1,6 +1,19 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-import { gotoDesktop } from "./helpers";
+import { gotoDesktop, waitForDesktopReady } from "./helpers";
+
+async function waitForIdle(page: Page): Promise<void> {
+  await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+}
+
+async function getA1FontProp(page: Page, prop: "bold" | "italic"): Promise<boolean> {
+  return await page.evaluate((propName) => {
+    const app = (window as any).__formulaApp;
+    const sheetId = app.getCurrentSheetId();
+    const doc = app.getDocument();
+    return doc.getCellFormat(sheetId, "A1").font?.[propName] ?? false;
+  }, prop);
+}
 
 test.describe("formatting shortcuts", () => {
   test("Ctrl/Cmd+B toggles bold on the selection", async ({ page }) => {
@@ -8,43 +21,51 @@ test.describe("formatting shortcuts", () => {
 
     await page.evaluate(() => {
       const app = (window as any).__formulaApp;
+      const sheetId = app.getCurrentSheetId();
       const doc = app.getDocument();
-      doc.setCellValue("Sheet1", "A1", "Hello");
-    });
 
-    await page.waitForFunction(() => {
+      doc.setCellValue(sheetId, "A1", "Hello");
+      app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 } });
+      app.focus();
+    });
+    await waitForIdle(page);
+
+    await page.keyboard.press("ControlOrMeta+B");
+    await waitForIdle(page);
+
+    expect(await getA1FontProp(page, "bold")).toBe(true);
+  });
+
+  test("Ctrl+I toggles italic; Cmd+I opens AI panel without changing formatting", async ({ page }) => {
+    await gotoDesktop(page);
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+
+    await page.evaluate(() => {
       const app = (window as any).__formulaApp;
-      const rect = app?.getCellRectA1?.("A1");
-      return rect && typeof rect.x === "number" && rect.width > 0 && rect.height > 0;
+      app.selectRange({ range: { startRow: 0, endRow: 0, startCol: 0, endCol: 0 } });
+      app.focus();
     });
+    await waitForIdle(page);
 
-    const rect = (await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("A1"))) as {
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-    };
+    expect(await getA1FontProp(page, "italic")).toBe(false);
 
-    // Select A1.
-    await page.locator("#grid").click({
-      position: { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 },
-    });
-    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+    await page.keyboard.press("Control+I");
+    await waitForIdle(page);
+    expect(await getA1FontProp(page, "italic")).toBe(true);
 
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
-    await page.keyboard.press(`${modifier}+B`);
+    await page.keyboard.press("Control+I");
+    await waitForIdle(page);
+    const italicOff = await getA1FontProp(page, "italic");
+    expect(italicOff).toBe(false);
 
-    await expect
-      .poll(async () => {
-        return await page.evaluate(() => {
-          const app = (window as any).__formulaApp;
-          const doc = app.getDocument();
-          const cell = doc.getCell("Sheet1", "A1");
-          const style = doc.styleTable.get(cell.styleId);
-          return style.font?.bold === true;
-        });
-      })
-      .toBe(true);
+    await expect(page.getByTestId("panel-aiChat")).toHaveCount(0);
+
+    await page.keyboard.press("Meta+I");
+    await expect(page.getByTestId("panel-aiChat")).toBeVisible();
+
+    expect(await getA1FontProp(page, "italic")).toBe(italicOff);
   });
 });
 
