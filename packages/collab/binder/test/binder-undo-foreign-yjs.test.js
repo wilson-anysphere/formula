@@ -179,6 +179,12 @@ test("binder normalizes foreign nested cell maps before mutating so collab undo 
   assert.ok(afterUndo);
   assert.ok(afterUndo instanceof Y.Map, "undo should not revert normalization to a foreign Y.Map");
   assert.equal(afterUndo.get("value"), "from-cjs");
+
+  const afterUndoLegacy = cellsRoot.get("Sheet1:0,0");
+  assert.ok(afterUndoLegacy);
+  assert.ok(afterUndoLegacy instanceof Y.Map, "undo should not revert legacy normalization to a foreign Y.Map");
+  assert.equal(afterUndoLegacy.get("value"), "from-cjs");
+
   assert.equal(undoService.canUndo(), false, "normalization should not create an extra undo step");
   assert.equal(documentController.getCell("Sheet1", { row: 0, col: 0 }).value, "from-cjs");
 
