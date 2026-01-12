@@ -349,3 +349,67 @@ fn project_normalized_data_project_properties_excludes_document_property_entirel
         "expected Name property tokens to be included"
     );
 }
+
+#[test]
+fn project_normalized_data_project_properties_excludes_cmg_dpb_gc_and_related_security_properties() {
+    // MS-OVBA §2.4.2.6 excludes several protection-related properties from ProjectNormalizedData.
+    // In practice these often show up as `CMG`, `DPB`, and `GC`, but some producers also emit
+    // longer-name variants such as `Password`, `ProtectionState`, and `VisibilityState`.
+
+    let project_stream = concat!(
+        "CMG=\"CMGSECRET\"\r\n",
+        "DPB=\"DPBSECRET\"\r\n",
+        "GC=\"GCSECRET\"\r\n",
+        "Password=PWSECRET\r\n",
+        "ProtectionState=PSSECRET\r\n",
+        "VisibilityState=VSSECRET\r\n",
+        "Name=\"VBAProject\"\r\n",
+        "HelpContextID=\"1\"\r\n",
+    );
+
+    // `project_normalized_data()` requires `VBA/dir` to exist, but the contents can be empty for
+    // this property-filtering test.
+    let dir_container = compress_container(&[]);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut s = ole.create_stream("PROJECT").expect("PROJECT stream");
+        s.write_all(project_stream.as_bytes())
+            .expect("write PROJECT");
+    }
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+
+    let vba_project_bin = ole.into_inner().into_inner();
+    let normalized =
+        project_normalized_data(&vba_project_bin).expect("compute ProjectNormalizedData");
+
+    // Excluded properties must not contribute (neither name tokens nor value bytes).
+    for needle in [
+        b"CMG" as &[u8],
+        b"CMGSECRET" as &[u8],
+        b"DPB" as &[u8],
+        b"DPBSECRET" as &[u8],
+        b"GC" as &[u8],
+        b"GCSECRET" as &[u8],
+        b"Password" as &[u8],
+        b"PWSECRET" as &[u8],
+        b"ProtectionState" as &[u8],
+        b"PSSECRET" as &[u8],
+        b"VisibilityState" as &[u8],
+        b"VSSECRET" as &[u8],
+    ] {
+        assert!(
+            find_subslice(&normalized, needle).is_none(),
+            "did not expect excluded property bytes to appear in ProjectNormalizedData: {:?}",
+            std::str::from_utf8(needle).unwrap_or("<non-utf8>"),
+        );
+    }
+
+    // Included properties should still contribute as name bytes + value bytes (no separators).
+    assert_eq!(normalized, b"NameVBAProjectHelpContextID1");
+}
