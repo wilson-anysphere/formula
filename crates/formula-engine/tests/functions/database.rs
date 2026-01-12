@@ -263,3 +263,20 @@ fn database_functions_computed_criteria_with_offset_database_range() {
     assert_number(&sheet.eval("=DSUM(B3:E7,\"Salary\",H1:H2)"), 3500.0);
     assert_number(&sheet.eval("=DSUM(B3:E7,4,H1:H2)"), 3500.0);
 }
+
+#[test]
+fn database_functions_computed_criteria_respects_absolute_references() {
+    let mut sheet = TestSheet::new();
+    seed_database(&mut sheet);
+
+    // Absolute row reference: C$2 is pinned to the first record row (Alice, age 30).
+    // Therefore the computed criteria is always FALSE (30 > 30 == FALSE) for every record row.
+    sheet.set_formula("F2", "=C$2>30");
+
+    assert_number(&sheet.eval("=DSUM(A1:D5,\"Salary\",F1:F2)"), 0.0);
+    assert_number(&sheet.eval("=DCOUNT(A1:D5,\"Salary\",F1:F2)"), 0.0);
+    assert_eq!(
+        sheet.eval("=DGET(A1:D5,\"Salary\",F1:F2)"),
+        Value::Error(ErrorKind::Value)
+    );
+}
