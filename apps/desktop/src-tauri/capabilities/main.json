@@ -39,6 +39,7 @@
         { "command": "marketplace_get_extension" },
         { "command": "marketplace_search" },
         { "command": "move_sheet" },
+        { "command": "reorder_sheets" },
         { "command": "network_fetch" },
         { "command": "new_workbook" },
         { "command": "open_external_url" },
