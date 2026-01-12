@@ -5741,22 +5741,61 @@ try {
   });
 
   window.addEventListener("keydown", (e) => {
-    const isSaveCombo = (e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S");
-    const isSaveAsCombo = (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "S" || e.key === "s");
-    if (isSaveAsCombo) {
+    const primary = e.ctrlKey || e.metaKey;
+    if (!primary) return;
+
+    const keyLower = e.key.toLowerCase();
+    const shift = e.shiftKey;
+
+    if (!shift && keyLower === "n") {
       e.preventDefault();
-      void handleSaveAs().catch((err) => {
-        console.error("Failed to save workbook:", err);
-        void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
+      void handleNewWorkbook().catch((err) => {
+        console.error("Failed to create workbook:", err);
+        void nativeDialogs.alert(`Failed to create workbook: ${String(err)}`);
       });
       return;
     }
-    if (!isSaveCombo) return;
-    e.preventDefault();
-    void handleSave().catch((err) => {
-      console.error("Failed to save workbook:", err);
-      void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
-    });
+
+    if (!shift && keyLower === "o") {
+      e.preventDefault();
+      void promptOpenWorkbook().catch((err) => {
+        console.error("Failed to open workbook:", err);
+        void nativeDialogs.alert(`Failed to open workbook: ${String(err)}`);
+      });
+      return;
+    }
+
+    if (!shift && keyLower === "w") {
+      e.preventDefault();
+      void handleCloseRequest({ quit: false }).catch((err) => {
+        console.error("Failed to close window:", err);
+      });
+      return;
+    }
+
+    if (!shift && keyLower === "q") {
+      e.preventDefault();
+      void handleCloseRequest({ quit: true }).catch((err) => {
+        console.error("Failed to quit app:", err);
+      });
+      return;
+    }
+
+    if (keyLower === "s") {
+      if (shift) {
+        e.preventDefault();
+        void handleSaveAs().catch((err) => {
+          console.error("Failed to save workbook:", err);
+          void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
+        });
+        return;
+      }
+      e.preventDefault();
+      void handleSave().catch((err) => {
+        console.error("Failed to save workbook:", err);
+        void nativeDialogs.alert(`Failed to save workbook: ${String(err)}`);
+      });
+    }
   });
 } catch {
   // Not running under Tauri; desktop host integration is unavailable.

@@ -353,7 +353,9 @@ function resolveCollabOptionsFromUrl(): SpreadsheetAppCollabOptions | null {
     const token = params.get("token") ?? undefined;
     const userId = params.get("userId") ?? `user_${Math.random().toString(16).slice(2)}`;
     const userName = params.get("userName") ?? t("presence.anonymous");
-    const defaultUserColor = resolveCssVar("--accent", { fallback: "dodgerblue" });
+    const defaultUserColor = resolveCssVar("--formula-grid-remote-presence-default", {
+      fallback: resolveCssVar("--accent", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) }),
+    });
     const userColor = params.get("userColor") ?? defaultUserColor;
     return {
       wsUrl,
@@ -1407,7 +1409,9 @@ export class SpreadsheetApp {
 
         // Render remote presences.
         this.collabPresenceUnsubscribe = presence.subscribe((presences: any[]) => {
-          const defaultPresenceColor = resolveCssVar("--accent", { fallback: "dodgerblue" });
+          const defaultPresenceColor = resolveCssVar("--formula-grid-remote-presence-default", {
+            fallback: resolveCssVar("--accent", { fallback: resolveCssVar("--text-primary", { fallback: "CanvasText" }) }),
+          });
           this.remotePresences = (Array.isArray(presences) ? presences : []).map((p) => {
             const cursor =
               p?.cursor && typeof p.cursor.row === "number" && typeof p.cursor.col === "number"

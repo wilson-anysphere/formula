@@ -20,22 +20,43 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const firstButtonRef = React.useRef<HTMLButtonElement | null>(null);
 
+  const isMac = React.useMemo(() => {
+    if (typeof navigator === "undefined") return false;
+    return /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+  }, []);
+
+  const shortcut = React.useCallback(
+    (key: string, options: { shift?: boolean } = {}) => {
+      if (isMac) {
+        return `${options.shift ? "⌘⇧" : "⌘"}${key}`;
+      }
+      return `Ctrl+${options.shift ? "Shift+" : ""}${key}`;
+    },
+    [isMac],
+  );
+
   const items = React.useMemo<BackstageItem[]>(
     () => [
-      { label: "New Workbook", hint: "Ctrl+N", testId: "file-new", ariaLabel: "New workbook", onInvoke: actions?.newWorkbook },
-      { label: "Open…", hint: "Ctrl+O", testId: "file-open", ariaLabel: "Open workbook", onInvoke: actions?.openWorkbook },
-      { label: "Save", hint: "Ctrl+S", testId: "file-save", ariaLabel: "Save workbook", onInvoke: actions?.saveWorkbook },
+      {
+        label: "New Workbook",
+        hint: shortcut("N"),
+        testId: "file-new",
+        ariaLabel: "New workbook",
+        onInvoke: actions?.newWorkbook,
+      },
+      { label: "Open…", hint: shortcut("O"), testId: "file-open", ariaLabel: "Open workbook", onInvoke: actions?.openWorkbook },
+      { label: "Save", hint: shortcut("S"), testId: "file-save", ariaLabel: "Save workbook", onInvoke: actions?.saveWorkbook },
       {
         label: "Save As…",
-        hint: "Ctrl+Shift+S",
+        hint: shortcut("S", { shift: true }),
         testId: "file-save-as",
         ariaLabel: "Save workbook as",
         onInvoke: actions?.saveWorkbookAs,
       },
-      { label: "Close Window", hint: "Ctrl+W", testId: "file-close", ariaLabel: "Close window", onInvoke: actions?.closeWindow },
-      { label: "Quit", hint: "Ctrl+Q", testId: "file-quit", ariaLabel: "Quit application", onInvoke: actions?.quit },
+      { label: "Close Window", hint: shortcut("W"), testId: "file-close", ariaLabel: "Close window", onInvoke: actions?.closeWindow },
+      { label: "Quit", hint: shortcut("Q"), testId: "file-quit", ariaLabel: "Quit application", onInvoke: actions?.quit },
     ],
-    [actions],
+    [actions, shortcut],
   );
 
   const focusFirst = React.useCallback(() => {
@@ -130,4 +151,3 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
     </div>
   );
 }
-
