@@ -166,7 +166,7 @@ At a high level:
   - Source: `packages/extension-host/src/browser/index.mjs` (exported as `@formula/extension-host/browser`)
   - Each extension runs in its own module `Worker` (`packages/extension-host/src/browser/extension-worker.mjs`).
 - **Installer + package store:** `WebExtensionManager` (IndexedDB-backed installer/loader)
-  - Source: `packages/extension-marketplace/src/WebExtensionManager.ts`
+  - Source: `packages/extension-marketplace/src/WebExtensionManager.ts` (exported as `@formula/extension-marketplace`)
   - Downloads signed `.fextpkg` packages from the marketplace, verifies SHA-256 + Ed25519 signatures **in the
     WebView**, and persists verified bytes + metadata to IndexedDB.
   - **Boot:** `WebExtensionManager.loadAllInstalled()` loads all installed extensions and triggers startup semantics

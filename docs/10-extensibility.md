@@ -276,6 +276,7 @@ Key components:
   - Marketplace installer for browser/WebView runtimes.
   - Downloads signed `.fextpkg` blobs, verifies them in the WebView, stores verified bytes in IndexedDB, and loads
     them into `BrowserExtensionHost` via `blob:` module URLs.
+  - Package entrypoint: `@formula/extension-marketplace`
 
 ### Desktop architecture
 
