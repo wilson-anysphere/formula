@@ -2,6 +2,7 @@
 
 use serde_json::json;
 use serde_json::Value as JsonValue;
+use js_sys::{Object, Reflect};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -19,6 +20,11 @@ struct LexToken {
     span: Span,
     #[serde(default)]
     value: Option<JsonValue>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TokenKindOnly {
+    kind: String,
 }
 
 fn assert_json_number(value: &JsonValue, expected: f64) {
@@ -148,6 +154,64 @@ fn lex_formula_emits_utf16_spans_for_emoji() {
         .expect("expected string token");
     assert_eq!(string_token.span.start, 1);
     assert_eq!(string_token.span.end, expected_end);
+}
+
+#[wasm_bindgen_test]
+fn lex_formula_honors_locale_id_option_for_arg_separator() {
+    let opts = Object::new();
+    Reflect::set(&opts, &JsValue::from_str("localeId"), &JsValue::from_str("de-DE")).unwrap();
+
+    // In en-US, ';' is an array-row separator. In de-DE, ';' is the argument separator.
+    let tokens_js = lex_formula("=SUMME(1;2)", Some(opts.into())).unwrap();
+    let tokens: Vec<TokenKindOnly> = serde_wasm_bindgen::from_value(tokens_js).unwrap();
+    assert!(
+        tokens.iter().any(|t| t.kind == "ArgSep"),
+        "expected de-DE lexing to emit ArgSep tokens, got {tokens:?}"
+    );
+
+    let default_js = lex_formula("=SUMME(1;2)", None).unwrap();
+    let default_tokens: Vec<TokenKindOnly> = serde_wasm_bindgen::from_value(default_js).unwrap();
+    assert!(
+        default_tokens.iter().any(|t| t.kind == "ArrayRowSep"),
+        "expected default en-US lexing to treat ';' as ArrayRowSep, got {default_tokens:?}"
+    );
+}
+
+#[wasm_bindgen_test]
+fn lex_formula_honors_reference_style_option() {
+    let opts = Object::new();
+    Reflect::set(
+        &opts,
+        &JsValue::from_str("referenceStyle"),
+        &JsValue::from_str("R1C1"),
+    )
+    .unwrap();
+
+    let tokens_js = lex_formula("=R1C1", Some(opts.into())).unwrap();
+    let tokens: Vec<TokenKindOnly> = serde_wasm_bindgen::from_value(tokens_js).unwrap();
+    assert!(
+        tokens.iter().any(|t| t.kind == "R1C1Cell"),
+        "expected R1C1 lexing to emit R1C1Cell tokens, got {tokens:?}"
+    );
+
+    let default_js = lex_formula("=R1C1", None).unwrap();
+    let default_tokens: Vec<TokenKindOnly> = serde_wasm_bindgen::from_value(default_js).unwrap();
+    assert!(
+        default_tokens.iter().all(|t| t.kind != "R1C1Cell"),
+        "expected default A1 lexing to NOT emit R1C1Cell tokens, got {default_tokens:?}"
+    );
+}
+
+#[wasm_bindgen_test]
+fn parse_formula_partial_honors_locale_id_option() {
+    let opts = Object::new();
+    Reflect::set(&opts, &JsValue::from_str("localeId"), &JsValue::from_str("de-DE")).unwrap();
+
+    let parsed_js =
+        parse_formula_partial("=SUMME(1;2)".to_string(), None, Some(opts.into())).unwrap();
+    let parsed: PartialParseResult = serde_wasm_bindgen::from_value(parsed_js).unwrap();
+
+    assert!(parsed.error.is_none(), "expected successful parse, got {parsed:?}");
 }
 
 #[wasm_bindgen_test]
