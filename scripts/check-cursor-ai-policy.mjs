@@ -50,7 +50,6 @@ const EXCLUDED_ROOT_PATHS = new Set([
   "mockups",
   "scratchpad.md",
   "handoff.md",
-  "pnpm-lock.yaml",
 ]);
 
 // These files document the policy (or implement this guard) and may include
@@ -92,6 +91,7 @@ const SCANNED_FILE_EXTENSIONS = new Set([
   ".yaml",
   ".yml",
   ".toml",
+  ".lock",
   ".rs",
   ".py",
   ".go",
@@ -112,7 +112,7 @@ const MAX_BYTES_TO_SCAN = 2 * 1024 * 1024; // 2 MiB guard against generated/bina
 
 // Config formats where any mention of provider identifiers is almost certainly a
 // direct dependency/config regression (not an incidental string in code/comments).
-const CONFIG_FILE_EXTENSIONS = new Set([".json", ".toml", ".yaml", ".yml"]);
+const CONFIG_FILE_EXTENSIONS = new Set([".json", ".toml", ".yaml", ".yml", ".lock"]);
 
 /**
  * @typedef {{ file: string, ruleId: string, message: string, line?: number, column?: number }} Violation

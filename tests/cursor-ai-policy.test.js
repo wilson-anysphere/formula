@@ -61,6 +61,32 @@ test("cursor AI policy guard fails when forbidden provider strings are present i
   }
 });
 
+test("cursor AI policy guard scans lockfiles (Cargo.lock) for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-cargo-lock-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "Cargo.lock", '[[package]]\nname = "openai"\nversion = "0.0.0"\n');
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
+test("cursor AI policy guard scans pnpm-lock.yaml for provider strings", async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-pnpm-lock-fail-"));
+  try {
+    await writeFixtureFile(tmpRoot, "pnpm-lock.yaml", "openai: 0.0.0\n");
+
+    const proc = runPolicy(tmpRoot);
+    assert.notEqual(proc.status, 0);
+    assert.match(`${proc.stdout}\n${proc.stderr}`, /openai/i);
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test("cursor AI policy guard scans scripts/ directory by default", async () => {
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cursor-ai-policy-scripts-dir-fail-"));
   try {
