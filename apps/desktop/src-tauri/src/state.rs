@@ -6164,6 +6164,76 @@ mod tests {
     }
 
     #[test]
+    fn reorder_sheets_reorders_workbook_info() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+
+        let sheet1_id = workbook.sheets[0].id.clone();
+        let sheet2_id = workbook.sheets[1].id.clone();
+        let sheet3_id = workbook.sheets[2].id.clone();
+
+        let mut state = AppState::new();
+        state.load_workbook(workbook);
+
+        let before = state.workbook_info().expect("workbook_info before reorder");
+        let before_order = before
+            .sheets
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(before_order, vec![sheet1_id.as_str(), sheet2_id.as_str(), sheet3_id.as_str()]);
+
+        state
+            .reorder_sheets(vec![sheet3_id.clone(), sheet1_id.clone(), sheet2_id.clone()])
+            .expect("reorder sheets");
+
+        let after = state.workbook_info().expect("workbook_info after reorder");
+        let after_order = after
+            .sheets
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(after_order, vec![sheet3_id.as_str(), sheet1_id.as_str(), sheet2_id.as_str()]);
+        assert!(state.has_unsaved_changes());
+    }
+
+    #[test]
+    fn reorder_sheets_reorders_workbook_and_storage() {
+        let mut workbook = Workbook::new_empty(None);
+        workbook.add_sheet("Sheet1".to_string());
+        workbook.add_sheet("Sheet2".to_string());
+        workbook.add_sheet("Sheet3".to_string());
+
+        let sheet1_id = workbook.sheets[0].id.clone();
+        let sheet2_id = workbook.sheets[1].id.clone();
+        let sheet3_id = workbook.sheets[2].id.clone();
+
+        let mut state = AppState::new();
+        state
+            .load_workbook_persistent(workbook, WorkbookPersistenceLocation::InMemory)
+            .expect("load persistent workbook");
+
+        state
+            .reorder_sheets(vec![sheet3_id.clone(), sheet1_id.clone(), sheet2_id.clone()])
+            .expect("reorder sheets");
+
+        let info = state.workbook_info().expect("workbook info");
+        let ids: Vec<String> = info.sheets.iter().map(|s| s.id.clone()).collect();
+        assert_eq!(ids, vec![sheet3_id.clone(), sheet1_id.clone(), sheet2_id.clone()]);
+
+        let storage = state.persistent_storage().expect("storage available");
+        let workbook_id = state.persistent_workbook_id().expect("workbook id");
+        let metas = storage.list_sheets(workbook_id).expect("list sheets");
+        let names: Vec<String> = metas.iter().map(|m| m.name.clone()).collect();
+        assert_eq!(
+            names,
+            vec!["Sheet3".to_string(), "Sheet1".to_string(), "Sheet2".to_string()]
+        );
+    }
+
+    #[test]
     fn move_sheet_validates_sheet_and_index() {
         let mut workbook = Workbook::new_empty(None);
         workbook.add_sheet("Sheet1".to_string());
