@@ -69,6 +69,23 @@ See also: [20-images-in-cells-richdata.md](./20-images-in-cells-richdata.md) for
 best-effort) description of the `richValue*` part set and how `richValueRel.xml` is used to resolve
 media relationships.
 
+## In-repo fixture (cell image store part)
+
+Fixture workbook: `fixtures/xlsx/basic/cell-images.xlsx`
+
+Confirmed values from this fixture:
+
+- Part paths:
+  - `xl/cellImages.xml`
+  - `xl/_rels/cellImages.xml.rels`
+  - `xl/media/image1.png`
+- `xl/cellImages.xml` root namespace:
+  - `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
+- `[Content_Types].xml` override for the part:
+  - `application/vnd.ms-excel.cellimages+xml`
+- Workbook → `cellImages.xml` relationship `Type` URI (in `xl/_rels/workbook.xml.rels`):
+  - `http://schemas.microsoft.com/office/2023/02/relationships/cellImage`
+
 ### Quick reference: `cellImages` part graph (OPC + XML)
 
 This section is a “what to look for” summary for the core **cell image store** parts. Details and
@@ -80,6 +97,8 @@ variant shapes are documented further below.
 
 - A workbook can contain a dedicated `cellImages` part (seen in tests as `xl/cellimages.xml` and
   `xl/cellImages.xml`) plus a matching relationship part at `xl/_rels/<part>.rels`.
+- `fixtures/xlsx/basic/cell-images.xlsx` contains `xl/cellImages.xml` with namespace:
+  - `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
 - The `cellImages` XML can reference binary images via DrawingML-style `r:embed="rIdX"` references.
 - `rIdX` is resolved through the `*.rels` part to an image under `xl/media/*`.
 - Image relationship type is the standard OOXML one:
@@ -93,7 +112,8 @@ variant shapes are documented further below.
   have seen other variants in synthetic fixtures).
 - Exact schema shape (e.g. whether `<cellImage>` always contains a full `<xdr:pic>` subtree or can be
   a lightweight reference-only element).
-- The relationship `Type` URI used for “workbook/worksheet → `cellImages.xml`” discovery.
+- Whether Excel consistently uses a single relationship `Type` URI (and whether the relationship is
+  always on `xl/workbook.xml.rels` vs sometimes worksheet-level).
 - The exact “cell → image” mapping mechanism (likely via `vm`/`metadata.xml` + `xl/richData/*`, but
   needs confirmation from a real Excel-generated file).
 
@@ -111,6 +131,8 @@ variant shapes are documented further below.
   - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
 - Some in-repo synthetic fixtures also use a more generic Microsoft SpreadsheetML namespace:
   - `http://schemas.microsoft.com/office/spreadsheetml/2020/07/main` (unverified vs real Excel)
+- `fixtures/xlsx/basic/cell-images.xlsx` uses:
+  - `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
 - The root contains one or more `<cellImage>` entries, each containing a DrawingML picture subtree
   (typically `<xdr:pic>`) and a blip like:
   - `<a:blip r:embed="rIdX"/>`
@@ -129,8 +151,12 @@ variant shapes are documented further below.
 
 - Image relationship type (standard OOXML):
   - `http://schemas.openxmlformats.org/officeDocument/2006/relationships/image`
-- Relationship type for “workbook/worksheet → `cellImages.xml`”: **unknown** (likely Microsoft-specific);
-  discover from a real Excel-generated file and preserve byte-for-byte until verified.
+- Relationship type for “workbook/worksheet → `cellImages.xml`” discovery:
+  - Confirmed in `fixtures/xlsx/basic/cell-images.xlsx`:
+    - `http://schemas.microsoft.com/office/2023/02/relationships/cellImage`
+  - Other candidates observed in synthetic fixtures / tooling:
+    - `http://schemas.microsoft.com/office/2020/07/relationships/cellImages`
+    - `http://schemas.microsoft.com/office/2022/relationships/cellImages`
   - Candidate observed in a synthetic round-trip test:
     - `http://schemas.microsoft.com/office/2020/07/relationships/cellImages`
   - Candidate observed in synthetic fixtures / corpus tooling:
@@ -165,15 +191,14 @@ variant shapes are documented further below.
 </Relationships>
 ```
 
-#### Minimal example (`xl/_rels/workbook.xml.rels` entry) (synthetic; **Type URI unverified**)
+#### Minimal example (`xl/_rels/workbook.xml.rels` entry) (fixture)
 
 Some files link `xl/workbook.xml` → `xl/cellImages.xml` via an OPC relationship in
-`xl/_rels/workbook.xml.rels`. The relationship `Type` is currently **unverified** against real Excel,
-but is likely Microsoft-specific.
+`xl/_rels/workbook.xml.rels` using a Microsoft-specific relationship `Type`.
 
 ```xml
-<Relationship Id="rIdCellImages"
-              Type="http://schemas.microsoft.com/office/.../relationships/cellImages"
+<Relationship Id="rId3"
+              Type="http://schemas.microsoft.com/office/2023/02/relationships/cellImage"
               Target="cellImages.xml"/>
 ```
 
