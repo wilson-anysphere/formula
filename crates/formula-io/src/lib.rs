@@ -694,6 +694,13 @@ fn ole_workbook_has_biff_filepass_record<R: std::io::Read + std::io::Write + std
         let record_id = u16::from_le_bytes([header[0], header[1]]);
         let len = u16::from_le_bytes([header[2], header[3]]) as usize;
 
+        // BIFF streams always begin with a BOF record. If the workbook stream doesn't look like
+        // BIFF, don't attempt to interpret it as record headers (avoids false positives on other
+        // OLE payloads that happen to contain a `0x002F` word early).
+        if first_record && !matches!(record_id, BIFF_RECORD_BOF_BIFF8 | BIFF_RECORD_BOF_BIFF5) {
+            return false;
+        }
+
         if record_id == BIFF_RECORD_FILEPASS {
             return true;
         }
