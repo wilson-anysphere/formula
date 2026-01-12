@@ -10,12 +10,17 @@ import {
 import { createDesktopRag } from "./index.js";
 
 export type DesktopRagEmbedderConfig = {
-  type?: "hash";
   /**
    * Hash embeddings are deterministic and offline. Dimension controls the vector
    * size stored in SQLite (higher = more storage, marginally better recall).
+   *
+   * Note: Embeddings are intentionally not user-configurable in Formula; this is
+   * an internal/testing knob only.
    */
   dimension?: number;
+
+  // Kept for backwards compatibility with earlier config shapes.
+  type?: "hash";
 };
 
 export interface DesktopRagServiceOptions {
@@ -30,15 +35,16 @@ export interface DesktopRagServiceOptions {
   sampleRows?: number;
 
   /**
-   * Embedding configuration. Defaults to deterministic hash embeddings.
+   * Embedding configuration. Desktop workbook RAG uses deterministic hash
+   * embeddings by default (offline; no API keys / local models).
    */
   embedder?: DesktopRagEmbedderConfig;
 
   /**
    * Override the sqlite BinaryStorage namespace (advanced / tests).
    *
-   * Note: the default namespace is stable per workbook **and** embedder, so
-   * changing embedders doesn't brick the store due to dimension mismatches.
+   * Note: the default namespace is stable per workbook **and** embedding
+   * dimension, so changing the dimension won't brick the store due to mismatches.
    */
   storageNamespace?: string;
 
@@ -86,7 +92,10 @@ function storageNamespaceForEmbedder(params: {
   return `${params.baseNamespace}:${id}`;
 }
 
-function resolveEmbedder(config: DesktopRagEmbedderConfig | undefined): { embedder: any; dimension: number } {
+function resolveEmbedder(
+  config: DesktopRagEmbedderConfig | undefined,
+): { embedder: HashEmbedder; dimension: number } {
+  // Ignore unknown/legacy config types (Formula only supports deterministic hash embeddings).
   const dimension = config?.type && config.type !== "hash" ? 384 : (config?.dimension ?? 384);
   return { embedder: new HashEmbedder({ dimension }), dimension };
 }
@@ -96,6 +105,7 @@ function resolveEmbedder(config: DesktopRagEmbedderConfig | undefined): { embedd
  * - Uses sqlite-backed vector store persisted in LocalStorage.
  * - Tracks DocumentController mutations and only re-indexes when content changes.
  * - Keeps buildWorkbookContextFromSpreadsheetApi cheap (no workbook scan when index is up to date).
+ * - Uses deterministic hash embeddings by design (offline; no user API keys / local models).
  */
 export function createDesktopRagService(options: DesktopRagServiceOptions): DesktopRagService {
   const ragFactory = options.createRag ?? createDesktopRag;

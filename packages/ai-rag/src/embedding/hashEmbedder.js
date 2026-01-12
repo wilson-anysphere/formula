@@ -11,7 +11,17 @@ function fnv1a32(str) {
 }
 
 /**
- * A deterministic, offline embedder intended for tests and development.
+ * A deterministic, offline embedder used by Formula for workbook RAG.
+ *
+ * Formula intentionally uses a hash-based embedder so workbook indexing and
+ * retrieval work without:
+ * - user-supplied API keys
+ * - local model downloads / configuration
+ * - sending workbook content to a third-party embedding provider
+ *
+ * This is not a true ML embedding model, so retrieval quality is meaningfully
+ * lower than modern neural embeddings. However, it is fast, private, and
+ * "semantic-ish" enough for basic similarity search over spreadsheet text.
  *
  * It uses a hashing trick on tokenized words, then L2-normalizes the result so
  * cosine similarity approximates shared-token overlap.

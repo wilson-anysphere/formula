@@ -639,6 +639,11 @@ class DataSampler {
 
 For semantic search within large datasets:
 
+> Note: Workbook RAG embeddings are **not user-configurable**. Formula does not accept user API keys or local model
+> configuration for embeddings. The current implementation uses deterministic hash embeddings as a
+> privacy/compliance-friendly baseline; a future Cursor-managed embedding service can replace this to improve retrieval
+> quality.
+
 ```typescript
 class CellRAG {
   private vectorStore: VectorStore;
