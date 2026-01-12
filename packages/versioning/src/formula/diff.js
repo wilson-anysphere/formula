@@ -8,9 +8,29 @@ import { tokenizeFormula } from "./tokenize.js";
  */
 
 /**
+ * Track whether a token is inside an Excel array constant (`{...}`).
+ *
+ * This is used to avoid treating `,` and `;` as interchangeable when they are
+ * being used as array row/column separators (where the distinction matters).
+ *
+ * @param {Token[]} tokens
+ */
+function computeArrayDepthByToken(tokens) {
+  /** @type {WeakMap<Token, number>} */
+  const depthByToken = new WeakMap();
+  let depth = 0;
+  for (const token of tokens) {
+    depthByToken.set(token, depth);
+    if (token.type === "punct" && token.value === "{") depth += 1;
+    else if (token.type === "punct" && token.value === "}") depth = Math.max(0, depth - 1);
+  }
+  return depthByToken;
+}
+
+/**
  * @param {Token} a
  * @param {Token} b
- * @param {{ normalize: boolean }} opts
+ * @param {{ normalize: boolean, arrayDepthA?: number, arrayDepthB?: number }} opts
  */
 function tokenEquals(a, b, opts) {
   if (a.type !== b.type) return false;
@@ -30,9 +50,16 @@ function tokenEquals(a, b, opts) {
   // Excel uses either `,` or `;` as the function argument separator depending
   // on locale settings. Treat these as equivalent when normalization is enabled
   // so diffs don't get noisy across locales.
+  //
+  // However, inside array constants (`{...}`), `,` and `;` have distinct meanings
+  // (column vs row separators) and must NOT be treated as interchangeable.
   if (opts.normalize && a.type === "punct") {
     const isArgSep = (v) => v === "," || v === ";";
-    if (isArgSep(a.value) && isArgSep(b.value)) return true;
+    if (isArgSep(a.value) && isArgSep(b.value)) {
+      const depthA = opts.arrayDepthA ?? 0;
+      const depthB = opts.arrayDepthB ?? 0;
+      if (depthA === 0 && depthB === 0) return true;
+    }
   }
   return a.value === b.value;
 }
@@ -241,7 +268,8 @@ function commonSuffixLength(a, b, equals, prefixLen) {
  * tokenization:
  * - trimmed + ensured to have a leading `=`
  * - identifier tokens (functions/cell refs/names) are compared case-insensitively
- * - `,` and `;` are treated as equivalent argument separators (locale differences)
+ * - `,` and `;` are treated as equivalent argument separators (locale differences), except inside
+ *   array constants (`{...}`) where they have distinct meanings
  * - number tokens are compared by numeric value (e.g. `1` vs `1.0`)
  *
  * When normalization is enabled, `equal` ops emit tokens from `newFormula` so
@@ -262,7 +290,14 @@ export function diffFormula(oldFormula, newFormula, opts) {
   const oldTokens = tokenizeForDiff(oldText);
   const newTokens = tokenizeForDiff(newText);
 
-  const equals = (a, b) => tokenEquals(a, b, { normalize });
+  const oldArrayDepth = normalize ? computeArrayDepthByToken(oldTokens) : null;
+  const newArrayDepth = normalize ? computeArrayDepthByToken(newTokens) : null;
+  const equals = (a, b) =>
+    tokenEquals(a, b, {
+      normalize,
+      arrayDepthA: oldArrayDepth?.get(a) ?? 0,
+      arrayDepthB: newArrayDepth?.get(b) ?? 0,
+    });
 
   const equal =
     oldTokens.length === newTokens.length &&

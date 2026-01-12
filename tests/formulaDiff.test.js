@@ -144,6 +144,13 @@ test("diffFormula: normalize=false treats comma/semicolon argument separators as
   assert.equal(result.equal, false);
 });
 
+test("diffFormula: comma/semicolon are not interchangeable inside array constants", () => {
+  // In array constants (`{...}`), Excel uses `,` as a column separator and `;` as a row separator.
+  // Treating them as equivalent here would hide real structural changes.
+  const result = diffFormula("={1,2;3,4}", "={1;2;3;4}", { normalize: true });
+  assert.equal(result.equal, false);
+});
+
 test("diffFormula: normalize=true treats numeric formatting differences as equal", () => {
   const result = diffFormula("=1.0+2", "=1+2", { normalize: true });
   assert.equal(result.equal, true);
