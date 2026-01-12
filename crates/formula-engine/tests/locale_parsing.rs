@@ -1,4 +1,4 @@
-use formula_engine::{eval::parse_a1, locale, Engine, ErrorKind, Value};
+use formula_engine::{eval::parse_a1, locale, Engine, ErrorKind, ReferenceStyle, Value};
 
 #[test]
 fn canonicalize_and_localize_round_trip_for_de_de() {
@@ -374,6 +374,34 @@ fn canonicalize_and_localize_all_cube_function_names() {
         "=CUBEKPIMEMBER(\"conn\",\"kpi\",\"property\",\"caption\")",
         "=MIEMBROKPI.CUBO(\"conn\";\"kpi\";\"property\";\"caption\")",
     );
+}
+
+#[test]
+fn canonicalize_and_localize_with_style_r1c1_for_external_data_functions() {
+    for (locale, localized, canonical) in [
+        (
+            &locale::DE_DE,
+            "=CUBEWERT(\"conn\";R[-4]C[-2];1,5)",
+            "=CUBEVALUE(\"conn\",R[-4]C[-2],1.5)",
+        ),
+        (
+            &locale::FR_FR,
+            "=VALEUR.CUBE(\"conn\";R[-4]C[-2];1,5)",
+            "=CUBEVALUE(\"conn\",R[-4]C[-2],1.5)",
+        ),
+        (
+            &locale::ES_ES,
+            "=VALOR.CUBO(\"conn\";R[-4]C[-2];1,5)",
+            "=CUBEVALUE(\"conn\",R[-4]C[-2],1.5)",
+        ),
+    ] {
+        let canon = locale::canonicalize_formula_with_style(localized, locale, ReferenceStyle::R1C1)
+            .unwrap();
+        assert_eq!(canon, canonical);
+        let localized_roundtrip =
+            locale::localize_formula_with_style(&canon, locale, ReferenceStyle::R1C1).unwrap();
+        assert_eq!(localized_roundtrip, localized);
+    }
 }
 
 #[test]
