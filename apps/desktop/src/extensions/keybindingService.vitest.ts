@@ -576,6 +576,35 @@ describe("KeybindingService", () => {
     },
   );
 
+  it.each([
+    { symbol: "$", code: "Digit4", eventKey: "4", command: "builtin.currency", title: "Currency" },
+    { symbol: "%", code: "Digit5", eventKey: "5", command: "builtin.percent", title: "Percent" },
+    { symbol: "#", code: "Digit3", eventKey: "3", command: "builtin.date", title: "Date" },
+  ])(
+    "matches Excel-style number-format shortcuts via KeyboardEvent.code fallback on macOS (Cmd+Shift+$symbol)",
+    async ({ symbol, code, eventKey, command, title }) => {
+      const contextKeys = new ContextKeyService();
+      const commandRegistry = new CommandRegistry();
+
+      const run = vi.fn();
+      commandRegistry.registerBuiltinCommand(command, title, run);
+
+      const service = new KeybindingService({ commandRegistry, contextKeys, platform: "mac" });
+      service.setBuiltinKeybindings([{ command, key: `ctrl+shift+${symbol}`, mac: `cmd+shift+${symbol}` }]);
+
+      // Ensure the platform display string stays Excel-like (show "$/%/#", not "4/5/3").
+      expect(service.getCommandKeybindingDisplayIndex().get(command)).toEqual([`⇧⌘${symbol}`]);
+
+      // Simulate a non-US layout where the physical Digit key does not produce the literal symbol for the chord.
+      const event = makeKeydownEvent({ key: eventKey, code, metaKey: true, shiftKey: true });
+      const handled = await service.dispatchKeydown(event);
+
+      expect(handled).toBe(true);
+      expect(event.defaultPrevented).toBe(true);
+      expect(run).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("matches AutoSum on layouts where '=' requires Shift (Alt+Shift+Equal)", async () => {
     const contextKeys = new ContextKeyService();
     const commandRegistry = new CommandRegistry();
