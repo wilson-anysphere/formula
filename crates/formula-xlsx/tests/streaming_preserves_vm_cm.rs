@@ -31,12 +31,12 @@ fn build_minimal_xlsx() -> Vec<u8> {
     // "normal workbook" streaming patcher behavior (as opposed to patching an extracted worksheet
     // part ZIP).
     let content_types_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
- <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-   <Default Extension="xml" ContentType="application/xml"/>
-   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
 </Types>"#;
-
     let workbook_xml = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -100,7 +100,7 @@ fn build_minimal_xlsx_without_content_types() -> Vec<u8> {
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetData>
     <row r="1">
-      <c r="A1" vm="1" cm="2"><v>1</v></c>
+      <c r="A1" t="e" vm="1" cm="2"><v>#VALUE!</v></c>
     </row>
   </sheetData>
 </worksheet>"#;
