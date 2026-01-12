@@ -67,4 +67,29 @@ describe("CursorLLMClient.chat", () => {
       else process.env.CURSOR_AI_BASE_URL = originalBaseUrl;
     }
   });
+
+  it("accepts CURSOR_AI_BASE_URL values that already include /v1", async () => {
+    const originalBaseUrl = process.env.CURSOR_AI_BASE_URL;
+    process.env.CURSOR_AI_BASE_URL = "https://cursor.test/v1/";
+
+    try {
+      const fetchMock = vi.fn(async (url: string) => {
+        expect(url).toBe("https://cursor.test/v1/chat");
+        return new Response(
+          JSON.stringify({
+            message: { role: "assistant", content: "ok" },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      });
+
+      vi.stubGlobal("fetch", fetchMock as any);
+
+      const client = new CursorLLMClient();
+      await client.chat({ messages: [{ role: "user", content: "hi" }] as any });
+    } finally {
+      if (originalBaseUrl === undefined) delete process.env.CURSOR_AI_BASE_URL;
+      else process.env.CURSOR_AI_BASE_URL = originalBaseUrl;
+    }
+  });
 });

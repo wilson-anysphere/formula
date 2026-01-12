@@ -69,6 +69,18 @@ function getTimeoutMs() {
 }
 
 /**
+ * @param {string} baseUrl
+ * @returns {string}
+ */
+function chatEndpointFromBaseUrl(baseUrl) {
+  const trimmed = String(baseUrl ?? "").replace(/\/$/, "");
+  if (!trimmed) return "/v1/chat";
+  if (trimmed.endsWith("/v1/chat")) return trimmed;
+  if (trimmed.endsWith("/v1")) return `${trimmed}/chat`;
+  return `${trimmed}/v1/chat`;
+}
+
+/**
  * @param {any} json
  * @returns {import("./types.js").ChatResponse}
  */
@@ -172,6 +184,7 @@ function* synthesizeStreamEvents(full) {
 export class CursorLLMClient {
   constructor() {
     this.baseUrl = getBaseUrl();
+    this.chatEndpoint = chatEndpointFromBaseUrl(this.baseUrl);
     this.timeoutMs = getTimeoutMs();
   }
 
@@ -185,7 +198,7 @@ export class CursorLLMClient {
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
-      const response = await fetch(`${this.baseUrl}/v1/chat`, {
+      const response = await fetch(this.chatEndpoint, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -225,7 +238,7 @@ export class CursorLLMClient {
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
-      const response = await fetch(`${this.baseUrl}/v1/chat`, {
+      const response = await fetch(this.chatEndpoint, {
         method: "POST",
         headers: {
           "content-type": "application/json",
