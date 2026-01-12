@@ -905,43 +905,6 @@ pub(crate) fn parse_biff_sheet_cell_xf_indices_filtered(
     Ok(out)
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct SheetAutoFilterPresence {
-    pub(crate) has_autofilterinfo: bool,
-    pub(crate) has_filtermode: bool,
-}
-
-/// Scan a worksheet BIFF substream for AutoFilter presence records.
-///
-/// Excel stores worksheet AutoFilter state using:
-/// - `AUTOFILTERINFO` (0x009D): describes filter dropdown slots (column count).
-/// - `FILTERMODE` (0x009B): indicates the sheet is currently in "filter mode" (rows hidden).
-///
-/// This is best-effort metadata used to confirm a sheet contains an AutoFilter object when importing
-/// legacy `.xls` workbooks. The importer does not currently interpret FILTERMODE beyond presence.
-pub(crate) fn parse_biff_sheet_autofilter_presence(
-    workbook_stream: &[u8],
-    start: usize,
-) -> Result<SheetAutoFilterPresence, String> {
-    let mut out = SheetAutoFilterPresence::default();
-
-    for record in records::BestEffortSubstreamIter::from_offset(workbook_stream, start)? {
-        match record.record_id {
-            RECORD_AUTOFILTERINFO => out.has_autofilterinfo = true,
-            RECORD_FILTERMODE => out.has_filtermode = true,
-            records::RECORD_EOF => break,
-            _ => {}
-        }
-
-        if out.has_autofilterinfo && out.has_filtermode {
-            // We've seen all relevant records; stop scanning early.
-            break;
-        }
-    }
-
-    Ok(out)
-}
-
 #[derive(Debug, Default)]
 pub(crate) struct SheetHyperlinks {
     pub(crate) hyperlinks: Vec<Hyperlink>,

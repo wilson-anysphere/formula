@@ -225,7 +225,6 @@ fn import_xls_path_with_biff_reader(
     let mut biff_version: Option<biff::BiffVersion> = None;
     let mut biff_codepage: Option<u16> = None;
     let mut biff_globals: Option<biff::globals::BiffWorkbookGlobals> = None;
-    let mut biff_sheet_autofilter_presence: Option<Vec<biff::SheetAutoFilterPresence>> = None;
 
     if let Some(workbook_stream) = workbook_stream.as_deref() {
         // Detect encrypted/password-protected `.xls` files before attempting to parse workbook
@@ -379,7 +378,6 @@ fn import_xls_path_with_biff_reader(
 
         if let Some(sheets) = biff_sheets.as_ref() {
             let mut props_by_sheet = Vec::with_capacity(sheets.len());
-            let mut autofilter_by_sheet = Vec::with_capacity(sheets.len());
             for sheet in sheets {
                 if sheet.offset >= workbook_stream.len() {
                     warnings.push(ImportWarning::new(format!(
@@ -389,7 +387,6 @@ fn import_xls_path_with_biff_reader(
                         sheet.offset
                     )));
                     props_by_sheet.push(biff::SheetRowColProperties::default());
-                    autofilter_by_sheet.push(biff::SheetAutoFilterPresence::default());
                     continue;
                 }
 
@@ -413,21 +410,8 @@ fn import_xls_path_with_biff_reader(
                         props_by_sheet.push(biff::SheetRowColProperties::default());
                     }
                 }
-
-                match biff::parse_biff_sheet_autofilter_presence(workbook_stream, sheet.offset) {
-                    Ok(info) => autofilter_by_sheet.push(info),
-                    Err(parse_err) => {
-                        warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` AutoFilter metadata for BIFF sheet index {} (`{}`): {parse_err}",
-                            autofilter_by_sheet.len(),
-                            sheet.name
-                        )));
-                        autofilter_by_sheet.push(biff::SheetAutoFilterPresence::default());
-                    }
-                }
             }
             row_col_props = Some(props_by_sheet);
-            biff_sheet_autofilter_presence = Some(autofilter_by_sheet);
 
             if let Some(mask) = xf_is_interesting.as_deref() {
                 // Even if the workbook contains no non-General number formats, scan for
@@ -672,6 +656,13 @@ fn import_xls_path_with_biff_reader(
         }
 
         if let Some(biff_idx) = biff_idx {
+            let filter_database_range = filter_database_ranges
+                .as_ref()
+                .and_then(|ranges| ranges.get(&biff_idx))
+                .copied();
+
+            let mut sheet_stream_autofilter_range: Option<Range> = None;
+
             if let Some(props) = row_col_props
                 .as_ref()
                 .and_then(|props_by_sheet| props_by_sheet.get(biff_idx))
@@ -679,18 +670,7 @@ fn import_xls_path_with_biff_reader(
                 apply_row_col_properties(sheet, props);
                 apply_outline_properties(sheet, props);
 
-                if let Some(range) = props.auto_filter_range {
-                    // Best-effort: preserve the AutoFilter dropdown range even though we do not yet
-                    // import BIFF AutoFilter criteria.
-                    if sheet.auto_filter.is_none() {
-                        sheet.auto_filter = Some(SheetAutoFilter {
-                            range,
-                            filter_columns: Vec::new(),
-                            sort_state: None,
-                            raw_xml: Vec::new(),
-                        });
-                    }
-                }
+                sheet_stream_autofilter_range = props.auto_filter_range;
 
                 if props.filter_mode {
                     // BIFF `FILTERMODE` indicates that some rows are currently hidden by a filter.
@@ -703,18 +683,10 @@ fn import_xls_path_with_biff_reader(
             }
 
             if sheet.auto_filter.is_none() {
-                if let Some(range) = filter_database_ranges
-                    .as_ref()
-                    .and_then(|ranges| ranges.get(&biff_idx))
-                    .copied()
-                {
-                    // AutoFilter objects are also described in the sheet substream (AUTOFILTERINFO /
-                    // FILTERMODE). We scan those records (best-effort) but still import the filter
-                    // range when only the built-in NAME record is available.
-                    let _confirmed_by_sheet_stream = biff_sheet_autofilter_presence
-                        .as_ref()
-                        .and_then(|v| v.get(biff_idx))
-                        .is_some_and(|info| info.has_autofilterinfo || info.has_filtermode);
+                // Prefer the canonical AutoFilter range from the `_FilterDatabase` defined name when
+                // available, but fall back to best-effort inference from the worksheet substream
+                // (AUTOFILTERINFO / FILTERMODE + DIMENSIONS).
+                if let Some(range) = filter_database_range.or(sheet_stream_autofilter_range) {
                     sheet.auto_filter = Some(SheetAutoFilter {
                         range,
                         filter_columns: Vec::new(),
