@@ -76,39 +76,72 @@ globalThis.crossOriginIsolated
 typeof SharedArrayBuffer !== "undefined"
 ```
 
-## Extensions / Marketplace (current status)
+## Extensions / Marketplace (Tauri/WebView runtime — no Node)
 
-The desktop app’s canonical extension runtime is **no-Node** and runs entirely inside the WebView:
+Formula Desktop runs extensions inside the **WebView** runtime (no Electron-style Node integration).
 
-- **Runtime:** `BrowserExtensionHost` (runs each extension in a module `Worker`)
-- **Installer + persistence:** `WebExtensionManager` (downloads + verifies signed v2 `.fextpkg` packages and stores them
-  in IndexedDB)
+At a high level:
 
-Marketplace installs are loaded via:
-`WebExtensionManager.loadInstalled(...)` → `BrowserExtensionHost.loadExtension(...)` using a `blob:`/`data:` module URL
-(no filesystem extraction required).
+- **Runtime:** `BrowserExtensionHost` (Web Worker-based extension host)
+  - Source: `packages/extension-host/src/browser/index.mjs`
+  - Each extension runs in its own module `Worker` (`packages/extension-host/src/browser/extension-worker.mjs`).
+- **Installer + package store:** `WebExtensionManager` (IndexedDB-backed installer/loader)
+  - Source: `apps/web/src/marketplace/WebExtensionManager.ts`
+  - Downloads signed `.fextpkg` packages from the marketplace, verifies SHA-256 + Ed25519 signatures **in the
+    WebView**, and persists verified bytes + metadata to IndexedDB.
 
-### Where extensions are stored (and how to clear for dev)
+Extension panels (`contributes.panels` / `formula.ui.createPanel`) are rendered in a sandboxed `<iframe>` with a
+restrictive CSP (see `apps/desktop/src/extensions/ExtensionPanelBody.tsx`), so panel HTML cannot load remote scripts or
+make network requests directly. Panels should communicate with extension code via `postMessage`.
 
-Installed packages + metadata are stored in IndexedDB database **`formula.webExtensions`**.
+### Where extensions live / what persists
 
-To reset installed extensions during development:
+**Installed packages (code):**
 
-- DevTools → **Application** → **IndexedDB** → delete `formula.webExtensions`, then reload, or
-- run in the console: `indexedDB.deleteDatabase("formula.webExtensions")`
+- Stored in **IndexedDB** under database `formula.webExtensions` (see `WebExtensionManager`):
+  - `installed` store: `{ id, version, installedAt }`
+  - `packages` store: `{ key: "${id}@${version}", bytes, verified }`
 
-Note: permission grants and per-extension storage are persisted separately in `localStorage` (keys under
-`formula.extensionHost.*`).
+**Permission grants (user decisions):**
 
-### Legacy Node-only implementation (tests/legacy tooling)
+- Stored by `BrowserExtensionHost` in `localStorage["formula.extensionHost.permissions"]`
+  (per-extension record of granted permissions).
 
-These Node-only modules are kept for legacy tooling + integration tests and are **not** used by the Tauri/WebView
-runtime:
+**Extension storage + config (`formula.storage` / `formula.config` APIs):**
 
-- `apps/desktop/tools/marketplace/extensionManager.js`
-- `apps/desktop/tools/extensions/ExtensionHostManager.js`
+- Stored in `localStorage` via `LocalStorageExtensionStorage`:
+  - key prefix: `formula.extensionHost.storage.`
+  - key per extension: `formula.extensionHost.storage.<extensionId>`
 
-See `docs/10-extensibility.md` for the end-to-end flow.
+To “reset” extensions in dev, clear:
+
+- IndexedDB database `formula.webExtensions`
+- localStorage keys `formula.extensionHost.permissions` and `formula.extensionHost.storage.*`
+
+You can also do a quick reset from the console:
+
+```js
+indexedDB.deleteDatabase("formula.webExtensions");
+localStorage.removeItem("formula.extensionHost.permissions");
+// (Optional) clear per-extension storage keys under formula.extensionHost.storage.*
+```
+
+### Debugging
+
+- Use WebView DevTools to inspect:
+  - **Application → IndexedDB →** `formula.webExtensions` (installed packages + versions)
+  - **Application → Local Storage →** `formula.extensionHost.*` (permissions + extension storage)
+  - **Sources → Workers** to debug the extension worker runtime (`extension-worker.mjs`)
+
+### Legacy Node-only installer/runtime (deprecated)
+
+The repo still contains Node-only marketplace/host modules used by Node integration tests and earlier experiments:
+
+- Installer: `apps/desktop/src/marketplace/extensionManager.js`
+- Marketplace client: `apps/desktop/src/marketplace/client.js`
+- Runtime: `apps/desktop/src/extensions/ExtensionHostManager.js`
+
+They rely on `node:fs` / `worker_threads` and are **not used by the desktop renderer**.
 
 ## Power Query caching + credentials (security)
 

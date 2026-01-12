@@ -32,8 +32,10 @@ Extension panels are rendered as a sandboxed `<iframe>` (currently via a `blob:`
   - Webview → extension: `window.parent.postMessage(message, "*")`
   - Extension → webview: `panel.webview.postMessage(message)` delivered to the iframe via `postMessage`
 
-This is a **best-effort** browser sandbox. In the Tauri/WebView desktop runtime there is **no Node integration**;
-extensions run in a Web Worker (`BrowserExtensionHost`) with import/eval guardrails and CSP as the main defenses.
+See `apps/desktop/src/extensions/ExtensionPanelBody.tsx` for the exact `sandbox` + CSP that the desktop renderer applies.
+
+This is a **best-effort** browser sandbox. In Formula Desktop (Tauri/WebView) there is **no Node runtime** in the renderer:
+the primary boundaries are the WebView’s own process sandbox + the extension worker guardrails + the iframe sandbox/CSP.
 
 ## `when` clauses + context keys (subset)
 
@@ -169,90 +171,94 @@ the `:` key on layouts where that shares the same physical key.
 
 ---
 
-## Architecture
+## Desktop (Tauri/WebView) (production model — no Node)
+
+Formula Desktop runs extensions entirely inside the **WebView renderer**. The production desktop model does **not**
+use a Node runtime in the renderer; the extension host is the browser/WebWorker-based host.
+
+Key components:
+
+- **`BrowserExtensionHost`** (`packages/extension-host/src/browser/index.mjs`)
+  - Runs in the renderer and spawns one module `Worker` per extension (`extension-worker.mjs`).
+  - Routes commands/panels/menus/keybindings to extensions and permission-checks API calls.
+- **`WebExtensionManager`** (`apps/web/src/marketplace/WebExtensionManager.ts`)
+  - Marketplace installer for browser/WebView runtimes.
+  - Downloads signed `.fextpkg` blobs, verifies them in the WebView, stores verified bytes in IndexedDB, and loads
+    them into `BrowserExtensionHost` via `blob:` module URLs.
+
+### Desktop architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  WEBVIEW MAIN THREAD (Tauri)                                                │
-│  ├── Spreadsheet UI + state                                                 │
-│  ├── BrowserExtensionHost                                                   │
-│  └── Panel/webview bridge (postMessage)                                     │
-├──────────────────────────────────┬──────────────────────────────────────────┤
-│  EXTENSION WORKER 1              │  EXTENSION WORKER 2                      │
-│  (Web Worker)                    │  (Web Worker)                            │
-│  ├── Extension A                 │  ├── Extension C                         │
-│  ├── Extension B                 │  └── Extension D                         │
-│  └── API proxy + sandbox         │                                          │
-├──────────────────────────────────┴──────────────────────────────────────────┤
-│  EXTENSION API                                                              │
-│  ├── Cell/Range Operations                                                  │
-│  ├── UI Extensions (Commands, Panels, Menus)                                │
-│  ├── Event Subscriptions                                                    │
-│  ├── Custom Functions                                                       │
-│  └── Data Connectors                                                        │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────┐
+│  TAURI DESKTOP APP                                                            │
+├───────────────────────────────────────────────────────────────────────────────┤
+│  WEBVIEW (renderer, no Node)                                                  │
+│  ├── Spreadsheet UI / panels                                                  │
+│  ├── BrowserExtensionHost                                                     │
+│  │    ├── Extension Worker A (module Worker)                                  │
+│  │    ├── Extension Worker B (module Worker)                                  │
+│  │    └── …                                                                   │
+│  ├── Extension panels: sandboxed iframes (blob: URLs + restrictive CSP)       │
+│  └── WebExtensionManager (IndexedDB installer/loader)                         │
+│                                                                               │
+│  TAURI BACKEND (Rust)                                                         │
+│  └── Workbook I/O / engine / OS integration                                   │
+└───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Desktop runtime flow
+### Install + runtime flow (Desktop)
 
-#### Tauri/WebView runtime (canonical, no Node)
+1. **Search/install/update/uninstall** via a marketplace UI backed by `WebExtensionManager`.
+2. **Download + signature verification (mandatory)**:
+   - The marketplace serves `.fextpkg` bytes plus integrity headers (`X-Package-Sha256`, signature metadata, etc).
+   - `WebExtensionManager` verifies the download **in the WebView** (SHA-256 + Ed25519 signature verification) using
+     the publisher public key(s) returned by the marketplace (`publisherKeys` / `publisherPublicKeyPem`).
+   - The installer also verifies the manifest id/version match the requested `{id, version}`, and (when present)
+     checks `X-Package-Files-Sha256` against the verified package file inventory.
+3. **Persist**: verified package bytes + verification metadata are stored in IndexedDB (`formula.webExtensions`).
+4. **Load into runtime**:
+   - `WebExtensionManager.loadInstalled(id)` materializes the verified browser entrypoint as a `blob:` module URL.
+   - The extension is loaded into `BrowserExtensionHost`, which spawns `extension-worker.mjs` for execution.
+5. **Execution + sandboxing**:
+   - Extensions run in a Web Worker with sandbox guardrails (permission-gated `fetch`/`WebSocket`, no XHR, no nested
+     workers, best-effort import restrictions, optional `eval` lockdown).
+   - UI panels run in sandboxed iframes with a restrictive CSP injected by
+     `apps/desktop/src/extensions/ExtensionPanelBody.tsx` (no network, no remote scripts).
+6. **Persistence (Desktop)**:
+   - Permission grants: `localStorage["formula.extensionHost.permissions"]`
+   - Extension storage/config: `localStorage["formula.extensionHost.storage.<extensionId>"]`
 
-Desktop uses the browser extension host + the web-style marketplace installer (no filesystem extraction and no Node
-APIs in the WebView):
+**Important:** marketplace-installed extensions are loaded from `blob:` module URLs. Because `blob:` module URLs
+cannot reliably resolve relative imports, the browser entrypoint (`manifest.browser`/`manifest.module`) should be a
+**single-file ESM bundle**.
 
-1. **Install/update/uninstall** via the desktop marketplace UI.
-2. **Verify + persist** via `WebExtensionManager`:
-   - Downloads a signed v2 `.fextpkg` package from the Marketplace.
-   - Verifies the package in the WebView (tar parsing + per-file SHA-256 + Ed25519 signature verification).
-     - Desktop builds may optionally use a Rust/Tauri verifier as an optimization/fallback, but verification is always
-       mandatory before persisting.
-   - Stores verified package bytes + metadata in IndexedDB (DB name: `formula.webExtensions`).
-3. **Load into the runtime**:
-   - `WebExtensionManager.loadInstalled(id)` reads the verified bytes from IndexedDB, creates a `blob:`/`data:` module URL
-     for the entrypoint, then calls `BrowserExtensionHost.loadExtension(...)`.
-   - `BrowserExtensionHost` runs each extension in a module `Worker`.
+### Marketplace base URL + CSP / network constraints (Desktop)
 
-**CSP requirements (desktop WebView):**
+- `MarketplaceClient` (used by `WebExtensionManager`) takes `{ baseUrl }` (defaults to `"/api"`).
+  - In desktop builds, this is typically a full HTTPS URL like `https://marketplace.example.com/api`.
+- The WebView CSP must allow outbound connections to:
+  - the marketplace origin (for installs/updates), and
+  - any origins extensions need for `formula.network.fetch` / WebSocket connections.
 
-- `script-src` must allow `blob:` and `data:` (extensions are loaded from in-memory module URLs).
-- `worker-src` must allow `blob:` (extensions run in module workers).
-- `connect-src` must allow the Marketplace origin (and any additional hosts you expect extensions to reach; extension
-  permissions apply on top of CSP).
+In Tauri, the CSP lives in `apps/desktop/src-tauri/tauri.conf.json` (`app.security.csp`, notably `connect-src`).
 
-#### Legacy Node runtime (tests only)
+The CSP must also allow the extension runtime mechanics:
 
-The repo still contains a Node-only marketplace installer/runtime used by integration tests and legacy tooling:
+- `worker-src blob:` (extensions run in module workers)
+- `script-src blob: data:` (extensions are loaded from in-memory module URLs)
 
-- Installer: `apps/desktop/tools/marketplace/extensionManager.js`
-- Runtime: `apps/desktop/tools/extensions/ExtensionHostManager.js` (wraps the Node `ExtensionHost`)
+Note: extension panels are additionally sandboxed with `connect-src 'none'`, so panels cannot make network requests
+directly. Any network access must happen in the extension worker (and will still be subject to both the permission
+system *and* the WebView CSP).
 
-This legacy path extracts extensions to disk and loads them into the Node extension host:
+### Legacy Node-based installer/runtime (deprecated)
 
-1. **Filesystem + state** via `ExtensionManager`
-   - Packages are extracted to `extensionsDir/<publisher>.<name>/`
-   - The installed set is tracked in `ExtensionManager.statePath` (JSON)
-2. **Runtime loading** via `ExtensionHostManager`
-     - Reads `statePath` and calls `ExtensionHost.loadExtension(...)` for each installed extension
-     - Exposes `executeCommand`, `invokeCustomFunction`, and `listContributions` for the app to route UI actions
-     - Verifies extracted extension integrity using the file manifest stored in `statePath` both on startup
-       and during subsequent syncs; corrupted/tampered installs are quarantined and require reinstall
-     - Emits `onDidChangeContributions()` events after reload/unload/sync so the app can refresh command palettes,
-       menus, and panels in response to extension changes
-3. **Execution + contributions** via `ExtensionHost` (`packages/extension-host`)
-     - Spawns an isolated worker per extension
-     - Registers contributions (commands, panels, menus, keybindings, custom functions, data connectors)
-4. **Hot reload + runtime syncing**
-     - `ExtensionHostManager.syncInstalledExtensions()` reconciles the runtime with `statePath`:
-       loads new installs, reloads updated versions, and unloads removed extensions.
-     - The runtime can **bind to installer change events** (`ExtensionManager.onDidChange`) so installs outside
-       the marketplace panel still hot-reload automatically.
-    - For out-of-process changes (another process writing `statePath`), the runtime can also watch the state file
-      on disk via `ExtensionHostManager.watchStateFile()`.
-    - `ExtensionHostManager` serializes host operations so `syncInstalledExtensions()`, reload/unload, and command
-      execution do not race each other.
-     - `syncInstalledExtensions()` is serialized/coalesced so multiple rapid install/update events coalesce into a
-       single sync run.
-     - Uninstall removes contributions and terminates the worker (via `ExtensionHost.unloadExtension`).
+The repository still contains Node-only marketplace/host code paths that rely on `node:fs` / `worker_threads` and are
+**not used by the desktop renderer**:
+
+- `apps/desktop/src/marketplace/extensionManager.js`
+- `apps/desktop/src/marketplace/client.js`
+- `apps/desktop/src/extensions/ExtensionHostManager.js`
 
 ---
 
@@ -383,8 +389,8 @@ This legacy path extracts extensions to disk and loads them into the Node extens
 
 Formula validates extension manifests using **one shared validator** across:
 
-- the **Node/desktop extension host**
-- the **browser extension host**
+- the **browser extension host** (used by Web + Desktop/Tauri)
+- the **Node extension host** (used by Node-based test harnesses / legacy tooling)
 - **marketplace publish-time** checks
 - the **extension publisher** (so local packaging fails fast)
 
@@ -394,12 +400,14 @@ unknown commands/panels/custom functions/data connectors).
 
 Entrypoint fields:
 
-- `main` (**required**) — CommonJS entrypoint used by the Node/desktop extension host. The file must
-  exist in the published package. (Must end in `.js` or `.cjs`.)
-- `browser` (optional) — browser-first entrypoint (ESM). If present, the file must exist in the
-  published package. (Must end in `.js` or `.mjs`.)
-- `module` (optional) — module entrypoint (ESM). If present, the file must exist in the published
-  package. (Must end in `.js` or `.mjs`.)
+- `main` (**required**) — CommonJS entrypoint used by the **Node** extension host. The file must exist
+  in the published package. (Must end in `.js` or `.cjs`.)
+  - Note: `main` is currently required by the shared manifest validator even though Desktop/Tauri uses
+    the browser host.
+- `browser` (optional) — browser-first entrypoint (ESM) used by `BrowserExtensionHost` (Desktop/Tauri +
+  Web). If present, the file must exist in the published package. (Must end in `.js` or `.mjs`.)
+- `module` (optional) — module entrypoint (ESM) used by `BrowserExtensionHost` when `browser` is not
+  provided. If present, the file must exist in the published package. (Must end in `.js` or `.mjs`.)
 
 The browser extension host loads `browser` → `module` → `main` (first defined wins). The Node
 extension host always uses `main`.
@@ -940,10 +948,10 @@ misbehaving extension cannot hang or OOM the main app:
 - **Crash/restart**: on crash/timeout, the extension is marked inactive and the next activation will
   spawn a fresh worker. Hosts can also explicitly recycle an extension via `reloadExtension(id)`.
 
-### Node extension sandbox (security boundary)
+### Node extension sandbox (legacy/test harness)
 
-For the desktop/Node runtime, extensions execute inside a hardened `vm` context with a minimal
-CommonJS loader. This is the primary security boundary that makes the permission system enforceable.
+For the legacy Node runtime (used by Node-based tests and tooling), extensions execute inside a hardened `vm` context
+with a minimal CommonJS loader. This is the primary security boundary that makes the permission system enforceable.
 
 Key properties:
 
@@ -1076,7 +1084,7 @@ top-level permission key):
 
 #### Stored grant format (v2)
 
-On disk (Node) or in `localStorage` (browser), the host stores grants per extension as:
+On disk (Node) or in `localStorage` (browser/WebView), the host stores grants per extension as:
 
 ```json
 {
@@ -1138,87 +1146,19 @@ The web runtime and the Tauri/WebView desktop runtime use the same **no-Node** i
 Because `blob:`/`data:` module URLs cannot resolve relative imports, `manifest.browser` should point at a
 **single-file ESM bundle**.
 
-### Extension Discovery
+### Marketplace base URL configuration (Desktop)
 
-```typescript
-interface MarketplaceExtension {
-  id: string;
-  name: string;
-  displayName: string;
-  publisher: string;
-  version: string;
-  description: string;
-  categories: string[];
-  tags: string[];
-  rating: number;
-  reviewCount: number;
-  downloadCount: number;
-  icon: string;
-  screenshots: string[];
-  readme: string;
-  changelog: string;
-  lastUpdated: Date;
-  
-  // Verification
-  verified: boolean;
-  featured: boolean;
-}
+The browser/WebView marketplace client is `MarketplaceClient` (`apps/web/src/marketplace/MarketplaceClient.ts`).
+It defaults to a same-origin API at `"/api"`, but Desktop/Tauri builds typically point at an HTTPS marketplace origin:
 
-class ExtensionMarketplace {
-  private apiEndpoint = "https://marketplace.formula.app/api";
-  
-  async search(query: string, options?: SearchOptions): Promise<SearchResult> {
-    const params = new URLSearchParams({
-      q: query,
-      category: options?.category || "",
-      sortBy: options?.sortBy || "relevance",
-      page: String(options?.page || 1),
-      pageSize: String(options?.pageSize || 20)
-    });
-    
-    const response = await fetch(`${this.apiEndpoint}/search?${params}`);
-    return response.json();
-  }
-  
-  async getExtension(id: string): Promise<MarketplaceExtension> {
-    const response = await fetch(`${this.apiEndpoint}/extensions/${id}`);
-    return response.json();
-  }
-  
-  async install(id: string, version?: string): Promise<void> {
-    // Get extension package
-    const ext = await this.getExtension(id);
-    const packageUrl = await this.getPackageUrl(id, version || ext.version);
-    
-    // Download
-    const response = await fetch(packageUrl);
-    const buffer = await response.arrayBuffer();
-    
-    // Verify signature
-    const verified = await this.verifySignature(buffer, ext.publisher);
-    if (!verified) {
-      throw new Error("Extension signature verification failed");
-    }
-    
-    // Extract and install
-    await this.extractAndInstall(buffer);
-    
-    // Activate
-    await this.activateExtension(id);
-  }
-  
-  async uninstall(id: string): Promise<void> {
-    // Deactivate
-    await this.deactivateExtension(id);
-    
-    // Remove files
-    await this.removeExtensionFiles(id);
-    
-    // Clean up storage
-    await this.cleanupStorage(id);
-  }
-}
+```ts
+// See apps/web/src/marketplace/MarketplaceClient.ts and WebExtensionManager.ts
+const marketplace = new MarketplaceClient({ baseUrl: "https://marketplace.example.com/api" });
+const manager = new WebExtensionManager({ marketplaceClient: marketplace, host });
 ```
+
+**CSP constraint (Desktop):** marketplace installs are plain `fetch()` requests from the WebView, so they are subject
+to the app-level CSP (`apps/desktop/src-tauri/tauri.conf.json`, `connect-src`).
 
 ### Extension Publishing
 
@@ -1268,43 +1208,32 @@ class ExtensionPublisher {
 
 ---
 
-## Installed extension integrity (tamper detection + quarantine)
+## Installed extension integrity
 
 Extensions are treated as **immutable** after installation.
 
-### What we guarantee
+### Desktop (Tauri) / Web (IndexedDB installs)
 
-1. **Package signature verification at install time**
-   - When installing from the marketplace, the desktop app verifies the extension package signature
-     using the publisher public key.
-   - The installer persists verification metadata (package SHA-256, signature, and per-file
-     SHA-256 + size).
+For browser/WebView installs (the production Desktop/Tauri model):
 
-2. **On-disk integrity verification before execution**
-   - Before loading an installed extension into the runtime, the desktop app verifies the installed
-     extension directory matches the recorded per-file hashes.
-   - If any expected file is missing, modified, or if unexpected files are present, the extension is
-     considered **corrupted**.
+1. **Package signature verification at install time (mandatory)**
+   - `WebExtensionManager` verifies the downloaded `.fextpkg` in the WebView (SHA-256 + Ed25519 signature
+     verification + manifest id/version checks) before persisting anything.
+2. **Persistence model**
+   - Verified package bytes + metadata are stored in IndexedDB (`formula.webExtensions`).
+   - Extensions are loaded into `BrowserExtensionHost` from those verified bytes via a `blob:` module URL.
 
-### Quarantine behavior (“corrupted”)
+Because the browser/WebView runtime has no extracted on-disk extension directory, there is no filesystem location for a
+third party to edit to affect the runtime. If IndexedDB contents are corrupted (or the browser storage is cleared),
+loading will fail and reinstalling the extension fixes the issue.
 
-If integrity verification fails, the extension is **quarantined**:
+### Legacy Node filesystem installs (deprecated)
 
-- The extension is marked `corrupted: true` in the desktop marketplace state along with a timestamp
-  and human-readable reason.
-- The extension host refuses to load/execute the extension and surfaces an **“integrity check
-  failed”** error.
+The repository still contains a Node-only installer/runtime that extracted extensions to disk and performed per-file
+integrity checks + quarantine. This flow is **not used by the desktop renderer**, but remains for Node test harnesses:
 
-This protects users from accidental edits to the extension folder and from malware that tampers with
-installed extension code.
-
-### Recovery (“repair”)
-
-Users recover by reinstalling the extension from the marketplace:
-
-- **Repair** downloads and verifies the package again, then re-extracts it atomically over the
-  existing installation.
-- On success, the `corrupted` flag is cleared and the extension can be loaded again.
+- `apps/desktop/src/marketplace/extensionManager.js`
+- `apps/desktop/src/extensions/ExtensionHostManager.js`
 
 --- 
 
@@ -1336,53 +1265,52 @@ pnpm extension:build extensions/sample-hello
 // extension.ts
 import * as formula from "@formula/extension-api";
 
-export function activate(context: formula.ExtensionContext) {
+export async function activate(context: formula.ExtensionContext) {
   // Register command
-  const cmd = formula.commands.registerCommand("chartViz.createChart", async () => {
-    const selection = formula.cells.getSelection();
+  const cmd = await formula.commands.registerCommand("chartViz.createChart", async () => {
+    const selection = await formula.cells.getSelection();
     const values = selection.values;
-    
+
     // Create visualization panel
-    const panel = formula.ui.createPanel("chartViz.panel", {
+    const panel = await formula.ui.createPanel("chartViz.panel", {
       title: "Chart Visualization",
       position: "right"
     });
-    
-    // Generate chart
-    const chartConfig = inferChartType(values);
-    
+
+    // IMPORTANT: panel HTML runs in a sandboxed iframe with a restrictive CSP
+    // (`connect-src 'none'`, no remote scripts). Bundle everything you need.
     panel.webview.html = `
-      <!DOCTYPE html>
+      <!doctype html>
       <html>
-      <head>
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-      </head>
-      <body>
-        <canvas id="chart"></canvas>
-        <script>
-          const ctx = document.getElementById('chart').getContext('2d');
-          new Chart(ctx, ${JSON.stringify(chartConfig)});
-        </script>
-      </body>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: system-ui, -apple-system, sans-serif; margin: 12px; }
+            canvas { width: 100%; height: 200px; border: 1px solid #ddd; border-radius: 8px; }
+          </style>
+        </head>
+        <body>
+          <div style="font-weight: 600; margin-bottom: 8px;">Selection preview</div>
+          <canvas id="chart" width="600" height="200"></canvas>
+          <script>
+            const raw = ${JSON.stringify(values)};
+            const numbers = raw.flat().filter((v) => typeof v === "number");
+            const max = Math.max(1, ...numbers);
+            const canvas = document.getElementById("chart");
+            const ctx = canvas.getContext("2d");
+            ctx.fillStyle = "#4e79a7";
+            const barW = canvas.width / Math.max(1, numbers.length);
+            numbers.forEach((n, i) => {
+              const h = (n / max) * (canvas.height - 10);
+              ctx.fillRect(i * barW + 2, canvas.height - h, Math.max(1, barW - 4), h);
+            });
+          </script>
+        </body>
       </html>
     `;
   });
-  
-  context.subscriptions.push(cmd);
-}
 
-function inferChartType(data: CellValue[][]): ChartConfiguration {
-  // Analyze data to determine best chart type
-  const hasLabels = typeof data[0][0] === "string";
-  const numericColumns = data[0].filter(v => typeof v === "number").length;
-  
-  if (numericColumns === 1) {
-    return { type: "bar", data: formatBarData(data) };
-  } else if (numericColumns === 2) {
-    return { type: "scatter", data: formatScatterData(data) };
-  } else {
-    return { type: "line", data: formatLineData(data) };
-  }
+  context.subscriptions.push(cmd);
 }
 ```
 
@@ -1392,9 +1320,9 @@ function inferChartType(data: CellValue[][]): ChartConfiguration {
 // extension.ts
 import * as formula from "@formula/extension-api";
 
-export function activate(context: formula.ExtensionContext) {
+export async function activate(context: formula.ExtensionContext) {
   // Register custom function
-  const stockFunc = formula.functions.register("STOCK", {
+  const stockFunc = await formula.functions.register("STOCK", {
     description: "Get stock price",
     parameters: [
       { name: "symbol", type: "string", description: "Stock symbol" }
@@ -1403,9 +1331,9 @@ export function activate(context: formula.ExtensionContext) {
     isAsync: true,
     
     handler: async (symbol: string) => {
-      const apiKey = formula.config.get<string>("stockData.apiKey");
-      const response = await fetch(
-        `https://api.stockdata.com/v1/quote?symbol=${symbol}&api_key=${apiKey}`
+      const apiKey = await formula.config.get<string>("stockData.apiKey");
+      const response = await formula.network.fetch(
+        `https://api.stockdata.com/v1/quote?symbol=${encodeURIComponent(symbol)}&api_key=${encodeURIComponent(apiKey ?? "")}`
       );
       const data = await response.json();
       return data.price;
