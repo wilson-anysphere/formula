@@ -1666,13 +1666,129 @@ export class DocumentController {
 
     for (const [key, cell] of sheet.cells.entries()) {
       const { row, col } = parseRowColKey(key);
+      const effectiveStyle = this.#resolveEffectiveCellStyle(sheetId, row, col, cell.styleId);
       cells.set(semanticDiffCellKey(row, col), {
         value: cell.value ?? null,
         formula: cell.formula ?? null,
-        format: cell.styleId === 0 ? null : this.styleTable.get(cell.styleId),
+        // Semantic diff consumers expect the *effective* format for stored cells so inherited
+        // row/col/sheet formatting is visible even when `styleId === 0`.
+        format: effectiveStyle && Object.keys(effectiveStyle).length > 0 ? effectiveStyle : null,
       });
     }
     return { cells };
+  }
+
+  /**
+   * Resolve a cell's effective formatting, taking layered formatting into account:
+   * sheet -> column -> row -> range-runs -> cell.
+   *
+   * This helper is intentionally resilient to schema evolution: it looks for common
+   * field names used by layered-formatting implementations (Task 44 / Task 118) and
+   * falls back to the legacy per-cell `styleId` only model when those structures are
+   * absent.
+   *
+   * @param {string} sheetId
+   * @param {number} row
+   * @param {number} col
+   * @param {number} cellStyleId
+   * @returns {Record<string, any>}
+   */
+  #resolveEffectiveCellStyle(sheetId, row, col, cellStyleId) {
+    const sheet = this.model.sheets.get(sheetId);
+
+    const layerToStyle = (layer) => {
+      if (layer == null) return null;
+      if (typeof layer === "number") {
+        if (!Number.isFinite(layer) || layer === 0) return null;
+        return this.styleTable.get(layer);
+      }
+      if (typeof layer === "object") return layer;
+      return null;
+    };
+
+    const merge = (base, layer) => {
+      const patch = layerToStyle(layer);
+      if (!patch) return base;
+      if (typeof patch !== "object") return base;
+      if (Object.keys(patch).length === 0) return base;
+      return applyStylePatch(base, patch);
+    };
+
+    const axisLookup = (container, index) => {
+      if (!container) return null;
+      // Support either Map-like or plain object encodings.
+      if (typeof container.get === "function") {
+        return container.get(index) ?? container.get(String(index)) ?? null;
+      }
+      if (typeof container === "object") {
+        return container[String(index)] ?? null;
+      }
+      return null;
+    };
+
+    /** @type {Record<string, any>} */
+    let style = {};
+
+    if (sheet) {
+      // Sheet default.
+      style = merge(
+        style,
+        sheet.sheetStyleId ??
+          sheet.sheetFormatId ??
+          sheet.defaultStyleId ??
+          sheet.sheetDefaultStyleId ??
+          sheet.format ??
+          sheet.sheetFormat ??
+          null,
+      );
+
+      // Column default.
+      const colLayer =
+        axisLookup(sheet.colStyleIds, col) ??
+        axisLookup(sheet.colFormatIds, col) ??
+        axisLookup(sheet.colFormats, col) ??
+        axisLookup(sheet.columnStyleIds, col) ??
+        axisLookup(sheet.columnFormats, col) ??
+        null;
+      style = merge(style, colLayer);
+
+      // Row default.
+      const rowLayer =
+        axisLookup(sheet.rowStyleIds, row) ??
+        axisLookup(sheet.rowFormatIds, row) ??
+        axisLookup(sheet.rowFormats, row) ??
+        axisLookup(sheet.rowsStyleIds, row) ??
+        axisLookup(sheet.rowsFormats, row) ??
+        null;
+      style = merge(style, rowLayer);
+
+      // Range runs (Task 118). Expected to be sparse and reasonably small.
+      const runs =
+        sheet.formatRuns ??
+        sheet.rangeFormatRuns ??
+        sheet.rangeRuns ??
+        sheet.formattingRuns ??
+        sheet.formatRanges ??
+        null;
+      if (Array.isArray(runs)) {
+        for (const run of runs) {
+          if (!run || typeof run !== "object") continue;
+          const startRow = Number(run.startRow ?? run.start?.row ?? run.sr);
+          const startCol = Number(run.startCol ?? run.start?.col ?? run.sc);
+          const endRow = Number(run.endRow ?? run.end?.row ?? run.er);
+          const endCol = Number(run.endCol ?? run.end?.col ?? run.ec);
+          if (!Number.isInteger(startRow) || !Number.isInteger(startCol)) continue;
+          if (!Number.isInteger(endRow) || !Number.isInteger(endCol)) continue;
+          if (row < startRow || row > endRow || col < startCol || col > endCol) continue;
+          style = merge(style, run.styleId ?? run.format ?? run.style ?? null);
+        }
+      }
+    }
+
+    // Cell override (legacy cell-level formatting).
+    style = merge(style, cellStyleId);
+
+    return style;
   }
 
   /**

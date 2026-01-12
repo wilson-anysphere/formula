@@ -33,3 +33,49 @@ test("diffDocumentSnapshots computes semantic diffs between two snapshots", () =
   assert.equal(diff.added.length, 1);
   assert.equal(diff.removed.length, 0);
 });
+
+test("diffDocumentSnapshots detects formatOnly edits from column-default formatting", () => {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  const beforeSnapshot = doc.encodeState();
+
+  const parsed = JSON.parse(decoder.decode(beforeSnapshot));
+  const sheet = parsed.sheets.find((s) => s?.id === "Sheet1");
+  assert.ok(sheet, "expected Sheet1 to exist in snapshot");
+  sheet.colFormats = { "0": { font: { bold: true } } };
+
+  const afterSnapshot = encoder.encode(JSON.stringify(parsed));
+
+  const diff = diffDocumentSnapshots({ beforeSnapshot, afterSnapshot, sheetId: "Sheet1" });
+  assert.equal(diff.formatOnly.length, 1);
+  assert.deepEqual(diff.formatOnly[0].cell, { row: 0, col: 0 });
+  assert.equal(diff.modified.length, 0);
+  assert.equal(diff.added.length, 0);
+  assert.equal(diff.removed.length, 0);
+});
+
+test("diffDocumentSnapshots detects formatOnly edits from sheet-default formatting", () => {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  const doc = new DocumentController();
+  doc.setCellValue("Sheet1", "A1", 1);
+  const beforeSnapshot = doc.encodeState();
+
+  const parsed = JSON.parse(decoder.decode(beforeSnapshot));
+  const sheet = parsed.sheets.find((s) => s?.id === "Sheet1");
+  assert.ok(sheet, "expected Sheet1 to exist in snapshot");
+  sheet.format = { font: { bold: true } };
+
+  const afterSnapshot = encoder.encode(JSON.stringify(parsed));
+
+  const diff = diffDocumentSnapshots({ beforeSnapshot, afterSnapshot, sheetId: "Sheet1" });
+  assert.equal(diff.formatOnly.length, 1);
+  assert.deepEqual(diff.formatOnly[0].cell, { row: 0, col: 0 });
+  assert.equal(diff.modified.length, 0);
+  assert.equal(diff.added.length, 0);
+  assert.equal(diff.removed.length, 0);
+});
