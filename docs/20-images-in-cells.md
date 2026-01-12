@@ -53,9 +53,11 @@ Notes:
   lowercase) instead of `xl/cellImages.xml`. OPC part names are case-sensitive inside the ZIP, so:
   - readers should handle both variants, and
   - writers should preserve the original casing when round-tripping an existing file.
-- **`cellImages.xml` is optional:** Some “Place in Cell” / richData workbooks store image bytes via
-  `xl/richData/richValueRel.xml` → `xl/richData/_rels/richValueRel.xml.rels` → `xl/media/*` without a
-  separate `xl/cellImages.xml` part. If `cellImages.xml` exists, preserve it and its relationship graph.
+- **`cellImages.xml` may be absent:** Some workbooks store image-in-cell values entirely via
+  `xl/metadata.xml` + `xl/richData/*` (especially `richValueRel.xml` → `.rels` → `xl/media/*`) without a
+  separate `xl/cellImages.xml` part. See `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` and
+  `crates/formula-xlsx/tests/rich_data_roundtrip.rs`.
+  - If `cellImages.xml` exists, preserve it and its relationship graph.
 - `xl/media/*` contains the actual image bytes (usually `.png`, but Excel may use other formats).
 - The exact `xl/richData/*` file set can vary across Excel builds; the `richValue*` names shown above are
   common, but Formula should preserve the entire `xl/richData/` directory byte-for-byte unless we
@@ -268,7 +270,9 @@ explicitly implement full rich-value editing.
 
 Formula’s current understanding (implemented in `crates/formula-xlsx/src/rich_data/metadata.rs`) is:
 
-1. Worksheet cells reference a *value metadata record* via `c/@vm` (**often 1-based, but 0-based is also observed**; treat as opaque and preserve).
+1. Worksheet cells reference a *value metadata record* via `c/@vm`.
+   - Excel commonly emits `vm` as **1-based**, but **0-based** values are also observed in the wild (and in our
+     test-only richData fixtures). Treat `vm` as opaque and preserve it.
 2. `xl/metadata.xml` contains `<valueMetadata>` with a list of `<bk>` records; `vm` selects a `<bk>`.
 3. That `<bk>` contains `<rc t="…" v="…"/>` where:
     - `t` is the **1-based** index of `"XLRICHVALUE"` inside `<metadataTypes>`.
@@ -310,10 +314,18 @@ Representative snippet (from the unit tests in `crates/formula-xlsx/src/rich_dat
 </metadata>
 ```
 
+Other observed `xl/metadata.xml` shapes exist. For example, `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
+contains a `<valueMetadata>` table but **no** `<futureMetadata>` block; Formula currently treats these
+schemas as opaque and focuses on round-trip preservation (with best-effort extraction utilities in
+`crates/formula-xlsx/src/rich_data/mod.rs`).
+
 ## `xl/cellImages.xml` (a.k.a. `xl/cellimages.xml`)
 
 `xl/cellImages.xml` is the workbook-level “cell image store” part. It is expected to contain a list of
 image entries that can be referenced (directly or indirectly) by rich values.
+
+Note: not all images-in-cell workbooks include this part (some use `xl/metadata.xml` + `xl/richData/*`
+only). When present, it must be preserved along with its `.rels` and referenced media.
 
 The part embeds **SpreadsheetDrawing / DrawingML** `<xdr:pic>` payloads and uses
 `<a:blip r:embed="rId…">` to reference an image relationship in `xl/_rels/cellImages.xml.rels`.
@@ -517,13 +529,16 @@ Also observed in tests:
 And observed that **no override** may be present (default `application/xml`), in:
 
 - `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
+Note: some workbooks omit the override entirely and rely on the package default
+`<Default Extension="xml" ContentType="application/xml"/>` (e.g. `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`).
 
 ### `xl/richData/*` content types (TODO: fixture-driven)
 
 Content types for `xl/richData/*` still need confirmation from a real Excel-exported workbook *that emits
 explicit overrides* for these parts.
 
-Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`: no richData overrides (default `application/xml`).
+Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`: no explicit `[Content_Types].xml` overrides
+for `xl/richData/*` (falls back to the package default `application/xml`).
 
 Likely patterns seen in the ecosystem (unverified; do not hardcode without a real Excel fixture in
 `fixtures/xlsx/**`):
@@ -539,6 +554,7 @@ Likely patterns seen in the ecosystem (unverified; do not hardcode without a rea
   <Default Extension="png" ContentType="image/png"/>
   <!-- ... -->
 
+  <!-- These overrides may be absent; Excel sometimes relies on the default XML content type. -->
   <Override PartName="/xl/cellImages.xml"
              ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.cellimages+xml"/>
 
@@ -572,6 +588,12 @@ Partially known (fixture-driven details still recommended):
   - Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`:
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"`
   - Preservation is covered by `crates/formula-xlsx/tests/metadata_rich_values_vm_roundtrip.rs`.
+- Workbook → richData parts (when stored directly in workbook relationships):
+  - Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`:
+    - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValue"`
+      - `Target="richData/richValue.xml"`
+    - `Type="http://schemas.microsoft.com/office/2017/06/relationships/richValueRel"`
+      - `Target="richData/richValueRel.xml"`
 - Workbook → `xl/cellImages.xml` relationship:
   - Lives in `xl/_rels/workbook.xml.rels`.
   - Excel uses a Microsoft-extension relationship `Type` URI that has been observed to vary.
@@ -584,6 +606,8 @@ Partially known (fixture-driven details still recommended):
 - RichData relationship indirection (images referenced via `richValueRel.xml`):
   - `xl/richData/_rels/richValueRel.xml.rels` is expected to contain standard image relationships:
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"`
+  - Observed in `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` and the unit test
+    `crates/formula-xlsx/tests/rich_data_cell_images.rs`.
   - Workbook → richData relationships (Type URIs are Microsoft-specific and versioned). Observed in this repo:
     - `http://schemas.microsoft.com/office/2017/06/relationships/richValue` (fixture: `image-in-cell-richdata.xlsx`)
     - `http://schemas.microsoft.com/office/2017/06/relationships/richValueRel` (fixture: `image-in-cell-richdata.xlsx`)
@@ -594,8 +618,8 @@ Partially known (fixture-driven details still recommended):
 TODO (confirm via real Excel fixture, then harden parsers/writers):
 
 - Relationship type(s) connecting `xl/workbook.xml` (or other workbook-level parts) to:
-  - `xl/richData/*`
   - `xl/cellImages.xml`
+  - richData parts when linked indirectly via `xl/_rels/metadata.xml.rels` (instead of directly from `workbook.xml.rels`)
 
 Until confirmed, Formula must preserve any such relationships byte-for-byte rather than regenerating.
 
@@ -658,9 +682,15 @@ does not “orphan” images or break Excel’s internal references.
 - **Best-effort image import during `XlsxDocument` load**
   - `crates/formula-xlsx/src/read/mod.rs` calls `load_cell_images_from_parts(...)` to populate `workbook.images`.
 - **Preservation of `xl/cellImages.xml` / `xl/cellimages.xml` + matching `.rels` + `xl/media/*` on cell edits**
-   - Test: `crates/formula-xlsx/tests/cellimages_preservation.rs`
+  - Test: `crates/formula-xlsx/tests/cellimages_preservation.rs`
+- **Round-trip preservation of richData-backed in-cell image parts**
+  - Test: `crates/formula-xlsx/tests/rich_data_roundtrip.rs`
+  - Fixture: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
 - **Preservation of RichData “Place in Cell” parts (`xl/metadata.xml` + `xl/richData/*` + `xl/media/*`) on edits**
   - Test: `crates/formula-xlsx/tests/embedded_images_place_in_cell_roundtrip.rs`
+- **Best-effort extraction of richData-backed in-cell images (cell → bytes)**
+  - API: `crates/formula-xlsx/src/rich_data/mod.rs` (`extract_rich_cell_images`)
+  - Test: `crates/formula-xlsx/tests/rich_data_cell_images.rs`
 - **`vm` attribute preservation** on edit is covered by:
   - `crates/formula-xlsx/tests/sheetdata_row_col_attrs.rs` (`editing_a_cell_does_not_strip_unrelated_row_col_or_cell_attrs`)
   - `crates/formula-xlsx/tests/metadata_rich_values_vm_roundtrip.rs` (also asserts `xl/metadata.xml` is preserved and the workbook relationship to `metadata.xml` remains)
@@ -677,16 +707,17 @@ does not “orphan” images or break Excel’s internal references.
 
 Limitations (current Formula behavior):
 
-- Formula can **load** the image bytes referenced by the `cellImages` part (`xl/cellImages.xml` / `xl/cellimages.xml`) into `workbook.images`, but it does not yet
-  build a first-class “cell → image” semantic mapping from `vm`/`metadata.xml`/`richData/*`. That work is tracked
-  in the TODO section below (fixture-driven rich-value parsing).
+- Formula can **load** the image bytes referenced by the `cellImages` part (`xl/cellImages.xml` / `xl/cellimages.xml`) into `workbook.images`
+  during `XlsxDocument` load.
+- For richData-backed images, Formula has best-effort extractors (see above), but the main `formula-model` cell value
+  layer does not yet represent an image-in-cell value as a first-class `CellValue` variant (and this doc intentionally
+  does not cover UI rendering).
 
 ### TODO work (required for images-in-cells)
 
 - **Add a real Excel-generated fixture workbook** covering:
-  - a “Place in Cell” inserted image
-  - a formula cell containing `=IMAGE(...)`
-  - and the accompanying `xl/metadata.xml` + `xl/richData/*` parts
+  - a “Place in Cell” inserted image that uses `xl/cellImages.xml` (if present in modern Excel builds)
+  - a richData-backed image-in-cell (e.g. from `=IMAGE(...)`)
 - **Confirm and document the remaining relationship/content-type details** from that fixture:
   - `[Content_Types].xml` overrides for:
     - `/xl/metadata.xml`

@@ -495,22 +495,30 @@ Minimal sketch of `xl/metadata.xml` structure:
 </metadata>
 ```
 
-The structured payloads referenced by this metadata live under `xl/richData/` (commonly
-`rdRichValueTypes.xml` + `rdrichvalue.xml`, plus related supporting tables such as `richValueRel.xml`.
-Some Excel builds use the unprefixed naming (`richValue*.xml`) for rich value instances/types/structure.
+The structured payloads referenced by this metadata live under `xl/richData/`. Excel has been observed to
+use multiple naming schemes, including:
+
+- `rdrichvalue.xml` + `rdRichValueTypes.xml` / `rdrichvaluestructure.xml` (prefixed)
+- `richValue.xml` + `richValueTypes.xml` / `richValueStructure.xml` (unprefixed)
+
+In both cases, the image payload is commonly referenced indirectly via `richValueRel.xml` (and its
+`xl/richData/_rels/richValueRel.xml.rels` relationships).
 
 These pieces are connected via OPC relationships:
 
 - `xl/_rels/workbook.xml.rels` typically has a relationship from the workbook to `xl/metadata.xml`.
-- `xl/_rels/metadata.xml.rels` typically has relationships from `xl/metadata.xml` to `xl/richData/*` parts.
+- `xl/_rels/metadata.xml.rels` may have relationships from `xl/metadata.xml` to `xl/richData/*` parts.
+- Some workbooks instead include direct relationships from `xl/_rels/workbook.xml.rels` to the richData tables
+  (e.g. `richData/richValue.xml` and `richData/richValueRel.xml`) using Microsoft-specific relationship type URIs.
 
-Simplified relationship sketch (workbook → metadata uses a stable OOXML relationship type; richData linkage types may vary across Excel builds):
+Simplified relationship sketch (Excel uses multiple relationship type URIs for workbook → metadata; richData linkage types vary across builds and may be linked either directly from `workbook.xml.rels` or indirectly via `metadata.xml.rels`):
 
 ```xml
 <!-- xl/_rels/workbook.xml.rels -->
 <Relationship Id="rIdMeta"
               <!-- Observed as either `.../metadata` or `.../sheetMetadata` depending on producer/version. -->
               Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"
+              <!-- also observed: http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata -->
               Target="metadata.xml"/>
 
 <!-- xl/_rels/metadata.xml.rels -->

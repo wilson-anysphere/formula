@@ -25,8 +25,8 @@ xl/
   richData/
     richValue.xml
     richValueRel.xml
-    richValueTypes.xml
-    richValueStructure.xml
+    richValueTypes.xml        # optional (not present in all workbooks)
+    richValueStructure.xml    # optional (not present in all workbooks)
   richData/_rels/
     richValueRel.xml.rels   # required if richValueRel.xml contains r:id entries
 ```
@@ -207,7 +207,7 @@ This indirection is important for engineering because:
 
 Excel uses multiple indices; mixing bases is a common source of bugs.
 
-### `vm` (worksheet cell attribute) — **0-based or 1-based (tolerate both)**
+### `vm` (worksheet cell attribute) — **0-based vs 1-based**
 
 In worksheet XML, cells can carry `vm="n"` to attach value metadata:
 
@@ -226,11 +226,13 @@ Some workbooks use `vm="0"` for the first entry (0-based). Example from
 
 Current Formula behavior:
 
-* `vm` is treated as **ambiguous** (0-based or 1-based), because both appear in the wild.
-  Implementations should attempt to resolve both (e.g. try `vm` and `vm-1`), and preserve the original
-  values when round-tripping.
+* Excel emits both **0-based** and **1-based** `vm` values in different files/contexts.
+  - Example: `fixtures/xlsx/basic/image-in-cell-richdata.xlsx` uses `vm="0"`.
+  - Example: `fixtures/xlsx/metadata/rich-values-vm.xlsx` uses `vm="1"`.
+* Formula treats `vm` as **ambiguous** (0-based or 1-based) and tries to resolve both bases where possible
+  (see `crates/formula-xlsx/src/rich_data/mod.rs`).
 * Missing `vm` means “no value metadata”.
-* Preserve unusual values like `vm="0"` if encountered (even if they don’t resolve cleanly).
+* Preserve `vm` exactly on round-trip even if it doesn’t resolve cleanly.
 
 ### Indices inside `xl/metadata.xml` used by `XLRICHVALUE`
 
