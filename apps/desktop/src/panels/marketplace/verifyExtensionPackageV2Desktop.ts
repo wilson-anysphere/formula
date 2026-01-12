@@ -28,33 +28,38 @@ function bytesToHex(bytes: Uint8Array): string {
   return out;
 }
 
+function normalizeBytesForCrypto(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+  // `crypto.subtle.*` expects BufferSources backed by `ArrayBuffer`. TypeScript models `Uint8Array`
+  // as potentially backed by a `SharedArrayBuffer` (`ArrayBufferLike`), so normalize to an
+  // `ArrayBuffer`-backed view for type safety (and to ensure downstream code doesn't need casts).
+  return bytes.buffer instanceof ArrayBuffer ? (bytes as Uint8Array<ArrayBuffer>) : new Uint8Array(bytes);
+}
+
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle || typeof subtle.digest !== "function") {
     throw new Error("WebCrypto subtle.digest is required to verify extension packages");
   }
 
-  // `crypto.subtle.digest` expects a BufferSource backed by an `ArrayBuffer`. TypeScript models
-  // `Uint8Array` as potentially backed by a `SharedArrayBuffer` (`ArrayBufferLike`), so normalize
-  // to an `ArrayBuffer`-backed view for type safety.
-  const normalized: Uint8Array<ArrayBuffer> =
-    bytes.buffer instanceof ArrayBuffer ? (bytes as Uint8Array<ArrayBuffer>) : new Uint8Array(bytes);
+  const normalized = normalizeBytesForCrypto(bytes);
 
   const digest = await subtle.digest("SHA-256", normalized);
   return bytesToHex(new Uint8Array(digest));
 }
 
-function base64ToBytes(base64: string): Uint8Array {
+function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
   const raw = String(base64);
+  // Test/runtime fallback (Node).
+  if (typeof Buffer !== "undefined") {
+    const buf = Buffer.from(raw, "base64");
+    const sliced = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    return new Uint8Array(sliced);
+  }
   if (typeof globalThis.atob === "function") {
     const bin = globalThis.atob(raw);
     const out = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out;
-  }
-  // Test/runtime fallback (Node).
-  if (typeof Buffer !== "undefined") {
-    return Uint8Array.from(Buffer.from(raw, "base64"));
   }
   throw new Error("Base64 decoding is not available in this runtime");
 }
@@ -86,14 +91,17 @@ async function verifyEd25519SignatureViaWebCrypto(
   publicKeyPem: string
 ): Promise<boolean> {
   const signature = base64ToBytes(signatureBase64);
+  const normalizedSignature = normalizeBytesForCrypto(signature);
+  const normalizedPayload = normalizeBytesForCrypto(payloadBytes);
+  const normalizedPublicKeyDer = normalizeBytesForCrypto(pemToDerBytes(publicKeyPem));
 
   const subtle = globalThis.crypto?.subtle;
   if (!subtle || typeof subtle.importKey !== "function" || typeof subtle.verify !== "function") {
     throw new Error("WebCrypto (crypto.subtle.importKey()/verify()) is required to verify extension packages");
   }
 
-  const key = await subtle.importKey("spki", pemToDerBytes(publicKeyPem), { name: "Ed25519" }, false, ["verify"]);
-  const ok = await subtle.verify({ name: "Ed25519" }, key, signature, payloadBytes);
+  const key = await subtle.importKey("spki", normalizedPublicKeyDer, { name: "Ed25519" }, false, ["verify"]);
+  const ok = await subtle.verify({ name: "Ed25519" }, key, normalizedSignature, normalizedPayload);
   return Boolean(ok);
 }
 

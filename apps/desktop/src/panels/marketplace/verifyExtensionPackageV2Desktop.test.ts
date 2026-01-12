@@ -71,20 +71,57 @@ afterAll(() => {
 });
 
 function createMockMarketplace({ extensionId, latestVersion, publicKeyPem, pkgBytes }: any) {
+  const now = new Date().toISOString();
   return {
+    // `WebExtensionManager` accepts a `MarketplaceClient` (class) and relies on structural typing
+    // in tests. Provide a minimal compatible surface area.
+    baseUrl: "https://example.invalid/api",
+    async search(_params: any) {
+      return { total: 0, results: [], nextCursor: null };
+    },
     async getExtension(id: string) {
       if (id !== extensionId) return null;
       return {
         id,
+        name: id.split(".").slice(1).join("."),
+        displayName: id,
+        publisher: id.split(".")[0] ?? "unknown",
+        description: "",
         latestVersion,
+        verified: true,
+        featured: false,
+        categories: [],
+        tags: [],
+        screenshots: [],
+        downloadCount: 0,
+        updatedAt: now,
+        createdAt: now,
+        versions: [
+          {
+            version: latestVersion,
+            sha256: "0".repeat(64),
+            uploadedAt: now,
+            yanked: false,
+            scanStatus: "passed",
+            signingKeyId: null,
+            formatVersion: 2,
+          },
+        ],
+        readme: "",
+        deprecated: false,
+        blocked: false,
+        malicious: false,
         publisherPublicKeyPem: publicKeyPem
       };
     },
     async downloadPackage(id: string, version: string) {
       if (id !== extensionId) return null;
       if (version !== latestVersion) return null;
+      const rawBytes: Uint8Array = pkgBytes instanceof Uint8Array ? pkgBytes : new Uint8Array(pkgBytes);
+      const bytes: Uint8Array<ArrayBuffer> =
+        rawBytes.buffer instanceof ArrayBuffer ? (rawBytes as Uint8Array<ArrayBuffer>) : new Uint8Array(rawBytes);
       return {
-        bytes: new Uint8Array(pkgBytes),
+        bytes,
         signatureBase64: null,
         sha256: null,
         formatVersion: 2,

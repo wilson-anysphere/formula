@@ -50,6 +50,7 @@ export class BrowserExtensionHost {
     manifest: Record<string, any>;
     mainUrl: string;
   }): Promise<string>;
+  reloadExtension(extensionId: string): Promise<void>;
   unloadExtension(extensionId: string): Promise<void | boolean>;
   updateExtension(args: {
     extensionId: string;
