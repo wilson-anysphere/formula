@@ -10,8 +10,17 @@ test("renderMacroRunner is class-driven (no inline style assignments)", () => {
   const srcPath = path.join(__dirname, "..", "src", "macros", "dom_ui.ts");
   const src = fs.readFileSync(srcPath, "utf8");
 
+  const usesInlineStyle =
+    // Direct DOM style manipulation (element.style.* / element.style = ... / etc).
+    /\.style\b/.test(src) ||
+    // Attribute-based inline styles.
+    /setAttribute\(\s*["']style["']/.test(src) ||
+    /setAttributeNS\(\s*[^,]+,\s*["']style["']/.test(src) ||
+    // Inline style attributes in HTML strings (e.g. element.innerHTML = "<div style=\"...\">").
+    /<[^>]*\bstyle\s*=\s*["']/.test(src);
+
   assert.equal(
-    /\.style\b/.test(src) || /setAttribute\(\s*["']style["']/.test(src),
+    usesInlineStyle,
     false,
     "renderMacroRunner should not use inline styles (element.style* / setAttribute('style', ...)); use src/styles/macros-runner.css classes instead",
   );
