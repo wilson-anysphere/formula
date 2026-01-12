@@ -805,11 +805,11 @@ fn build_shared_strings(workbook: &Workbook) -> SharedStrings {
                     }
                 }
                 CellValue::Entity(entity) => {
-                    let s = &entity.display_value;
-                    if !index.contains_key(s) {
+                    let s = entity.display_value.clone();
+                    if !index.contains_key(&s) {
                         let idx = values.len();
                         values.push(s.clone());
-                        index.insert(s.clone(), idx);
+                        index.insert(s, idx);
                     }
                 }
                 CellValue::Record(record) => {
