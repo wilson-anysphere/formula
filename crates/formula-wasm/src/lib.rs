@@ -94,8 +94,18 @@ fn parse_options_from_js(options: Option<JsValue>) -> Result<ParseOptions, JsVal
         return Ok(opts);
     }
 
-    // Fall back to the full ParseOptions struct for advanced callers.
-    serde_wasm_bindgen::from_value(obj.into()).map_err(|err| js_err(err.to_string()))
+    let looks_like_parse_options =
+        Reflect::has(&obj, &JsValue::from_str("locale")).unwrap_or(false)
+            || Reflect::has(&obj, &JsValue::from_str("reference_style")).unwrap_or(false)
+            || Reflect::has(&obj, &JsValue::from_str("normalize_relative_to")).unwrap_or(false);
+    if looks_like_parse_options {
+        // Fall back to the full ParseOptions struct for advanced callers.
+        return serde_wasm_bindgen::from_value(obj.into()).map_err(|err| js_err(err.to_string()));
+    }
+
+    Err(js_err(
+        "options must be { localeId?: string, referenceStyle?: \"A1\" | \"R1C1\" } or a ParseOptions object",
+    ))
 }
 fn edit_error_to_string(err: EngineEditError) -> String {
     match err {

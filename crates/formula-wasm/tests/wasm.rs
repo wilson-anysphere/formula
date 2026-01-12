@@ -203,6 +203,22 @@ fn lex_formula_rejects_non_object_options() {
 }
 
 #[wasm_bindgen_test]
+fn lex_formula_rejects_unrecognized_options_object() {
+    let opts = Object::new();
+    // Common mistake: wrong casing on localeId.
+    Reflect::set(&opts, &JsValue::from_str("localeID"), &JsValue::from_str("de-DE")).unwrap();
+
+    let err = lex_formula("=1+2", Some(opts.into())).unwrap_err();
+    let message = err
+        .as_string()
+        .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
+    assert_eq!(
+        message,
+        "options must be { localeId?: string, referenceStyle?: \"A1\" | \"R1C1\" } or a ParseOptions object"
+    );
+}
+
+#[wasm_bindgen_test]
 fn lex_formula_honors_reference_style_option() {
     let opts = Object::new();
     Reflect::set(
@@ -285,6 +301,21 @@ fn parse_formula_partial_rejects_non_object_options() {
         .as_string()
         .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
     assert_eq!(message, "options must be an object");
+}
+
+#[wasm_bindgen_test]
+fn parse_formula_partial_rejects_unrecognized_options_object() {
+    let opts = Object::new();
+    Reflect::set(&opts, &JsValue::from_str("localeID"), &JsValue::from_str("de-DE")).unwrap();
+
+    let err = parse_formula_partial("=1+2".to_string(), None, Some(opts.into())).unwrap_err();
+    let message = err
+        .as_string()
+        .unwrap_or_else(|| format!("unexpected error value: {err:?}"));
+    assert_eq!(
+        message,
+        "options must be { localeId?: string, referenceStyle?: \"A1\" | \"R1C1\" } or a ParseOptions object"
+    );
 }
 
 #[wasm_bindgen_test]
