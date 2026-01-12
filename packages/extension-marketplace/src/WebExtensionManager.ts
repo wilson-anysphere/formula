@@ -1149,15 +1149,25 @@ export class WebExtensionManager {
     if (this.host.startup && !this._didHostStartup) {
       await this.host.startup();
       this._didHostStartup = true;
-      return newlyLoaded;
     }
 
-    // If the host is already running, ensure any newly loaded extensions get startup semantics
-    // without spamming already-active extensions.
-    if (this.host.startupExtension && newlyLoaded.length > 0) {
-      for (const id of newlyLoaded) {
-        // eslint-disable-next-line no-await-in-loop
-        await this.host.startupExtension(id);
+    // Ensure startup semantics for extensions that may already be loaded in the host (e.g. built-in
+    // extensions loaded outside this manager) and for any newly loaded installed extensions.
+    //
+    // `startupExtension` is safe to call repeatedly: it only activates extensions that have
+    // `onStartupFinished` and are not yet active, and only delivers the initial workbook snapshot
+    // to that extension (no global broadcast).
+    if (this.host.startupExtension) {
+      const loaded = this.host.listExtensions?.() ?? [];
+      for (const ext of loaded as any[]) {
+        const id = typeof ext?.id === "string" ? ext.id : null;
+        if (!id) continue;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await this.host.startupExtension(id);
+        } catch {
+          // ignore (best-effort boot)
+        }
       }
       this._didHostStartup = true;
     }

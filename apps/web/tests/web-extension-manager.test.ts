@@ -581,6 +581,51 @@ test("loadInstalled then loadAllInstalled does not duplicate the startup workboo
   }
 });
 
+test("loadAllInstalled starts onStartupFinished extensions already loaded in the host even if startup was skipped", async () => {
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true
+  });
+  const manager = new WebExtensionManager({ host, engineVersion: "1.0.0" });
+
+  try {
+    const extensionId = "test.manual-startup";
+    const source = `const api = globalThis[Symbol.for(\"formula.extensionApi.api\")];\nif (!api) { throw new Error(\"missing formula api\"); }\nexport async function activate() {\n  api.events.onWorkbookOpened(() => {\n    api.storage.set(\"manual.startup\", \"ok\").catch(() => {});\n  });\n}\n`;
+    const mainUrl = `data:text/javascript,${encodeURIComponent(source)}`;
+    await host.loadExtension({
+      extensionId,
+      extensionPath: "memory://manual-startup/",
+      manifest: {
+        name: "manual-startup",
+        publisher: "test",
+        version: "1.0.0",
+        main: "./dist/extension.mjs",
+        browser: "./dist/extension.mjs",
+        engines: { formula: "^1.0.0" },
+        activationEvents: ["onStartupFinished"],
+        permissions: ["storage"],
+        contributes: {}
+      },
+      mainUrl
+    });
+
+    // Simulate an environment where something else already started the host (or we want to avoid
+    // calling host.startup() because it would re-broadcast workbookOpened).
+    (manager as any)._didHostStartup = true;
+
+    await manager.loadAllInstalled();
+
+    const store = (host as any)._storageApi.getExtensionStore(extensionId);
+    await waitFor(() => store["manual.startup"] === "ok");
+    expect(store["manual.startup"]).toBe("ok");
+    expect(host.listExtensions().find((e: any) => e.id === extensionId)?.active).toBe(true);
+  } finally {
+    await manager.dispose();
+    await host.dispose();
+  }
+});
+
 test("update reloads onStartupFinished extension and re-delivers workbookOpened", async () => {
   const keys = generateEd25519KeyPair();
   const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "formula-web-ext-startup-update-"));

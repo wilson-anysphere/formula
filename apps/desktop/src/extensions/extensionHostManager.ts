@@ -162,24 +162,6 @@ export class DesktopExtensionHostManager {
           }
         },
       });
-
-      // If any extensions were loaded (built-in or marketplace-installed) before the manager
-      // ran `host.startup()`, calling `loadAllInstalled()` may have skipped the global startup
-      // broadcast to avoid duplicate `workbookOpened` events. Ensure any `onStartupFinished`
-      // extensions that are currently loaded still get started.
-      if (typeof (this.host as any).startupExtension === "function") {
-        const extensions = this.host.listExtensions?.() ?? [];
-        for (const ext of extensions as any[]) {
-          const id = typeof ext?.id === "string" ? ext.id : null;
-          if (!id) continue;
-          try {
-            // eslint-disable-next-line no-await-in-loop
-            await (this.host as any).startupExtension(id);
-          } catch (err) {
-            error ??= err;
-          }
-        }
-      }
     } catch (err) {
       // Best-effort: surface startup failures but keep going so built-in extensions can run.
       try {
