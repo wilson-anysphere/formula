@@ -181,8 +181,9 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
       },
       // 60fps budget.
       targetMs: 16,
-      iterations: 25,
-      warmup: 5,
+      // Use enough samples that occasional Node/V8 GC pauses don't dominate p95.
+      iterations: 100,
+      warmup: 10,
     },
     {
       name: 'gridRenderer.scrollStep.p95',
@@ -192,6 +193,9 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
         renderer.renderImmediately();
       },
       targetMs: 16,
+      // Use enough samples that occasional Node/V8 GC pauses don't dominate p95.
+      iterations: 200,
+      warmup: 20,
     },
     {
       name: 'gridRenderer.scrollStepHorizontal.p95',
@@ -201,6 +205,9 @@ export function createSharedGridRendererBenchmarks(): BenchmarkDef[] {
         renderer.renderImmediately();
       },
       targetMs: 16,
+      // Use enough samples that occasional Node/V8 GC pauses don't dominate p95.
+      iterations: 200,
+      warmup: 20,
     },
   ];
 
