@@ -305,6 +305,47 @@ fn content_normalized_data_preserves_project_record_order_for_projectname_and_co
 }
 
 #[test]
+fn content_normalized_data_reference_project_includes_libid_relative_before_version_byte() {
+    // Ensure `REFERENCEPROJECT` (0x000E) normalization concatenates:
+    //   LibidAbsolute || LibidRelative || Major(u32le) || Minor(u16le)
+    // and then copies bytes until the first 0x00.
+    //
+    // In particular, this test ensures LibidRelative is *not* skipped.
+    let dir_decompressed = {
+        let mut out = Vec::new();
+
+        let libid_absolute = b"Abs";
+        let libid_relative = b"Rel";
+        let major: u32 = 1; // 01 00 00 00 => stops after copying 0x01
+        let minor: u16 = 0;
+
+        let mut reference_project = Vec::new();
+        reference_project.extend_from_slice(&(libid_absolute.len() as u32).to_le_bytes());
+        reference_project.extend_from_slice(libid_absolute);
+        reference_project.extend_from_slice(&(libid_relative.len() as u32).to_le_bytes());
+        reference_project.extend_from_slice(libid_relative);
+        reference_project.extend_from_slice(&major.to_le_bytes());
+        reference_project.extend_from_slice(&minor.to_le_bytes());
+        push_record(&mut out, 0x000E, &reference_project);
+
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+    assert_eq!(normalized, b"AbsRel\x01".to_vec());
+}
+
+#[test]
 fn content_normalized_data_module_newlines_and_attribute_stripping() {
     // Module source includes:
     // - Attribute lines (mixed case) that must be stripped (case-insensitive match)
@@ -362,6 +403,58 @@ fn content_normalized_data_module_newlines_and_attribute_stripping() {
     .as_bytes()
     .to_vec();
 
+    assert_eq!(normalized, expected);
+}
+
+#[test]
+fn content_normalized_data_does_not_strip_attribute_with_leading_whitespace() {
+    // Per MS-OVBA, only lines that begin with `Attribute` (start-of-line match) are stripped.
+    // If the word is preceded by whitespace, it should be treated as a normal code line.
+    let module_code = concat!(
+        " Attribute VB_Name = \"Module1\"\r\n",
+        "\tAttribute VB_Base = \"0{00000000-0000-0000-0000-000000000000}\"\r\n",
+        "Attribute VB_Description = \"stripped\"\r\n",
+        "Option Explicit\r\n",
+    );
+
+    let module_container = compress_container(module_code.as_bytes());
+
+    let dir_decompressed = {
+        let mut out = Vec::new();
+        push_record(&mut out, 0x0019, b"Module1");
+        let mut stream_name = Vec::new();
+        stream_name.extend_from_slice(b"Module1");
+        stream_name.extend_from_slice(&0u16.to_le_bytes());
+        push_record(&mut out, 0x001A, &stream_name);
+        push_record(&mut out, 0x0021, &0u16.to_le_bytes());
+        push_record(&mut out, 0x0031, &0u32.to_le_bytes());
+        out
+    };
+    let dir_container = compress_container(&dir_decompressed);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    ole.create_storage("VBA").expect("VBA storage");
+    {
+        let mut s = ole.create_stream("VBA/dir").expect("dir stream");
+        s.write_all(&dir_container).expect("write dir");
+    }
+    {
+        let mut s = ole.create_stream("VBA/Module1").expect("module stream");
+        s.write_all(&module_container).expect("write module");
+    }
+    let vba_bin = ole.into_inner().into_inner();
+
+    let normalized = content_normalized_data(&vba_bin).expect("ContentNormalizedData");
+
+    // The two leading-whitespace lines should remain; the true Attribute line should be stripped.
+    let expected = concat!(
+        " Attribute VB_Name = \"Module1\"\r\n",
+        "\tAttribute VB_Base = \"0{00000000-0000-0000-0000-000000000000}\"\r\n",
+        "Option Explicit\r\n",
+    )
+    .as_bytes()
+    .to_vec();
     assert_eq!(normalized, expected);
 }
 
