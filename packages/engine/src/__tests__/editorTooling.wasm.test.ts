@@ -99,6 +99,9 @@ class WasmBackedWorker implements WorkerLike {
           case "lexFormula":
             result = this.wasm.lexFormula(params.formula, params.options);
             break;
+          case "lexFormulaPartial":
+            result = this.wasm.lexFormulaPartial(params.formula, params.options);
+            break;
           case "parseFormulaPartial":
             result = this.wasm.parseFormulaPartial(params.formula, params.cursor, params.options);
             break;
@@ -365,6 +368,27 @@ describeWasm("EngineWorker editor tooling RPCs (wasm)", () => {
       await expect(engine.parseFormulaPartial("=1+2", undefined, { localeId: "xx-XX" })).rejects.toThrow(
         /unknown localeId: xx-XX/
       );
+    } finally {
+      engine.terminate();
+    }
+  });
+
+  it("lexFormulaPartial returns tokens + error for unterminated strings (best-effort)", async () => {
+    const wasm = await loadFormulaWasm();
+    const worker = new WasmBackedWorker(wasm);
+    const engine = await EngineWorker.connect({
+      worker,
+      wasmModuleUrl: "mock://wasm",
+      channelFactory: createMockChannel
+    });
+
+    try {
+      const result = await engine.lexFormulaPartial("=\"hello");
+      expect(result.tokens.length).toBeGreaterThan(0);
+      expect(result.error?.message).toContain("Unterminated string literal");
+
+      const stringToken = result.tokens.find((t) => t.kind === "String");
+      expect(stringToken?.span).toEqual({ start: 1, end: 7 });
     } finally {
       engine.terminate();
     }
