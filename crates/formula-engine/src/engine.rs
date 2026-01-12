@@ -3097,15 +3097,6 @@ impl Engine {
         if !self.bytecode_enabled {
             return Err(BytecodeCompileReason::Disabled);
         }
-        // External workbook references are not supported by the bytecode backend. These formulas
-        // are also treated as volatile by the dependency graph, but classify them under the
-        // lowering error so coverage reports can prioritize external-reference support separately
-        // from volatile worksheet functions.
-        if let Some(lower_error) =
-            canonical_expr_depends_on_lowering_prefix_error(expr, key.sheet, &self.workbook)
-        {
-            return Err(BytecodeCompileReason::LowerError(lower_error));
-        }
         if !thread_safe {
             return Err(BytecodeCompileReason::NotThreadSafe);
         }
@@ -3165,6 +3156,17 @@ impl Engine {
             &self.workbook,
         );
         let expr_to_lower = rewritten_names.as_ref().unwrap_or(expr_after_structured);
+
+        // External workbook references and invalid sheet prefixes can be introduced via defined
+        // name inlining (or eliminated by it). Run the prefix check on the final expression shape
+        // that will be lowered so bytecode eligibility and diagnostics reflect the actual lowered
+        // references.
+        if let Some(lower_error) =
+            canonical_expr_depends_on_lowering_prefix_error(expr_to_lower, key.sheet, &self.workbook)
+        {
+            return Err(BytecodeCompileReason::LowerError(lower_error));
+        }
+
         let expr = bytecode::lower_canonical_expr(
             expr_to_lower,
             origin_ast,

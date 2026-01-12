@@ -5235,6 +5235,40 @@ fn bytecode_backend_sheet_qualified_defined_name_static_ref_from_other_sheet_can
 }
 
 #[test]
+fn bytecode_backend_sheet_qualified_defined_name_static_ref_can_inline_without_let() {
+    // When `Sheet2!RATE` resolves to a workbook defined name that is a static reference on the
+    // *current* sheet, the reference can be inlined and compiled to bytecode even without LET.
+    //
+    // This is a regression test ensuring prefix-error detection runs after static defined names
+    // are inlined, avoiding false cross-sheet rejections.
+    let mut engine = Engine::new();
+    engine.ensure_sheet("Sheet2");
+    engine.set_cell_value("Sheet1", "B1", 100.0).unwrap();
+    engine
+        .define_name(
+            "RATE",
+            NameScope::Workbook,
+            NameDefinition::Reference("Sheet1!$B$1".to_string()),
+        )
+        .unwrap();
+    engine
+        .set_cell_formula("Sheet1", "A1", "=Sheet2!RATE+1")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let via_bytecode = engine.get_cell_value("Sheet1", "A1");
+    assert_eq!(via_bytecode, Value::Number(101.0));
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let via_ast = engine.get_cell_value("Sheet1", "A1");
+
+    assert_eq!(via_bytecode, via_ast);
+}
+
+#[test]
 fn bytecode_backend_sheet_qualified_defined_name_static_ref_bypasses_let_locals() {
     // Same as the constant case, but for reference defined names that are inlined to static
     // cell/range references for bytecode eligibility.
