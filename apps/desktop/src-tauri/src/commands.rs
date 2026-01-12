@@ -4077,7 +4077,7 @@ pub async fn write_clipboard(
         text: Some(text),
         html,
         rtf,
-        png_base64: image_png_base64,
+        image_png_base64,
     };
     #[cfg(target_os = "macos")]
     {
