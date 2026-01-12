@@ -280,6 +280,9 @@ fn coerce_save_path_to_xlsx(path: &str) -> String {
     // saving without "Save As" would otherwise write an XLSX file to a non-XLSX filename.
     if ext.eq_ignore_ascii_case("xlsx")
         || ext.eq_ignore_ascii_case("xlsm")
+        || ext.eq_ignore_ascii_case("xltx")
+        || ext.eq_ignore_ascii_case("xltm")
+        || ext.eq_ignore_ascii_case("xlam")
         || ext.eq_ignore_ascii_case("xlsb")
     {
         return path.to_string();
@@ -3681,6 +3684,21 @@ mod tests {
             coerce_save_path_to_xlsx("/tmp/foo.xlsb"),
             "/tmp/foo.xlsb",
             "expected .xlsb saves to remain unchanged"
+        );
+        assert_eq!(
+            coerce_save_path_to_xlsx("/tmp/foo.xltx"),
+            "/tmp/foo.xltx",
+            "expected .xltx saves to remain unchanged"
+        );
+        assert_eq!(
+            coerce_save_path_to_xlsx("/tmp/foo.xltm"),
+            "/tmp/foo.xltm",
+            "expected .xltm saves to remain unchanged"
+        );
+        assert_eq!(
+            coerce_save_path_to_xlsx("/tmp/foo.xlam"),
+            "/tmp/foo.xlam",
+            "expected .xlam saves to remain unchanged"
         );
     }
 
