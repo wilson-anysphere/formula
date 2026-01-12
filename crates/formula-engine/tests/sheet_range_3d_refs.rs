@@ -442,3 +442,32 @@ fn bytecode_compiles_counta_and_countblank_over_large_sheet_range_span() {
         Value::Number(4_718_607.0)
     );
 }
+
+#[test]
+fn bytecode_compiles_countif_over_sheet_range_area_ref_and_matches_ast() {
+    let mut engine = Engine::new();
+
+    for sheet in ["Sheet1", "Sheet2", "Sheet3"] {
+        engine.set_cell_value(sheet, "A1", "x").unwrap();
+        engine.set_cell_value(sheet, "A2", 0.0).unwrap();
+        // sheet!A3 left blank.
+    }
+
+    engine
+        .set_cell_formula("Summary", "A1", "=COUNTIF(Sheet1:Sheet3!A1:A3,0)")
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+
+    engine.recalculate_single_threaded();
+    let bytecode_value = engine.get_cell_value("Summary", "A1");
+
+    engine.set_bytecode_enabled(false);
+    engine.recalculate_single_threaded();
+    let ast_value = engine.get_cell_value("Summary", "A1");
+
+    assert_eq!(bytecode_value, ast_value);
+    // `A1` on each sheet is text and should not be coerced to 0 for numeric COUNTIF criteria.
+    // Blanks match `0`, so the total is: 3 sheets x (0 + blank) = 6.
+    assert_eq!(bytecode_value, Value::Number(6.0));
+}
