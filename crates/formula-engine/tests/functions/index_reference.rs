@@ -55,8 +55,8 @@ fn index_reference_errors() {
     sheet.set("A2", 2.0);
     sheet.set("A3", 3.0);
 
-    // Excel requires column_num to be provided when row_num is 0.
-    assert_eq!(sheet.eval("=INDEX(A1:A3,0)"), Value::Error(ErrorKind::Value));
+    // column_num defaults to 1, so row_num=0 returns the first column slice.
+    assert_number(&sheet.eval("=SUM(INDEX(A1:A3,0))"), 6.0);
     assert_eq!(sheet.eval("=INDEX(A1:A3,4)"), Value::Error(ErrorKind::Ref));
 }
 
