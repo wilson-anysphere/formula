@@ -1,0 +1,352 @@
+use std::error::Error;
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs;
+use std::io::Cursor;
+use std::path::PathBuf;
+
+use formula_xlsx::metadata::parse_metadata_xml;
+use formula_xlsx::openxml;
+use formula_xlsx::XlsxPackage;
+use quick_xml::events::Event;
+use quick_xml::Reader;
+use std::cmp::Ordering;
+
+const MAX_CELL_REFS: usize = 10;
+
+fn usage() -> &'static str {
+    "dump_metadata <path.xlsx|path.xlsm>\n\
+\n\
+Debug CLI to inspect SpreadsheetML linked/rich-data metadata:\n\
+  - xl/metadata.xml\n\
+  - xl/_rels/metadata.xml.rels\n\
+  - xl/richData/*\n\
+  - worksheet <c> vm/cm attributes\n"
+}
+
+#[cfg(target_arch = "wasm32")]
+fn main() {}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn main() -> Result<(), Box<dyn Error>> {
+    let mut args = std::env::args().skip(1);
+    let Some(path) = args.next() else {
+        eprintln!("{}", usage());
+        return Ok(());
+    };
+    if let Some(extra) = args.next() {
+        eprintln!("unexpected extra argument: {extra}\n\n{}", usage());
+        return Ok(());
+    }
+
+    let path = PathBuf::from(path);
+    let bytes = fs::read(&path)?;
+    let pkg = XlsxPackage::from_bytes(&bytes)?;
+
+    println!("workbook: {}", path.display());
+    println!();
+
+    dump_metadata_xml(&pkg);
+    dump_metadata_relationships(&pkg);
+    dump_richdata_parts(&pkg);
+    dump_worksheet_vm_cm_summary(&pkg);
+
+    Ok(())
+}
+
+fn dump_metadata_xml(pkg: &XlsxPackage) {
+    println!("[xl/metadata.xml]");
+
+    let Some(bytes) = pkg.part("xl/metadata.xml") else {
+        println!("  (missing)");
+        println!();
+        return;
+    };
+
+    println!("  size: {} bytes", bytes.len());
+    let xml = match std::str::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(err) => {
+            println!("  warning: metadata.xml is not valid UTF-8: {err}");
+            println!();
+            return;
+        }
+    };
+
+    match parse_metadata_xml(xml) {
+        Ok(doc) => {
+            println!("  metadataTypes: {}", doc.metadata_types.len());
+            for (idx, ty) in doc.metadata_types.iter().enumerate() {
+                let attrs: Vec<String> = ty
+                    .attributes
+                    .iter()
+                    .filter(|(k, _)| k.as_str() != "name")
+                    .map(|(k, v)| format!("{k}={v}"))
+                    .collect();
+                if attrs.is_empty() {
+                    println!("    [{idx}] {}", ty.name);
+                } else {
+                    println!("    [{idx}] {} ({})", ty.name, attrs.join(", "));
+                }
+            }
+
+            let cell_metadata_blocks = doc.cell_metadata.len();
+            let cell_metadata_rc_total: usize =
+                doc.cell_metadata.iter().map(|b| b.records.len()).sum();
+            println!(
+                "  cellMetadata: blocks={} rc_records={}",
+                cell_metadata_blocks, cell_metadata_rc_total
+            );
+
+            let value_metadata_blocks = doc.value_metadata.len();
+            let value_metadata_rc_total: usize =
+                doc.value_metadata.iter().map(|b| b.records.len()).sum();
+            println!(
+                "  valueMetadata: blocks={} rc_records={}",
+                value_metadata_blocks, value_metadata_rc_total
+            );
+
+            println!(
+                "  futureMetadata blocks: {}",
+                doc.future_metadata_blocks.len()
+            );
+            for (idx, block) in doc.future_metadata_blocks.iter().enumerate() {
+                println!("    [{idx}] inner_xml_chars={}", block.inner_xml.len());
+            }
+        }
+        Err(err) => {
+            println!("  warning: failed to parse metadata.xml: {err}");
+        }
+    }
+
+    println!();
+}
+
+fn dump_metadata_relationships(pkg: &XlsxPackage) {
+    println!("[xl/_rels/metadata.xml.rels]");
+
+    let Some(bytes) = pkg.part("xl/_rels/metadata.xml.rels") else {
+        println!("  (missing)");
+        println!();
+        return;
+    };
+
+    println!("  size: {} bytes", bytes.len());
+
+    let mut relationships = match openxml::parse_relationships(bytes) {
+        Ok(rels) => rels,
+        Err(err) => {
+            println!("  warning: failed to parse relationships: {err}");
+            println!();
+            return;
+        }
+    };
+
+    relationships.sort_by(|a, b| relationship_id_sort_cmp(&a.id, &b.id));
+
+    println!("  relationships: {}", relationships.len());
+    for rel in relationships {
+        let mode = rel
+            .target_mode
+            .as_deref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("Internal");
+        let resolved = if mode.eq_ignore_ascii_case("External") {
+            "<external>".to_string()
+        } else {
+            openxml::resolve_target("xl/metadata.xml", &rel.target)
+        };
+        println!(
+            "    - id={} type={} target={} mode={} resolved={}",
+            rel.id, rel.type_uri, rel.target, mode, resolved
+        );
+    }
+
+    println!();
+}
+
+fn dump_richdata_parts(pkg: &XlsxPackage) {
+    println!("[xl/richData/*]");
+
+    let mut parts: Vec<&str> = pkg
+        .part_names()
+        .filter(|name| name.starts_with("xl/richData/"))
+        .collect();
+    parts.sort();
+
+    println!("  parts: {}", parts.len());
+    for name in parts {
+        println!("    - {name}");
+    }
+
+    println!();
+}
+
+#[derive(Debug, Default)]
+struct WorksheetCellMetadataSummary {
+    cm_cells: usize,
+    vm_cells: usize,
+    cm_refs: Vec<String>,
+    vm_refs: Vec<String>,
+    warning: Option<String>,
+}
+
+fn dump_worksheet_vm_cm_summary(pkg: &XlsxPackage) {
+    println!("[xl/worksheets/sheet*.xml vm/cm]");
+
+    let mut sheets: Vec<&str> = pkg
+        .part_names()
+        .filter(|name| name.starts_with("xl/worksheets/sheet") && name.ends_with(".xml"))
+        .collect();
+    sheets.sort_by(|a, b| worksheet_part_sort_cmp(a, b));
+
+    if sheets.is_empty() {
+        println!("  (no worksheet parts matched xl/worksheets/sheet*.xml)");
+        println!();
+        return;
+    }
+
+    for sheet_part in sheets {
+        println!("  {sheet_part}");
+        let Some(bytes) = pkg.part(sheet_part) else {
+            println!("    warning: missing part bytes");
+            continue;
+        };
+
+        let summary = scan_worksheet_cells_for_vm_cm(bytes, MAX_CELL_REFS);
+        println!(
+            "    cells with cm: {}{}",
+            summary.cm_cells,
+            format_first_refs(summary.cm_cells, &summary.cm_refs)
+        );
+        println!(
+            "    cells with vm: {}{}",
+            summary.vm_cells,
+            format_first_refs(summary.vm_cells, &summary.vm_refs)
+        );
+        if let Some(warn) = summary.warning {
+            println!("    warning: {warn}");
+        }
+    }
+
+    println!();
+}
+
+fn relationship_id_sort_cmp(a: &str, b: &str) -> Ordering {
+    match (parse_rid_index(a), parse_rid_index(b)) {
+        (Some(ai), Some(bi)) => ai.cmp(&bi).then_with(|| a.cmp(b)),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => a.cmp(b),
+    }
+}
+
+fn worksheet_part_sort_cmp(a: &str, b: &str) -> Ordering {
+    match (parse_sheet_index(a), parse_sheet_index(b)) {
+        (Some(ai), Some(bi)) => ai.cmp(&bi).then_with(|| a.cmp(b)),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => a.cmp(b),
+    }
+}
+
+fn parse_rid_index(id: &str) -> Option<u32> {
+    let prefix = id.get(0..3)?;
+    if !prefix.eq_ignore_ascii_case("rid") {
+        return None;
+    }
+    id[3..].parse().ok()
+}
+
+fn parse_sheet_index(part_name: &str) -> Option<u32> {
+    let file_name = part_name.rsplit('/').next()?;
+    let rest = file_name.strip_prefix("sheet")?;
+    let num = rest.strip_suffix(".xml")?;
+    num.parse().ok()
+}
+
+fn format_first_refs(total: usize, refs: &[String]) -> String {
+    if refs.is_empty() {
+        return String::new();
+    }
+    format!(" (first {} of {}: {})", refs.len(), total, refs.join(", "))
+}
+
+fn scan_worksheet_cells_for_vm_cm(bytes: &[u8], max_refs: usize) -> WorksheetCellMetadataSummary {
+    let mut summary = WorksheetCellMetadataSummary::default();
+
+    let mut reader = Reader::from_reader(Cursor::new(bytes));
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    loop {
+        let event = match reader.read_event_into(&mut buf) {
+            Ok(ev) => ev,
+            Err(err) => {
+                summary.warning.get_or_insert_with(|| format!("xml parse error: {err}"));
+                break;
+            }
+        };
+
+        match event {
+            Event::Start(e) | Event::Empty(e) => {
+                if openxml::local_name(e.name().as_ref()).eq_ignore_ascii_case(b"c") {
+                    let mut cell_ref: Option<String> = None;
+                    let mut has_cm = false;
+                    let mut has_vm = false;
+
+                    for attr in e.attributes().with_checks(false) {
+                        match attr {
+                            Ok(attr) => {
+                                let key = openxml::local_name(attr.key.as_ref());
+                                if key.eq_ignore_ascii_case(b"r") {
+                                    match attr.unescape_value() {
+                                        Ok(v) => {
+                                            cell_ref = Some(v.into_owned());
+                                        }
+                                        Err(err) => {
+                                            summary
+                                                .warning
+                                                .get_or_insert_with(|| format!("bad cell ref value: {err}"));
+                                        }
+                                    }
+                                } else if key.eq_ignore_ascii_case(b"cm") {
+                                    has_cm = true;
+                                } else if key.eq_ignore_ascii_case(b"vm") {
+                                    has_vm = true;
+                                }
+                            }
+                            Err(err) => {
+                                summary
+                                    .warning
+                                    .get_or_insert_with(|| format!("xml attribute error: {err}"));
+                            }
+                        }
+                    }
+
+                    if has_cm {
+                        summary.cm_cells += 1;
+                        if summary.cm_refs.len() < max_refs {
+                            if let Some(r) = cell_ref.as_ref() {
+                                summary.cm_refs.push(r.clone());
+                            }
+                        }
+                    }
+                    if has_vm {
+                        summary.vm_cells += 1;
+                        if summary.vm_refs.len() < max_refs {
+                            if let Some(r) = cell_ref.as_ref() {
+                                summary.vm_refs.push(r.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    summary
+}
