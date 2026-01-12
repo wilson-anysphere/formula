@@ -107,6 +107,11 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Desktop unit tests can incur a fair amount of Vite/React compilation overhead on
+    // shared runners; keep timeouts generous so we don't flake on cold caches.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
+    setupFiles: ["./vitest.setup.ts"],
     environmentMatchGlobs: [
       ["src/panels/ai-audit/AIAuditPanel.vitest.ts", "jsdom"],
       ["src/command-palette/commandPaletteController.vitest.ts", "jsdom"],

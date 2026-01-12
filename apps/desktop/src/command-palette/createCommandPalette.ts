@@ -287,6 +287,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   overlay.hidden = true;
   overlay.setAttribute("role", "dialog");
   overlay.setAttribute("aria-modal", "true");
+  overlay.setAttribute("aria-label", "Command Palette");
 
   const palette = document.createElement("div");
   palette.className = "command-palette";
@@ -305,6 +306,10 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   const list = document.createElement("ul");
   list.className = "command-palette__list";
   list.dataset.testid = "command-palette-list";
+  list.setAttribute("role", "listbox");
+  list.setAttribute("aria-label", "Commands");
+  // Ensure there's always a second tabbable target for the focus trap.
+  list.tabIndex = 0;
 
   palette.appendChild(input);
   palette.appendChild(hint);
@@ -338,6 +343,35 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   let cachedCommands: PreparedCommandForFuzzy<CommandContribution>[] = [];
   let chunkSearchController: AbortController | null = null;
   let extensionLoadTimer: number | null = null;
+  let lastFocusedElement: HTMLElement | null = null;
+
+  const handleDocumentFocusIn = (e: FocusEvent): void => {
+    if (!isOpen) return;
+    const target = e.target as Node | null;
+    if (!target) return;
+    if (overlay.contains(target)) return;
+    // If focus escapes the modal dialog, bring it back to the input.
+    input.focus();
+  };
+
+  const handleOverlayKeyDown = (e: KeyboardEvent): void => {
+    if (!isOpen) return;
+    if (e.key !== "Tab") return;
+
+    // Minimal focus trap: cycle focus between the input and listbox.
+    const focusable = [input, list].filter((el) => !el.hasAttribute("disabled"));
+    if (focusable.length === 0) return;
+
+    e.preventDefault();
+
+    const active = document.activeElement as HTMLElement | null;
+    const currentIndex = active ? focusable.indexOf(active as (typeof focusable)[number]) : -1;
+    const delta = e.shiftKey ? -1 : 1;
+    const nextIndex =
+      currentIndex === -1 ? (e.shiftKey ? focusable.length - 1 : 0) : (currentIndex + delta + focusable.length) % focusable.length;
+    focusable[nextIndex]!.focus();
+  };
+  overlay.addEventListener("keydown", handleOverlayKeyDown);
 
   const executeCommand = (commandId: string): void => {
     void commandRegistry.executeCommand(commandId).catch((err) => {
@@ -356,6 +390,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     debouncedRender.cancel();
     abortChunkedSearch();
     overlay.hidden = true;
+    document.removeEventListener("focusin", handleDocumentFocusIn);
     query = "";
     selectedIndex = 0;
     visibleItems = [];
@@ -364,17 +399,41 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
       window.clearTimeout(extensionLoadTimer);
       extensionLoadTimer = null;
     }
+
+    // Best-effort restore: return focus to whatever triggered opening the palette.
+    const restoreTarget = lastFocusedElement;
+    lastFocusedElement = null;
+    if (restoreTarget && restoreTarget.isConnected && typeof restoreTarget.focus === "function") {
+      try {
+        restoreTarget.focus();
+        if (document.activeElement === restoreTarget) return;
+      } catch {
+        // ignore
+      }
+    }
+
     onCloseFocus();
   }
 
   function open(): void {
+    if (isOpen) {
+      input.focus();
+      input.select();
+      return;
+    }
+
     debouncedRender.cancel();
     abortChunkedSearch();
+
+    const active = document.activeElement;
+    lastFocusedElement =
+      active instanceof HTMLElement && active !== document.body && !overlay.contains(active) ? active : null;
     query = "";
     selectedIndex = 0;
     input.value = "";
     overlay.hidden = false;
     isOpen = true;
+    document.addEventListener("focusin", handleDocumentFocusIn);
 
     renderResults("sync");
 
@@ -465,11 +524,15 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
 
     list.replaceChildren();
     visibleItemEls = [];
+    list.removeAttribute("aria-activedescendant");
 
     if (visibleItems.length === 0) {
       const empty = document.createElement("li");
       empty.className = "command-palette__empty";
       empty.textContent = emptyText;
+      empty.setAttribute("role", "option");
+      empty.setAttribute("aria-disabled", "true");
+      empty.setAttribute("aria-selected", "false");
       list.appendChild(empty);
       return;
     }
@@ -477,6 +540,8 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     if (goToSuggestion) {
       const li = document.createElement("li");
       li.className = "command-palette__item";
+      li.id = "command-palette-option-0";
+      li.setAttribute("role", "option");
       li.setAttribute("aria-selected", selectedIndex === 0 ? "true" : "false");
 
       const main = document.createElement("div");
@@ -512,6 +577,8 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
       const header = document.createElement("li");
       header.className = "command-palette__group";
       header.textContent = group.label;
+      header.setAttribute("role", "presentation");
+      header.setAttribute("aria-hidden", "true");
       list.appendChild(header);
 
       for (let i = 0; i < group.commands.length; i += 1) {
@@ -522,6 +589,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
         if (!cached) {
           const li = document.createElement("li");
           li.className = "command-palette__item";
+          li.setAttribute("role", "option");
 
           const main = document.createElement("div");
           main.className = "command-palette__item-main";
@@ -562,6 +630,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
           commandRowCache.set(cmd.commandId, cached);
         }
 
+        cached.li.id = `command-palette-option-${globalIndex}`;
         cached.li.setAttribute("aria-selected", globalIndex === selectedIndex ? "true" : "false");
         cached.label.replaceChildren(renderHighlightedText(cmd.title, cmd.titleRanges));
 
@@ -588,9 +657,17 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     }
 
     // Keep selection in view after re-render.
+    const selectedEl = visibleItemEls[selectedIndex];
+    if (selectedEl) {
+      list.setAttribute("aria-activedescendant", selectedEl.id);
+    } else {
+      list.removeAttribute("aria-activedescendant");
+    }
     queueMicrotask(() => {
       const el = visibleItemEls[selectedIndex];
-      if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
+      if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({ block: "nearest" });
+      }
     });
 
     // Evict least-recently-used rows to keep the cache bounded.
@@ -813,7 +890,12 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     const nextEl = visibleItemEls[selectedIndex];
     if (nextEl) {
       nextEl.setAttribute("aria-selected", "true");
-      if (typeof nextEl.scrollIntoView === "function") nextEl.scrollIntoView({ block: "nearest" });
+      list.setAttribute("aria-activedescendant", nextEl.id);
+      if (typeof nextEl.scrollIntoView === "function") {
+        nextEl.scrollIntoView({ block: "nearest" });
+      }
+    } else {
+      list.removeAttribute("aria-activedescendant");
     }
   }
 
@@ -880,6 +962,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     }
   };
   input.addEventListener("keydown", onInputKeyDown);
+  list.addEventListener("keydown", onInputKeyDown);
 
   const onGlobalKeyDown = (e: KeyboardEvent) => {
     if (e.defaultPrevented) return;
@@ -899,6 +982,7 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
   window.addEventListener("keydown", onGlobalKeyDown);
 
   function dispose(): void {
+    document.removeEventListener("focusin", handleDocumentFocusIn);
     debouncedRender.cancel();
     abortChunkedSearch();
     if (extensionLoadTimer != null) {
@@ -908,8 +992,10 @@ export function createCommandPalette(options: CreateCommandPaletteOptions): Comm
     disposeRegistrySub();
     disposeRecentsTracker();
     overlay.removeEventListener("click", onOverlayClick);
+    overlay.removeEventListener("keydown", handleOverlayKeyDown);
     input.removeEventListener("input", onInput);
     input.removeEventListener("keydown", onInputKeyDown);
+    list.removeEventListener("keydown", onInputKeyDown);
     window.removeEventListener("keydown", onGlobalKeyDown);
     overlay.remove();
   }

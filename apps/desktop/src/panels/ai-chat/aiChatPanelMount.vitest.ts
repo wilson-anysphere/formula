@@ -14,8 +14,8 @@ const mocks = vi.hoisted(() => {
     sentinelClient,
     createAiChatOrchestrator: vi.fn((_options: any) => ({
       sendMessage: vi.fn(),
-      sessionId: "test-session",
       dispose: vi.fn(async () => {}),
+      sessionId: "test-session",
     })),
     getDesktopAIAuditStore: vi.fn(() => ({
       logEntry: vi.fn(async () => {}),

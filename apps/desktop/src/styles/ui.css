@@ -459,6 +459,12 @@
   overflow: auto;
 }
 
+.command-palette__list:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--selection-bg);
+  border-radius: 10px;
+}
+
 .command-palette__group {
   margin: 10px 0 6px;
   padding: 0 10px;
