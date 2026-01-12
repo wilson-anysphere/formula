@@ -459,7 +459,10 @@ export function SheetTabStrip({
             return {
               type: "item" as const,
               label: entry.label,
-              leading: { type: "swatch" as const, color: entry.token },
+              // Use the resolved token value so the swatch color works in SVG `fill`
+              // across WebView engines (some do not support `var(--token)` in SVG
+              // presentation attributes).
+              leading: { type: "swatch" as const, color: rgb },
               onSelect: () => {
                 try {
                   store.setTabColor(sheet.id, { rgb });
