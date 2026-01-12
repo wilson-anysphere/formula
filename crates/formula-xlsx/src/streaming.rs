@@ -4171,6 +4171,7 @@ fn extract_cell_v_text(events: &[Event<'static>]) -> Result<Option<String>, Stre
     Ok(None)
 }
 
+#[allow(dead_code)]
 fn extract_cell_inline_string_text(
     events: &[Event<'static>],
 ) -> Result<Option<String>, StreamingPatchError> {
@@ -4225,6 +4226,7 @@ fn extract_cell_inline_string_text(
     Ok(None)
 }
 
+#[allow(dead_code)]
 fn cell_value_semantics_eq(
     existing_t: Option<&str>,
     inner_events: &[Event<'static>],
