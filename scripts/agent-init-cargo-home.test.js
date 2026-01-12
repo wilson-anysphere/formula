@@ -131,6 +131,27 @@ test('agent-init prepends CARGO_HOME/bin to PATH', { skip: !hasBash }, () => {
   assert.ok(pathValue.split(':')[0] === resolve(repoRoot, 'target', 'cargo-home', 'bin'));
 });
 
+test('agent-init derives CARGO_BUILD_JOBS from FORMULA_CARGO_JOBS', { skip: !hasBash }, () => {
+  const out = runBash(
+    [
+      'unset CARGO_HOME',
+      'unset CARGO_BUILD_JOBS',
+      'unset MAKEFLAGS',
+      'unset RAYON_NUM_THREADS',
+      'export FORMULA_CARGO_JOBS=7',
+      // Prevent agent-init from spawning Xvfb during this test.
+      'export DISPLAY=:99',
+      'source scripts/agent-init.sh >/dev/null',
+      'printf "%s\\n%s\\n%s" "$CARGO_BUILD_JOBS" "$MAKEFLAGS" "$RAYON_NUM_THREADS"',
+    ].join(' && '),
+  );
+
+  const [jobs, makeflags, rayon] = out.split('\n');
+  assert.equal(jobs, '7');
+  assert.equal(makeflags, '-j7');
+  assert.equal(rayon, '7');
+});
+
 test(
   'agent-init treats CARGO_HOME=$HOME/.cargo as unset in local runs (defaults to repo-local cargo-home)',
   { skip: !hasBash },
