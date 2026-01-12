@@ -88,6 +88,15 @@ export function FileBackstage({ open, actions, onClose }: FileBackstageProps) {
         onInvoke: actions?.saveWorkbookAs,
       },
       {
+        iconId: "file.info.manageWorkbook.versions",
+        label: "Version History",
+        hint: "",
+        ariaKeyShortcuts: "",
+        testId: "file-version-history",
+        ariaLabel: "Version history",
+        onInvoke: actions?.versionHistory,
+      },
+      {
         iconId: "file.print.print",
         label: "Print…",
         hint: shortcut("P"),

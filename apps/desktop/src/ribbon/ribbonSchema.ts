@@ -77,6 +77,7 @@ export interface RibbonFileActions {
   openWorkbook?: () => void;
   saveWorkbook?: () => void;
   saveWorkbookAs?: () => void;
+  versionHistory?: () => void;
   print?: () => void;
   pageSetup?: () => void;
   closeWindow?: () => void;

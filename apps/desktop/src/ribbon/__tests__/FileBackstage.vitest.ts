@@ -86,9 +86,11 @@ describe("FileBackstage", () => {
 
     const newItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-new"]');
     const openItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-open"]');
+    const versionHistoryItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-version-history"]');
     const quitItem = overlay.querySelector<HTMLButtonElement>('[data-testid="file-quit"]');
     expect(newItem).toBeInstanceOf(HTMLButtonElement);
     expect(openItem).toBeInstanceOf(HTMLButtonElement);
+    expect(versionHistoryItem).toBeInstanceOf(HTMLButtonElement);
     expect(quitItem).toBeInstanceOf(HTMLButtonElement);
 
     expect(document.activeElement).toBe(newItem);
@@ -102,6 +104,12 @@ describe("FileBackstage", () => {
       openItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
     });
     expect(document.activeElement).toBe(newItem);
+
+    // ArrowDown should continue to advance through items (including Version History).
+    act(() => {
+      openItem?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(versionHistoryItem);
 
     // Wrap around on ArrowUp from the first item.
     act(() => {
@@ -166,4 +174,3 @@ describe("FileBackstage", () => {
     act(() => root.unmount());
   });
 });
-

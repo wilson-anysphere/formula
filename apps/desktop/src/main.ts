@@ -6184,6 +6184,9 @@ mountRibbon(ribbonReactRoot, {
         showToast(`Failed to save workbook: ${String(err)}`, "error");
       });
     },
+    versionHistory: () => {
+      toggleDockPanel(PanelIds.VERSION_HISTORY);
+    },
     pageSetup: () => {
       void handleRibbonPageSetup().catch((err) => {
         console.error("Failed to open page setup:", err);
