@@ -2,6 +2,7 @@ import { showToast } from "../extensions/ui.js";
 import { t, tWithVars } from "../i18n/index.js";
 
 import { requestAppRestart } from "./appQuit";
+import { notify } from "./notifications";
 import { shellOpen } from "./shellOpen";
 import { installUpdateAndRestart } from "./updater";
 
@@ -396,7 +397,14 @@ function errorMessage(err: unknown): string {
 }
 
 function ensureUpdateDialog(): DialogElements {
-  if (updateDialog) return updateDialog;
+  if (updateDialog) {
+    // Tests (and potentially custom host integrations) may remove the dialog from the DOM.
+    // If it exists but is detached, reattach so update-available events can still surface UI.
+    if (!updateDialog.dialog.isConnected && document.body) {
+      document.body.appendChild(updateDialog.dialog);
+    }
+    return updateDialog;
+  }
 
   const dialog = document.createElement("dialog");
   dialog.className = "dialog";
@@ -747,6 +755,19 @@ function openUpdateAvailableDialog(payload: UpdaterEventPayload): void {
 
 export async function handleUpdaterEvent(name: UpdaterEventName, payload: UpdaterEventPayload): Promise<void> {
   const source = payload?.source;
+
+  if (name === "update-available" && source === "startup" && !manualUpdateCheckFollowUp) {
+    const version = typeof payload?.version === "string" ? payload.version.trim() : "";
+    const body = typeof payload?.body === "string" ? payload.body.trim() : "";
+    const message =
+      version && body
+        ? `Formula ${version} is available.\n\n${body}`
+        : version
+          ? `Formula ${version} is available.`
+          : body || "A new version of Formula is available.";
+
+    void notify({ title: "Update available", body: message });
+  }
 
   // Tray-triggered manual checks can happen while the app is hidden to tray. Ensure the
   // window is visible before rendering any toast/dialog feedback.

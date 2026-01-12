@@ -5405,18 +5405,8 @@ try {
   // Updater events can fire very early (e.g. a fast startup update check). `listen()` is async,
   // so we wait for registration before signaling readiness to the backend. The Rust host will
   // defer the startup update check until it receives `updater-ui-ready`.
-  const updateAvailableListener = listen("update-available", (event) => {
-    const payload = (event as any)?.payload;
-    const version = typeof payload?.version === "string" ? payload.version.trim() : "";
-    const body = typeof payload?.body === "string" ? payload.body.trim() : "";
-    const message =
-      version && body
-        ? `Formula ${version} is available.\n\n${body}`
-        : version
-          ? `Formula ${version} is available.`
-          : body || "A new version of Formula is available.";
-
-    void notify({ title: "Update available", body: message });
+  const updateAvailableListener = listen("update-available", () => {
+    // User-facing update UX (dialogs/toasts/system notification) is handled by `tauri/updaterUi.ts`.
   });
 
   void Promise.all([updaterUiListeners, updateAvailableListener])
@@ -5427,7 +5417,6 @@ try {
     .catch((err) => {
       console.error("Failed to install updater listeners or signal updater-ui-ready:", err);
     });
-
   let closeInFlight = false;
   type RawCellUpdate = {
     sheet_id: string;

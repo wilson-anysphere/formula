@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as ui from "../../extensions/ui";
 import { setLocale, t } from "../../i18n/index.js";
+import * as notifications from "../notifications";
 import { handleUpdaterEvent, installUpdaterUi } from "../updaterUi";
 
 describe("updaterUi (events)", () => {
@@ -149,5 +150,37 @@ describe("updaterUi (events)", () => {
     const toasts = document.querySelectorAll('[data-testid="toast"]');
     expect(toasts).toHaveLength(2);
     expect(toasts[1]?.textContent).toBe(t("updater.upToDate"));
+  });
+
+  it("sends a system notification for startup update-available events", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="toast-root"></div>';
+
+    const notifySpy = vi.spyOn(notifications, "notify").mockResolvedValue(undefined);
+    const toastSpy = vi.spyOn(ui, "showToast");
+
+    await handleUpdaterEvent("update-available", { source: "startup", version: "1.2.3", body: "Bug fixes" });
+
+    expect(notifySpy).toHaveBeenCalledTimes(1);
+    expect(notifySpy).toHaveBeenCalledWith({
+      title: "Update available",
+      body: expect.stringContaining("Formula 1.2.3 is available."),
+    });
+    expect(toastSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not send a system notification for manual update-available events", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="toast-root"></div>';
+
+    const notifySpy = vi.spyOn(notifications, "notify").mockResolvedValue(undefined);
+
+    await handleUpdaterEvent("update-available", { source: "manual", version: "9.9.9" });
+
+    expect(notifySpy).not.toHaveBeenCalled();
+
+    const dialog = document.querySelector('[data-testid="updater-dialog"]');
+    expect(dialog).toBeTruthy();
+    expect(document.querySelector('[data-testid="updater-version"]')?.textContent).toContain("Version 9.9.9");
   });
 });
