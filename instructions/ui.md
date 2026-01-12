@@ -159,8 +159,8 @@ FUNCTIONALITY (# of Excel buttons/features)
 | `Cmd/Ctrl+F` | Find |
 | `Cmd+Option+F` (macOS) / `Ctrl+H` (Windows/Linux) | Replace |
 | `Cmd/Ctrl+G` | Go to |
-| `Ctrl+PgUp` (Windows/Linux) / `Cmd+PgUp` (macOS) | Activate previous sheet (wrap) |
-| `Ctrl+PgDn` (Windows/Linux) / `Cmd+PgDn` (macOS) | Activate next sheet (wrap) |
+| `Ctrl+PgUp` (Windows/Linux) / `Cmd+PgUp` (macOS) | Activate previous visible sheet (wrap around) |
+| `Ctrl+PgDn` (Windows/Linux) / `Cmd+PgDn` (macOS) | Activate next visible sheet (wrap around) |
 
 ### App Shortcuts
 
