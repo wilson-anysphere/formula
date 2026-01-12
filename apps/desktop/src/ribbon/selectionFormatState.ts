@@ -216,16 +216,77 @@ export function computeSelectionFormatState(
       return doc.styleTable.get((doc.getCell(sheetId, { row, col }) as any)?.styleId ?? 0) as any;
     })();
 
-    state.bold = state.bold && Boolean(style?.font?.bold);
-    state.italic = state.italic && Boolean(style?.font?.italic);
-    state.underline = state.underline && Boolean(style?.font?.underline);
-    state.strikethrough = state.strikethrough && Boolean(style?.font?.strike);
-    state.wrapText = state.wrapText && Boolean(style?.alignment?.wrapText);
+    const font = style?.font ?? null;
 
-    mergeFontName(style?.font?.name);
-    mergeFontSize(style?.font?.size);
-    mergeAlign(style?.alignment?.horizontal);
-    mergeNumberFormat(style?.numberFormat);
+    const bold =
+      typeof font?.bold === "boolean"
+        ? font.bold
+        : typeof style?.bold === "boolean"
+          ? style.bold
+          : false;
+    state.bold = state.bold && bold;
+
+    const italic =
+      typeof font?.italic === "boolean"
+        ? font.italic
+        : typeof style?.italic === "boolean"
+          ? style.italic
+          : false;
+    state.italic = state.italic && italic;
+
+    const underlineRaw =
+      typeof font?.underline === "boolean" || typeof font?.underline === "string"
+        ? font.underline
+        : typeof style?.underline === "boolean" || typeof style?.underline === "string"
+          ? style.underline
+          : undefined;
+    const underline = underlineRaw === true || (typeof underlineRaw === "string" && underlineRaw !== "none");
+    state.underline = state.underline && underline;
+
+    const strike =
+      typeof font?.strike === "boolean"
+        ? font.strike
+        : typeof style?.strike === "boolean"
+          ? style.strike
+          : false;
+    state.strikethrough = state.strikethrough && strike;
+
+    const alignment = style?.alignment ?? null;
+    const wrapText = typeof alignment?.wrapText === "boolean" ? alignment.wrapText : false;
+    state.wrapText = state.wrapText && wrapText;
+
+    const fontName =
+      typeof font?.name === "string"
+        ? font.name
+        : typeof style?.fontFamily === "string"
+          ? style.fontFamily
+          : typeof style?.font_family === "string"
+            ? style.font_family
+            : typeof style?.fontName === "string"
+              ? style.fontName
+              : typeof style?.font_name === "string"
+                ? style.font_name
+                : undefined;
+    mergeFontName(fontName);
+
+    const fontSize =
+      typeof font?.size === "number"
+        ? font.size
+        : typeof style?.fontSize === "number"
+          ? style.fontSize
+          : typeof style?.font_size === "number"
+            ? style.font_size
+            : undefined;
+    mergeFontSize(fontSize);
+
+    const horizontal =
+      alignment?.horizontal ??
+      style?.horizontalAlign ??
+      style?.horizontal_align ??
+      style?.horizontalAlignment ??
+      style?.horizontal_alignment;
+    mergeAlign(horizontal);
+    mergeNumberFormat(style?.numberFormat ?? style?.number_format);
   };
 
   outer: for (const range of ranges) {
