@@ -236,6 +236,14 @@ This relationships file is standard OPC, and the **image relationship type URI i
 Targets are usually relative paths and may appear as `media/image1.png` or `../media/image1.png`
 (preserve the original `Target` exactly).
 
+**Parser resilience (Formula):** the `cell_images` parser uses a best-effort resolver that tries:
+
+1. standard OPC resolution relative to the source part (`xl/cellimages*.xml`)
+2. a fallback relative to the `.rels` part
+3. a fallback that re-roots under `xl/` if the path escaped via `..`
+
+See `crates/formula-xlsx/src/cell_images/mod.rs` (`resolve_target_best_effort`).
+
 **Round-trip rules:**
 
 - Preserve `Relationship/@Id` values.
@@ -419,6 +427,12 @@ does not “orphan” images or break Excel’s internal references.
 - **`_xlfn.` prefix handling** exists in:
   - `crates/formula-xlsx/src/formula_text.rs`
   - includes an explicit `IMAGE()` round-trip test (`xlfn_roundtrip_preserves_image_function`)
+
+Limitations (current Formula behavior):
+
+- Formula can **load** the image bytes referenced by `cellimages.xml` into `workbook.images`, but it does not yet
+  build a first-class “cell → image” semantic mapping from `vm`/`metadata.xml`/`richData/*`. That work is tracked
+  in the TODO section below (fixture-driven rich-value parsing).
 
 ### TODO work (required for images-in-cells)
 
