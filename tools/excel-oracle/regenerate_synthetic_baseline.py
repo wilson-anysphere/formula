@@ -95,7 +95,7 @@ def main() -> int:
     p.add_argument(
         "--run-tests",
         action="store_true",
-        help="Run validation tests after regeneration (formula-engine + tools/excel-oracle python tests).",
+        help="Run validation tests after regeneration (formula-engine + node function-catalog + tools/excel-oracle python tests).",
     )
     args = p.parse_args()
 
@@ -174,6 +174,19 @@ def main() -> int:
             )
         else:
             _run(cmd=("cargo", "test", "-p", "formula-engine"), cwd=repo_root, env=env)
+        # Validate that the committed JS/TS function catalog artifacts are in sync.
+        if _have_command("node"):
+            _run(
+                cmd=(
+                    "node",
+                    "--test",
+                    "packages/ai-completion/test/functionCatalogArtifact.test.js",
+                ),
+                cwd=repo_root,
+                env=env,
+            )
+        else:
+            print("Skipping function catalog node:test suite (node not found on PATH).")
         _run(
             cmd=(sys.executable, "-m", "unittest", "discover", "-s", "tools/excel-oracle/tests"),
             cwd=repo_root,
