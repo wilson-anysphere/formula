@@ -57,6 +57,7 @@ fn fieldaccess_scalar(base: &Value, field: &str) -> Value {
             Some(v) => v.clone(),
             None => Value::Error(ErrorKind::Field),
         },
+        // Field access on a non-rich value is a type error.
         _ => Value::Error(ErrorKind::Value),
     }
 }
