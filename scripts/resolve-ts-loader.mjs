@@ -2,6 +2,9 @@ import { readFile } from "node:fs/promises";
 
 import ts from "typescript";
 
+const shouldEmitSourceMaps =
+  process.execArgv.includes("--enable-source-maps") || (process.env.NODE_OPTIONS?.includes("--enable-source-maps") ?? false);
+
 /**
  * In-flight transpile de-dupe.
  *
@@ -143,8 +146,9 @@ export async function load(url, context, defaultLoad) {
           compilerOptions: {
             module: ts.ModuleKind.ESNext,
             target: ts.ScriptTarget.ES2022,
-            // Helpful stack traces when running with `node --enable-source-maps`.
-            inlineSourceMap: true,
+            // Only emit inline source maps when source map support is enabled; otherwise
+            // they add overhead (larger module source strings) with no benefit.
+            inlineSourceMap: shouldEmitSourceMaps,
             ...(isTsx ? { jsx: ts.JsxEmit.ReactJSX } : {}),
           },
         });
