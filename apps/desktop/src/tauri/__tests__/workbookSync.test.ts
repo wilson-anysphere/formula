@@ -232,4 +232,29 @@ describe("workbookSync", () => {
 
     sync.stop();
   });
+
+  it("clears the backend dirty flag when undo returns the document to a saved state (sheet metadata only)", async () => {
+    const document = new DocumentController();
+    const sync = startWorkbookSync({ document: document as any });
+    const invoke = (globalThis as any).__TAURI__?.core?.invoke as ReturnType<typeof vi.fn>;
+
+    document.renameSheet("Sheet1", "RenamedSheet1");
+    expect(document.isDirty).toBe(true);
+
+    // Renames are persisted to the backend via main.ts in desktop mode, so workbookSync should
+    // only mirror the undo/redo direction.
+    await flushMicrotasks();
+    expect(invoke).not.toHaveBeenCalled();
+
+    expect(document.undo()).toBe(true);
+    expect(document.isDirty).toBe(false);
+
+    await flushMicrotasks(8);
+
+    const cmds = invoke.mock.calls.map((c) => c[0]);
+    expect(cmds[0]).toBe("rename_sheet");
+    expect(cmds[1]).toBe("mark_saved");
+
+    sync.stop();
+  });
 });
