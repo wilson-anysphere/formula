@@ -987,7 +987,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               testId: "ribbon-insert-pivot-table",
               menuItems: [
                 { id: "insert.tables.pivotTable", label: "PivotTable…", ariaLabel: "PivotTable", iconId: "chart" },
-                { id: "insert.tables.pivotTable.fromTableRange", label: "From Table/Range…", ariaLabel: "PivotTable from Table or Range", icon: "▦" },
+                { id: "insert.tables.pivotTable.fromTableRange", label: "From Table/Range…", ariaLabel: "PivotTable from Table or Range", iconId: "formatAsTable" },
                 { id: "insert.tables.pivotTable.fromExternal", label: "From External Data…", ariaLabel: "PivotTable from External Data", iconId: "globe" },
                 { id: "insert.tables.pivotTable.fromDataModel", label: "From Data Model…", ariaLabel: "PivotTable from Data Model", iconId: "puzzle" },
               ],
@@ -1007,7 +1007,7 @@ export const defaultRibbonSchema: RibbonSchema = {
                 },
               ],
             },
-            { id: "insert.tables.table", label: "Table", ariaLabel: "Table", icon: "▦", size: "large" },
+            { id: "insert.tables.table", label: "Table", ariaLabel: "Table", iconId: "formatAsTable", size: "large" },
           ],
         },
         {
@@ -1271,7 +1271,7 @@ export const defaultRibbonSchema: RibbonSchema = {
           id: "insert.equations",
           label: "Equations",
           buttons: [
-            { id: "insert.equations.equation", label: "Equation", ariaLabel: "Insert Equation", icon: "∑", kind: "dropdown", size: "large" },
+            { id: "insert.equations.equation", label: "Equation", ariaLabel: "Insert Equation", iconId: "autoSum", kind: "dropdown", size: "large" },
             { id: "insert.equations.inkEquation", label: "Ink Equation", ariaLabel: "Ink Equation", iconId: "edit", kind: "dropdown" },
           ],
         },
@@ -1279,7 +1279,7 @@ export const defaultRibbonSchema: RibbonSchema = {
           id: "insert.symbols",
           label: "Symbols",
           buttons: [
-            { id: "insert.symbols.equation", label: "Equation", ariaLabel: "Insert Equation", icon: "∑", kind: "dropdown" },
+            { id: "insert.symbols.equation", label: "Equation", ariaLabel: "Insert Equation", iconId: "autoSum", kind: "dropdown" },
             { id: "insert.symbols.symbol", label: "Symbol", ariaLabel: "Insert Symbol", icon: "Ω", kind: "dropdown" },
           ],
         },
@@ -1496,9 +1496,9 @@ export const defaultRibbonSchema: RibbonSchema = {
           id: "pageLayout.sheetOptions",
           label: "Sheet Options",
           buttons: [
-            { id: "pageLayout.sheetOptions.gridlinesView", label: "Gridlines View", ariaLabel: "View Gridlines", icon: "▦", kind: "toggle", size: "small", defaultPressed: true },
+            { id: "pageLayout.sheetOptions.gridlinesView", label: "Gridlines View", ariaLabel: "View Gridlines", iconId: "gridlines", kind: "toggle", size: "small", defaultPressed: true },
             { id: "pageLayout.sheetOptions.gridlinesPrint", label: "Gridlines Print", ariaLabel: "Print Gridlines", iconId: "print", kind: "toggle", size: "small", defaultPressed: false },
-            { id: "pageLayout.sheetOptions.headingsView", label: "Headings View", ariaLabel: "View Headings", icon: "A1", kind: "toggle", size: "small", defaultPressed: true },
+            { id: "pageLayout.sheetOptions.headingsView", label: "Headings View", ariaLabel: "View Headings", iconId: "headings", kind: "toggle", size: "small", defaultPressed: true },
             { id: "pageLayout.sheetOptions.headingsPrint", label: "Headings Print", ariaLabel: "Print Headings", iconId: "print", kind: "toggle", size: "small", defaultPressed: false },
           ],
         },
@@ -1594,7 +1594,7 @@ export const defaultRibbonSchema: RibbonSchema = {
             { id: "formulas.definedNames.nameManager", label: "Name Manager", ariaLabel: "Name Manager", iconId: "tag", kind: "dropdown", size: "large" },
             { id: "formulas.definedNames.defineName", label: "Define Name", ariaLabel: "Define Name", iconId: "plus", kind: "dropdown" },
             { id: "formulas.definedNames.useInFormula", label: "Use in Formula", ariaLabel: "Use in Formula", iconId: "function", kind: "dropdown" },
-            { id: "formulas.definedNames.createFromSelection", label: "Create from Selection", ariaLabel: "Create from Selection", icon: "▦", kind: "dropdown" },
+            { id: "formulas.definedNames.createFromSelection", label: "Create from Selection", ariaLabel: "Create from Selection", iconId: "gridlines", kind: "dropdown" },
           ],
         },
         {
@@ -1797,7 +1797,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               menuItems: [
                 { id: "data.forecast.whatIfAnalysis.scenarioManager", label: "Scenario Manager…", ariaLabel: "Scenario Manager", iconId: "settings" },
                 { id: "data.forecast.whatIfAnalysis.goalSeek", label: "Goal Seek…", ariaLabel: "Goal Seek", iconId: "find" },
-                { id: "data.forecast.whatIfAnalysis.dataTable", label: "Data Table…", ariaLabel: "Data Table", icon: "▦" },
+                { id: "data.forecast.whatIfAnalysis.dataTable", label: "Data Table…", ariaLabel: "Data Table", iconId: "gridlines" },
               ],
             },
             {
@@ -1825,7 +1825,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               kind: "dropdown",
               menuItems: [
                 { id: "data.outline.group.group", label: "Group…", ariaLabel: "Group", iconId: "plus" },
-                { id: "data.outline.group.groupSelection", label: "Group Selection", ariaLabel: "Group Selection", icon: "▦" },
+                { id: "data.outline.group.groupSelection", label: "Group Selection", ariaLabel: "Group Selection", iconId: "gridlines" },
               ],
             },
             {
@@ -2125,14 +2125,14 @@ export const defaultRibbonSchema: RibbonSchema = {
           label: "Show",
           buttons: [
             { id: "view.show.ruler", label: "Ruler", ariaLabel: "Ruler", iconId: "ruler", kind: "toggle", defaultPressed: false },
-            { id: "view.show.gridlines", label: "Gridlines", ariaLabel: "Gridlines", icon: "▦", kind: "toggle", defaultPressed: true },
+            { id: "view.show.gridlines", label: "Gridlines", ariaLabel: "Gridlines", iconId: "gridlines", kind: "toggle", defaultPressed: true },
             { id: "view.show.formulaBar", label: "Formula Bar", ariaLabel: "Formula Bar", iconId: "function", kind: "toggle", defaultPressed: true },
-            { id: "view.show.headings", label: "Headings", ariaLabel: "Headings", icon: "A1", kind: "toggle", defaultPressed: true },
+            { id: "view.show.headings", label: "Headings", ariaLabel: "Headings", iconId: "headings", kind: "toggle", defaultPressed: true },
             {
               id: "view.show.showFormulas",
               label: "Show Formulas",
               ariaLabel: "Show formulas (Ctrl/Cmd+`)",
-              icon: "`",
+              iconId: "function",
               kind: "toggle",
               defaultPressed: false,
               testId: "ribbon-show-formulas",
@@ -2178,8 +2178,8 @@ export const defaultRibbonSchema: RibbonSchema = {
           id: "view.workbookViews",
           label: "Workbook Views",
           buttons: [
-            { id: "view.workbookViews.normal", label: "Normal", ariaLabel: "Normal View", icon: "▦", kind: "toggle", defaultPressed: true, size: "large" },
-            { id: "view.workbookViews.pageBreakPreview", label: "Page Break Preview", ariaLabel: "Page Break Preview", icon: "⤶", kind: "toggle", size: "large" },
+            { id: "view.workbookViews.normal", label: "Normal", ariaLabel: "Normal View", iconId: "gridlines", kind: "toggle", defaultPressed: true, size: "large" },
+            { id: "view.workbookViews.pageBreakPreview", label: "Page Break Preview", ariaLabel: "Page Break Preview", iconId: "pageBreak", kind: "toggle", size: "large" },
             { id: "view.workbookViews.pageLayout", label: "Page Layout", ariaLabel: "Page Layout View", iconId: "file", kind: "toggle", size: "large" },
             {
               id: "view.workbookViews.customViews",
@@ -2218,7 +2218,7 @@ export const defaultRibbonSchema: RibbonSchema = {
               kind: "dropdown",
               menuItems: [
                 { id: "view.window.arrangeAll", label: "Arrange All…", ariaLabel: "Arrange All", iconId: "window" },
-                { id: "view.window.arrangeAll.tiled", label: "Tiled", ariaLabel: "Tiled", icon: "▦" },
+                { id: "view.window.arrangeAll.tiled", label: "Tiled", ariaLabel: "Tiled", iconId: "gridlines" },
                 { id: "view.window.arrangeAll.horizontal", label: "Horizontal", ariaLabel: "Horizontal", iconId: "arrowLeftRight" },
                 { id: "view.window.arrangeAll.vertical", label: "Vertical", ariaLabel: "Vertical", iconId: "arrowUpDown" },
                 { id: "view.window.arrangeAll.cascade", label: "Cascade", ariaLabel: "Cascade", iconId: "window" },
