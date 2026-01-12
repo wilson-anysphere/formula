@@ -46,6 +46,13 @@ test("pnpm check:coi script builds via cargo_agent and targets the desktop tauri
     "expected COI smoke-check script to verify the built binary exists",
   );
 
+  // If Cargo output is redirected via CARGO_TARGET_DIR, the script should still find the binary.
+  assert.match(
+    src,
+    /process\.env\.CARGO_TARGET_DIR/,
+    "expected COI smoke-check script to respect CARGO_TARGET_DIR when locating the built binary",
+  );
+
   // Must build the desktop frontend (Vite).
   assert.match(
     src,
