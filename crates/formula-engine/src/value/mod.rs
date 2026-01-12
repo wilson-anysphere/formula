@@ -7,7 +7,7 @@ use crate::error::ExcelError;
 use crate::eval::CompiledExpr;
 use crate::functions::{FunctionContext, Reference};
 use crate::locale::ValueLocaleConfig;
-use formula_model::CellRef;
+use formula_model::{CellRef, ErrorValue as ModelErrorValue};
 use formula_format::{DateSystem, FormatOptions, Value as FmtValue};
 
 mod number_parse;
@@ -176,6 +176,48 @@ impl ErrorKind {
             return Some(ErrorKind::Unknown);
         }
         None
+    }
+}
+
+impl From<ModelErrorValue> for ErrorKind {
+    fn from(value: ModelErrorValue) -> Self {
+        match value {
+            ModelErrorValue::Null => ErrorKind::Null,
+            ModelErrorValue::Div0 => ErrorKind::Div0,
+            ModelErrorValue::Value => ErrorKind::Value,
+            ModelErrorValue::Ref => ErrorKind::Ref,
+            ModelErrorValue::Name => ErrorKind::Name,
+            ModelErrorValue::Num => ErrorKind::Num,
+            ModelErrorValue::NA => ErrorKind::NA,
+            ModelErrorValue::GettingData => ErrorKind::GettingData,
+            ModelErrorValue::Spill => ErrorKind::Spill,
+            ModelErrorValue::Calc => ErrorKind::Calc,
+            ModelErrorValue::Field => ErrorKind::Field,
+            ModelErrorValue::Connect => ErrorKind::Connect,
+            ModelErrorValue::Blocked => ErrorKind::Blocked,
+            ModelErrorValue::Unknown => ErrorKind::Unknown,
+        }
+    }
+}
+
+impl From<ErrorKind> for ModelErrorValue {
+    fn from(value: ErrorKind) -> Self {
+        match value {
+            ErrorKind::Null => ModelErrorValue::Null,
+            ErrorKind::Div0 => ModelErrorValue::Div0,
+            ErrorKind::Value => ModelErrorValue::Value,
+            ErrorKind::Ref => ModelErrorValue::Ref,
+            ErrorKind::Name => ModelErrorValue::Name,
+            ErrorKind::Num => ModelErrorValue::Num,
+            ErrorKind::NA => ModelErrorValue::NA,
+            ErrorKind::GettingData => ModelErrorValue::GettingData,
+            ErrorKind::Spill => ModelErrorValue::Spill,
+            ErrorKind::Calc => ModelErrorValue::Calc,
+            ErrorKind::Field => ModelErrorValue::Field,
+            ErrorKind::Connect => ModelErrorValue::Connect,
+            ErrorKind::Blocked => ModelErrorValue::Blocked,
+            ErrorKind::Unknown => ModelErrorValue::Unknown,
+        }
     }
 }
 

@@ -699,12 +699,8 @@ fn getting_data_error_literal_is_parsed_as_error() {
     let mut wb = WasmWorkbook::new();
     wb.set_cell("A1".to_string(), JsValue::from_str("#GETTING_DATA"), None)
         .unwrap();
-    wb.set_cell(
-        "A2".to_string(),
-        JsValue::from_str("  #getting_data  "),
-        None,
-    )
-    .unwrap();
+    wb.set_cell("A2".to_string(), JsValue::from_str("  #getting_data  "), None)
+        .unwrap();
 
     // Use ISERROR to distinguish between real errors and error-looking text.
     wb.set_cell("B1".to_string(), JsValue::from_str("=ISERROR(A1)"), None)
@@ -774,12 +770,8 @@ fn leading_apostrophe_forces_text_for_error_literals() {
         .unwrap();
     wb.set_cell("A2".to_string(), JsValue::from_str("'#DIV/0!"), None)
         .unwrap();
-    wb.set_cell(
-        "A3".to_string(),
-        JsValue::from_str("'#GETTING_DATA"),
-        None,
-    )
-    .unwrap();
+    wb.set_cell("A3".to_string(), JsValue::from_str("'#GETTING_DATA"), None)
+        .unwrap();
 
     // Use ISERROR to distinguish between real errors and error-looking text.
     wb.set_cell("B1".to_string(), JsValue::from_str("=ISERROR(A1)"), None)
@@ -812,6 +804,100 @@ fn leading_apostrophe_forces_text_for_error_literals() {
     let a3: CellData = serde_wasm_bindgen::from_value(a3_js).unwrap();
     assert_eq!(a3.input, json!("'#GETTING_DATA"));
     assert_eq!(a3.value, json!("#GETTING_DATA"));
+}
+
+#[wasm_bindgen_test]
+fn from_xlsx_bytes_imports_extended_error_cells_as_errors() {
+    let bytes = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/xlsx/basic/extended-errors.xlsx"
+    ));
+    let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
+
+    // Verify the imported cached values are surfaced as error literals (not plain text).
+    let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let a1: CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
+    assert_eq!(a1.input, json!("#GETTING_DATA"));
+    assert_eq!(a1.value, json!("#GETTING_DATA"));
+
+    // Formulas should treat the value as an error.
+    wb.set_cell("A2".to_string(), JsValue::from_str("=ISERROR(A1)"), None)
+        .unwrap();
+    wb.set_cell("A3".to_string(), JsValue::from_str("=ERROR.TYPE(A1)"), None)
+        .unwrap();
+    wb.set_cell("A4".to_string(), JsValue::from_str("=A1+1"), None)
+        .unwrap();
+
+    wb.recalculate(None).unwrap();
+
+    let a2_js = wb.get_cell("A2".to_string(), None).unwrap();
+    let a2: CellData = serde_wasm_bindgen::from_value(a2_js).unwrap();
+    assert_eq!(a2.value, json!(true));
+
+    let a3_js = wb.get_cell("A3".to_string(), None).unwrap();
+    let a3: CellData = serde_wasm_bindgen::from_value(a3_js).unwrap();
+    assert_json_number(&a3.value, 8.0);
+
+    let a4_js = wb.get_cell("A4".to_string(), None).unwrap();
+    let a4: CellData = serde_wasm_bindgen::from_value(a4_js).unwrap();
+    assert_eq!(a4.value, json!("#GETTING_DATA"));
+
+    // Spot check one more non-classic error kind.
+    wb.set_cell("B2".to_string(), JsValue::from_str("=ERROR.TYPE(B1)"), None)
+        .unwrap();
+    wb.recalculate(None).unwrap();
+    let b2_js = wb.get_cell("B2".to_string(), None).unwrap();
+    let b2: CellData = serde_wasm_bindgen::from_value(b2_js).unwrap();
+    assert_json_number(&b2.value, 11.0);
+}
+
+#[wasm_bindgen_test]
+fn scalar_protocol_parses_known_error_strings_but_not_unknown_hash_strings() {
+    let mut wb = WasmWorkbook::new();
+
+    // Known error literal → error value.
+    wb.set_cell("A1".to_string(), JsValue::from_str("#BLOCKED!"), None)
+        .unwrap();
+    wb.set_cell("A2".to_string(), JsValue::from_str("=ISERROR(A1)"), None)
+        .unwrap();
+    wb.set_cell("A3".to_string(), JsValue::from_str("=ERROR.TYPE(A1)"), None)
+        .unwrap();
+    wb.set_cell("A4".to_string(), JsValue::from_str("=A1+1"), None)
+        .unwrap();
+    wb.recalculate(None).unwrap();
+
+    let a1_js = wb.get_cell("A1".to_string(), None).unwrap();
+    let a1: CellData = serde_wasm_bindgen::from_value(a1_js).unwrap();
+    assert_eq!(a1.input, json!("#BLOCKED!"));
+    assert_eq!(a1.value, json!("#BLOCKED!"));
+
+    let a2_js = wb.get_cell("A2".to_string(), None).unwrap();
+    let a2: CellData = serde_wasm_bindgen::from_value(a2_js).unwrap();
+    assert_eq!(a2.value, json!(true));
+
+    let a3_js = wb.get_cell("A3".to_string(), None).unwrap();
+    let a3: CellData = serde_wasm_bindgen::from_value(a3_js).unwrap();
+    assert_json_number(&a3.value, 13.0);
+
+    let a4_js = wb.get_cell("A4".to_string(), None).unwrap();
+    let a4: CellData = serde_wasm_bindgen::from_value(a4_js).unwrap();
+    assert_eq!(a4.value, json!("#BLOCKED!"));
+
+    // Unknown `#FOO` strings must remain plain text.
+    wb.set_cell("B1".to_string(), JsValue::from_str("#NOT_A_REAL_ERROR"), None)
+        .unwrap();
+    wb.set_cell("B2".to_string(), JsValue::from_str("=ISERROR(B1)"), None)
+        .unwrap();
+    wb.recalculate(None).unwrap();
+
+    let b1_js = wb.get_cell("B1".to_string(), None).unwrap();
+    let b1: CellData = serde_wasm_bindgen::from_value(b1_js).unwrap();
+    assert_eq!(b1.input, json!("#NOT_A_REAL_ERROR"));
+    assert_eq!(b1.value, json!("#NOT_A_REAL_ERROR"));
+
+    let b2_js = wb.get_cell("B2".to_string(), None).unwrap();
+    let b2: CellData = serde_wasm_bindgen::from_value(b2_js).unwrap();
+    assert_eq!(b2.value, json!(false));
 }
 
 #[wasm_bindgen_test]
@@ -894,6 +980,10 @@ fn from_xlsx_bytes_imports_defined_names() {
     let mut wb = WasmWorkbook::from_xlsx_bytes(bytes).unwrap();
     wb.set_cell("C1".to_string(), JsValue::from_str("=ZedName"), None)
         .unwrap();
+    wb.set_cell("C2".to_string(), JsValue::from_str("=ErrName"), None)
+        .unwrap();
+    wb.set_cell("C3".to_string(), JsValue::from_str("=ERROR.TYPE(ErrName)"), None)
+        .unwrap();
 
     wb.recalculate(None).unwrap();
 
@@ -901,6 +991,16 @@ fn from_xlsx_bytes_imports_defined_names() {
     let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
     assert_eq!(cell.input, json!("=ZedName"));
     assert_eq!(cell.value, json!("Hello"));
+
+    let cell_js = wb.get_cell("C2".to_string(), None).unwrap();
+    let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert_eq!(cell.input, json!("=ErrName"));
+    assert_eq!(cell.value, json!("#N/A"));
+
+    let cell_js = wb.get_cell("C3".to_string(), None).unwrap();
+    let cell: CellData = serde_wasm_bindgen::from_value(cell_js).unwrap();
+    assert_eq!(cell.input, json!("=ERROR.TYPE(ErrName)"));
+    assert_json_number(&cell.value, 7.0);
 }
 
 #[wasm_bindgen_test]
@@ -1230,7 +1330,12 @@ fn rich_values_roundtrip_through_wasm_exports() {
         .get_cell_rich(DEFAULT_SHEET.to_string(), "A1".to_string())
         .unwrap();
     let got: JsonValue = serde_wasm_bindgen::from_value(got_js).unwrap();
-    assert_eq!(got, entity);
+    // `serde_wasm_bindgen` may canonicalize JS numbers that are whole integers (e.g. `42.0`) into
+    // integer JSON numbers (`42`). Normalize the expected payload through the same JS round-trip so
+    // this assertion reflects the actual wasm boundary behavior.
+    let expected_js = serde_wasm_bindgen::to_value(&entity).unwrap();
+    let expected: JsonValue = serde_wasm_bindgen::from_value(expected_js).unwrap();
+    assert_eq!(got, expected);
 
     // Scalar API remains scalar-only.
     let cell_js = wb.get_cell("A1".to_string(), None).unwrap();

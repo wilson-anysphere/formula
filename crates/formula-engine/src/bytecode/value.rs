@@ -151,8 +151,8 @@ impl ResolvedRange {
 pub enum ErrorKind {
     Null,
     Div0,
-    Ref,
     Value,
+    Ref,
     Name,
     Num,
     NA,

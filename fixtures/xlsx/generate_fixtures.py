@@ -1980,6 +1980,7 @@ def main() -> None:
             """  <definedNames>
     <definedName name="ZedName">Sheet1!$B$1</definedName>
     <definedName name="MyRange">Sheet1!$A$1:$A$1</definedName>
+    <definedName name="ErrName">#N/A</definedName>
   </definedNames>""",
         ),
         sheet_names=["Sheet1"],

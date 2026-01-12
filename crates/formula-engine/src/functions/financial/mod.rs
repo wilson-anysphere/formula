@@ -43,3 +43,14 @@ pub use securities::{
     yieldmat,
 };
 pub use time_value::{effect, fv, ipmt, nominal, nper, pmt, ppmt, pv, rate, rri};
+
+// On wasm targets, `inventory` registrations can be dropped by the linker if the object file
+// contains no otherwise-referenced symbols. This `#[used]` anchor forces the linker to keep the
+// `financial::builtins` module so its `inventory::submit!` entries are retained.
+#[cfg(target_arch = "wasm32")]
+#[used]
+static FORCE_LINK_FINANCIAL_BUILTINS: fn() = builtins::__force_link;
+
+// Referenced from `functions/mod.rs` to ensure the `financial` module itself is linked on wasm.
+#[cfg(target_arch = "wasm32")]
+pub(super) fn __force_link() {}

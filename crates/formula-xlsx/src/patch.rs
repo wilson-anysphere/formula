@@ -2010,7 +2010,7 @@ fn value_semantics_eq(existing: &ExistingCellValue, patch_value: Option<&CellVal
                 ExistingCellValue::SharedString(rich) => rich.text == display,
                 _ => false,
             }
-        }
+        },
         CellValue::RichText(rich) => match existing {
             ExistingCellValue::SharedString(existing_rich) => existing_rich == rich,
             ExistingCellValue::String(v) => rich.runs.is_empty() && &rich.text == v,

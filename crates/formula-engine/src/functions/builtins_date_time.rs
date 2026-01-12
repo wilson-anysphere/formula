@@ -1319,3 +1319,9 @@ fn normalize_year_month(year: i64, month: i64) -> (i64, i64) {
     let new_month = total_months.rem_euclid(12) + 1;
     (new_year, new_month)
 }
+
+// On wasm targets, `inventory` registrations can be dropped by the linker if the object file
+// contains no otherwise-referenced symbols. Referencing this function from a `#[used]` table in
+// `functions/mod.rs` ensures the module (and its `inventory::submit!` entries) are retained.
+#[cfg(target_arch = "wasm32")]
+pub(super) fn __force_link() {}

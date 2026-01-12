@@ -85,7 +85,6 @@ pub enum RichDataError {
         source: roxmltree::Error,
     },
 }
-
 fn rich_data_error_to_xlsx(err: RichDataError) -> XlsxError {
     match err {
         RichDataError::Xlsx(err) => err,

@@ -111,12 +111,20 @@ fn ensure_rust_constructors_run() {
         // `wasm-bindgen-test`) do not automatically invoke them, which leaves the
         // function registry empty. Call the generated constructor trampoline when
         // needed so spreadsheet functions like `SUM()` work under wasm.
-        if formula_engine::functions::iter_function_specs()
-            .into_iter()
-            .next()
-            .is_some()
-        {
-            return;
+        //
+        // Note: some runtimes can leave the registry *partially* populated. Avoid checking
+        // "is there any function?" and instead probe for a small set of representative built-ins.
+        let mut has_sum = false;
+        let mut has_sequence = false;
+        for spec in formula_engine::functions::iter_function_specs() {
+            match spec.name {
+                "SUM" => has_sum = true,
+                "SEQUENCE" => has_sequence = true,
+                _ => {}
+            }
+            if has_sum && has_sequence {
+                return;
+            }
         }
 
         extern "C" {
@@ -128,11 +136,17 @@ fn ensure_rust_constructors_run() {
         // to be populated under wasm-bindgen-test.
         unsafe { __wasm_call_ctors() }
 
+        let mut has_sum = false;
+        let mut has_sequence = false;
+        for spec in formula_engine::functions::iter_function_specs() {
+            match spec.name {
+                "SUM" => has_sum = true,
+                "SEQUENCE" => has_sequence = true,
+                _ => {}
+            }
+        }
         debug_assert!(
-            formula_engine::functions::iter_function_specs()
-                .into_iter()
-                .next()
-                .is_some(),
+            has_sum && has_sequence,
             "formula-engine inventory registry did not populate after calling __wasm_call_ctors"
         );
     });
@@ -2334,6 +2348,8 @@ impl WasmWorkbook {
                 NameDefinition::Constant(EngineValue::Bool(false))
             } else if let Ok(n) = refers_to.parse::<f64>() {
                 NameDefinition::Constant(EngineValue::Number(n))
+            } else if let Ok(err) = refers_to.parse::<formula_model::ErrorValue>() {
+                NameDefinition::Constant(EngineValue::Error(err.into()))
             } else {
                 NameDefinition::Reference(refers_to.to_string())
             };
@@ -2469,7 +2485,6 @@ impl WasmWorkbook {
         let cell = self.inner.get_cell_data(sheet, &address)?;
         cell_data_to_js(&cell)
     }
-
     #[wasm_bindgen(js_name = "setCell")]
     pub fn set_cell(
         &mut self,

@@ -68,6 +68,31 @@ mod builtins_text;
 mod builtins_text_dbcs;
 mod builtins_thai;
 
+// On wasm targets, `inventory` registrations can be dropped by the linker if the object file
+// contains no otherwise-referenced symbols. Force-link every module that contains
+// `inventory::submit!` registrations so `inventory::iter::<FunctionSpec>` sees the full
+// built-in function set under `wasm-bindgen-test`.
+#[cfg(target_arch = "wasm32")]
+#[used]
+static FORCE_LINK_BUILTINS: [fn(); 16] = [
+    builtins_array::__force_link,
+    builtins_date_time::__force_link,
+    builtins_dynamic_arrays::__force_link,
+    builtins_dynamic_array_textsplit::__force_link,
+    builtins_information::__force_link,
+    builtins_lambda::__force_link,
+    builtins_logical::__force_link,
+    builtins_logical_extended::__force_link,
+    builtins_lookup::__force_link,
+    builtins_math::__force_link,
+    builtins_math_extended::__force_link,
+    builtins_select::__force_link,
+    builtins_reference::__force_link,
+    builtins_statistical::__force_link,
+    builtins_text::__force_link,
+    financial::__force_link,
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Volatility {
     NonVolatile,
