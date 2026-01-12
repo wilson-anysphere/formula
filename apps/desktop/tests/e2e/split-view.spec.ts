@@ -815,6 +815,67 @@ test.describe("split view", () => {
     expect(Math.abs(primaryScrollAfter.y - primaryScrollBefore.y)).toBeLessThan(0.1);
   });
 
+  test("secondary keyboard navigation updates global selection without scrolling primary", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    // Scroll the primary pane away so cross-pane scroll bugs are detectable.
+    const primary = page.locator("#grid");
+    await primary.hover({ position: { x: 60, y: 40 } });
+    await page.mouse.wheel(100 * 100, 0);
+    await expect.poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().x)).toBeGreaterThan(0);
+    await page.mouse.wheel(0, 200 * 24);
+    await expect.poll(async () => await page.evaluate(() => (window as any).__formulaApp.getScroll().y)).toBeGreaterThan(0);
+
+    const scrollBefore = await page.evaluate(() => (window as any).__formulaApp.getScroll());
+
+    // Focus secondary on A1 then use arrow keys to move selection.
+    await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByTestId("active-cell")).toHaveText("A2");
+    await expect(page.getByTestId("formula-address")).toHaveValue("A2");
+    await expect(page.locator("#grid").getByTestId("canvas-grid-a11y-active-cell")).toContainText("Cell A2");
+
+    const scrollAfter = await page.evaluate(() => (window as any).__formulaApp.getScroll());
+    expect(Math.abs(scrollAfter.x - scrollBefore.x)).toBeLessThan(0.1);
+    expect(Math.abs(scrollAfter.y - scrollBefore.y)).toBeLessThan(0.1);
+  });
+
+  test("F2 starts editing in the secondary pane", async ({ page }) => {
+    await gotoDesktop(page, "/?grid=shared");
+    await page.evaluate(() => localStorage.clear());
+    await page.reload();
+    await waitForDesktopReady(page);
+    await waitForIdle(page);
+
+    await page.getByTestId("ribbon-root").getByTestId("split-vertical").click();
+    const secondary = page.locator("#grid-secondary");
+    await expect(secondary).toBeVisible();
+    await waitForGridCanvasesToBeSized(page, "#grid-secondary");
+
+    await secondary.click({ position: { x: 48 + 12, y: 24 + 12 } }); // A1
+    await expect(page.getByTestId("active-cell")).toHaveText("A1");
+
+    await page.keyboard.press("F2");
+    const editor = secondary.locator("textarea.cell-editor");
+    await expect(editor).toBeVisible();
+    await page.keyboard.type("F2");
+    await page.keyboard.press("Enter");
+    await waitForIdle(page);
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCellValueA1("A1"))).toBe("F2");
+  });
+
   test("disabling split view commits an in-progress secondary-pane edit", async ({ page }) => {
     await gotoDesktop(page, "/?grid=shared");
     await page.evaluate(() => localStorage.clear());
