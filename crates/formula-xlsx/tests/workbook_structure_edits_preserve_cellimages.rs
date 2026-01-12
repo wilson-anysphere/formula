@@ -23,6 +23,7 @@ fn zip_part(zip_bytes: &[u8], name: &str) -> Vec<u8> {
 }
 
 fn workbook_rels_has_target_suffix(rels_xml: &[u8], suffix: &str) -> bool {
+    let suffix_lower = suffix.to_ascii_lowercase();
     let mut reader = Reader::from_reader(rels_xml);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
@@ -33,8 +34,11 @@ fn workbook_rels_has_target_suffix(rels_xml: &[u8], suffix: &str) -> bool {
             {
                 for attr in e.attributes().flatten() {
                     if local_name(attr.key.as_ref()).eq_ignore_ascii_case(b"Target") {
-                        let target = attr.unescape_value().expect("Target attr").into_owned();
-                        if target.ends_with(suffix) {
+                        let target = attr.unescape_value().expect("Target attr");
+                        let target = target.as_ref();
+                        // Be tolerant of malformed producers that append a fragment.
+                        let target = target.split('#').next().unwrap_or(target);
+                        if target.to_ascii_lowercase().ends_with(&suffix_lower) {
                             return true;
                         }
                     }
@@ -269,4 +273,3 @@ fn workbook_structure_edits_preserve_cellimages_parts_and_relationships() {
     let saved_after_delete = doc.save_to_vec().expect("save after delete sheet");
     assert_preserves_cellimages_parts_and_package_links(&saved_after_delete, &fixture);
 }
-
