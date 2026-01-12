@@ -241,10 +241,12 @@ fn model_value_to_scalar(value: &ModelCellValue) -> CellScalar {
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| "[Image]".to_string()),
         ),
-        ModelCellValue::Array(arr) => CellScalar::Text(format!("{:?}", arr.data)),
-        ModelCellValue::Spill(_) => CellScalar::Error("#SPILL!".to_string()),
-        #[allow(unreachable_patterns)]
-        _ => rich_model_cell_value_to_scalar(value).unwrap_or_else(|| CellScalar::Text(format!("{value:?}"))),
+        other => match other {
+            ModelCellValue::Array(arr) => CellScalar::Text(format!("{:?}", arr.data)),
+            ModelCellValue::Spill(_) => CellScalar::Error("#SPILL!".to_string()),
+            _ => rich_model_cell_value_to_scalar(other)
+                .unwrap_or_else(|| CellScalar::Text(format!("{other:?}"))),
+        },
     }
 }
 
