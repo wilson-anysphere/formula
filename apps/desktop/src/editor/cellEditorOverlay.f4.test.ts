@@ -26,6 +26,22 @@ describe("CellEditorOverlay F4 absolute reference toggle", () => {
     container.remove();
   });
 
+  it("does not toggle when the caret is not within a reference token", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    const overlay = new CellEditorOverlay(container, { onCancel: () => {}, onCommit: () => {} });
+    overlay.open({ row: 0, col: 0 }, { x: 0, y: 0, width: 100, height: 24 }, "=SUM(");
+
+    overlay.element.setSelectionRange(overlay.element.value.length, overlay.element.value.length);
+    overlay.element.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
+
+    expect(overlay.element.value).toBe("=SUM(");
+
+    overlay.close();
+    container.remove();
+  });
+
   it("does not toggle non-formula text", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -42,4 +58,3 @@ describe("CellEditorOverlay F4 absolute reference toggle", () => {
     container.remove();
   });
 });
-

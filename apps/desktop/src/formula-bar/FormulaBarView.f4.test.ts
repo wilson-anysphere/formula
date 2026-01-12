@@ -47,23 +47,43 @@ describe("FormulaBarView F4 absolute reference toggle", () => {
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(view.textarea.value).toBe("=$A$1");
-    expect(view.textarea.selectionStart).toBe(4);
-    expect(view.textarea.selectionEnd).toBe(4);
+    expect(view.textarea.selectionStart).toBe(1);
+    expect(view.textarea.selectionEnd).toBe(5);
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(view.textarea.value).toBe("=A$1");
-    expect(view.textarea.selectionStart).toBe(3);
-    expect(view.textarea.selectionEnd).toBe(3);
+    expect(view.textarea.selectionStart).toBe(1);
+    expect(view.textarea.selectionEnd).toBe(4);
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(view.textarea.value).toBe("=$A1");
-    expect(view.textarea.selectionStart).toBe(3);
-    expect(view.textarea.selectionEnd).toBe(3);
+    expect(view.textarea.selectionStart).toBe(1);
+    expect(view.textarea.selectionEnd).toBe(4);
 
     view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
     expect(view.textarea.value).toBe("=A1");
-    expect(view.textarea.selectionStart).toBe(2);
-    expect(view.textarea.selectionEnd).toBe(2);
+    expect(view.textarea.selectionStart).toBe(1);
+    expect(view.textarea.selectionEnd).toBe(3);
+
+    host.remove();
+  });
+
+  it("does not toggle when the caret is not within a reference token", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const view = new FormulaBarView(host, { onCommit: () => {} });
+    view.setActiveCell({ address: "A1", input: "", value: null });
+
+    view.focus({ cursor: "end" });
+    view.textarea.value = "=SUM(";
+    view.textarea.setSelectionRange(view.textarea.value.length, view.textarea.value.length);
+    view.textarea.dispatchEvent(new Event("input"));
+
+    view.textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "F4", cancelable: true }));
+
+    expect(view.textarea.value).toBe("=SUM(");
+    expect(view.model.draft).toBe("=SUM(");
 
     host.remove();
   });
