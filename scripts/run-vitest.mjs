@@ -1,14 +1,7 @@
 import { spawn } from "node:child_process";
+import { normalizeVitestArgs } from "./vitestArgs.mjs";
 
-// pnpm forwards script args without requiring a `--` delimiter, but if callers *do*
-// include one (npm/yarn muscle memory), pnpm forwards the literal `--` through to the
-// script. Vitest treats a bare `--` as a test pattern, which can accidentally cause the
-// full suite to run. Strip it so `pnpm test:vitest -- <file>` behaves as expected.
-let args = process.argv.slice(2);
-const delimiterIdx = args.indexOf("--");
-if (delimiterIdx >= 0) {
-  args = [...args.slice(0, delimiterIdx), ...args.slice(delimiterIdx + 1)];
-}
+const args = normalizeVitestArgs(process.argv.slice(2));
 
 const child = spawn("vitest", ["run", ...args], {
   stdio: "inherit",
