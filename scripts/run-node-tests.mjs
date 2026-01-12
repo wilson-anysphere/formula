@@ -3,6 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { builtinModules, createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const repoRoot = path.resolve(new URL(".", import.meta.url).pathname, "..");
 const require = createRequire(import.meta.url);
@@ -92,7 +93,14 @@ if (runnableTestFiles.length === 0) {
 }
 
 const baseNodeArgs = ["--no-warnings"];
-if (canStripTypes) baseNodeArgs.push("--experimental-strip-types");
+if (canStripTypes) {
+  baseNodeArgs.push("--experimental-strip-types");
+  // Many TS sources in this repo use `.js` specifiers that point at `.ts` files
+  // (bundler-style resolution). Node's default ESM resolver does not support that,
+  // so we install a tiny loader that falls back from `./foo.js` -> `./foo.ts`.
+  const loaderUrl = pathToFileURL(path.join(repoRoot, "scripts", "resolve-ts-imports-loader.mjs")).href;
+  baseNodeArgs.push(`--experimental-loader=${loaderUrl}`);
+}
 
 // Node's test runner defaults `--test-concurrency` to the number of available CPU
 // cores. On large/shared runners this can massively over-parallelize heavyweight
