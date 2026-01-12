@@ -1115,17 +1115,24 @@ function scheduleRibbonSelectionFormatStateUpdate(): void {
     const numberFormatLabel = (() => {
       const format = formatState.numberFormat;
       if (format === "mixed") return "Mixed";
-      if (format == null) return "General";
-      if (typeof format === "string" && /^[€£¥$]#,##0\\.00$/.test(format)) return "Currency";
-      if (format === NUMBER_FORMATS.currency) return "Currency";
-      if (format === NUMBER_FORMATS.percent) return "Percent";
-      if (format === NUMBER_FORMATS.date) return "Date";
-      if (format === "0.00") return "Number";
-      if (format === "#,##0.00") return "Comma";
-      if (format === "h:mm:ss") return "Time";
-      if (format === "# ?/?") return "Fraction";
-      if (format === "0.00E+00") return "Scientific";
-      if (format === "@") return "Text";
+
+      const normalized = typeof format === "string" ? format.trim() : "";
+      if (!normalized || normalized.toLowerCase() === "general") return "General";
+
+      const compact = normalized.toLowerCase().replace(/\s+/g, "");
+
+      if (/^[$€£¥]#,##0\\.00$/.test(normalized)) return "Currency";
+      if (compact === NUMBER_FORMATS.currency.toLowerCase()) return "Currency";
+      if (compact.includes("m/d/yyyy") || compact.includes("yyyy-mm-dd")) return "Date";
+      if (compact === NUMBER_FORMATS.date.toLowerCase()) return "Date";
+      if (/^h{1,2}:m{1,2}(:s{1,2})?$/.test(compact)) return "Time";
+      if (compact.includes("%")) return "Percent";
+      if (compact === "#,##0.00") return "Comma";
+      if (compact === "0.00") return "Number";
+      if (compact.includes("e")) return "Scientific";
+      if (compact.includes("/")) return "Fraction";
+      if (compact === "@") return "Text";
+
       return "Custom";
     })();
 
