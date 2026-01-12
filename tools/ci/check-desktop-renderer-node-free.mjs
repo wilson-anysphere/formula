@@ -17,6 +17,8 @@ import process from "node:process";
 
 const repoRoot = process.cwd();
 const desktopSrcDir = path.join(repoRoot, "apps", "desktop", "src");
+const desktopToolsDir = path.join(repoRoot, "apps", "desktop", "tools");
+const desktopScriptsDir = path.join(repoRoot, "apps", "desktop", "scripts");
 
 const SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]);
 
@@ -94,6 +96,20 @@ function isBannedImport(specifier) {
   return BANNED_MODULE_SPECIFIERS.has(specifier);
 }
 
+function stripQueryAndHash(specifier) {
+  const queryIndex = specifier.indexOf("?");
+  const hashIndex = specifier.indexOf("#");
+  let end = specifier.length;
+  if (queryIndex !== -1) end = Math.min(end, queryIndex);
+  if (hashIndex !== -1) end = Math.min(end, hashIndex);
+  return specifier.slice(0, end);
+}
+
+function isPathWithin(absPath, absDir) {
+  const rel = path.relative(absDir, absPath);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
 /** @type {{ file: string, line: number, column: number, kind: string, specifier: string }[]} */
 const violations = [];
 
@@ -111,6 +127,25 @@ for await (const absPath of walkFiles(desktopSrcDir)) {
   const sourceText = await fs.readFile(absPath, "utf8");
   const imports = listImportSpecifiers(sourceText);
   for (const imp of imports) {
+    // Keep Node-only tooling out of the WebView renderer import graph. Anything in
+    // `apps/desktop/tools` or `apps/desktop/scripts` is assumed to be Node-only (or at least
+    // not safe to bundle into the renderer).
+    if (imp.specifier.startsWith(".")) {
+      const cleaned = stripQueryAndHash(imp.specifier);
+      const resolved = path.resolve(path.dirname(absPath), cleaned);
+      if (isPathWithin(resolved, desktopToolsDir) || isPathWithin(resolved, desktopScriptsDir)) {
+        const { line, column } = lineAndColumnForIndex(sourceText, imp.index);
+        violations.push({
+          file: path.relative(repoRoot, absPath),
+          line,
+          column,
+          kind: `${imp.kind} (renderer-imports-node-only-tooling)`,
+          specifier: imp.specifier,
+        });
+        continue;
+      }
+    }
+
     if (!isBannedImport(imp.specifier)) continue;
     const { line, column } = lineAndColumnForIndex(sourceText, imp.index);
     violations.push({
@@ -134,4 +169,3 @@ if (violations.length > 0) {
   );
   process.exitCode = 1;
 }
-
