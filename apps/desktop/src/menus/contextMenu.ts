@@ -52,6 +52,7 @@ export class ContextMenu {
   private readonly onClose: (() => void) | null;
   private keydownListener: ((e: KeyboardEvent) => void) | null = null;
   private pointerDownListener: ((e: PointerEvent) => void) | null = null;
+  private scrollListener: ((e: Event) => void) | null = null;
   private wheelListener: ((e: WheelEvent) => void) | null = null;
   private resizeListener: (() => void) | null = null;
   private blurListener: (() => void) | null = null;
@@ -109,6 +110,18 @@ export class ContextMenu {
       this.close();
     };
     window.addEventListener("pointerdown", this.pointerDownListener, true);
+
+    // Close on scroll events that originate outside the menu. This covers cases like
+    // dragging scrollbars (which may not emit wheel events).
+    this.scrollListener = (e: Event) => {
+      if (!this.isShown) return;
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (this.menu.contains(target)) return;
+      if (this.submenu && this.submenu.contains(target)) return;
+      this.close();
+    };
+    window.addEventListener("scroll", this.scrollListener, true);
 
     // Close on wheel scrolling the underlying surface (keep it open when scrolling
     // within the menu/submenu itself).
@@ -205,6 +218,11 @@ export class ContextMenu {
     if (this.wheelListener) {
       window.removeEventListener("wheel", this.wheelListener, true);
       this.wheelListener = null;
+    }
+
+    if (this.scrollListener) {
+      window.removeEventListener("scroll", this.scrollListener, true);
+      this.scrollListener = null;
     }
 
     if (this.resizeListener) {
