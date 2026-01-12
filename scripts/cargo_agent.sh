@@ -88,7 +88,10 @@ if ! [[ "${nproc_val}" =~ ^[0-9]+$ ]] || [[ "${nproc_val}" -lt 1 ]]; then
 fi
 
 # Defaults
-jobs="${FORMULA_CARGO_JOBS:-4}"
+#
+# Prefer the wrapper-specific override, but fall back to the standard Cargo env var so
+# `source scripts/agent-init.sh` (which sets `CARGO_BUILD_JOBS`) influences the wrapper too.
+jobs="${FORMULA_CARGO_JOBS:-${CARGO_BUILD_JOBS:-4}}"
 limit_as="${FORMULA_CARGO_LIMIT_AS:-12G}"
 
 # Cargo also supports configuring the default parallelism via `CARGO_BUILD_JOBS`.
