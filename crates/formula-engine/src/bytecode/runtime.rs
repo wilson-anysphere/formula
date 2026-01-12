@@ -23,6 +23,13 @@ thread_local! {
     static BYTECODE_NOW_UTC: RefCell<DateTime<Utc>> = RefCell::new(Utc::now());
 }
 
+/// Row-span threshold for treating a reference as "huge" and preferring sparse iteration.
+///
+/// The engine's bytecode column-cache builder also uses this threshold to avoid allocating large
+/// `Vec<f64>` buffers for ranges like `A:A` on sparse sheets. When the cache is skipped, the
+/// bytecode runtime can still compute aggregates correctly by iterating only stored cells.
+pub(crate) const BYTECODE_SPARSE_RANGE_ROW_THRESHOLD: i32 = 262_144;
+
 pub(crate) struct BytecodeEvalContextGuard {
     prev_date_system: ExcelDateSystem,
     prev_value_locale: ValueLocaleConfig,
@@ -2767,6 +2774,31 @@ fn count_if_range_criteria(
         return Err(ErrorKind::Ref);
     }
 
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut count = 0usize;
+            let mut seen = 0usize;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                seen += 1;
+                let engine_value = bytecode_value_to_engine(v);
+                if criteria.matches(&engine_value) {
+                    count += 1;
+                }
+            }
+
+            if criteria.matches(&EngineValue::Blank) {
+                let total_cells = (range.rows() as i64) * (range.cols() as i64);
+                let implicit_blanks = total_cells.saturating_sub(seen as i64);
+                count = count.saturating_add(implicit_blanks as usize);
+            }
+
+            return Ok(count);
+        }
+    }
+
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
         for row in range.row_start..=range.row_end {
@@ -2804,10 +2836,63 @@ fn range_in_bounds(grid: &dyn Grid, range: ResolvedRange) -> bool {
     })
 }
 
+#[inline]
+fn coord_in_range(coord: CellCoord, range: ResolvedRange) -> bool {
+    coord.row >= range.row_start
+        && coord.row <= range.row_end
+        && coord.col >= range.col_start
+        && coord.col <= range.col_end
+}
+
+#[inline]
+fn record_error_col_major(
+    best: &mut Option<(i32, i32, ErrorKind)>,
+    coord: CellCoord,
+    err: ErrorKind,
+) {
+    // The dense fallback paths scan columns outermost and rows innermost. Preserve that precedence
+    // by selecting the error with the smallest (col, row) coordinate.
+    match best {
+        None => *best = Some((coord.col, coord.row, err)),
+        Some((best_col, best_row, _)) => {
+            if (coord.col, coord.row) < (*best_col, *best_row) {
+                *best = Some((coord.col, coord.row, err));
+            }
+        }
+    }
+}
+
 fn sum_range(grid: &dyn Grid, range: ResolvedRange) -> Result<f64, ErrorKind> {
     if !range_in_bounds(grid, range) {
         return Err(ErrorKind::Ref);
     }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut sum = 0.0;
+            let mut best_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                match v {
+                    Value::Number(n) => sum += n,
+                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    // SUM ignores text/logicals/blanks in references.
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_) => {}
+                }
+            }
+            if let Some((_, _, err)) = best_error {
+                return Err(err);
+            }
+            return Ok(sum);
+        }
+    }
+
     let mut sum = 0.0;
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
@@ -2834,6 +2919,37 @@ fn sum_count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<(f64, usize)
     if !range_in_bounds(grid, range) {
         return Err(ErrorKind::Ref);
     }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut sum = 0.0;
+            let mut count = 0usize;
+            let mut best_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                match v {
+                    Value::Number(n) => {
+                        sum += n;
+                        count += 1;
+                    }
+                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    // Ignore non-numeric values in references.
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_) => {}
+                }
+            }
+            if let Some((_, _, err)) = best_error {
+                return Err(err);
+            }
+            return Ok((sum, count));
+        }
+    }
+
     let mut sum = 0.0;
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
@@ -2866,6 +2982,22 @@ fn count_range(grid: &dyn Grid, range: ResolvedRange) -> Result<usize, ErrorKind
     if !range_in_bounds(grid, range) {
         return Err(ErrorKind::Ref);
     }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut count = 0usize;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                if matches!(v, Value::Number(_)) {
+                    count += 1;
+                }
+            }
+            return Ok(count);
+        }
+    }
+
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
@@ -2885,6 +3017,32 @@ fn min_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
     if !range_in_bounds(grid, range) {
         return Err(ErrorKind::Ref);
     }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut out: Option<f64> = None;
+            let mut best_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                match v {
+                    Value::Number(n) => out = Some(out.map_or(n, |prev| prev.min(n))),
+                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_) => {}
+                }
+            }
+            if let Some((_, _, err)) = best_error {
+                return Err(err);
+            }
+            return Ok(out);
+        }
+    }
+
     let mut out: Option<f64> = None;
     for col in range.col_start..=range.col_end {
         let col_min = if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
@@ -2915,6 +3073,32 @@ fn max_range(grid: &dyn Grid, range: ResolvedRange) -> Result<Option<f64>, Error
     if !range_in_bounds(grid, range) {
         return Err(ErrorKind::Ref);
     }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut out: Option<f64> = None;
+            let mut best_error: Option<(i32, i32, ErrorKind)> = None;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                match v {
+                    Value::Number(n) => out = Some(out.map_or(n, |prev| prev.max(n))),
+                    Value::Error(e) => record_error_col_major(&mut best_error, coord, e),
+                    Value::Bool(_)
+                    | Value::Text(_)
+                    | Value::Empty
+                    | Value::Array(_)
+                    | Value::Range(_) => {}
+                }
+            }
+            if let Some((_, _, err)) = best_error {
+                return Err(err);
+            }
+            return Ok(out);
+        }
+    }
+
     let mut out: Option<f64> = None;
     for col in range.col_start..=range.col_end {
         let col_max = if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {
@@ -2949,6 +3133,34 @@ fn count_if_range(
     if !range_in_bounds(grid, range) {
         return Err(ErrorKind::Ref);
     }
+
+    if range.rows() > BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+        if let Some(iter) = grid.iter_cells() {
+            let mut count = 0usize;
+            let mut seen = 0usize;
+            for (coord, v) in iter {
+                if !coord_in_range(coord, range) {
+                    continue;
+                }
+                seen += 1;
+                if let Some(n) = coerce_countif_value_to_number(v) {
+                    if matches_numeric_criteria(n, criteria) {
+                        count += 1;
+                    }
+                }
+            }
+
+            // COUNTIF treats implicit blanks as zero for numeric criteria.
+            if matches_numeric_criteria(0.0, criteria) {
+                let total_cells = (range.rows() as i64) * (range.cols() as i64);
+                let implicit_blanks = total_cells.saturating_sub(seen as i64);
+                count = count.saturating_add(implicit_blanks as usize);
+            }
+
+            return Ok(count);
+        }
+    }
+
     let mut count = 0usize;
     for col in range.col_start..=range.col_end {
         if let Some(slice) = grid.column_slice(col, range.row_start, range.row_end) {

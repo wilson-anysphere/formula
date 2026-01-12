@@ -16,6 +16,19 @@ pub trait Grid: Sync {
     /// Return a contiguous slice for a single-column row range if the backing storage is columnar.
     fn column_slice(&self, col: i32, row_start: i32, row_end: i32) -> Option<&[f64]>;
 
+    /// Optional sparse iteration over populated cells.
+    ///
+    /// When implemented, this should yield coordinates and values for cells that have a stored
+    /// value in the backing grid (i.e. non-implicit blanks). The iterator does **not** need to
+    /// include implicit empty cells; callers can account for them separately when needed.
+    ///
+    /// This is primarily used to optimize large-range aggregates like `SUM(A:A)` on sparse sheets
+    /// without allocating/visiting every cell in the range.
+    #[inline]
+    fn iter_cells(&self) -> Option<Box<dyn Iterator<Item = (CellCoord, Value)> + '_>> {
+        None
+    }
+
     fn bounds(&self) -> (i32, i32);
 
     #[inline]

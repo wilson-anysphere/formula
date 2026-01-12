@@ -178,6 +178,35 @@ fn setup_range_aggregate_engine(size: usize) -> (Engine, String, String) {
     (engine, sum_cell, countif_cell)
 }
 
+fn setup_sparse_huge_range_engine() -> (Engine, String, String) {
+    let mut engine = Engine::new();
+
+    // Sparse column with a couple of values spread far apart. This models sheets where users
+    // write `=SUM(A:A)`/`=COUNTIF(A:A, ...)` over mostly-empty columns.
+    engine
+        .set_cell_value("Sheet1", "A1", 1.0_f64)
+        .expect("seed value");
+    engine
+        .set_cell_value("Sheet1", "A500000", 2.0_f64)
+        .expect("seed value");
+    engine
+        .set_cell_value("Sheet1", "A1048576", 3.0_f64)
+        .expect("seed value");
+
+    let sum_cell = "B1".to_string();
+    let countif_cell = "B2".to_string();
+
+    engine
+        .set_cell_formula("Sheet1", &sum_cell, "=SUM(A:A)")
+        .expect("set SUM formula");
+    engine
+        .set_cell_formula("Sheet1", &countif_cell, "=COUNTIF(A:A, 0)")
+        .expect("set COUNTIF formula");
+
+    engine.recalculate_single_threaded();
+    (engine, sum_cell, countif_cell)
+}
+
 pub fn run_benchmarks() -> Vec<BenchmarkResult> {
     let parse_inputs: Vec<String> = (0..1000)
         .map(|i| format!("=SUM(A{}:A{})", i + 1, i + 100))
@@ -287,6 +316,29 @@ pub fn run_benchmarks() -> Vec<BenchmarkResult> {
             std::hint::black_box((a, b));
         },
     ));
+
+    // Opt-in benchmark for huge sparse ranges (`A:A`-style). Enable via:
+    //   FORMULA_ENGINE_BENCH_SPARSE_HUGE_RANGES=1 cargo run -p formula-engine --bin perf_bench
+    if std::env::var("FORMULA_ENGINE_BENCH_SPARSE_HUGE_RANGES").is_ok() {
+        let (mut engine_sparse, sum_cell, countif_cell) = setup_sparse_huge_range_engine();
+        let mut counter4 = 0_i64;
+        results.push(run_benchmark(
+            "calc.recalc_sparse_sum_countif_full_column.p95",
+            20,
+            5,
+            50.0,
+            || {
+                counter4 += 1;
+                engine_sparse
+                    .set_cell_value("Sheet1", "A1", (counter4 % 10) as f64)
+                    .expect("update");
+                engine_sparse.recalculate_single_threaded();
+                let a = engine_sparse.get_cell_value("Sheet1", &sum_cell);
+                let b = engine_sparse.get_cell_value("Sheet1", &countif_cell);
+                std::hint::black_box((a, b));
+            },
+        ));
+    }
 
     results
 }

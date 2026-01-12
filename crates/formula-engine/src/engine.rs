@@ -5256,6 +5256,12 @@ impl BytecodeColumnCache {
                     // surfaced. Don't build a cache that would otherwise treat them as empty/NaN.
                     continue;
                 }
+                if resolved.rows() > crate::bytecode::runtime::BYTECODE_SPARSE_RANGE_ROW_THRESHOLD {
+                    // Avoid allocating huge columnar buffers for sparse ranges like `A:A`. The
+                    // bytecode runtime can compute aggregates over these ranges by iterating the
+                    // stored (non-implicit-blank) cells instead.
+                    continue;
+                }
                 for col in resolved.col_start..=resolved.col_end {
                     row_ranges_by_col[key.sheet]
                         .entry(col)
@@ -5483,6 +5489,45 @@ impl bytecode::grid::Grid for EngineBytecodeGrid<'_> {
             return None;
         }
         Some(&seg.values[start..=end])
+    }
+
+    fn iter_cells(
+        &self,
+    ) -> Option<Box<dyn Iterator<Item = (bytecode::CellCoord, bytecode::Value)> + '_>> {
+        // When external values are provided out-of-band, we cannot safely iterate just the
+        // snapshot's stored cells because we'd miss provider-backed cells that should contribute
+        // to aggregates.
+        if self.snapshot.external_value_provider.is_some() {
+            return None;
+        }
+
+        let start = CellKey {
+            sheet: self.sheet,
+            addr: CellAddr { row: 0, col: 0 },
+        };
+        let end = CellKey {
+            sheet: self.sheet,
+            addr: CellAddr {
+                row: u32::MAX,
+                col: u32::MAX,
+            },
+        };
+
+        Some(Box::new(
+            self.snapshot
+                .ordered_cells
+                .range(start..=end)
+                .filter_map(|k| {
+                    let value = self.snapshot.values.get(k)?;
+                    Some((
+                        bytecode::CellCoord {
+                            row: k.addr.row as i32,
+                            col: k.addr.col as i32,
+                        },
+                        engine_value_to_bytecode(value),
+                    ))
+                }),
+        ))
     }
 
     fn bounds(&self) -> (i32, i32) {
@@ -7239,6 +7284,78 @@ mod tests {
                 value: Value::Number(8.0),
             }]
         );
+    }
+
+    #[test]
+    fn bytecode_sparse_iteration_matches_ast_for_huge_sparse_ranges() {
+        fn setup(engine: &mut Engine) {
+            // Sparse values spread across a full Excel column.
+            engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
+            engine.set_cell_value("Sheet1", "A500000", 2.0).unwrap();
+            engine.set_cell_value("Sheet1", "A1048576", 3.0).unwrap();
+
+            engine
+                .set_cell_formula("Sheet1", "B1", "=SUM(A:A)")
+                .unwrap();
+            engine
+                .set_cell_formula("Sheet1", "B2", "=COUNTIF(A:A, 0)")
+                .unwrap();
+        }
+
+        let mut bytecode_engine = Engine::new();
+        setup(&mut bytecode_engine);
+
+        // Ensure the SUM formula is actually bytecode-compiled.
+        let sheet_id = bytecode_engine.workbook.sheet_id("Sheet1").unwrap();
+        let b1 = parse_a1("B1").unwrap();
+        let cell_b1 = bytecode_engine.workbook.sheets[sheet_id]
+            .cells
+            .get(&b1)
+            .and_then(|c| c.compiled.as_ref())
+            .expect("compiled formula");
+        assert!(
+            matches!(cell_b1, CompiledFormula::Bytecode(_)),
+            "expected SUM(A:A) to compile to bytecode"
+        );
+
+        // Column caches should *not* allocate a full-column buffer for `A:A`.
+        let snapshot = Snapshot::from_workbook(
+            &bytecode_engine.workbook,
+            &bytecode_engine.spills,
+            bytecode_engine.external_value_provider.clone(),
+        );
+        let key_b1 = CellKey {
+            sheet: sheet_id,
+            addr: b1,
+        };
+        let tasks = vec![(key_b1, cell_b1.clone())];
+        let column_cache = BytecodeColumnCache::build(bytecode_engine.workbook.sheets.len(), &snapshot, &tasks);
+        assert!(
+            !column_cache
+                .by_sheet
+                .get(sheet_id)
+                .map(|cols| cols.contains_key(&0))
+                .unwrap_or(false),
+            "expected full-column range to skip column-slice cache allocation"
+        );
+
+        bytecode_engine.recalculate_single_threaded();
+        let bc_sum = bytecode_engine.get_cell_value("Sheet1", "B1");
+        let bc_countif = bytecode_engine.get_cell_value("Sheet1", "B2");
+
+        let mut ast_engine = Engine::new();
+        ast_engine.set_bytecode_enabled(false);
+        setup(&mut ast_engine);
+        ast_engine.recalculate_single_threaded();
+        let ast_sum = ast_engine.get_cell_value("Sheet1", "B1");
+        let ast_countif = ast_engine.get_cell_value("Sheet1", "B2");
+
+        assert_eq!(bc_sum, ast_sum, "SUM mismatch");
+        assert_eq!(bc_countif, ast_countif, "COUNTIF mismatch");
+
+        // Sanity check expected values.
+        assert_eq!(bc_sum, Value::Number(6.0));
+        assert_eq!(bc_countif, Value::Number(1_048_573.0));
     }
 
     #[test]
