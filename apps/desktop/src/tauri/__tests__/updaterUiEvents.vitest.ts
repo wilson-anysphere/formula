@@ -414,4 +414,34 @@ describe("updaterUi (events)", () => {
     const restartBtn = document.querySelector<HTMLButtonElement>('[data-testid="updater-restart"]');
     expect(restartBtn?.style.display === "none").toBe(false);
   });
+
+  it("persists dismissal when the user clicks 'Later' on the update-ready toast", async () => {
+    // Provide a stable in-memory localStorage for this test (Node can throw on globalThis.localStorage).
+    const store = new Map<string, string>();
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => (store.has(key) ? store.get(key)! : null),
+        setItem: (key: string, value: string) => {
+          store.set(String(key), String(value));
+        },
+        removeItem: (key: string) => {
+          store.delete(String(key));
+        },
+      },
+    });
+    Object.defineProperty(window, "localStorage", { configurable: true, value: (globalThis as any).localStorage });
+
+    document.body.innerHTML = '<div id="toast-root"></div>';
+
+    const { handleUpdaterEvent } = await import("../updaterUi");
+
+    await handleUpdaterEvent("update-downloaded", { source: "startup", version: "9.9.9" });
+    const laterBtn = document.querySelector<HTMLButtonElement>('[data-testid="update-ready-later"]');
+    expect(laterBtn).not.toBeNull();
+    laterBtn?.click();
+
+    expect(window.localStorage.getItem("formula.updater.dismissedVersion")).toBe("9.9.9");
+    expect(Number(window.localStorage.getItem("formula.updater.dismissedAt"))).toBeGreaterThan(0);
+  });
 });

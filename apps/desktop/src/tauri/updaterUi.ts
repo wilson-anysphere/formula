@@ -800,6 +800,12 @@ function showUpdateReadyToast(update: { version: string }): void {
   controls.style.marginTop = "0";
   controls.style.pointerEvents = "auto";
   controls.style.flex = "0 0 auto";
+  controls.style.flexWrap = "wrap";
+
+  const laterBtn = document.createElement("button");
+  laterBtn.type = "button";
+  laterBtn.textContent = t("updater.later");
+  laterBtn.dataset.testid = "update-ready-later";
 
   const viewVersionsBtn = document.createElement("button");
   viewVersionsBtn.type = "button";
@@ -811,6 +817,7 @@ function showUpdateReadyToast(update: { version: string }): void {
   restartBtn.textContent = t("updater.restartNow");
   restartBtn.dataset.testid = "update-ready-restart";
 
+  controls.appendChild(laterBtn);
   controls.appendChild(viewVersionsBtn);
   controls.appendChild(restartBtn);
   toast.appendChild(controls);
@@ -825,11 +832,21 @@ function showUpdateReadyToast(update: { version: string }): void {
     cleanup();
   });
 
+  laterBtn.addEventListener("click", () => {
+    const version = update.version.trim();
+    if (version) {
+      const storage = getLocalStorageOrNull();
+      if (storage) setUpdaterDismissal(storage, version);
+    }
+    cleanup();
+  });
+
   restartBtn.addEventListener("click", () => {
     void (async () => {
       // Prevent double-click restart attempts.
       restartBtn.disabled = true;
       viewVersionsBtn.disabled = true;
+      laterBtn.disabled = true;
       try {
         const didRestart = await restartToInstallUpdate();
         if (didRestart) {
@@ -840,6 +857,7 @@ function showUpdateReadyToast(update: { version: string }): void {
         if (toast.isConnected) {
           restartBtn.disabled = false;
           viewVersionsBtn.disabled = false;
+          laterBtn.disabled = false;
         }
       }
     })();
