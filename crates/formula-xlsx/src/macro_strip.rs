@@ -200,7 +200,13 @@ fn parse_relationship_targets_for_ids(
                     continue;
                 };
                 let target = strip_fragment(&target);
-                out.insert(resolve_target_for_source(source_part, target));
+                let resolved = resolve_target_for_source(source_part, target);
+                // Worksheet OLE objects are stored under `xl/embeddings/` and referenced from
+                // `<oleObjects>` in sheet XML (valid in `.xlsx`). For macro stripping we only
+                // delete embedding binaries referenced by VML `<o:OLEObject>` control shapes.
+                if resolved.starts_with("xl/embeddings/") {
+                    out.insert(resolved);
+                }
             }
             _ => {}
         }
