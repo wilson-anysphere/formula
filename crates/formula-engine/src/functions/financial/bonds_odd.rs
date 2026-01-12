@@ -66,8 +66,14 @@
 //! the given `frequency` (even though the first/last period is irregular).
 //!
 //! Implementation note: computing `E` requires generating the regular coupon schedule (see “EOM
-//! stepping” below) and taking the day-count between adjacent regular coupon dates. For 30/360
-//! bases, `E` is typically treated as `360 / frequency` days.
+//! stepping” below) and taking the day-count between adjacent regular coupon dates.
+//!
+//! For reference, this engine follows `coupon_schedule::coupon_period_e`:
+//!
+//! - basis `0` / `2`: `E = 360 / frequency`
+//! - basis `3`: `E = 365 / frequency`
+//! - basis `1`: `E = ncd - pcd` (actual days between regular coupon dates)
+//! - basis `4`: `E = DAYS360(pcd, ncd, method=true)` (European 30/360; can differ from `360 / frequency`)
 //!
 //! **Coupon amount**
 //!
