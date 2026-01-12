@@ -73,6 +73,47 @@ test("CollabSession legacy `options.offline` (file) migrates old .yjslog format 
   }
 });
 
+test("CollabSession legacy `options.offline` with autoLoad=false gates schema init until load", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "collab-session-offline-compat-file-schema-"));
+  const legacyFilePath = path.join(dir, "doc.yjslog");
+
+  t.after(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // Seed a legacy offline log with a workbook that already has a non-default sheet id.
+  {
+    const doc = new Y.Doc();
+    const sheets = doc.getArray("sheets");
+    const sheet = new Y.Map();
+    sheet.set("id", "Persisted");
+    sheet.set("name", "Persisted");
+    sheets.push([sheet]);
+    const update = Y.encodeStateAsUpdate(doc);
+    await fs.writeFile(legacyFilePath, encodeRecord(update));
+    doc.destroy();
+  }
+
+  const session = createCollabSession({
+    doc: new Y.Doc(),
+    // Do not auto-load persistence; we want to ensure schema init waits.
+    offline: { mode: "file", filePath: legacyFilePath, autoLoad: false },
+  });
+
+  t.after(() => {
+    session.destroy();
+    session.doc.destroy();
+  });
+
+  // No default sheet should be created before offline state is loaded.
+  assert.equal(session.sheets.length, 0);
+
+  await session.offline?.whenLoaded();
+
+  const ids = session.sheets.toArray().map((s) => String(s.get("id") ?? ""));
+  assert.deepEqual(ids, ["Persisted"]);
+});
+
 test("CollabSession legacy `options.offline` (file) is implemented via collab-persistence", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "collab-session-offline-compat-file-"));
   const filePath = path.join(dir, "doc.yjslog");
