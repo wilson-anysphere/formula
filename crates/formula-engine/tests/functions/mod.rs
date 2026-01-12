@@ -13,6 +13,7 @@ mod dynamic_arrays_textsplit;
 mod engineering_complex;
 mod engineering_convert;
 mod financial_bonds;
+mod financial_bonds_optional_args;
 mod financial_cashflows;
 mod financial_accrint;
 mod financial_bonds_date_system;
