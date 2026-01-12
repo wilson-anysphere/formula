@@ -6294,9 +6294,17 @@ export class SpreadsheetApp {
       // DocumentController layered-formatting storage (sheet/row/col/cell).
       if (sheetModel && typeof sheetModel === "object") {
         // These property names match the desktop DocumentController's internal model.
-        const sheetDefaultStyleId = normalizeStyleId((sheetModel as any).defaultStyleId);
-        const rowStyleId = normalizeStyleId((sheetModel as any).rowStyleIds?.get?.(row));
-        const colStyleId = normalizeStyleId((sheetModel as any).colStyleIds?.get?.(col));
+        // Keep legacy fallbacks (`sheetStyleId` / `sheetDefaultStyleId`, `rowStyles`, `colStyles`)
+        // for older snapshots/adapters.
+        const sheetDefaultStyleId = normalizeStyleId(
+          (sheetModel as any).defaultStyleId ?? (sheetModel as any).sheetStyleId ?? (sheetModel as any).sheetDefaultStyleId
+        );
+        const rowStyleId = normalizeStyleId(
+          (sheetModel as any).rowStyleIds?.get?.(row) ?? (sheetModel as any).rowStyles?.get?.(row)
+        );
+        const colStyleId = normalizeStyleId(
+          (sheetModel as any).colStyleIds?.get?.(col) ?? (sheetModel as any).colStyles?.get?.(col)
+        );
         return [sheetDefaultStyleId, rowStyleId, colStyleId, normalizeStyleId(cellStyleId)].join(",");
       }
 
