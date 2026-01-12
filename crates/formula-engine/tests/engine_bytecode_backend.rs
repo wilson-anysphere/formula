@@ -1428,6 +1428,27 @@ fn bytecode_backend_choose_is_scalar_safe_for_abs() {
 }
 
 #[test]
+fn bytecode_backend_let_array_returning_abs_does_not_enable_concat_bytecode() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "A1", -1.0).unwrap();
+    engine.set_cell_value("Sheet1", "A2", -2.0).unwrap();
+
+    // ABS supports array-lifting semantics in bytecode, but CONCAT is a scalar-only bytecode
+    // function. Ensure LET kind inference prevents smuggling ABS's array result into CONCAT.
+    let formula = "=CONCAT(LET(x, ABS(A1:A2), x))";
+    engine.set_cell_formula("Sheet1", "B1", formula).unwrap();
+
+    // CONCAT should fall back to the AST evaluator here, since the bytecode CONCAT implementation
+    // does not flatten array arguments the way Excel does.
+    assert_eq!(engine.bytecode_program_count(), 0);
+
+    engine.recalculate_single_threaded();
+
+    assert_eq!(engine.get_cell_value("Sheet1", "B1"), Value::Text("12".into()));
+    assert_engine_matches_ast(&engine, formula, "B1");
+}
+
+#[test]
 fn bytecode_backend_let_cell_ref_bindings_can_be_consumed_as_ranges_for_countif() {
     let mut engine = Engine::new();
     engine.set_cell_value("Sheet1", "A1", 1.0).unwrap();
