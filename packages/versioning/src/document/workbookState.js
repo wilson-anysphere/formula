@@ -135,6 +135,36 @@ function parseIndexedFormats(raw, opts) {
 }
 
 /**
+ * Parse sparse rectangular format runs.
+ *
+ * This is an optional schema extension (Task 118) used to represent formatting applied
+ * to arbitrary ranges without materializing per-cell styles.
+ *
+ * @param {any} raw
+ * @returns {Array<{ startRow: number, startCol: number, endRow: number, endCol: number, format: Record<string, any> }>}
+ */
+function normalizeRangeRuns(raw) {
+  /** @type {Array<{ startRow: number, startCol: number, endRow: number, endCol: number, format: Record<string, any> }>} */
+  const out = [];
+  if (!Array.isArray(raw)) return out;
+  for (const run of raw) {
+    if (!run || typeof run !== "object") continue;
+    const startRow = Number(run.startRow ?? run.start?.row ?? run.sr);
+    const startCol = Number(run.startCol ?? run.start?.col ?? run.sc);
+    const endRow = Number(run.endRow ?? run.end?.row ?? run.er);
+    const endCol = Number(run.endCol ?? run.end?.col ?? run.ec);
+    if (!Number.isInteger(startRow) || startRow < 0) continue;
+    if (!Number.isInteger(startCol) || startCol < 0) continue;
+    if (!Number.isInteger(endRow) || endRow < 0) continue;
+    if (!Number.isInteger(endCol) || endCol < 0) continue;
+    const format = extractStyleObject(run.format ?? run.style ?? run.value);
+    if (!format) continue;
+    out.push({ startRow, startCol, endRow, endCol, format });
+  }
+  return out;
+}
+
+/**
  * @typedef {{ id: string, name: string | null }} SheetMeta
  * @typedef {{ id: string, cellRef: string | null, content: string | null, resolved: boolean, repliesLength: number }} CommentSummary
  *
@@ -289,6 +319,10 @@ export function workbookStateFromDocumentSnapshot(snapshot) {
       if (colFormats.size > 0) break;
     }
 
+    const formatRuns = normalizeRangeRuns(
+      sheet?.formatRuns ?? sheet?.rangeFormatRuns ?? sheet?.rangeRuns ?? sheet?.formattingRuns ?? null,
+    );
+
     /** @type {Map<string, any>} */
     const cells = new Map();
     const entries = Array.isArray(sheet?.cells) ? sheet.cells : [];
@@ -299,17 +333,16 @@ export function workbookStateFromDocumentSnapshot(snapshot) {
       if (!Number.isInteger(col) || col < 0) continue;
 
       // Compute effective (layered) format without enumerating the full sheet.
-      // Precedence (low -> high): sheet default, column default, row default, cell override.
+      // Precedence (low -> high): sheet default, column default, row default, range runs, cell override.
       const cellFormat = extractStyleObject(entry?.format ?? entry?.style);
-      const effective = normalizeFormat(
-        deepMerge(
-          deepMerge(
-            deepMerge(sheetDefaultFormat ?? {}, colFormats.get(col) ?? null),
-            rowFormats.get(row) ?? null
-          ),
-          cellFormat
-        )
-      );
+      let merged = deepMerge(deepMerge(sheetDefaultFormat ?? {}, colFormats.get(col) ?? null), rowFormats.get(row) ?? null);
+      for (const run of formatRuns) {
+        if (row < run.startRow || row > run.endRow) continue;
+        if (col < run.startCol || col > run.endCol) continue;
+        merged = deepMerge(merged, run.format);
+      }
+      merged = deepMerge(merged, cellFormat);
+      const effective = normalizeFormat(merged);
       cells.set(cellKey(row, col), {
         value: entry?.value ?? null,
         formula: entry?.formula ?? null,
