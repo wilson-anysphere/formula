@@ -621,16 +621,7 @@ function installCollabStatusIndicator(app: unknown, element: HTMLElement): void 
     }
   };
 
-  const getSession = (): unknown | null => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const maybeGetter = (app as any)?.getCollabSession as (() => unknown) | undefined;
-    if (typeof maybeGetter !== "function") return null;
-    try {
-      return maybeGetter.call(app) ?? null;
-    } catch {
-      return null;
-    }
-  };
+  const getSession = (): unknown | null => app.getCollabSession();
 
   const getDocId = (session: unknown): string => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -5896,7 +5887,7 @@ if (
     },
     workbookId,
     getWorkbookId: () => activePanelWorkbookId,
-    getCollabSession: () => (app as any).getCollabSession?.() ?? null,
+    getCollabSession: () => app.getCollabSession(),
     invoke:
       typeof (globalThis as any).__TAURI__?.core?.invoke === "function"
         ? (cmd, args) => {
@@ -6743,19 +6734,13 @@ if (
   // call `app.focus()` to restore keyboard focus to the spreadsheet. In split-view mode, restore
   // focus to the *active* pane so shortcuts invoked from the secondary pane don't steal focus back
   // to the primary grid.
-  const focusPrimaryGrid = app.focus.bind(app);
-  (app as any).focus = () => {
+  app.setFocusTargetProvider(() => {
     const split = layoutController.layout.splitView;
     if (split.direction !== "none" && (split.activePane ?? "primary") === "secondary") {
-      try {
-        (gridSecondaryEl as any).focus?.({ preventScroll: true });
-      } catch {
-        gridSecondaryEl.focus?.();
-      }
-      return;
+      return gridSecondaryEl;
     }
-    focusPrimaryGrid();
-  };
+    return null;
+  });
 
   // Minimal UX: clicking/focusing a pane marks it active so the split-view outline is stable.
   gridRoot.addEventListener("pointerdown", () => setActivePane("primary"), { capture: true });

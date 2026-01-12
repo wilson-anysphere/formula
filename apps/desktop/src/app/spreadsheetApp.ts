@@ -698,6 +698,7 @@ export class SpreadsheetApp {
 
   private editState = false;
   private readonly editStateListeners = new Set<(isEditing: boolean) => void>();
+  private focusTargetProvider: (() => HTMLElement | null) | null = null;
 
   private editor: CellEditorOverlay;
   private suppressFocusRestoreOnNextCommandCommit = false;
@@ -2155,7 +2156,28 @@ export class SpreadsheetApp {
   }
 
   focus(): void {
+    const target = this.focusTargetProvider?.() ?? null;
+    if (target && target.isConnected) {
+      try {
+        (target as any).focus?.({ preventScroll: true });
+        return;
+      } catch {
+        // Fall back to regular focus below.
+      }
+
+      try {
+        target.focus();
+        return;
+      } catch {
+        // Fall back to focusing the primary grid.
+      }
+    }
+
     this.root.focus();
+  }
+
+  setFocusTargetProvider(provider: (() => HTMLElement | null) | null): void {
+    this.focusTargetProvider = provider;
   }
 
   /**
