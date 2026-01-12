@@ -335,7 +335,10 @@ def main() -> int:
     # Keep the gate debuggable in CI logs: the "expected dataset" selection has precedence rules
     # (versioned corpus-hash match vs pinned fallback) that can otherwise be non-obvious when
     # investigating mismatches.
-    print(f"Excel-oracle datasets: expected={expected_path} actual={actual_path} report={report_path}")
+    print(
+        f"Excel-oracle datasets: expected={expected_path} actual={actual_path} report={report_path}",
+        flush=True,
+    )
 
     include_tags = _effective_include_tags(tier=args.tier, user_include_tags=args.include_tag)
     exclude_tags = _normalize_tags(args.exclude_tag)
@@ -452,6 +455,10 @@ def main() -> int:
         lines: list[str] = []
         lines.append("# Excel oracle compatibility report")
         lines.append("")
+        lines.append(f"* Cases corpus: `{cases_path}`")
+        lines.append(f"* Expected dataset: `{expected_path}`")
+        lines.append(f"* Actual dataset: `{actual_path}`")
+        lines.append(f"* Report: `{report_path}`")
         lines.append(f"* Total cases: {summary.get('totalCases')}")
         lines.append(f"* Mismatches: {summary.get('mismatches')}")
         lines.append(f"* Mismatch rate: {summary.get('mismatchRate')}")
