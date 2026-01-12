@@ -656,6 +656,26 @@ pub fn build_note_comment_author_xl_unicode_string_fixture_xls() -> Vec<u8> {
 }
 
 /// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment where the
+/// NOTE author string is stored as a BIFF5-style short ANSI string (length + bytes), without the
+/// BIFF8 `ShortXLUnicodeString` option flags byte.
+///
+/// Some `.xls` producers appear to omit the BIFF8 flags byte; the importer should still recover
+/// the author via best-effort decoding.
+pub fn build_note_comment_author_missing_flags_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_note_comment_author_missing_flags_workbook_stream();
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a BIFF8 `.xls` fixture containing a single sheet with a NOTE/OBJ/TXO comment where the
 /// TXO header reports `cchText=0` but still includes a `cbRuns` value and a continued text payload.
 ///
 /// Some `.xls` producers appear to zero out the `cchText` field while still writing the text into
@@ -2079,6 +2099,14 @@ fn build_note_comment_author_xl_unicode_string_workbook_stream() -> Vec<u8> {
     )
 }
 
+fn build_note_comment_author_missing_flags_workbook_stream() -> Vec<u8> {
+    build_single_sheet_workbook_stream(
+        "NotesAuthorNoFlags",
+        &build_note_comment_author_missing_flags_sheet_stream(),
+        1252,
+    )
+}
+
 fn build_note_comment_txo_cch_text_zero_workbook_stream() -> Vec<u8> {
     build_single_sheet_workbook_stream(
         "NotesTxoCchZero",
@@ -2439,6 +2467,42 @@ fn build_note_comment_author_xl_unicode_string_sheet_stream() -> Vec<u8> {
         &mut sheet,
         RECORD_NOTE,
         &note_record_with_xl_unicode_author(0u16, 0u16, OBJECT_ID, AUTHOR),
+    );
+    push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
+    push_txo_logical_record(&mut sheet, TEXT);
+
+    push_record(&mut sheet, RECORD_EOF, &[]);
+    sheet
+}
+
+fn build_note_comment_author_missing_flags_sheet_stream() -> Vec<u8> {
+    const OBJECT_ID: u16 = 1;
+    const AUTHOR: &str = "Alice";
+    const TEXT: &str = "Hello";
+    const XF_GENERAL_CELL: u16 = 16;
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET));
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes());
+    dims.extend_from_slice(&1u32.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    dims.extend_from_slice(&1u16.to_le_bytes());
+    dims.extend_from_slice(&0u16.to_le_bytes());
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+
+    // Ensure the anchor cell exists in the calamine value grid.
+    push_record(&mut sheet, RECORD_BLANK, &blank_cell(0, 0, XF_GENERAL_CELL));
+
+    // NOTE author stored as a BIFF5-style short string (no flags byte).
+    push_record(
+        &mut sheet,
+        RECORD_NOTE,
+        &note_record_author_bytes_without_flags(0u16, 0u16, OBJECT_ID, AUTHOR.as_bytes()),
     );
     push_record(&mut sheet, RECORD_OBJ, &obj_record_with_ftcmo(OBJECT_ID));
     push_txo_logical_record(&mut sheet, TEXT);
@@ -3009,6 +3073,26 @@ fn note_record_author_bytes(row: u16, col: u16, object_id: u16, author_bytes: &[
     out.push(len);
     out.push(0); // compressed (8-bit)
     out.extend_from_slice(author_bytes);
+    out
+}
+
+fn note_record_author_bytes_without_flags(
+    row: u16,
+    col: u16,
+    object_id: u16,
+    author_bytes: &[u8],
+) -> Vec<u8> {
+    // NOTE record (BIFF8): [rw: u16][col: u16][grbit: u16][idObj: u16][stAuthor]
+    //
+    // Nonstandard variant: `stAuthor` is stored as a BIFF5-style ANSI short string (no BIFF8
+    // option flags byte):
+    //   [cch: u8][rgb: u8 * cch]
+    let mut out = Vec::<u8>::new();
+    out.extend_from_slice(&row.to_le_bytes());
+    out.extend_from_slice(&col.to_le_bytes());
+    out.extend_from_slice(&object_id.to_le_bytes()); // grbit (or idObj)
+    out.extend_from_slice(&object_id.to_le_bytes()); // idObj (or grbit)
+    write_short_ansi_bytes(&mut out, author_bytes);
     out
 }
 

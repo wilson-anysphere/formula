@@ -335,13 +335,25 @@ fn parse_note_record(
                 match strings::parse_biff8_unicode_string(author_bytes, codepage) {
                     Ok((alt, _)) => alt,
                     Err(unicode_err) => {
-                        push_warning(
-                            warnings,
-                            format!(
-                                "failed to parse NOTE author string at offset {offset}: {err}; XLUnicodeString fallback also failed: {unicode_err}"
-                            ),
-                        );
-                        String::new()
+                        if let Some(best_effort) =
+                            strings::parse_biff5_short_string_best_effort(author_bytes, codepage)
+                        {
+                            push_warning(
+                                warnings,
+                                format!(
+                                    "failed to parse NOTE author string at offset {offset}: {err}; XLUnicodeString fallback also failed: {unicode_err}; treating author as BIFF5 ANSI short string"
+                                ),
+                            );
+                            best_effort
+                        } else {
+                            push_warning(
+                                warnings,
+                                format!(
+                                    "failed to parse NOTE author string at offset {offset}: {err}; XLUnicodeString fallback also failed: {unicode_err}"
+                                ),
+                            );
+                            String::new()
+                        }
                     }
                 }
             } else {
@@ -1246,6 +1258,33 @@ mod tests {
         let parsed = parse_note_record(&payload, 0, BiffVersion::Biff8, 1252, &mut warnings)
             .expect("parse note");
         assert_eq!(parsed.author, author);
+    }
+
+    #[test]
+    fn note_record_parses_author_as_biff5_short_string_when_biff8_parsing_fails() {
+        // Some nonstandard `.xls` producers appear to store the NOTE author as a BIFF5-style
+        // short ANSI string (length + bytes) even in a BIFF8 worksheet. Best-effort parsing should
+        // still recover the author.
+        let author = "Alice";
+
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0u16.to_le_bytes()); // row
+        payload.extend_from_slice(&0u16.to_le_bytes()); // col
+        payload.extend_from_slice(&1u16.to_le_bytes()); // grbit/idObj
+        payload.extend_from_slice(&1u16.to_le_bytes()); // idObj/grbit
+
+        // BIFF5-style author string (no BIFF8 flags byte).
+        payload.push(author.len() as u8);
+        payload.extend_from_slice(author.as_bytes());
+
+        let mut warnings = Vec::new();
+        let parsed = parse_note_record(&payload, 0, BiffVersion::Biff8, 1252, &mut warnings)
+            .expect("parse note");
+        assert_eq!(parsed.author, author);
+        assert!(
+            warnings.iter().any(|w| w.contains("treating author as BIFF5 ANSI short string")),
+            "expected BIFF5 fallback warning; warnings={warnings:?}"
+        );
     }
 
     #[test]
