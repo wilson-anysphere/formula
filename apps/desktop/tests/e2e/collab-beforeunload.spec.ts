@@ -4,7 +4,7 @@ import { gotoDesktop, waitForDesktopReady } from "./helpers";
 import { installCollabSessionStub } from "./collabSessionStub";
 
 async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
-  await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+  await page.evaluate(() => (window.__formulaApp as any).whenIdle());
 }
 
 test.describe("collab: beforeunload unsaved-changes prompt", () => {
@@ -19,7 +19,8 @@ test.describe("collab: beforeunload unsaved-changes prompt", () => {
     await page.keyboard.press("Enter");
     await waitForIdle(page);
 
-    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getDocument().isDirty)).toBe(true);
+    await expect.poll(() => page.evaluate(() => (window.__formulaApp as any).getDocument().isDirty)).toBe(true);
+
 
     await installCollabSessionStub(page);
 

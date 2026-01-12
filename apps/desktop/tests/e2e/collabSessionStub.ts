@@ -19,7 +19,7 @@ export async function installCollabSessionStub(page: Page, options: CollabSessio
 
   await page.evaluate(
     ({ sessionId, docId }) => {
-      const app = (window as any).__formulaApp;
+      const app = window.__formulaApp as any;
       if (!app) throw new Error("Missing __formulaApp");
 
       const sheetId = (typeof app.getCurrentSheetId === "function" ? app.getCurrentSheetId() : null) ?? "Sheet1";
