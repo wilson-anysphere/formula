@@ -1305,7 +1305,7 @@ export class SpreadsheetApp {
       this.scheduleStatusUpdate();
       // Similarly, chart SVG content is only rendered on "full" refreshes. Schedule a debounced
       // chart-content update so charts reflect remote data edits in real time.
-      this.scheduleChartContentRefresh();
+      this.scheduleChartContentRefresh(payload);
     });
 
     if (!collabEnabled && typeof window !== "undefined") {
@@ -1743,14 +1743,49 @@ export class SpreadsheetApp {
     });
   }
 
-  private scheduleChartContentRefresh(): void {
+  private scheduleChartContentRefresh(payload?: any): void {
     if (this.disposed) return;
     if (!this.uiReady) return;
     // A pending full refresh will render chart content anyway.
     if (this.renderScheduled && this.pendingRenderMode === "full") return;
     if (this.chartContentRefreshScheduled) return;
-    // No charts to render on the active sheet => nothing to do.
-    if (!this.chartStore.listCharts().some((chart) => chart.sheetId === this.sheetId)) return;
+    const visibleCharts = this.chartStore.listCharts().filter((chart) => chart.sheetId === this.sheetId);
+    if (visibleCharts.length === 0) return;
+
+    // Avoid expensive chart rerenders unless the incoming deltas could affect the visible charts.
+    // This keeps high-frequency external edits (e.g. collaborative typing elsewhere) from forcing
+    // chart SVG regeneration on every frame.
+    if (payload) {
+      const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
+      if (deltas.length === 0) return;
+
+      const affects = deltas.some((delta: any) => {
+        const sheetId = String(delta?.sheetId ?? "");
+        const row = Number(delta?.row);
+        const col = Number(delta?.col);
+        if (!Number.isInteger(row) || row < 0) return false;
+        if (!Number.isInteger(col) || col < 0) return false;
+
+        for (const chart of visibleCharts) {
+          for (const ser of chart.series ?? []) {
+            const ranges = [ser.categories, ser.values, ser.xValues, ser.yValues];
+            for (const rangeRef of ranges) {
+              if (typeof rangeRef !== "string" || rangeRef.trim() === "") continue;
+              const parsed = parseA1Range(rangeRef);
+              if (!parsed) continue;
+              const rangeSheet = parsed.sheetName ?? chart.sheetId;
+              if (rangeSheet !== sheetId) continue;
+              if (row < parsed.startRow || row > parsed.endRow) continue;
+              if (col < parsed.startCol || col > parsed.endCol) continue;
+              return true;
+            }
+          }
+        }
+        return false;
+      });
+
+      if (!affects) return;
+    }
 
     this.chartContentRefreshScheduled = true;
 
