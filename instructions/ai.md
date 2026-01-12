@@ -135,27 +135,88 @@ const tools = [
   {
     name: "read_range",
     description: "Read cell values from a range",
-    parameters: { range: "A1:C10" }
+    parameters: {
+      type: "object",
+      properties: {
+        range: { type: "string", description: "Range in A1 notation (e.g. 'Sheet1!A1:C10')" },
+        include_formulas: { type: "boolean", default: false }
+      },
+      required: ["range"]
+    }
   },
   {
     name: "write_cell",
     description: "Write a value or formula to a cell",
-    parameters: { cell: "A1", value: "=SUM(B1:B10)", is_formula: true }
+    parameters: {
+      type: "object",
+      properties: {
+        cell: { type: "string", description: "Cell reference (e.g. 'Sheet1!A1')" },
+        value: {
+          description: "Scalar value or formula string",
+          anyOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }, { type: "null" }]
+        },
+        is_formula: { type: "boolean", description: "Treat value as formula even if it does not start with '='." }
+      },
+      required: ["cell", "value"]
+    }
   },
   {
     name: "create_pivot_table",
-    description: "Create a pivot table from data",
-    parameters: { source: "A1:F1000", rows: ["Region"], values: [{ field: "Sales", agg: "SUM" }] }
+    description: "Create a pivot table from a source range.",
+    parameters: {
+      type: "object",
+      properties: {
+        source_range: { type: "string" },
+        rows: { type: "array", items: { type: "string" } },
+        columns: { type: "array", items: { type: "string" } },
+        values: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              field: { type: "string" },
+              aggregation: {
+                type: "string",
+                enum: [
+                  "sum",
+                  "count",
+                  "average",
+                  "min",
+                  "max",
+                  "product",
+                  "countNumbers",
+                  "stdDev",
+                  "stdDevP",
+                  "var",
+                  "varP"
+                ]
+              }
+            },
+            required: ["field", "aggregation"]
+          }
+        },
+        destination: { type: "string" }
+      },
+      required: ["source_range", "rows", "values"]
+    }
   },
   {
     name: "detect_anomalies",
     description: "Find outliers in data",
-    parameters: { range: "D2:D100", method: "zscore", threshold: 2.5 }
+    parameters: {
+      type: "object",
+      properties: {
+        range: { type: "string" },
+        method: { type: "string", enum: ["zscore", "iqr", "isolation_forest"], default: "zscore" },
+        threshold: { type: "number" }
+      },
+      required: ["range"]
+    }
   }
 ];
 ```
 
-Tool calling should be implemented using the provider-agnostic `ToolDefinition` and `LLMMessage` models in `packages/llm`. Cursor's backend is responsible for translating these structures into whatever underlying model API it routes to.
+Tool calling should be implemented using the provider-agnostic `ToolDefinition` and `LLMMessage` models in `packages/llm` (spreadsheet tool schemas live in `packages/ai-tools`). Cursor's backend is responsible for translating these structures into whatever underlying model API it routes to.
 
 ---
 
