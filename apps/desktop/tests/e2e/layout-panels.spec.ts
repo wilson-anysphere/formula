@@ -53,5 +53,18 @@ test.describe("dockable panels layout persistence", () => {
     await rightDock.getByTestId("dock-tab-macros").click();
     await expect(rightDock.getByTestId("panel-macros")).toBeVisible();
     await expect(rightDock.getByTestId("panel-aiChat")).toHaveCount(0);
+
+    // Keyboard navigation (roving tabindex).
+    await rightDock.getByTestId("dock-tab-macros").press("Home");
+    await expect(rightDock.getByTestId("panel-aiChat")).toBeVisible();
+    await expect(rightDock.getByTestId("panel-macros")).toHaveCount(0);
+
+    await rightDock.getByTestId("dock-tab-aiChat").press("End");
+    await expect(rightDock.getByTestId("panel-macros")).toBeVisible();
+    await expect(rightDock.getByTestId("panel-aiChat")).toHaveCount(0);
+
+    await rightDock.getByTestId("dock-tab-macros").press("ArrowLeft");
+    await expect(rightDock.getByTestId("panel-aiChat")).toBeVisible();
+    await expect(rightDock.getByTestId("panel-macros")).toHaveCount(0);
   });
 });
