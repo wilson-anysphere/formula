@@ -3168,6 +3168,116 @@ function installSheetStoreSubscription(): void {
 
   lastSheetStoreSnapshot = captureSnapshot();
 
+  // Coalesce doc-driven sheet reorder persistence so we don't spam the backend when a single
+  // DocumentController reorder is applied to the store as multiple `store.move(...)` calls.
+  let pendingDocDrivenReorder:
+    | { invoke: TauriInvoke; prevOrder: string[]; nextOrder: string[] }
+    | null = null;
+  let pendingDocDrivenReorderScheduled = false;
+
+  const simulateMove = (order: string[], sheetId: string, toIndex: number): string[] => {
+    const fromIndex = order.indexOf(sheetId);
+    if (fromIndex === -1) return order.slice();
+    if (fromIndex === toIndex) return order.slice();
+    const next = order.slice();
+    next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, sheetId);
+    return next;
+  };
+
+  const detectSingleMove = (
+    prevOrder: string[],
+    nextOrder: string[],
+  ): { sheetId: string; toIndex: number } | null => {
+    if (prevOrder.length !== nextOrder.length) return null;
+    if (prevOrder.length === 0) return null;
+
+    // Ensure we're only dealing with pure reorders (no adds/removes).
+    const prevSet = new Set(prevOrder);
+    for (const id of nextOrder) {
+      if (!prevSet.has(id)) return null;
+    }
+
+    const firstMismatch = prevOrder.findIndex((id, idx) => id !== nextOrder[idx]);
+    if (firstMismatch === -1) return null;
+
+    const tryMove = (sheetId: string, toIndex: number): { sheetId: string; toIndex: number } | null => {
+      if (!sheetId) return null;
+      if (!Number.isInteger(toIndex) || toIndex < 0 || toIndex >= prevOrder.length) return null;
+      const simulated = simulateMove(prevOrder, sheetId, toIndex);
+      const ok = simulated.length === nextOrder.length && simulated.every((id, idx) => id === nextOrder[idx]);
+      return ok ? { sheetId, toIndex } : null;
+    };
+
+    // Prefer moving the first mismatched sheet from the *previous* order. This is deterministic,
+    // and matches our current e2e expectations for undo/redo swap cases.
+    const preferredId = prevOrder[firstMismatch] ?? "";
+    const preferredToIndex = nextOrder.indexOf(preferredId);
+    const preferred = tryMove(preferredId, preferredToIndex);
+    if (preferred) return preferred;
+
+    // Fall back to moving the sheet that appears at the mismatch location in the *next* order.
+    const altId = nextOrder[firstMismatch] ?? "";
+    const alt = tryMove(altId, firstMismatch);
+    if (alt) return alt;
+
+    return null;
+  };
+
+  const flushPersistDocDrivenReorder = (): void => {
+    pendingDocDrivenReorderScheduled = false;
+    const pending = pendingDocDrivenReorder;
+    pendingDocDrivenReorder = null;
+    if (!pending) return;
+
+    const { invoke, prevOrder, nextOrder } = pending;
+    if (prevOrder.join("|") === nextOrder.join("|")) return;
+
+    const move = detectSingleMove(prevOrder, nextOrder);
+    if (move) {
+      void invoke("move_sheet", { sheet_id: move.sheetId, to_index: move.toIndex }).catch((err) => {
+        console.error("[formula][desktop] Failed to persist sheet reorder to backend:", err);
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Failed to sync sheet reorder to workbook: ${message}`, "error");
+      });
+      return;
+    }
+
+    // Fallback: apply a stable sequence of moves to transform the previous order into the next.
+    // This is slower/noisier than a single move but should be rare (complex doc reorders).
+    const current = prevOrder.slice();
+    for (let targetIndex = 0; targetIndex < nextOrder.length; targetIndex += 1) {
+      const sheetId = nextOrder[targetIndex]!;
+      const currentIndex = current.indexOf(sheetId);
+      if (currentIndex === -1) continue;
+      if (currentIndex === targetIndex) continue;
+
+      current.splice(currentIndex, 1);
+      current.splice(targetIndex, 0, sheetId);
+
+      void invoke("move_sheet", { sheet_id: sheetId, to_index: targetIndex }).catch((err) => {
+        console.error("[formula][desktop] Failed to persist sheet reorder to backend:", err);
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`Failed to sync sheet reorder to workbook: ${message}`, "error");
+      });
+    }
+  };
+
+  const schedulePersistDocDrivenReorder = (invoke: TauriInvoke, prevOrder: string[], nextOrder: string[]): void => {
+    if (!pendingDocDrivenReorder) {
+      pendingDocDrivenReorder = { invoke, prevOrder: prevOrder.slice(), nextOrder: nextOrder.slice() };
+    } else {
+      // Preserve the earliest observed `prevOrder` so we can transform the backend state
+      // (which should still match that ordering) into the final ordering after coalescing.
+      pendingDocDrivenReorder.invoke = invoke;
+      pendingDocDrivenReorder.nextOrder = nextOrder.slice();
+    }
+
+    if (pendingDocDrivenReorderScheduled) return;
+    pendingDocDrivenReorderScheduled = true;
+    queueMicrotask(flushPersistDocDrivenReorder);
+  };
+
   stopSheetStoreListener = workbookSheetStore.subscribe(() => {
     const prevSnapshot = lastSheetStoreSnapshot;
     const nextSnapshot = captureSnapshot();
@@ -3354,6 +3464,123 @@ function installSheetStoreSubscription(): void {
               doc.setSheetTabColor(sheetId, after.tabColor);
             } catch {
               // ignore
+            }
+          }
+        }
+      }
+    }
+
+    // When the sheet store is mutated as a *result* of DocumentController-driven state changes
+    // (undo/redo/applyState/script-driven edits), reconcile the local workbook backend so future
+    // saves reflect the restored sheet structure.
+    if (syncingSheetUi && prevSnapshot) {
+      const session = app.getCollabSession?.() ?? null;
+      if (!session) {
+        const baseInvoke = (globalThis as any).__TAURI__?.core?.invoke as TauriInvoke | undefined;
+        // Prefer the queued invoke (it sequences behind pending `set_cell` / `set_range` sync work).
+        const invoke =
+          queuedInvoke ??
+          (typeof baseInvoke === "function" ? ((cmd: string, args?: any) => queueBackendOp(() => baseInvoke(cmd, args))) : null);
+
+        if (typeof invoke === "function") {
+          const tabColorEqual = (a: TabColor | undefined, b: TabColor | undefined): boolean => {
+            if (a === b) return true;
+            if (!a || !b) return !a && !b;
+            return (
+              (a.rgb ?? null) === (b.rgb ?? null) &&
+              (a.theme ?? null) === (b.theme ?? null) &&
+              (a.indexed ?? null) === (b.indexed ?? null) &&
+              (a.tint ?? null) === (b.tint ?? null) &&
+              (a.auto ?? null) === (b.auto ?? null)
+            );
+          };
+
+          const prevOrder = prevSnapshot.order;
+          const nextOrder = nextSnapshot.order;
+          const prevById = prevSnapshot.byId;
+          const nextById = nextSnapshot.byId;
+
+          const added = nextOrder.filter((id) => !prevById.has(id));
+          const removed = prevOrder.filter((id) => !nextById.has(id));
+
+          const hasMetaChange = nextOrder.some((sheetId) => {
+            if (added.includes(sheetId)) return false;
+            if (removed.includes(sheetId)) return false;
+            const before = prevById.get(sheetId);
+            const after = nextById.get(sheetId);
+            if (!before || !after) return false;
+            return (
+              before.name !== after.name ||
+              before.visibility !== after.visibility ||
+              !tabColorEqual(before.tabColor, after.tabColor)
+            );
+          });
+
+          const prevKey = prevOrder.join("|");
+          const nextKey = nextOrder.join("|");
+          const hasOrderChange = prevKey !== nextKey;
+
+          if (added.length > 0 || removed.length > 0 || hasMetaChange || hasOrderChange) {
+            const reportError = (label: string, err: unknown): void => {
+              console.error(`[formula][desktop] Failed to reconcile sheet ${label} to backend:`, err);
+              const message = err instanceof Error ? err.message : String(err);
+              showToast(`Failed to sync sheet changes to workbook: ${message}`, "error");
+            };
+
+            // Deletes.
+            for (const sheetId of removed) {
+              void invoke("delete_sheet", { sheet_id: sheetId }).catch((err) => reportError("delete", err));
+            }
+
+            // Adds.
+            for (const sheetId of added) {
+              const meta = nextById.get(sheetId);
+              if (!meta) continue;
+              const idx = nextOrder.indexOf(sheetId);
+              const afterSheetId = idx > 0 ? nextOrder[idx - 1] : null;
+              void invoke("add_sheet_with_id", {
+                sheet_id: sheetId,
+                name: meta.name,
+                after_sheet_id: afterSheetId,
+                index: idx,
+              }).catch((err) => reportError("add", err));
+            }
+
+            // Metadata updates.
+            for (const sheetId of nextOrder) {
+              if (added.includes(sheetId)) continue;
+              if (removed.includes(sheetId)) continue;
+              const before = prevById.get(sheetId);
+              const after = nextById.get(sheetId);
+              if (!before || !after) continue;
+
+              if (before.name !== after.name) {
+                void invoke("rename_sheet", { sheet_id: sheetId, name: after.name }).catch((err) => reportError("rename", err));
+              }
+
+              if (before.visibility !== after.visibility) {
+                void invoke("set_sheet_visibility", { sheet_id: sheetId, visibility: after.visibility }).catch((err) =>
+                  reportError("visibility", err),
+                );
+              }
+
+              if (!tabColorEqual(before.tabColor, after.tabColor)) {
+                void invoke("set_sheet_tab_color", { sheet_id: sheetId, tab_color: after.tabColor ?? null }).catch((err) =>
+                  reportError("tab color", err),
+                );
+              }
+            }
+
+            // Reorder (including hidden sheets).
+            //
+            // Reorder persistence is handled via a coalescer so we don't spam `move_sheet`
+            // during doc->store sync (a single document reorder can be applied as multiple
+            // `store.move(...)` calls).
+            //
+            // Note: when sheets are added/removed we already pass explicit insertion indices
+            // to `add_sheet_with_id`, and deletions keep remaining relative order stable.
+            if (hasOrderChange && added.length === 0 && removed.length === 0) {
+              schedulePersistDocDrivenReorder(invoke, prevOrder, nextOrder);
             }
           }
         }

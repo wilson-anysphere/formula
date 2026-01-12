@@ -761,7 +761,9 @@ test.describe("tauri workbook integration", () => {
       const calls = ((window as any).__tauriInvokeCalls ?? []).filter((c: any) => c?.cmd === "move_sheet");
       return calls.at(-1) ?? null;
     });
-    expect(undoMove?.args).toEqual({ sheet_id: "Sheet2", to_index: 1 });
+    // Reorder persistence may choose either of the two swapped sheets; we currently expect
+    // a single-sheet move that restores Sheet3 to the end.
+    expect(undoMove?.args).toEqual({ sheet_id: "Sheet3", to_index: 2 });
 
     const moveCountAfterUndo = initialMoveCount + 1;
 
@@ -779,6 +781,7 @@ test.describe("tauri workbook integration", () => {
       const calls = ((window as any).__tauriInvokeCalls ?? []).filter((c: any) => c?.cmd === "move_sheet");
       return calls.at(-1) ?? null;
     });
-    expect(redoMove?.args).toEqual({ sheet_id: "Sheet3", to_index: 1 });
+    // Re-apply the reorder via a single-sheet move.
+    expect(redoMove?.args).toEqual({ sheet_id: "Sheet2", to_index: 2 });
   });
 });
