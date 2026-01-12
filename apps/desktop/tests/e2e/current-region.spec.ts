@@ -3,8 +3,8 @@ import { expect, test } from "@playwright/test";
 import { gotoDesktop } from "./helpers";
 
 async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
-  await page.waitForFunction(() => Boolean((window as any).__formulaApp?.whenIdle), null, { timeout: 10_000 });
-  await page.evaluate(() => (window as any).__formulaApp.whenIdle());
+  await page.waitForFunction(() => Boolean((window.__formulaApp as any)?.whenIdle), null, { timeout: 10_000 });
+  await page.evaluate(() => (window.__formulaApp as any).whenIdle());
 }
 
 test.describe("Ctrl/Cmd+Shift+* (select current region)", () => {
@@ -16,7 +16,7 @@ test.describe("Ctrl/Cmd+Shift+* (select current region)", () => {
       await waitForIdle(page);
 
       await page.evaluate(() => {
-        const app = (window as any).__formulaApp;
+        const app = window.__formulaApp as any;
         const sheetId = app.getCurrentSheetId();
         const doc = app.getDocument();
 
@@ -39,7 +39,7 @@ test.describe("Ctrl/Cmd+Shift+* (select current region)", () => {
       const gridBox = await page.locator("#grid").boundingBox();
       expect(gridBox).not.toBeNull();
 
-      const f2Rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("F2"));
+      const f2Rect = await page.evaluate(() => (window.__formulaApp as any).getCellRectA1("F2"));
       expect(f2Rect).not.toBeNull();
 
       await page.mouse.click(gridBox!.x + f2Rect!.x + f2Rect!.width / 2, gridBox!.y + f2Rect!.y + f2Rect!.height / 2);
@@ -57,7 +57,7 @@ test.describe("Ctrl/Cmd+Shift+* (select current region)", () => {
       await waitForIdle(page);
 
       await page.evaluate(() => {
-        const app = (window as any).__formulaApp;
+        const app = window.__formulaApp as any;
         const sheetId = app.getCurrentSheetId();
         const doc = app.getDocument();
 
@@ -75,7 +75,7 @@ test.describe("Ctrl/Cmd+Shift+* (select current region)", () => {
       const gridBox = await page.locator("#grid").boundingBox();
       expect(gridBox).not.toBeNull();
 
-      const f2Rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("F2"));
+      const f2Rect = await page.evaluate(() => (window.__formulaApp as any).getCellRectA1("F2"));
       expect(f2Rect).not.toBeNull();
 
       await page.mouse.click(gridBox!.x + f2Rect!.x + f2Rect!.width / 2, gridBox!.y + f2Rect!.y + f2Rect!.height / 2);
@@ -93,7 +93,7 @@ test.describe("Ctrl/Cmd+Shift+* (select current region)", () => {
       await waitForIdle(page);
 
       await page.evaluate(() => {
-        const app = (window as any).__formulaApp;
+        const app = window.__formulaApp as any;
         const sheetId = app.getCurrentSheetId();
         const doc = app.getDocument();
         doc.setCellValue(sheetId, "E1", 1);
@@ -104,7 +104,7 @@ test.describe("Ctrl/Cmd+Shift+* (select current region)", () => {
       const gridBox = await page.locator("#grid").boundingBox();
       expect(gridBox).not.toBeNull();
 
-      const f1Rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("F1"));
+      const f1Rect = await page.evaluate(() => (window.__formulaApp as any).getCellRectA1("F1"));
       expect(f1Rect).not.toBeNull();
 
       await page.mouse.click(gridBox!.x + f1Rect!.x + f1Rect!.width / 2, gridBox!.y + f1Rect!.y + f1Rect!.height / 2);
@@ -124,7 +124,7 @@ test.describe("Ctrl/Cmd+Shift+* (select current region)", () => {
       const gridBox = await page.locator("#grid").boundingBox();
       expect(gridBox).not.toBeNull();
 
-      const j10Rect = await page.evaluate(() => (window as any).__formulaApp.getCellRectA1("J10"));
+      const j10Rect = await page.evaluate(() => (window.__formulaApp as any).getCellRectA1("J10"));
       expect(j10Rect).not.toBeNull();
 
       await page.mouse.click(
