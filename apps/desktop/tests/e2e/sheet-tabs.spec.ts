@@ -140,6 +140,34 @@ test.describe("sheet tabs", () => {
     await expect(tab).not.toContainText("ShouldNotCommit");
   });
 
+  test("invalid rename keeps editing and blocks switching sheets", async ({ page }) => {
+    await gotoDesktop(page);
+
+    // Create a second sheet we can attempt to switch to.
+    await page.getByTestId("sheet-add").click();
+    await expect(page.getByTestId("sheet-tab-Sheet2")).toBeVisible();
+
+    // Switch back to Sheet1 and begin renaming.
+    const sheet1Tab = page.getByTestId("sheet-tab-Sheet1");
+    await sheet1Tab.click();
+    await expect(sheet1Tab).toHaveAttribute("data-active", "true");
+
+    await sheet1Tab.dblclick();
+    const input = sheet1Tab.locator("input.sheet-tab__input");
+    await expect(input).toBeVisible();
+
+    // Trigger an invalid name (empty) and attempt to commit.
+    await input.fill("");
+    await input.press("Enter");
+
+    // Attempt to switch sheets; invalid rename should block activation.
+    await page.getByTestId("sheet-tab-Sheet2").click();
+
+    await expect.poll(() => page.evaluate(() => (window as any).__formulaApp.getCurrentSheetId())).toBe("Sheet1");
+    await expect(sheet1Tab).toHaveAttribute("data-active", "true");
+    await expect(input).toBeVisible();
+  });
+
   test("drag reordering sheet tabs updates Ctrl+PgUp/PgDn navigation order", async ({ page }) => {
     await gotoDesktop(page);
 
@@ -187,6 +215,7 @@ test.describe("sheet tabs", () => {
 
         const dt = new DataTransfer();
         dt.setData("text/sheet-id", fromId);
+        dt.setData("text/plain", fromId);
 
         const drop = new DragEvent("drop", {
           bubbles: true,
