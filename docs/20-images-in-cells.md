@@ -164,9 +164,9 @@ variant shapes are documented further below.
 
 - A workbook can contain a dedicated `cellImages` part (seen in tests as `xl/cellimages.xml` and
   `xl/cellImages.xml`) plus a matching relationship part at `xl/_rels/<part>.rels`.
-- `fixtures/xlsx/basic/cell-images.xlsx` contains `xl/cellImages.xml` with root namespace:
+- The **synthetic** fixture `fixtures/xlsx/basic/cell-images.xlsx` contains `xl/cellImages.xml` with root namespace:
   - `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main`
-- `fixtures/xlsx/basic/cellimages.xlsx` contains `xl/cellimages.xml` with root namespace:
+- The **synthetic** fixture `fixtures/xlsx/basic/cellimages.xlsx` contains `xl/cellimages.xml` with root namespace:
   - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
 - The real Excel fixture [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx) contains `xl/cellimages.xml` with namespace:
   - `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages`
@@ -849,7 +849,7 @@ Checklist (what we still want additional fixtures for):
 1. Confirm whether Excel ever uses numbered parts like `cellImages1.xml` / `cellimages1.xml` (not yet observed in this repo).
 2. Discover additional `cellImages` namespace variants across Excel versions:
    - observed: `http://schemas.microsoft.com/office/spreadsheetml/2022/cellimages` (real Excel fixture `images-in-cell.xlsx`)
-   - observed: `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main` (fixture `cell-images.xlsx`)
+   - observed: `http://schemas.microsoft.com/office/spreadsheetml/2023/02/main` (synthetic fixture `cell-images.xlsx`)
 3. Discover additional XML shapes:
    - observed: `<cellImages><cellImage><xdr:pic>...` (real Excel fixture `images-in-cell.xlsx`)
 4. Confirm additional `[Content_Types].xml` override strings (Excel appears to vary):
@@ -857,8 +857,8 @@ Checklist (what we still want additional fixtures for):
    - observed: `application/vnd.ms-excel.cellimages+xml`
 5. Discover additional relationship Type URIs and owning-part behaviors:
    - observed workbook → cellimages: `http://schemas.microsoft.com/office/2019/relationships/cellimages` (real Excel fixture)
-   - observed workbook → cellImages: `http://schemas.microsoft.com/office/2023/02/relationships/cellImage` (fixture)
-   - still unknown: worksheet-level relationship variants (if any)
+   - observed workbook → cellImages: `http://schemas.microsoft.com/office/2023/02/relationships/cellImage` (synthetic fixture)
+    - still unknown: worksheet-level relationship variants (if any)
 6. Confirm how `=IMAGE(...)` worksheet cells are encoded (still unknown in real Excel fixtures checked into this repo).
 
 ## Round-trip constraints for Formula
