@@ -42,6 +42,39 @@ function stableStringify(value) {
   return `{${entries.join(",")}}`;
 }
 
+/**
+ * Minimal CSS named-color support for paste normalization in non-DOM environments (Node tests).
+ *
+ * This is intentionally not exhaustive; browsers/WebViews will still normalize the full
+ * CSS color space via `getComputedStyle` in `normalizeCssColorViaDom`.
+ *
+ * @type {Record<string, { r: number, g: number, b: number }>}
+ */
+const CSS_NAMED_COLORS = {
+  black: { r: 0, g: 0, b: 0 },
+  silver: { r: 192, g: 192, b: 192 },
+  gray: { r: 128, g: 128, b: 128 },
+  grey: { r: 128, g: 128, b: 128 },
+  white: { r: 255, g: 255, b: 255 },
+  maroon: { r: 128, g: 0, b: 0 },
+  red: { r: 255, g: 0, b: 0 },
+  purple: { r: 128, g: 0, b: 128 },
+  fuchsia: { r: 255, g: 0, b: 255 },
+  magenta: { r: 255, g: 0, b: 255 },
+  green: { r: 0, g: 128, b: 0 },
+  lime: { r: 0, g: 255, b: 0 },
+  olive: { r: 128, g: 128, b: 0 },
+  yellow: { r: 255, g: 255, b: 0 },
+  navy: { r: 0, g: 0, b: 128 },
+  blue: { r: 0, g: 0, b: 255 },
+  teal: { r: 0, g: 128, b: 128 },
+  aqua: { r: 0, g: 255, b: 255 },
+  cyan: { r: 0, g: 255, b: 255 },
+  orange: { r: 255, g: 165, b: 0 },
+  hotpink: { r: 255, g: 105, b: 180 },
+  rebeccapurple: { r: 102, g: 51, b: 153 },
+};
+
 function clampByte(value) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(255, Math.round(value)));
@@ -187,6 +220,9 @@ function cssColorToArgb(value) {
   // Keep as concatenation so hardcoded-color detectors don't flag it as a UI literal.
   if (lower === "transparent") return "#" + "00000000";
   if (lower === "none") return null;
+
+  const named = CSS_NAMED_COLORS[lower];
+  if (named) return `#FF${toHex2(named.r)}${toHex2(named.g)}${toHex2(named.b)}`;
 
   const hex = trimmed.replace(/^#/, "");
   if (/^[0-9a-fA-F]{3}$/.test(hex)) {

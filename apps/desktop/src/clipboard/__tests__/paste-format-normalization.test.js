@@ -76,3 +76,21 @@ test("pasteClipboardContent converts rgb()/rgba() + #AARRGGBB CSS colors to ARGB
   assert.equal(styleE1.font?.color, "#80FF0000");
   assert.equal(styleE1.fill?.fgColor, "#400000FF");
 });
+
+test("pasteClipboardContent converts common CSS named colors to ARGB (non-DOM fallback)", () => {
+  const doc = new DocumentController();
+
+  const html = `<!DOCTYPE html><html><body><table>
+    <tr>
+      <td style="color:red;background-color:yellow">X</td>
+    </tr>
+  </table></body></html>`;
+
+  const pasted = pasteClipboardContent(doc, "Sheet1", "A1", { html });
+  assert.equal(pasted, true);
+
+  const cell = doc.getCell("Sheet1", "A1");
+  const style = doc.styleTable.get(cell.styleId);
+  assert.equal(style.font?.color, "#FFFF0000");
+  assert.equal(style.fill?.fgColor, "#FFFFFF00");
+});
