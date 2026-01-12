@@ -113,6 +113,14 @@ export interface CanvasGridProps {
   onZoomChange?: (zoom: number) => void;
   enableResize?: boolean;
   /**
+   * Fired when a row height or column width is updated via an interactive resize
+   * drag or via auto-fit (double-click / double-tap on a resize handle).
+   *
+   * This callback intentionally only fires for user-driven interactions so host
+   * applications can persist the new size and create a single undo entry.
+   */
+  onAxisSizeChange?: (change: GridAxisSizeChange) => void;
+  /**
    * How many extra rows beyond the visible viewport to prefetch.
    *
    * This reduces flicker/blank cells when using async (engine-backed) providers
@@ -149,6 +157,34 @@ export interface CanvasGridProps {
   ariaLabel?: string;
   ariaLabelledBy?: string;
 }
+
+export type GridAxisSizeChange =
+  | {
+      kind: "col";
+      index: number;
+      /** New size in CSS pixels. */
+      size: number;
+      /** Size before the interaction began. */
+      previousSize: number;
+      /** Default size for this axis (used when the override is cleared). */
+      defaultSize: number;
+      /** Current grid zoom factor. */
+      zoom: number;
+      source: "resize" | "autoFit";
+    }
+  | {
+      kind: "row";
+      index: number;
+      /** New size in CSS pixels. */
+      size: number;
+      /** Size before the interaction began. */
+      previousSize: number;
+      /** Default size for this axis (used when the override is cleared). */
+      defaultSize: number;
+      /** Current grid zoom factor. */
+      zoom: number;
+      source: "resize" | "autoFit";
+    };
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -271,6 +307,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const onFillPreviewChangeRef = useRef(props.onFillPreviewChange);
   const onFillCommitRef = useRef(props.onFillCommit);
   const onZoomChangeRef = useRef(props.onZoomChange);
+  const onAxisSizeChangeRef = useRef(props.onAxisSizeChange);
 
   onSelectionChangeRef.current = props.onSelectionChange;
   onSelectionRangeChangeRef.current = props.onSelectionRangeChange;
@@ -283,6 +320,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   onFillPreviewChangeRef.current = props.onFillPreviewChange;
   onFillCommitRef.current = props.onFillCommit;
   onZoomChangeRef.current = props.onZoomChange;
+  onAxisSizeChangeRef.current = props.onAxisSizeChange;
 
   const selectionAnchorRef = useRef<{ row: number; col: number } | null>(null);
   const keyboardAnchorRef = useRef<{ row: number; col: number } | null>(null);
@@ -292,6 +330,7 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
   const autoScrollFrameRef = useRef<number | null>(null);
   const resizePointerIdRef = useRef<number | null>(null);
   const resizeDragRef = useRef<ResizeDragState | null>(null);
+  const lastResizeClickRef = useRef<{ time: number; hit: ResizeHit } | null>(null);
   const dragModeRef = useRef<"selection" | "fillHandle" | null>(null);
   const cancelFillHandleDragRef = useRef<(() => void) | null>(null);
   const fillHandleStateRef = useRef<{
@@ -869,6 +908,13 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
     const RESIZE_HIT_RADIUS_PX = 4;
     const MIN_COL_WIDTH = 24;
     const MIN_ROW_HEIGHT = 16;
+    const AUTO_FIT_MAX_COL_WIDTH = 500;
+    const AUTO_FIT_MAX_ROW_HEIGHT = 500;
+    const DOUBLE_CLICK_MS = 500;
+
+    const nowMs = () =>
+      typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+
     const TOUCH_PAN_THRESHOLD_PX = 4;
 
     type TouchPanState = {
@@ -1702,6 +1748,8 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       }
 
       if (resizePointerIdRef.current !== null && event.pointerId === resizePointerIdRef.current) {
+        const drag = resizeDragRef.current;
+
         resizePointerIdRef.current = null;
         resizeDragRef.current = null;
         selectionCanvas.style.cursor = "default";
@@ -1710,6 +1758,71 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
         } catch {
           // Some environments throw if the pointer isn't captured; ignore.
         }
+
+        const resizeRenderer = rendererRef.current;
+        if (resizeRenderer && drag) {
+          const endSize =
+            drag.kind === "col" ? resizeRenderer.getColWidth(drag.index) : resizeRenderer.getRowHeight(drag.index);
+          const defaultSize =
+            drag.kind === "col" ? resizeRenderer.scroll.cols.defaultSize : resizeRenderer.scroll.rows.defaultSize;
+
+          const sizeChanged = endSize !== drag.startSize;
+
+          if (sizeChanged) {
+            onAxisSizeChangeRef.current?.({
+              kind: drag.kind,
+              index: drag.index,
+              size: endSize,
+              previousSize: drag.startSize,
+              defaultSize,
+              zoom: zoomRef.current,
+              source: "resize"
+            });
+            lastResizeClickRef.current = null;
+            syncScrollbars();
+            return;
+          }
+
+          // Treat a non-moving resize interaction as a "click" on the handle. If we see two clicks
+          // within the double-click threshold, auto-fit (Excel behavior).
+          if (event.type === "pointerup" && interactionModeRef.current !== "rangeSelection") {
+            const ts = nowMs();
+            const last = lastResizeClickRef.current;
+            if (last && last.hit.kind === drag.kind && last.hit.index === drag.index && ts - last.time <= DOUBLE_CLICK_MS) {
+              lastResizeClickRef.current = null;
+
+              const prevSize = endSize;
+              const nextSize =
+                drag.kind === "col"
+                  ? resizeRenderer.autoFitCol(drag.index, { maxWidth: AUTO_FIT_MAX_COL_WIDTH })
+                  : resizeRenderer.autoFitRow(drag.index, { maxHeight: AUTO_FIT_MAX_ROW_HEIGHT });
+              syncScrollbars();
+
+              if (nextSize !== prevSize) {
+                onAxisSizeChangeRef.current?.({
+                  kind: drag.kind,
+                  index: drag.index,
+                  size: nextSize,
+                  previousSize: prevSize,
+                  defaultSize,
+                  zoom: zoomRef.current,
+                  source: "autoFit"
+                });
+              }
+              return;
+            }
+
+            lastResizeClickRef.current = { time: ts, hit: { kind: drag.kind, index: drag.index } };
+          } else {
+            lastResizeClickRef.current = null;
+          }
+
+          syncScrollbars();
+          return;
+        }
+
+        syncScrollbars();
+        return;
       }
 
       if (selectionPointerIdRef.current === null) return;
@@ -1859,16 +1972,9 @@ export function CanvasGrid(props: CanvasGridProps): React.ReactElement {
       if (!renderer) return;
       const point = getViewportPoint(event);
 
-      if (enableResizeRef.current) {
-        const hit = getResizeHit(point.x, point.y);
-        if (hit) {
-          event.preventDefault();
-          if (hit.kind === "col") renderer.autoFitCol(hit.index, { maxWidth: 500 });
-          else renderer.autoFitRow(hit.index, { maxHeight: 500 });
-          syncScrollbars();
-          return;
-        }
-      }
+      // Auto-fit is handled via pointer-driven double-click detection (so it works with
+      // `pointerdown.preventDefault()` and on touch devices). Keep dblclick for in-cell edit only.
+      if (enableResizeRef.current && getResizeHit(point.x, point.y)) return;
 
       const picked = renderer.pickCellAt(point.x, point.y);
       if (!picked) return;

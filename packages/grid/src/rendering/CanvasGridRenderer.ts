@@ -944,7 +944,8 @@ export class CanvasGridRenderer {
   /**
    * Auto-fit a column based on the widest visible cell text in the current viewport.
    *
-   * Note: This intentionally only scans the visible viewport for ergonomics/performance.
+   * Note: This intentionally only scans a bounded viewport window (visible range + small overscan)
+   * for ergonomics/performance.
    */
   autoFitCol(col: number, options?: { maxWidth?: number }): number {
     this.assertColIndex(col);
@@ -955,6 +956,7 @@ export class CanvasGridRenderer {
     const minWidth = 24 * zoom;
     const paddingX = 4 * zoom;
     const extraPadding = 8 * zoom;
+    const overscanRows = 2;
 
     const rowCount = this.getRowCount();
     const frozenHeightClamped = Math.min(viewport.frozenHeight, viewport.height);
@@ -965,7 +967,12 @@ export class CanvasGridRenderer {
 
     const viewportScrollableHeight = Math.max(0, viewport.height - frozenHeightClamped);
     const mainRowsRange =
-      viewportScrollableHeight === 0 || rowCount === viewport.frozenRows ? { start: 0, end: 0 } : viewport.main.rows;
+      viewportScrollableHeight === 0 || rowCount === viewport.frozenRows
+        ? { start: 0, end: 0 }
+        : {
+            start: Math.max(viewport.frozenRows, viewport.main.rows.start - overscanRows),
+            end: Math.min(rowCount, viewport.main.rows.end + overscanRows)
+          };
 
     const layoutEngine = this.textLayoutEngine;
 
@@ -997,9 +1004,10 @@ export class CanvasGridRenderer {
   }
 
   /**
-   * Auto-fit a row based on wrapped text height for visible cells in the current viewport.
+   * Auto-fit a row based on text height for visible cells in the current viewport.
    *
-   * If no visible cell uses wrapping, the row is reset to the default height.
+   * If wrapping is enabled on any visible cell, wrapped layout height is used.
+   * Otherwise font metrics are used so large fonts can still auto-fit.
    */
   autoFitRow(row: number, options?: { maxHeight?: number }): number {
     this.assertRowIndex(row);
@@ -1009,6 +1017,7 @@ export class CanvasGridRenderer {
     const maxHeight = (options?.maxHeight ?? 500) * zoom;
     const paddingX = 4 * zoom;
     const paddingY = 2 * zoom;
+    const overscanCols = 2;
 
     const colCount = this.getColCount();
     const frozenWidthClamped = Math.min(viewport.frozenWidth, viewport.width);
@@ -1019,13 +1028,18 @@ export class CanvasGridRenderer {
 
     const viewportScrollableWidth = Math.max(0, viewport.width - frozenWidthClamped);
     const mainColsRange =
-      viewportScrollableWidth === 0 || colCount === viewport.frozenCols ? { start: 0, end: 0 } : viewport.main.cols;
+      viewportScrollableWidth === 0 || colCount === viewport.frozenCols
+        ? { start: 0, end: 0 }
+        : {
+            start: Math.max(viewport.frozenCols, viewport.main.cols.start - overscanCols),
+            end: Math.min(colCount, viewport.main.cols.end + overscanCols)
+          };
 
     const layoutEngine = this.textLayoutEngine;
     const defaultHeight = this.scroll.rows.defaultSize;
     if (!layoutEngine) return defaultHeight;
 
-    let hasWrapped = false;
+    let hasContent = false;
     let maxMeasuredHeight = defaultHeight;
 
     const measureCol = (col: number) => {
@@ -1034,23 +1048,27 @@ export class CanvasGridRenderer {
 
       const style = cell.style;
       const wrapMode = style?.wrapMode ?? "none";
-      if (wrapMode === "none") return;
 
       const text = formatCellDisplayText(cell.value);
       if (text === "") return;
 
-      hasWrapped = true;
+      hasContent = true;
 
       const fontSize = (style?.fontSize ?? 12) * zoom;
       const fontFamily = style?.fontFamily ?? "system-ui";
       const fontWeight = style?.fontWeight ?? "400";
       const fontSpec = { family: fontFamily, sizePx: fontSize, weight: fontWeight };
 
+      const lineHeight = Math.ceil(fontSize * 1.2);
+      // Even without wrapping, large fonts should auto-fit the row height.
+      maxMeasuredHeight = Math.max(maxMeasuredHeight, lineHeight + paddingY * 2);
+
+      if (wrapMode === "none") return;
+
       const colWidth = this.scroll.cols.getSize(col);
       const availableWidth = Math.max(0, colWidth - paddingX * 2);
       if (availableWidth === 0) return;
 
-      const lineHeight = Math.ceil(fontSize * 1.2);
       const align: CanvasTextAlign =
         style?.textAlign ?? (typeof cell.value === "number" ? "end" : "start");
       const layoutAlign =
@@ -1077,7 +1095,7 @@ export class CanvasGridRenderer {
     for (let col = frozenColsRange.start; col < frozenColsRange.end; col++) measureCol(col);
     for (let col = mainColsRange.start; col < mainColsRange.end; col++) measureCol(col);
 
-    if (!hasWrapped) {
+    if (!hasContent) {
       this.resetRowHeight(row);
       return this.scroll.rows.defaultSize;
     }
