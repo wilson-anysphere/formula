@@ -10,8 +10,8 @@
  * @param {string} sheetId
  * @param {string | import("../document/coords.js").CellRange} range
  * @param {Record<string, any>} changes
+ * @returns {boolean}
  */
 export function applyFormatCells(doc, sheetId, range, changes) {
-  doc.setRangeFormat(sheetId, range, changes, { label: "Format Cells" });
+  return doc.setRangeFormat(sheetId, range, changes, { label: "Format Cells" });
 }
-

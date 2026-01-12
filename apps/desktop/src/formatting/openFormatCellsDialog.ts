@@ -479,18 +479,27 @@ export function openFormatCellsDialog(host: FormatCellsDialogHost): void {
     });
 
     const useBatch = expanded.length > 1;
+    let applied = true;
     if (useBatch) doc.beginBatch({ label: "Format Cells" });
     try {
       for (const r of expanded) {
-        applyFormatCells(
+        const ok = applyFormatCells(
           doc,
           sheetIdNow,
           { start: { row: r.startRow, col: r.startCol }, end: { row: r.endRow, col: r.endCol } },
           changes,
         );
+        if (ok === false) applied = false;
       }
     } finally {
       if (useBatch) doc.endBatch();
+    }
+    if (!applied) {
+      try {
+        showToast("Formatting could not be applied to the full selection. Try selecting fewer cells/rows.", "warning");
+      } catch {
+        // ignore (e.g. toast root missing in tests)
+      }
     }
   }
 
