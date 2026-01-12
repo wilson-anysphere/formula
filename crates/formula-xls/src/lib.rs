@@ -587,61 +587,6 @@ pub fn import_xls_path(path: impl AsRef<Path>) -> Result<XlsImportResult, Import
             }
         }
 
-        // Extract legacy NOTE/OBJ/TXO cell comments ("notes") after merged regions have been
-        // populated so the model can anchor notes to merged-region top-left cells.
-        if let (Some(workbook_stream), Some(codepage), Some(biff_idx)) = (
-            workbook_stream.as_deref(),
-            biff_codepage,
-            biff_idx,
-        ) {
-            if let Some(sheet_info) = biff_sheets.as_ref().and_then(|s| s.get(biff_idx)) {
-                if sheet_info.offset >= workbook_stream.len() {
-                    warnings.push(ImportWarning::new(format!(
-                        "failed to import `.xls` comments for sheet `{sheet_name}`: out-of-bounds stream offset {}",
-                        sheet_info.offset
-                    )));
-                } else {
-                    match biff::parse_biff_sheet_note_comments(
-                        workbook_stream,
-                        sheet_info.offset,
-                        codepage,
-                    ) {
-                        Ok(parsed) => {
-                            for note in parsed.comments {
-                                let mut author = CommentAuthor::default();
-                                if let Some(name) = note.author {
-                                    author.name = name;
-                                }
-
-                                let comment = Comment {
-                                    kind: CommentKind::Note,
-                                    author,
-                                    content: note.text,
-                                    ..Default::default()
-                                };
-
-                                if let Err(err) = sheet.add_comment(note.cell_ref, comment) {
-                                    warnings.push(ImportWarning::new(format!(
-                                        "failed to add `.xls` comment at {} in sheet `{sheet_name}`: {err}",
-                                        note.cell_ref
-                                    )));
-                                }
-                            }
-
-                            warnings.extend(parsed.warnings.into_iter().map(|w| {
-                                ImportWarning::new(format!(
-                                    "failed to fully import `.xls` comments for sheet `{sheet_name}`: {w}"
-                                ))
-                            }));
-                        }
-                        Err(err) => warnings.push(ImportWarning::new(format!(
-                            "failed to import `.xls` comments for sheet `{sheet_name}`: {err}"
-                        ))),
-                    }
-                }
-            }
-        }
-
         // Extract BIFF hyperlinks after merged regions have been populated so callers can resolve
         // anchors consistently with the model's merged-cell semantics.
         if let (Some(workbook_stream), Some(codepage), Some(biff_idx)) = (
