@@ -20,6 +20,129 @@ function stableStringify(value) {
   return `{${entries.join(",")}}`;
 }
 
+function isYText(value) {
+  if (!value || typeof value !== "object") return false;
+  if (value.constructor?.name === "YText") return true;
+  return typeof value.toString === "function" && typeof value.toDelta === "function";
+}
+
+/**
+ * @param {any} value
+ * @returns {string | null}
+ */
+function coerceString(value) {
+  if (isYText(value)) return value.toString();
+  if (typeof value === "string") return value;
+  if (value == null) return null;
+  return String(value);
+}
+
+/**
+ * Convert (potentially nested) Yjs values into plain JS objects.
+ *
+ * @param {any} value
+ * @returns {any}
+ */
+function yjsValueToJson(value) {
+  if (isYText(value)) return value.toString();
+
+  if (value && typeof value === "object") {
+    if (value.constructor?.name === "YArray" && typeof value.toArray === "function") {
+      return value.toArray().map((item) => yjsValueToJson(item));
+    }
+
+    if (value.constructor?.name === "YMap" && typeof value.keys === "function" && typeof value.get === "function") {
+      /** @type {Record<string, any>} */
+      const out = {};
+      const keys = Array.from(value.keys()).sort();
+      for (const key of keys) out[key] = yjsValueToJson(value.get(key));
+      return out;
+    }
+
+    if (Array.isArray(value)) return value.map((item) => yjsValueToJson(item));
+
+    // Preserve plain objects as-is (clone to avoid accidental mutations).
+    if (!Array.isArray(value)) {
+      try {
+        return structuredClone(value);
+      } catch {
+        // Ignore: fall through.
+      }
+    }
+  }
+
+  return value;
+}
+
+/**
+ * @param {any} value
+ * @returns {number}
+ */
+function normalizeFrozenCount(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.max(0, Math.trunc(num));
+}
+
+/**
+ * Normalize Yjs `sheet.view` state into the {@link SheetViewState} shape expected
+ * by DocumentController.
+ *
+ * @param {any} view
+ * @returns {{ frozenRows: number, frozenCols: number, colWidths?: Record<string, number>, rowHeights?: Record<string, number> }}
+ */
+function normalizeSheetViewState(view) {
+  const normalizeAxisSize = (value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    if (num <= 0) return null;
+    return num;
+  };
+
+  const normalizeAxisOverrides = (raw) => {
+    if (!raw) return null;
+
+    /** @type {Record<string, number>} */
+    const out = {};
+
+    if (Array.isArray(raw)) {
+      for (const entry of raw) {
+        const index = Array.isArray(entry) ? entry[0] : entry?.index;
+        const size = Array.isArray(entry) ? entry[1] : entry?.size;
+        const idx = Number(index);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        const normalized = normalizeAxisSize(size);
+        if (normalized == null) continue;
+        out[String(idx)] = normalized;
+      }
+    } else if (typeof raw === "object") {
+      for (const [key, value] of Object.entries(raw)) {
+        const idx = Number(key);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        const normalized = normalizeAxisSize(value);
+        if (normalized == null) continue;
+        out[String(idx)] = normalized;
+      }
+    }
+
+    return Object.keys(out).length === 0 ? null : out;
+  };
+
+  const colWidths = normalizeAxisOverrides(view?.colWidths);
+  const rowHeights = normalizeAxisOverrides(view?.rowHeights);
+
+  return {
+    frozenRows: normalizeFrozenCount(view?.frozenRows),
+    frozenCols: normalizeFrozenCount(view?.frozenCols),
+    ...(colWidths ? { colWidths } : {}),
+    ...(rowHeights ? { rowHeights } : {}),
+  };
+}
+
+function emptySheetViewState() {
+  return { frozenRows: 0, frozenCols: 0 };
+}
+
 function getYMapCell(cellData) {
   // y-websocket currently pulls in the CJS build of Yjs, which means callers using
   // ESM `import * as Y from "yjs"` can observe Yjs types that fail `instanceof`
@@ -187,7 +310,7 @@ export function bindYjsToDocumentController(options) {
   if (!ydoc) throw new Error("bindYjsToDocumentController requires { ydoc }");
   if (!documentController) throw new Error("bindYjsToDocumentController requires { documentController }");
 
-  const cells = getWorkbookRoots(ydoc).cells;
+  const { cells, sheets } = getWorkbookRoots(ydoc);
   const docIdForEncryption = ydoc.guid ?? "unknown";
 
   // Stable origin token for local DocumentController -> Yjs transactions when
@@ -277,6 +400,8 @@ export function bindYjsToDocumentController(options) {
   let applyChain = Promise.resolve();
   // Serialize DocumentController -> Yjs writes (encryption can be async).
   let writeChain = Promise.resolve();
+  // Serialize DocumentController -> Yjs sheet metadata writes (view state, etc).
+  let sheetWriteChain = Promise.resolve();
 
   /**
    * @param {Set<string>} changedCanonicalKeys
@@ -291,11 +416,32 @@ export function bindYjsToDocumentController(options) {
   }
 
   /**
+   * @param {Set<string>} changedSheetIds
+   */
+  function enqueueSheetViewApply(changedSheetIds) {
+    if (!changedSheetIds || changedSheetIds.size === 0) return;
+    const snapshot = new Set(changedSheetIds);
+    applyChain = applyChain.then(() => applyYjsSheetViewChangesToDocumentController(snapshot)).catch((err) => {
+      console.error(err);
+    });
+  }
+
+  /**
    * @param {any[]} deltas
    */
   function enqueueWrite(deltas) {
     const snapshot = Array.from(deltas ?? []);
     writeChain = writeChain.then(() => applyDocumentDeltas(snapshot)).catch((err) => {
+      console.error(err);
+    });
+  }
+
+  /**
+   * @param {any[]} deltas
+   */
+  function enqueueSheetViewWrite(deltas) {
+    const snapshot = Array.from(deltas ?? []);
+    sheetWriteChain = sheetWriteChain.then(() => applyDocumentSheetViewDeltas(snapshot)).catch((err) => {
       console.error(err);
     });
   }
@@ -510,6 +656,96 @@ export function bindYjsToDocumentController(options) {
   }
 
   /**
+   * @param {any} sheetEntry
+   * @returns {{ frozenRows: number, frozenCols: number, colWidths?: Record<string, number>, rowHeights?: Record<string, number> }}
+   */
+  function readSheetViewFromYjsSheetEntry(sheetEntry) {
+    if (!sheetEntry || typeof sheetEntry.get !== "function") return emptySheetViewState();
+
+    // Canonical format (BranchService):
+    //   sheetMap.set("view", { frozenRows, frozenCols, colWidths?, rowHeights? })
+    const rawView = sheetEntry.get("view");
+    if (rawView !== undefined) {
+      const json = yjsValueToJson(rawView);
+      return normalizeSheetViewState(json);
+    }
+
+    // Back-compat: legacy top-level frozen rows/cols.
+    const frozenRows = sheetEntry.get("frozenRows");
+    const frozenCols = sheetEntry.get("frozenCols");
+    if (frozenRows !== undefined || frozenCols !== undefined) {
+      return normalizeSheetViewState({
+        frozenRows: yjsValueToJson(frozenRows) ?? 0,
+        frozenCols: yjsValueToJson(frozenCols) ?? 0,
+      });
+    }
+
+    return emptySheetViewState();
+  }
+
+  /**
+   * @param {string} sheetId
+   * @returns {any | null}
+   */
+  function findYjsSheetEntryById(sheetId) {
+    if (!sheetId) return null;
+    for (const entry of sheets.toArray()) {
+      if (!entry || typeof entry.get !== "function") continue;
+      const id = coerceString(entry.get("id"));
+      if (id === sheetId) return entry;
+    }
+    return null;
+  }
+
+  /**
+   * Apply a set of sheet view updates from Yjs into DocumentController.
+   *
+   * @param {Set<string>} changedSheetIds
+   */
+  function applyYjsSheetViewChangesToDocumentController(changedSheetIds) {
+    if (!changedSheetIds || changedSheetIds.size === 0) return;
+
+    /** @type {any[]} */
+    const deltas = [];
+
+    for (const sheetId of changedSheetIds) {
+      if (!sheetId) continue;
+
+      const entry = findYjsSheetEntryById(sheetId);
+      const after = readSheetViewFromYjsSheetEntry(entry);
+      const before = documentController.getSheetView(sheetId);
+
+      if (stableStringify(before) === stableStringify(after)) continue;
+
+      deltas.push({ sheetId, before, after });
+    }
+
+    if (deltas.length === 0) return;
+
+    applyingRemote = true;
+    try {
+      if (typeof documentController.applyExternalSheetViewDeltas === "function") {
+        documentController.applyExternalSheetViewDeltas(deltas, { source: "collab" });
+      } else {
+        // Best-effort fallback: apply the full view state via `setFrozen`/`setColWidth`/`setRowHeight`.
+        // This is not perfectly atomic but preserves reasonable behavior for older controllers.
+        for (const delta of deltas) {
+          const view = delta.after ?? emptySheetViewState();
+          documentController.setFrozen(delta.sheetId, view.frozenRows, view.frozenCols);
+          for (const [col, width] of Object.entries(view.colWidths ?? {})) {
+            documentController.setColWidth(delta.sheetId, Number(col), width);
+          }
+          for (const [row, height] of Object.entries(view.rowHeights ?? {})) {
+            documentController.setRowHeight(delta.sheetId, Number(row), height);
+          }
+        }
+      }
+    } finally {
+      applyingRemote = false;
+    }
+  }
+
+  /**
    * One-time initial hydration of existing Yjs state into DocumentController.
    * Allowed to scan the full `cells` map exactly once at bind time.
    */
@@ -532,6 +768,24 @@ export function bindYjsToDocumentController(options) {
     });
 
     enqueueApply(changedKeys);
+  }
+
+  /**
+   * Initial hydration of sheet view state from Yjs `sheets` metadata.
+   */
+  function hydrateSheetViewsFromYjs() {
+    /** @type {Set<string>} */
+    const changed = new Set();
+
+    for (const entry of sheets.toArray()) {
+      if (!entry || typeof entry.get !== "function") continue;
+      const id = coerceString(entry.get("id"));
+      if (!id) continue;
+      changed.add(id);
+    }
+
+    // Hydration should not create an undo step (handled by applyExternalSheetViewDeltas).
+    applyYjsSheetViewChangesToDocumentController(changed);
   }
 
   /**
@@ -590,6 +844,67 @@ export function bindYjsToDocumentController(options) {
     }
 
     enqueueApply(changed);
+  };
+
+  /**
+   * @param {any[]} events
+   * @param {any} transaction
+   */
+  const handleSheetsDeepChange = (events, transaction) => {
+    if (!events || events.length === 0) return;
+    const origin = transaction?.origin ?? null;
+    if (localOrigins.has(origin)) return;
+
+    /** @type {Set<string>} */
+    const changed = new Set();
+    let needsFullScan = false;
+
+    for (const event of events) {
+      const changes = event?.changes?.keys;
+      const hasPotentialViewChange =
+        changes &&
+        (changes.has("view") ||
+          changes.has("frozenRows") ||
+          changes.has("frozenCols") ||
+          changes.has("colWidths") ||
+          changes.has("rowHeights"));
+
+      // Array-level changes (insert/delete/move) don't expose `changes.keys`.
+      if (!changes) {
+        needsFullScan = true;
+        continue;
+      }
+
+      if (!hasPotentialViewChange) continue;
+
+      // If the event target is a sheet map, read its id directly.
+      const targetId = coerceString(event?.target?.get?.("id"));
+      if (targetId) {
+        changed.add(targetId);
+        continue;
+      }
+
+      // Otherwise fall back to resolving the sheet index from the deep path.
+      const path = event?.path;
+      if (Array.isArray(path) && typeof path[0] === "number") {
+        const entry = sheets.get(path[0]);
+        const id = entry && typeof entry.get === "function" ? coerceString(entry.get("id")) : null;
+        if (id) changed.add(id);
+        continue;
+      }
+
+      needsFullScan = true;
+    }
+
+    if (needsFullScan) {
+      for (const entry of sheets.toArray()) {
+        if (!entry || typeof entry.get !== "function") continue;
+        const id = coerceString(entry.get("id"));
+        if (id) changed.add(id);
+      }
+    }
+
+    enqueueSheetViewApply(changed);
   };
 
   /**
@@ -734,6 +1049,52 @@ export function bindYjsToDocumentController(options) {
   }
 
   /**
+   * Apply DocumentController sheet view deltas (freeze panes, row/col sizes, etc) into Yjs.
+   *
+   * Canonical storage format (BranchService compatible):
+   *   sheets[i].set("view", { frozenRows, frozenCols, colWidths?, rowHeights? })
+   *
+   * @param {any[]} deltas
+   */
+  function applyDocumentSheetViewDeltas(deltas) {
+    if (!deltas || deltas.length === 0) return;
+
+    /** @type {Array<{ sheetId: string, view: any }>} */
+    const prepared = [];
+
+    for (const delta of deltas) {
+      const sheetId = delta?.sheetId;
+      if (typeof sheetId !== "string" || sheetId === "") continue;
+      const after = delta?.after ?? emptySheetViewState();
+      prepared.push({ sheetId, view: normalizeSheetViewState(after) });
+    }
+
+    if (prepared.length === 0) return;
+
+    const apply = () => {
+      for (const item of prepared) {
+        const { sheetId, view } = item;
+
+        let entry = findYjsSheetEntryById(sheetId);
+        if (!entry) {
+          entry = new Y.Map();
+          entry.set("id", sheetId);
+          entry.set("name", sheetId);
+          sheets.push([entry]);
+        }
+
+        entry.set("view", view);
+      }
+    };
+
+    if (typeof undoService?.transact === "function") {
+      undoService.transact(apply);
+    } else {
+      ydoc.transact(apply, binderOrigin);
+    }
+  }
+
+  /**
    * Determine whether a local DocumentController change should be allowed to propagate
    * into Yjs when encryption is enabled (or encrypted cells exist in the doc).
    *
@@ -784,6 +1145,12 @@ export function bindYjsToDocumentController(options) {
   const handleDocumentChange = (payload) => {
     if (applyingRemote) return;
     const deltas = Array.isArray(payload?.deltas) ? payload.deltas : [];
+    const sheetViewDeltas = Array.isArray(payload?.sheetViewDeltas) ? payload.sheetViewDeltas : [];
+
+    if (sheetViewDeltas.length > 0) {
+      enqueueSheetViewWrite(sheetViewDeltas);
+    }
+
     if (deltas.length === 0) return;
 
     const needsEncryptionGuard = Boolean(encryption || hasEncryptedCells);
@@ -865,14 +1232,17 @@ export function bindYjsToDocumentController(options) {
   const unsubscribe = documentController.on("change", handleDocumentChange);
 
   cells.observeDeep(handleCellsDeepChange);
+  sheets.observeDeep(handleSheetsDeepChange);
 
   // Initial hydration (and for cases where the provider has already applied some state).
   hydrateFromYjs();
+  hydrateSheetViewsFromYjs();
 
   return {
     destroy() {
       unsubscribe?.();
       cells.unobserveDeep(handleCellsDeepChange);
+      sheets.unobserveDeep(handleSheetsDeepChange);
       if (didPatchDocumentCanEditCell) {
         documentController.canEditCell = prevDocumentCanEditCell;
       }
