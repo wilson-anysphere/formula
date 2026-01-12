@@ -58,7 +58,14 @@ import { ExtensionPanelBridge } from "./extensions/extensionPanelBridge.js";
 import { ContextKeyService } from "./extensions/contextKeys.js";
 import { resolveMenuItems } from "./extensions/contextMenus.js";
 import { buildContextMenuModel } from "./extensions/contextMenuModel.js";
-import { matchesKeybinding, parseKeybinding, platformKeybinding, type ContributedKeybinding } from "./extensions/keybindings.js";
+import {
+  buildCommandKeybindingDisplayIndex,
+  getPrimaryCommandKeybindingDisplay,
+  matchesKeybinding,
+  parseKeybinding,
+  platformKeybinding,
+  type ContributedKeybinding,
+} from "./extensions/keybindings.js";
 import { deriveSelectionContextKeys } from "./extensions/selectionContextKeys.js";
 import { evaluateWhenClause } from "./extensions/whenClause.js";
 import { CommandRegistry } from "./extensions/commandRegistry.js";
@@ -1006,6 +1013,7 @@ if (
 
   // Keybindings (foundation): execute contributed commands.
   const parsedKeybindings: Array<ReturnType<typeof parseKeybinding>> = [];
+  let commandKeybindingDisplayIndex = new Map<string, string[]>();
   let lastLoadedExtensionIds = new Set<string>();
 
   const syncContributedCommands = () => {
@@ -1090,9 +1098,11 @@ if (
 
   const updateKeybindings = () => {
     parsedKeybindings.length = 0;
+    commandKeybindingDisplayIndex = new Map<string, string[]>();
     if (!extensionHostManager.ready) return;
     const platform = /Mac|iPhone|iPad|iPod/.test(navigator.platform) ? "mac" : "other";
     const contributed = extensionHostManager.getContributedKeybindings() as ContributedKeybinding[];
+    commandKeybindingDisplayIndex = buildCommandKeybindingDisplayIndex({ platform, contributed });
     for (const kb of contributed) {
       const binding = platformKeybinding(kb, platform);
       const parsed = parseKeybinding(kb.command, binding, kb.when ?? null);
@@ -1222,6 +1232,7 @@ if (
             type: "item",
             label: entry.label,
             enabled: entry.enabled,
+            shortcut: getPrimaryCommandKeybindingDisplay(entry.commandId, commandKeybindingDisplayIndex) ?? undefined,
             onSelect: () => executeExtensionCommand(entry.commandId),
           });
         }

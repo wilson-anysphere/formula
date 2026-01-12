@@ -130,6 +130,7 @@ export class ContextMenu {
 
       if (item.shortcut) {
         const shortcut = document.createElement("span");
+        shortcut.setAttribute("aria-hidden", "true");
         shortcut.textContent = item.shortcut;
         shortcut.style.color = "var(--text-secondary)";
         shortcut.style.fontSize = "12px";
