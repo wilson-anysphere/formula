@@ -217,4 +217,94 @@ describe("ExtensionsPanel (IndexedDB installs)", () => {
       root.unmount();
     });
   });
+
+  it("does not fall back to repair() when update() is a no-op for an engine mismatch", async () => {
+    const rootEl = document.createElement("div");
+    document.body.appendChild(rootEl);
+    const root = createRoot(rootEl);
+
+    const listeners = new Set<() => void>();
+
+    const manager = {
+      ready: true,
+      error: null,
+      subscribe: (listener: () => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      loadBuiltInExtensions: vi.fn(async () => {}),
+      host: { listExtensions: () => [] },
+      getContributedCommands: () => [],
+      getContributedPanels: () => [],
+      getContributedKeybindings: () => [],
+      getGrantedPermissions: vi.fn(async () => ({})),
+      revokePermission: vi.fn(async () => {}),
+      resetPermissionsForExtension: vi.fn(async () => {}),
+      resetAllPermissions: vi.fn(async () => {}),
+    } as any;
+
+    const installedList: any[] = [
+      {
+        id: "test.incompatible-ext",
+        version: "1.0.0",
+        incompatible: true,
+        incompatibleReason: "engine mismatch: need ^2.0.0",
+      },
+    ];
+
+    const webExtensionManager = {
+      verifyAllInstalled: vi.fn(async () => ({})),
+      listInstalled: vi.fn(async () => installedList),
+      update: vi.fn(async (id: string) => ({ ...installedList[0], id })),
+      repair: vi.fn(async () => {
+        throw new Error("repair should not be used for engine mismatches");
+      }),
+      loadInstalled: vi.fn(async () => {}),
+    } as any;
+
+    await act(async () => {
+      root.render(
+        React.createElement(ExtensionsPanel, {
+          manager,
+          webExtensionManager,
+          onSyncExtensions: vi.fn(),
+          onExecuteCommand: vi.fn(),
+          onOpenPanel: vi.fn(),
+        }),
+      );
+    });
+
+    // Allow effects (refreshInstalled) to run.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const actionButton = rootEl.querySelector(
+      '[data-testid="repair-extension-test.incompatible-ext"]',
+    ) as HTMLButtonElement | null;
+    expect(actionButton).toBeTruthy();
+
+    await act(async () => {
+      actionButton?.click();
+    });
+
+    await waitFor(() => webExtensionManager.update.mock.calls.length > 0);
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(webExtensionManager.update).toHaveBeenCalledWith("test.incompatible-ext");
+    expect(webExtensionManager.repair).not.toHaveBeenCalled();
+
+    const statusAfter = rootEl.querySelector(
+      '[data-testid="installed-extension-status-test.incompatible-ext"]',
+    ) as HTMLDivElement | null;
+    expect(statusAfter).toBeTruthy();
+    expect(statusAfter?.textContent).toContain("Incompatible: engine mismatch");
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
 });

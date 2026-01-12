@@ -297,13 +297,20 @@ export function ExtensionsPanel({
                             setRepairingId(item.id);
                             try {
                               if (isIncompatible) {
+                                const installedVersion = String(item.version ?? "");
                                 const updated = await webExtensionManager.update(item.id);
-                                // If no update is available, fall back to a repair/reinstall of the
-                                // currently-installed version. This handles cases where the
-                                // incompatible quarantine was caused by persisted manifest
-                                // corruption rather than an engine mismatch.
-                                if (String(updated?.version ?? "") === String(item.version ?? "")) {
-                                  await webExtensionManager.repair(item.id);
+                                const updatedVersion = String(updated?.version ?? "");
+
+                                const didUpdate = updatedVersion.length > 0 && updatedVersion !== installedVersion;
+                                if (!didUpdate) {
+                                  const reason = String(item.incompatibleReason ?? "");
+                                  const isEngineMismatch = reason.toLowerCase().includes("engine mismatch");
+                                  // If the extension is quarantined due to a corrupted/invalid stored
+                                  // manifest (not an engine mismatch), reinstalling the current version
+                                  // can repair it even when no update is available.
+                                  if (!isEngineMismatch) {
+                                    await webExtensionManager.repair(item.id);
+                                  }
                                 }
                               } else {
                                 await webExtensionManager.repair(item.id);
