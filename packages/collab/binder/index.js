@@ -365,33 +365,14 @@ export function bindYjsToDocumentController(options) {
   // we don't have a dedicated undo service wrapper.
   const binderOrigin = undoService?.origin ?? { type: "document-controller:binder" };
 
-  /**
-   * Yjs "origin" values that correspond to local DocumentController-driven writes.
-   * We ignore these in the Yjs -> DocumentController observer to avoid echo work.
-   *
-   * Important: we intentionally do NOT ignore Y.UndoManager (used for undo/redo)
-   * origins so local undo/redo still updates the DocumentController.
-   * @type {Set<any>}
-   */
-  const localOrigins = new Set([binderOrigin]);
-
-  if (undoService?.origin) localOrigins.add(undoService.origin);
-
-  // Some undo services expose a `localOrigins` set which includes both the
-  // origin token and the UndoManager instance. We only want to treat the origin
-  // token as "local" for echo suppression.
-  const maybeLocalOrigins = undoService?.localOrigins;
-  if (maybeLocalOrigins && typeof maybeLocalOrigins[Symbol.iterator] === "function") {
-    for (const origin of maybeLocalOrigins) {
-      if (isUndoManager(origin)) continue;
-      localOrigins.add(origin);
-    }
-  }
-
   /** @type {Map<string, NormalizedCell>} */
   let cache = new Map();
 
   let applyingRemote = false;
+  // True while this binder is applying DocumentController-driven writes into Yjs.
+  // Used to suppress observer echo work without suppressing other session-origin
+  // mutations (branch checkout/restore, programmatic `session.setCell*`, etc).
+  let applyingLocal = false;
   let hasEncryptedCells = false;
 
   const permissionResolver = createPermissionsResolver(permissions, userId);
@@ -870,8 +851,14 @@ export function bindYjsToDocumentController(options) {
    */
   const handleCellsDeepChange = (events, transaction) => {
     if (!events || events.length === 0) return;
-    const origin = transaction?.origin ?? null;
-    if (localOrigins.has(origin)) return;
+    // Avoid processing the deep event that immediately follows a local
+    // DocumentController -> Yjs write we initiated.
+    //
+    // Note: we intentionally do NOT blanket-suppress by `transaction.origin`
+    // (even if it's "local") because CollabSession and other integrations often
+    // reuse the same origin token for programmatic local mutations (e.g. branch
+    // checkout/merge/restore) that *must* update the DocumentController.
+    if (applyingLocal) return;
 
     /** @type {Set<string>} */
     const changed = new Set();
@@ -1132,9 +1119,19 @@ export function bindYjsToDocumentController(options) {
     };
 
     if (typeof undoService?.transact === "function") {
-      undoService.transact(apply);
+      applyingLocal = true;
+      try {
+        undoService.transact(apply);
+      } finally {
+        applyingLocal = false;
+      }
     } else {
-      ydoc.transact(apply, binderOrigin);
+      applyingLocal = true;
+      try {
+        ydoc.transact(apply, binderOrigin);
+      } finally {
+        applyingLocal = false;
+      }
     }
   }
 
@@ -1365,13 +1362,6 @@ export function bindYjsToDocumentController(options) {
       }
     },
   };
-}
-
-function isUndoManager(value) {
-  if (!value || typeof value !== "object") return false;
-  const maybe = value;
-  if (maybe.constructor?.name === "UndoManager") return true;
-  return typeof maybe.undo === "function" && typeof maybe.redo === "function" && maybe.trackedOrigins instanceof Set;
 }
 
 /**

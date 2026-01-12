@@ -1703,7 +1703,7 @@ export type DocumentControllerBinder = { destroy: () => void };
 export async function bindCollabSessionToDocumentController(options: {
   session: CollabSession;
   documentController: any;
-  undoService?: { transact?: (fn: () => void) => void; origin?: any } | null;
+  undoService?: { transact?: (fn: () => void) => void; origin?: any; localOrigins?: Set<any> } | null;
   defaultSheetId?: string;
   userId?: string | null;
 }): Promise<DocumentControllerBinder> {
@@ -1716,15 +1716,26 @@ export async function bindCollabSessionToDocumentController(options: {
   // unless a consumer explicitly opts into DocumentController wiring.
   const { bindYjsToDocumentController } = await import("../../binder/index.js");
 
+  // Default to running DocumentController-driven writes through the session's
+  // local transaction helper so edits use the session's origin token. This keeps
+  // collaborative undo and conflict monitors consistent across both
+  // DocumentController edits and direct `session.setCell*` calls.
+  //
+  // Callers can override this by providing an explicit `undoService` (or `null`
+  // to disable the wrapper).
+  const defaultUndoService =
+    undoService === undefined
+      ? {
+          transact: (fn: () => void) => session.transactLocal(fn),
+          origin: session.origin,
+          localOrigins: session.localOrigins,
+        }
+      : undoService;
+
   return bindYjsToDocumentController({
     ydoc: session.doc,
     documentController,
-    // Intentionally do not default to `session.undo` here: CollabSession's undo origin
-    // is the same as `session.origin`, and wiring it into the binder would cause
-    // direct `session.setCell*` calls to be treated as "local" and ignored by the
-    // Yjs→DocumentController observer. Callers that want Yjs UndoManager semantics
-    // can pass an explicit `undoService`.
-    undoService: undoService ?? null,
+    undoService: defaultUndoService ?? null,
     defaultSheetId,
     userId,
     encryption: session.getEncryptionConfig(),
