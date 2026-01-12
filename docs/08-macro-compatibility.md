@@ -1069,9 +1069,12 @@ Binding plan (future tightening; see MS-OVBA):
 1. Compute the MS-OVBA “VBA project digest” over the project streams (excluding the signature
    streams), using the hash algorithm indicated by the extracted `DigestInfo`.
 2. Compare the computed digest to the `DigestInfo` digest bytes.
-3. Only treat `trusted_signed_only` as satisfied if:
-   - the PKCS#7/CMS signature verifies, **and**
-   - the digest comparison matches (signature is bound to the project contents).
+
+Trust Center enforcement (future work):
+
+- Only treat `trusted_signed_only` as satisfied if:
+  - the PKCS#7/CMS signature verifies, **and**
+  - the digest comparison matches (signature is bound to the project contents).
 
 For more detail, see [`vba-digital-signatures.md`](./vba-digital-signatures.md).
 
