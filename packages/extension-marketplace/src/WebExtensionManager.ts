@@ -34,6 +34,19 @@ export interface InstalledExtensionRecord {
   corrupted?: boolean;
   corruptedAt?: string;
   corruptedReason?: string;
+  /**
+   * Marketplace-provided security scan status for the installed package/version.
+   *
+   * Typically sourced from the download header (`x-package-scan-status`) and/or
+   * the per-version metadata field.
+   */
+  scanStatus?: string | null;
+  /**
+   * Marketplace key id for the publisher signing key that signed this package.
+   *
+   * Typically sourced from `x-publisher-key-id` and/or the per-version `signingKeyId`.
+   */
+  signingKeyId?: string | null;
 
   /**
    * When set, the installed record has been quarantined because its stored
@@ -263,7 +276,8 @@ export interface WebExtensionInstallOptions {
    * - "allow": allow install but return a warning (and optionally require confirmation)
    * - "ignore": ignore scan status completely
    *
-   * Default: "enforce" in production builds, "allow" in dev/test builds.
+   * Default: "enforce". Override via `FORMULA_EXTENSION_SCAN_POLICY` /
+   * `FORMULA_WEB_EXTENSION_SCAN_POLICY` (node) or `VITE_FORMULA_EXTENSION_SCAN_POLICY` (web).
    */
   scanPolicy?: ExtensionScanPolicy;
   /**
@@ -280,7 +294,6 @@ function isNodeRuntime(): boolean {
 }
 
 function defaultScanPolicyFromEnv(): ExtensionScanPolicy {
-  // Node (tests/desktop) should honor NODE_ENV for deterministic behavior.
   if (isNodeRuntime()) {
     const env = (process as any)?.env as Record<string, string | undefined> | undefined;
     const explicit = env?.FORMULA_EXTENSION_SCAN_POLICY ?? env?.FORMULA_WEB_EXTENSION_SCAN_POLICY;
@@ -290,10 +303,9 @@ function defaultScanPolicyFromEnv(): ExtensionScanPolicy {
         return normalized as ExtensionScanPolicy;
       }
     }
-    return env?.NODE_ENV === "production" ? "enforce" : "allow";
+    return "enforce";
   }
 
-  // Browser builds: prefer Vite's import.meta.env.PROD when available.
   const metaEnv = (import.meta as any)?.env as Record<string, unknown> | undefined;
   const explicit = metaEnv?.VITE_FORMULA_EXTENSION_SCAN_POLICY;
   if (explicit) {
@@ -302,12 +314,18 @@ function defaultScanPolicyFromEnv(): ExtensionScanPolicy {
       return normalized as ExtensionScanPolicy;
     }
   }
-  if (typeof metaEnv?.PROD === "boolean") {
-    return metaEnv.PROD ? "enforce" : "allow";
-  }
-
-  // Safe default.
   return "enforce";
+}
+
+function normalizeOptionalString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeScanStatus(value: unknown): string | null {
+  const normalized = normalizeOptionalString(value);
+  return normalized ? normalized.toLowerCase() : null;
 }
 
 function isSha256Hex(value: string): boolean {
@@ -631,6 +649,11 @@ export class WebExtensionManager {
       throw new Error("Marketplace did not provide latestVersion");
     }
 
+    const versionMeta = Array.isArray(ext.versions)
+      ? ext.versions.find((v) => v && typeof (v as any).version === "string" && (v as any).version === resolvedVersion) ??
+        null
+      : null;
+
     const rawPublisherKeys = Array.isArray(ext.publisherKeys) ? ext.publisherKeys : [];
     const hasPublisherKeySet = rawPublisherKeys.length > 0;
 
@@ -655,31 +678,60 @@ export class WebExtensionManager {
     const download = await this.marketplaceClient.downloadPackage(id, resolvedVersion);
     if (!download) throw new Error(`Package not found: ${id}@${resolvedVersion}`);
 
-    const scanStatus =
-      typeof download.scanStatus === "string" && download.scanStatus.trim().length > 0
-        ? download.scanStatus.trim()
-        : null;
-    if (scanStatus && scanStatus.toLowerCase() !== "passed") {
-      const policy = options.scanPolicy ?? this.scanPolicy;
-      if (policy === "enforce") {
-        throw new Error(
-          `Refusing to install ${id}@${resolvedVersion}: package scan status is "${scanStatus}" (expected "passed")`
-        );
-      }
-      if (policy === "allow") {
-        await addWarning({
-          kind: "scanStatus",
-          scanStatus,
-          message: `Extension ${id}@${resolvedVersion} has package scan status "${scanStatus}". Proceed with caution.`,
-        });
-      }
+    const signingKeyIdFromHeader = normalizeOptionalString(download.publisherKeyId);
+    const signingKeyIdFromVersion = normalizeOptionalString((versionMeta as any)?.signingKeyId);
+    if (signingKeyIdFromHeader && signingKeyIdFromVersion && signingKeyIdFromHeader !== signingKeyIdFromVersion) {
+      throw new Error(
+        `Marketplace signing key mismatch for ${id}@${resolvedVersion}: header=${signingKeyIdFromHeader} version=${signingKeyIdFromVersion}`
+      );
     }
+    const signingKeyId = signingKeyIdFromHeader ?? signingKeyIdFromVersion ?? null;
 
-    if (hasPublisherKeySet && download.publisherKeyId) {
-      const keyId = String(download.publisherKeyId);
+    if (hasPublisherKeySet && signingKeyId) {
+      const keyId = String(signingKeyId);
       const preferred = candidateKeys.find((k) => k.id === keyId);
       if (preferred) {
         candidateKeys = [preferred, ...candidateKeys.filter((k) => k.id !== keyId)];
+      }
+    }
+
+    const scanStatusFromHeader = normalizeScanStatus(download.scanStatus);
+    const scanStatusFromVersion = normalizeScanStatus((versionMeta as any)?.scanStatus);
+    if (scanStatusFromHeader && scanStatusFromVersion && scanStatusFromHeader !== scanStatusFromVersion) {
+      throw new Error(
+        `Marketplace provided conflicting package scan statuses for ${id}@${resolvedVersion}: header=${scanStatusFromHeader} version=${scanStatusFromVersion}`
+      );
+    }
+
+    const scanStatus = scanStatusFromHeader ?? scanStatusFromVersion ?? null;
+    const policy = options.scanPolicy ?? this.scanPolicy;
+    if (policy !== "ignore") {
+      if (!scanStatus) {
+        if (policy === "enforce") {
+          throw new Error(
+            `Refusing to install ${id}@${resolvedVersion}: package scan status is missing (expected "passed")`
+          );
+        }
+        if (policy === "allow") {
+          await addWarning({
+            kind: "scanStatus",
+            scanStatus: null,
+            message: `Extension ${id}@${resolvedVersion} is missing package scan status. Proceed with caution.`
+          });
+        }
+      } else if (scanStatus !== "passed") {
+        if (policy === "enforce") {
+          throw new Error(
+            `Refusing to install ${id}@${resolvedVersion}: package scan status is "${scanStatus}" (expected "passed")`
+          );
+        }
+        if (policy === "allow") {
+          await addWarning({
+            kind: "scanStatus",
+            scanStatus,
+            message: `Extension ${id}@${resolvedVersion} has package scan status "${scanStatus}". Proceed with caution.`
+          });
+        }
       }
     }
 
@@ -761,6 +813,14 @@ export class WebExtensionManager {
     }
 
     const installedAt = new Date().toISOString();
+    const installedRecord: InstalledExtensionRecord = {
+      id,
+      version: resolvedVersion,
+      installedAt,
+      scanStatus,
+      signingKeyId,
+      ...(warnings.length > 0 ? { warnings } : {})
+    };
     const db = await openDb();
     try {
       const tx = db.transaction([STORE_INSTALLED, STORE_PACKAGES], "readwrite");
@@ -780,7 +840,7 @@ export class WebExtensionManager {
       };
 
       packagesStore.put(pkgRecord);
-      installedStore.put({ id, version: resolvedVersion, installedAt });
+      installedStore.put(installedRecord);
 
       if (prev && prev.version && prev.version !== resolvedVersion) {
         packagesStore.delete(`${id}@${prev.version}`);
@@ -807,9 +867,7 @@ export class WebExtensionManager {
       }
     }
 
-    return warnings.length > 0
-      ? { id, version: resolvedVersion, installedAt, warnings }
-      : { id, version: resolvedVersion, installedAt };
+    return installedRecord;
   }
 
   async uninstall(id: string): Promise<void> {

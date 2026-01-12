@@ -17,16 +17,108 @@ const { createExtensionPackageV2, readExtensionPackageV2 } = extensionPackagePkg
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 
-test("install + run marketplace extension in browser (no CSP violations)", async ({ page }) => {
-  const keys = generateEd25519KeyPair();
-  const extensionDir = path.join(repoRoot, "extensions", "sample-hello");
-  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
-  const pkgSha256 = crypto.createHash("sha256").update(pkgBytes).digest("hex");
-  const pkgSignatureBase64 = readExtensionPackageV2(pkgBytes)?.signature?.signatureBase64 || "";
-  expect(pkgSignatureBase64).toMatch(/\S/);
+type SampleHelloFixture = {
+  keys: { publicKeyPem: string; privateKeyPem: string };
+  pkgBytes: Uint8Array;
+  pkgSha256: string;
+  pkgSignatureBase64: string;
+  publisherKeyId: string;
+};
 
-  const keyDer = crypto.createPublicKey(keys.publicKeyPem).export({ type: "spki", format: "der" });
-  const publisherKeyId = crypto.createHash("sha256").update(keyDer).digest("hex");
+let sampleHelloFixturePromise: Promise<SampleHelloFixture> | null = null;
+
+async function getSampleHelloFixture(): Promise<SampleHelloFixture> {
+  if (sampleHelloFixturePromise) return sampleHelloFixturePromise;
+  sampleHelloFixturePromise = (async () => {
+    const keys = generateEd25519KeyPair();
+    const extensionDir = path.join(repoRoot, "extensions", "sample-hello");
+    const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+    const pkgSha256 = crypto.createHash("sha256").update(pkgBytes).digest("hex");
+    const pkgSignatureBase64 = readExtensionPackageV2(pkgBytes)?.signature?.signatureBase64 || "";
+    if (!/\S/.test(pkgSignatureBase64)) {
+      throw new Error("Failed to read signatureBase64 from built extension package");
+    }
+
+    const keyDer = crypto.createPublicKey(keys.publicKeyPem).export({ type: "spki", format: "der" });
+    const publisherKeyId = crypto.createHash("sha256").update(keyDer).digest("hex");
+
+    return { keys, pkgBytes, pkgSha256, pkgSignatureBase64, publisherKeyId };
+  })();
+  return sampleHelloFixturePromise;
+}
+
+async function mockSampleHelloMarketplace(
+  page: Parameters<typeof test>[0] extends { page: infer P } ? P : any,
+  fixture: SampleHelloFixture,
+  opts: {
+    deprecated?: boolean;
+    blocked?: boolean;
+    malicious?: boolean;
+    publisherRevoked?: boolean;
+    scanStatusHeader?: string;
+  } = {}
+) {
+  const scanStatusHeader = typeof opts.scanStatusHeader === "string" ? opts.scanStatusHeader : "passed";
+
+  await page.route("**/api/extensions/formula.sample-hello", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        id: "formula.sample-hello",
+        name: "sample-hello",
+        displayName: "Sample Hello",
+        publisher: "formula",
+        description: "",
+        categories: [],
+        tags: [],
+        screenshots: [],
+        verified: true,
+        featured: false,
+        deprecated: Boolean(opts.deprecated),
+        blocked: Boolean(opts.blocked),
+        malicious: Boolean(opts.malicious),
+        publisherRevoked: Boolean(opts.publisherRevoked),
+        downloadCount: 0,
+        latestVersion: "1.0.0",
+        versions: [
+          {
+            version: "1.0.0",
+            sha256: fixture.pkgSha256,
+            uploadedAt: new Date().toISOString(),
+            yanked: false,
+            scanStatus: scanStatusHeader,
+            signingKeyId: fixture.publisherKeyId
+          }
+        ],
+        readme: "",
+        publisherPublicKeyPem: fixture.keys.publicKeyPem,
+        publisherKeys: [{ id: fixture.publisherKeyId, publicKeyPem: fixture.keys.publicKeyPem, revoked: false }],
+        updatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString()
+      })
+    });
+  });
+
+  await page.route("**/api/extensions/formula.sample-hello/download/1.0.0", async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: {
+        "Content-Type": "application/vnd.formula.extension-package",
+        "X-Package-Sha256": fixture.pkgSha256,
+        "X-Package-Signature": fixture.pkgSignatureBase64,
+        "X-Package-Scan-Status": scanStatusHeader,
+        "X-Package-Format-Version": "2",
+        "X-Publisher": "formula",
+        "X-Publisher-Key-Id": fixture.publisherKeyId
+      },
+      body: fixture.pkgBytes
+    });
+  });
+}
+
+test("install + run marketplace extension in browser (no CSP violations)", async ({ page }) => {
+  const fixture = await getSampleHelloFixture();
 
   const cspViolations: string[] = [];
   const consoleErrors: string[] = [];
@@ -55,50 +147,7 @@ test("install + run marketplace extension in browser (no CSP violations)", async
     }
   });
 
-  await page.route("**/api/extensions/formula.sample-hello", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        id: "formula.sample-hello",
-        name: "sample-hello",
-        displayName: "Sample Hello",
-        publisher: "formula",
-        description: "",
-        categories: [],
-        tags: [],
-        screenshots: [],
-        verified: true,
-        featured: false,
-        deprecated: false,
-        blocked: false,
-        malicious: false,
-        downloadCount: 0,
-        latestVersion: "1.0.0",
-        versions: [{ version: "1.0.0", sha256: pkgSha256, uploadedAt: new Date().toISOString(), yanked: false }],
-        readme: "",
-        publisherPublicKeyPem: keys.publicKeyPem,
-        publisherKeys: [{ id: publisherKeyId, publicKeyPem: keys.publicKeyPem, revoked: false }],
-        updatedAt: new Date().toISOString(),
-        createdAt: new Date().toISOString()
-      })
-    });
-  });
-
-  await page.route("**/api/extensions/formula.sample-hello/download/1.0.0", async (route) => {
-    await route.fulfill({
-      status: 200,
-      headers: {
-        "Content-Type": "application/vnd.formula.extension-package",
-        "X-Package-Sha256": pkgSha256,
-        "X-Package-Signature": pkgSignatureBase64,
-        "X-Package-Format-Version": "2",
-        "X-Publisher": "formula",
-        "X-Publisher-Key-Id": publisherKeyId
-      },
-      body: pkgBytes
-    });
-  });
+  await mockSampleHelloMarketplace(page, fixture, { scanStatusHeader: "passed" });
 
   await page.goto("/?extTest=1");
   try {
@@ -136,4 +185,104 @@ test("install + run marketplace extension in browser (no CSP violations)", async
   expect(result.sum).toBe(10);
   expect(result.outCell).toBe(10);
   expect(cspViolations).toEqual([]);
+});
+
+test("blocked extension cannot install", async ({ page }) => {
+  const fixture = await getSampleHelloFixture();
+  await mockSampleHelloMarketplace(page, fixture, { blocked: true, scanStatusHeader: "passed" });
+
+  await page.goto("/?extTest=1");
+  await page.waitForFunction(() => Boolean((window as any).__formulaExtensionTest), null, { timeout: 30_000 });
+
+  const result = await page.evaluate(async () => {
+    const api = (window as any).__formulaExtensionTest;
+    try {
+      await api.installExtension("formula.sample-hello");
+      return { ok: true, error: null, installed: await api.listInstalled() };
+    } catch (error) {
+      return {
+        ok: false,
+        error: { message: String((error as any)?.message ?? error) },
+        installed: await api.listInstalled()
+      };
+    } finally {
+      await api.dispose();
+    }
+  });
+
+  expect(result.ok).toBe(false);
+  expect(result.error?.message).toMatch(/blocked/i);
+  expect(result.installed).toEqual([]);
+});
+
+test("deprecated extension shows warning and can require confirmation", async ({ page }) => {
+  const fixture = await getSampleHelloFixture();
+  await mockSampleHelloMarketplace(page, fixture, { deprecated: true, scanStatusHeader: "passed" });
+
+  await page.goto("/?extTest=1");
+  await page.waitForFunction(() => Boolean((window as any).__formulaExtensionTest), null, { timeout: 30_000 });
+
+  const result = await page.evaluate(async () => {
+    const api = (window as any).__formulaExtensionTest;
+    const first = await (async () => {
+      try {
+        await api.installExtension("formula.sample-hello", null, {
+          confirm: () => false,
+        });
+        return { ok: true };
+      } catch (error) {
+        return {
+          ok: false,
+          error: {
+            message: String((error as any)?.message ?? error),
+          },
+          installed: await api.listInstalled(),
+        };
+      }
+    })();
+
+    const second = await api.installExtension("formula.sample-hello", null, {
+      confirm: () => true,
+    });
+    const installed = await api.listInstalled();
+    await api.dispose();
+    return { first, second, installed };
+  });
+
+  expect(result.first.ok).toBe(false);
+  expect((result.first as any).error?.message).toMatch(/cancelled/i);
+  expect((result.first as any).installed).toEqual([]);
+  expect((result.second as any)?.warnings?.some((w: any) => w.kind === "deprecated")).toBe(true);
+  expect(result.second).toMatchObject({ id: "formula.sample-hello", version: "1.0.0", scanStatus: "passed" });
+  expect((result.second as any)?.signingKeyId).toBe(fixture.publisherKeyId);
+  expect(result.installed).toHaveLength(1);
+});
+
+test("scanStatus failure blocks install", async ({ page }) => {
+  const fixture = await getSampleHelloFixture();
+  await mockSampleHelloMarketplace(page, fixture, { scanStatusHeader: "failed" });
+
+  await page.goto("/?extTest=1");
+  await page.waitForFunction(() => Boolean((window as any).__formulaExtensionTest), null, { timeout: 30_000 });
+
+  const result = await page.evaluate(async () => {
+    const api = (window as any).__formulaExtensionTest;
+    try {
+      await api.installExtension("formula.sample-hello");
+      return { ok: true, error: null, installed: await api.listInstalled() };
+    } catch (error) {
+      return {
+        ok: false,
+        error: { message: String((error as any)?.message ?? error) },
+        installed: await api.listInstalled()
+      };
+    } finally {
+      await api.dispose();
+    }
+  });
+
+  expect(result.ok).toBe(false);
+  expect(result.error?.message).toMatch(/scan status/i);
+  expect(result.error?.message).toMatch(/failed/i);
+  expect(result.installed).toEqual([]);
 });

@@ -87,13 +87,22 @@ export async function setupExtensionTestHarness(): Promise<void> {
   const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: host.engineVersion });
 
   const api = {
-    async installExtension(id: string) {
-      await manager.install(id);
+    async installExtension(id: string, version: string | null = null, options: any = undefined) {
+      const record = await manager.install(id, version, options);
       await manager.loadAllInstalled();
-      return id;
+      return record;
+    },
+    async loadInstalled(id: string) {
+      return manager.loadInstalled(id);
     },
     async uninstallExtension(id: string) {
       await manager.uninstall(id);
+    },
+    async listInstalled() {
+      return manager.listInstalled();
+    },
+    async getInstalled(id: string) {
+      return manager.getInstalled(id);
     },
     async installSampleHello() {
       const id = "formula.sample-hello";

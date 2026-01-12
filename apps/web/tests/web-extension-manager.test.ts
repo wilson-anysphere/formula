@@ -153,11 +153,12 @@ function createMockMarketplace({
   packages,
   publisherKeys = null,
   publisherKeyIds = null,
+  scanStatuses = null,
+  extensionVersions = null,
   deprecated = false,
   blocked = false,
   malicious = false,
-  publisherRevoked = false,
-  scanStatuses = null
+  publisherRevoked = false
 }: any) {
   return {
     async getExtension(id: string) {
@@ -176,7 +177,7 @@ function createMockMarketplace({
         screenshots: [],
         downloadCount: 0,
         updatedAt: new Date().toISOString(),
-        versions: [],
+        versions: Array.isArray(extensionVersions) ? extensionVersions : [],
         readme: "",
         publisherPublicKeyPem: publicKeyPem,
         publisherKeys: Array.isArray(publisherKeys) ? publisherKeys : undefined,
@@ -202,9 +203,9 @@ function createMockMarketplace({
             ? publisherKeyIds[version]
             : null,
         scanStatus:
-          scanStatuses && typeof scanStatuses === "object" && typeof scanStatuses[version] === "string"
-            ? scanStatuses[version]
-            : null,
+          scanStatuses && typeof scanStatuses === "object" && Object.prototype.hasOwnProperty.call(scanStatuses, version)
+            ? (scanStatuses as any)[version]
+            : "passed",
         filesSha256: null
       };
     }
@@ -319,7 +320,10 @@ test("install → verify → load → execute a command (sample-hello)", async (
 
   const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
-  await manager.install("formula.sample-hello");
+  const installed = await manager.install("formula.sample-hello");
+  expect(installed.scanStatus).toBe("passed");
+  expect(installed.signingKeyId ?? null).toBeNull();
+  expect((await manager.getInstalled("formula.sample-hello"))?.scanStatus).toBe("passed");
 
   // Installing an extension should synchronously persist its contributed panels so the desktop
   // layout system can seed the panel registry before deserializing persisted layouts.
@@ -330,7 +334,6 @@ test("install → verify → load → execute a command (sample-hello)", async (
     extensionId: "formula.sample-hello",
     title: "Sample Hello Panel",
   });
-
   await manager.loadInstalled("formula.sample-hello");
 
   const result = await host.executeCommand("sampleHello.sumSelection");
@@ -819,11 +822,12 @@ test("install supports publisher signing key rotation via publisherKeys + per-ve
   const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
   await manager.install("test.test-ext", "1.0.0");
+  expect((await manager.getInstalled("test.test-ext"))?.signingKeyId).toBe("keyA");
   await manager.loadInstalled("test.test-ext");
   expect(await host.executeCommand("test.version")).toBe("v1");
 
   await manager.update("test.test-ext");
-  expect(await manager.getInstalled("test.test-ext")).toMatchObject({ version: "1.0.1" });
+  expect(await manager.getInstalled("test.test-ext")).toMatchObject({ version: "1.0.1", signingKeyId: "keyB" });
   expect(await host.executeCommand("test.version")).toBe("v2");
 
   await manager.dispose();
@@ -929,7 +933,7 @@ test("install rejects conflicting contributed panel ids across installed extensi
         formatVersion: 2,
         publisher: id.split(".")[0],
         publisherKeyId: null,
-        scanStatus: null,
+        scanStatus: "passed",
         filesSha256: null
       };
     }
@@ -1460,6 +1464,62 @@ test("install can be cancelled via confirm() when installing a deprecated extens
   await host.dispose();
 });
 
+test("install uses per-version scanStatus metadata when download scanStatus header is missing", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+    scanStatuses: { "1.0.0": null },
+    extensionVersions: [{ version: "1.0.0", scanStatus: "passed" }],
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true,
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  const installed = await manager.install("formula.sample-hello", "1.0.0");
+  expect(installed.scanStatus).toBe("passed");
+  expect((await manager.getInstalled("formula.sample-hello"))?.scanStatus).toBe("passed");
+
+  await manager.dispose();
+  await host.dispose();
+});
+
+test("install refuses when scanStatus is missing by default", async () => {
+  const keys = generateEd25519KeyPair();
+  const extensionDir = path.resolve("extensions/sample-hello");
+  const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
+
+  const marketplaceClient = createMockMarketplace({
+    extensionId: "formula.sample-hello",
+    latestVersion: "1.0.0",
+    publicKeyPem: keys.publicKeyPem,
+    packages: { "1.0.0": pkgBytes },
+    scanStatuses: { "1.0.0": null },
+  });
+
+  const host = new BrowserExtensionHost({
+    engineVersion: "1.0.0",
+    spreadsheetApi: new TestSpreadsheetApi(),
+    permissionPrompt: async () => true,
+  });
+  const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
+
+  await expect(manager.install("formula.sample-hello", "1.0.0")).rejects.toThrow(/scan status.*missing/i);
+  expect(await manager.listInstalled()).toEqual([]);
+
+  await manager.dispose();
+  await host.dispose();
+});
+
 test("install enforces scanStatus when configured", async () => {
   const keys = generateEd25519KeyPair();
   const extensionDir = path.resolve("extensions/sample-hello");
@@ -1554,7 +1614,7 @@ test("install can be cancelled via confirm() when scanStatus is non-passed and p
   await host.dispose();
 });
 
-test("scanStatus is allowed by default in dev/test builds (warn-only)", async () => {
+test("scanStatus is enforced by default", async () => {
   const keys = generateEd25519KeyPair();
   const extensionDir = path.resolve("extensions/sample-hello");
   const pkgBytes = await createExtensionPackageV2(extensionDir, { privateKeyPem: keys.privateKeyPem });
@@ -1574,8 +1634,8 @@ test("scanStatus is allowed by default in dev/test builds (warn-only)", async ()
   });
   const manager = new WebExtensionManager({ marketplaceClient, host, engineVersion: "1.0.0" });
 
-  const result = await manager.install("formula.sample-hello", "1.0.0");
-  expect(result.warnings?.some((w) => w.kind === "scanStatus")).toBe(true);
+  await expect(manager.install("formula.sample-hello", "1.0.0")).rejects.toThrow(/scan status/i);
+  expect(await manager.listInstalled()).toEqual([]);
 
   await manager.dispose();
   await host.dispose();
