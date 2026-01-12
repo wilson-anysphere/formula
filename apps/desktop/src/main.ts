@@ -6184,7 +6184,7 @@ async function loadWorkbookIntoDocument(info: WorkbookInfo): Promise<void> {
     queryString: typeof window !== "undefined" ? window.location.search : "",
     env: {
       ...((import.meta as any).env ?? {}),
-      ...(typeof process !== "undefined" ? (process as any).env ?? {} : {}),
+      ...(((globalThis as any).process?.env as Record<string, unknown> | undefined) ?? {}),
     },
   });
 
