@@ -57,12 +57,37 @@ fn lambda_used_as_number_returns_value_error() {
 #[test]
 fn lambda_used_in_lookup_functions_returns_value_error() {
     let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "B1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "C1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "B2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "C2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "B4", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "C4", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "B5", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "C5", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "D1", 1.0).unwrap();
+    engine.set_cell_value("Sheet1", "D2", 2.0).unwrap();
+    engine.set_cell_value("Sheet1", "E1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "E2", 20.0).unwrap();
+
     assert_eq!(
         eval(&mut engine, "=MATCH(LAMBDA(x,x),{1,2},0)"),
         Value::Error(ErrorKind::Value)
     );
     assert_eq!(
         eval(&mut engine, "=XMATCH(LAMBDA(x,x),{1,2})"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        eval(&mut engine, r#"=XLOOKUP(LAMBDA(x,x),D1:D2,E1:E2,"no")"#),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        eval(&mut engine, "=VLOOKUP(LAMBDA(x,x),B1:C2,2,FALSE)"),
+        Value::Error(ErrorKind::Value)
+    );
+    assert_eq!(
+        eval(&mut engine, "=HLOOKUP(LAMBDA(x,x),B4:C5,2,FALSE)"),
         Value::Error(ErrorKind::Value)
     );
 }
