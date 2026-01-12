@@ -424,14 +424,14 @@ Representative snippet (from the unit tests in `crates/formula-xlsx/src/rich_dat
 ```
 
 Other observed `xl/metadata.xml` shapes exist. For example, the **synthetic** fixture
-`fixtures/xlsx/basic/image-in-cell-richdata.xlsx` contains a `<valueMetadata>` table but **no**
-`<futureMetadata>` block.
+`fixtures/xlsx/basic/image-in-cell-richdata.xlsx` uses a `<futureMetadata name="XLRICHVALUE">` table with a
+single `<xlrd:rvb i="0"/>` mapping, but its sheet cells use `vm="0"` (0-based).
 
 In that fixture:
 
 - Worksheet cells use `vm="0"` (0-based).
-- The `<rc v="0"/>` value appears to directly reference the rich value index (0-based) into
-  `xl/richData/richValue.xml`.
+- `<rc t="1" v="0"/>` selects the first `<futureMetadata name="XLRICHVALUE">` `<bk>`.
+- `<xlrd:rvb i="0"/>` provides the 0-based rich value index into `xl/richData/richValue.xml`.
 
 See [`docs/20-images-in-cells-richdata.md`](./20-images-in-cells-richdata.md) for the exact XML and
 namespaces observed in that fixture. Formula currently treats these schemas as opaque and focuses on
@@ -680,19 +680,18 @@ Also observed in tests:
 - `application/vnd.openxmlformats-officedocument.spreadsheetml.metadata+xml`
   - used by `crates/formula-xlsx/tests/metadata_rich_value_roundtrip.rs`
 
-And observed that **no override** may be present (default `application/xml`), in the **synthetic** fixture:
-
-- `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`
-Note: some workbooks omit the override entirely and rely on the package default
-`<Default Extension="xml" ContentType="application/xml"/>` (e.g. `fixtures/xlsx/basic/image-in-cell-richdata.xlsx`).
+Some workbooks may omit the override entirely and rely on the package default
+`<Default Extension="xml" ContentType="application/xml"/>`.
 
 ### `xl/richData/*` content types (observed + variants)
 
 Content types for `xl/richData/*` vary across Excel/producers and across the two naming schemes
 (`richValue*.xml` vs `rdRichValue*`).
 
-Observed in the **synthetic** fixture [`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`](../fixtures/xlsx/basic/image-in-cell-richdata.xlsx): no explicit `[Content_Types].xml` overrides
-for `xl/richData/*` (falls back to the package default `application/xml`).
+Observed in the **synthetic** fixture [`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`](../fixtures/xlsx/basic/image-in-cell-richdata.xlsx) (explicit overrides present):
+
+- `/xl/richData/richValue.xml`: `application/vnd.ms-excel.richvalue+xml`
+- `/xl/richData/richValueRel.xml`: `application/vnd.ms-excel.richvaluerel+xml`
 
 Observed in [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx) (explicit overrides present):
 
@@ -762,7 +761,7 @@ Partially known (fixture-driven details still recommended):
   - Also observed in [`fixtures/xlsx/rich-data/images-in-cell.xlsx`](../fixtures/xlsx/rich-data/images-in-cell.xlsx):
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
   - Observed in [`fixtures/xlsx/basic/image-in-cell-richdata.xlsx`](../fixtures/xlsx/basic/image-in-cell-richdata.xlsx):
-    - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"`
+    - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata"`
   - Observed in [`fixtures/xlsx/basic/image-in-cell.xlsx`](../fixtures/xlsx/basic/image-in-cell.xlsx):
     - `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata"`
   - Preservation is covered by `crates/formula-xlsx/tests/metadata_rich_values_vm_roundtrip.rs`.

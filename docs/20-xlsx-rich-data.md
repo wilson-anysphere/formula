@@ -16,7 +16,8 @@ In OOXML this is implemented using **Rich Values** (“richData”) plus **cell 
 - The worksheet cell points to a **value-metadata record** via the cell attribute `vm="…"`.
 - That value-metadata record binds the cell to a **rich value index**. The exact mapping schema varies:
   - Some files use a `futureMetadata name="XLRICHVALUE"` table containing `<xlrd:rvb i="…"/>` entries.
-  - Other files omit `futureMetadata`/`rvb` and appear to use `rc/@v` directly as the rich value index.
+  - Other variants may omit `futureMetadata`/`rvb` and may use `rc/@v` directly as the rich value index
+    (not currently observed in the `image-in-cell*.xlsx` fixtures in this repo).
 - The rich value data lives in either:
   - `xl/richData/richValue*.xml` (a list of `<rv>` entries), or
   - the **`rdRichValue*`** variant (`xl/richData/rdrichvalue.xml` + `xl/richData/rdrichvaluestructure.xml`)
@@ -178,13 +179,23 @@ xl/richData/_rels/richValueRel.xml.rels
 xl/media/image1.png
 ```
 
-**`xl/metadata.xml` shape (no `futureMetadata`)**
+**`xl/metadata.xml` (`futureMetadata name="XLRICHVALUE"` + `xlrd:rvb i="..."`)**
 
 ```xml
-<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<metadata xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+          xmlns:xlrd="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
   <metadataTypes count="1">
-    <metadataType name="XLRICHVALUE" minSupportedVersion="0" copy="1" pasteAll="1" pasteValues="1" merge="1" splitFirst="1" rowColShift="1" clearFormats="1" clearComments="1" assign="1" coerce="1" cellMeta="1"/>
+    <metadataType name="XLRICHVALUE" minSupportedVersion="120000" maxSupportedVersion="120000"/>
   </metadataTypes>
+  <futureMetadata name="XLRICHVALUE" count="1">
+    <bk>
+      <extLst>
+        <ext uri="{3E2803F5-59A4-4A43-8C86-93BA0C219F4F}">
+          <xlrd:rvb i="0"/>
+        </ext>
+      </extLst>
+    </bk>
+  </futureMetadata>
   <valueMetadata count="1">
     <bk>
       <rc t="1" v="0"/>
@@ -196,13 +207,14 @@ xl/media/image1.png
 Notes:
 
 * In this fixture, worksheet `c/@vm` is **0-based** (`vm="0"` selects the first `valueMetadata` record).
-* With no `futureMetadata` table present, `rc/@v` **appears to be the rich value index** (0-based).
+* `rc/@v` is a **0-based** index into the `<futureMetadata name="XLRICHVALUE">` `<bk>` list.
+* `xlrd:rvb/@i` is the **0-based rich value index** into `xl/richData/richValue.xml`.
 
 **`xl/richData/richValue.xml` + `xl/richData/richValueRel.xml` namespaces**
 
 ```xml
 <rvData xmlns="http://schemas.microsoft.com/office/spreadsheetml/2017/richdata">
-  <rv s="0" t="image"><v>0</v></rv>
+  <rv s="0" t="image"><v kind="rel">0</v></rv>
 </rvData>
 ```
 
@@ -214,8 +226,9 @@ Notes:
 ```
 
 * Namespace is **`…/2017/richdata`** for `richValue.xml` and **`…/2017/richdata2`** for `richValueRel.xml`.
-* The image payload is a single integer `<v>` and it is the 0-based index into the `<rel>` list.
-  * Shape: `<rv t="image"><v>REL_SLOT</v></rv>`
+* The image payload is a single integer `<v>` (in this fixture: `<v kind="rel">…</v>`) and it is the
+  0-based index into the `<rel>` list.
+  * Shape: `<rv t="image"><v kind="rel">REL_SLOT</v></rv>`
   * In this fixture: `REL_SLOT = 0`
 
 ### Fixture: `fixtures/xlsx/basic/image-in-cell.xlsx` (`rdrichvalue.xml` + `richValueRel.xml` 2022 variant)
