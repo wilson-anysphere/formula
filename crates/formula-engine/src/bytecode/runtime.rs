@@ -7088,20 +7088,25 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         return Value::Error(ErrorKind::Value);
     };
 
-    // Bytecode currently supports only scalar XLOOKUP results (return_array must be a vector).
-    // This matches the common spreadsheet pattern of looking up a value from a single column/row.
+    // Validate return_array shape:
+    // - vertical lookup_array (Nx1) requires return_array.rows == N; result spills horizontally.
+    // - horizontal lookup_array (1xN) requires return_array.cols == N; result spills vertically.
+    let lookup_len_i32 = match i32::try_from(lookup_len) {
+        Ok(v) => v,
+        Err(_) => return Value::Error(ErrorKind::Value),
+    };
     match lookup_shape {
         XlookupVectorShape::Vertical => {
-            if return_range.cols() != 1 || return_range.rows() != lookup_len as i32 {
+            if return_range.rows() != lookup_len_i32 {
                 return Value::Error(ErrorKind::Value);
             }
         }
         XlookupVectorShape::Horizontal => {
-            if return_range.rows() != 1 || return_range.cols() != lookup_len as i32 {
+            if return_range.cols() != lookup_len_i32 {
                 return Value::Error(ErrorKind::Value);
             }
         }
-    }
+    };
 
     let lookup_value_engine = bytecode_value_to_engine(lookup_value.clone());
     let match_pos = lookup::xmatch_with_modes_accessor_with_locale(
@@ -7143,18 +7148,52 @@ fn fn_xlookup(args: &[Value], grid: &dyn Grid, base: CellCoord) -> Value {
         _ => return Value::Error(ErrorKind::Value),
     };
 
-    let result_coord = match lookup_shape {
-        XlookupVectorShape::Vertical => CellCoord {
-            row: return_range.row_start + idx as i32,
-            col: return_range.col_start,
-        },
-        XlookupVectorShape::Horizontal => CellCoord {
-            row: return_range.row_start,
-            col: return_range.col_start + idx as i32,
-        },
-    };
-
-    grid.get_value(result_coord)
+    match lookup_shape {
+        XlookupVectorShape::Vertical => {
+            // Return the matched row from return_array.
+            let row = return_range.row_start + idx as i32;
+            let cols = match usize::try_from(return_range.cols()) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Value),
+            };
+            if cols == 1 {
+                return grid.get_value(CellCoord {
+                    row,
+                    col: return_range.col_start,
+                });
+            }
+            let mut values = Vec::with_capacity(cols);
+            for col_offset in 0..cols {
+                values.push(grid.get_value(CellCoord {
+                    row,
+                    col: return_range.col_start + col_offset as i32,
+                }));
+            }
+            Value::Array(ArrayValue::new(1, cols, values))
+        }
+        XlookupVectorShape::Horizontal => {
+            // Return the matched column from return_array.
+            let col = return_range.col_start + idx as i32;
+            let rows = match usize::try_from(return_range.rows()) {
+                Ok(v) => v,
+                Err(_) => return Value::Error(ErrorKind::Value),
+            };
+            if rows == 1 {
+                return grid.get_value(CellCoord {
+                    row: return_range.row_start,
+                    col,
+                });
+            }
+            let mut values = Vec::with_capacity(rows);
+            for row_offset in 0..rows {
+                values.push(grid.get_value(CellCoord {
+                    row: return_range.row_start + row_offset as i32,
+                    col,
+                }));
+            }
+            Value::Array(ArrayValue::new(rows, 1, values))
+        }
+    }
 }
 
 fn wildcard_pattern_for_lookup(lookup: &Value) -> Option<WildcardPattern> {

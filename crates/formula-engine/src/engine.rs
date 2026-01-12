@@ -8097,17 +8097,12 @@ fn bytecode_expr_is_eligible_inner(
                     args[1],
                     bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
                 );
-                let return_array_ok = match &args[2] {
-                    bytecode::Expr::CellRef(_) => true,
-                    bytecode::Expr::RangeRef(r) => {
-                        // Bytecode currently supports only scalar XLOOKUP results, so require a
-                        // 1D return vector (single row or single column) to avoid dynamic-array
-                        // results that the bytecode backend cannot represent.
-                        (r.start.row == r.end.row && r.start.row_abs == r.end.row_abs)
-                            || (r.start.col == r.end.col && r.start.col_abs == r.end.col_abs)
-                    }
-                    _ => false,
-                };
+                // Bytecode supports XLOOKUP's vector spill semantics (row/column slice) as long as
+                // lookup_array/return_array are reference-like arguments (ranges).
+                let return_array_ok = matches!(
+                    args[2],
+                    bytecode::Expr::RangeRef(_) | bytecode::Expr::CellRef(_)
+                );
                 let if_not_found_ok = args.get(3).map_or(true, |arg| {
                     bytecode_expr_is_eligible_inner(arg, false, false, lexical_scopes)
                 });

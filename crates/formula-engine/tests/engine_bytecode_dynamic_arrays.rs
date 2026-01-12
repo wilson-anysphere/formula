@@ -192,3 +192,71 @@ fn bytecode_backend_spills_let_bound_array_literal() {
     assert_eq!(engine.get_cell_value("Sheet1", "C2"), Value::Number(4.0));
     assert_eq!(engine.get_cell_value("Sheet1", "D2"), Value::Number(5.0));
 }
+
+#[test]
+fn bytecode_backend_xlookup_spills_row_result() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "B1", "a").unwrap();
+    engine.set_cell_value("Sheet1", "B2", "b").unwrap();
+    engine.set_cell_value("Sheet1", "B3", "c").unwrap();
+    engine.set_cell_value("Sheet1", "B4", "d").unwrap();
+
+    engine.set_cell_value("Sheet1", "C1", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "C2", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "C3", 30.0).unwrap();
+    engine.set_cell_value("Sheet1", "C4", 40.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "D1", 100.0).unwrap();
+    engine.set_cell_value("Sheet1", "D2", 200.0).unwrap();
+    engine.set_cell_value("Sheet1", "D3", 300.0).unwrap();
+    engine.set_cell_value("Sheet1", "D4", 400.0).unwrap();
+
+    // Return array is 4x2, so XLOOKUP should spill a 1x2 row slice.
+    engine
+        .set_cell_formula("Sheet1", "F1", r#"=XLOOKUP("b",B1:B4,C1:D4)"#)
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "F1").expect("spill range");
+    assert_eq!(start, parse_a1("F1").unwrap());
+    assert_eq!(end, parse_a1("G1").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "F1"), Value::Number(20.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G1"), Value::Number(200.0));
+}
+
+#[test]
+fn bytecode_backend_xlookup_spills_column_result() {
+    let mut engine = Engine::new();
+    engine.set_cell_value("Sheet1", "B6", "a").unwrap();
+    engine.set_cell_value("Sheet1", "C6", "b").unwrap();
+    engine.set_cell_value("Sheet1", "D6", "c").unwrap();
+    engine.set_cell_value("Sheet1", "E6", "d").unwrap();
+
+    engine.set_cell_value("Sheet1", "B7", 10.0).unwrap();
+    engine.set_cell_value("Sheet1", "C7", 20.0).unwrap();
+    engine.set_cell_value("Sheet1", "D7", 30.0).unwrap();
+    engine.set_cell_value("Sheet1", "E7", 40.0).unwrap();
+
+    engine.set_cell_value("Sheet1", "B8", 100.0).unwrap();
+    engine.set_cell_value("Sheet1", "C8", 200.0).unwrap();
+    engine.set_cell_value("Sheet1", "D8", 300.0).unwrap();
+    engine.set_cell_value("Sheet1", "E8", 400.0).unwrap();
+
+    // Return array is 2x4, so XLOOKUP should spill a 2x1 column slice.
+    engine
+        .set_cell_formula("Sheet1", "G6", r#"=XLOOKUP("c",B6:E6,B7:E8)"#)
+        .unwrap();
+
+    assert_eq!(engine.bytecode_program_count(), 1);
+    engine.recalculate_single_threaded();
+
+    let (start, end) = engine.spill_range("Sheet1", "G6").expect("spill range");
+    assert_eq!(start, parse_a1("G6").unwrap());
+    assert_eq!(end, parse_a1("G7").unwrap());
+
+    assert_eq!(engine.get_cell_value("Sheet1", "G6"), Value::Number(30.0));
+    assert_eq!(engine.get_cell_value("Sheet1", "G7"), Value::Number(300.0));
+}
