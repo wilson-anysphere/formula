@@ -3188,7 +3188,8 @@ fn xor_array(a: &ArrayValue, acc: &mut bool) -> Option<ErrorKind> {
     for v in a.iter() {
         match v {
             Value::Error(e) => return Some(*e),
-            // Be tolerant of NaN values (some columnar paths use NaN for blanks/non-numeric).
+            // Historical behavior: the engine used NaN as a blank sentinel for dense numeric arrays.
+            // Keep ignoring NaNs so older array materializations still behave like blanks.
             Value::Number(n) if n.is_nan() => {}
             Value::Number(n) => {
                 *acc ^= *n != 0.0;
