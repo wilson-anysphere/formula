@@ -67,7 +67,7 @@ fn parse_formula_partial_fallback_context_in_unterminated_string() {
     let formula = r#"=SUM("hello"#.to_string();
     let cursor = formula.encode_utf16().count() as u32;
 
-    let parsed_js = parse_formula_partial(formula, cursor, None).unwrap();
+    let parsed_js = parse_formula_partial(formula, Some(cursor), None).unwrap();
     let parsed: PartialParseResult = serde_wasm_bindgen::from_value(parsed_js).unwrap();
 
     assert!(parsed.error.is_some());
@@ -86,7 +86,7 @@ fn parse_formula_partial_fallback_context_in_unterminated_sheet_quote() {
     let formula = "=SUM('My Sheet".to_string();
     let cursor = formula.encode_utf16().count() as u32;
 
-    let parsed_js = parse_formula_partial(formula, cursor, None).unwrap();
+    let parsed_js = parse_formula_partial(formula, Some(cursor), None).unwrap();
     let parsed: PartialParseResult = serde_wasm_bindgen::from_value(parsed_js).unwrap();
 
     assert!(parsed.error.is_some());

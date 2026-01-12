@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value as EngineValue};
 use formula_engine::locale::{
     canonicalize_formula, get_locale, FormulaLocale, ValueLocaleConfig, EN_US,
 };
-use formula_model::{display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range};
+use formula_engine::{Engine, ErrorKind, NameDefinition, NameScope, Value as EngineValue};
+use formula_model::{
+    display_formula_text, CellRef, CellValue, DateSystem, DefinedNameScope, Range,
+};
 use js_sys::{Array, Object, Reflect};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -537,6 +539,14 @@ fn utf16_cursor_to_byte_index(s: &str, cursor_utf16: u32) -> usize {
     s.len()
 }
 
+fn byte_index_to_utf16_cursor(s: &str, byte_idx: usize) -> usize {
+    let mut byte_idx = byte_idx.min(s.len());
+    while byte_idx > 0 && !s.is_char_boundary(byte_idx) {
+        byte_idx -= 1;
+    }
+    s[..byte_idx].encode_utf16().count()
+}
+
 fn is_ident_start_char(c: char) -> bool {
     matches!(c, '$' | '_' | '\\' | 'A'..='Z' | 'a'..='z') || (!c.is_ascii() && c.is_alphabetic())
 }
@@ -798,7 +808,7 @@ struct WasmPartialParse {
 #[wasm_bindgen(js_name = "parseFormulaPartial")]
 pub fn parse_formula_partial(
     formula: String,
-    cursor: u32,
+    cursor: Option<u32>,
     opts: Option<JsValue>,
 ) -> Result<JsValue, JsValue> {
     ensure_rust_constructors_run();
@@ -811,7 +821,8 @@ pub fn parse_formula_partial(
     };
 
     // Cursor is expressed in UTF-16 code units by JS callers.
-    let byte_cursor = utf16_cursor_to_byte_index(&formula, cursor);
+    let cursor_utf16 = cursor.unwrap_or_else(|| formula.encode_utf16().count() as u32);
+    let byte_cursor = utf16_cursor_to_byte_index(&formula, cursor_utf16);
     let prefix = &formula[..byte_cursor];
 
     let mut parsed = formula_engine::parse_formula_partial(prefix, opts.clone());
@@ -831,8 +842,8 @@ pub fn parse_formula_partial(
     let error = parsed.error.map(|err| WasmParseError {
         message: err.message,
         span: WasmSpan {
-            start: err.span.start,
-            end: err.span.end,
+            start: byte_index_to_utf16_cursor(prefix, err.span.start),
+            end: byte_index_to_utf16_cursor(prefix, err.span.end),
         },
     });
 
@@ -849,7 +860,9 @@ pub fn parse_formula_partial(
         context,
     };
 
-    serde_wasm_bindgen::to_value(&out).map_err(|err| js_err(err.to_string()))
+    use serde::ser::Serialize as _;
+    out.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|err| js_err(err.to_string()))
 }
 
 #[wasm_bindgen]
@@ -1399,7 +1412,10 @@ mod tests {
         let json_str = wb.to_json().unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
-        assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A1"], json!("=SUM(1,2)"));
+        assert_eq!(
+            parsed["sheets"]["Sheet1"]["cells"]["A1"],
+            json!("=SUM(1,2)")
+        );
         assert_eq!(parsed["sheets"]["Sheet1"]["cells"]["A2"], json!("=1.5+1"));
     }
 }
