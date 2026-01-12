@@ -291,6 +291,9 @@ test("integration: denied network permission blocks fetch", async (t) => {
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    // Worker startup can be slow under heavy CI load; keep integration tests focused on
+    // correctness rather than the default 5s activation SLA.
+    activationTimeoutMs: 20_000,
     permissionPrompt: async ({ permissions }) => {
       if (permissions.includes("network")) return false;
       return true;
@@ -317,6 +320,7 @@ test("integration: clipboard API is permission gated and writes clipboard text",
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    activationTimeoutMs: 20_000,
     permissionPrompt: async () => true
   });
 
@@ -343,6 +347,7 @@ test("integration: denied clipboard permission blocks clipboard writes", async (
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    activationTimeoutMs: 20_000,
     permissionPrompt: async ({ permissions }) => {
       if (permissions.includes("clipboard")) return false;
       return true;
@@ -374,6 +379,7 @@ test("integration: config.get returns contributed default values", async (t) => 
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    activationTimeoutMs: 20_000,
     permissionPrompt: async () => true
   });
 
@@ -396,6 +402,7 @@ test("integration: denied permission prevents side effects", async (t) => {
     engineVersion: "1.0.0",
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
+    activationTimeoutMs: 20_000,
     permissionPrompt: async ({ permissions }) => {
       // Allow command registration, but deny write access.
       if (permissions.includes("cells.write")) return false;

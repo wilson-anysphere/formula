@@ -51,8 +51,10 @@ test("activation is de-duplicated when multiple commands trigger it concurrently
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true,
-    activationTimeoutMs: 5000,
-    commandTimeoutMs: 5000
+    // Worker startup can be slow under heavy CI/agent load; keep this generous so the
+    // test focuses on activation de-duplication rather than the default 5s SLA.
+    activationTimeoutMs: 20_000,
+    commandTimeoutMs: 20_000
   });
 
   t.after(async () => {

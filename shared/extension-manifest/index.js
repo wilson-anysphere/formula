@@ -271,7 +271,7 @@ function validateActivationEvents(activationEvents, contributes) {
     if (ev.startsWith("onView:")) {
       const id = ev.slice("onView:".length);
       if (id.trim().length === 0) {
-        throw new ManifestError(`activationEvents references empty view/panel id`);
+        throw new ManifestError("activationEvents references empty view/panel id");
       }
       // `onView:*` is used to activate an extension when its own contributed panel/view is opened.
       // Require that the referenced id is declared under `contributes.panels` to keep activation

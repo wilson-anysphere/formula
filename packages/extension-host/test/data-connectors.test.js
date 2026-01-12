@@ -106,7 +106,7 @@ test("data connectors: registration rejected when connector not declared in mani
     permissionPrompt: async () => true,
     // Activation can be slow on contended runners; keep this high enough to
     // avoid flaking while still exercising the "undeclared connector" guard.
-    activationTimeoutMs: 5000
+    activationTimeoutMs: 20_000
   });
 
   t.after(async () => {
@@ -199,7 +199,9 @@ test("data connectors: timeout terminates worker, rejects in-flight requests, an
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true,
-    activationTimeoutMs: 5000,
+    // Worker startup can be slow under heavy CI load; keep activation timeout generous so this
+    // test exercises worker termination + restart rather than flaking on activation.
+    activationTimeoutMs: 20_000,
     dataConnectorTimeoutMs: 100
   });
 

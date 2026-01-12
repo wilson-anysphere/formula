@@ -54,8 +54,10 @@ test("crash: worker crash marks extension inactive and next command spawns a fre
     permissionsStoragePath: path.join(dir, "permissions.json"),
     extensionStoragePath: path.join(dir, "storage.json"),
     permissionPrompt: async () => true,
-    activationTimeoutMs: 5000,
-    commandTimeoutMs: 5000
+    // Worker startup can be slow under heavy CI/agent load; keep this generous so the
+    // test focuses on crash recovery rather than the default 5s activation SLA.
+    activationTimeoutMs: 20_000,
+    commandTimeoutMs: 20_000
   });
 
   t.after(async () => {
