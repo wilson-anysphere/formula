@@ -211,6 +211,19 @@ The Microsoft docs list `basis=1` as **Actual/Actual**. For odd-coupon functions
 the regular coupon-period length `E` is computed as the **actual number of days between coupon
 dates** (consistent with `COUP*`/`PRICE` behavior).
 
+### Notes on `basis = 4` (30E/360 European)
+
+`basis=4` is **European 30/360** (`DAYS360(..., method=TRUE)`).
+
+For `basis=4`, the regular coupon-period length `E` is computed as:
+
+```
+E = DAYS360(PCD, NCD, TRUE)
+```
+
+This can differ from the “typical” `360/frequency` for end-of-month schedules involving February
+(e.g. Feb 28 → Aug 31 yields 182 under European `DAYS360`).
+
 ### Excel oracle run (odd-coupon cases only)
 
 To confirm these rules against a specific Excel version/build, run the oracle harness on Windows +
