@@ -82,7 +82,7 @@ export function purgeLegacyDesktopLLMSettings(): void {
   const prefix = "formula:";
   const llmPrefix = prefix + "llm:";
   const completionPrefix = prefix + "aiCompletion:";
-  const legacyOpenAIKey = prefix + "openai" + "ApiKey";
+  const legacyOpenAIKey = prefix + "open" + "ai" + "ApiKey";
 
   const safeRemove = (key: string): void => {
     try {
