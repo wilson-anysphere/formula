@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+"""
+Incrementally update the pinned Excel-oracle dataset (`excel-oracle.pinned.json`).
+
+Why this exists
+---------------
+
+When adding new deterministic cases to `tests/compatibility/excel-oracle/cases.json`, the pinned
+dataset used by CI must be updated to include results for the new case IDs.
+
+Regenerating the *entire* pinned dataset via `tools/excel-oracle/regenerate_synthetic_baseline.py`
+is correct but produces a very large diff (and often conflicts during rebases/parallel work).
+
+This script keeps the existing pinned results and only fills in missing cases by:
+
+1) Updating `caseSet.sha256`/`caseSet.count` to match the current cases.json
+2) Removing results for case IDs that no longer exist in cases.json
+3) Appending results for any missing case IDs, sourced from either:
+   - one or more `--merge-results` JSON files (e.g. from a tag-filtered engine run), and/or
+   - a targeted `formula-excel-oracle` run on a temporary corpus containing only the missing cases
+
+Typical usage
+-------------
+
+Update pinned dataset after adding new cases:
+
+  python tools/excel-oracle/update_pinned_dataset.py
+
+If you already generated results for a subset (e.g. only the new Thai cases) and want to avoid a
+full engine run:
+
+  target/debug/formula-excel-oracle --cases tests/compatibility/excel-oracle/cases.json \\
+    --out /tmp/new-results.json --include-tag thai
+  python tools/excel-oracle/update_pinned_dataset.py --merge-results /tmp/new-results.json --no-engine
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any, Iterable
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _load_json(path: Path) -> Any:
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _write_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2, sort_keys=False)
+        f.write("\n")
+
+
+def _stable_case_path_string(*, repo_root: Path, cases_path: Path) -> str:
+    try:
+        rel = cases_path.resolve().relative_to(repo_root.resolve())
+        return rel.as_posix()
+    except Exception:
+        return cases_path.as_posix()
+
+
+def _iter_result_entries(payload: Any) -> Iterable[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    results = payload.get("results", [])
+    if not isinstance(results, list):
+        return []
+    for r in results:
+        if isinstance(r, dict):
+            yield r
+
+
+def _run_formula_excel_oracle(
+    *,
+    repo_root: Path,
+    engine_bin: Path | None,
+    cases_path: Path,
+    out_path: Path,
+) -> None:
+    if engine_bin is not None:
+        cmd = [str(engine_bin), "--cases", str(cases_path), "--out", str(out_path)]
+        subprocess.run(cmd, cwd=str(repo_root), check=True)
+        return
+
+    cmd = [
+        "cargo",
+        "run",
+        "-p",
+        "formula-excel-oracle",
+        "--quiet",
+        "--locked",
+        "--",
+        "--cases",
+        str(cases_path),
+        "--out",
+        str(out_path),
+    ]
+    subprocess.run(cmd, cwd=str(repo_root), check=True)
+
+
+def update_pinned_dataset(
+    *,
+    cases_path: Path,
+    pinned_path: Path,
+    merge_results_paths: list[Path],
+    engine_bin: Path | None,
+    run_engine_for_missing: bool,
+) -> tuple[int, int]:
+    """
+    Update `pinned_path` in-place.
+
+    Returns: (missing_before, missing_after)
+    """
+
+    repo_root = Path(__file__).resolve().parents[2]
+    cases_payload = _load_json(cases_path)
+    pinned_payload = _load_json(pinned_path)
+
+    cases_sha = _sha256_file(cases_path)
+    cases_list = cases_payload.get("cases", [])
+    if not isinstance(cases_list, list):
+        raise SystemExit(f"{cases_path}: expected top-level 'cases' array")
+
+    case_ids: set[str] = set()
+    for c in cases_list:
+        if isinstance(c, dict) and isinstance(c.get("id"), str):
+            case_ids.add(c["id"])
+
+    if not case_ids:
+        raise SystemExit(f"{cases_path}: no case IDs found")
+
+    # Normalize pinned metadata.
+    pinned_payload.setdefault("caseSet", {})
+    if not isinstance(pinned_payload.get("caseSet"), dict):
+        raise SystemExit(f"{pinned_path}: expected caseSet object")
+
+    case_set = pinned_payload["caseSet"]
+    assert isinstance(case_set, dict)
+    case_set["path"] = _stable_case_path_string(repo_root=repo_root, cases_path=cases_path)
+    case_set["sha256"] = cases_sha
+
+    # Filter existing pinned results: drop duplicates + drop results for removed cases.
+    existing_results = pinned_payload.get("results", [])
+    if not isinstance(existing_results, list):
+        raise SystemExit(f"{pinned_path}: expected top-level 'results' array")
+
+    filtered_results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for r in _iter_result_entries(pinned_payload):
+        cid = r.get("caseId")
+        if not isinstance(cid, str):
+            continue
+        if cid not in case_ids:
+            continue
+        if cid in seen:
+            continue
+        seen.add(cid)
+        filtered_results.append(r)
+
+    missing = set(case_ids.difference(seen))
+    missing_before = len(missing)
+
+    # Merge any provided results files before running the engine.
+    for path in merge_results_paths:
+        payload = _load_json(path)
+        for r in _iter_result_entries(payload):
+            cid = r.get("caseId")
+            if not isinstance(cid, str):
+                continue
+            if cid not in missing:
+                continue
+            if cid in seen:
+                continue
+            seen.add(cid)
+            missing.remove(cid)
+            filtered_results.append(r)
+
+    # If still missing, optionally run the engine on a temp corpus containing only missing cases.
+    if missing and run_engine_for_missing:
+        missing_cases = [c for c in cases_list if isinstance(c, dict) and c.get("id") in missing]
+        temp_corpus = {
+            "schemaVersion": cases_payload.get("schemaVersion"),
+            "caseSet": cases_payload.get("caseSet"),
+            "defaultSheet": cases_payload.get("defaultSheet"),
+            "cases": missing_cases,
+        }
+
+        with tempfile.TemporaryDirectory(prefix="excel-oracle-missing-") as tmp:
+            tmp_dir = Path(tmp)
+            tmp_cases = tmp_dir / "missing-cases.json"
+            tmp_results = tmp_dir / "missing-results.json"
+            _write_json(tmp_cases, temp_corpus)
+            _run_formula_excel_oracle(
+                repo_root=repo_root, engine_bin=engine_bin, cases_path=tmp_cases, out_path=tmp_results
+            )
+            payload = _load_json(tmp_results)
+            for r in _iter_result_entries(payload):
+                cid = r.get("caseId")
+                if not isinstance(cid, str):
+                    continue
+                if cid not in missing:
+                    continue
+                if cid in seen:
+                    continue
+                seen.add(cid)
+                missing.remove(cid)
+                filtered_results.append(r)
+
+    missing_after = len(missing)
+    if missing_after:
+        missing_preview = ", ".join(sorted(list(missing))[:25])
+        suffix = "" if missing_after <= 25 else f" (+{missing_after - 25} more)"
+        raise SystemExit(
+            "Pinned dataset is still missing results for some case IDs. "
+            "Provide additional --merge-results or re-run without --no-engine. "
+            f"Missing ({missing_after}): {missing_preview}{suffix}"
+        )
+
+    pinned_payload["results"] = filtered_results
+    case_set["count"] = len(filtered_results)
+
+    _write_json(pinned_path, pinned_payload)
+    return (missing_before, missing_after)
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument(
+        "--cases",
+        default="tests/compatibility/excel-oracle/cases.json",
+        help="Path to cases.json (default: %(default)s)",
+    )
+    p.add_argument(
+        "--pinned",
+        default="tests/compatibility/excel-oracle/datasets/excel-oracle.pinned.json",
+        help="Path to pinned dataset to update (default: %(default)s)",
+    )
+    p.add_argument(
+        "--merge-results",
+        action="append",
+        default=[],
+        help=(
+            "Path to a results JSON file (engine output schema) to merge into the pinned dataset "
+            "before running the engine (can be repeated)."
+        ),
+    )
+    p.add_argument(
+        "--no-engine",
+        action="store_true",
+        help="Do not run formula-excel-oracle. Require --merge-results to cover all missing cases.",
+    )
+    p.add_argument(
+        "--engine-bin",
+        default="",
+        help=(
+            "Optional path to a prebuilt formula-excel-oracle binary. If omitted, the script will "
+            "use target/debug/formula-excel-oracle when present, else fall back to `cargo run`."
+        ),
+    )
+    args = p.parse_args()
+
+    repo_root = Path(__file__).resolve().parents[2]
+    cases_path = (repo_root / args.cases).resolve() if not os.path.isabs(args.cases) else Path(args.cases)
+    pinned_path = (repo_root / args.pinned).resolve() if not os.path.isabs(args.pinned) else Path(args.pinned)
+
+    merge_results_paths = [Path(p).resolve() for p in args.merge_results]
+
+    engine_bin: Path | None = None
+    if args.engine_bin:
+        engine_bin = Path(args.engine_bin).resolve()
+    else:
+        candidate = repo_root / "target" / "debug" / "formula-excel-oracle"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            engine_bin = candidate
+
+    missing_before, missing_after = update_pinned_dataset(
+        cases_path=cases_path,
+        pinned_path=pinned_path,
+        merge_results_paths=merge_results_paths,
+        engine_bin=engine_bin,
+        run_engine_for_missing=not args.no_engine,
+    )
+
+    if missing_before == 0:
+        print("Pinned dataset already covered all cases (updated metadata only).")
+    else:
+        print(f"Filled {missing_before - missing_after}/{missing_before} missing case results.")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+

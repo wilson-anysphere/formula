@@ -1,0 +1,112 @@
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import json
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+class UpdatePinnedDatasetTests(unittest.TestCase):
+    def _load_update_module(self):
+        tool = Path(__file__).resolve().parents[1] / "update_pinned_dataset.py"
+        self.assertTrue(tool.is_file(), f"update_pinned_dataset.py not found at {tool}")
+
+        spec = importlib.util.spec_from_file_location("excel_oracle_update_pinned_dataset", tool)
+        assert spec is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+
+    def test_merges_results_without_running_engine(self) -> None:
+        update = self._load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+
+            cases_path = tmp / "cases.json"
+            cases_payload = {
+                "schemaVersion": 1,
+                "caseSet": "test",
+                "defaultSheet": "Sheet1",
+                "cases": [
+                    {"id": "case1", "formula": "=1+1", "outputCell": "C1", "inputs": [], "tags": []},
+                    {"id": "case2", "formula": "=2+2", "outputCell": "C1", "inputs": [], "tags": []},
+                ],
+            }
+            cases_path.write_text(json.dumps(cases_payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+            cases_sha = hashlib.sha256(cases_path.read_bytes()).hexdigest()
+
+            pinned_path = tmp / "pinned.json"
+            pinned_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "2026-01-01T00:00:00Z",
+                "source": {"kind": "excel", "version": "unknown", "build": "unknown", "operatingSystem": "unknown"},
+                "caseSet": {"path": "cases.json", "sha256": "old", "count": 1},
+                "results": [{"caseId": "case1"}],
+            }
+            pinned_path.write_text(json.dumps(pinned_payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+            merge_path = tmp / "merge.json"
+            merge_payload = {"schemaVersion": 1, "results": [{"caseId": "case2"}]}
+            merge_path.write_text(json.dumps(merge_payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+            missing_before, missing_after = update.update_pinned_dataset(
+                cases_path=cases_path,
+                pinned_path=pinned_path,
+                merge_results_paths=[merge_path],
+                engine_bin=None,
+                run_engine_for_missing=False,
+            )
+            self.assertEqual(missing_before, 1)
+            self.assertEqual(missing_after, 0)
+
+            pinned_updated = json.loads(pinned_path.read_text(encoding="utf-8"))
+            self.assertEqual(pinned_updated["caseSet"]["sha256"], cases_sha)
+            self.assertEqual(pinned_updated["caseSet"]["count"], 2)
+            result_ids = {r.get("caseId") for r in pinned_updated.get("results", []) if isinstance(r, dict)}
+            self.assertEqual(result_ids, {"case1", "case2"})
+
+    def test_fails_if_missing_and_no_engine(self) -> None:
+        update = self._load_update_module()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+
+            cases_path = tmp / "cases.json"
+            cases_payload = {
+                "schemaVersion": 1,
+                "caseSet": "test",
+                "defaultSheet": "Sheet1",
+                "cases": [{"id": "case1", "formula": "=1+1", "outputCell": "C1", "inputs": [], "tags": []}],
+            }
+            cases_path.write_text(json.dumps(cases_payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+            pinned_path = tmp / "pinned.json"
+            pinned_payload = {
+                "schemaVersion": 1,
+                "generatedAt": "2026-01-01T00:00:00Z",
+                "source": {"kind": "excel", "version": "unknown", "build": "unknown", "operatingSystem": "unknown"},
+                "caseSet": {"path": "cases.json", "sha256": "old", "count": 0},
+                "results": [],
+            }
+            pinned_path.write_text(json.dumps(pinned_payload, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+            with self.assertRaises(SystemExit):
+                update.update_pinned_dataset(
+                    cases_path=cases_path,
+                    pinned_path=pinned_path,
+                    merge_results_paths=[],
+                    engine_bin=None,
+                    run_engine_for_missing=False,
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()
+

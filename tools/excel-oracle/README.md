@@ -166,6 +166,20 @@ To regenerate all of them from the current `formula-engine` implementation:
 python tools/excel-oracle/regenerate_synthetic_baseline.py
 ```
 
+### Incremental pinned dataset updates (merge-friendly)
+
+When you *only add new cases* to `cases.json` (i.e. existing case IDs remain valid), regenerating the
+entire pinned dataset can create very large diffs and frequent merge conflicts.
+
+You can instead update the pinned dataset incrementally to fill in only the missing case results:
+
+```bash
+python tools/excel-oracle/update_pinned_dataset.py
+```
+
+This script preserves existing results, updates the `caseSet.sha256`/`caseSet.count` metadata, and
+only evaluates missing cases via `crates/formula-excel-oracle`.
+
 This will:
 
 1. Regenerate the function catalog from `formula-engine`'s inventory registry.
