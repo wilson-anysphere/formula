@@ -1,5 +1,5 @@
-use std::collections::{BTreeMap, HashMap};
-use std::io::{Cursor, Read, Write};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::{Reader as XmlReader, Writer as XmlWriter};
@@ -139,6 +139,126 @@ impl From<RecalcPolicyError> for XlsxError {
 #[derive(Debug, Clone)]
 pub struct XlsxPackage {
     parts: BTreeMap<String, Vec<u8>>,
+}
+
+/// Read a single ZIP part from an XLSX/XLSM container without inflating the entire package.
+pub fn read_part_from_reader<R: Read + Seek>(
+    mut reader: R,
+    part_name: &str,
+) -> Result<Option<Vec<u8>>, XlsxError> {
+    reader.seek(SeekFrom::Start(0))?;
+    let mut zip = zip::ZipArchive::new(reader)?;
+    let part_name = part_name.strip_prefix('/').unwrap_or(part_name);
+    // `ZipFile` borrows `ZipArchive`; keep the `Result` in a local so it drops
+    // before `zip` to avoid borrowck issues.
+    let result = zip.by_name(part_name);
+    match result {
+        Ok(mut file) => {
+            if file.is_dir() {
+                return Ok(None);
+            }
+            let mut buf = Vec::with_capacity(file.size() as usize);
+            file.read_to_end(&mut buf)?;
+            Ok(Some(buf))
+        }
+        Err(zip::result::ZipError::FileNotFound) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+/// Parse the workbook theme palette from `xl/theme/theme1.xml` (if present) without inflating the
+/// entire package.
+pub fn theme_palette_from_reader<R: Read + Seek>(reader: R) -> Result<Option<ThemePalette>, XlsxError> {
+    let Some(theme_xml) = read_part_from_reader(reader, "xl/theme/theme1.xml")? else {
+        return Ok(None);
+    };
+    Ok(Some(parse_theme_palette(&theme_xml)?))
+}
+
+/// Resolve ordered workbook sheets to worksheet part names without inflating the entire package.
+///
+/// This is the streaming counterpart of [`XlsxPackage::worksheet_parts`]. It is intentionally
+/// best-effort: if `xl/_rels/workbook.xml.rels` is missing or malformed, it falls back to the
+/// common `xl/worksheets/sheet{sheetId}.xml` naming convention when possible.
+pub fn worksheet_parts_from_reader<R: Read + Seek>(
+    mut reader: R,
+) -> Result<Vec<WorksheetPartInfo>, XlsxError> {
+    reader.seek(SeekFrom::Start(0))?;
+    let mut zip = zip::ZipArchive::new(reader)?;
+
+    let mut part_names: HashSet<String> = HashSet::new();
+    for i in 0..zip.len() {
+        let file = zip.by_index(i)?;
+        if file.is_dir() {
+            continue;
+        }
+        part_names.insert(file.name().to_string());
+    }
+
+    let workbook_xml = match zip.by_name("xl/workbook.xml") {
+        Ok(mut file) => {
+            let mut buf = Vec::with_capacity(file.size() as usize);
+            file.read_to_end(&mut buf)?;
+            buf
+        }
+        Err(zip::result::ZipError::FileNotFound) => {
+            return Err(XlsxError::MissingPart("xl/workbook.xml".to_string()))
+        }
+        Err(err) => return Err(err.into()),
+    };
+    let workbook_xml = String::from_utf8(workbook_xml)?;
+    let sheets = parse_workbook_sheets(&workbook_xml)?;
+
+    let rels_bytes = match zip.by_name("xl/_rels/workbook.xml.rels") {
+        Ok(mut file) => {
+            let mut buf = Vec::with_capacity(file.size() as usize);
+            file.read_to_end(&mut buf)?;
+            Some(buf)
+        }
+        Err(zip::result::ZipError::FileNotFound) => None,
+        Err(err) => return Err(err.into()),
+    };
+
+    let relationships = match rels_bytes.as_deref() {
+        Some(bytes) => crate::openxml::parse_relationships(bytes).unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let rel_by_id: HashMap<String, crate::openxml::Relationship> = relationships
+        .into_iter()
+        .map(|rel| (rel.id.clone(), rel))
+        .collect();
+
+    let workbook_part = "xl/workbook.xml";
+    let mut out = Vec::with_capacity(sheets.len());
+    for sheet in sheets {
+        let resolved = rel_by_id
+            .get(&sheet.rel_id)
+            .filter(|rel| {
+                !rel
+                    .target_mode
+                    .as_deref()
+                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+            })
+            .map(|rel| crate::path::resolve_target(workbook_part, &rel.target))
+            .or_else(|| {
+                let candidate = format!("xl/worksheets/sheet{}.xml", sheet.sheet_id);
+                part_names.contains(&candidate).then_some(candidate)
+            });
+
+        let Some(worksheet_part) = resolved else {
+            continue;
+        };
+
+        out.push(WorksheetPartInfo {
+            name: sheet.name,
+            sheet_id: sheet.sheet_id,
+            rel_id: sheet.rel_id,
+            visibility: sheet.visibility,
+            worksheet_part,
+        });
+    }
+
+    Ok(out)
 }
 
 impl XlsxPackage {

@@ -1,11 +1,15 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::{Read, Seek, SeekFrom};
 
 use roxmltree::Document;
+use zip::ZipArchive;
 
 use crate::path::rels_for_part;
 pub use crate::preserve::rels_merge::RelationshipStub;
 use crate::preserve::rels_merge::{ensure_rels_has_relationships, xml_escape};
-use crate::preserve::sheet_match::{match_sheet_by_name_or_index, workbook_sheet_parts};
+use crate::preserve::sheet_match::{
+    match_sheet_by_name_or_index, workbook_sheet_parts, workbook_sheet_parts_from_workbook_xml,
+};
 use crate::relationships::parse_relationships;
 use crate::workbook::ChartExtractionError;
 use crate::XlsxPackage;
@@ -51,6 +55,220 @@ pub struct PreservedPivotParts {
     pub workbook_pivot_cache_rels: Vec<RelationshipStub>,
     /// Preserved `<pivotTables>` subtrees and `.rels` metadata per worksheet.
     pub sheet_pivot_tables: BTreeMap<String, PreservedSheetPivotTables>,
+}
+
+/// Streaming variant of [`XlsxPackage::preserve_pivot_parts`].
+///
+/// This reads only the subset of ZIP parts required to retain pivot tables, caches, slicers, and
+/// timelines for a later regeneration-based round-trip.
+///
+/// Unlike [`XlsxPackage::from_bytes`], this does **not** inflate every ZIP entry into memory.
+pub fn preserve_pivot_parts_from_reader<R: Read + Seek>(
+    mut reader: R,
+) -> Result<PreservedPivotParts, ChartExtractionError> {
+    reader
+        .seek(SeekFrom::Start(0))
+        .map_err(|e| ChartExtractionError::XmlStructure(format!("io error: {e}")))?;
+    let mut archive = ZipArchive::new(reader)
+        .map_err(|e| ChartExtractionError::XmlStructure(format!("zip error: {e}")))?;
+
+    let mut part_names: HashSet<String> = HashSet::new();
+    for i in 0..archive.len() {
+        let file = archive
+            .by_index(i)
+            .map_err(|e| ChartExtractionError::XmlStructure(format!("zip error: {e}")))?;
+        if file.is_dir() {
+            continue;
+        }
+        part_names.insert(file.name().to_string());
+    }
+
+    let content_types_xml = read_zip_part_required(&mut archive, "[Content_Types].xml")?;
+
+    let mut parts = BTreeMap::new();
+    for name in &part_names {
+        if name.starts_with("xl/pivotTables/")
+            || name.starts_with("xl/pivotCache/")
+            || name.starts_with("xl/slicers/")
+            || name.starts_with("xl/slicerCaches/")
+            || name.starts_with("xl/timelines/")
+            || name.starts_with("xl/timelineCaches/")
+        {
+            if let Some(bytes) = read_zip_part_optional(&mut archive, name)? {
+                parts.insert(name.clone(), bytes);
+            }
+        }
+    }
+
+    let workbook_part = "xl/workbook.xml";
+    let workbook_xml = read_zip_part_required(&mut archive, workbook_part)?;
+    let workbook_xml_str = std::str::from_utf8(&workbook_xml)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8(workbook_part.to_string(), e))?;
+    let workbook_doc = Document::parse(workbook_xml_str)
+        .map_err(|e| ChartExtractionError::XmlParse(workbook_part.to_string(), e))?;
+
+    let pivot_caches_node = workbook_doc
+        .descendants()
+        .find(|n| n.is_element() && n.tag_name().name() == "pivotCaches");
+
+    let mut workbook_pivot_cache_rids: HashSet<String> = HashSet::new();
+    if let Some(node) = pivot_caches_node {
+        for rid in node
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name() == "pivotCache")
+            .filter_map(|n| {
+                n.attribute((REL_NS, "id"))
+                    .or_else(|| n.attribute("r:id"))
+                    .or_else(|| n.attribute("id"))
+            })
+        {
+            workbook_pivot_cache_rids.insert(rid.to_string());
+        }
+    }
+
+    let workbook_rels_part = "xl/_rels/workbook.xml.rels";
+    let workbook_rels_xml = read_zip_part_optional(&mut archive, workbook_rels_part)?;
+    // Best-effort: some producers emit malformed rels. For pivot preservation we treat this as
+    // "no relationships" instead of failing the whole extraction.
+    let rel_map: HashMap<String, crate::relationships::Relationship> = match workbook_rels_xml
+        .as_deref()
+    {
+        Some(workbook_rels_xml) => match parse_relationships(workbook_rels_xml, workbook_rels_part)
+        {
+            Ok(rels) => rels.into_iter().map(|r| (r.id.clone(), r)).collect(),
+            Err(_) => HashMap::new(),
+        },
+        None => HashMap::new(),
+    };
+
+    // Only preserve the <pivotCaches> subtree when we can also preserve every referenced
+    // pivotCacheDefinition relationship. Otherwise re-applying would introduce broken r:id
+    // references in workbook.xml.
+    let (workbook_pivot_caches, workbook_pivot_cache_rels) = match pivot_caches_node {
+        Some(node) if !workbook_pivot_cache_rids.is_empty() => {
+            let mut rels = Vec::new();
+            let mut missing_rel = false;
+            for rid in &workbook_pivot_cache_rids {
+                match rel_map.get(rid) {
+                    Some(rel) if rel.type_ == PIVOT_CACHE_DEF_REL_TYPE => {
+                        rels.push(RelationshipStub {
+                            rel_id: rid.clone(),
+                            target: rel.target.clone(),
+                        });
+                    }
+                    _ => {
+                        missing_rel = true;
+                        break;
+                    }
+                }
+            }
+
+            if missing_rel {
+                (None, Vec::new())
+            } else {
+                (
+                    Some(workbook_xml_str.as_bytes()[node.range()].to_vec()),
+                    rels,
+                )
+            }
+        }
+        _ => (None, Vec::new()),
+    };
+
+    let sheets = workbook_sheet_parts_from_workbook_xml(
+        &workbook_xml,
+        workbook_rels_xml.as_deref(),
+        |name| part_names.contains(name),
+    )?;
+    let mut sheet_pivot_tables: BTreeMap<String, PreservedSheetPivotTables> = BTreeMap::new();
+
+    for sheet in sheets {
+        let sheet_rels_part = rels_for_part(&sheet.part_name);
+        let Some(sheet_rels_xml) = read_zip_part_optional(&mut archive, &sheet_rels_part)? else {
+            continue;
+        };
+        let rels = match parse_relationships(&sheet_rels_xml, &sheet_rels_part) {
+            Ok(rels) => rels,
+            Err(_) => continue,
+        };
+
+        // Fast-path: if the sheet has no pivotTable relationships, it cannot contain a valid
+        // `<pivotTables>` block we can re-apply.
+        if !rels.iter().any(|rel| rel.type_ == PIVOT_TABLE_REL_TYPE) {
+            continue;
+        }
+
+        let Some(sheet_xml) = read_zip_part_optional(&mut archive, &sheet.part_name)? else {
+            continue;
+        };
+        let sheet_xml_str = std::str::from_utf8(&sheet_xml)
+            .map_err(|e| ChartExtractionError::XmlNonUtf8(sheet.part_name.clone(), e))?;
+        let sheet_doc = Document::parse(sheet_xml_str)
+            .map_err(|e| ChartExtractionError::XmlParse(sheet.part_name.clone(), e))?;
+
+        let pivot_tables_node = sheet_doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "pivotTables");
+        let Some(pivot_tables_node) = pivot_tables_node else {
+            continue;
+        };
+
+        let pivot_tables_xml = sheet_xml_str.as_bytes()[pivot_tables_node.range()].to_vec();
+
+        let pivot_table_rids: Vec<String> = pivot_tables_node
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name() == "pivotTable")
+            .filter_map(|n| {
+                n.attribute((REL_NS, "id"))
+                    .or_else(|| n.attribute("r:id"))
+                    .or_else(|| n.attribute("id"))
+            })
+            .map(|s| s.to_string())
+            .collect();
+
+        let rel_map: HashMap<_, _> = rels.into_iter().map(|r| (r.id.clone(), r)).collect();
+
+        let mut pivot_table_rels = Vec::new();
+        if !pivot_table_rids.is_empty() {
+            let mut missing_rel = false;
+            for rid in &pivot_table_rids {
+                match rel_map.get(rid) {
+                    Some(rel) if rel.type_ == PIVOT_TABLE_REL_TYPE => {
+                        pivot_table_rels.push(RelationshipStub {
+                            rel_id: rid.clone(),
+                            target: rel.target.clone(),
+                        });
+                    }
+                    _ => {
+                        missing_rel = true;
+                        break;
+                    }
+                }
+            }
+
+            if missing_rel {
+                continue;
+            }
+        }
+
+        sheet_pivot_tables.insert(
+            sheet.name,
+            PreservedSheetPivotTables {
+                sheet_index: sheet.index,
+                sheet_id: sheet.sheet_id,
+                pivot_tables_xml,
+                pivot_table_rels,
+            },
+        );
+    }
+
+    Ok(PreservedPivotParts {
+        content_types_xml,
+        parts,
+        workbook_pivot_caches,
+        workbook_pivot_cache_rels,
+        sheet_pivot_tables,
+    })
 }
 
 impl PreservedPivotParts {
@@ -329,6 +547,35 @@ impl XlsxPackage {
 
         Ok(())
     }
+}
+
+fn read_zip_part_optional<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<Option<Vec<u8>>, ChartExtractionError> {
+    match archive.by_name(name) {
+        Ok(mut file) => {
+            if file.is_dir() {
+                return Ok(None);
+            }
+            let mut buf = Vec::with_capacity(file.size() as usize);
+            file.read_to_end(&mut buf)
+                .map_err(|e| ChartExtractionError::XmlStructure(format!("io error: {e}")))?;
+            Ok(Some(buf))
+        }
+        Err(zip::result::ZipError::FileNotFound) => Ok(None),
+        Err(err) => Err(ChartExtractionError::XmlStructure(format!(
+            "zip error: {err}"
+        ))),
+    }
+}
+
+fn read_zip_part_required<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<Vec<u8>, ChartExtractionError> {
+    read_zip_part_optional(archive, name)?
+        .ok_or_else(|| ChartExtractionError::MissingPart(name.to_string()))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,13 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::io::{Read, Seek, SeekFrom};
 
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 use quick_xml::{Reader as XmlReader, Writer as XmlWriter};
 use roxmltree::Document;
+use zip::ZipArchive;
 
 use crate::path::{rels_for_part, resolve_target};
-use crate::preserve::opc_graph::collect_transitive_related_parts;
 use crate::preserve::rels_merge::{ensure_rels_has_relationships, RelationshipStub};
-use crate::preserve::sheet_match::{match_sheet_by_name_or_index, workbook_sheet_parts};
+use crate::preserve::sheet_match::{
+    match_sheet_by_name_or_index, workbook_sheet_parts, workbook_sheet_parts_from_workbook_xml,
+};
 use crate::relationships::parse_relationships;
 use crate::workbook::ChartExtractionError;
 use crate::XlsxPackage;
@@ -136,6 +139,370 @@ impl PreservedDrawingParts {
             && self.sheet_drawing_hfs.is_empty()
             && self.chart_sheets.is_empty()
     }
+}
+
+/// Streaming variant of [`XlsxPackage::preserve_drawing_parts`].
+///
+/// This reads only the subset of ZIP parts required to capture DrawingML objects (including
+/// charts) for a later regeneration-based round-trip.
+///
+/// Unlike [`XlsxPackage::from_bytes`], this does **not** inflate every ZIP entry into memory.
+pub fn preserve_drawing_parts_from_reader<R: Read + Seek>(
+    mut reader: R,
+) -> Result<PreservedDrawingParts, ChartExtractionError> {
+    reader
+        .seek(SeekFrom::Start(0))
+        .map_err(|e| ChartExtractionError::XmlStructure(format!("io error: {e}")))?;
+    let mut archive = ZipArchive::new(reader)
+        .map_err(|e| ChartExtractionError::XmlStructure(format!("zip error: {e}")))?;
+
+    let mut part_names: HashSet<String> = HashSet::new();
+    for i in 0..archive.len() {
+        let file = archive
+            .by_index(i)
+            .map_err(|e| ChartExtractionError::XmlStructure(format!("zip error: {e}")))?;
+        if file.is_dir() {
+            continue;
+        }
+        part_names.insert(file.name().to_string());
+    }
+
+    let content_types_xml = read_zip_part_required(&mut archive, "[Content_Types].xml")?;
+
+    let workbook_xml = read_zip_part_required(&mut archive, "xl/workbook.xml")?;
+    let workbook_rels_xml = read_zip_part_optional(&mut archive, "xl/_rels/workbook.xml.rels")?;
+
+    let chart_sheets = extract_workbook_chart_sheets_from_workbook_parts(
+        &workbook_xml,
+        workbook_rels_xml.as_deref(),
+        &part_names,
+    )?;
+    let sheets = workbook_sheet_parts_from_workbook_xml(
+        &workbook_xml,
+        workbook_rels_xml.as_deref(),
+        |name| part_names.contains(name),
+    )?;
+
+    let mut root_parts: BTreeSet<String> = BTreeSet::new();
+    for sheet in chart_sheets.values() {
+        root_parts.insert(sheet.part_name.clone());
+    }
+
+    let mut sheet_drawings: BTreeMap<String, PreservedSheetDrawings> = BTreeMap::new();
+    let mut sheet_pictures: BTreeMap<String, PreservedSheetPicture> = BTreeMap::new();
+    let mut sheet_ole_objects: BTreeMap<String, PreservedSheetOleObjects> = BTreeMap::new();
+    let mut sheet_controls: BTreeMap<String, PreservedSheetControls> = BTreeMap::new();
+    let mut sheet_drawing_hfs: BTreeMap<String, PreservedSheetDrawingHF> = BTreeMap::new();
+
+    for sheet in sheets {
+        let sheet_rels_part = rels_for_part(&sheet.part_name);
+
+        // Best-effort: some producers emit malformed `.rels` parts. For preservation we skip
+        // relationship discovery for this sheet rather than erroring.
+        let rels = match read_zip_part_optional(&mut archive, &sheet_rels_part)? {
+            Some(xml) => match parse_relationships(&xml, &sheet_rels_part) {
+                Ok(rels) => rels,
+                Err(_) => Vec::new(),
+            },
+            None => Vec::new(),
+        };
+
+        for rel in &rels {
+            if rel
+                .target_mode
+                .as_deref()
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+            {
+                continue;
+            }
+            let resolved = resolve_target(&sheet.part_name, &rel.target);
+            if is_drawing_adjacent_relationship(rel.type_.as_str(), &resolved)
+                && part_names.contains(&resolved)
+            {
+                root_parts.insert(resolved);
+            }
+        }
+
+        if sheet.part_name.starts_with("xl/chartsheets/") {
+            root_parts.insert(sheet.part_name.clone());
+        }
+
+        // Only parse the worksheet XML when the sheet has at least one drawing-adjacent relationship.
+        // This avoids inflating large sheet XML parts for the common case where a workbook has many
+        // data-only sheets.
+        let should_parse_sheet_xml = sheet.part_name.starts_with("xl/chartsheets/")
+            || rels.iter().any(|rel| {
+                if rel
+                    .target_mode
+                    .as_deref()
+                    .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+                {
+                    return false;
+                }
+                let resolved = resolve_target(&sheet.part_name, &rel.target);
+                is_drawing_adjacent_relationship(rel.type_.as_str(), &resolved)
+            });
+        if !should_parse_sheet_xml {
+            continue;
+        }
+
+        let Some(sheet_xml) = read_zip_part_optional(&mut archive, &sheet.part_name)? else {
+            continue;
+        };
+
+        let sheet_xml_str = std::str::from_utf8(&sheet_xml)
+            .map_err(|e| ChartExtractionError::XmlNonUtf8(sheet.part_name.clone(), e))?;
+        let doc = Document::parse(sheet_xml_str)
+            .map_err(|e| ChartExtractionError::XmlParse(sheet.part_name.clone(), e))?;
+
+        let drawing_rids: Vec<String> = doc
+            .descendants()
+            .filter(|n| n.is_element() && n.tag_name().name() == "drawing")
+            .filter_map(|n| {
+                n.attribute((REL_NS, "id"))
+                    .or_else(|| n.attribute("r:id"))
+                    .or_else(|| n.attribute("id"))
+            })
+            .map(|s| s.to_string())
+            .collect();
+
+        let picture_node = doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "picture");
+        let picture = picture_node.and_then(|node| {
+            let rid = node
+                .attribute((REL_NS, "id"))
+                .or_else(|| node.attribute("r:id"))
+                .or_else(|| node.attribute("id"))?;
+            Some((rid.to_string(), sheet_xml_str.as_bytes()[node.range()].to_vec()))
+        });
+
+        let ole_objects_node = doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "oleObjects");
+        let ole_objects = ole_objects_node.map(|node| {
+            let rids: Vec<String> = node
+                .descendants()
+                .filter(|n| n.is_element() && n.tag_name().name() == "oleObject")
+                .filter_map(|n| {
+                    n.attribute((REL_NS, "id"))
+                        .or_else(|| n.attribute("r:id"))
+                        .or_else(|| n.attribute("id"))
+                })
+                .map(|s| s.to_string())
+                .collect();
+            (sheet_xml_str.as_bytes()[node.range()].to_vec(), rids)
+        });
+
+        let controls_node = doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "controls");
+        let controls = controls_node.map(|node| {
+            (
+                sheet_xml_str.as_bytes()[node.range()].to_vec(),
+                extract_relationship_ids(node),
+            )
+        });
+
+        let drawing_hf_node = doc
+            .descendants()
+            .find(|n| n.is_element() && n.tag_name().name() == "drawingHF");
+        let drawing_hf = drawing_hf_node.map(|node| {
+            (
+                sheet_xml_str.as_bytes()[node.range()].to_vec(),
+                extract_relationship_ids(node),
+            )
+        });
+
+        if drawing_rids.is_empty()
+            && picture.is_none()
+            && ole_objects.is_none()
+            && controls.is_none()
+            && drawing_hf.is_none()
+        {
+            continue;
+        }
+
+        let rel_map: HashMap<_, _> = rels.into_iter().map(|r| (r.id.clone(), r)).collect();
+
+        if !drawing_rids.is_empty() {
+            let mut drawings = Vec::new();
+            for rid in drawing_rids {
+                if let Some(rel) = rel_map.get(&rid) {
+                    if rel.type_ == DRAWING_REL_TYPE
+                        && !rel
+                            .target_mode
+                            .as_deref()
+                            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+                    {
+                        drawings.push(SheetDrawingRelationship {
+                            rel_id: rid.clone(),
+                            target: rel.target.clone(),
+                        });
+                    }
+                }
+            }
+
+            if !drawings.is_empty() {
+                sheet_drawings.insert(
+                    sheet.name.clone(),
+                    PreservedSheetDrawings {
+                        sheet_index: sheet.index,
+                        sheet_id: sheet.sheet_id,
+                        drawings,
+                    },
+                );
+            }
+        }
+
+        if let Some((rid, picture_xml)) = picture {
+            if let Some(rel) = rel_map.get(&rid) {
+                if rel.type_ == IMAGE_REL_TYPE
+                    && !rel
+                        .target_mode
+                        .as_deref()
+                        .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+                {
+                    sheet_pictures.insert(
+                        sheet.name.clone(),
+                        PreservedSheetPicture {
+                            sheet_index: sheet.index,
+                            sheet_id: sheet.sheet_id,
+                            picture_xml,
+                            picture_rel: SheetRelationshipStub {
+                                rel_id: rid.clone(),
+                                target: rel.target.clone(),
+                            },
+                        },
+                    );
+                }
+            }
+        }
+
+        if let Some((ole_objects_xml, rids)) = ole_objects {
+            if !rids.is_empty() {
+                let mut rels = Vec::new();
+                let mut missing_rel = false;
+                for rid in &rids {
+                    match rel_map.get(rid) {
+                        Some(rel)
+                            if rel.type_ == OLE_OBJECT_REL_TYPE
+                                && !rel.target_mode.as_deref().is_some_and(|mode| {
+                                    mode.trim().eq_ignore_ascii_case("External")
+                                }) =>
+                        {
+                            rels.push(SheetRelationshipStub {
+                                rel_id: rid.clone(),
+                                target: rel.target.clone(),
+                            })
+                        }
+                        _ => {
+                            missing_rel = true;
+                            break;
+                        }
+                    }
+                }
+
+                if !missing_rel {
+                    sheet_ole_objects.insert(
+                        sheet.name.clone(),
+                        PreservedSheetOleObjects {
+                            sheet_index: sheet.index,
+                            sheet_id: sheet.sheet_id,
+                            ole_objects_xml,
+                            ole_object_rels: rels,
+                        },
+                    );
+                }
+            }
+        }
+
+        if let Some((controls_xml, rids)) = controls {
+            let mut rels = Vec::new();
+            let mut missing_rel = false;
+            for rid in &rids {
+                match rel_map.get(rid) {
+                    Some(rel)
+                        if !rel.target_mode.as_deref().is_some_and(|mode| {
+                            mode.trim().eq_ignore_ascii_case("External")
+                        }) =>
+                    {
+                        rels.push(SheetRelationshipStubWithType {
+                            rel_id: rid.clone(),
+                            type_: rel.type_.clone(),
+                            target: rel.target.clone(),
+                        })
+                    }
+                    _ => {
+                        missing_rel = true;
+                        break;
+                    }
+                }
+            }
+
+            if !missing_rel {
+                sheet_controls.insert(
+                    sheet.name.clone(),
+                    PreservedSheetControls {
+                        sheet_index: sheet.index,
+                        sheet_id: sheet.sheet_id,
+                        controls_xml,
+                        control_rels: rels,
+                    },
+                );
+            }
+        }
+
+        if let Some((drawing_hf_xml, rids)) = drawing_hf {
+            let mut rels = Vec::new();
+            let mut missing_rel = false;
+            for rid in &rids {
+                match rel_map.get(rid) {
+                    Some(rel)
+                        if !rel.target_mode.as_deref().is_some_and(|mode| {
+                            mode.trim().eq_ignore_ascii_case("External")
+                        }) =>
+                    {
+                        rels.push(SheetRelationshipStubWithType {
+                            rel_id: rid.clone(),
+                            type_: rel.type_.clone(),
+                            target: rel.target.clone(),
+                        })
+                    }
+                    _ => {
+                        missing_rel = true;
+                        break;
+                    }
+                }
+            }
+
+            if !missing_rel {
+                sheet_drawing_hfs.insert(
+                    sheet.name.clone(),
+                    PreservedSheetDrawingHF {
+                        sheet_index: sheet.index,
+                        sheet_id: sheet.sheet_id,
+                        drawing_hf_xml,
+                        drawing_hf_rels: rels,
+                    },
+                );
+            }
+        }
+    }
+
+    let parts =
+        collect_transitive_related_parts_from_archive(&mut archive, &part_names, root_parts)?;
+
+    Ok(PreservedDrawingParts {
+        content_types_xml,
+        parts,
+        sheet_drawings,
+        sheet_pictures,
+        sheet_ole_objects,
+        sheet_controls,
+        sheet_drawing_hfs,
+        chart_sheets,
+    })
 }
 
 impl XlsxPackage {
@@ -437,7 +804,10 @@ impl XlsxPackage {
             }
         }
 
-        let parts = collect_transitive_related_parts(self, root_parts.into_iter())?;
+        let parts = crate::preserve::opc_graph::collect_transitive_related_parts(
+            self,
+            root_parts.into_iter(),
+        )?;
 
         Ok(PreservedDrawingParts {
             content_types_xml,
@@ -718,6 +1088,170 @@ impl XlsxPackage {
 
         Ok(())
     }
+}
+
+fn read_zip_part_optional<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<Option<Vec<u8>>, ChartExtractionError> {
+    match archive.by_name(name) {
+        Ok(mut file) => {
+            if file.is_dir() {
+                return Ok(None);
+            }
+            let mut buf = Vec::with_capacity(file.size() as usize);
+            file.read_to_end(&mut buf)
+                .map_err(|e| ChartExtractionError::XmlStructure(format!("io error: {e}")))?;
+            Ok(Some(buf))
+        }
+        Err(zip::result::ZipError::FileNotFound) => Ok(None),
+        Err(err) => Err(ChartExtractionError::XmlStructure(format!(
+            "zip error: {err}"
+        ))),
+    }
+}
+
+fn read_zip_part_required<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    name: &str,
+) -> Result<Vec<u8>, ChartExtractionError> {
+    read_zip_part_optional(archive, name)?
+        .ok_or_else(|| ChartExtractionError::MissingPart(name.to_string()))
+}
+
+fn collect_transitive_related_parts_from_archive<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+    part_names: &HashSet<String>,
+    root_parts: impl IntoIterator<Item = String>,
+) -> Result<BTreeMap<String, Vec<u8>>, ChartExtractionError> {
+    use std::collections::VecDeque;
+
+    let mut out: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut queue: VecDeque<String> = root_parts.into_iter().collect();
+
+    while let Some(part_name) = queue.pop_front() {
+        if !visited.insert(part_name.clone()) {
+            continue;
+        }
+
+        if !part_names.contains(&part_name) {
+            continue;
+        }
+        let Some(part_bytes) = read_zip_part_optional(archive, &part_name)? else {
+            continue;
+        };
+        out.insert(part_name.clone(), part_bytes);
+
+        let rels_part_name = rels_for_part(&part_name);
+        if !part_names.contains(&rels_part_name) {
+            continue;
+        }
+        let Some(rels_bytes) = read_zip_part_optional(archive, &rels_part_name)? else {
+            continue;
+        };
+        out.insert(rels_part_name.clone(), rels_bytes.clone());
+
+        let relationships = match crate::openxml::parse_relationships(&rels_bytes) {
+            Ok(rels) => rels,
+            Err(_) => continue,
+        };
+
+        for rel in relationships {
+            if rel
+                .target_mode
+                .as_deref()
+                .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+            {
+                continue;
+            }
+
+            let target_part = resolve_target(&part_name, &rel.target);
+            if part_names.contains(&target_part) {
+                queue.push_back(target_part);
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+fn extract_workbook_chart_sheets_from_workbook_parts(
+    workbook_xml: &[u8],
+    workbook_rels_xml: Option<&[u8]>,
+    part_names: &HashSet<String>,
+) -> Result<BTreeMap<String, PreservedChartSheet>, ChartExtractionError> {
+    let workbook_part = "xl/workbook.xml";
+    let workbook_xml = std::str::from_utf8(workbook_xml)
+        .map_err(|e| ChartExtractionError::XmlNonUtf8(workbook_part.to_string(), e))?;
+    let workbook_doc = Document::parse(workbook_xml)
+        .map_err(|e| ChartExtractionError::XmlParse(workbook_part.to_string(), e))?;
+
+    let workbook_rels_part = "xl/_rels/workbook.xml.rels";
+    let rel_map: HashMap<String, crate::relationships::Relationship> = match workbook_rels_xml {
+        Some(workbook_rels_xml) => match parse_relationships(workbook_rels_xml, workbook_rels_part)
+        {
+            Ok(rels) => rels.into_iter().map(|r| (r.id.clone(), r)).collect(),
+            Err(_) => HashMap::new(),
+        },
+        None => HashMap::new(),
+    };
+
+    let mut out = BTreeMap::new();
+    for (index, sheet_node) in workbook_doc
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "sheet")
+        .enumerate()
+    {
+        let Some(name) = sheet_node.attribute("name") else {
+            continue;
+        };
+        let sheet_id = sheet_node
+            .attribute("sheetId")
+            .and_then(|v| v.parse::<u32>().ok());
+        let Some(rel_id) = sheet_node
+            .attribute((REL_NS, "id"))
+            .or_else(|| sheet_node.attribute("r:id"))
+            .or_else(|| sheet_node.attribute("id"))
+        else {
+            continue;
+        };
+        let state = sheet_node.attribute("state").map(|s| s.to_string());
+
+        let Some(rel) = rel_map.get(rel_id) else {
+            continue;
+        };
+        if rel
+            .target_mode
+            .as_deref()
+            .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("External"))
+        {
+            continue;
+        }
+        if rel.type_ != CHARTSHEET_REL_TYPE {
+            continue;
+        }
+
+        let resolved_target = resolve_target(workbook_part, &rel.target);
+        if !resolved_target.starts_with("xl/chartsheets/") || !part_names.contains(&resolved_target)
+        {
+            continue;
+        }
+
+        out.insert(
+            name.to_string(),
+            PreservedChartSheet {
+                sheet_index: index,
+                sheet_id,
+                rel_id: rel_id.to_string(),
+                rel_target: rel.target.clone(),
+                state,
+                part_name: resolved_target,
+            },
+        );
+    }
+
+    Ok(out)
 }
 
 fn extract_workbook_chart_sheets(

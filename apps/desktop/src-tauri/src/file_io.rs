@@ -431,36 +431,46 @@ pub fn read_xlsx_blocking(path: &Path) -> anyhow::Result<Workbook> {
         //
         // Note: formula-xlsx only understands XLSX/XLSM ZIP containers (not legacy XLS).
         let mut worksheet_parts_by_name: HashMap<String, String> = HashMap::new();
-        if let Ok(pkg) = XlsxPackage::from_bytes(origin_xlsx_bytes.as_ref()) {
-            out.vba_project_bin = pkg.vba_project_bin().map(|b| b.to_vec());
-            if let Some(power_query_xml) = pkg.part(FORMULA_POWER_QUERY_PART) {
-                let bytes = power_query_xml.to_vec();
-                out.power_query_xml = Some(bytes.clone());
-                out.original_power_query_xml = Some(bytes);
+        out.vba_project_bin =
+            formula_xlsx::read_part_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()), "xl/vbaProject.bin")
+                .ok()
+                .flatten();
+        if let Ok(Some(power_query_xml)) = formula_xlsx::read_part_from_reader(
+            Cursor::new(origin_xlsx_bytes.as_ref()),
+            FORMULA_POWER_QUERY_PART,
+        ) {
+            out.power_query_xml = Some(power_query_xml.clone());
+            out.original_power_query_xml = Some(power_query_xml);
+        }
+        if let (Some(origin), Some(vba)) = (out.origin_path.as_deref(), out.vba_project_bin.as_deref())
+        {
+            out.macro_fingerprint = Some(compute_macro_fingerprint(origin, vba));
+        }
+        if let Ok(parts) =
+            formula_xlsx::worksheet_parts_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
+        {
+            for part in parts {
+                worksheet_parts_by_name.insert(part.name, part.worksheet_part);
             }
-            if let (Some(origin), Some(vba)) =
-                (out.origin_path.as_deref(), out.vba_project_bin.as_deref())
-            {
-                out.macro_fingerprint = Some(compute_macro_fingerprint(origin, vba));
+        }
+        if let Ok(preserved) = formula_xlsx::drawingml::preserve_drawing_parts_from_reader(
+            Cursor::new(origin_xlsx_bytes.as_ref()),
+        ) {
+            if !preserved.is_empty() {
+                out.preserved_drawing_parts = Some(preserved);
             }
-            if let Ok(parts) = pkg.worksheet_parts() {
-                for part in parts {
-                    worksheet_parts_by_name.insert(part.name, part.worksheet_part);
-                }
+        }
+        if let Ok(preserved) =
+            formula_xlsx::pivots::preserve_pivot_parts_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
+        {
+            if !preserved.is_empty() {
+                out.preserved_pivot_parts = Some(preserved);
             }
-            if let Ok(preserved) = pkg.preserve_drawing_parts() {
-                if !preserved.is_empty() {
-                    out.preserved_drawing_parts = Some(preserved);
-                }
-            }
-            if let Ok(preserved) = pkg.preserve_pivot_parts() {
-                if !preserved.is_empty() {
-                    out.preserved_pivot_parts = Some(preserved);
-                }
-            }
-            if let Ok(palette) = pkg.theme_palette() {
-                out.theme_palette = palette;
-            }
+        }
+        if let Ok(palette) =
+            formula_xlsx::theme_palette_from_reader(Cursor::new(origin_xlsx_bytes.as_ref()))
+        {
+            out.theme_palette = palette;
         }
 
         out.sheets = workbook_model

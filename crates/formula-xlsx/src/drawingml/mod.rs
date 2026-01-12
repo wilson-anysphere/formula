@@ -11,6 +11,7 @@ pub use preserve::{
     PreservedChartSheet, PreservedDrawingParts, PreservedSheetControls, PreservedSheetDrawingHF,
     PreservedSheetDrawings, PreservedSheetOleObjects, PreservedSheetPicture,
     SheetDrawingRelationship, SheetRelationshipStub, SheetRelationshipStubWithType,
+    preserve_drawing_parts_from_reader,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

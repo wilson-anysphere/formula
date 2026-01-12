@@ -17,13 +17,15 @@ pub(crate) struct WorkbookSheetPart {
     pub part_name: String,
 }
 
-pub(crate) fn workbook_sheet_parts(
-    pkg: &XlsxPackage,
-) -> Result<Vec<WorkbookSheetPart>, ChartExtractionError> {
+pub(crate) fn workbook_sheet_parts_from_workbook_xml<F>(
+    workbook_xml: &[u8],
+    workbook_rels_xml: Option<&[u8]>,
+    has_part: F,
+) -> Result<Vec<WorkbookSheetPart>, ChartExtractionError>
+where
+    F: Fn(&str) -> bool,
+{
     let workbook_part = "xl/workbook.xml";
-    let workbook_xml = pkg
-        .part(workbook_part)
-        .ok_or_else(|| ChartExtractionError::MissingPart(workbook_part.to_string()))?;
     let workbook_xml = std::str::from_utf8(workbook_xml)
         .map_err(|e| ChartExtractionError::XmlNonUtf8(workbook_part.to_string(), e))?;
     let workbook_doc = Document::parse(workbook_xml)
@@ -33,8 +35,9 @@ pub(crate) fn workbook_sheet_parts(
     // Best-effort: workbook relationships are frequently missing in "regenerated" workbooks and
     // some producers emit malformed XML. For preservation, fall back to common sheet naming
     // conventions instead of erroring.
-    let rel_map: HashMap<String, crate::relationships::Relationship> = match pkg.part(workbook_rels_part) {
-        Some(workbook_rels_xml) => match parse_relationships(workbook_rels_xml, workbook_rels_part) {
+    let rel_map: HashMap<String, crate::relationships::Relationship> = match workbook_rels_xml {
+        Some(workbook_rels_xml) => match parse_relationships(workbook_rels_xml, workbook_rels_part)
+        {
             Ok(rels) => rels.into_iter().map(|r| (r.id.clone(), r)).collect(),
             Err(_) => HashMap::new(),
         },
@@ -72,7 +75,7 @@ pub(crate) fn workbook_sheet_parts(
             }
             _ => sheet_id
                 .map(|sheet_id| format!("xl/worksheets/sheet{sheet_id}.xml"))
-                .filter(|candidate| pkg.part(candidate).is_some()),
+                .filter(|candidate| has_part(candidate)),
         };
         let Some(target) = target else {
             continue;
@@ -87,6 +90,21 @@ pub(crate) fn workbook_sheet_parts(
     }
 
     Ok(sheets)
+}
+
+pub(crate) fn workbook_sheet_parts(
+    pkg: &XlsxPackage,
+) -> Result<Vec<WorkbookSheetPart>, ChartExtractionError> {
+    let workbook_part = "xl/workbook.xml";
+    let workbook_xml = pkg
+        .part(workbook_part)
+        .ok_or_else(|| ChartExtractionError::MissingPart(workbook_part.to_string()))?;
+    let workbook_rels_part = "xl/_rels/workbook.xml.rels";
+    workbook_sheet_parts_from_workbook_xml(
+        workbook_xml,
+        pkg.part(workbook_rels_part),
+        |candidate| pkg.part(candidate).is_some(),
+    )
 }
 
 #[cfg(test)]
