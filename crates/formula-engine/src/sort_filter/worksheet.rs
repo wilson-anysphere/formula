@@ -459,5 +459,117 @@ mod tests {
             model_cell_value_to_sort_value(&record_missing_display_field),
             CellValue::Blank
         );
+
+        let Some(record_string) = from_json_or_skip_unknown_variant(json!({
+            "type": "record",
+            "value": {
+                "displayField": "name",
+                "fields": {
+                    "name": { "type": "string", "value": "Alice" },
+                    "age": { "type": "number", "value": 42.0 }
+                }
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_string),
+            CellValue::Text("Alice".to_string())
+        );
+
+        let Some(record_number) = from_json_or_skip_unknown_variant(json!({
+            "type": "record",
+            "value": {
+                "displayField": "age",
+                "fields": {
+                    "name": { "type": "string", "value": "Alice" },
+                    "age": { "type": "number", "value": 42.0 }
+                }
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_number),
+            CellValue::Number(42.0)
+        );
+
+        let Some(record_bool) = from_json_or_skip_unknown_variant(json!({
+            "type": "record",
+            "value": {
+                "displayField": "active",
+                "fields": {
+                    "active": { "type": "boolean", "value": true }
+                }
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(model_cell_value_to_sort_value(&record_bool), CellValue::Bool(true));
+
+        let Some(record_error) = from_json_or_skip_unknown_variant(json!({
+            "type": "record",
+            "value": {
+                "displayField": "err",
+                "fields": {
+                    "err": { "type": "error", "value": "#REF!" }
+                }
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_error),
+            CellValue::Error(ErrorValue::Ref)
+        );
+
+        let Some(record_rich_text) = from_json_or_skip_unknown_variant(json!({
+            "type": "record",
+            "value": {
+                "displayField": "rt",
+                "fields": {
+                    "rt": { "type": "rich_text", "value": { "text": "Hello", "runs": [] } }
+                }
+            }
+        })) else {
+            return;
+        };
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_rich_text),
+            CellValue::Text("Hello".to_string())
+        );
+
+        // Records only use the display field if it's a primitive sort/filter value.
+        // Rich values fall back to blank.
+        let record_entity_display_field: ModelCellValue = serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "displayField": "entity",
+                "fields": {
+                    "entity": { "type": "entity", "value": { "display": "Nested entity" } }
+                }
+            }
+        }))
+        .expect("record should deserialize");
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_entity_display_field),
+            CellValue::Blank
+        );
+
+        // Missing display field should fall back to blank.
+        let record_missing_display_field: ModelCellValue = serde_json::from_value(json!({
+            "type": "record",
+            "value": {
+                "displayField": "missing",
+                "fields": {
+                    "name": { "type": "string", "value": "Alice" }
+                }
+            }
+        }))
+        .expect("record should deserialize");
+        assert_eq!(
+            model_cell_value_to_sort_value(&record_missing_display_field),
+            CellValue::Blank
+        );
     }
 }

@@ -66,6 +66,26 @@ fn sumif_basic_and_optional_sum_range() {
 }
 
 #[test]
+fn sumif_numeric_criteria_does_not_treat_text_as_zero() {
+    let mut sheet = TestSheet::new();
+    sheet.set("A1", "x");
+    sheet.set("A2", 0);
+    // A3 left unset (blank) -> treated as 0 for numeric SUMIF criteria.
+
+    sheet.set("B1", 5);
+    sheet.set("B2", 10);
+    sheet.set("B3", 20);
+
+    sheet.set_formula(sheet.scratch_cell, "=SUMIF(A1:A3,0,B1:B3)");
+    assert!(
+        sheet.engine.bytecode_program_count() > 0,
+        "expected SUMIF formula to compile to bytecode for this test"
+    );
+    sheet.engine.recalculate();
+    assert_number(&sheet.engine.get_cell_value(sheet.sheet, sheet.scratch_cell), 30.0);
+}
+
+#[test]
 fn averageif_treats_blank_average_range_as_omitted() {
     let mut sheet = TestSheet::new();
     sheet.set("A1", 1);
