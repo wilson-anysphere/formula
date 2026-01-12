@@ -484,7 +484,9 @@ export const defaultRibbonSchema: RibbonSchema = {
               kind: "dropdown",
               size: "icon",
               menuItems: [
-                { id: "home.font.fillColor.noFill", label: "No Fill", ariaLabel: "No Fill", icon: "⬜" },
+                // Keep command ids aligned with desktop wiring (`apps/desktop/src/main.ts`)
+                // so core formatting actions work out of the box.
+                { id: "home.font.fillColor.none", label: "No Fill", ariaLabel: "No Fill", icon: "⬜" },
                 { id: "home.font.fillColor.lightGray", label: "Light Gray", ariaLabel: "Light Gray Fill", icon: "⬚" },
                 { id: "home.font.fillColor.yellow", label: "Yellow", ariaLabel: "Yellow Fill", icon: "🟨" },
                 { id: "home.font.fillColor.blue", label: "Blue", ariaLabel: "Blue Fill", icon: "🟦" },
