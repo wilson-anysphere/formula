@@ -32,6 +32,9 @@ const RECORD_PRECISION: u16 = 0x000E;
 const RECORD_DELTA: u16 = 0x0010;
 const RECORD_ITERATION: u16 = 0x0011;
 const RECORD_WINDOW1: u16 = 0x003D;
+// FILEPASS [MS-XLS 2.4.105] indicates the workbook stream is encrypted/password-protected.
+// When present in the workbook globals substream, subsequent records are encrypted.
+const RECORD_FILEPASS: u16 = 0x002F;
 const RECORD_FORMAT_BIFF8: u16 = 0x041E;
 const RECORD_FORMAT2_BIFF5: u16 = 0x001E;
 const RECORD_PALETTE: u16 = 0x0092;
@@ -131,6 +134,9 @@ pub(crate) fn parse_biff_bound_sheets(
 /// Workbook-global BIFF records needed for stable number format and date system import.
 #[derive(Debug, Clone)]
 pub(crate) struct BiffWorkbookGlobals {
+    /// True when the workbook stream contains a BIFF `FILEPASS` record, indicating it is
+    /// encrypted/password-protected.
+    pub(crate) is_encrypted: bool,
     pub(crate) date_system: DateSystem,
     pub(crate) calculation_mode: Option<CalculationMode>,
     pub(crate) iterative_enabled: Option<bool>,
@@ -155,6 +161,7 @@ pub(crate) struct BiffWorkbookGlobals {
 impl Default for BiffWorkbookGlobals {
     fn default() -> Self {
         Self {
+            is_encrypted: false,
             date_system: DateSystem::Excel1900,
             calculation_mode: None,
             iterative_enabled: None,
@@ -716,6 +723,19 @@ pub(crate) fn parse_biff_workbook_globals(
         }
 
         match record_id {
+            // FILEPASS [MS-XLS 2.4.105]
+            //
+            // This record indicates the workbook is encrypted/password-protected. We do not
+            // attempt to parse encryption details; callers should treat the workbook stream as
+            // unreadable without a password and abort import.
+            RECORD_FILEPASS => {
+                out.is_encrypted = true;
+                // Stop scanning: subsequent records are encrypted and may decode to nonsense.
+                // Treat this as an intentional early-termination so we don't emit a misleading
+                // "missing EOF" warning.
+                saw_eof = true;
+                break;
+            }
             // WINDOW1 [MS-XLS 2.4.346]
             RECORD_WINDOW1 => {
                 // iTabCur is a 0-based active sheet tab index stored at offset 10.

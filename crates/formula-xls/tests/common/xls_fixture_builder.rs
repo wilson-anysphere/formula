@@ -11,6 +11,7 @@ const RECORD_EOF: u16 = 0x000A;
 const RECORD_CODEPAGE: u16 = 0x0042;
 const RECORD_DATEMODE: u16 = 0x0022;
 const RECORD_WINDOW1: u16 = 0x003D;
+const RECORD_FILEPASS: u16 = 0x002F;
 const RECORD_FONT: u16 = 0x0031;
 const RECORD_CALCCOUNT: u16 = 0x000C;
 const RECORD_CALCMODE: u16 = 0x000D;
@@ -64,6 +65,23 @@ const COLOR_AUTOMATIC: u16 = 0x7FFF;
 /// to exercise our importer with targeted style payloads (FORMAT/XF + BLANK).
 pub fn build_number_format_fixture_xls(date_1904: bool) -> Vec<u8> {
     let workbook_stream = build_workbook_stream(date_1904);
+
+    let cursor = Cursor::new(Vec::new());
+    let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
+    {
+        let mut stream = ole.create_stream("Workbook").expect("Workbook stream");
+        stream
+            .write_all(&workbook_stream)
+            .expect("write Workbook stream");
+    }
+    ole.into_inner().into_inner()
+}
+
+/// Build a minimal BIFF8 `.xls` fixture whose workbook globals include a `FILEPASS` record.
+///
+/// The presence of `FILEPASS` indicates the workbook stream is encrypted/password-protected.
+pub fn build_encrypted_filepass_fixture_xls() -> Vec<u8> {
+    let workbook_stream = build_encrypted_filepass_workbook_stream();
 
     let cursor = Cursor::new(Vec::new());
     let mut ole = cfb::CompoundFile::create(cursor).expect("create cfb");
@@ -551,6 +569,51 @@ fn build_workbook_stream(date_1904: bool) -> Vec<u8> {
         .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
 
     // Append sheet substream.
+    globals.extend_from_slice(&sheet);
+    globals
+}
+
+fn build_encrypted_filepass_workbook_stream() -> Vec<u8> {
+    // -- Globals -----------------------------------------------------------------
+    let mut globals = Vec::<u8>::new();
+    push_record(&mut globals, RECORD_BOF, &bof(BOF_DT_WORKBOOK_GLOBALS));
+    // FILEPASS indicates the workbook stream is encrypted/password-protected.
+    // The payload layout depends on the encryption scheme; any bytes are fine for our fixture.
+    push_record(&mut globals, RECORD_FILEPASS, &[]);
+
+    // Include a minimal BoundSheet + worksheet so the stream is well-formed. Real encrypted
+    // workbooks would encrypt records after FILEPASS, but our importer aborts on FILEPASS so the
+    // exact contents are not important.
+    let boundsheet_start = globals.len();
+    let mut boundsheet = Vec::<u8>::new();
+    boundsheet.extend_from_slice(&0u32.to_le_bytes()); // placeholder lbPlyPos
+    boundsheet.extend_from_slice(&0u16.to_le_bytes()); // visible worksheet
+    write_short_unicode_string(&mut boundsheet, "Encrypted");
+    push_record(&mut globals, RECORD_BOUNDSHEET, &boundsheet);
+    let boundsheet_offset_pos = boundsheet_start + 4;
+
+    push_record(&mut globals, RECORD_EOF, &[]); // EOF globals
+
+    // -- Sheet -------------------------------------------------------------------
+    let sheet_offset = globals.len();
+    globals[boundsheet_offset_pos..boundsheet_offset_pos + 4]
+        .copy_from_slice(&(sheet_offset as u32).to_le_bytes());
+
+    let mut sheet = Vec::<u8>::new();
+    push_record(&mut sheet, RECORD_BOF, &bof(BOF_DT_WORKSHEET)); // BOF: worksheet
+
+    // DIMENSIONS: rows [0, 1) cols [0, 1)
+    let mut dims = Vec::<u8>::new();
+    dims.extend_from_slice(&0u32.to_le_bytes()); // first row
+    dims.extend_from_slice(&1u32.to_le_bytes()); // last row + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // first col
+    dims.extend_from_slice(&1u16.to_le_bytes()); // last col + 1
+    dims.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    push_record(&mut sheet, RECORD_DIMENSIONS, &dims);
+
+    push_record(&mut sheet, RECORD_WINDOW2, &window2());
+    push_record(&mut sheet, RECORD_EOF, &[]);
+
     globals.extend_from_slice(&sheet);
     globals
 }

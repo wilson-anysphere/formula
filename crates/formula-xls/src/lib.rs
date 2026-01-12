@@ -168,6 +168,8 @@ pub struct XlsImportResult {
 pub enum ImportError {
     #[error("failed to read `.xls`: {0}")]
     Xls(#[from] calamine::XlsError),
+    #[error("encrypted workbook not supported: workbook is password-protected/encrypted; remove password protection in Excel and try again")]
+    EncryptedWorkbook,
     #[error("invalid worksheet name: {0}")]
     InvalidSheetName(#[from] formula_model::SheetNameError),
 }
@@ -197,6 +199,44 @@ fn import_xls_path_with_biff_reader(
     read_biff_workbook_stream: impl FnOnce(&Path) -> Result<Vec<u8>, String>,
 ) -> Result<XlsImportResult, ImportError> {
     let path = path.as_ref();
+    // Best-effort: read the raw BIFF workbook stream up-front so we can detect
+    // legacy `.xls` encryption (BIFF `FILEPASS`) before handing off to calamine.
+    // Calamine does not support BIFF encryption and may return opaque parse
+    // errors for password-protected workbooks.
+    let mut warnings = Vec::new();
+    let workbook_stream = match read_biff_workbook_stream(path) {
+        Ok(bytes) => Some(bytes),
+        Err(err) => {
+            warnings.push(ImportWarning::new(format!(
+                "failed to read `.xls` workbook stream: {err}"
+            )));
+            None
+        }
+    };
+
+    let mut biff_version: Option<biff::BiffVersion> = None;
+    let mut biff_codepage: Option<u16> = None;
+    let mut biff_globals: Option<biff::globals::BiffWorkbookGlobals> = None;
+
+    if let Some(workbook_stream) = workbook_stream.as_deref() {
+        let detected_biff_version = biff::detect_biff_version(workbook_stream);
+        let codepage = biff::parse_biff_codepage(workbook_stream);
+        biff_version = Some(detected_biff_version);
+        biff_codepage = Some(codepage);
+
+        match biff::parse_biff_workbook_globals(workbook_stream, detected_biff_version, codepage) {
+            Ok(globals) => {
+                if globals.is_encrypted {
+                    return Err(ImportError::EncryptedWorkbook);
+                }
+                biff_globals = Some(globals);
+            }
+            Err(err) => warnings.push(ImportWarning::new(format!(
+                "failed to import `.xls` workbook globals: {err}"
+            ))),
+        }
+    }
+
     let mut workbook: Xls<_> = open_workbook(path)?;
 
     // We need to snapshot metadata (names, visibility, type) up-front because we
@@ -208,69 +248,52 @@ fn import_xls_path_with_biff_reader(
 
     let mut out = Workbook::new();
     let mut used_sheet_names: Vec<String> = Vec::new();
-    let mut warnings = Vec::new();
     let mut merged_ranges = Vec::new();
-    let workbook_stream = match read_biff_workbook_stream(path) {
-        Ok(bytes) => Some(bytes),
-        Err(err) => {
-            warnings.push(ImportWarning::new(format!(
-                "failed to read `.xls` workbook stream: {err}"
-            )));
-            None
-        }
-    };
 
     let mut xf_style_ids: Option<Vec<u32>> = None;
     let mut xf_is_interesting: Option<Vec<bool>> = None;
-    let mut biff_globals: Option<biff::globals::BiffWorkbookGlobals> = None;
     let mut sheet_tab_colors: Option<Vec<Option<TabColor>>> = None;
     let mut workbook_active_tab: Option<u16> = None;
     let mut biff_sheets: Option<Vec<biff::BoundSheetInfo>> = None;
     let mut row_col_props: Option<Vec<biff::SheetRowColProperties>> = None;
     let mut cell_xf_indices: Option<Vec<HashMap<CellRef, u16>>> = None;
     let mut cell_xf_parse_failed: Option<Vec<bool>> = None;
-    let mut biff_version: Option<biff::BiffVersion> = None;
-    let mut biff_codepage: Option<u16> = None;
 
     if let Some(workbook_stream) = workbook_stream.as_deref() {
-        let detected_biff_version = biff::detect_biff_version(workbook_stream);
-        let codepage = biff::parse_biff_codepage(workbook_stream);
-        biff_version = Some(detected_biff_version);
-        biff_codepage = Some(codepage);
+        let detected_biff_version =
+            biff_version.unwrap_or_else(|| biff::detect_biff_version(workbook_stream));
+        let codepage = biff_codepage.unwrap_or_else(|| biff::parse_biff_codepage(workbook_stream));
+        biff_version.get_or_insert(detected_biff_version);
+        biff_codepage.get_or_insert(codepage);
 
-        match biff::parse_biff_workbook_globals(workbook_stream, detected_biff_version, codepage) {
-            Ok(mut globals) => {
-                out.date_system = globals.date_system;
-                if let Some(mode) = globals.calculation_mode {
-                    out.calc_settings.calculation_mode = mode;
-                }
-                if let Some(value) = globals.calculate_before_save {
-                    out.calc_settings.calculate_before_save = value;
-                }
-                if let Some(enabled) = globals.iterative_enabled {
-                    out.calc_settings.iterative.enabled = enabled;
-                }
-                if let Some(max_iterations) = globals.iterative_max_iterations {
-                    out.calc_settings.iterative.max_iterations = max_iterations;
-                }
-                if let Some(max_change) = globals.iterative_max_change {
-                    out.calc_settings.iterative.max_change = max_change;
-                }
-                if let Some(full_precision) = globals.full_precision {
-                    out.calc_settings.full_precision = full_precision;
-                }
-                workbook_active_tab = globals.active_tab_index;
-                warnings.extend(globals.warnings.drain(..).map(ImportWarning::new));
-                sheet_tab_colors = Some(std::mem::take(&mut globals.sheet_tab_colors));
-
-                let interesting = globals.xf_is_interesting_mask();
-                xf_style_ids = Some(vec![0; interesting.len()]);
-                xf_is_interesting = Some(interesting);
-                biff_globals = Some(globals);
+        if let Some(mut globals) = biff_globals.take() {
+            out.date_system = globals.date_system;
+            if let Some(mode) = globals.calculation_mode {
+                out.calc_settings.calculation_mode = mode;
             }
-            Err(err) => warnings.push(ImportWarning::new(format!(
-                "failed to import `.xls` workbook globals: {err}"
-            ))),
+            if let Some(value) = globals.calculate_before_save {
+                out.calc_settings.calculate_before_save = value;
+            }
+            if let Some(enabled) = globals.iterative_enabled {
+                out.calc_settings.iterative.enabled = enabled;
+            }
+            if let Some(max_iterations) = globals.iterative_max_iterations {
+                out.calc_settings.iterative.max_iterations = max_iterations;
+            }
+            if let Some(max_change) = globals.iterative_max_change {
+                out.calc_settings.iterative.max_change = max_change;
+            }
+            if let Some(full_precision) = globals.full_precision {
+                out.calc_settings.full_precision = full_precision;
+            }
+            workbook_active_tab = globals.active_tab_index;
+            warnings.extend(globals.warnings.drain(..).map(ImportWarning::new));
+            sheet_tab_colors = Some(std::mem::take(&mut globals.sheet_tab_colors));
+
+            let interesting = globals.xf_is_interesting_mask();
+            xf_style_ids = Some(vec![0; interesting.len()]);
+            xf_is_interesting = Some(interesting);
+            biff_globals = Some(globals);
         }
 
         match biff::parse_biff_bound_sheets(workbook_stream, detected_biff_version, codepage) {
