@@ -135,6 +135,10 @@ impl RichDataVmIndex {
     }
 }
 
+// Note: `XlsxPackage::extract_rich_data_images` is defined in `media_parts.rs` as a legacy helper
+// that returns raw `xl/media/*` parts referenced by the RichData graph.
+//
+// For per-cell in-cell image extraction, use `XlsxPackage::extract_rich_cell_images_by_cell`.
 /// Errors returned by rich-data parsing helpers.
 ///
 /// These parsers are intentionally "best effort": missing parts yield empty results, while
