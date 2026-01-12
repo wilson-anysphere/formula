@@ -5368,13 +5368,35 @@ try {
     showToast("Formula Desktop", "info");
   });
 
+  // Some desktop builds trigger update checks directly from the Rust menu/tray handlers (and
+  // still emit `menu-check-updates` for frontend bookkeeping). Track the last time we saw a
+  // manual update-check event so we can avoid invoking a duplicate update check from JS.
+  let lastManualUpdateCheckEventAtMs = 0;
+  const recordManualUpdateCheckEvent = (event: unknown) => {
+    const payload = (event as any)?.payload;
+    if (payload?.source !== "manual") return;
+    lastManualUpdateCheckEventAtMs = Date.now();
+  };
+  void listen("update-check-started", recordManualUpdateCheckEvent);
+  void listen("update-check-already-running", recordManualUpdateCheckEvent);
+
   void listen("menu-check-updates", () => {
     // Keep a stable menu event id; the actual update UX is driven by the
     // `update-check-*` events emitted by the Rust updater wrapper.
-    void checkForUpdatesFromCommandPalette("manual").catch((err) => {
-      console.error("Failed to check for updates:", err);
-      showToast(`Update check failed: ${String((err as any)?.message ?? err)}`, "error", { timeoutMs: 10_000 });
-    });
+    const suppressDuplicateWindowMs = 250;
+    const fallbackDelayMs = 50;
+
+    // If a manual update check was just kicked off by the backend, don't start another one.
+    if (Date.now() - lastManualUpdateCheckEventAtMs < suppressDuplicateWindowMs) return;
+
+    window.setTimeout(() => {
+      if (Date.now() - lastManualUpdateCheckEventAtMs < suppressDuplicateWindowMs) return;
+      lastManualUpdateCheckEventAtMs = Date.now();
+      void checkForUpdatesFromCommandPalette("manual").catch((err) => {
+        console.error("Failed to check for updates:", err);
+        showToast(`Update check failed: ${String((err as any)?.message ?? err)}`, "error", { timeoutMs: 10_000 });
+      });
+    }, fallbackDelayMs);
   });
 
   // Updater UI (toasts / dialogs / focus management) is handled by `installUpdaterUi(...)`.
